@@ -19,7 +19,7 @@ State these honestly rather than repeating the aspiration:
 
 - **No shadcn/ui, no Radix.** There is no `components.json` and no `@radix-ui/*` dependency. Every primitive (`Button`, `Card`, `Modal`, `Toast`, `DataTable`, `Carousel`, `ConfirmButton`, `LedgerTable`, `Charts`) is hand-rolled. This is drift, not a reasoned decision — either adopt shadcn or record a rationale, but do not describe the current state as compliant.
 - **Not iDesign / hexagonal.** Folder layering inside one assembly does not enforce dependency direction. Compare `fa.lifeos`, which has genuine project separation.
-- **No Redux Toolkit.** Context-only state. Minor; acceptable at this size.
+- **No Redux Toolkit.** State is React context only (`lib/auth.tsx`, `lib/profile.tsx`, `lib/balance.tsx`). Like the shadcn gap this is an undeclared deviation from the parent mandate, not a granted waiver — it is tracked as an open decision with an owner in `MEMORY.md`.
 
 ## Invariants — violating any of these is a defect, not a style choice
 
@@ -41,7 +41,7 @@ State these honestly rather than repeating the aspiration:
 - **SSRF guard with a deliberate carve-out:** production rejects RFC1918 webhook destinations *unless* the endpoint is on an internal-LAN allow-list. That carve-out exists specifically for the lights controller — do not close it.
 - **Webhook delivery:** HMAC-SHA256 in `X-Crusaders-Signature`, timestamp in `X-Crusaders-Timestamp`, per-endpoint queue, backoff 1m/5m/30m/2h/12h/24h, auto-disable after 6 failures plus an email to the owner. A missing template variable is a **config error, not a retryable failure**.
 - **Docker device passthrough:** the .NET service runs in a container but must reach a USB/serial biometric device on the host — needs `--device` passthrough or `privileged: true` with the specific device path.
-- Deploy follows the standard FrostAura pattern; `fa.startup/.github/workflows/ci.yml` is the canonical reference to mirror. The JWT + WebAuthn auth pattern is also lifted from there — lift, don't reinvent.
+- Deploy follows the standard FrostAura pattern and this repo's own `.github/workflows/ci.yml` now carries the full chain (multi-arch → Docker Hub → `deploy-portainer`); it is the reference to keep in sync, not `fa.startup`'s. The JWT + WebAuthn auth pattern was lifted from `fa.startup` — note that repo pins `Fido2.AspNet` 4.x while this one uses the base `Fido2` 3.0.1 package, so controller code is not portable either way.
 
 ## Build / test / run
 

@@ -2,7 +2,7 @@
 
 The .NET app runs on the same physical machine as a biometric peripheral (fingerprint reader and/or face camera). The app accesses it via a clean abstraction so the SDK can change without rewriting scheduling logic.
 
-## Identification triple-stack (per [client blueprint](../client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md) B.1)
+## Identification triple-stack (per [client blueprint](./client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md) B.1)
 
 The courtside terminal accepts three identification methods, any of which the player can opt into in their profile:
 

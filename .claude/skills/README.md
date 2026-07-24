@@ -1,6 +1,8 @@
 # Skills index
 
-These are **vendored copies of the shared Gaia engineering skill set**, not skills authored for this project. The same nine directories appear byte-identical in `fa.lifeos` and `crusaders.mainframe`, and partial mirrors live under `.github/skills/` in some repos. Nothing reconciles these copies against upstream, so treat a disagreement between a skill here and the FrostAura root policy as drift in *this* copy.
+These are **vendored copies of the shared Gaia engineering skill set**, not skills authored for this project. The same nine directories appear byte-identical in `fa.lifeos` and `crusaders.mainframe`, and mirrors of varying vintage live under `.github/skills/` in several repos. Nothing reconciles any of them against upstream, so treat a disagreement between a skill here and the FrostAura root policy as drift in *this* copy.
+
+**These copies are a stale generation.** Upstream — `Labs/projects/ai.toolkit.gaia/plugins/engineering/skills/` — has renamed every one of these `gaia-*` skills to `fa-*`. Consuming the plugin is the maintained path; this directory is a snapshot with no update mechanism. Do not hand-edit a skill here as though it were locally authored; fix it upstream or record the divergence. The portfolio-wide verdict on whether these copies should exist at all is in `Technologies/MEMORY.md`.
 
 | Skill | Use it when |
 | --- | --- |
