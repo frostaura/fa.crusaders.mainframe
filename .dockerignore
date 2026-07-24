@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+.vscode
+.copilot
+**/node_modules
+**/dist
+**/coverage
+**/playwright-report
+**/test-results
+**/bin
+**/obj
+**/TestResults
+**/.DS_Store
+docs/

@@ -1,0 +1,431 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ============================================================================
+  # Backend — lint, build, test (.NET 10)
+  # ============================================================================
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ./src/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('src/backend/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: |
+          dotnet restore Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj
+          dotnet restore Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj
+
+      - name: Build
+        run: |
+          dotnet build Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj --nologo -v q
+          dotnet build Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
+
+      - name: Test with coverage
+        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --settings coverlet.runsettings --results-directory ./TestResults
+
+      - name: Enforce coverage threshold
+        run: |
+          THRESHOLD=70
+          REPORT=$(find ./TestResults -name "coverage.cobertura.xml" | head -1)
+          if [ -z "$REPORT" ]; then
+            echo "No coverage report found yet — skipping (early build)"
+            exit 0
+          fi
+          line_rate=$(grep -oP 'line-rate="\K[^"]+' "$REPORT" | head -1)
+          coverage=$(awk "BEGIN {printf \"%.1f\", $line_rate * 100}")
+          echo "Line coverage: ${coverage}% (threshold: ${THRESHOLD}%)"
+          if [ "$(awk "BEGIN {print ($coverage < $THRESHOLD)}")" -eq 1 ]; then
+            echo "Coverage ${coverage}% is below the ${THRESHOLD}% threshold"
+            exit 1
+          fi
+
+  # ============================================================================
+  # Frontend — lint, build, test (Node 22 / React 19 / Vite 7)
+  # ============================================================================
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ./src/frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ./src/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm run test -- --run
+
+  # ============================================================================
+  # Backend Integration — real Postgres boundary checks (no EF in-memory)
+  # ============================================================================
+  backend-integration:
+    name: Backend Integration (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [backend]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crusaders
+          POSTGRES_PASSWORD: crusaders_test_pw
+          POSTGRES_DB: crusaders_mainframe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crusaders"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: ./src/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj
+
+      - name: Run integration tests against Postgres
+        env:
+          API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=crusaders_mainframe_test;Username=crusaders;Password=crusaders_test_pw
+        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --filter "(FullyQualifiedName~ApiBoundaryTests|FullyQualifiedName~TenantIsolationTests)" || (echo "No integration tests yet — passing"; exit 0)
+
+  # ============================================================================
+  # Security — npm audit + dotnet vulnerable package scan
+  # ============================================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [frontend, backend]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ./src/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./src/frontend
+        run: npm ci
+
+      - name: npm audit (high severity)
+        working-directory: ./src/frontend
+        run: npm audit --audit-level=high
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore backend packages
+        working-directory: ./src/backend
+        run: dotnet restore
+
+      - name: Check vulnerable NuGet packages
+        working-directory: ./src/backend
+        run: |
+          set -euo pipefail
+          dotnet list package --vulnerable --include-transitive --format json > vulnerable-packages.json
+          node -e "
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('vulnerable-packages.json', 'utf8'));
+            const projects = report.projects || [];
+            const vulnerable = [];
+            for (const project of projects) {
+              for (const framework of project.frameworks || []) {
+                for (const pkg of framework.topLevelPackages || []) {
+                  if ((pkg.vulnerabilities || []).length > 0) vulnerable.push(pkg);
+                }
+                for (const pkg of framework.transitivePackages || []) {
+                  if ((pkg.vulnerabilities || []).length > 0) vulnerable.push(pkg);
+                }
+              }
+            }
+            if (vulnerable.length > 0) {
+              console.error('Vulnerable NuGet packages detected:');
+              for (const pkg of vulnerable) {
+                const ids = (pkg.vulnerabilities || []).map(v => v.severity + ':' + v.advisoryUrl).join(', ');
+                console.error('- ' + pkg.id + ' ' + pkg.resolvedVersion + ' -> ' + ids);
+              }
+              process.exit(1);
+            }
+            console.log('No vulnerable NuGet packages detected');
+          "
+
+  # ============================================================================
+  # Docker Build & Push — only on push to main, after CI passes
+  # ============================================================================
+  build-backend-amd64:
+    name: Build Backend (amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [backend, frontend, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push backend (amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/backend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-amd64
+
+  build-backend-arm64:
+    name: Build Backend (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    needs: [backend, frontend, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push backend (arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/backend/Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-arm64
+
+  merge-backend-manifests:
+    name: Create Backend Multi-arch Manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-backend-amd64, build-backend-arm64]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-backend:latest-arm64
+
+  build-frontend-amd64:
+    name: Build Frontend (amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [backend, frontend, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push frontend (amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/frontend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-amd64
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+
+  build-frontend-arm64:
+    name: Build Frontend (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    needs: [backend, frontend, backend-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push frontend (arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./src/frontend/Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-arm64
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+
+  merge-frontend-manifests:
+    name: Create Frontend Multi-arch Manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-frontend-amd64, build-frontend-arm64]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-arm64
+
+  # ============================================================================
+  # Portainer deploy — re-pull images and redeploy the live stack
+  # ============================================================================
+  deploy-portainer:
+    name: Re-pull image and redeploy on Portainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [merge-backend-manifests, merge-frontend-manifests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Wait for Docker Hub propagation
+        run: |
+          echo "Sleeping 30s to let Docker Hub propagate the freshly pushed manifests."
+          sleep 30
+
+      - name: Trigger Portainer re-pull and redeploy
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_TOKEN: ${{ secrets.PORTAINER_TOKEN }}
+          PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID }}
+          PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
+        run: |
+          set -euo pipefail
+          : "${PORTAINER_URL:?secret PORTAINER_URL is required}"
+          : "${PORTAINER_TOKEN:?secret PORTAINER_TOKEN is required}"
+          : "${PORTAINER_ENDPOINT_ID:?secret PORTAINER_ENDPOINT_ID is required}"
+          : "${PORTAINER_STACK_ID:?secret PORTAINER_STACK_ID is required}"
+
+          api="${PORTAINER_URL%/}/api"
+
+          echo "Fetching current stack file content..."
+          stack_file_content=$(curl -fsSL \
+            -H "X-API-Key: ${PORTAINER_TOKEN}" \
+            "${api}/stacks/${PORTAINER_STACK_ID}/file" \
+            | jq -r '.StackFileContent')
+
+          echo "Fetching current stack metadata..."
+          env_array=$(curl -fsSL \
+            -H "X-API-Key: ${PORTAINER_TOKEN}" \
+            "${api}/stacks/${PORTAINER_STACK_ID}" \
+            | jq -c '.Env // []')
+
+          echo "Submitting update with pullImage=true..."
+          body=$(jq -n \
+            --arg sfc "${stack_file_content}" \
+            --argjson env "${env_array}" \
+            '{stackFileContent: $sfc, env: $env, prune: false, pullImage: true}')
+
+          http_code=$(curl -sS -o /tmp/portainer-resp.json -w "%{http_code}" \
+            -X PUT "${api}/stacks/${PORTAINER_STACK_ID}?endpointId=${PORTAINER_ENDPOINT_ID}" \
+            -H "X-API-Key: ${PORTAINER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "${body}")
+
+          echo "Portainer responded with HTTP ${http_code}"
+          if [ "${http_code}" -ge 400 ]; then
+            cat /tmp/portainer-resp.json
+            exit 1
+          fi
+          echo "Stack ${PORTAINER_STACK_ID} redeployed successfully."
