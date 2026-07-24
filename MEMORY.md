@@ -42,7 +42,7 @@ Blueprint **Rev 2** (received 2026-05-09 from the Crusaders committee) is the cu
 - **2-year retention** of usage history via a nightly anonymisation worker.
 - **POPI compliance is deliberately out of scope.** Founder direction, 2026-05-06: "forget about legislation for now." This is a decision, not an oversight — but it is a decision to revisit before any club other than Crusaders onboards.
 - **Biometrics are soft on the critical path.** Booking, top-up and cancellation all work without them; v1.0 can fall back to a manual admin "mark as no-show" button. The physical install is likewise off the SaaS launch critical path.
-- **Do not couple this to `Foundation/projects/fa.sports.squash-command-center`.** A standing root decision keeps the commercial racquet-club SaaS and the philanthropic squash program separate — the rationale is commercial/philanthropic separation, and the two look obviously mergeable to anyone who sees only the domain overlap. The Foundation side records this in full; this line exists so an agent entering from the Technologies side gets the same signal.
+- **(Updated 2026-07-24)** The formerly-adjacent Foundation squash program was killed. The standing rationale survives: commercial club software and any future philanthropic squash program stay decoupled unless root decides otherwise; kill record in `Foundation/projects/MEMORY.md`.
 
 ## Gotchas
 

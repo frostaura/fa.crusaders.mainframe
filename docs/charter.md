@@ -17,7 +17,7 @@ The first deployment is at Crusaders Squash Club. The architecture is multi-tena
 
 ## Where it sits in FrostAura
 - **Subsidiary:** `Technologies/` — software product, multi-tenant SaaS, recurring-revenue trajectory.
-- **Adjacent (do not couple):** `Foundation/Projects/fa.sports.squash-command-center` (Dean's personal squash analytics). If a player-identity layer ever needs to span both, that's a parent-level call.
+- **Adjacent philanthropic angle:** the former Foundation squash program was killed 2026-07-24; if a philanthropic squash program re-emerges, it starts from a written impact thesis and remains decoupled from this commercial SaaS unless root decides otherwise.
 - **Reuses from Technologies:** the `fa.startup` deploy pipeline, JWT+WebAuthn auth pattern.
 - **Belongs-in test:** ✅ Generates capital (per-club SaaS or per-booking margin); ✅ Builds reusable capability (multi-tenant booking + biometric peripheral abstraction); ✅ Strengthens FrostAura as an institution (a deployable product with a real customer on day one). Passes the five-point test.
 - **Red lines:** ✅ Clears all four. Not predatory finance, not weaponized, not animal-harm, not surveillance/authoritarian (biometric data is local-machine + opt-in for a service the player explicitly signs up for, not population-scale tracking). The biometric abstraction must keep template data on-premises by default — see `docs/specs/biometric-abstraction.md` for the privacy posture.
