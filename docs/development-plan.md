@@ -347,7 +347,7 @@ Decisions still pending. Unblock these as they become load-bearing.
 
 - This document updates whenever a phase completes or a decision lands. The same commit updates `CLAUDE.md`'s "Current phase" line.
 - Each phase, when started, gets a `docs/phases/phase-<n>.md` execution log capturing branch names, PRs, deviations, and lessons. Lessons feed back into specs.
-- The Gaia agents under `.claude/agents/` are invoked at phase boundaries — `gaia-intake-orchestrator` for scope framing, `gaia-solutions-architect` for design pass, `gaia-implementation-planner` for branch-tree, `gaia-software-engineer` for the work, `gaia-tester` for verification, `gaia-release-engineer` for the final gate.
+- The Gaia agents from the installed plugins are invoked at phase boundaries — the intake coordinator for scope framing, the solutions architect for the design pass, the implementation planner for the branch tree, the software engineer for the work, the tester for verification, and the release engineer for the final gate. Select them by capability from the installed set rather than by a hardcoded path; they are versioned upstream and are not files in this repo.
 - Open decisions in the parking lot above are revisited at every phase boundary; defaults take effect if not addressed.
 
 ## Phase 8 — Client deltas (blueprint Rev 2, 2026-05-09) (XL)

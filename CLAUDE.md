@@ -72,7 +72,15 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 - **Never commit `.env`.** It holds live SMTP credentials.
 - **Never add a ledger field whose name implies one unit while the column holds another.** That bug already exists once; do not add a second.
 
-## Upkeep
-This repo's `CLAUDE.md`, `MEMORY.md` and any local `.claude/skills/` are kept current **as changes land** — part of the change, not follow-up work. `MEMORY.md` is required here exactly as `CLAUDE.md` is, and cascades downward identically; a `CLAUDE.md` with no `MEMORY.md` beside it is a defect.
+## Skills
 
-Update the memory store at the end of any session that shipped, decided, discovered or abandoned something, and restamp `last_verified:` only for what you actually inspected. This file changes only when a rule changes — a status belongs in `MEMORY.md`. A skill that no longer matches how work is really done here is fixed or deleted, not left to rot. The standard is [`/docs/operating/context-cascade.md`](../../../docs/operating/context-cascade.md).
+From the installed Gaia plugins this repo draws the mandated-stack baseline it deviates from (e.g. `fa-engineering-default-tech-stack`) — read it before arguing the deviations are fine; the UI-engineering capability for the hand-rolled primitive set (e.g. `fa-engineering-ui`); the formal-testing capability for the layers behind the red gate (e.g. `fa-engineering-testing`); the implementation capability for delivery (e.g. `fa-engineering-implementation`); and the **deploy-chain activation** capability for the secrets-then-stack ordering this repo is blocked on (e.g. `fa-engineering-deploy-chain`), backed by the watch list.
+
+**Reference a capability by what it does, naming the current skill only as an example — never as the identifier, never by path.** Plugin skills are not files in this repo, so a rename breaks nothing visibly and a bare name simply stops resolving. Whether the named skill is installed today is a `MEMORY.md` question.
+
+This repo carries **no local `.claude/skills/`** and must not reacquire one. A procedure that would be equally correct in an unrelated repository belongs upstream in a plugin, never here; the reasoning, and what the last such set cost, are in `MEMORY.md`.
+
+## Upkeep
+Three artifacts are kept current **as changes land**, not in a later pass: this `CLAUDE.md`, [`MEMORY.md`](MEMORY.md) with its `memory/` topic store, and the skills layer above (empty by decision). `MEMORY.md` is required here exactly as `CLAUDE.md` is, and cascades downward identically; a `CLAUDE.md` with no `MEMORY.md` beside it is a defect.
+
+Update the memory store at the end of any session that shipped, decided, discovered or abandoned something, and restamp `last_verified:` only for what you actually inspected. This file changes only when a rule changes — a status belongs in `MEMORY.md`. A stale plugin procedure is fixed upstream and reinstalled, never forked back in here. The standard is [`/docs/operating/context-cascade.md`](../../../docs/operating/context-cascade.md).
