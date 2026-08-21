@@ -15,3 +15,6 @@ last_verified: 2026-07-24
 - Docs use "Arduino" and "ESP32" interchangeably for the same lights controller.
 - **Docker device passthrough is undocumented in `docker-compose.yml`**, pending the biometric SDK choice.
 - iCloud has fabricated `* 2.dll` / `* 2.pdb` duplicates under `src/backend/.../bin` and `obj`. Build output only, gitignored, harmless — do not treat them as source.
+- **Local `dotnet test` fails MSB3021 "Access denied" copying `appsettings*.json` into `bin/`** on this iCloud path (source files carry the protected `com.apple.provenance` xattr; MSBuild's copy is denied on *create* but succeeds on *overwrite*). Recovery: `cp` the two appsettings files into each project's `bin/Debug/net10.0/` by hand once, then rerun — verified 2026-08-21. Plain `cp` and CI (ubuntu) are unaffected.
+- **vitest has no `localStorage` under Node ≥25 + jsdom 28** (jsdom 28 defers to Node's flag-gated built-in, which is undefined without `--localstorage-file`). Fixed 2026-08-21 with an in-memory Storage polyfill in `src/frontend/src/test/setup.ts` — keep it if that file is ever rewritten, or App.test.tsx fails on `localStorage.clear()`.
+- **Frontend `node_modules` on this iCloud path loses rollup's native optional dep** (build fails with a missing `rollup/dist/native.js` require). Recovery: `rm -rf node_modules && npm ci`.
