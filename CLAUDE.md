@@ -73,4 +73,6 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 - **Never add a ledger field whose name implies one unit while the column holds another.** That bug already exists once; do not add a second.
 
 ## Upkeep
-This repo's `CLAUDE.md`, `MEMORY.md` and any `.claude/skills/` are kept current as changes land — treat them as part of the change, not as follow-up. Update `MEMORY.md` at the end of any session that shipped, decided, discovered or abandoned something, and refresh `_Last verified_` only when you actually inspected. A skill that no longer matches how work is really done here is fixed or deleted, not left to rot. The standard is [`/docs/operating/context-cascade.md`](../../../docs/operating/context-cascade.md).
+This repo's `CLAUDE.md`, `MEMORY.md` and any local `.claude/skills/` are kept current **as changes land** — part of the change, not follow-up work. `MEMORY.md` is required here exactly as `CLAUDE.md` is, and cascades downward identically; a `CLAUDE.md` with no `MEMORY.md` beside it is a defect.
+
+Update the memory store at the end of any session that shipped, decided, discovered or abandoned something, and restamp `last_verified:` only for what you actually inspected. This file changes only when a rule changes — a status belongs in `MEMORY.md`. A skill that no longer matches how work is really done here is fixed or deleted, not left to rot. The standard is [`/docs/operating/context-cascade.md`](../../../docs/operating/context-cascade.md).
