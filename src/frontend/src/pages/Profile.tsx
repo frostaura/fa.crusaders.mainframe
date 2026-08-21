@@ -23,6 +23,7 @@ export default function ProfilePage() {
   // Local-only edits for the name; commits via Save.
   const [fullName, setFullName] = useState("");
   const [savingName, setSavingName] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors server profile into the local name-edit buffer
   useEffect(() => { if (profile) setFullName(profile.full_name ?? ""); }, [profile]);
 
   const handleFile = async (file: File) => {
@@ -179,6 +180,7 @@ function PasskeysCard() {
     catch { /* non-blocking */ }
     finally { setLoading(false); }
   };
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { if (supported) load(); }, [supported]);
 
   const add = async () => {

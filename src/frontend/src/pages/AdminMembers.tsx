@@ -64,12 +64,13 @@ export default function AdminMembersPage() {
     } catch { /* non-blocking */ }
   };
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { load(); loadBiometrics(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [status]);
 
   const filtered = useMemo(() => {
     if (!members) return [];
     const q = search.trim().toLowerCase();
-    let rows = q
+    const rows = q
       ? members.filter((m) =>
           m.full_name.toLowerCase().includes(q) ||
           m.email.toLowerCase().includes(q) ||

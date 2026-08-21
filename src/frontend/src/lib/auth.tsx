@@ -62,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- session bootstrap on mount; no-token path resolves to anonymous synchronously
   useEffect(() => { refreshFromToken(); }, [refreshFromToken]);
 
   // Centralised session-expired handler — wired to the api client so any 401 on an authenticated

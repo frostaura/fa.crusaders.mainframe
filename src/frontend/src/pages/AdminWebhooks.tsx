@@ -96,6 +96,7 @@ export default function AdminWebhooksPage() {
   const [deliveries, setDeliveries] = useState<WebhookDeliveryDto[]>([]);
 
   const load = async () => setList(await endpoints.adminWebhooksList());
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { load().catch(() => {}); }, []);
 
   const create = async () => {
@@ -377,32 +378,30 @@ function TemplateInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
+  // Caret position mirrored into state from input events so token detection stays pure at render time.
+  const [caret, setCaret] = useState(0);
 
   // Find the variable token currently being typed (after `{` and before space/`}`).
   const tokenInfo = useMemo(() => {
-    if (!inputRef.current) return null;
-    const caret = inputRef.current.selectionStart ?? value.length;
     const before = value.slice(0, caret);
     const openIdx = before.lastIndexOf("{");
     if (openIdx === -1) return null;
     const between = before.slice(openIdx + 1);
     if (/[}\s]/.test(between)) return null;
     return { openIdx, prefix: between, caret };
-  }, [value, open]);
+  }, [value, caret]);
 
   const suggestions = useMemo(() => {
     const prefix = tokenInfo?.prefix?.toLowerCase() ?? "";
     return variables.filter((v) => v.toLowerCase().startsWith(prefix)).slice(0, 8);
   }, [variables, tokenInfo]);
 
-  useEffect(() => { setActiveIdx(0); }, [tokenInfo?.prefix]);
-
   const insertAtCaret = (varName: string) => {
     const el = inputRef.current;
     if (!el) return;
     const caret = el.selectionStart ?? value.length;
     let head = value.slice(0, caret);
-    let tail = value.slice(caret);
+    const tail = value.slice(caret);
 
     // If we're inside a partial `{prefix`, replace from the `{` up to caret.
     const openIdx = head.lastIndexOf("{");
@@ -438,8 +437,9 @@ function TemplateInput({
           "focus:outline-none focus:ring-2 focus:ring-accent-strong focus:border-accent-strong",
           "font-mono text-sm",
         )}
-        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onChange={(e) => { onChange(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); setActiveIdx(0); setOpen(true); }}
+        onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? value.length)}
+        onFocus={(e) => { setCaret(e.currentTarget.selectionStart ?? value.length); setOpen(true); }}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={(e) => {
           if (!showPopover) return;

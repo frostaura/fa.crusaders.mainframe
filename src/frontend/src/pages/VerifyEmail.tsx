@@ -5,10 +5,10 @@ import { Card } from "../components/Card";
 
 export default function VerifyEmailPage() {
   const { token } = useParams<{ token: string }>();
-  const [state, setState] = useState<"verifying" | "ok" | "fail">("verifying");
+  const [state, setState] = useState<"verifying" | "ok" | "fail">(token ? "verifying" : "fail");
 
   useEffect(() => {
-    if (!token) { setState("fail"); return; }
+    if (!token) return;
     endpoints.verifyEmail(token).then((r) => setState(r.verified ? "ok" : "fail")).catch(() => setState("fail"));
   }, [token]);
 

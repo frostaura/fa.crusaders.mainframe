@@ -43,6 +43,7 @@ export default function ReportsPage() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { load().catch(() => {}); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [from, to, isAdmin]);
 
   const tiles = isAdmin

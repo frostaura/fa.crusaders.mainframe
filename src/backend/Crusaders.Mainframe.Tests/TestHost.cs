@@ -60,6 +60,7 @@ public sealed class TestHost : IAsyncDisposable
         services.AddSingleton<IEmailService>(emailStub);
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
+        services.AddSingleton<BalanceBroadcaster>();
         services.AddScoped<TenantSettingsAccessor>();
         services.AddScoped<LedgerService>();
         services.AddScoped<ScheduleService>();

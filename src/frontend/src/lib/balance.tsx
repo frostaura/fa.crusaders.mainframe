@@ -40,7 +40,9 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
 
   // Initial fetch + refresh on auth flip.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs wallet state with the auth lifecycle; loader sets its flag synchronously
     if (auth.status === "authenticated") refresh();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale balance on sign-out
     else setBalance(null);
   }, [auth.status, refresh]);
 

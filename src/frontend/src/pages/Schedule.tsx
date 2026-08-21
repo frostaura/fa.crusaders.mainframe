@@ -18,15 +18,21 @@ export default function SchedulePage() {
   const [day, setDay] = useState<ScheduleDay | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Snapshot of "now", taken when the schedule loads, so past-slot styling is pure at render time.
+  const [loadedAt, setLoadedAt] = useState(0);
 
   const load = async () => {
     setLoading(true);
     setError(null);
-    try { setDay(await endpoints.schedule(date)); }
+    try {
+      setDay(await endpoints.schedule(date));
+      setLoadedAt(Date.now());
+    }
     catch { setError("Couldn't load schedule."); }
     finally { setLoading(false); }
   };
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [date]);
 
   const slotsByCourtAndStart = useMemo(() => {
@@ -105,7 +111,7 @@ export default function SchedulePage() {
                 </div>
               ))}
               {timeSlices.map((t) => {
-                const isPast = new Date(t.utc).getTime() < Date.now();
+                const isPast = new Date(t.utc).getTime() < loadedAt;
                 return (
                   <RowFragment key={t.utc} t={t}>
                     {day.courts.map((c) => {

@@ -31,6 +31,7 @@ export default function AdminSettingsPage() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { load(); }, []);
 
   const save = async () => {

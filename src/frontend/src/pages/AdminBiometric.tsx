@@ -34,6 +34,7 @@ export default function AdminBiometricPage() {
     catch { toast.push({ tone: "danger", text: "Couldn't load enrollments." }); }
     finally { setLoading(false); }
   };
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { load(); }, []);
 
   const filtered = useMemo(() => {

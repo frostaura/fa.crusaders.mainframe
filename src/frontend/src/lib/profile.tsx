@@ -31,6 +31,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   }, [auth.status]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs profile state with the auth lifecycle; loader sets its flag synchronously
     if (auth.status === "authenticated") refresh();
     else setProfile(null);
   }, [auth.status, refresh]);
