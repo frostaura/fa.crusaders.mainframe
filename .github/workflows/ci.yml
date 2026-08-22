@@ -140,6 +140,8 @@ jobs:
       - name: Run integration tests against Postgres
         env:
           API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=crusaders_mainframe_test;Username=crusaders;Password=crusaders_test_pw
+          # Asserts the boundary tests actually run here rather than skipping quietly.
+          REQUIRE_BOUNDARY_TESTS: "true"
         run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --filter "(FullyQualifiedName~ApiBoundaryTests|FullyQualifiedName~TenantIsolationTests)"
 
   # ============================================================================

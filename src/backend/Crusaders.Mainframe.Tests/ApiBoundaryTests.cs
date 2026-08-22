@@ -38,18 +38,24 @@ public sealed class PostgresFixture : IAsyncLifetime
     {
         var configured = Environment.GetEnvironmentVariable(EnvVar);
 
-        // On CI the variable is always set, so an unconfigured run means the
-        // pipeline broke — fail loudly rather than skipping into a green tick.
-        // Locally it is usually absent, and blocking `dotnet test` on a Postgres
-        // install would push people towards skipping the whole suite.
+        // These tests must never silently skip in the job that exists to run them,
+        // but they must skip cleanly everywhere else.
+        //
+        // Keying that on CI=true does not work: GitHub sets it in every job, including
+        // `backend`, which deliberately provisions no Postgres. So the integration job
+        // sets REQUIRE_BOUNDARY_TESTS explicitly — if that is on and the connection
+        // string is missing, the pipeline is broken and should say so.
         if (string.IsNullOrWhiteSpace(configured))
         {
-            var onCi = string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
-            if (onCi)
+            var required = string.Equals(
+                Environment.GetEnvironmentVariable("REQUIRE_BOUNDARY_TESTS"), "true",
+                StringComparison.OrdinalIgnoreCase);
+
+            if (required)
             {
                 throw new InvalidOperationException(
-                    $"{EnvVar} is not set but CI=true. The boundary tests must run in CI; " +
-                    "they are the only tests that exercise real SQL and real migrations.");
+                    $"REQUIRE_BOUNDARY_TESTS is set but {EnvVar} is not. These are the only " +
+                    "tests that exercise real SQL and real migrations — they must not be skipped here.");
             }
             return;
         }
