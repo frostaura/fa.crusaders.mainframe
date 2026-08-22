@@ -68,9 +68,14 @@ public sealed class WebhookDeliveryWorker : BackgroundService
                 _logger.LogWarning("webhook {EndpointId} skipped: missing template variable {Var}", endpoint.Id, rendered.MissingVariable);
                 db.WebhookDeliveries.Add(new WebhookDelivery
                 {
-                    TenantId = evt.TenantId, EndpointId = endpoint.Id,
-                    EventId = evt.Id, EventType = evt.Type, Url = endpoint.UrlTemplate,
-                    RequestBody = envelopeJson, FinalState = "failed", Attempt = 1,
+                    TenantId = evt.TenantId,
+                    EndpointId = endpoint.Id,
+                    EventId = evt.Id,
+                    EventType = evt.Type,
+                    Url = endpoint.UrlTemplate,
+                    RequestBody = envelopeJson,
+                    FinalState = "failed",
+                    Attempt = 1,
                     ResponseBodyExcerpt = $"missing-variable:{rendered.MissingVariable}",
                 });
                 continue;
@@ -78,9 +83,13 @@ public sealed class WebhookDeliveryWorker : BackgroundService
 
             var delivery = new WebhookDelivery
             {
-                TenantId = evt.TenantId, EndpointId = endpoint.Id,
-                EventId = evt.Id, EventType = evt.Type, Url = rendered.Url!,
-                RequestBody = envelopeJson, Attempt = 1,
+                TenantId = evt.TenantId,
+                EndpointId = endpoint.Id,
+                EventId = evt.Id,
+                EventType = evt.Type,
+                Url = rendered.Url!,
+                RequestBody = envelopeJson,
+                Attempt = 1,
             };
             db.WebhookDeliveries.Add(delivery);
 

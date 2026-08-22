@@ -55,8 +55,9 @@ jobs:
           THRESHOLD=70
           REPORT=$(find ./TestResults -name "coverage.cobertura.xml" | head -1)
           if [ -z "$REPORT" ]; then
-            echo "No coverage report found yet — skipping (early build)"
-            exit 0
+            echo "No coverage report produced — the collector did not run."
+            echo "This used to exit 0, which meant the gate passed whenever it broke."
+            exit 1
           fi
           line_rate=$(grep -oP 'line-rate="\K[^"]+' "$REPORT" | head -1)
           coverage=$(awk "BEGIN {printf \"%.1f\", $line_rate * 100}")
@@ -139,7 +140,74 @@ jobs:
       - name: Run integration tests against Postgres
         env:
           API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=crusaders_mainframe_test;Username=crusaders;Password=crusaders_test_pw
-        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --filter "(FullyQualifiedName~ApiBoundaryTests|FullyQualifiedName~TenantIsolationTests)" || (echo "No integration tests yet — passing"; exit 0)
+        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --filter "(FullyQualifiedName~ApiBoundaryTests|FullyQualifiedName~TenantIsolationTests)"
+
+  # ============================================================================
+  # IoT firmware — host-compiled unit tests, no hardware required.
+  #
+  # Deliberately has no `needs:`. The backend job carries pre-existing failures,
+  # and chaining firmware behind it would mean the firmware gate never runs.
+  # ============================================================================
+  iot:
+    name: IoT Firmware (native tests + lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('src/iot/platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install toolchain
+        run: pip install platformio lizard gcovr
+
+      - name: Formatting (clang-format)
+        run: clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h')
+
+      - name: Strict compile — full pedantic set as errors
+        run: src/iot/tools/strict_compile.sh
+
+      - name: Purity gate — pure lib/ must not include Arduino headers
+        run: |
+          if grep -rn --include=*.h --include=*.cpp \
+               -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal)' \
+               src/iot/lib --exclude-dir=arduino_hal --exclude-dir=posix_hal; then
+            echo "::error::pure lib/ modules must stay free of Arduino headers so they compile for the host"
+            exit 1
+          fi
+
+      - name: Rollover gate — no raw deadline comparisons
+        run: |
+          if grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)' \
+               src/iot/lib src/iot/src --include=*.cpp --include=*.h 2>/dev/null \
+               | grep -v 'lib/timebase'; then
+            echo "::error::use tb::reached() or tb::Deadline — a direct comparison breaks at the 49.7-day millis() wrap"
+            exit 1
+          fi
+
+      - name: Unit tests (host)
+        run: pio test -d src/iot -e native
+
+      - name: Unit tests under ASAN + UBSAN
+        run: pio test -d src/iot -e native_asan
+
+      - name: Complexity (C++, C# and TypeScript)
+        run: |
+          lizard src/iot/lib src/iot/src src/backend/Crusaders.Mainframe.Api src/frontend/src \
+            -C 15 -L 200 -a 6 -W whitelizard.txt \
+            -x '*/Migrations/*' -x '*/node_modules/*' -x '*/.pio/*' -x '*/.venv/*' \
+            -x '*/bin/*' -x '*/obj/*' -x '*.test.tsx' -x '*.test.ts' -w
 
   # ============================================================================
   # Security — npm audit + dotnet vulnerable package scan
@@ -215,7 +283,7 @@ jobs:
     name: Build Backend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, backend-integration, security]
+    needs: [backend, frontend, backend-integration, iot, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -243,7 +311,7 @@ jobs:
     name: Build Backend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, backend-integration, security]
+    needs: [backend, frontend, backend-integration, iot, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -292,7 +360,7 @@ jobs:
     name: Build Frontend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, backend-integration, security]
+    needs: [backend, frontend, backend-integration, iot, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -322,7 +390,7 @@ jobs:
     name: Build Frontend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, backend-integration, security]
+    needs: [backend, frontend, backend-integration, iot, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code

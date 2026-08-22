@@ -31,7 +31,9 @@ public static class PinEndpoints
             user.PinHash = hasher.Hash(req.Pin!);
             db.AuditLogs.Add(new AuditLog
             {
-                TenantId = user.TenantId, ActorUserId = userId, SubjectUserId = userId,
+                TenantId = user.TenantId,
+                ActorUserId = userId,
+                SubjectUserId = userId,
                 Action = "user.pin_set",
             });
             await db.SaveChangesAsync(ct);
@@ -46,7 +48,9 @@ public static class PinEndpoints
             user.PinHash = null;
             db.AuditLogs.Add(new AuditLog
             {
-                TenantId = user.TenantId, ActorUserId = userId, SubjectUserId = userId,
+                TenantId = user.TenantId,
+                ActorUserId = userId,
+                SubjectUserId = userId,
                 Action = "user.pin_cleared",
             });
             await db.SaveChangesAsync(ct);
