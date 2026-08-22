@@ -12,7 +12,7 @@ namespace Crusaders.Mainframe.Tests;
 ///
 /// <para>
 /// The worker used to post a positive <see cref="LedgerEntryType.CancellationRefund"/>
-/// for the full booking value whenever <c>AmountChargedZar &gt; 0</c>, with no check
+/// for the full booking value whenever <c>AmountChargedCredits &gt; 0</c>, with no check
 /// that anything had ever been debited. Under charge-on-activation a no-show by
 /// definition never checked in — that is the selection predicate — so no
 /// <see cref="LedgerEntryType.BookingCharge"/> existed to refund. It then subtracted
@@ -44,7 +44,7 @@ public class NoShowWorkerTests
             EndsAt = DateTimeOffset.UtcNow.AddMinutes(-45),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedZar = amount,
+            AmountChargedCredits = amount,
             Status = BookingStatus.Booked,
             CheckedInAt = null,
             ChargedAt = charged ? DateTimeOffset.UtcNow.AddHours(-1) : null,
@@ -165,7 +165,7 @@ public class NoShowWorkerTests
             EndsAt = DateTimeOffset.UtcNow.AddDays(-400).AddMinutes(15),
             SliceMinutes = 15,
             SliceCount = 1,
-            AmountChargedZar = 8m,
+            AmountChargedCredits = 8m,
             Status = BookingStatus.Booked,
         };
         db.Bookings.Add(ancient);

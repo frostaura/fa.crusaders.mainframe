@@ -206,7 +206,7 @@ public sealed class ApiBoundaryTests : IClassFixture<PostgresFixture>
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO ledger_entries
-                    ("Id","TenantId","UserId","Type","AmountZar","ActorUserId","Reason","ExternalReference","CreatedAt")
+                    ("Id","TenantId","UserId","Type","AmountCredits","ActorUserId","Reason","ExternalReference","CreatedAt")
                 VALUES
                     (@id, @tenant, @user, 0, 1.00, @actor, 'boundary test', @ext, now())
                 """;

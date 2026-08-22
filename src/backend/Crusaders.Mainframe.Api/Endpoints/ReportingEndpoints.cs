@@ -35,8 +35,8 @@ public static class ReportingEndpoints
         {
             var (f, t) = ResolveRange(from, to);
             var rows = await db.LedgerEntries.Where(l => l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
-            var topUps = rows.Where(r => r.Type == LedgerEntryType.TopUp).Sum(r => r.AmountZar);
-            var reversals = rows.Where(r => r.Type == LedgerEntryType.PaymentReversal).Sum(r => r.AmountZar);
+            var topUps = rows.Where(r => r.Type == LedgerEntryType.TopUp).Sum(r => r.AmountCredits);
+            var reversals = rows.Where(r => r.Type == LedgerEntryType.PaymentReversal).Sum(r => r.AmountCredits);
             return Results.Ok(new { from = f, to = t, gross_topups_zar = topUps, reversals_zar = reversals, net_zar = topUps + reversals });
         });
 
@@ -57,7 +57,7 @@ public static class ReportingEndpoints
                         court_name = meta.Name,
                         slices = g.Sum(b => b.SliceCount),
                         bookings = g.Count(),
-                        revenue_zar = g.Sum(b => b.AmountChargedZar),
+                        revenue_credits = g.Sum(b => b.AmountChargedCredits),
                     };
                 })
                 .OrderBy(r => r.court_number)
@@ -115,10 +115,10 @@ public static class ReportingEndpoints
                 return new
                 {
                     date = d.ToString("yyyy-MM-dd"),
-                    top_ups_zar = le.Where(x => x.Type == LedgerEntryType.TopUp).Sum(x => x.AmountZar),
-                    booking_charges_zar = -le.Where(x => x.Type == LedgerEntryType.BookingCharge).Sum(x => x.AmountZar),
-                    refunds_zar = le.Where(x => x.Type == LedgerEntryType.CancellationRefund).Sum(x => x.AmountZar),
-                    penalties_zar = -le.Where(x => x.Type == LedgerEntryType.NoShowPenalty || x.Type == LedgerEntryType.LateCancellationPenalty).Sum(x => x.AmountZar),
+                    top_ups_credits = le.Where(x => x.Type == LedgerEntryType.TopUp).Sum(x => x.AmountCredits),
+                    booking_charges_credits = -le.Where(x => x.Type == LedgerEntryType.BookingCharge).Sum(x => x.AmountCredits),
+                    refunds_credits = le.Where(x => x.Type == LedgerEntryType.CancellationRefund).Sum(x => x.AmountCredits),
+                    penalties_credits = -le.Where(x => x.Type == LedgerEntryType.NoShowPenalty || x.Type == LedgerEntryType.LateCancellationPenalty).Sum(x => x.AmountCredits),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
                     no_shows = bk.Count(b => b.Status == BookingStatus.NoShow),
                 };
@@ -140,22 +140,22 @@ public static class ReportingEndpoints
 
             decimal running = 0m;
             // Seed running balance with everything before the window so the chart line starts at the right value.
-            running = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt < f).SumAsync(x => (decimal?)x.AmountZar, ct) ?? 0m;
+            running = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt < f).SumAsync(x => (decimal?)x.AmountCredits, ct) ?? 0m;
 
             var rows = allDays.Select(d =>
             {
                 var le = ledgerByDay.GetValueOrDefault(d) ?? new();
                 var bk = bookingsByDay.GetValueOrDefault(d) ?? new();
-                var dayDelta = le.Sum(x => x.AmountZar);
+                var dayDelta = le.Sum(x => x.AmountCredits);
                 running += dayDelta;
                 return new
                 {
                     date = d.ToString("yyyy-MM-dd"),
-                    top_ups_zar = le.Where(x => x.Type == LedgerEntryType.TopUp).Sum(x => x.AmountZar),
-                    spent_zar = -le.Where(x => x.Type == LedgerEntryType.BookingCharge).Sum(x => x.AmountZar),
-                    refunds_zar = le.Where(x => x.Type == LedgerEntryType.CancellationRefund).Sum(x => x.AmountZar),
+                    top_ups_credits = le.Where(x => x.Type == LedgerEntryType.TopUp).Sum(x => x.AmountCredits),
+                    spent_credits = -le.Where(x => x.Type == LedgerEntryType.BookingCharge).Sum(x => x.AmountCredits),
+                    refunds_credits = le.Where(x => x.Type == LedgerEntryType.CancellationRefund).Sum(x => x.AmountCredits),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
-                    balance_zar = running,
+                    balance_credits = running,
                 };
             }).ToList();
             return Results.Ok(rows);
@@ -180,11 +180,11 @@ public static class ReportingEndpoints
 
     private static object BuildWalletReport(List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to)
     {
-        var topUps = entries.Where(e => e.Type == LedgerEntryType.TopUp).Sum(e => e.AmountZar);
-        var spent = -entries.Where(e => e.Type == LedgerEntryType.BookingCharge).Sum(e => e.AmountZar);
-        var refunds = entries.Where(e => e.Type == LedgerEntryType.CancellationRefund).Sum(e => e.AmountZar);
+        var topUps = entries.Where(e => e.Type == LedgerEntryType.TopUp).Sum(e => e.AmountCredits);
+        var spent = -entries.Where(e => e.Type == LedgerEntryType.BookingCharge).Sum(e => e.AmountCredits);
+        var refunds = entries.Where(e => e.Type == LedgerEntryType.CancellationRefund).Sum(e => e.AmountCredits);
         var penalties = entries.Where(e => e.Type == LedgerEntryType.NoShowPenalty || e.Type == LedgerEntryType.LateCancellationPenalty).Count();
-        return new { from, to, top_ups_zar = topUps, spent_zar = spent, refunds_zar = refunds, penalty_count = penalties, count = entries.Count };
+        return new { from, to, top_ups_credits = topUps, spent_credits = spent, refunds_credits = refunds, penalty_count = penalties, count = entries.Count };
     }
 
     private static string LedgerCsv(IEnumerable<LedgerEntry> entries)
@@ -195,7 +195,7 @@ public static class ReportingEndpoints
         {
             sb.Append(e.CreatedAt.ToString("o", CultureInfo.InvariantCulture)).Append(',');
             sb.Append(e.Type).Append(',');
-            sb.Append(e.AmountZar.ToString(CultureInfo.InvariantCulture)).Append(',');
+            sb.Append(e.AmountCredits.ToString(CultureInfo.InvariantCulture)).Append(',');
             sb.Append(Csv(e.Reason)).Append(',');
             sb.Append(Csv(e.ExternalReference)).Append(',');
             sb.AppendLine(e.RelatedBookingId?.ToString() ?? "");

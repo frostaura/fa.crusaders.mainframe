@@ -107,7 +107,7 @@ export default function SchedulePage() {
               {day.courts.map((c) => (
                 <div key={c.id} className="sticky top-0 z-20 bg-bg-surface px-2 py-2 text-xs text-text-secondary text-center border-b border-border">
                   <div className="font-medium text-text-primary">{c.name}</div>
-                  <div>R{c.slicePriceZar.toFixed(2)}/slice</div>
+                  <div>R{c.slicePriceCredits.toFixed(2)}/slice</div>
                 </div>
               ))}
               {timeSlices.map((t) => {
@@ -116,7 +116,7 @@ export default function SchedulePage() {
                   <RowFragment key={t.utc} t={t}>
                     {day.courts.map((c) => {
                       const slot = slotsByCourtAndStart.get(`${c.id}|${new Date(t.utc).getTime()}`);
-                      return <SlotCell key={c.id + t.utc} slot={slot} isPast={isPast} priceZar={c.slicePriceZar} onBook={() => book(c, t.utc)} onCancel={(id) => cancel(id)} />;
+                      return <SlotCell key={c.id + t.utc} slot={slot} isPast={isPast} priceZar={c.slicePriceCredits} onBook={() => book(c, t.utc)} onCancel={(id) => cancel(id)} />;
                     })}
                   </RowFragment>
                 );

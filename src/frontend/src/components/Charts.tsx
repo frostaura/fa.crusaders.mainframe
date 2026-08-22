@@ -40,7 +40,7 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
           <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Area type="monotone" dataKey="top_ups_zar" name="Top-ups" stroke={ACCENT} fill="url(#revFill)" strokeWidth={2} />
+          <Area type="monotone" dataKey="top_ups_credits" name="Top-ups" stroke={ACCENT} fill="url(#revFill)" strokeWidth={2} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -57,9 +57,9 @@ export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
           <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Bar dataKey="top_ups_zar" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="booking_charges_zar" name="Bookings" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="penalties_zar" name="Penalties" stackId="b" fill={WARNING} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="booking_charges_credits" name="Bookings" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="penalties_credits" name="Penalties" stackId="b" fill={WARNING} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -84,7 +84,7 @@ export function BookingsLineChart({ data }: { data: DailyAdminPoint[] }) {
   );
 }
 
-export function CourtsRevenueBarChart({ data }: { data: { court_name: string; revenue_zar: number; bookings: number }[] }) {
+export function CourtsRevenueBarChart({ data }: { data: { court_name: string; revenue_credits: number; bookings: number }[] }) {
   return (
     <div style={{ height: CHART_HEIGHT }}>
       <ResponsiveContainer>
@@ -93,7 +93,7 @@ export function CourtsRevenueBarChart({ data }: { data: { court_name: string; re
           <XAxis dataKey="court_name" fontSize={11} stroke={TEXT_MUTED} />
           <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} />
-          <Bar dataKey="revenue_zar" name="Revenue" fill={ACCENT} radius={[6, 6, 0, 0]} />
+          <Bar dataKey="revenue_credits" name="Revenue" fill={ACCENT} radius={[6, 6, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -136,7 +136,7 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
           <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Area type="monotone" dataKey="balance_zar" name="Balance" stroke={ACCENT} fill="url(#balFill)" strokeWidth={2} />
+          <Area type="monotone" dataKey="balance_credits" name="Balance" stroke={ACCENT} fill="url(#balFill)" strokeWidth={2} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -153,9 +153,9 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
           <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Bar dataKey="top_ups_zar" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="refunds_zar" name="Refunds" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="spent_zar" name="Spent" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="refunds_credits" name="Refunds" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="spent_credits" name="Spent" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

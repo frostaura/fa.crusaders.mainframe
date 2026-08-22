@@ -127,7 +127,7 @@ function CourtsSection({ courts, reload }: { courts: AdminCourt[]; reload: () =>
     if (!newName.trim()) { toast.push({ tone: "warning", text: "Court name is required." }); return; }
     setAdding(true);
     try {
-      await endpoints.adminCourtsCreate({ name: newName.trim(), slicePriceZar: newPrice });
+      await endpoints.adminCourtsCreate({ name: newName.trim(), slicePriceCredits: newPrice });
       setNewName(""); setNewPrice(50);
       await reload();
       toast.push({ tone: "success", text: "Court added." });
@@ -163,14 +163,14 @@ function CourtsSection({ courts, reload }: { courts: AdminCourt[]; reload: () =>
 function CourtRow({ court, reload }: { court: AdminCourt; reload: () => Promise<void> }) {
   const toast = useToast();
   const [name, setName] = useState(court.name);
-  const [price, setPrice] = useState(court.slice_price_zar);
+  const [price, setPrice] = useState(court.slice_price_credits);
   const [busy, setBusy] = useState(false);
-  const dirty = name !== court.name || price !== court.slice_price_zar;
+  const dirty = name !== court.name || price !== court.slice_price_credits;
 
   const save = async () => {
     setBusy(true);
     try {
-      await endpoints.adminCourtsUpdate(court.id, { name, slicePriceZar: price });
+      await endpoints.adminCourtsUpdate(court.id, { name, slicePriceCredits: price });
       await reload();
       toast.push({ tone: "success", text: `${name} updated.` });
     } catch { toast.push({ tone: "danger", text: "Update failed." }); }

@@ -12,7 +12,7 @@ import {
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
-type UtilRow = { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_zar: number };
+type UtilRow = { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_credits: number };
 
 export default function ReportsPage() {
   const auth = useAuth();
@@ -54,9 +54,9 @@ export default function ReportsPage() {
         { label: "No-show rate", value: noShow ? `${noShow.no_show_pct.toFixed(1)}%` : "—", tone: noShow && noShow.no_show_pct > 5 ? "warning" as const : "neutral" as const },
       ]
     : [
-        { label: "Top-ups", value: wallet ? `R${wallet.top_ups_zar.toFixed(0)}` : "—", tone: "success" as const },
-        { label: "Spent", value: wallet ? `R${wallet.spent_zar.toFixed(0)}` : "—", tone: "accent" as const },
-        { label: "Refunds", value: wallet ? `R${wallet.refunds_zar.toFixed(0)}` : "—", tone: "neutral" as const },
+        { label: "Top-ups", value: wallet ? `R${wallet.top_ups_credits.toFixed(0)}` : "—", tone: "success" as const },
+        { label: "Spent", value: wallet ? `R${wallet.spent_credits.toFixed(0)}` : "—", tone: "accent" as const },
+        { label: "Refunds", value: wallet ? `R${wallet.refunds_credits.toFixed(0)}` : "—", tone: "neutral" as const },
         { label: "Movements", value: wallet ? String(wallet.count) : "—", tone: "neutral" as const },
       ];
 
@@ -121,9 +121,9 @@ export default function ReportsPage() {
         <Card>
           <h2 className="font-semibold mb-3">My wallet — totals</h2>
           <dl className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
-            <Stat label="Top-ups" value={`R${wallet.top_ups_zar.toFixed(2)}`} />
-            <Stat label="Spent" value={`R${wallet.spent_zar.toFixed(2)}`} />
-            <Stat label="Refunds" value={`R${wallet.refunds_zar.toFixed(2)}`} />
+            <Stat label="Top-ups" value={`R${wallet.top_ups_credits.toFixed(2)}`} />
+            <Stat label="Spent" value={`R${wallet.spent_credits.toFixed(2)}`} />
+            <Stat label="Refunds" value={`R${wallet.refunds_credits.toFixed(2)}`} />
             <Stat label="Penalty count" value={String(wallet.penalty_count)} />
             <Stat label="Movements" value={String(wallet.count)} />
           </dl>
@@ -148,13 +148,13 @@ export default function ReportsPage() {
             rows={util.by_court}
             rowKey={(r) => r.court_id}
             search={{ placeholder: "Filter by court name…", fields: (r) => r.court_name }}
-            defaultSort={{ key: "revenue_zar", dir: "desc" }}
+            defaultSort={{ key: "revenue_credits", dir: "desc" }}
             emptyTitle="No bookings in this window."
             columns={[
               { key: "court_name", header: "Court", cell: (r) => r.court_name },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
               { key: "slices", header: "Slices", align: "right", cell: (r) => r.slices, sortValue: (r) => r.slices },
-              { key: "revenue_zar", header: "Revenue", align: "right", cell: (r) => `R${r.revenue_zar.toFixed(2)}`, sortValue: (r) => r.revenue_zar },
+              { key: "revenue_credits", header: "Revenue", align: "right", cell: (r) => `R${r.revenue_credits.toFixed(2)}`, sortValue: (r) => r.revenue_credits },
             ] satisfies DataColumn<UtilRow>[]}
           />
         </Card>
@@ -174,10 +174,10 @@ export default function ReportsPage() {
             maxHeight="60vh"
             columns={[
               { key: "date", header: "Date", cell: (r) => prettyDate(r.date), sortValue: (r) => r.date, width: 130 },
-              { key: "top_ups_zar", header: "Top-ups", align: "right", cell: (r) => zar(r.top_ups_zar), sortValue: (r) => r.top_ups_zar },
-              { key: "booking_charges_zar", header: "Charges", align: "right", cell: (r) => zar(r.booking_charges_zar), sortValue: (r) => r.booking_charges_zar },
-              { key: "refunds_zar", header: "Refunds", align: "right", cell: (r) => zar(r.refunds_zar), sortValue: (r) => r.refunds_zar },
-              { key: "penalties_zar", header: "Penalties", align: "right", cell: (r) => zar(r.penalties_zar), sortValue: (r) => r.penalties_zar },
+              { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => zar(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
+              { key: "booking_charges_credits", header: "Charges", align: "right", cell: (r) => zar(r.booking_charges_credits), sortValue: (r) => r.booking_charges_credits },
+              { key: "refunds_credits", header: "Refunds", align: "right", cell: (r) => zar(r.refunds_credits), sortValue: (r) => r.refunds_credits },
+              { key: "penalties_credits", header: "Penalties", align: "right", cell: (r) => zar(r.penalties_credits), sortValue: (r) => r.penalties_credits },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
               { key: "no_shows", header: "No-shows", align: "right", cell: (r) => r.no_shows, sortValue: (r) => r.no_shows },
             ] satisfies DataColumn<DailyAdminPoint>[]}
@@ -199,11 +199,11 @@ export default function ReportsPage() {
             maxHeight="60vh"
             columns={[
               { key: "date", header: "Date", cell: (r) => prettyDate(r.date), sortValue: (r) => r.date, width: 130 },
-              { key: "top_ups_zar", header: "Top-ups", align: "right", cell: (r) => zar(r.top_ups_zar), sortValue: (r) => r.top_ups_zar },
-              { key: "spent_zar", header: "Spent", align: "right", cell: (r) => zar(r.spent_zar), sortValue: (r) => r.spent_zar },
-              { key: "refunds_zar", header: "Refunds", align: "right", cell: (r) => zar(r.refunds_zar), sortValue: (r) => r.refunds_zar },
+              { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => zar(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
+              { key: "spent_credits", header: "Spent", align: "right", cell: (r) => zar(r.spent_credits), sortValue: (r) => r.spent_credits },
+              { key: "refunds_credits", header: "Refunds", align: "right", cell: (r) => zar(r.refunds_credits), sortValue: (r) => r.refunds_credits },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
-              { key: "balance_zar", header: "Balance", align: "right", cell: (r) => zar(r.balance_zar), sortValue: (r) => r.balance_zar },
+              { key: "balance_credits", header: "Balance", align: "right", cell: (r) => zar(r.balance_credits), sortValue: (r) => r.balance_credits },
             ] satisfies DataColumn<DailyMePoint>[]}
           />
         </Card>

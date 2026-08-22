@@ -16,7 +16,7 @@ public enum LedgerEntryType
 /// Every credit movement is one of these entries; rows are append-only.
 /// <para>
 /// Per the Crusaders client blueprint Rev 2 (A.8), the ledger unit is <b>credits</b>, not ZAR.
-/// The legacy column name <see cref="AmountZar"/> is preserved for migration stability — read it as
+/// The legacy column name <see cref="AmountCredits"/> is preserved for migration stability — read it as
 /// "the unit of account, which Crusaders has fixed at credits". On <see cref="LedgerEntryType.TopUp"/>
 /// rows, <see cref="ZarPaid"/> and <see cref="ConversionRate"/> capture the ZAR amount that funded
 /// the top-up and the class-specific rate used (160 or 240 credits per rand), so the conversion is
@@ -32,7 +32,7 @@ public sealed class LedgerEntry : ITenantScoped
     public LedgerEntryType Type { get; set; }
 
     /// <summary>Signed amount in the unit of account (credits for Crusaders). Positive credits the user, negative debits.</summary>
-    public decimal AmountZar { get; set; }
+    public decimal AmountCredits { get; set; }
 
     /// <summary>For <see cref="LedgerEntryType.TopUp"/> + <see cref="LedgerEntryType.PaymentReversal"/>: the ZAR amount that moved. Null on internal entries.</summary>
     public decimal? ZarPaid { get; set; }

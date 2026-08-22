@@ -25,7 +25,7 @@ public sealed class TenantSettingsAccessor
         var root = doc.RootElement;
 
         int sliceMinutes = TryInt(root, "slice_minutes", 15);                       // Blueprint B.4 — 15-minute default for Crusaders.
-        decimal slicePrice = TryDecimal(root, "slice_price_zar", 8m);                // Now read as credits per slice.
+        decimal slicePrice = TryDecimal(root, "slice_price_credits", 8m);                // Now read as credits per slice.
         decimal penaltyPct = TryDecimal(root, "penalty_pct", 30m);
         int graceMin = TryInt(root, "grace_window_minutes", 5);
         int penaltyMin = TryInt(root, "penalty_window_minutes", 15);
@@ -66,7 +66,7 @@ public sealed class TenantSettingsAccessor
 
 public sealed record TenantSettingsView(
     int SliceMinutes,
-    decimal DefaultSlicePriceZar,           // Unit is credits per blueprint A.8/A.9. Legacy field name kept.
+    decimal DefaultSlicePriceCredits,           // Unit is credits per blueprint A.8/A.9. Legacy field name kept.
     decimal PenaltyPct,
     int GraceWindowMinutes,
     int PenaltyWindowMinutes,

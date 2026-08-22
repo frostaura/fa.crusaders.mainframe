@@ -150,7 +150,7 @@ public static class TopUpEndpoints
                 await ledger.PostAsync(new LedgerPosting(
                     UserId: pending.UserId,
                     Type: LedgerEntryType.TopUp,
-                    AmountZar: credits,
+                    AmountCredits: credits,
                     ZarPaid: pending.AmountZar,
                     ConversionRate: rate,
                     ActorUserId: pending.UserId,

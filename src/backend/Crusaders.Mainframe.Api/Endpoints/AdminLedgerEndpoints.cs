@@ -84,7 +84,7 @@ public static class LedgerRowMapper
             _ => (Treasury, e.Reason ?? e.Type.ToString()),
         };
 
-        var (fromLabel, toLabel) = e.AmountZar >= 0
+        var (fromLabel, toLabel) = e.AmountCredits >= 0
             ? (counterparty, subject)   // money flowed INTO subject
             : (subject, counterparty);  // money flowed OUT of subject
 
@@ -93,8 +93,8 @@ public static class LedgerRowMapper
             At: e.CreatedAt,
             From: fromLabel,
             To: toLabel,
-            AmountZar: Math.Abs(e.AmountZar),
-            SignedAmountZar: e.AmountZar,
+            AmountCredits: Math.Abs(e.AmountCredits),
+            SignedAmountZar: e.AmountCredits,
             Type: e.Type.ToString(),
             Comment: comment,
             SubjectUserId: e.UserId,
@@ -110,7 +110,7 @@ public sealed record LedgerRowDto(
     DateTimeOffset At,
     string From,
     string To,
-    decimal AmountZar,
+    decimal AmountCredits,
     decimal SignedAmountZar,
     string Type,
     string Comment,

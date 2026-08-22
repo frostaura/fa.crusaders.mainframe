@@ -79,12 +79,12 @@ public sealed class NoShowWorker : BackgroundService
                 // Who pays is who was charged. Posting the penalty to the booker when
                 // someone else paid (blueprint B.2 payer override) debits the wrong person.
                 var payerUserId = b.PaidByUserId ?? b.UserId.Value;
-                var penalty = Math.Round(b.AmountChargedZar * tSettings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero);
+                var penalty = Math.Round(b.AmountChargedCredits * tSettings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero);
 
                 // The refund is guarded on an actual charge having happened.
                 //
                 // This previously posted a positive CancellationRefund for the full booking
-                // value whenever AmountChargedZar > 0, with no check that anything had ever
+                // value whenever AmountChargedCredits > 0, with no check that anything had ever
                 // been debited. Under charge-on-activation a no-show by definition never
                 // checked in — CheckedInAt == null is the selection predicate above — so no
                 // BookingCharge existed to refund. The net effect was to CREDIT the player
@@ -93,10 +93,10 @@ public sealed class NoShowWorker : BackgroundService
                 // from the charge-at-booking era and referred to a row that was not there.
                 var wasCharged = b.ChargedAt is not null;
 
-                if (wasCharged && b.AmountChargedZar > 0)
+                if (wasCharged && b.AmountChargedCredits > 0)
                 {
                     await ledger.PostAsync(new LedgerPosting(
-                        UserId: payerUserId, Type: LedgerEntryType.CancellationRefund, AmountZar: b.AmountChargedZar,
+                        UserId: payerUserId, Type: LedgerEntryType.CancellationRefund, AmountCredits: b.AmountChargedCredits,
                         ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: "No-show — booking refunded"), ct);
                 }
 
@@ -106,16 +106,16 @@ public sealed class NoShowWorker : BackgroundService
                 if (wasCharged && penalty > 0)
                 {
                     await ledger.PostAsync(new LedgerPosting(
-                        UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountZar: -penalty,
+                        UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountCredits: -penalty,
                         ActorUserId: Guid.Empty, RelatedBookingId: b.Id,
-                        Reason: $"No-show penalty ({tSettings.PenaltyPct}% of {b.AmountChargedZar:0.00} credits)"), ct);
+                        Reason: $"No-show penalty ({tSettings.PenaltyPct}% of {b.AmountChargedCredits:0.00} credits)"), ct);
                 }
 
                 b.Status = BookingStatus.NoShow;
 
                 var user = await db.Users.FirstAsync(u => u.Id == b.UserId, ct);
                 var court = await db.Courts.FirstAsync(c => c.Id == b.CourtId, ct);
-                var netRefund = b.AmountChargedZar - penalty;
+                var netRefund = b.AmountChargedCredits - penalty;
                 try
                 {
                     await email.SendAsync(EmailTemplates.BookingCancellation(user.Email, court.Name + " (no-show)", netRefund, penalty), ct);
@@ -133,8 +133,8 @@ public sealed class NoShowWorker : BackgroundService
                         ["court_id"] = b.CourtId,
                         ["court_number"] = court.CourtNumber,
                         ["user_id"] = b.UserId,
-                        ["penalty_zar"] = penalty,
-                        ["refund_zar"] = netRefund,
+                        ["penalty_credits"] = penalty,
+                        ["refund_credits"] = netRefund,
                     }), ct);
             }
 

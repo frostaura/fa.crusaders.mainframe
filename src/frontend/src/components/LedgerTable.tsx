@@ -30,7 +30,7 @@ export function LedgerTable({
         case "time": return new Date(r.at).getTime();
         case "from": return r.from;
         case "to": return r.to;
-        case "amount": return r.signedAmountZar;
+        case "amount": return r.signedAmountCredits;
         case "comment": return r.comment ?? "";
       }
     };
@@ -81,9 +81,9 @@ export function LedgerTable({
               {columns.includes("amount") && (
                 <td className={cn(
                   "px-4 py-2 align-top text-right font-mono whitespace-nowrap",
-                  r.signedAmountZar >= 0 ? "text-success-strong" : "text-warning-strong",
+                  r.signedAmountCredits >= 0 ? "text-success-strong" : "text-warning-strong",
                 )}>
-                  {r.signedAmountZar >= 0 ? "+" : "−"}R{r.amountZar.toFixed(2)}
+                  {r.signedAmountCredits >= 0 ? "+" : "−"}{r.amountCredits.toFixed(2)} cr
                 </td>
               )}
               {columns.includes("comment") && (

@@ -36,7 +36,7 @@ public class LedgerTests
 
         var rows = await db.LedgerEntries.OrderBy(l => l.CreatedAt).ToListAsync();
         Assert.Equal(2, rows.Count);
-        Assert.Equal(100m, rows[0].AmountZar);
-        Assert.Equal(-25m, rows[1].AmountZar);
+        Assert.Equal(100m, rows[0].AmountCredits);
+        Assert.Equal(-25m, rows[1].AmountCredits);
     }
 }

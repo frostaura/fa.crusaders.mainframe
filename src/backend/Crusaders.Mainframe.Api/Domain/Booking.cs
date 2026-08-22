@@ -43,7 +43,7 @@ public sealed class Booking : ITenantScoped
     public int SliceCount { get; set; } = 1;
 
     /// <summary>The price quoted to the player at booking time, locked in until cancellation. In credits (legacy column name kept for migration stability).</summary>
-    public decimal AmountChargedZar { get; set; }
+    public decimal AmountChargedCredits { get; set; }
 
     public BookingStatus Status { get; set; } = BookingStatus.Booked;
 

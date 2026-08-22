@@ -24,19 +24,19 @@ const EVENTS: EventDef[] = [
     name: "booking.created",
     label: "Booking created",
     description: "A member (or admin on their behalf) booked a court slot.",
-    vars: ["booking_id", "court_id", "court_number", "court_name", "user_id", "starts_at", "ends_at", "slice_count", "amount_charged_zar", "balance_after_zar"],
+    vars: ["booking_id", "court_id", "court_number", "court_name", "user_id", "starts_at", "ends_at", "slice_count", "amount_charged_credits", "balance_after_credits"],
   },
   {
     name: "booking.cancelled",
     label: "Booking cancelled",
     description: "A booking was cancelled with no penalty.",
-    vars: ["booking_id", "court_id", "court_number", "user_id", "refund_zar", "penalty_zar"],
+    vars: ["booking_id", "court_id", "court_number", "user_id", "refund_credits", "penalty_credits"],
   },
   {
     name: "booking.late_cancellation",
     label: "Late cancellation",
     description: "Cancelled inside the penalty window — penalty applied.",
-    vars: ["booking_id", "court_id", "court_number", "user_id", "refund_zar", "penalty_zar"],
+    vars: ["booking_id", "court_id", "court_number", "user_id", "refund_credits", "penalty_credits"],
   },
   {
     name: "booking.lights_on",
@@ -54,13 +54,13 @@ const EVENTS: EventDef[] = [
     name: "booking.no_show",
     label: "No-show",
     description: "Player did not biometric-authenticate within the grace window.",
-    vars: ["booking_id", "court_id", "court_number", "user_id", "penalty_zar", "refund_zar"],
+    vars: ["booking_id", "court_id", "court_number", "user_id", "penalty_credits", "refund_credits"],
   },
   {
     name: "credit.topped_up",
     label: "Credit topped up",
     description: "A successful PeachPayments top-up cleared.",
-    vars: ["topup_id", "amount_zar", "external_reference"],
+    vars: ["topup_id", "zar_paid", "credits", "conversion_rate", "member_class", "external_reference"],
   },
 ];
 

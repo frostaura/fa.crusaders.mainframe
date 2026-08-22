@@ -22,7 +22,7 @@ export default function WalletPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm text-text-secondary">Current balance</p>
-            <p className="text-3xl font-semibold">{data.balance_zar.toFixed(2)} <span className="text-base font-normal text-text-secondary">credits</span></p>
+            <p className="text-3xl font-semibold">{data.balance_credits.toFixed(2)} <span className="text-base font-normal text-text-secondary">credits</span></p>
             <p className="text-xs text-text-muted mt-1">Credits are the unit of account for bookings. Top up in rand → receive credits at your member-class rate.</p>
           </div>
           <Link to="/wallet/topup"><Button>Top up</Button></Link>

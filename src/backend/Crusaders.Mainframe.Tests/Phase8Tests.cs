@@ -80,7 +80,7 @@ public class Phase8Tests
         var entry = await db.LedgerEntries.SingleAsync();
         Assert.Equal(100m, entry.ZarPaid);
         Assert.Equal(1.6m, entry.ConversionRate);
-        Assert.Equal(160m, entry.AmountZar); // legacy column name, holds credits now
+        Assert.Equal(160m, entry.AmountCredits); // legacy column name, holds credits now
     }
 
     // ---- 8.3 Charge on lights-on ----
@@ -103,7 +103,7 @@ public class Phase8Tests
         // Balance unchanged — only one entry (the top-up).
         var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
         Assert.Equal(100m, balance);
-        Assert.Equal(100m, ok.BalanceAfterZar);
+        Assert.Equal(100m, ok.BalanceAfterCredits);
 
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var entries = await db.LedgerEntries.Where(l => l.UserId == host.PlayerUser.Id).ToListAsync();
@@ -171,8 +171,8 @@ public class Phase8Tests
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.PlayerUser.Id, waivePenalty: false, default);
-        Assert.Equal(0m, cancelled.RefundedZar);
-        Assert.Equal(0m, cancelled.PenaltyZar);
+        Assert.Equal(0m, cancelled.RefundedCredits);
+        Assert.Equal(0m, cancelled.PenaltyCredits);
 
         Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
@@ -192,8 +192,8 @@ public class Phase8Tests
 
         // Use admin actor so the "can't self-cancel after start" guard doesn't trip on edge timing.
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.AdminUser.Id, waivePenalty: false, default);
-        Assert.Equal(0m, cancelled.RefundedZar);     // no charge to refund
-        Assert.Equal(2.4m, cancelled.PenaltyZar);    // 30% of 8 credits = 2.4
+        Assert.Equal(0m, cancelled.RefundedCredits);     // no charge to refund
+        Assert.Equal(2.4m, cancelled.PenaltyCredits);    // 30% of 8 credits = 2.4
 
         // Balance: 100 - 2.4 = 97.6
         Assert.Equal(97.6m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));

@@ -62,8 +62,8 @@ export type LedgerRow = {
   at: string;
   from: string;
   to: string;
-  amountZar: number;
-  signedAmountZar: number;
+  amountCredits: number;
+  signedAmountCredits: number;
   type: string;
   comment: string;
   subjectUserId: string;
@@ -74,7 +74,7 @@ export type LedgerRow = {
 };
 
 export type WalletResponse = {
-  balance_zar: number;
+  balance_credits: number;
   entries: LedgerRow[];
 };
 export type ScheduleSlot = {
@@ -88,7 +88,7 @@ export type ScheduleSlot = {
   bookingId: string | null;
   blockLabel: string | null;
 };
-export type ScheduleCourt = { id: string; courtNumber: number; name: string; slicePriceZar: number };
+export type ScheduleCourt = { id: string; courtNumber: number; name: string; slicePriceCredits: number };
 export type ScheduleDay = {
   date: string; timezone: string; sliceMinutes: number;
   dayStartMinute: number; dayEndMinute: number; advanceBookingDays: number;
@@ -97,7 +97,7 @@ export type ScheduleDay = {
 
 export type AdminSettings = {
   slice_minutes: number;
-  slice_price_zar: number;
+  slice_price_credits: number;
   advance_booking_days: number;
   day_start_minute: number;
   day_end_minute: number;
@@ -112,7 +112,7 @@ export type AdminCourt = {
   court_number: number;
   name: string;
   court_type: string;
-  slice_price_zar: number;
+  slice_price_credits: number;
   is_active: boolean;
 };
 export type MyProfile = {
@@ -131,14 +131,14 @@ export type AdminMember = {
   full_name: string; membership_number: string; photo_url: string | null;
   status: string; created_at: string; rejection_reason: string | null;
   member_class?: "Regular" | "LeagueOrSenior";   // Phase 8.1
-  balance_zar: number;
+  balance_credits: number;
 };
 
 // Phase 8 — per-member spend drill-down (blueprint C.3).
 export type MemberSpendMonth = {
   month: string;
-  top_ups_credits: number;
-  top_ups_zar: number;
+  top_ups_credits: number;   // credits added to the wallet
+  top_ups_zar: number;       // actual rand paid, for reconciliation
   spent_credits: number;
   refunds_credits: number;
   penalties_credits: number;
@@ -200,9 +200,9 @@ export type WebAuthnCredentialRow = {
   last_used_at: string | null;
 };
 
-export type WalletReport = { from: string; to: string; top_ups_zar: number; spent_zar: number; refunds_zar: number; penalty_count: number; count: number };
-export type DailyAdminPoint = { date: string; top_ups_zar: number; booking_charges_zar: number; refunds_zar: number; penalties_zar: number; bookings: number; no_shows: number };
-export type DailyMePoint = { date: string; top_ups_zar: number; spent_zar: number; refunds_zar: number; bookings: number; balance_zar: number };
+export type WalletReport = { from: string; to: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; penalty_count: number; count: number };
+export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; bookings: number; no_shows: number };
+export type DailyMePoint = { date: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; bookings: number; balance_credits: number };
 export type RevenueReport = { from: string; to: string; gross_topups_zar: number; reversals_zar: number; net_zar: number };
 
 export async function uploadPhoto(file: File): Promise<{ url: string }> {
@@ -245,14 +245,14 @@ export const endpoints = {
   wallet: () => api.get<WalletResponse>("/api/v1/wallet"),
   schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}`),
   book: (courtId: string, startsAt: string, sliceCount: number) =>
-    api.post<{ booking_id: string; balance_after_zar: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),
-  cancelBooking: (bookingId: string) => api.post<{ refunded_zar: number; penalty_zar: number }>(`/api/v1/bookings/${bookingId}/cancel`),
+    api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),
+  cancelBooking: (bookingId: string) => api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/bookings/${bookingId}/cancel`),
 
   adminMembers: (status?: string) => api.get<AdminMember[]>(`/api/v1/admin/members/${status ? `?status=${status}` : ""}`),
   adminApprove: (memberId: string) => api.post<{ approved: boolean }>(`/api/v1/admin/members/${memberId}/approve`),
   adminReject: (memberId: string, reason: string) => api.post<{ rejected: boolean }>(`/api/v1/admin/members/${memberId}/reject`, { reason }),
-  adminAdjust: (userId: string, amountZar: number, reason: string) =>
-    api.post<{ entry_id: string; amount_zar: number; balance_after_zar: number }>(`/api/v1/admin/credit/${userId}/adjust`, { amountZar, reason }),
+  adminAdjust: (userId: string, amountCredits: number, reason: string) =>
+    api.post<{ entry_id: string; amount_credits: number; balance_after_credits: number }>(`/api/v1/admin/credit/${userId}/adjust`, { amountCredits, reason }),
   adminResetMemberPassword: (memberId: string) =>
     api.post<{ temp_password: string; email_sent_to: string; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
 
@@ -279,7 +279,7 @@ export const endpoints = {
     api.post<{ matched: boolean; user_id?: string; reason?: string }>(`/api/v1/court/${courtNumber}/qr/match`, { token }),
 
   // Top-up
-  topupStart: (amountZar: number) => api.post<{ topup_id: string; checkout_id: string; redirect_url: string }>("/api/v1/credit/topup", { amountZar }),
+  topupStart: (amountCredits: number) => api.post<{ topup_id: string; checkout_id: string; redirect_url: string }>("/api/v1/credit/topup", { amountCredits }),
   topupStatus: (topupId: string) => api.get<{ id: string; status: string; amount_zar: number; failure_reason: string | null }>(`/api/v1/credit/topup/${topupId}`),
 
   // Webhooks (admin)
@@ -306,7 +306,7 @@ export const endpoints = {
   reportRevenue: (from?: string, to?: string) =>
     api.get<RevenueReport>(`/api/v1/admin/reports/revenue${qs({ from, to })}`),
   reportUtilisation: (from?: string, to?: string) =>
-    api.get<{ from: string; to: string; by_court: { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_zar: number }[] }>(`/api/v1/admin/reports/utilisation${qs({ from, to })}`),
+    api.get<{ from: string; to: string; by_court: { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_credits: number }[] }>(`/api/v1/admin/reports/utilisation${qs({ from, to })}`),
   reportNoShows: (from?: string, to?: string) =>
     api.get<{ from: string; to: string; total: number; no_show: number; no_show_pct: number }>(`/api/v1/admin/reports/no-shows${qs({ from, to })}`),
   reportDailyAdmin: (from?: string, to?: string) =>
@@ -318,7 +318,7 @@ export const endpoints = {
   adminSettingsGet: () => api.get<AdminSettings>("/api/v1/admin/settings/"),
   adminSettingsSave: (req: Omit<AdminSettings, "timezone">) => api.put<{ saved: true }>("/api/v1/admin/settings/", {
     sliceMinutes: req.slice_minutes,
-    slicePriceZar: req.slice_price_zar,
+    slicePriceCredits: req.slice_price_credits,
     advanceBookingDays: req.advance_booking_days,
     dayStartMinute: req.day_start_minute,
     dayEndMinute: req.day_end_minute,
@@ -329,9 +329,9 @@ export const endpoints = {
 
   // Admin: courts
   adminCourtsList: () => api.get<AdminCourt[]>("/api/v1/admin/courts/"),
-  adminCourtsCreate: (req: { name: string; courtType?: string; slicePriceZar: number }) =>
-    api.post<{ id: string; court_number: number }>("/api/v1/admin/courts/", { name: req.name, courtType: req.courtType ?? "Squash", slicePriceZar: req.slicePriceZar }),
-  adminCourtsUpdate: (id: string, req: { name?: string; slicePriceZar?: number; isActive?: boolean }) =>
+  adminCourtsCreate: (req: { name: string; courtType?: string; slicePriceCredits: number }) =>
+    api.post<{ id: string; court_number: number }>("/api/v1/admin/courts/", { name: req.name, courtType: req.courtType ?? "Squash", slicePriceCredits: req.slicePriceCredits }),
+  adminCourtsUpdate: (id: string, req: { name?: string; slicePriceCredits?: number; isActive?: boolean }) =>
     api.patch<{ saved: true }>(`/api/v1/admin/courts/${id}`, req),
   adminCourtsDelete: (id: string) => api.del<{ deactivated: true }>(`/api/v1/admin/courts/${id}`),
 

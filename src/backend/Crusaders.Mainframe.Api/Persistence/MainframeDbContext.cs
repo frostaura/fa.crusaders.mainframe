@@ -100,7 +100,7 @@ public class MainframeDbContext : DbContext
             e.HasIndex(c => new { c.TenantId, c.CourtNumber }).IsUnique();
             e.Property(c => c.Name).HasMaxLength(128).IsRequired();
             e.Property(c => c.CourtType).HasConversion<int>();
-            e.Property(c => c.SlicePriceZar).HasColumnType("numeric(10,2)");
+            e.Property(c => c.SlicePriceCredits).HasColumnType("numeric(10,2)");
             e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
         });
 
@@ -110,7 +110,7 @@ public class MainframeDbContext : DbContext
             e.HasKey(b => b.Id);
             e.HasIndex(b => new { b.TenantId, b.CourtId, b.StartsAt });
             e.HasIndex(b => new { b.TenantId, b.UserId, b.StartsAt });
-            e.Property(b => b.AmountChargedZar).HasColumnType("numeric(10,2)");
+            e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
             e.Property(b => b.Status).HasConversion<int>();
             e.Property(b => b.BlockLabel).HasMaxLength(128);
             e.Property(b => b.CancellationReason).HasMaxLength(512);
@@ -123,7 +123,7 @@ public class MainframeDbContext : DbContext
             e.HasKey(l => l.Id);
             e.HasIndex(l => new { l.TenantId, l.UserId, l.CreatedAt });
             e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
-            e.Property(l => l.AmountZar).HasColumnType("numeric(10,2)");
+            e.Property(l => l.AmountCredits).HasColumnType("numeric(10,2)");
             e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
             e.Property(l => l.ConversionRate).HasColumnType("numeric(8,4)");
             e.Property(l => l.Type).HasConversion<int>();

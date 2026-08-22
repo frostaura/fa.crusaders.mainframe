@@ -48,7 +48,7 @@ public static class Seeder
                 SettingsJson = """
                 {
                   "slice_minutes": 15,
-                  "slice_price_zar": 8.00,
+                  "slice_price_credits": 8.00,
                   "penalty_pct": 30.0,
                   "grace_window_minutes": 5,
                   "penalty_window_minutes": 15,
@@ -130,7 +130,7 @@ public static class Seeder
                     CourtNumber = i,
                     Name = $"Court {i}",
                     CourtType = CourtType.Squash,
-                    SlicePriceZar = 50.00m,
+                    SlicePriceCredits = 50.00m,
                 });
             }
             await db.SaveChangesAsync();
@@ -194,7 +194,7 @@ public static class Seeder
                 TenantId = tenantId,
                 UserId = user.Id,
                 Type = Domain.LedgerEntryType.AdminAdjustment,
-                AmountZar = 500m,
+                AmountCredits = 500m,
                 ActorUserId = adminUserId,
                 Reason = "sample seed opening balance",
             });
@@ -264,7 +264,7 @@ public static class Seeder
                     EndsAt = endsAtUtc,
                     SliceMinutes = 30,
                     SliceCount = 1,
-                    AmountChargedZar = court.SlicePriceZar,
+                    AmountChargedCredits = court.SlicePriceCredits,
                     Status = Domain.BookingStatus.Booked,
                 };
                 db.Bookings.Add(booking);
@@ -273,7 +273,7 @@ public static class Seeder
                     TenantId = tenantId,
                     UserId = userId,
                     Type = Domain.LedgerEntryType.BookingCharge,
-                    AmountZar = -court.SlicePriceZar,
+                    AmountCredits = -court.SlicePriceCredits,
                     RelatedBookingId = booking.Id,
                     ActorUserId = adminUserId,
                     Reason = $"Booking {court.Name} {startsAtUtc:yyyy-MM-dd HH:mm}",

@@ -148,7 +148,7 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid>("ActorUserId")
                         .HasColumnType("uuid");
 
-                    b.Property<decimal>("AmountChargedZar")
+                    b.Property<decimal>("AmountChargedCredits")
                         .HasColumnType("numeric(10,2)");
 
                     b.Property<string>("BlockLabel")
@@ -242,7 +242,7 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<decimal>("SlicePriceZar")
+                    b.Property<decimal>("SlicePriceCredits")
                         .HasColumnType("numeric(10,2)");
 
                     b.Property<Guid>("TenantId")
@@ -306,7 +306,7 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid>("ActorUserId")
                         .HasColumnType("uuid");
 
-                    b.Property<decimal>("AmountZar")
+                    b.Property<decimal>("AmountCredits")
                         .HasColumnType("numeric(10,2)");
 
                     b.Property<decimal?>("ConversionRate")

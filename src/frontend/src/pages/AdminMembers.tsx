@@ -114,7 +114,7 @@ export default function AdminMembersPage() {
     try {
       const r = await endpoints.adminAdjust(targetUserId, amount, creditReason);
       // Reflect the new balance in this row immediately — no list refetch, no reload.
-      setMembers((prev) => prev?.map((m) => m.user_id === targetUserId ? { ...m, balance_zar: r.balance_after_zar } : m) ?? prev);
+      setMembers((prev) => prev?.map((m) => m.user_id === targetUserId ? { ...m, balance_credits: r.balance_after_credits } : m) ?? prev);
       toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} R${Math.abs(amount).toFixed(2)}.` });
       setCreditFor(null); setCreditAmount(""); setCreditReason("");
     } catch { toast.push({ tone: "danger", text: "Credit adjustment failed." }); }
@@ -241,8 +241,8 @@ export default function AdminMembersPage() {
                     <td className="px-4 py-3 font-mono text-xs text-text-secondary">{m.membership_number}</td>
                     <td className="px-4 py-3"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></td>
                     <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
-                      <span className={cn("font-medium", m.balance_zar < 0 ? "text-danger-strong" : "text-text-primary")}>
-                        R{m.balance_zar.toFixed(2)}
+                      <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
+                        R{m.balance_credits.toFixed(2)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-text-secondary whitespace-nowrap text-xs">

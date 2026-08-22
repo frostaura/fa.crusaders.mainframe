@@ -27,7 +27,7 @@ public sealed class LedgerService
     {
         var sum = await _db.LedgerEntries
             .Where(l => l.UserId == userId)
-            .SumAsync(l => (decimal?)l.AmountZar, ct);
+            .SumAsync(l => (decimal?)l.AmountCredits, ct);
         return sum ?? 0m;
     }
 
@@ -44,7 +44,7 @@ public sealed class LedgerService
             TenantId = _tenant.TenantId,
             UserId = posting.UserId,
             Type = posting.Type,
-            AmountZar = posting.AmountZar,
+            AmountCredits = posting.AmountCredits,
             ZarPaid = posting.ZarPaid,
             ConversionRate = posting.ConversionRate,
             RelatedBookingId = posting.RelatedBookingId,
@@ -66,7 +66,7 @@ public sealed class LedgerService
 public sealed record LedgerPosting(
     Guid UserId,
     LedgerEntryType Type,
-    decimal AmountZar,                 // signed credits amount (legacy field name)
+    decimal AmountCredits,                 // signed credits amount (legacy field name)
     Guid ActorUserId,
     Guid? RelatedBookingId = null,
     string? Reason = null,

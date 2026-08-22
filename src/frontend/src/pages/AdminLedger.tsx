@@ -54,8 +54,8 @@ export default function AdminLedgerPage() {
   }, [rows, userQuery]);
 
   const totals = useMemo(() => {
-    const credits = filtered.filter((r) => r.signedAmountZar > 0).reduce((s, r) => s + r.amountZar, 0);
-    const debits = filtered.filter((r) => r.signedAmountZar < 0).reduce((s, r) => s + r.amountZar, 0);
+    const credits = filtered.filter((r) => r.signedAmountCredits > 0).reduce((s, r) => s + r.amountCredits, 0);
+    const debits = filtered.filter((r) => r.signedAmountCredits < 0).reduce((s, r) => s + r.amountCredits, 0);
     return { credits, debits, net: credits - debits, count: filtered.length };
   }, [filtered]);
 

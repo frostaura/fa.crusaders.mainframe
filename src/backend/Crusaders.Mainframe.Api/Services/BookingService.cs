@@ -70,7 +70,7 @@ public sealed class BookingService
             if (capResult is not null) return capResult;
         }
 
-        var pricePerSlice = court.SlicePriceZar;      // Now in credits per blueprint A.8/A.9.
+        var pricePerSlice = court.SlicePriceCredits;      // Now in credits per blueprint A.8/A.9.
         var totalCost = pricePerSlice * sliceCount;
         var balance = await _ledger.GetBalanceAsync(userId, ct);
         if (balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
@@ -87,7 +87,7 @@ public sealed class BookingService
             EndsAt = endsAt,
             SliceMinutes = settings.SliceMinutes,
             SliceCount = sliceCount,
-            AmountChargedZar = totalCost,      // Quoted price locked in; charged at lights-on.
+            AmountChargedCredits = totalCost,      // Quoted price locked in; charged at lights-on.
             Status = BookingStatus.Booked,
         };
         _db.Bookings.Add(booking);
@@ -134,7 +134,7 @@ public sealed class BookingService
                 ["ends_at"] = endsAt,
                 ["slice_count"] = sliceCount,
                 ["amount_credits"] = totalCost,
-                ["balance_after_zar"] = balance,
+                ["balance_after_credits"] = balance,
             }), ct);
 
         return new BookingResult.Ok(booking, balance);
@@ -169,11 +169,11 @@ public sealed class BookingService
             var totalSeconds = (booking.EndsAt - booking.StartsAt).TotalSeconds;
             var usedSeconds = Math.Max(0, (DateTimeOffset.UtcNow - booking.StartsAt).TotalSeconds);
             var remainingFraction = Math.Max(0m, 1m - (decimal)(usedSeconds / totalSeconds));
-            refundAmount = Math.Round(booking.AmountChargedZar * remainingFraction, 2, MidpointRounding.AwayFromZero);
+            refundAmount = Math.Round(booking.AmountChargedCredits * remainingFraction, 2, MidpointRounding.AwayFromZero);
         }
         else if (insidePenaltyWindow && !waivePenalty)
         {
-            penaltyAmount = Math.Round(booking.AmountChargedZar * settings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero);
+            penaltyAmount = Math.Round(booking.AmountChargedCredits * settings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero);
         }
 
         booking.Status = BookingStatus.Cancelled;
@@ -184,7 +184,7 @@ public sealed class BookingService
             await _ledger.PostAsync(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.CancellationRefund,
-                AmountZar: refundAmount,
+                AmountCredits: refundAmount,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
                 Reason: "Mid-session cancellation refund (unused portion)"), ct);
@@ -193,7 +193,7 @@ public sealed class BookingService
             await _ledger.PostAsync(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.LateCancellationPenalty,
-                AmountZar: -penaltyAmount,
+                AmountCredits: -penaltyAmount,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
                 Reason: $"Late-cancellation penalty {settings.PenaltyPct}% on uncharged booking"), ct);
@@ -244,19 +244,19 @@ public sealed class BookingService
         var booking = await _db.Bookings.FirstOrDefaultAsync(b => b.Id == bookingId, ct);
         if (booking is null || booking.UserId is null) return new ChargeResult.NotFound();
         if (booking.Status != BookingStatus.Booked && booking.Status != BookingStatus.Completed) return new ChargeResult.NotChargeable();
-        if (booking.ChargedAt is not null) return new ChargeResult.AlreadyCharged(booking.AmountChargedZar);
+        if (booking.ChargedAt is not null) return new ChargeResult.AlreadyCharged(booking.AmountChargedCredits);
 
         var payerUserId = payerOverrideUserId ?? booking.PaidByUserId ?? booking.UserId.Value;
         var court = await _db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
 
         var balance = await _ledger.GetBalanceAsync(payerUserId, ct);
-        if (balance < booking.AmountChargedZar)
-            return new ChargeResult.InsufficientBalance(payerUserId, balance, booking.AmountChargedZar);
+        if (balance < booking.AmountChargedCredits)
+            return new ChargeResult.InsufficientBalance(payerUserId, balance, booking.AmountChargedCredits);
 
         await _ledger.PostAsync(new LedgerPosting(
             UserId: payerUserId,
             Type: LedgerEntryType.BookingCharge,
-            AmountZar: -booking.AmountChargedZar,
+            AmountCredits: -booking.AmountChargedCredits,
             ActorUserId: actorUserId,
             RelatedBookingId: booking.Id,
             Reason: $"Booking {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}"), ct);
@@ -270,11 +270,11 @@ public sealed class BookingService
             ActorUserId = actorUserId,
             SubjectUserId = payerUserId,
             Action = payerOverrideUserId is not null ? "booking.charged_by_payer_override" : "booking.charged",
-            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { booking_id = booking.Id, payer_user_id = payerUserId, amount_credits = booking.AmountChargedZar }),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { booking_id = booking.Id, payer_user_id = payerUserId, amount_credits = booking.AmountChargedCredits }),
         });
 
         await _db.SaveChangesAsync(ct);
-        return new ChargeResult.Ok(booking, payerUserId, booking.AmountChargedZar);
+        return new ChargeResult.Ok(booking, payerUserId, booking.AmountChargedCredits);
     }
 
     // ---- helpers ----
@@ -361,19 +361,19 @@ public sealed class BookingService
 
 public abstract record BookingResult
 {
-    public sealed record Ok(Booking Booking, decimal BalanceAfterZar) : BookingResult;
+    public sealed record Ok(Booking Booking, decimal BalanceAfterCredits) : BookingResult;
     public sealed record NotFound : BookingResult;
     public sealed record PastTime : BookingResult;
     public sealed record TooFarAhead : BookingResult;
     public sealed record SlotTaken : BookingResult;
-    public sealed record InsufficientBalance(decimal CurrentZar, decimal RequiredZar) : BookingResult;
+    public sealed record InsufficientBalance(decimal CurrentCredits, decimal RequiredCredits) : BookingResult;
     public sealed record PeakHoursLeagueOnly(string PeakStart, string PeakEnd, int RegularAdvanceHours) : BookingResult;
     public sealed record PerDayCapExceeded(int CapMinutes, int AlreadyBookedMinutes, int AttemptedMinutes) : BookingResult;
 }
 
 public abstract record CancellationResult
 {
-    public sealed record Ok(decimal RefundedZar, decimal PenaltyZar) : CancellationResult;
+    public sealed record Ok(decimal RefundedCredits, decimal PenaltyCredits) : CancellationResult;
     public sealed record NotFound : CancellationResult;
     public sealed record AlreadyStarted : CancellationResult;
 }

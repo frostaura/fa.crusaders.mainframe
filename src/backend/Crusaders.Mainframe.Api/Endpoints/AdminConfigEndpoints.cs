@@ -23,7 +23,7 @@ public static class AdminConfigEndpoints
             return Results.Ok(new
             {
                 slice_minutes = GetInt(doc, "slice_minutes", 30),
-                slice_price_zar = GetDecimal(doc, "slice_price_zar", 50m),
+                slice_price_credits = GetDecimal(doc, "slice_price_credits", 50m),
                 advance_booking_days = GetInt(doc, "advance_booking_days", 14),
                 day_start_minute = GetInt(doc, "day_start_minute", 6 * 60),
                 day_end_minute = GetInt(doc, "day_end_minute", 22 * 60),
@@ -53,7 +53,7 @@ public static class AdminConfigEndpoints
             }
             var doc = ParseObject(row.SettingsJson);
             doc["slice_minutes"] = ToElement(req.SliceMinutes);
-            doc["slice_price_zar"] = ToElement(req.SlicePriceZar);
+            doc["slice_price_credits"] = ToElement(req.SlicePriceCredits);
             doc["advance_booking_days"] = ToElement(req.AdvanceBookingDays);
             doc["day_start_minute"] = ToElement(req.DayStartMinute);
             doc["day_end_minute"] = ToElement(req.DayEndMinute);
@@ -76,7 +76,7 @@ public static class AdminConfigEndpoints
                 court_number = c.CourtNumber,
                 name = c.Name,
                 court_type = c.CourtType.ToString(),
-                slice_price_zar = c.SlicePriceZar,
+                slice_price_credits = c.SlicePriceCredits,
                 is_active = c.IsActive,
             }));
         });
@@ -84,7 +84,7 @@ public static class AdminConfigEndpoints
         courts.MapPost("/", async (CreateCourtRequest req, MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.Name)) return Results.BadRequest(new { error = "name_required" });
-            if (req.SlicePriceZar < 0) return Results.BadRequest(new { error = "price_negative" });
+            if (req.SlicePriceCredits < 0) return Results.BadRequest(new { error = "price_negative" });
             var maxNo = await db.Courts.IgnoreQueryFilters().Where(c => c.TenantId == tenant.TenantId).MaxAsync(c => (int?)c.CourtNumber, ct) ?? 0;
             var court = new Court
             {
@@ -92,7 +92,7 @@ public static class AdminConfigEndpoints
                 CourtNumber = maxNo + 1,
                 Name = req.Name.Trim(),
                 CourtType = Enum.TryParse<CourtType>(req.CourtType, true, out var t) ? t : CourtType.Squash,
-                SlicePriceZar = req.SlicePriceZar,
+                SlicePriceCredits = req.SlicePriceCredits,
                 IsActive = true,
             };
             db.Courts.Add(court);
@@ -105,10 +105,10 @@ public static class AdminConfigEndpoints
             var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == id, ct);
             if (court is null) return Results.NotFound();
             if (req.Name is not null) court.Name = req.Name.Trim();
-            if (req.SlicePriceZar is not null)
+            if (req.SlicePriceCredits is not null)
             {
-                if (req.SlicePriceZar < 0) return Results.BadRequest(new { error = "price_negative" });
-                court.SlicePriceZar = req.SlicePriceZar.Value;
+                if (req.SlicePriceCredits < 0) return Results.BadRequest(new { error = "price_negative" });
+                court.SlicePriceCredits = req.SlicePriceCredits.Value;
             }
             if (req.IsActive is not null) court.IsActive = req.IsActive.Value;
             await db.SaveChangesAsync(ct);
@@ -147,7 +147,7 @@ public static class AdminConfigEndpoints
 
 public sealed record UpdateSettingsRequest(
     int SliceMinutes,
-    decimal SlicePriceZar,
+    decimal SlicePriceCredits,
     int AdvanceBookingDays,
     int DayStartMinute,
     int DayEndMinute,
@@ -155,5 +155,5 @@ public sealed record UpdateSettingsRequest(
     int GraceWindowMinutes,
     int PenaltyWindowMinutes);
 
-public sealed record CreateCourtRequest(string Name, string CourtType, decimal SlicePriceZar);
-public sealed record UpdateCourtRequest(string? Name, decimal? SlicePriceZar, bool? IsActive);
+public sealed record CreateCourtRequest(string Name, string CourtType, decimal SlicePriceCredits);
+public sealed record UpdateCourtRequest(string? Name, decimal? SlicePriceCredits, bool? IsActive);
