@@ -25,6 +25,7 @@ public class MainframeDbContext : DbContext
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<AuthToken> AuthTokens => Set<AuthToken>();
     public DbSet<Court> Courts => Set<Court>();
+    public DbSet<Device> Devices => Set<Device>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<LedgerEntry> LedgerEntries => Set<LedgerEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -91,6 +92,25 @@ public class MainframeDbContext : DbContext
             e.Property(t => t.TokenHash).HasMaxLength(128).IsRequired();
             e.Property(t => t.Kind).HasConversion<int>();
             e.HasQueryFilter(t => t.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<Device>(e =>
+        {
+            e.ToTable("devices");
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => new { d.TenantId, d.DeviceCode }).IsUnique();
+            e.HasIndex(d => new { d.TenantId, d.Kind });
+            e.Property(d => d.DeviceCode).HasMaxLength(64).IsRequired();
+            e.Property(d => d.Name).HasMaxLength(128).IsRequired();
+            e.Property(d => d.GateKey).HasMaxLength(64);
+            e.Property(d => d.LastIpAddress).HasMaxLength(64);
+            e.Property(d => d.RunningVersion).HasMaxLength(32);
+            e.Property(d => d.MegaVersion).HasMaxLength(32);
+            e.Property(d => d.PinnedVersion).HasMaxLength(32);
+            e.Property(d => d.Kind).HasConversion<int>();
+            e.Property(d => d.Hardware).HasConversion<int>();
+            e.Property(d => d.OtaChannel).HasConversion<int>();
+            e.HasQueryFilter(d => d.TenantId == _tenant.TenantId);
         });
 
         modelBuilder.Entity<Court>(e =>

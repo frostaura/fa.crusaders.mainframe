@@ -23,6 +23,7 @@ public sealed class TenantResolutionMiddleware
         "/api/v1/uploads/",               // anonymous registration upload
         "/uploads/",                      // static-served media
         "/api/v1/court/",                 // court-side endpoints — admin auth, kiosk mode resolves tenant from JWT
+        "/api/v1/device/",                // device surface — DeviceAuthenticationHandler sets the tenant from the device row
     };
 
     public TenantResolutionMiddleware(RequestDelegate next, ILogger<TenantResolutionMiddleware> logger)

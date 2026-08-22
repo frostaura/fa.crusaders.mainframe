@@ -1,14 +1,20 @@
 using System.Security.Claims;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Services;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
+
+
 
 public static class AuthEndpoints
 {
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/v1/auth");
+        // Rate-limited as a group. Login and reset are password oracles; register is a
+        // membership-number oracle; every one of them is anonymous by necessity.
+        var g = app.MapGroup("/api/v1/auth").RequireRateLimiting(RateLimitPolicies.Auth);
 
         g.MapPost("/register", async (RegisterRequest req, AuthService auth, CancellationToken ct) =>
         {

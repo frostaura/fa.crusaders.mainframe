@@ -33,6 +33,25 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
     /// </summary>
     public string? ConnectionString { get; init; }
 
+    /// <summary>
+    /// Per-minute rate-limit ceilings, keyed by the <c>RateLimits:*</c> suffix
+    /// ("AuthPerMinute", "DevicePerMinute", "GlobalPerMinute").
+    ///
+    /// <para>
+    /// Defaults are raised far above production so an ordinary test suite never trips a
+    /// limiter and fails for a reason it is not testing. The rate-limit tests lower
+    /// them deliberately.
+    /// </para>
+    /// </summary>
+    public IReadOnlyDictionary<string, int>? RateLimits { get; init; }
+
+    private static readonly Dictionary<string, int> DefaultRateLimits = new()
+    {
+        ["AuthPerMinute"] = 100_000,
+        ["DevicePerMinute"] = 100_000,
+        ["GlobalPerMinute"] = 100_000,
+    };
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Program.cs reads builder.Configuration DURING its own execution — the
@@ -42,9 +61,20 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         // because WebApplication.CreateBuilder reads them when it builds.
         Environment.SetEnvironmentVariable("Database__AutoMigrateOnStartup", ConnectionString is null ? "false" : "true");
         Environment.SetEnvironmentVariable("Jwt__Secret", "test-only-signing-key-not-used-in-any-real-environment");
-        if (ConnectionString is not null)
+        // Set on both branches, not just when present. These variables are process-wide
+        // and outlive the factory that set them: leaving a previous factory's value in
+        // place gave a deliberately database-free host a live connection string, so a
+        // test that should have failed fast on "no database" instead reached Postgres
+        // and failed somewhere unrecognisable. Clearing it is what makes ConnectionString
+        // == null actually mean no database.
+        Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", ConnectionString);
+
+        // Read by Program.cs at limiter-registration time, so this has the same
+        // must-be-an-environment-variable constraint as the connection string above.
+        foreach (var (key, fallback) in DefaultRateLimits)
         {
-            Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", ConnectionString);
+            var value = RateLimits is not null && RateLimits.TryGetValue(key, out var v) ? v : fallback;
+            Environment.SetEnvironmentVariable($"RateLimits__{key}", value.ToString());
         }
 
         // "Testing" rather than "Development": Program.cs runs the Seeder under

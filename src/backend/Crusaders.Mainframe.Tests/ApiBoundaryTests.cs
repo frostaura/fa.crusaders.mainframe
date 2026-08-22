@@ -93,7 +93,8 @@ public sealed class PostgresFixture : IAsyncLifetime
     }
 }
 
-public sealed class ApiBoundaryTests : IClassFixture<PostgresFixture>
+[Collection(HttpTestCollection.Name)]
+public sealed class ApiBoundaryTests
 {
     private readonly PostgresFixture _pg;
 

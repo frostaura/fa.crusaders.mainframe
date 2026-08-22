@@ -11,6 +11,8 @@ using Crusaders.Mainframe.Api.Webhooks;
 using Fido2NetLib;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -36,7 +38,16 @@ builder.Services.AddCors(options =>
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is required.");
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "crusaders.mainframe";
 var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "crusaders.mainframe.app";
+// Device authentication is a second scheme rather than a variant of the JWT one:
+// a board in a cupboard has no user, no refresh cycle and no browser, and giving it
+// an admin JWT was the alternative.
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.DeviceAuth.IDeviceKeyDeriver,
+                              Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyDeriver>();
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddScheme<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceAuthOptions,
+               Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceAuthenticationHandler>(
+        Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceAuthenticationHandler.SchemeName, _ => { })
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -64,9 +75,81 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 }
                 return Task.CompletedTask;
             },
+
+            // A bearer token must be an *access* token and nothing else.
+            //
+            // Every token this application issues is signed with the same key, for the
+            // same issuer and audience — including the one-minute qr_ident token a
+            // member's phone displays at the court, which a camera in a public room
+            // photographs by design. Without this check that token is a valid
+            // Authorization header for the whole API as that member: scan the screen,
+            // read the wallet, book on their credits. The planned printed member-card
+            // QR would have made it permanent rather than one-minute.
+            //
+            // Enforced here rather than per-endpoint so a new endpoint is covered by
+            // default; an endpoint that genuinely wants a one-time token validates it
+            // itself, out of band, as the QR match endpoint already does.
+            OnTokenValidated = ctx =>
+            {
+                var purpose = ctx.Principal?.FindFirst("purpose")?.Value;
+                if (!string.Equals(purpose, "access", StringComparison.Ordinal))
+                {
+                    ctx.Fail($"Token purpose '{purpose ?? "(none)"}' is not valid for API access.");
+                }
+                return Task.CompletedTask;
+            },
         };
     });
 builder.Services.AddAuthorization();
+
+// ---- Rate limiting ----
+//
+// The application had none. Three surfaces need it for different reasons, so they get
+// three policies rather than one global number:
+//   auth   — password and PIN guessing, which is an unbounded oracle without a limit
+//   device — a court box calls on a schedule; anything faster is a fault or a flood
+//   api    — a backstop so one client cannot saturate an on-prem box at the club
+//
+// Partitioned by remote address, falling back to a single shared partition when the
+// address is unknown, so a proxy that strips it cannot be used to escape the limit.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    static string PartitionKey(HttpContext ctx)
+        => ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+    options.AddPolicy(RateLimitPolicies.Auth, ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(PartitionKey(ctx), _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = builder.Configuration.GetValue("RateLimits:AuthPerMinute", 10),
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        }));
+
+    options.AddPolicy(RateLimitPolicies.Device, ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(PartitionKey(ctx), _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = builder.Configuration.GetValue("RateLimits:DevicePerMinute", 120),
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        }));
+
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+        RateLimitPartition.GetFixedWindowLimiter(PartitionKey(ctx), _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = builder.Configuration.GetValue("RateLimits:GlobalPerMinute", 600),
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        }));
+
+    options.OnRejected = async (ctx, ct) =>
+    {
+        ctx.HttpContext.Response.Headers.RetryAfter = "60";
+        await ctx.HttpContext.Response.WriteAsJsonAsync(
+            new { error = "rate_limited", message = "Too many requests. Try again shortly." }, ct);
+    };
+});
 
 // ---- DI registrations ----
 builder.Services.AddScoped<ITenantContext, TenantContext>();
@@ -77,6 +160,8 @@ builder.Services.AddScoped<IJwtIssuer, JwtIssuer>();
 // off the request thread without scope-disposal hazards.
 builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<TenantSettingsAccessor>();
+builder.Services.AddScoped<DeviceRegistryService>();
+builder.Services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddHttpClient("peach");
 builder.Services.AddScoped<IPaymentProvider, PeachPaymentsProvider>();
@@ -161,6 +246,7 @@ app.UseCors();
     });
 }
 
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthorization();
@@ -185,6 +271,7 @@ app.MapWalletEndpoints();
 app.MapScheduleEndpoints();
 app.MapBookingEndpoints();
 app.MapAdminConfigEndpoints();
+app.MapAdminDeviceEndpoints();
 app.MapAdminLedgerEndpoints();
 app.MapMeProfileEndpoints();
 app.MapWebhookEndpoints();
@@ -194,6 +281,8 @@ app.MapReportingEndpoints();
 app.MapTopUpEndpoints();
 app.MapPinEndpoints();
 app.MapQrEndpoints();
+app.MapUploadEndpoints();
+app.MapDeviceEndpoints();
 
 app.Run();
 

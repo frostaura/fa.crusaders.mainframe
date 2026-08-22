@@ -2,9 +2,12 @@ using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
+
+
 
 /// <summary>
 /// Phase 8.6 — PIN identification endpoints (per blueprint B.1).
@@ -119,7 +122,9 @@ public static class PinEndpoints
                     return Results.Ok(new { matched = true, user_id = c.Id });
             }
             return Results.Ok(new { matched = false, user_id = (Guid?)null });
-        }).RequireAuthorization(p => p.RequireRole("admin"));
+        }).RequireAuthorization(p => p.RequireRole("admin"))
+          // A four-digit PIN is a 10,000-space oracle. Unlimited, it falls in minutes.
+          .RequireRateLimiting(RateLimitPolicies.Auth);
 
         return app;
     }

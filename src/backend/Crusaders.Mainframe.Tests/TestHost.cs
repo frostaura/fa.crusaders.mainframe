@@ -34,9 +34,15 @@ public sealed class TestHost : IAsyncDisposable
         Courts = courts; Services = services; EmailService = emailService;
     }
 
-    public static async Task<TestHost> CreateAsync(string? tenantSlug = null)
+    /// <summary>
+    /// Builds an isolated host. Pass <paramref name="sharedDatabaseName"/> to place two
+    /// tenants in the SAME database, which is the only way a cross-tenant test proves
+    /// anything: with a database per host, tenant B is empty because it is a different
+    /// store, and the assertion holds even with every query filter deleted.
+    /// </summary>
+    public static async Task<TestHost> CreateAsync(string? tenantSlug = null, string? sharedDatabaseName = null)
     {
-        var dbName = $"crusaders-test-{Guid.NewGuid():N}";
+        var dbName = sharedDatabaseName ?? $"crusaders-test-{Guid.NewGuid():N}";
         var slug = tenantSlug ?? "crusaders";
 
         var services = new ServiceCollection();
@@ -45,9 +51,11 @@ public sealed class TestHost : IAsyncDisposable
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Jwt:Secret"] = "TEST_SECRET_THAT_IS_DEFINITELY_LONG_ENOUGH_FOR_HS256",
-                ["Jwt:Issuer"] = "test", ["Jwt:Audience"] = "test",
+                ["Jwt:Issuer"] = "test",
+                ["Jwt:Audience"] = "test",
                 ["App:PublicBaseUrl"] = "http://localhost:8088",
-                ["Smtp:Host"] = "stub", ["Smtp:From"] = "noreply@test.local",
+                ["Smtp:Host"] = "stub",
+                ["Smtp:From"] = "noreply@test.local",
             }).Build());
         services.AddDbContext<MainframeDbContext>(o => o.UseInMemoryDatabase(dbName));
 
@@ -60,8 +68,20 @@ public sealed class TestHost : IAsyncDisposable
         services.AddSingleton<IEmailService>(emailStub);
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
+        // Mirrors Program.cs — the hardware abstraction and its key deriver must be
+        // registered in both, or a test host diverges from the app it stands in for.
+        services.AddSingleton<Crusaders.Mainframe.Api.Security.DeviceAuth.IDeviceKeyDeriver>(
+            _ => new Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyDeriver(
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Devices:MasterKey"] = "test-only-device-master-key-thirty-two-plus-bytes",
+                    }).Build()));
+        services.AddMemoryCache();
         services.AddSingleton<BalanceBroadcaster>();
         services.AddScoped<TenantSettingsAccessor>();
+        services.AddScoped<DeviceRegistryService>();
+        services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();
         services.AddScoped<LedgerService>();
         services.AddScoped<ScheduleService>();
         services.AddScoped<BookingService>();

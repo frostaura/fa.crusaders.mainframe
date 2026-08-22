@@ -3,11 +3,15 @@ using System.Security.Claims;
 using System.Text;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Security;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
+
+
 
 /// <summary>
 /// Phase 8.6 — QR identification (third leg of blueprint B.1's triple-stack alongside biometric + PIN).
@@ -54,7 +58,8 @@ public static class QrEndpoints
             var jwt = new JwtSecurityTokenHandler().WriteToken(token);
 
             return Results.Ok(new { token = jwt, expires_in_seconds = 60 });
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .RequireRateLimiting(RateLimitPolicies.Auth);
 
         app.MapPost("/api/v1/court/{courtNumber:int}/qr/match", async (
             int courtNumber, QrMatchRequest req,
@@ -110,7 +115,8 @@ public static class QrEndpoints
             if (!hasBooking) return Results.Ok(new { matched = false, reason = "no_active_booking" });
 
             return Results.Ok(new { matched = true, user_id = userId });
-        }).RequireAuthorization(p => p.RequireRole("admin"));
+        }).RequireAuthorization(p => p.RequireRole("admin"))
+          .RequireRateLimiting(RateLimitPolicies.Auth);
 
         return app;
     }
