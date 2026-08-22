@@ -1,0 +1,9 @@
+{
+  "description": "Discovery beacon wire format, signing and claim commitment. Read by src/iot/lib/discovery and by the .NET discovery listener.",
+  "authority": "docs/specs/device-discovery.md \u2014 the spec is the contract; neither implementation is the reference.",
+  "case_count": {
+    "encode": 5,
+    "decode": 16,
+    "claim_examples": 3
+  }
+}
