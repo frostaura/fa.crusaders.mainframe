@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-gotchas
-description: "Money bug FIXED 2026-08-22 (credits rename done, schema deployable); .env holds real SMTP creds; three CI gates were incapable of failing; dotnet and pio are absent from fresh remote sessions"
+description: "Money bug FIXED 2026-08-22 (credits rename done, schema deployable); .env holds real SMTP creds; three CI gates were incapable of failing; dotnet and pio are absent from fresh remote sessions; .NET 10 defers BackgroundService.ExecuteAsync and lizard mis-scopes brace-bodied expression members"
 type: gotcha
 last_verified: 2026-08-22
 ---
@@ -21,6 +21,8 @@ last_verified: 2026-08-22
 - **Webhook retry is documented but not implemented.** The backoff array exists; `NextRetryAt` is written and read by nothing; `Attempt` is hardcoded to 1. A non-2xx is lost permanently, leaving a row that still says "pending" — and because `LightsCueWorker` stamps the cue *after* emitting regardless of outcome, a lost lights command can never be re-derived. This is why relay actuation must not ride the webhook bus.
 - **`docs/phases/` does not exist** despite the plan mandating a `phase-<n>.md` execution log per phase. There is no record of *why* any implementation choice was made — only what the specs said should happen.
 - **The claim commitment hashes the nonce's HEX TEXT, not its 8 raw bytes.** `docs/specs/device-discovery.md` writes `cch = SHA256(code || ":" || nonce)` while calling `n` an "8-byte nonce, hex", which reads either way; the shared corpus settles it as the ASCII hex. A side that hashed the decoded bytes would produce a commitment that never matches, and the symptom is an admin whose correct claim code is refused — the same class of invisible byte-level disagreement the corpus exists to catch. Same for the truncation: 16 hex characters means the first 8 digest BYTES.
+- **`BackgroundService.StartAsync` no longer runs `ExecuteAsync` inline on .NET 10.** It schedules it, and `StopAsync` immediately afterwards can return before `_executeTask` is even assigned. Any test that starts a hosted service directly and then asserts on what it did must poll with a deadline; asserting straight after `StartAsync` — or even after `StartAsync` then `StopAsync` — races it and reads the pre-start state. This cost two red tests in `DiscoveryListenerTests` that looked like a listener bug and were not.
+- **lizard's C# parser mis-scopes any expression-bodied member whose body contains braces** — `=> new { ... }`, `=> new() { ... }`, `=> x switch { ... }`, even a property pattern like `=> code is { Length: 8 }`. It treats the `{` as closing the function and dumps the rest of the file into a `*global*` pseudo-function whose reported *length is the whole file*. In a file over 200 lines that trips `-L 200` with a warning that names no real function and points at line 0. The fix is a block body (`{ return ...; }`), not a `whitelizard.txt` entry. Existing offenders (`DeviceView.Of`) survive only because their files are short.
 - Docs use "Arduino" and "ESP32" interchangeably for the same lights controller.
 - **Docker device passthrough is undocumented in `docker-compose.yml`**, pending the biometric SDK choice.
 - iCloud has fabricated `* 2.dll` / `* 2.pdb` duplicates under `src/backend/.../bin` and `obj`. Build output only, gitignored, harmless — do not treat them as source.

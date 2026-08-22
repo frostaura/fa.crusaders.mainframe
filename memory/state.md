@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-state
-description: "Backend 230/230 and firmware 85/85 green; Phases 0-4 done bar PayFast; device identity, SSRF guard and webhook retry built; PR #1 open as draft on the court-hardware branch"
+description: "Backend 284/284 and firmware 85/85 green; Phases 0-4 done bar PayFast; device identity, SSRF guard, webhook retry and both halves of device discovery built; PR #1 open as draft on the court-hardware branch"
 type: state
 last_verified: 2026-08-22
 ---
@@ -9,7 +9,7 @@ last_verified: 2026-08-22
 
 _Last verified: 2026-08-22 — every claim below was executed, not read. A .NET 10 SDK and PlatformIO were installed into this environment (neither was present), a real Postgres 16 was started locally, the full suite was run, the migration was applied to a fresh database, and each quality gate was deliberately broken to confirm it fails. Verify before trusting anything dated older than ~60 days._
 
-**Backend 230/230 green** (39 need Postgres and skip cleanly without it), **firmware 85/85 green** under both native and ASAN/UBSAN with no board attached. The backend was 24/30 at the start of 2026-08-22. The working tree is clean and `main` is at `6ed1fea`; all work sits on `claude/squash-booking-system-design-dt7ja6`, pushed, with **PR #1 open as a draft** carrying a phase checklist. The delivery shape is one branch, one PR — agreed with the founder, so do not split it.
+**Backend 284/284 green** (46 need Postgres and skip cleanly without it), **firmware 85/85 green** under both native and ASAN/UBSAN with no board attached. The backend was 24/30 at the start of 2026-08-22. The working tree is clean and `main` is at `6ed1fea`; all work sits on `claude/squash-booking-system-design-dt7ja6`, pushed, with **PR #1 open as a draft** carrying a phase checklist. The delivery shape is one branch, one PR — agreed with the founder, so do not split it.
 
 ### What changed on 2026-08-22
 
@@ -38,6 +38,32 @@ Neither `dotnet` nor `pio` is present in a fresh remote session — install both
 - **Phase 4 firmware modules**: `lib/hal` + `lib/hal_fakes` (seven ports, fakes that model the hardware rather than the calls), `lib/devcrypto` (clean-room SHA-256/HMAC/HKDF/signer), `lib/protocol`. The `http/` corpus agrees across three independent implementations — Python, C#, C++ — on all 31 vectors.
 - **A fifth CI-shaped defect**: `strict_compile.sh` excluded `lib/hal_fakes/` and reported success when it found nothing to compile.
 - **The device-discovery firmware module is built** — `src/iot/lib/discovery` (beacon codec, canonical form + HMAC, claim code/commitment, announce state machine), 21 Unity tests, and a 24-case shared corpus at `src/contracts/device-protocol/discovery/` read by both this and the .NET listener. Two rules are types rather than comments: a claimed box cannot be asked to accept an unsigned OFFER (`ClaimedBox` takes the key as a required constructor argument and `accept()` has no verification-skipping overload), and the claim code cannot be encoded into an ANNOUNCE (`Packet` has no public field setter and `announceUnclaimed()` takes a `ClaimCommitment`). Confirmed by mutation — disabling checksum verification, the canonical sort, and the commitment's `:` separator turns 2, 5 and 3 tests red respectively.
+
+### The mainframe half of device discovery (2026-08-22, later still)
+
+The server side of `docs/specs/device-discovery.md` is built and the shared corpus is now
+read by both implementations: `Security/Discovery/` (beacon codec, bounded announcer store,
+`DiscoveryListener` hosted service, DB-backed device resolver), `Services/DeviceDiscoveryService`
+for the claim decision, and three admin endpoints under `/api/v1/admin/devices` —
+`GET /discovered`, `POST /claim`, `GET /discovery-status`. 54 new tests; all 24 corpus cases
+execute on the .NET side (5 encode, 16 decode, 3 claim). Confirmed by mutation: disabling
+checksum verification, the canonical sort, and the duplicate-commitment refusal turns 2, 3
+and 3 tests red respectively.
+
+Three things worth knowing before touching it:
+
+- **`docker-compose.onprem.yml` is new and is not optional at the club.** On the base compose
+  file the backend is on a bridge, so the listener receives nothing, ever. The status endpoint
+  reports that state rather than letting it look like a firmware fault.
+- **The claim flow stops at returning the key.** The spec has the API POST the key and the
+  claim code to the board's address; that outbound step is deliberately not built, because the
+  address came from an unauthenticated UDP packet and the outbound guard's private-network
+  allow-list is what stands between this API and being an SSRF proxy for the LAN. Someone has
+  to decide how the board is provisioned — an admin-confirmed push, or the technician pasting
+  the key — before it ships.
+- **`Device` has no MAC column**, so a claimed board cannot be tied back to the physical box it
+  came from except through the audit row. Correlation after claiming goes through the device id
+  the board announces. Adding one is a migration nobody has needed yet.
 
 ### Still red or unbuilt
 

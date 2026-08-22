@@ -191,6 +191,22 @@ builder.Services.AddHostedService<NoShowWorker>();
 // Phase 8.8 — retention worker (nightly anonymisation of records older than retention_years)
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.RetentionWorker>();
 
+// Device discovery — a UDP listener on the club LAN plus the bounded store behind it.
+//
+// The store is a singleton independent of the listener on purpose: the admin endpoints
+// have to answer "did the listener bind?" even — especially — when it did not, and a
+// store that only existed once a socket was open could not report its own absence.
+builder.Services.AddSingleton(sp =>
+    Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions.FromConfiguration(
+        sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryStore>(sp =>
+    new Crusaders.Mainframe.Api.Security.Discovery.DiscoveryStore(
+        sp.GetRequiredService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions>()));
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.IDiscoveryDeviceResolver,
+                              Crusaders.Mainframe.Api.Security.Discovery.DiscoveryDeviceResolver>();
+builder.Services.AddHostedService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryListener>();
+builder.Services.AddScoped<DeviceDiscoveryService>();
+
 // Phase 5 — biometric abstraction
 builder.Services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
 builder.Services.AddScoped<BiometricService>();
@@ -281,6 +297,7 @@ app.MapScheduleEndpoints();
 app.MapBookingEndpoints();
 app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();
+app.MapAdminDeviceDiscoveryEndpoints();
 app.MapAdminLedgerEndpoints();
 app.MapMeProfileEndpoints();
 app.MapWebhookEndpoints();

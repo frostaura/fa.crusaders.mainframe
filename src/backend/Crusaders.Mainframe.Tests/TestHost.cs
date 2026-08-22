@@ -78,6 +78,15 @@ public sealed class TestHost : IAsyncDisposable
                         ["Devices:MasterKey"] = "test-only-device-master-key-thirty-two-plus-bytes",
                     }).Build()));
         services.AddMemoryCache();
+        // Discovery: the bounded LAN store and the claim service that reads it. Registered
+        // here for the same reason the key deriver is — a test host that lacks something
+        // Program.cs registers is a host that diverges from the app it stands in for. The
+        // listener itself is not registered: it opens a UDP socket, which belongs to the
+        // tests that drive one deliberately.
+        services.AddSingleton(_ => new Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions());
+        services.AddSingleton(sp => new Crusaders.Mainframe.Api.Security.Discovery.DiscoveryStore(
+            sp.GetRequiredService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions>()));
+        services.AddScoped<DeviceDiscoveryService>();
         services.AddSingleton<BalanceBroadcaster>();
         services.AddScoped<TenantSettingsAccessor>();
         services.AddScoped<DeviceRegistryService>();
