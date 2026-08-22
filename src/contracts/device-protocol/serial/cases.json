@@ -1149,7 +1149,7 @@
       "note": "The spec says uppercase. Accepting lowercase would widen the set of byte sequences that count as a frame, and 'a' differs from 'A' by one bit.",
       "link": "downlink",
       "chunks": [
-        "!ON,A,1800*49\n"
+        "!ON,B,1800*4a\n"
       ],
       "expect": [
         {

@@ -1,0 +1,9 @@
+{
+  "name": "protocol",
+  "version": "2.0.0",
+  "description": "Court box serial line protocol (ATmega2560 <-> ESP8266) codec. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
+  "keywords": "serial, protocol, codec, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": { "flags": ["-I include"] }
+}
