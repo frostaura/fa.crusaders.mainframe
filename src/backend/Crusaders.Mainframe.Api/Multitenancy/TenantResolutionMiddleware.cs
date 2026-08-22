@@ -71,11 +71,49 @@ public sealed class TenantResolutionMiddleware
         await _next(context);
     }
 
-    private static string? ExtractHostSubdomain(string host)
+    /// <summary>
+    /// Derives a tenant slug from the Host header, or null when the host carries no
+    /// tenant information.
+    /// </summary>
+    /// <remarks>
+    /// IP literals must return null. The club runs the API on-prem, so devices and
+    /// admins on the LAN address it as e.g. 192.168.68.10 — and taking everything
+    /// before the first dot yields the "slug" 192, which resolves to no tenant. The
+    /// result is a 404 for an anonymous caller, or a 403 tenant_mismatch for one
+    /// holding a valid token. Neither is visible through the Cloudflare tunnel, which
+    /// carries a real hostname; it only shows up on the LAN, which is exactly where
+    /// the hardware lives.
+    /// </remarks>
+    internal static string? ExtractHostSubdomain(string host)
     {
-        // localhost or bare hostnames — no subdomain.
-        if (string.IsNullOrEmpty(host) || host == "localhost" || !host.Contains('.'))
+        if (string.IsNullOrEmpty(host) || host == "localhost")
+        {
             return null;
+        }
+
+        // Strip any port before inspecting the host.
+        var portIndex = host.LastIndexOf(':');
+        if (portIndex > 0 && !host.Contains(']') && host.IndexOf(':') == portIndex)
+        {
+            host = host[..portIndex];
+        }
+
+        // IPv6 literals arrive bracketed and never carry a tenant.
+        if (host.StartsWith('[') || host.Contains(']'))
+        {
+            return null;
+        }
+
+        if (System.Net.IPAddress.TryParse(host, out _))
+        {
+            return null;
+        }
+
+        if (!host.Contains('.'))
+        {
+            return null;
+        }
+
         var firstDot = host.IndexOf('.');
         var sub = host[..firstDot];
         return string.IsNullOrWhiteSpace(sub) || sub == "www" || sub == "admin" ? null : sub;
