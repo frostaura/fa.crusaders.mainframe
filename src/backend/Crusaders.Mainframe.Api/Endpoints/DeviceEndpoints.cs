@@ -3,6 +3,7 @@ using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Security.DeviceAuth;
+using Crusaders.Mainframe.Api.Security.Discovery;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -80,9 +81,79 @@ public static class DeviceEndpoints
             });
         });
 
+        // Provisioning is deliberately OUTSIDE the signed group above: a board collecting
+        // its key does not have one yet, so it cannot sign. It authenticates with the
+        // claim code instead — which it generated, is displaying on its own LCD, and has
+        // never put on the wire.
+        app.MapPost("/api/v1/device/provision", ProvisionAsync)
+           .AllowAnonymous()
+           .RequireRateLimiting(RateLimitPolicies.Auth);
+
         return app;
     }
+
+    /// <summary>
+    /// Hands a freshly-claimed board its device key, once.
+    ///
+    /// <para>
+    /// The direction is inverted on purpose. Pushing the key to the address the board
+    /// announced from would mean dialling an address that arrived in an unauthenticated
+    /// UDP datagram — exactly what <c>OutboundAddressGuard</c> exists to prevent, and a
+    /// discovered RFC1918 address is by definition not on its allow-list. Having the
+    /// board fetch instead means nothing dials anything and the API's outbound posture is
+    /// unchanged.
+    /// </para>
+    ///
+    /// <para>
+    /// Anonymous, so the failure responses are deliberately uniform: a wrong code, an
+    /// unknown MAC and an expired grant are indistinguishable to the caller. Telling them
+    /// apart would turn this into an oracle for which boards are mid-claim.
+    /// </para>
+    /// </summary>
+    private static IResult ProvisionAsync(
+        ProvisionRequest req,
+        ProvisioningGrants grants,
+        IDeviceKeyDeriver keys,
+        DiscoveryOptions discovery,
+        HttpContext ctx)
+    {
+        if (string.IsNullOrWhiteSpace(req.Mac) || string.IsNullOrWhiteSpace(req.ClaimCode))
+        {
+            return Results.BadRequest(new { error = "mac_and_claim_code_required" });
+        }
+
+        var grant = grants.Redeem(req.Mac.Trim(), req.ClaimCode);
+        if (grant is null)
+        {
+            return Results.NotFound(new
+            {
+                error = "no_pending_claim",
+                message = "No claim is pending for this board, or the code did not match. Ask an admin to connect it again.",
+            });
+        }
+
+        return Results.Ok(new
+        {
+            device_id = grant.DeviceId,
+            tenant_slug = grant.TenantSlug,
+            key_version = grant.KeyVersion,
+            device_key = keys.DeriveEncoded(grant.TenantId, grant.DeviceId, grant.KeyVersion),
+            // Not discovered — echoed. The board reached this endpoint somehow, so the
+            // address it used is by construction one that works from where it is
+            // standing. An explicitly configured value still wins, for a club that
+            // fronts the API with a name the boards must use instead.
+            api_base_url = !string.IsNullOrWhiteSpace(discovery.AdvertisedBaseUrl)
+                ? discovery.AdvertisedBaseUrl
+                : $"{ctx.Request.Scheme}://{ctx.Request.Host}",
+        });
+    }
 }
+
+/// <summary>What a board presents to collect its key. The MAC identifies the grant; the
+/// claim code authenticates it.</summary>
+public sealed record ProvisionRequest(
+    [property: JsonPropertyName("mac")] string? Mac,
+    [property: JsonPropertyName("claim_code")] string? ClaimCode);
 
 /// <summary>
 /// What a court box reports about itself. Every field is optional: a box that has just

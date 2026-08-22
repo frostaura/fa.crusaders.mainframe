@@ -48,14 +48,17 @@ public sealed class DeviceDiscoveryService
     private readonly DeviceRegistryService _devices;
     private readonly MainframeDbContext _db;
     private readonly ITenantContext _tenant;
+    private readonly ProvisioningGrants _grants;
 
     public DeviceDiscoveryService(
-        DiscoveryStore store, DeviceRegistryService devices, MainframeDbContext db, ITenantContext tenant)
+        DiscoveryStore store, DeviceRegistryService devices, MainframeDbContext db,
+        ITenantContext tenant, ProvisioningGrants grants)
     {
         _store = store;
         _devices = devices;
         _db = db;
         _tenant = tenant;
+        _grants = grants;
     }
 
     public DiscoveryStatus Status() => _store.Status();
@@ -108,6 +111,22 @@ public sealed class DeviceDiscoveryService
             actorUserId, ct);
 
         _store.MarkClaimed(board.Mac, registration.Device.Id, registration.Device.TenantId);
+
+        // The board can now collect this key itself by presenting the code it is
+        // displaying. The key is still returned to the admin as well: a technician with a
+        // serial cable is the fallback for a board that cannot reach the API yet, and an
+        // automatic path with no manual equivalent is the thing the discovery spec
+        // explicitly refuses to ship.
+        _grants.Issue(new ProvisioningGrant
+        {
+            Mac = board.Mac,
+            ClaimCodeHash = ProvisioningGrants.HashCode(cmd.ClaimCode),
+            DeviceId = registration.Device.Id,
+            TenantId = registration.Device.TenantId,
+            TenantSlug = _tenant.TenantSlug,
+            KeyVersion = registration.Device.KeyVersion,
+            ExpiresAt = DateTimeOffset.UtcNow.Add(ProvisioningGrants.Lifetime),
+        });
 
         Audit(actorUserId, "device.claimed", new
         {

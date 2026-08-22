@@ -186,12 +186,34 @@ attack is denial of service, not key theft, and it is loud rather than silent.
 32⁸ ≈ 1.1 × 10¹² codes, and the commitment changes every boot, so guessing is
 not a path.
 
-### After a match
+### After a match — the board fetches, the API does not push
 
-The API creates the `Device` row, derives the key, and POSTs it to the board's
-address along with the claim code. The board checks the code against the one it
-is displaying — belt and braces, because the commitment already proved it — then
-persists and switches to `claimed`. Three wrong codes lock claiming until reboot.
+The API creates the `Device` row, derives the key, and issues a **provisioning
+grant**: single-use, ten minutes, keyed on the board's MAC and holding a hash of
+the claim code. The board then collects its own key with
+`POST /api/v1/device/provision {mac, claim_code}`.
+
+**The direction is inverted deliberately.** The obvious design has the API POST
+the key to the address the board announced from — and that address arrived in an
+unauthenticated UDP datagram from the club LAN. Dialling it is precisely what
+`OutboundAddressGuard` exists to prevent, and a discovered RFC1918 address is by
+definition not on its allow-list. Building a push would have carved a
+member-reachable hole through the SSRF guard. Having the board fetch means
+nothing dials anything and the API's outbound posture is unchanged.
+
+The claim code is what authenticates the fetch: the board generated it, is
+displaying it, and it has never been on the wire. The endpoint is anonymous by
+necessity — a board collecting its first key has no credential — so its
+refusals are deliberately uniform: a wrong code, an unknown MAC and an expired
+grant are indistinguishable, or it becomes an oracle for which boards are
+mid-claim. A wrong guess burns the grant rather than granting another turn.
+
+The key is **also** returned to the admin, because a technician with a serial
+cable is the fallback for a board that cannot reach the API yet — and an
+automatic path with no manual equivalent is exactly what the layer table above
+refuses to ship.
+
+The board then persists the key and switches to `claimed`. Three wrong codes lock claiming until reboot.
 
 ## What is deliberately not authenticated
 

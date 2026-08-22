@@ -162,6 +162,7 @@ builder.Services.AddScoped<IJwtIssuer, JwtIssuer>();
 builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<TenantSettingsAccessor>();
 builder.Services.AddScoped<DeviceRegistryService>();
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.ProvisioningGrants>();
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddHttpClient("peach");
