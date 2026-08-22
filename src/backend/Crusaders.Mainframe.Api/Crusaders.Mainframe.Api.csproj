@@ -18,4 +18,8 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Crusaders.Mainframe.Tests" />
+  </ItemGroup>
+
 </Project>

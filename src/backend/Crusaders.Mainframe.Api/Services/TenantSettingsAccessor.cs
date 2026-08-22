@@ -43,6 +43,7 @@ public sealed class TenantSettingsAccessor
         string peakHours = TryString(root, "peak_hours", "16:00-19:00");                     // A.12 — peak window.
         int peakAdvanceHoursForRegular = TryInt(root, "peak_advance_hours_for_regular", 1);  // A.12 — Regular members may grab a still-empty peak slot within 1h of start.
         int retentionYears = TryInt(root, "retention_years", 2);                             // D.1 — 2-year retention.
+        int noShowLookbackDays = TryInt(root, "no_show_lookback_days", 7);                   // How far back the no-show sweep reaches; bounds a first-run backlog.
 
         return new TenantSettingsView(
             sliceMinutes, slicePrice, penaltyPct, graceMin, penaltyMin, advanceDays, tz,
@@ -51,7 +52,8 @@ public sealed class TenantSettingsAccessor
             memberPerDayMaxMinutes,
             peakHours, peakAdvanceHoursForRegular,
             retentionYears,
-            dayStartMinute, dayEndMinute);
+            dayStartMinute, dayEndMinute,
+            noShowLookbackDays);
     }
 
     private static int TryInt(JsonElement root, string name, int fallback)
@@ -79,7 +81,8 @@ public sealed record TenantSettingsView(
     int PeakAdvanceHoursForRegular,
     int RetentionYears,
     int DayStartMinute,
-    int DayEndMinute)
+    int DayEndMinute,
+    int NoShowLookbackDays)
 {
     /// <summary>Returns credits-per-rand for a given member class. Defaults to <see cref="CreditsPerZarRegular"/> if unknown.</summary>
     public decimal ConversionRateFor(Crusaders.Mainframe.Api.Domain.MemberClass cls)

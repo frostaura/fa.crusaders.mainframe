@@ -31,7 +31,9 @@ public sealed class NoShowWorker : BackgroundService
         }
     }
 
-    private async Task TickAsync(CancellationToken ct)
+    // internal so the money-correctness regression test can drive one tick directly
+    // rather than waiting on the 30s BackgroundService timer.
+    internal async Task TickAsync(CancellationToken ct)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -57,31 +59,57 @@ public sealed class NoShowWorker : BackgroundService
             // Note: we deliberately check CheckedInAt — NOT LightsOnCuedAt — because LightsCueWorker
             // sets LightsOnCuedAt automatically at slot start as a webhook-idempotency stamp,
             // independent of whether anyone actually showed up.
+            // The lower bound matters: without it, switching on terminal check-in over a
+            // backlog of historical un-checked-in Booked rows would mass-post no-shows
+            // (and, before the refund guard below, mass-refund them) on the first tick.
+            var lookbackFloor = now.AddDays(-tSettings.NoShowLookbackDays);
+
             var dueNoShow = await db.Bookings
                 .Where(b => b.Status == BookingStatus.Booked
                     && b.CheckedInAt == null
                     && b.UserId != null
-                    && b.StartsAt <= graceCutoff)
+                    && b.StartsAt <= graceCutoff
+                    && b.StartsAt >= lookbackFloor)
                 .ToListAsync(ct);
 
             foreach (var b in dueNoShow)
             {
                 if (b.UserId is null) continue;
+
+                // Who pays is who was charged. Posting the penalty to the booker when
+                // someone else paid (blueprint B.2 payer override) debits the wrong person.
+                var payerUserId = b.PaidByUserId ?? b.UserId.Value;
                 var penalty = Math.Round(b.AmountChargedZar * tSettings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero);
 
-                // Honest ledger: full refund of the original BookingCharge, then a signed penalty debit.
-                // Net effect on user balance is identical to the old "partial refund + R0 penalty" pair,
-                // but the rows now read truthfully — penalty totals in reports reflect actual money kept.
-                if (b.AmountChargedZar > 0)
-                    await ledger.PostAsync(new LedgerPosting(
-                        UserId: b.UserId.Value, Type: LedgerEntryType.CancellationRefund, AmountZar: b.AmountChargedZar,
-                        ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: "No-show — booking refunded"), ct);
+                // The refund is guarded on an actual charge having happened.
+                //
+                // This previously posted a positive CancellationRefund for the full booking
+                // value whenever AmountChargedZar > 0, with no check that anything had ever
+                // been debited. Under charge-on-activation a no-show by definition never
+                // checked in — CheckedInAt == null is the selection predicate above — so no
+                // BookingCharge existed to refund. The net effect was to CREDIT the player
+                // (100% refund minus a 30% penalty = +70% of the booking value) for failing
+                // to turn up. The stale comment describing "the original BookingCharge" dated
+                // from the charge-at-booking era and referred to a row that was not there.
+                var wasCharged = b.ChargedAt is not null;
 
-                if (penalty > 0)
+                if (wasCharged && b.AmountChargedZar > 0)
+                {
                     await ledger.PostAsync(new LedgerPosting(
-                        UserId: b.UserId.Value, Type: LedgerEntryType.NoShowPenalty, AmountZar: -penalty,
+                        UserId: payerUserId, Type: LedgerEntryType.CancellationRefund, AmountZar: b.AmountChargedZar,
+                        ActorUserId: Guid.Empty, RelatedBookingId: b.Id, Reason: "No-show — booking refunded"), ct);
+                }
+
+                // A penalty is only collectable against money that moved. Charging one for a
+                // booking that was never paid for would drive the balance negative for a slot
+                // the club never received anything for.
+                if (wasCharged && penalty > 0)
+                {
+                    await ledger.PostAsync(new LedgerPosting(
+                        UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountZar: -penalty,
                         ActorUserId: Guid.Empty, RelatedBookingId: b.Id,
-                        Reason: $"No-show penalty ({tSettings.PenaltyPct}% of R{b.AmountChargedZar:0.00})"), ct);
+                        Reason: $"No-show penalty ({tSettings.PenaltyPct}% of {b.AmountChargedZar:0.00} credits)"), ct);
+                }
 
                 b.Status = BookingStatus.NoShow;
 
