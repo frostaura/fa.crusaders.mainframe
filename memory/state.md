@@ -37,6 +37,7 @@ Neither `dotnet` nor `pio` is present in a fresh remote session — install both
 - **`MapUploadEndpoints()` had never been mounted** — photo upload is mandatory at registration and returned 404.
 - **Phase 4 firmware modules**: `lib/hal` + `lib/hal_fakes` (seven ports, fakes that model the hardware rather than the calls), `lib/devcrypto` (clean-room SHA-256/HMAC/HKDF/signer), `lib/protocol`. The `http/` corpus agrees across three independent implementations — Python, C#, C++ — on all 31 vectors.
 - **A fifth CI-shaped defect**: `strict_compile.sh` excluded `lib/hal_fakes/` and reported success when it found nothing to compile.
+- **The device-discovery firmware module is built** — `src/iot/lib/discovery` (beacon codec, canonical form + HMAC, claim code/commitment, announce state machine), 21 Unity tests, and a 24-case shared corpus at `src/contracts/device-protocol/discovery/` read by both this and the .NET listener. Two rules are types rather than comments: a claimed box cannot be asked to accept an unsigned OFFER (`ClaimedBox` takes the key as a required constructor argument and `accept()` has no verification-skipping overload), and the claim code cannot be encoded into an ANNOUNCE (`Packet` has no public field setter and `announceUnclaimed()` takes a `ClaimCommitment`). Confirmed by mutation — disabling checksum verification, the canonical sort, and the commitment's `:` separator turns 2, 5 and 3 tests red respectively.
 
 ### Still red or unbuilt
 

@@ -65,9 +65,44 @@ CRSDR1 <VERB> key=value key=value ... *CC\n
   ignored without parsing.
 - Fields are `key=value`, space-separated, order-independent on receipt.
 - `*CC` — two uppercase hex digits, XOR of every byte between the space after
-  the verb and the `*`. UDP's own checksum is optional on IPv4 and is sometimes
+  the verb and the `*`, **exclusive of that space and inclusive of the spaces
+  between fields**. UDP's own checksum is optional on IPv4 and is sometimes
   zero; this one is not.
 - UDP port **48653**, both directions.
+
+### Limits
+
+Both implementations must agree on these or a packet one side considers valid is
+garbage to the other — and nothing would go red, because a corpus only covers
+the cases it contains.
+
+| Limit | Value |
+|---|---|
+| Fields per packet | 12 |
+| Key length | 8 |
+| Value length | 64 |
+| Datagram length | 320 bytes |
+
+Exceeding any of them is `bad_frame`. An **empty value** (`mega=`) is also
+`bad_frame`: absent and blank are not the same statement, and silently treating
+them alike hides a firmware bug that failed to fill a field in.
+
+### Error taxonomy and its precedence
+
+Order matters, because more than one rule can be broken at once and the two
+implementations must name the same failure.
+
+1. `bad_frame` — shorter than the minimum, no `*CC`, malformed field, empty
+   value, or any limit above exceeded. Checked **before** the magic, so an empty
+   datagram is `bad_frame` rather than `bad_magic`.
+2. `bad_magic` — does not begin `CRSDR1 `. Discarded without further parsing;
+   port 48653 will receive unrelated traffic on a club LAN.
+3. `bad_checksum` — including a *lowercase* checksum, which is `bad_checksum`
+   and not `bad_frame`: it is a well-formed field carrying a value this protocol
+   does not accept, for the reason given in the serial spec.
+4. `bad_verb` — reachable only once the checksum has passed.
+5. `duplicate_key` — a repeated key is refused rather than last-wins. Two values
+   for `st` is not a packet anyone meant to send.
 
 ### `ANNOUNCE` — box → 255.255.255.255:48653
 
@@ -98,6 +133,18 @@ Every 5s while unclaimed, every 60s while claimed, and immediately on link-up.
 | `n` | Echo of the box's nonce, so an OFFER cannot be replayed at a later boot |
 | `sig` | HMAC. Present only when answering a claimed box |
 
+**A claimed box MUST refuse an unsigned `OFFER`, and one whose signature does
+not verify.** This is the rule the whole OFFER signature exists for — without it
+anyone on the club LAN redirects a claimed board to their own mainframe by
+answering an announce faster than the real one. It was implied by "present only
+when answering a claimed box" and is now stated, because an implementer reading
+only the field table would have built the vulnerable version and passed every
+test.
+
+`t` is optional on receipt: a box treats an absent or unparseable value as "no
+clock update" rather than rejecting the packet, since the URL is the part it
+actually needs.
+
 ### Canonical form for signing
 
 Fields other than `sig`, sorted by key, joined with `\n` as `key=value`, with
@@ -118,8 +165,14 @@ cupboard, rather than to a laptop on the club WiFi that also announced?
    because someone reads this off a 16×2 display in an electrical cupboard and
    types it on a phone.
 2. It displays the code and broadcasts
-   `cch = SHA256(code || ":" || nonce)`, truncated to 16 hex characters.
-   **The code itself is never on the wire.**
+   `cch = SHA256(code || ":" || n)`, truncated to 16 lowercase hex characters
+   (i.e. the first 8 digest bytes). **The code itself is never on the wire.**
+
+   `n` here is **the ASCII text of the `n` field**, not the 8 bytes it decodes
+   to. Both readings are defensible from the sentence above, they produce
+   different digests, and the disagreement would surface as a claim that never
+   matches — with nothing to point at. The corpus settles it; the spec now says
+   it out loud.
 3. The admin sees the board in the UI — by MAC, hardware and firmware — and
    types the code from the LCD.
 4. The API computes the commitment for each announcer and claims the one that
