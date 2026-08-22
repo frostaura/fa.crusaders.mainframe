@@ -1,0 +1,1688 @@
+{
+  "description": "ATmega2560 <-> ESP8266 line protocol: encode cases (Frame -> exact bytes) and decode cases (bytes -> Frames or errors). Read by src/iot/test/test_protocol. Checksums here were produced by an independent Python XOR, not by the codec under test.",
+  "authority": "docs/specs/device-serial-protocol.md",
+  "encode": [
+    {
+      "id": "enc-on",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "ON",
+        "args": [
+          "A",
+          "1800"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ON,A,1800*49\n"
+    },
+    {
+      "id": "enc-on-clamp-high",
+      "kind": "encode_v2",
+      "note": "A caller asking for 16 hours gets the 90-minute hard cap, not a rejection.",
+      "frame": {
+        "verb": "ON",
+        "args": [
+          "D",
+          "60000"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ON,D,5400*44\n"
+    },
+    {
+      "id": "enc-on-clamp-low",
+      "kind": "encode_v2",
+      "note": "Zero seconds would be an indefinite-on by another name; it clamps up to 1.",
+      "frame": {
+        "verb": "ON",
+        "args": [
+          "B",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ON,B,1*72\n"
+    },
+    {
+      "id": "enc-off",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "OFF",
+        "args": [
+          "C"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!OFF,C*20\n"
+    },
+    {
+      "id": "enc-ext",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "EXT",
+        "args": [
+          "A",
+          "900"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!EXT,A,900*31\n"
+    },
+    {
+      "id": "enc-ext-clamp-high",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "EXT",
+        "args": [
+          "C",
+          "9000"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!EXT,C,5400*0B\n"
+    },
+    {
+      "id": "enc-lcd",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "LCD",
+        "args": [
+          "WELCOME",
+          "COURT A"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!LCD,WELCOME,COURT A*2F\n"
+    },
+    {
+      "id": "enc-lcd-escaped",
+      "kind": "encode_v2",
+      "note": "A comma and a percent in one frame. The checksum covers the ESCAPED bytes.",
+      "frame": {
+        "verb": "LCD",
+        "args": [
+          "SMITH, J",
+          "50% LEFT"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!LCD,SMITH%2C J,50%25 LEFT*22\n"
+    },
+    {
+      "id": "enc-lcd-empty-second-line",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "LCD",
+        "args": [
+          "READY",
+          ""
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!LCD,READY,*00\n"
+    },
+    {
+      "id": "enc-auth",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "AUTH",
+        "args": [
+          "30"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!AUTH,30*27\n"
+    },
+    {
+      "id": "enc-auth-zero-disarms",
+      "kind": "encode_v2",
+      "note": "AUTH is the one duration with no lower clamp: 0 is how the buttons are disarmed.",
+      "frame": {
+        "verb": "AUTH",
+        "args": [
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!AUTH,0*14\n"
+    },
+    {
+      "id": "enc-auth-clamp-high",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "AUTH",
+        "args": [
+          "99999"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!AUTH,5400*25\n"
+    },
+    {
+      "id": "enc-rst",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "RST",
+        "args": []
+      },
+      "cap": 4096,
+      "bytes": "!RST*55\n"
+    },
+    {
+      "id": "enc-ping",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "PING",
+        "args": []
+      },
+      "cap": 4096,
+      "bytes": "!PING*10\n"
+    },
+    {
+      "id": "enc-btn-court",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "BTN",
+        "args": [
+          "A"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!BTN,A*35\n"
+    },
+    {
+      "id": "enc-btn-slot",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "BTN",
+        "args": [
+          "3"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!BTN,3*47\n"
+    },
+    {
+      "id": "enc-scan",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "SCAN",
+        "args": [
+          "045A2F19B4"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!SCAN,045A2F19B4*49\n"
+    },
+    {
+      "id": "enc-state",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "STATE",
+        "args": [
+          "5",
+          "1800",
+          "0",
+          "0",
+          "120"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!STATE,5,1800,0,0,120*74\n"
+    },
+    {
+      "id": "enc-state-all-idle",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "STATE",
+        "args": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!STATE,0,0,0,0,0*4B\n"
+    },
+    {
+      "id": "enc-pong",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "PONG",
+        "args": [
+          "1.0.0",
+          "86400"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!PONG,1.0.0,86400*1D\n"
+    },
+    {
+      "id": "enc-evt-autooff",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "EVT",
+        "args": [
+          "AUTOOFF",
+          "A"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!EVT,AUTOOFF,A*46\n"
+    },
+    {
+      "id": "enc-evt-authexpired",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "EVT",
+        "args": [
+          "AUTHEXPIRED",
+          ""
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!EVT,AUTHEXPIRED,*18\n"
+    },
+    {
+      "id": "enc-err-badcrc",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "ERR",
+        "args": [
+          "BADCRC"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ERR,BADCRC*7C\n"
+    },
+    {
+      "id": "enc-err-nocourt",
+      "kind": "encode_v2",
+      "frame": {
+        "verb": "ERR",
+        "args": [
+          "NOCOURT"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ERR,NOCOURT*37\n"
+    },
+    {
+      "id": "enc-max-length-frame",
+      "kind": "encode_v2",
+      "note": "The longest frame any named constructor can produce: two full-width arguments of entirely escapable bytes. 154 bytes, comfortably inside kMaxFrameLen.",
+      "frame": {
+        "verb": "LCD",
+        "args": [
+          ",,,,,,,,,,,,,,,,,,,,,,,,",
+          "%%%%%%%%%%%%%%%%%%%%%%%%"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!LCD,%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C,%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25*4B\n"
+    },
+    {
+      "id": "enc-refuses-to-truncate",
+      "kind": "encode_v2",
+      "note": "A truncated relay command is worse than none, so a frame that will not fit emits ZERO bytes rather than a prefix.",
+      "frame": {
+        "verb": "ON",
+        "args": [
+          "A",
+          "1800"
+        ]
+      },
+      "cap": 8,
+      "bytes": ""
+    },
+    {
+      "id": "encl-on-loses-duration",
+      "kind": "encode_legacy",
+      "note": "The legacy message has nowhere to put a duration. This is the defect v2 exists to fix, and why the Mega's auto-off timer is independent of the bridge.",
+      "frame": {
+        "verb": "ON",
+        "args": [
+          "A",
+          "1800"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "A\n"
+    },
+    {
+      "id": "encl-on-court-d",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "ON",
+        "args": [
+          "D",
+          "600"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "D\n"
+    },
+    {
+      "id": "encl-off",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "OFF",
+        "args": [
+          "C"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "c\n"
+    },
+    {
+      "id": "encl-off-court-a",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "OFF",
+        "args": [
+          "A"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "a\n"
+    },
+    {
+      "id": "encl-rst",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "RST",
+        "args": []
+      },
+      "cap": 4096,
+      "bytes": "RESET\n"
+    },
+    {
+      "id": "encl-lcd",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "LCD",
+        "args": [
+          "ENTER CODE",
+          "COURT A"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "ENTER CODE|COURT A\n"
+    },
+    {
+      "id": "encl-btn-court",
+      "kind": "encode_legacy",
+      "note": "Identical bytes to encl-on-court-a, in the other direction. The collision is preserved on purpose: each end only ever reads one direction.",
+      "frame": {
+        "verb": "BTN",
+        "args": [
+          "A"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "A\n"
+    },
+    {
+      "id": "encl-btn-slot",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "BTN",
+        "args": [
+          "2"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "2\n"
+    },
+    {
+      "id": "encl-scan",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "SCAN",
+        "args": [
+          "9931"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "CHECK:9931\n"
+    },
+    {
+      "id": "encl-ext-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "EXT",
+        "args": [
+          "A",
+          "600"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-auth-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "AUTH",
+        "args": [
+          "30"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-ping-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "PING",
+        "args": []
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-state-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "STATE",
+        "args": [
+          "1",
+          "0",
+          "0",
+          "0",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-pong-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "PONG",
+        "args": [
+          "1.0.0",
+          "1"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-evt-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "EVT",
+        "args": [
+          "OVERRUN",
+          ""
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-err-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "ERR",
+        "args": [
+          "BADARG"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-refuses-to-truncate",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "RST",
+        "args": []
+      },
+      "cap": 3,
+      "bytes": ""
+    }
+  ],
+  "decode": [
+    {
+      "id": "dec-on",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,1800*49\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "A",
+              "1800"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-on-clamp-high",
+      "kind": "decode",
+      "note": "Clamped, never rejected: a clamped light is a wrong-length game, a rejected one is a dark court.",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,99999*79\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "A",
+              "5400"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-on-clamp-absurd",
+      "kind": "decode",
+      "note": "Saturating, not wrapping. A value that overflows uint32 must become the hard cap, not a small number.",
+      "link": "downlink",
+      "chunks": [
+        "!ON,B,99999999999*7A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "B",
+              "5400"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-on-clamp-low",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,0*70\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "A",
+              "1"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-on-without-duration-is-refused",
+      "kind": "decode",
+      "note": "THE safety case. There is no ON frame without a duration, on the wire or in the API, so this line cannot become a relay command.",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A*6C\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-off",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!OFF,B*21\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "OFF",
+            "args": [
+              "B"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-ext",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!EXT,C,900*33\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "EXT",
+            "args": [
+              "C",
+              "900"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-lcd",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!LCD,WELCOME,COURT A*2F\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "WELCOME",
+              "COURT A"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-lcd-escaped",
+      "kind": "decode",
+      "note": "Round-trip of enc-lcd-escaped. A comma and a percent inside LCD text.",
+      "link": "downlink",
+      "chunks": [
+        "!LCD,SMITH%2C J,50%25 LEFT*22\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "SMITH, J",
+              "50% LEFT"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-lcd-empty-second-line",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!LCD,READY,*00\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "READY",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-lcd-both-lines-empty",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!LCD,,*4B\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-bad-escape-is-refused",
+      "kind": "decode",
+      "note": "A malformed escape is rejected, not silently kept. Keeping it would break the round-trip and neither end could discover the disagreement.",
+      "link": "downlink",
+      "chunks": [
+        "!LCD,50%2X,B*43\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-truncated-escape-is-refused",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!LCD,ABC%2,B*5E\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-auth",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!AUTH,30*27\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "AUTH",
+            "args": [
+              "30"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-auth-zero-disarms",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!AUTH,0*14\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "AUTH",
+            "args": [
+              "0"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-rst",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!RST*55\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "RST",
+            "args": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-ping",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!PING*10\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "PING",
+            "args": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-bad-checksum-is-dropped",
+      "kind": "decode",
+      "note": "Never guessed at: a half-understood relay command is worse than a missing one.",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,1800*00\n"
+      ],
+      "expect": [
+        {
+          "error": "BADCRC"
+        }
+      ]
+    },
+    {
+      "id": "dec-bad-checksum-single-bit",
+      "kind": "decode",
+      "note": "One flipped bit in the checksum field, which is the failure mode of 9600 baud next to four switching relay coils.",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,1800*48\n"
+      ],
+      "expect": [
+        {
+          "error": "BADCRC"
+        }
+      ]
+    },
+    {
+      "id": "dec-unknown-verb",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!NOPE,A*79\n"
+      ],
+      "expect": [
+        {
+          "error": "BADVERB"
+        }
+      ]
+    },
+    {
+      "id": "dec-court-out-of-range",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!ON,Z,600*6D\n"
+      ],
+      "expect": [
+        {
+          "error": "NOCOURT"
+        }
+      ]
+    },
+    {
+      "id": "dec-too-many-args",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!OFF,A,B*4C\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-arg-overflow",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!STATE,1,2,3,4,5,6*50\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-non-numeric-duration",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,SOON*5D\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-arg-too-long",
+      "kind": "decode",
+      "note": "A truncated scanner code is a valid-looking code belonging to somebody else.",
+      "link": "downlink",
+      "chunks": [
+        "!SCAN,XXXXXXXXXXXXXXXXXXXXXXXXX*6B\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-arg-at-max-length",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!SCAN,XXXXXXXXXXXXXXXXXXXXXXXX*33\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "SCAN",
+            "args": [
+              "XXXXXXXXXXXXXXXXXXXXXXXX"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-crlf-is-one-terminator",
+      "kind": "decode",
+      "note": "Two results here would mean every frame from a CRLF peer produced a spurious empty line.",
+      "link": "downlink",
+      "chunks": [
+        "!RST*55\r\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "RST",
+            "args": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-cr-alone-terminates",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!PING*10\r"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "PING",
+            "args": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-partial-frame-in-two-chunks",
+      "kind": "decode",
+      "note": "How the UART actually delivers: half a frame this pass of loop(), the rest next.",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,18",
+        "00*49\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "A",
+              "1800"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-partial-frame-in-four-chunks",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!L",
+        "CD,WELC",
+        "OME,COURT A*2F",
+        "\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "WELCOME",
+              "COURT A"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-two-frames-one-chunk",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!RST*55\n!PING*10\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "RST",
+            "args": []
+          }
+        },
+        {
+          "frame": {
+            "verb": "PING",
+            "args": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-overrun",
+      "kind": "decode",
+      "note": "Longer than kMaxFrameLen. Reported, and NOT parsed from the buffered prefix.",
+      "link": "downlink",
+      "chunks": [
+        "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n"
+      ],
+      "expect": [
+        {
+          "error": "OVERRUN"
+        }
+      ]
+    },
+    {
+      "id": "dec-overrun-resynchronises",
+      "kind": "decode",
+      "note": "The over-long line looks like a valid ON prefix. It must not become one: the decoder resynchronises at the next terminator and the following frame is clean.",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999*AB\n",
+        "!RST*55\n"
+      ],
+      "expect": [
+        {
+          "error": "OVERRUN"
+        },
+        {
+          "frame": {
+            "verb": "RST",
+            "args": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-garbage-between-frames",
+      "kind": "decode",
+      "note": "Blank lines are the gap between frames, not an error. Actual garbage is.",
+      "link": "downlink",
+      "chunks": [
+        "\n\n",
+        "xyzzy\n",
+        "!RST*55\n"
+      ],
+      "expect": [
+        {
+          "error": "BADFRAME"
+        },
+        {
+          "frame": {
+            "verb": "RST",
+            "args": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-no-checksum-delimiter",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!ONA1800\n"
+      ],
+      "expect": [
+        {
+          "error": "BADFRAME"
+        }
+      ]
+    },
+    {
+      "id": "dec-lowercase-checksum-is-refused",
+      "kind": "decode",
+      "note": "The spec says uppercase. Accepting lowercase would widen the set of byte sequences that count as a frame, and 'a' differs from 'A' by one bit.",
+      "link": "downlink",
+      "chunks": [
+        "!ON,A,1800*49\n"
+      ],
+      "expect": [
+        {
+          "error": "BADFRAME"
+        }
+      ]
+    },
+    {
+      "id": "dec-sentinel-only",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!\n"
+      ],
+      "expect": [
+        {
+          "error": "BADFRAME"
+        }
+      ]
+    },
+    {
+      "id": "dec-max-length-frame",
+      "kind": "decode",
+      "note": "Round-trip of enc-max-length-frame at the far end of the buffer.",
+      "link": "downlink",
+      "chunks": [
+        "!LCD,%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C%2C,%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25%25*4B\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              ",,,,,,,,,,,,,,,,,,,,,,,,",
+              "%%%%%%%%%%%%%%%%%%%%%%%%"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-on-court-a",
+      "kind": "decode",
+      "note": "A legacy on gets the hard cap, because the alternative is forever.",
+      "link": "downlink",
+      "chunks": [
+        "A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "A",
+              "5400"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-on-court-d",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "D\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ON",
+            "args": [
+              "D",
+              "5400"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-off-court-a",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "a\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "OFF",
+            "args": [
+              "A"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-off-court-d",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "d\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "OFF",
+            "args": [
+              "D"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-reset",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "RESET\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "RST",
+            "args": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-enter-code",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "ENTER CODE\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "RST",
+            "args": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-invalid-code",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "INVALID CODE\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "INVALID CODE",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-low-balance",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "LOW BALANCE\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "LOW BALANCE",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-denied",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "DENIED\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "DENIED",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-two-line-prompt-also-arms",
+      "kind": "decode",
+      "note": "One legacy line, two v2 frames: the display, and the AUTH window that was implicit in Carl's sketch and had no expiry at all.",
+      "link": "downlink",
+      "chunks": [
+        "WELCOME|COURT A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "WELCOME",
+              "COURT A"
+            ]
+          }
+        },
+        {
+          "frame": {
+            "verb": "AUTH",
+            "args": [
+              "30"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-empty-second-line",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "ENTER CODE|\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "LCD",
+            "args": [
+              "ENTER CODE",
+              ""
+            ]
+          }
+        },
+        {
+          "frame": {
+            "verb": "AUTH",
+            "args": [
+              "30"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-unknown-line",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "Z\n"
+      ],
+      "expect": [
+        {
+          "error": "BADFRAME"
+        }
+      ]
+    },
+    {
+      "id": "dec-btn-court",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!BTN,A*35\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "BTN",
+            "args": [
+              "A"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-btn-slot",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!BTN,3*47\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "BTN",
+            "args": [
+              "3"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-scan",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!SCAN,045A2F19B4*49\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "SCAN",
+            "args": [
+              "045A2F19B4"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-state",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!STATE,5,1800,0,0,120*74\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "STATE",
+            "args": [
+              "5",
+              "1800",
+              "0",
+              "0",
+              "120"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-pong",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!PONG,1.0.0,86400*1D\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "PONG",
+            "args": [
+              "1.0.0",
+              "86400"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-evt",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!EVT,AUTOOFF,A*46\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "EVT",
+            "args": [
+              "AUTOOFF",
+              "A"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-err",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!ERR,BADCRC*7C\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ERR",
+            "args": [
+              "BADCRC"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-btn-court-a",
+      "kind": "decode",
+      "note": "The same byte as decl-on-court-a, decoded in the other direction. This is the legacy collision the spec preserves rather than fixes.",
+      "link": "uplink",
+      "chunks": [
+        "A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "BTN",
+            "args": [
+              "A"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-btn-court-d",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "D\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "BTN",
+            "args": [
+              "D"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-btn-slot-1",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "1\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "BTN",
+            "args": [
+              "1"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-btn-slot-4",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "4\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "BTN",
+            "args": [
+              "4"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-scan",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "CHECK:9931\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "SCAN",
+            "args": [
+              "9931"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decl-scan-empty-code",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "CHECK:\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "decl-scan-code-too-long",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "CHECK:9999999999999999999999999\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "decl-unknown-line",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "HELLO\n"
+      ],
+      "expect": [
+        {
+          "error": "BADFRAME"
+        }
+      ]
+    }
+  ]
+}

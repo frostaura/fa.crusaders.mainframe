@@ -93,7 +93,7 @@ All payloads are JSON, structured:
 - **At-least-once.** Receivers must be idempotent on `id`.
 - **Signed.** `X-Crusaders-Signature: sha256=<hex>` header — HMAC-SHA256 of the raw body using the endpoint's secret.
 - **Timestamped.** `X-Crusaders-Timestamp: <unix-seconds>` — receivers should reject events older than 5 minutes to mitigate replay.
-- **Retry policy.** On any non-2xx response (or timeout >10s): retry with exponential backoff at 1m, 5m, 30m, 2h, 12h, 24h. After 6 failures the endpoint is auto-disabled and the owner is emailed.
+- **Retry policy.** On any non-2xx response (or timeout >10s): retry with exponential backoff at 1m, 5m, 30m, 2h, 12h, 24h. After 6 failures the endpoint is auto-disabled and the owner is emailed. Driven by `WebhookRetryWorker`, which sweeps due deliveries every 30s in batches of 50. A blocked destination is exempt and is abandoned on the first attempt.
 - **Per-endpoint queue.** Slow / failing endpoints don't block others. Each endpoint has its own delivery worker.
 - **Retention.** Each event keeps its delivery log (status code, response time, retry count) for 30 days, viewable in admin UI.
 
@@ -106,7 +106,55 @@ The on-court Arduino lights controller is a **first-class internal webhook consu
 - A **platform-admin-registered** endpoint can receive all events across all tenants (the `tenant_id` field disambiguates). Used for the platform observability stack.
 
 ## Security posture
-- HTTPS only. Self-signed certs allowed for testing but flagged in the UI.
-- No outbound calls to RFC1918 / link-local addresses from the production environment (prevents SSRF-via-webhook).
-- Outbound IP allowlist published so receivers can lock down inbound to our IPs if they want.
+
+### SSRF guard — as built
+
+Implemented in `Security/Outbound/OutboundAddressGuard.cs` and wired into the
+`webhooks` HttpClient by `GuardedHttpClient.cs`.
+
+**The decision is made in the socket's `ConnectCallback`, against the address about to
+be dialled — not when the URL is registered.** Registration-time validation is a
+usability courtesy: the host is resolved minutes or months later and can point
+somewhere else by then, so a pre-flight check is not a boundary. A name that answers
+publicly for the validation lookup and `169.254.169.254` for the delivery lookup —
+DNS rebinding — defeats any check that happens before the connection.
+
+Refused, unless allow-listed:
+
+- loopback, `0.0.0.0`, `::`
+- RFC1918 (`10/8`, `172.16/12`, `192.168/16`)
+- link-local `169.254/16` — **including the cloud metadata endpoint**, which is
+  link-local rather than private and which an RFC1918-only guard therefore misses
+- carrier NAT `100.64/10`, multicast and reserved (`224/4` upward)
+- IPv6 link-local, site-local, unique-local, multicast
+- IPv4-mapped IPv6 (`::ffff:10.0.0.1`), unwrapped before classification
+
+Also:
+
+- **every** resolved address must pass, not merely one — a name answering with both a
+  public and a private address is the rebinding case, and picking the good one is the bug
+- **redirects are not followed.** A public URL answering `302` to the metadata endpoint
+  is the cheapest way past a guard that inspects only the first hop, and a webhook
+  receiver has no legitimate reason to redirect
+- a template variable in the **host** is refused at registration. Variables are
+  substituted from event-payload fields, which carry member-supplied values; a host
+  assembled from those is a destination nobody chose. Variables in the path and query
+  stay allowed — they cannot change where the request goes
+- a blocked destination is **abandoned immediately**, not retried. It is a configuration
+  error, and re-running an unchangeable decision six times over 41 hours buries the reason
+
+### The LAN carve-out
+
+`Webhooks:PrivateNetworkAllowList` is a list of CIDRs, so
+`"192.168.68.150/32"` admits one court box rather than the entire private internet.
+`Webhooks:AllowPrivateNetworks` disables the guard wholesale and defaults to **on in
+Development only** — the dev loop runs against MailHog, a local API and a simulator on
+localhost.
+
+`CLAUDE.md` states this carve-out must not be closed. It exists because a court box
+lives at a fixed RFC1918 address on the club LAN and there is nowhere else for it to be.
+
+### Other
+
+- HTTPS preferred; HTTP permitted so an allow-listed LAN device can be reached.
 - The secret is shown to the user only once at creation; thereafter it's masked. They can rotate it any time.

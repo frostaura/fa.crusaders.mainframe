@@ -12,6 +12,7 @@ using Fido2NetLib;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.RateLimiting;
+using Crusaders.Mainframe.Api.Security.Outbound;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 
@@ -174,8 +175,16 @@ builder.Services.AddScoped<MemberApprovalService>();
 
 // Phase 4 — webhook engine + lights cue worker + no-show worker
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
-builder.Services.AddHttpClient("webhooks");
+// Webhook delivery dials whatever URL an endpoint owner configured, so it is the one
+// HttpClient in the application that must not be allowed to reach the LAN it runs on.
+// The guard lives in the socket's ConnectCallback rather than in URL validation —
+// see GuardedHttpClient for why a pre-flight check is not a boundary.
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Outbound.IOutboundAddressGuard,
+                              Crusaders.Mainframe.Api.Security.Outbound.OutboundAddressGuard>();
+builder.Services.AddGuardedHttpClient("webhooks");
+builder.Services.AddSingleton<WebhookSender>();
 builder.Services.AddHostedService<WebhookDeliveryWorker>();
+builder.Services.AddHostedService<WebhookRetryWorker>();
 builder.Services.AddHostedService<LightsCueWorker>();
 builder.Services.AddHostedService<NoShowWorker>();
 

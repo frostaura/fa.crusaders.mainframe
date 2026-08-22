@@ -2,6 +2,7 @@ using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
+using Crusaders.Mainframe.Api.Security.Outbound;
 using Crusaders.Mainframe.Api.Webhooks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -23,10 +24,10 @@ public static class WebhookEndpoints
             return Results.Ok(rows);
         });
 
-        g.MapPost("/", async (CreateWebhookRequest req, HttpContext ctx, MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
+        g.MapPost("/", async (CreateWebhookRequest req, HttpContext ctx, MainframeDbContext db, ITenantContext tenant, IOutboundAddressGuard guard, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
-            var validation = ValidateUrl(req.UrlTemplate, allowLan: true);
+            var validation = ValidateUrl(req.UrlTemplate, guard);
             if (validation is not null) return Results.BadRequest(new { error = validation });
 
             var endpoint = new WebhookEndpoint
@@ -63,9 +64,9 @@ public static class WebhookEndpoints
             return Results.Ok(rows);
         });
 
-        admin.MapPost("/", async (CreateWebhookRequest req, MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
+        admin.MapPost("/", async (CreateWebhookRequest req, MainframeDbContext db, ITenantContext tenant, IOutboundAddressGuard guard, CancellationToken ct) =>
         {
-            var validation = ValidateUrl(req.UrlTemplate, allowLan: true);
+            var validation = ValidateUrl(req.UrlTemplate, guard);
             if (validation is not null) return Results.BadRequest(new { error = validation });
             var endpoint = new WebhookEndpoint
             {
@@ -104,6 +105,16 @@ public static class WebhookEndpoints
         return app;
     }
 
+    /// <summary>Everything up to the third slash: scheme, credentials, host and port.</summary>
+    private static string SchemeAndAuthority(string url)
+    {
+        var afterScheme = url.IndexOf("//", StringComparison.Ordinal);
+        if (afterScheme < 0) return url;
+
+        var pathStart = url.IndexOf('/', afterScheme + 2);
+        return pathStart < 0 ? url : url[..pathStart];
+    }
+
     private static object Project(WebhookEndpoint w, bool includeSecret = false) => new
     {
         id = w.Id,
@@ -118,13 +129,45 @@ public static class WebhookEndpoints
         secret = includeSecret ? w.Secret : null,
     };
 
-    private static string? ValidateUrl(string? url, bool allowLan)
+    /// <summary>
+    /// A courtesy check, not the security boundary.
+    ///
+    /// <para>
+    /// It rejects the obvious cases at registration so an owner finds out immediately
+    /// rather than through a silently failing delivery. It cannot be the boundary,
+    /// because the host is resolved at delivery time and a name can point somewhere
+    /// else by then. The boundary is in the socket — see
+    /// <c>GuardedHttpClient.ConnectCallback</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// The previous signature took an <c>allowLan</c> flag that was hardcoded
+    /// <c>true</c> at both call sites and gated nothing but an https requirement. It is
+    /// gone: an argument that is always the same value is a comment pretending to be a
+    /// control.
+    /// </para>
+    /// </summary>
+    internal static string? ValidateUrl(string? url, IOutboundAddressGuard guard)
     {
         if (string.IsNullOrWhiteSpace(url)) return "url_required";
+
+        // Checked textually, and BEFORE the parse: a brace percent-escapes to %7B, which
+        // is not legal in a host, so parsing first would report every templated host as
+        // a generic "url_invalid" and hide the actual rule.
+        //
+        // The rule is a security one, not a parsing limitation. Variables are
+        // substituted from event payload fields, which carry member-supplied values —
+        // a host assembled from those is a destination the endpoint owner never chose
+        // and nobody reviewed. Variables in the path and query stay allowed; they
+        // cannot change where the request goes.
+        if (SchemeAndAuthority(url).Contains('{')) return "template_variable_not_allowed_in_host";
+
+        // The remaining braces are not legal in a URI either, so they are percent-escaped
+        // for the parse only. The stored template keeps them.
         if (!Uri.TryCreate(url.Replace("{", "%7B").Replace("}", "%7D"), UriKind.Absolute, out var u)) return "url_invalid";
-        if (u.Scheme != "http" && u.Scheme != "https") return "scheme_must_be_http_or_https";
-        if (!allowLan && (u.Scheme == "http" && !u.Host.StartsWith("localhost"))) return "https_required";
-        return null;
+        if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps) return "scheme_must_be_http_or_https";
+
+        return guard.CheckHostLiteral(u.Host);
     }
 }
 
