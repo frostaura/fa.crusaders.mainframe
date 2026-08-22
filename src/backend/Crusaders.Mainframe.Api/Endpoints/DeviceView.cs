@@ -23,6 +23,7 @@ public static class DeviceView
         hardware = d.Hardware.ToString(),
         court_number = d.CourtNumber,
         gate_key = d.GateKey,
+        mac_address = d.MacAddress,
         key_version = d.KeyVersion,
         enabled = d.Enabled,
         revoked_at = d.RevokedAt,

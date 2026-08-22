@@ -371,4 +371,64 @@ public class DeviceClaimTests
         Assert.Equal(expected.ToString(), details.GetProperty("reason").GetString());
         Assert.DoesNotContain(Code, row.DetailsJson!, StringComparison.Ordinal);
     }
+
+    // ---- One physical board, one row ---------------------------------------
+
+    /// <summary>
+    /// A board that was reflashed, or whose key was lost, announces st=unclaimed with no
+    /// device id — indistinguishable from a new board except by its MAC. Registering it
+    /// again would leave two rows for one piece of hardware, both deriving working keys.
+    /// Revoking the row an admin can see would then not stop the board.
+    /// </summary>
+    [Fact]
+    public async Task A_board_that_is_already_registered_is_refused_rather_than_duplicated()
+    {
+        var f = await CreateAsync();
+        f.Store.Upsert(Board());
+
+        var first = await f.Service.ClaimAsync(Command(), f.Host.AdminUser.Id, default);
+        Assert.True(first.Succeeded);
+
+        // The same physical board comes back unclaimed — reflashed, or restored from a
+        // backup that predates the claim — and an admin tries to connect it again.
+        f.Store.Upsert(Board());
+
+        var second = await f.Service.ClaimAsync(
+            Command(deviceCode: "court-box-2"), f.Host.AdminUser.Id, default);
+
+        Assert.False(second.Succeeded);
+        Assert.Equal(ClaimFailure.BoardAlreadyRegistered, second.Failure);
+
+        // The refusal names the row that already owns it, so the admin knows to rotate
+        // rather than to guess.
+        Assert.Equal("court-box-1", second.Detail);
+
+        Assert.Single(await f.Db.Devices.IgnoreQueryFilters().Where(d => d.MacAddress == "5ccf7f1a2b3c").ToListAsync());
+        Assert.NotEmpty(await AuditAsync(f.Db, "device.claim_failed"));
+
+        f.Scope.Dispose();
+        await f.Host.DisposeAsync();
+    }
+
+    /// <summary>A different board is still claimable while the first one is registered.</summary>
+    [Fact]
+    public async Task A_second_distinct_board_is_still_claimable()
+    {
+        var f = await CreateAsync();
+        f.Store.Upsert(Board());
+
+        Assert.True((await f.Service.ClaimAsync(Command(), f.Host.AdminUser.Id, default)).Succeeded);
+
+        const string otherNonce = "ffeeddccbbaa9988";
+        f.Store.Upsert(Board(mac: "aabbccddeeff", nonce: otherNonce, code: "PQRS4567"));
+
+        var second = await f.Service.ClaimAsync(
+            new ClaimBoardCommand("PQRS4567", "court-box-2", "Court 2 box", 2), f.Host.AdminUser.Id, default);
+
+        Assert.True(second.Succeeded);
+        Assert.Equal("aabbccddeeff", second.Registration!.Device.MacAddress);
+
+        f.Scope.Dispose();
+        await f.Host.DisposeAsync();
+    }
 }

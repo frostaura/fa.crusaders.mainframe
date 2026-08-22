@@ -117,6 +117,13 @@ public static class AdminDeviceDiscoveryEndpoints
     {
         return result.Failure switch
         {
+            ClaimFailure.BoardAlreadyRegistered => Results.Conflict(new
+            {
+                error = "board_already_registered",
+                message = $"This board is already registered as '{result.Detail}'. Rotate that device's key rather " +
+                          "than registering it a second time — two rows for one board both derive working keys.",
+                device_code = result.Detail,
+            }),
             ClaimFailure.InvalidClaimCode => Results.BadRequest(new
             {
                 error = "claim_code_invalid",

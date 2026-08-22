@@ -16,6 +16,9 @@ public enum ClaimFailure
     Ambiguous,
     BoardAlreadyClaimed,
     DeviceCodeTaken,
+
+    /// <summary>This physical board already has a row in this tenant, matched by MAC.</summary>
+    BoardAlreadyRegistered,
 }
 
 /// <summary>The claim code read off the board's LCD, plus the registration details for the row it will create.</summary>
@@ -105,9 +108,23 @@ public sealed class DeviceDiscoveryService
             return await RefuseAsync(ClaimFailure.DeviceCodeTaken, board, cmd, actorUserId, ct);
         }
 
+        // A board that was reflashed, or whose key was lost, announces st=unclaimed with no
+        // device id — indistinguishable from a new board except by its MAC. Registering it
+        // again would leave two rows for one piece of hardware, both deriving working keys,
+        // both looking legitimate. The answer is to rotate the existing row's key, not to
+        // create a second one, so this refuses and says which row already owns the board.
+        var existing = await _devices.FindByMacAddressAsync(board!.Mac, ct);
+        if (existing is not null)
+        {
+            return await RefuseAsync(
+                ClaimFailure.BoardAlreadyRegistered, board, cmd, actorUserId, ct,
+                detail: existing.DeviceCode);
+        }
+
         var registration = await _devices.RegisterAsync(
             new RegisterDeviceCommand(
-                cmd.DeviceCode, cmd.Name, DeviceKind.CourtBox, HardwareOf(board!.Hardware), cmd.CourtNumber, null),
+                cmd.DeviceCode, cmd.Name, DeviceKind.CourtBox, HardwareOf(board.Hardware), cmd.CourtNumber, null)
+            { MacAddress = board.Mac },
             actorUserId, ct);
 
         _store.MarkClaimed(board.Mac, registration.Device.Id, registration.Device.TenantId);
@@ -208,7 +225,8 @@ public sealed class DeviceDiscoveryService
     }
 
     private async Task<ClaimResult> RefuseAsync(
-        ClaimFailure failure, DiscoveredBoard? board, ClaimBoardCommand cmd, Guid actorUserId, CancellationToken ct)
+        ClaimFailure failure, DiscoveredBoard? board, ClaimBoardCommand cmd, Guid actorUserId,
+        CancellationToken ct, string? detail = null)
     {
         // The claim code itself is never logged. It is a secret the board is displaying, and
         // an audit log is read by more people than can stand in front of the cupboard.
@@ -221,7 +239,7 @@ public sealed class DeviceDiscoveryService
         });
 
         await _db.SaveChangesAsync(ct);
-        return new ClaimResult(failure, null, board, null);
+        return new ClaimResult(failure, detail, board, null);
     }
 
     private void Audit(Guid actorUserId, string action, object details)

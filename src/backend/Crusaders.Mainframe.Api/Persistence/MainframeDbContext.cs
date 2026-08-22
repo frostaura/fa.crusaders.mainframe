@@ -94,24 +94,7 @@ public class MainframeDbContext : DbContext
             e.HasQueryFilter(t => t.TenantId == _tenant.TenantId);
         });
 
-        modelBuilder.Entity<Device>(e =>
-        {
-            e.ToTable("devices");
-            e.HasKey(d => d.Id);
-            e.HasIndex(d => new { d.TenantId, d.DeviceCode }).IsUnique();
-            e.HasIndex(d => new { d.TenantId, d.Kind });
-            e.Property(d => d.DeviceCode).HasMaxLength(64).IsRequired();
-            e.Property(d => d.Name).HasMaxLength(128).IsRequired();
-            e.Property(d => d.GateKey).HasMaxLength(64);
-            e.Property(d => d.LastIpAddress).HasMaxLength(64);
-            e.Property(d => d.RunningVersion).HasMaxLength(32);
-            e.Property(d => d.MegaVersion).HasMaxLength(32);
-            e.Property(d => d.PinnedVersion).HasMaxLength(32);
-            e.Property(d => d.Kind).HasConversion<int>();
-            e.Property(d => d.Hardware).HasConversion<int>();
-            e.Property(d => d.OtaChannel).HasConversion<int>();
-            e.HasQueryFilter(d => d.TenantId == _tenant.TenantId);
-        });
+        ConfigureDevices(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -233,6 +216,45 @@ public class MainframeDbContext : DbContext
             e.Property(p => p.Status).HasConversion<int>();
             e.Property(p => p.FailureReason).HasMaxLength(512);
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// The devices table, lifted out of <c>OnModelCreating</c>.
+    ///
+    /// <para>
+    /// Extracted because adding the MAC index pushed that method past the 200-line
+    /// ceiling. Splitting one entity out is the honest fix — a whitelizard entry would
+    /// have frozen a method that only ever grows, since every new table lands in it.
+    /// </para>
+    /// </summary>
+    private void ConfigureDevices(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Device>(e =>
+        {
+            e.ToTable("devices");
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => new { d.TenantId, d.DeviceCode }).IsUnique();
+            e.HasIndex(d => new { d.TenantId, d.Kind });
+            e.Property(d => d.DeviceCode).HasMaxLength(64).IsRequired();
+            e.Property(d => d.Name).HasMaxLength(128).IsRequired();
+            e.Property(d => d.GateKey).HasMaxLength(64);
+            e.Property(d => d.LastIpAddress).HasMaxLength(64);
+            e.Property(d => d.RunningVersion).HasMaxLength(32);
+            e.Property(d => d.MegaVersion).HasMaxLength(32);
+            e.Property(d => d.PinnedVersion).HasMaxLength(32);
+            e.Property(d => d.Kind).HasConversion<int>();
+            e.Property(d => d.Hardware).HasConversion<int>();
+            e.Property(d => d.OtaChannel).HasConversion<int>();
+            e.HasQueryFilter(d => d.TenantId == _tenant.TenantId);
+
+            // Filtered unique: one row per physical board per tenant, while leaving
+            // hand-registered devices (which have no MAC) unconstrained. Without it the
+            // "already registered" check below is advisory — two concurrent claims for the
+            // same board would both pass it and both insert.
+            e.HasIndex(d => new { d.TenantId, d.MacAddress })
+                .IsUnique()
+                .HasFilter("\"MacAddress\" IS NOT NULL");
         });
     }
 }

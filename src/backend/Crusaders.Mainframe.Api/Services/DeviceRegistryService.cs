@@ -53,6 +53,7 @@ public sealed class DeviceRegistryService
             Hardware = cmd.Hardware,
             CourtNumber = cmd.CourtNumber,
             GateKey = cmd.GateKey?.Trim(),
+            MacAddress = cmd.MacAddress?.Trim().ToLowerInvariant(),
         };
 
         _db.Devices.Add(device);
@@ -109,6 +110,16 @@ public sealed class DeviceRegistryService
     public Task<bool> DeviceCodeTakenAsync(string deviceCode, CancellationToken ct) =>
         _db.Devices.AnyAsync(d => d.DeviceCode == deviceCode, ct);
 
+    /// <summary>
+    /// The row that already owns this physical board, if any. Tenant-filtered like every
+    /// other read here: a board registered by another club is not this club's to recognise.
+    /// </summary>
+    public Task<Device?> FindByMacAddressAsync(string macAddress, CancellationToken ct)
+    {
+        var normalised = macAddress.Trim().ToLowerInvariant();
+        return _db.Devices.FirstOrDefaultAsync(d => d.MacAddress == normalised, ct);
+    }
+
     private string KeyFor(Device device) =>
         _keys.DeriveEncoded(device.TenantId, device.Id, device.KeyVersion);
 
@@ -132,7 +143,11 @@ public sealed record RegisterDeviceCommand(
     DeviceKind Kind,
     DeviceHardware Hardware,
     int? CourtNumber,
-    string? GateKey);
+    string? GateKey)
+{
+    /// <summary>Set when the device was discovered rather than typed in by hand.</summary>
+    public string? MacAddress { get; init; }
+}
 
 public sealed record UpdateDeviceCommand(
     string? Name,

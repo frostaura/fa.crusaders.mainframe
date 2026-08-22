@@ -296,6 +296,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("MacAddress")
+                        .HasColumnType("text");
+
                     b.Property<string>("MegaVersion")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
@@ -328,6 +331,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .IsUnique();
 
                     b.HasIndex("TenantId", "Kind");
+
+                    b.HasIndex("TenantId", "MacAddress")
+                        .IsUnique()
+                        .HasFilter("\"MacAddress\" IS NOT NULL");
 
                     b.ToTable("devices", (string)null);
                 });

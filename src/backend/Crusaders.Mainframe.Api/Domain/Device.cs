@@ -70,6 +70,22 @@ public sealed class Device : ITenantScoped
     public string? GateKey { get; set; }
 
     /// <summary>
+    /// The board's MAC address, lowercase hex without separators, as it announces itself.
+    /// Null for a device registered by hand rather than discovered.
+    ///
+    /// <para>
+    /// This is the only stable link between a physical board and its row. A board that has
+    /// been reflashed, or whose key was lost, announces <c>st=unclaimed</c> with no device
+    /// id — so without a MAC the API cannot tell it apart from a brand-new board, and an
+    /// admin reconnecting it silently creates a <i>second</i> row for the same hardware.
+    /// Both rows then derive working keys, both look legitimate, and the court has two
+    /// identities. Recognising the MAC turns that into "this board is already registered
+    /// as court-box-1 — rotate its key" instead.
+    /// </para>
+    /// </summary>
+    public string? MacAddress { get; set; }
+
+    /// <summary>
     /// Bumped to rotate the derived key. The device is re-provisioned with the new
     /// version; the old key stops verifying immediately.
     /// </summary>
