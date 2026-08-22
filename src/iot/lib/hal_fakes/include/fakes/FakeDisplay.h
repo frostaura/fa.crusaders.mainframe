@@ -1,0 +1,119 @@
+// Crusaders Mainframe — recording fake for hal::IDisplayPort.
+//
+// WHY IT MODELS THE GRID INSTEAD OF LOGGING CALLS
+// -----------------------------------------------
+// A call log answers "did you print COURT A?". The questions that actually
+// matter on a 16x2 panel are "what does the glass say now?" and "what fell off
+// the right-hand edge?", and a call log cannot answer either.
+//
+// Two real failures this catches that a call log does not:
+//   - Repainting a row with a shorter string leaves the tail of the previous
+//     message behind, so "COURT A 45 MIN" becomes "COURT A 5 MINN". The grid
+//     shows it; the call log shows two innocent-looking print() calls.
+//   - Text that overruns column 16 is silently lost. On the physical 20x4 panel
+//     driven as 16x2 those columns exist but are never repainted, so stale
+//     characters sit there indefinitely.
+//
+// Rows read back space-padded to the full width and NUL-terminated, so a test
+// asserts the exact 16 characters with TEST_ASSERT_EQUAL_STRING. Padding is not
+// cosmetic: it is what makes the leftover-tail bug visible in the assertion.
+//
+// No Arduino headers, no heap, no String.
+
+#ifndef CRUSADERS_FAKES_FAKEDISPLAY_H
+#define CRUSADERS_FAKES_FAKEDISPLAY_H
+
+#include <stdint.h>
+
+#include "hal/Display.h"
+
+namespace fakes {
+
+class FakeDisplay final : public hal::IDisplayPort {
+public:
+  FakeDisplay() { clear(); }
+
+  void clear() override {
+    ++clearCalls_;
+    for (uint8_t r = 0U; r < hal::kDisplayRows; ++r) {
+      for (uint8_t c = 0U; c < hal::kDisplayCols; ++c) {
+        grid_[r][c] = ' ';
+      }
+      grid_[r][hal::kDisplayCols] = '\0';
+    }
+  }
+
+  void print(uint8_t row, uint8_t col, const char* text) override {
+    ++printCalls_;
+    if (row >= hal::kDisplayRows || text == nullptr) {
+      ++offGridCalls_;
+      return;
+    }
+    if (col >= hal::kDisplayCols) {
+      // Starts past the last column: nothing can land on the glass at all.
+      ++offGridCalls_;
+      countDropped(text, 0U);
+      return;
+    }
+    uint8_t c = col;
+    uint16_t i = 0U;
+    while (text[i] != '\0' && c < hal::kDisplayCols) {
+      grid_[row][c] = text[i];
+      ++c;
+      ++i;
+    }
+    countDropped(text, i);
+  }
+
+  // --- observation ---------------------------------------------------------
+
+  /// One row, space-padded to kDisplayCols and NUL-terminated. An out-of-range
+  /// row returns an empty string rather than reading past the grid.
+  const char* row(uint8_t index) const { return index < hal::kDisplayRows ? grid_[index] : ""; }
+
+  char at(uint8_t rowIndex, uint8_t col) const {
+    if (rowIndex >= hal::kDisplayRows || col >= hal::kDisplayCols) {
+      return '\0';
+    }
+    return grid_[rowIndex][col];
+  }
+
+  /// Characters that fell off the right-hand edge. Non-zero means the caller
+  /// wrote a message the panel cannot show — a truncated court name is a
+  /// support call, not a cosmetic issue.
+  uint16_t droppedChars() const { return droppedChars_; }
+
+  /// print() calls addressed to a row that does not exist, to a column past the
+  /// last one, or with a null pointer. All three drop the whole call.
+  uint16_t offGridCalls() const { return offGridCalls_; }
+
+  uint16_t printCalls() const { return printCalls_; }
+
+  uint16_t clearCalls() const { return clearCalls_; }
+
+  void resetCounters() {
+    droppedChars_ = 0U;
+    offGridCalls_ = 0U;
+    printCalls_ = 0U;
+    clearCalls_ = 0U;
+  }
+
+private:
+  void countDropped(const char* text, uint16_t written) {
+    uint16_t i = written;
+    while (text[i] != '\0') {
+      ++droppedChars_;
+      ++i;
+    }
+  }
+
+  char grid_[hal::kDisplayRows][hal::kDisplayCols + 1U] = {};
+  uint16_t droppedChars_ = 0U;
+  uint16_t offGridCalls_ = 0U;
+  uint16_t printCalls_ = 0U;
+  uint16_t clearCalls_ = 0U;
+};
+
+} // namespace fakes
+
+#endif // CRUSADERS_FAKES_FAKEDISPLAY_H

@@ -1,0 +1,9 @@
+{
+  "name": "hal",
+  "version": "1.0.0",
+  "description": "Court-box hardware port interfaces: relay, display, scanner, buttons, clock, transport, store. No Arduino headers; compiles for AVR, Xtensa and host.",
+  "keywords": "hal, ports, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": { "flags": ["-I include"] }
+}

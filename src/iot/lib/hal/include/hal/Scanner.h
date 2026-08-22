@@ -1,0 +1,54 @@
+// Crusaders Mainframe — the QR scanner port.
+//
+// WHY THIS EXISTS
+// ---------------
+// A serial barcode module on Mega Serial2 (RX 17 / TX 16) at 9600 baud. It
+// emits the decoded payload followed by \r, \n or \r\n, on its own schedule,
+// whenever somebody happens to present a phone.
+//
+// WHY BYTE AT A TIME AND NOT readLine()
+// -------------------------------------
+// A readLine() on this port would have to block until the terminator arrives.
+// The same loop that would be blocked also services the relay auto-off timer —
+// the one safety mechanism that still works when the ESP, the WiFi and the
+// backend are all gone. Nothing is allowed to stall it, so the port hands over
+// whatever bytes have arrived and line assembly happens above it, where a
+// partial line is just state and the host tests can drive it.
+//
+// It also means the corrupted cases are testable: 9600 baud over jumper wires
+// running beside four switching relay coils produces truncated payloads, split
+// lines and dropped terminators in normal service, not just in theory.
+//
+// Rejected: Arduino Stream's `int read()` returning -1 for "nothing". Every
+// call site then juggles a signed int holding an unsigned byte, which is
+// exactly the conversion the strict gate rejects, and it makes 0xFF and -1 look
+// alike at a glance.
+//
+// No Arduino headers. Compiles for AVR, Xtensa and the host test runner.
+
+#ifndef CRUSADERS_HAL_SCANNER_H
+#define CRUSADERS_HAL_SCANNER_H
+
+#include <stdint.h>
+
+namespace hal {
+
+class IScannerPort {
+public:
+  virtual ~IScannerPort() = default;
+
+  /// Pop the next received byte into `out`. Returns false when nothing has
+  /// arrived; never blocks.
+  ///
+  /// The stream is binary-clean: 0x00 is a legal byte and is delivered like any
+  /// other. Nothing may treat NUL as a terminator — the scanner is configured
+  /// for \r/\n and a NUL in the payload means the payload is corrupt, which the
+  /// framing layer decides, not this port.
+  ///
+  /// Not const: taking a byte consumes it.
+  virtual bool read(uint8_t& out) = 0;
+};
+
+} // namespace hal
+
+#endif // CRUSADERS_HAL_SCANNER_H
