@@ -1,20 +1,30 @@
 ---
 name: crusaders-mainframe-state
-description: "Substantially built; private GitHub repo created and pushed 2026-08-21 (main tracks origin, 0/0); CI Docker/Portainer secrets still unset; Phase 8 largely BUILT though the plan says Specified"
+description: "Backend suite green for the first time (68/68, coverage 81.1%); credits rename DONE; schema now deployable; src/iot scaffolded with host-testable firmware; PR #1 open as draft on the court-hardware branch"
 type: state
-last_verified: 2026-08-21
+last_verified: 2026-08-22
 ---
 
 # Current state
 
-_Last verified: 2026-08-21 — `git status`, `git branch -vv`, `rev-list --left-right --count`, `gh repo view`, `gh secret list` and the first CI run inspected directly; git state re-confirmed later the same day by the division audit. Verify before trusting anything dated older than ~60 days._
+_Last verified: 2026-08-22 — every claim below was executed, not read. A .NET 10 SDK and PlatformIO were installed into this environment (neither was present), a real Postgres 16 was started locally, the full suite was run, the migration was applied to a fresh database, and each quality gate was deliberately broken to confirm it fails. Verify before trusting anything dated older than ~60 days._
 
-**Substantially built, versioned, and now pushed off-machine.** Private repo `frostaura/fa.crusaders.mainframe` was created 2026-08-21 via `gh` and `main` pushed with upstream tracking — `origin/main...main` was fully in sync, head `9264eb2` (the two most recent being the CI-runnability fixes and the state record written that day). The division audit later that day added a context-only commit on top, so the branch is **ahead-only by context commits alone** — the *product* is off-machine; the context commits are not. Remote was switched from SSH to `https://github.com/frostaura/fa.crusaders.mainframe.git` to match the sibling repos and the `gh` https git protocol. Working tree clean at push time — **it is not clean now, and must not be tidied.** 58 uncommitted paths as of 2026-08-21: 55 staged deletions of the vendored `.claude/skills`, `.claude/agents`, `gaia-instructions.md` and `.github/` mirror, plus modified `CLAUDE.md`, `docs/development-plan.md` and `memory/gotchas.md`. Staged and **un-ratified pending founder review** — see the gotchas topic. Tracked files verified secret-free before push: real `.env` is gitignored and never committed; only `.env.example` templates (placeholder values inspected) are in history.
+**The backend suite is green for the first time: 68/68, line coverage 81.1%.** It was 24/30 at the start of 2026-08-22. The working tree is clean and `main` is at `6ed1fea`; all work sits on `claude/squash-booking-system-design-dt7ja6`, pushed, with **PR #1 open as a draft** carrying a phase checklist. The delivery shape is one branch, one PR — agreed with the founder, so do not split it.
 
-Code: 63 backend `.cs` files under a single flat `Crusaders.Mainframe.Api` project, 39 frontend source files, 7 xUnit test classes (`AuthFlowTests`, `BookingTests`, `LedgerTests`, `TenantIsolationTests`, `UrlTemplateTests`, `Phase8Tests`, `HealthEndpointTests`) plus `TestHost`. `.github/workflows/ci.yml` (431 lines) carries the full chain — backend `dotnet test`, frontend `vitest`, multi-arch Docker Hub push, `deploy-portainer` — and **now runs**: as of 2026-08-21 (run 32465795076) the **Frontend job is green** (lint 0 errors, vitest, build) and the **Backend job is red with exactly 24/30 passing** — the 6 failures (5 `BookingTests` + `HealthEndpointTests`) are the known credits-rename/missing-migrations money bug, identical locally and in CI. Docker/Portainer jobs are gated behind those tests and additionally need the repo's 6 Actions secrets, none of which are set (see the watch list).
+### What changed on 2026-08-22
 
-Last real code activity before this was **2026-05-06 → 2026-05-18**; 2026-08-21 added build-infrastructure fixes only (`coverlet.runsettings`, frontend lint/test-env fixes, `TestHost` `BalanceBroadcaster` registration) — no product behavior changed.
+- **The credits rename is done** and the money bug is closed — see gotchas, which now records it as fixed rather than open. `AmountZar → AmountCredits`, `AmountChargedZar → AmountChargedCredits`, `SlicePriceZar → SlicePriceCredits`, plus every wire key. Genuinely-rand fields (`PendingTopup.AmountZar`, `ZarPaid`, `ConversionRate`, `top_ups_zar`, the `topup_*` and `credits_per_zar_*` settings) were deliberately left alone, so both units now carry honest names.
+- **The schema is deployable.** Confirmed empirically that a production boot against a fresh Postgres previously threw `PendingModelChangesWarning` and died. The migration is regenerated from the model (a real 26KB `InitialCreate` and a real 27KB snapshot, replacing hand-written SQL and a 52-line stub), the raw DDL block is gone from `Seeder.cs`, and all eight previously-orphaned columns plus `webauthn_credentials` are now migrated.
+- **`src/iot/` exists** — a PlatformIO project with `native`, `native_asan`, `native_cov`, `court_mega`, `court_bridge` and `simulator` environments, pinned platform versions, and `lib/timebase` (rollover-safe time, 10 tests at four clock bases). `src/firmware/lights-controller/` is deleted.
+- **Four CI defects fixed**, three of which were gates that could not fail: `backend-integration`'s `|| exit 0`; the coverage gate's `exit 0` on a missing report; and Security Scan, unreachable behind a permanently red backend. The fourth was `setup-python` lacking a dependency file.
+- **10 frontend advisories resolved** (9 undici, 2 vite; 3 low, 7 high) — surfaced only because the security gate became reachable. Lockfile-only, all semver-compatible.
+- **`NoShowWorker` no longer pays members for not showing up** — it refunded uncharged bookings, netting +70% of the booking value per no-show.
+- **`ExtractHostSubdomain` no longer reads `192.168.68.10` as the tenant slug `"192"`**, which would have broken every device call from the club LAN while staying invisible through the tunnel.
 
-### Phase 8 is largely BUILT — the plan says otherwise and the plan is wrong
+### Environment notes worth keeping
 
-`docs/development-plan.md` marks Phase 8 "Specified". Verified in code: 8.1 member classes (**done** — `MemberClass` in `AdminMemberEndpoints.cs`, `TopUpEndpoints.cs`, `MainframeDbContext.cs`, `Seeder.cs`), 8.3 charge-on-lights-on (**done**, `BiometricService.cs`), 8.4 per-day cap + peak hours (**done**, `BookingService.cs` / `TenantSettingsAccessor.cs`), 8.5 payer override (**done**, `Domain/Booking.cs`), 8.6 PIN + QR (**done**, `Endpoints/PinEndpoints.cs`, `Endpoints/QrEndpoints.cs`), 8.8 retention (**done**, `Workers/RetentionWorker.cs`). Only **8.2 credits rename is partial and broken** — see the money bug. An agent following the plan literally would rebuild finished work.
+Neither `dotnet` nor `pio` is present in a fresh remote session — install both before assuming a test run means anything. A local Postgres can be started from `/usr/lib/postgresql/16/bin` without Docker. The IoT toolchain is pinned in `src/iot/requirements.txt`, including `clang-format`, because formatter output varies by version and an unpinned one lets CI reject correctly-formatted code.
+
+### Still red or unbuilt
+
+The six Docker/Portainer Actions secrets remain unset, so the release chain still cannot run. Phases 3 onward of the court-hardware plan (device identity and auth, the HAL and protocol codec, court firmware, lights as a purchasable good, charge-at-booking, OTA, admin UI) are not started. Gates are parked by decision — the hardware is undecided.
