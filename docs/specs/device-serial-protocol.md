@@ -89,7 +89,9 @@ Accepted, and emitted when talking to a legacy peer:
 | `A`…`D` (downlink) | `!ON,<court>,<RELAY_HARD_CAP_S>` — a legacy on gets the hard cap, because the alternative is forever |
 | `a`…`d` (downlink) | `!OFF,<court>` |
 | `RESET`, `ENTER CODE` | `!RST` |
-| `INVALID CODE` / `LOW BALANCE` / `DENIED` | `!LCD` with the same two lines |
+| `INVALID CODE` | `!LCD,INVALID CODE,TRY AGAIN` |
+| `LOW BALANCE` | `!LCD,LOW BALANCE,TOP UP` |
+| `DENIED` | `!LCD,ACCESS DENIED,` |
 | `<line1>\|<line2>` | `!LCD,<line1>,<line2>` plus `!AUTH,30` |
 | `A`…`D`, `1`…`4` (uplink) | `!BTN,<key>` |
 | `CHECK:<code>` (uplink) | `!SCAN,<code>` |
@@ -98,3 +100,38 @@ The legacy uplink/downlink collision — `A` means *button A pressed* going up a
 *relay A on* coming down — is preserved rather than fixed. It is unambiguous in
 practice because each end only reads one direction, and changing it would break
 the compatibility this table exists to provide.
+
+## Points the first draft left open
+
+Each was resolved while implementing `lib/protocol` and is recorded here so the
+spec, not the code, remains the contract.
+
+**The three refusal messages carry fixed second lines, taken from the sketch.**
+They are not derivable from the command name — `DENIED` displays
+`ACCESS DENIED`, and two of the three tell the player what to do about it. An
+implementation that decoded these to the command text alone would show a member
+*less* than the hardware shows them today, in the one place the system speaks to
+someone standing at a locked court.
+
+**`AUTH` clamps to 0..5400; `ON` and `EXT` clamp to 1..5400.** Zero seconds is
+not a legal relay duration — it is an `OFF` wearing an `ON`'s clothes — but zero
+is exactly how `AUTH` disarms. The lower bound is therefore per-verb.
+
+**Clamping saturates rather than wraps.** `!ON,A,99999999999` becomes the hard
+cap. A duration that wrapped to a small number would be a short game; one that
+wrapped to a large number would be the failure this protocol exists to prevent.
+
+**The checksum is uppercase-only on receipt.** The spec said uppercase and the
+decoder now *enforces* it, rejecting `*4a` as a bad frame. Accepting both cases
+would widen the set of byte sequences that count as a valid frame, and `a`
+differs from `A` by a single bit — the exact corruption the checksum is there
+to catch.
+
+**`NOCOURT` is the decoder's to raise.** Court letters are validated during
+decode, so all four `!ERR` codes are producible by the codec rather than three
+of them being reserved for a layer above it.
+
+**Argument and frame lengths are bounded**: `kMaxArgLen` 24, `kMaxFrameLen` 192.
+An over-long LCD line is **truncated** — the panel is 16 columns, so the text
+was going to be cut anyway. An over-long `SCAN` code is **refused**, because a
+truncated member code does not fail, it identifies a *different member*.

@@ -1310,11 +1310,12 @@
             "verb": "LCD",
             "args": [
               "INVALID CODE",
-              ""
+              "TRY AGAIN"
             ]
           }
         }
-      ]
+      ],
+      "note": "Two lines taken from Carl's sketch, not inferred from the command name. DENIED displays 'ACCESS DENIED', and two of the three carry a second line telling the player what to do. Decoding to the command text alone would show a member less than the hardware shows them today."
     },
     {
       "id": "decl-low-balance",
@@ -1329,11 +1330,12 @@
             "verb": "LCD",
             "args": [
               "LOW BALANCE",
-              ""
+              "TOP UP"
             ]
           }
         }
-      ]
+      ],
+      "note": "Two lines taken from Carl's sketch, not inferred from the command name. DENIED displays 'ACCESS DENIED', and two of the three carry a second line telling the player what to do. Decoding to the command text alone would show a member less than the hardware shows them today."
     },
     {
       "id": "decl-denied",
@@ -1347,12 +1349,13 @@
           "frame": {
             "verb": "LCD",
             "args": [
-              "DENIED",
+              "ACCESS DENIED",
               ""
             ]
           }
         }
-      ]
+      ],
+      "note": "Two lines taken from Carl's sketch, not inferred from the command name. DENIED displays 'ACCESS DENIED', and two of the three carry a second line telling the player what to do. Decoding to the command text alone would show a member less than the hardware shows them today."
     },
     {
       "id": "decl-two-line-prompt-also-arms",

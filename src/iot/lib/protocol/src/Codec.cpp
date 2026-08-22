@@ -207,16 +207,37 @@ private:
 /// three are pure display instructions, so they become an LCD frame carrying
 /// the same text. The spec does not say what the second line holds; empty is
 /// the only reading that does not invent words for the panel.
+/// The three fixed refusal messages, with the exact two lines Carl's sketch puts
+/// on the panel for each.
+///
+/// Taken from the sketch rather than inferred from the command name, and they do
+/// not match it: `DENIED` displays "ACCESS DENIED", and two of the three carry a
+/// second line telling the player what to do about it. Decoding these to the
+/// command text alone would have shown a member less than the hardware shows
+/// them today — a silent downgrade in the one place the system talks to someone
+/// standing at a locked court.
+struct LegacyMessage {
+  const char* command;
+  const char* line1;
+  const char* line2;
+};
+
+constexpr LegacyMessage kLegacyMessages[] = {
+    {"INVALID CODE", "INVALID CODE", "TRY AGAIN"},
+    {"LOW BALANCE", "LOW BALANCE", "TOP UP"},
+    {"DENIED", "ACCESS DENIED", ""},
+};
+
 bool legacyFixedMessage(const char* line, size_t n, Frame& out) {
   if (textIs(line, n, "RESET") || textIs(line, n, "ENTER CODE")) {
     out = Frame::rst();
     return true;
   }
-  if (textIs(line, n, "INVALID CODE") || textIs(line, n, "LOW BALANCE") || textIs(line, n, "DENIED")) {
-    Arg text;
-    static_cast<void>(text.set(line, n));
-    out = Frame::lcd(text.c_str(), "");
-    return true;
+  for (const LegacyMessage& m : kLegacyMessages) {
+    if (textIs(line, n, m.command)) {
+      out = Frame::lcd(m.line1, m.line2);
+      return true;
+    }
   }
   return false;
 }
