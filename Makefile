@@ -5,6 +5,8 @@
 # IoT toolchain lives in a venv so `pio` and `lizard` are pinned per-checkout
 PIO ?= src/iot/.venv/bin/pio
 PY  ?= src/iot/.venv/bin/python
+# Pinned via src/iot/requirements.txt: formatter output varies by version.
+CLANG_FORMAT ?= src/iot/.venv/bin/clang-format
 
 # Install all dependencies
 install:
@@ -12,7 +14,7 @@ install:
 	cd src/frontend && npm install
 	python3 -m venv src/iot/.venv
 	$(PY) -m pip install --quiet --upgrade pip
-	$(PY) -m pip install --quiet platformio lizard gcovr
+	$(PY) -m pip install --quiet -r src/iot/requirements.txt
 
 # Lint
 lint: lint-backend lint-frontend lint-iot
@@ -25,7 +27,7 @@ lint-frontend:
 
 # Lint — IoT firmware. Formatting, the purity rule, and the strict compile gate.
 lint-iot:
-	clang-format --dry-run -Werror $$(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h')
+	$(CLANG_FORMAT) --dry-run -Werror $$(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h')
 	src/iot/tools/strict_compile.sh
 	@! grep -rn --include=*.h --include=*.cpp -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal)' \
 	    src/iot/lib --exclude-dir=arduino_hal --exclude-dir=posix_hal \
@@ -35,7 +37,7 @@ lint-iot:
 	  || (echo 'raw deadline comparison — use tb::reached / tb::Deadline' && exit 1)
 
 format-iot:
-	clang-format -i $$(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h')
+	$(CLANG_FORMAT) -i $$(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h')
 
 # Build
 build: lint build-iot

@@ -161,6 +161,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: src/iot/requirements.txt
 
       - name: Cache PlatformIO
         uses: actions/cache@v4
@@ -169,11 +170,14 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('src/iot/platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
-      - name: Install toolchain
-        run: pip install platformio lizard gcovr
+      - name: Install pinned toolchain
+        run: pip install -r src/iot/requirements.txt
 
       - name: Formatting (clang-format)
-        run: clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h')
+        run: |
+          # Must be the pinned pip build, not the OS one — versions format differently.
+          clang-format --version
+          clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h')
 
       - name: Strict compile — full pedantic set as errors
         run: src/iot/tools/strict_compile.sh

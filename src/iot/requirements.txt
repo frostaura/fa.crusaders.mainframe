@@ -1,0 +1,10 @@
+# IoT toolchain — pinned so a developer machine, a CI runner and a rebuild in six
+# months all produce identical results.
+#
+# clang-format is pinned here rather than taken from the OS. Its output changes
+# between major versions, so an unpinned formatter means CI can reject code that
+# was formatted correctly by whatever version the developer happened to have.
+platformio==6.1.19
+lizard==1.24.0
+gcovr==8.6
+clang-format==18.1.8
