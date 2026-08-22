@@ -99,3 +99,15 @@ src/firmware/**/.pio/
 # Scratch — every temporary artefact (logs, screenshots, captures, reports).
 # Emptied at the end of every session; see the tree root CLAUDE.md "Scratch" section.
 .tmp/
+
+# IoT firmware (src/iot) — build output, toolchain venv, coverage
+src/iot/.pio/
+src/iot/.venv/
+src/iot/coverage.xml
+src/iot/**/*.bin
+src/iot/**/*.elf
+src/iot/**/*.hex
+
+# Firmware secrets — a filled-in secrets.h was previously committable
+**/secrets.h
+**/ota_privkey.pem

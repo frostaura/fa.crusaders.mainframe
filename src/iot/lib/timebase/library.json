@@ -1,0 +1,9 @@
+{
+  "name": "timebase",
+  "version": "1.0.0",
+  "description": "Rollover-safe millis() primitives. No Arduino headers; compiles for AVR, Xtensa and host.",
+  "keywords": "time, rollover, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": { "flags": ["-I include"] }
+}

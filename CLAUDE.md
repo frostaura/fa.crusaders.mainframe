@@ -11,7 +11,13 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
 - **`src/backend/Crusaders.Mainframe.Api`** — .NET 10 Minimal APIs, EF Core, PostgreSQL 16. Folder-layered (`Endpoints/ Domain/ Services/ Persistence/ Security/ Webhooks/ Biometric/ Multitenancy/ Payments/ Workers/`) inside a **single flat project**. Auth is JWT HS256 + WebAuthn passkeys (Fido2).
 - **`src/backend/Crusaders.Mainframe.Tests`** — xUnit, in-process `TestHost`. Cross-tenant injection tests are part of the suite and are non-negotiable.
 - **`src/frontend`** — React 19 + TypeScript + Vite 7 + Tailwind, mobile-first PWA. **Figtree** font, Monday.com-style soft palette. State is React context (`lib/auth.tsx`, `lib/profile.tsx`, `lib/balance.tsx`).
-- **`src/firmware/lights-controller`** — ESP32 sketch driving the relay board. Off the SaaS critical path.
+- **`src/iot`** — PlatformIO project for the court-control hardware: a WeMos Mega 2560 + onboard ESP8266.
+  The **Mega is a thin I/O layer** (buttons, scanner, relays, LCD, plus an *independent* auto-off timer) and
+  **all volatile logic lives on the ESP8266**, because the ATmega cannot be flashed over WiFi — its ESP sits
+  on Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET. Everything under `lib/` except
+  `arduino_hal/` and `posix_hal/` is free of Arduino headers so it compiles for the host test runner.
+- **`src/contracts/device-protocol`** — the wire-protocol fixture corpus, consumed by *both* the C++ and the
+  .NET tests. Neutral ground: neither side may drift from the other without a test going red.
 
 ### Known deviations from the FrostAura mandate
 
