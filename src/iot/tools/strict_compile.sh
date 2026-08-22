@@ -32,14 +32,22 @@ while IFS= read -r d; do
 done < <(find lib -mindepth 2 -maxdepth 2 -type d -name include \
          -not -path 'lib/arduino_hal/*' -not -path 'lib/posix_hal/*' | sort)
 
+# hal_fakes/ IS in scope. It was excluded when this gate was written and should not
+# have been: the fakes are pure host-compilable headers, and they are test
+# infrastructure — a bug in a fake is silent and poisons every test that trusts it.
+# The one place strictness matters most is the code nothing else checks.
 mapfile -t SOURCES < <(find lib -type f \( -name '*.cpp' -o -name '*.h' \) \
   -not -path 'lib/arduino_hal/*' \
-  -not -path 'lib/posix_hal/*' \
-  -not -path 'lib/hal_fakes/*' | sort)
+  -not -path 'lib/posix_hal/*' | sort)
 
 if [ ${#SOURCES[@]} -eq 0 ]; then
-  echo "strict_compile: no pure sources found under lib/ — nothing to check"
-  exit 0
+  # Not a pass. A gate that reports success when it found nothing to check is the
+  # third silent-pass escape hatch this repo would have had, and the other two had
+  # both rotted into gates that could not fail.
+  echo "strict_compile: FAILED — no sources found under lib/." >&2
+  echo "  Either the tree moved or the find filters are wrong. Either way this gate" >&2
+  echo "  checked nothing, and reporting that as success is how it stops being a gate." >&2
+  exit 1
 fi
 
 echo "strict_compile: ${#SOURCES[@]} file(s), ${#INCLUDES[@]} include dir(s)"
