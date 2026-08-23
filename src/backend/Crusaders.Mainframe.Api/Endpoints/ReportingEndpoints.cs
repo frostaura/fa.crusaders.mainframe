@@ -35,9 +35,30 @@ public static class ReportingEndpoints
         {
             var (f, t) = ResolveRange(from, to);
             var rows = await db.LedgerEntries.Where(l => l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
-            var topUps = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type)).Sum(r => r.AmountCredits);
-            var reversals = rows.Where(r => LedgerEntryTypes.Reversal.Contains(r.Type)).Sum(r => r.AmountCredits);
-            return Results.Ok(new { from = f, to = t, gross_topups_zar = topUps, reversals_zar = reversals, net_zar = topUps + reversals });
+            var funding = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type)).ToList();
+            var reversed = rows.Where(r => LedgerEntryTypes.Reversal.Contains(r.Type)).ToList();
+
+            // Rand comes from ZarPaid; credits come from AmountCredits. They are not
+            // interchangeable and this endpoint used to treat them as though they were —
+            // it summed AmountCredits and labelled the result gross_topups_zar, which the
+            // admin revenue page then printed with a rand sign. A Regular member's R1000
+            // top-up posts 1600 credits and a League member's posts 2400, so the club was
+            // shown R1600–R2400 of income for R1000 actually received, and no amount of
+            // arithmetic downstream could unmix the two classes once summed.
+            //
+            // Both figures are now reported side by side, each under a name that says what
+            // unit it is in — which is the same rule AdminMemberEndpoints already followed.
+            return Results.Ok(new
+            {
+                from = f,
+                to = t,
+                gross_topups_zar = funding.Sum(SignedZar),
+                reversals_zar = reversed.Sum(SignedZar),
+                net_zar = funding.Sum(SignedZar) + reversed.Sum(SignedZar),
+                gross_topups_credits = funding.Sum(r => r.AmountCredits),
+                reversals_credits = reversed.Sum(r => r.AmountCredits),
+                net_credits = funding.Sum(r => r.AmountCredits) + reversed.Sum(r => r.AmountCredits),
+            });
         });
 
         admin.MapGet("/utilisation", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, CancellationToken ct) =>
@@ -164,6 +185,24 @@ public static class ReportingEndpoints
         return app;
     }
 
+    /// <summary>
+    /// The rand a ledger row moved, signed the way its credits are.
+    ///
+    /// <para>
+    /// <c>ZarPaid</c> records what the member actually paid and is populated on funding and
+    /// reversal rows. Its stored sign cannot be relied on — <c>PaymentReversal</c> has no
+    /// producer yet, so no convention has been set by real data — while the credit amount's
+    /// sign is load-bearing everywhere else in this file. Taking the direction from the
+    /// credits keeps a reversal subtracting from revenue whichever way the rand figure is
+    /// eventually written.
+    /// </para>
+    /// </summary>
+    private static decimal SignedZar(LedgerEntry e)
+    {
+        var rand = Math.Abs(e.ZarPaid ?? 0m);
+        return e.AmountCredits < 0 ? -rand : rand;
+    }
+
     private static IEnumerable<DateOnly> EnumerateDays(DateTimeOffset from, DateTimeOffset to)
     {
         var d = DateOnly.FromDateTime(from.UtcDateTime);
@@ -190,7 +229,7 @@ public static class ReportingEndpoints
     private static string LedgerCsv(IEnumerable<LedgerEntry> entries)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("created_at,type,amount_zar,reason,external_reference,related_booking_id");
+        sb.AppendLine("created_at,type,amount_credits,reason,external_reference,related_booking_id");
         foreach (var e in entries)
         {
             sb.Append(e.CreatedAt.ToString("o", CultureInfo.InvariantCulture)).Append(',');

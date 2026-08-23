@@ -41,6 +41,23 @@ public sealed class BookingService
 
     public async Task<BookingResult> CreateAsync(Guid courtId, Guid userId, Guid actorId, DateTimeOffset startsAt, int sliceCount, CancellationToken ct)
     {
+        // Bounds before arithmetic, because the arithmetic is signed.
+        //
+        // sliceCount arrives straight off the request body and was never checked. A negative
+        // count runs the whole method backwards: endsAt lands BEFORE startsAt, the overlap
+        // predicate cannot match an inverted range, the per-day cap sees negative minutes
+        // and passes, totalCost comes out negative, and the balance guard `balance <
+        // totalCost` reads 0 < -200 and passes too. The debit is posted as -(-200), which
+        // CREDITS the member 200 for a booking they did not pay for.
+        //
+        // The only thing standing in the way today is Postgres refusing tstzrange(lower >
+        // upper) when it maintains the exclusion-constraint index — SQLSTATE 22000, which is
+        // not the 23P01 the overlap catch filters on, so it surfaces as a 500. That is
+        // protection by accident, and it is invisible to the test suite: the in-memory
+        // provider has neither the constraint nor the numeric column.
+        if (sliceCount is < 1 or > MaxSlicesPerBooking)
+            return new BookingResult.InvalidDuration(sliceCount, MaxSlicesPerBooking);
+
         var settings = await _settings.GetAsync(ct);
         var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == courtId && c.IsActive, ct);
         if (court is null) return new BookingResult.NotFound();
@@ -239,7 +256,12 @@ public sealed class BookingService
         {
             await _ledger.PostAsync(new LedgerPosting(
                 UserId: userId,
-                Type: LedgerEntryType.BookingCharge,
+                // A walk-up is light time bought at the court, not a reservation, and the
+                // enum member exists to tell the two apart in reporting. Nothing had ever
+                // posted it: every walk-up landed as a BookingCharge, so a
+                // Where(Type == LightsPurchase) report was guaranteed to be empty. Both are
+                // in LedgerEntryTypes.Spend, so no bucket total moves.
+                Type: spec.IsWalkUp ? LedgerEntryType.LightsPurchase : LedgerEntryType.BookingCharge,
                 AmountCredits: -spec.TotalCost,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
@@ -592,6 +614,19 @@ public sealed class BookingService
     /// </summary>
     private const string OverlapConstraintName = "ck_bookings_no_overlapping_slot";
 
+    /// <summary>
+    /// The most slices one booking may span — a day's worth at the default 15-minute slice.
+    ///
+    /// <para>
+    /// An upper bound as well as a lower one, because an enormous count is the same defect
+    /// as a negative one wearing a different hat: it walks straight past the per-day cap for
+    /// an admin actor and prices a court in the millions. The real limit on a member is
+    /// <c>member_per_day_max_minutes</c>; this is the outer wall that keeps the arithmetic
+    /// sane for everyone, admins included.
+    /// </para>
+    /// </summary>
+    private const int MaxSlicesPerBooking = 96;
+
     private static bool IsOverlapViolation(DbUpdateException ex) =>
         ex.InnerException is Npgsql.PostgresException pg
         && pg.SqlState == "23P01"
@@ -694,6 +729,12 @@ public abstract record BookingResult
     /// playing: the court box has to say "court free at 18:00", not "court busy".
     /// </summary>
     public sealed record NoTimeAvailable(int RequestedMinutes, int AvailableMinutes) : BookingResult;
+
+    /// <summary>
+    /// The requested slice count is not a length a booking can have. Zero, negative, or past
+    /// the outer wall.
+    /// </summary>
+    public sealed record InvalidDuration(int RequestedSlices, int MaxSlices) : BookingResult;
 }
 
 public abstract record CancellationResult

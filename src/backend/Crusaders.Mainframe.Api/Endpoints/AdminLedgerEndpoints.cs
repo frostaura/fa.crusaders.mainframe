@@ -94,7 +94,7 @@ public static class LedgerRowMapper
             From: fromLabel,
             To: toLabel,
             AmountCredits: Math.Abs(e.AmountCredits),
-            SignedAmountZar: e.AmountCredits,
+            SignedAmountCredits: e.AmountCredits,
             Type: e.Type.ToString(),
             Comment: comment,
             SubjectUserId: e.UserId,
@@ -111,7 +111,20 @@ public sealed record LedgerRowDto(
     string From,
     string To,
     decimal AmountCredits,
-    decimal SignedAmountZar,
+
+    /// <summary>
+    /// The same amount, keeping its sign, so a reader can tell money in from money out
+    /// without re-deriving it from the type.
+    ///
+    /// <para>
+    /// This was <c>SignedAmountZar</c> while holding credits — the unit lie
+    /// <c>CLAUDE.md</c> says must never be added a second time. It was also simply broken:
+    /// the frontend has always read <c>signedAmountCredits</c>, so the field arrived
+    /// undefined, every row in the admin ledger and the member wallet rendered with a minus
+    /// sign, and the credits/debits totals on the admin ledger page were both zero.
+    /// </para>
+    /// </summary>
+    decimal SignedAmountCredits,
     string Type,
     string Comment,
     Guid SubjectUserId,

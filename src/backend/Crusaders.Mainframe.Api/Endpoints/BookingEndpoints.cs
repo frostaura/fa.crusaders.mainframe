@@ -20,6 +20,7 @@ public static class BookingEndpoints
                 BookingResult.PastTime => Results.BadRequest(new { error = "past_time" }),
                 BookingResult.TooFarAhead => Results.BadRequest(new { error = "too_far_ahead" }),
                 BookingResult.SlotTaken => Results.Conflict(new { error = "slot_taken" }),
+                BookingResult.InvalidDuration id => Results.BadRequest(new { error = "invalid_duration", requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
                 BookingResult.InsufficientBalance ib => Results.Json(new { error = "insufficient_balance", current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
                 _ => Results.Problem("Unexpected"),
             };
@@ -52,6 +53,7 @@ public static class BookingEndpoints
                 BookingResult.PastTime => Results.BadRequest(new { error = "past_time" }),
                 BookingResult.TooFarAhead => Results.BadRequest(new { error = "too_far_ahead" }),
                 BookingResult.SlotTaken => Results.Conflict(new { error = "slot_taken" }),
+                BookingResult.InvalidDuration id => Results.BadRequest(new { error = "invalid_duration", requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
                 BookingResult.InsufficientBalance ib => Results.Json(new { error = "insufficient_balance", current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
                 _ => Results.Problem("Unexpected"),
             };

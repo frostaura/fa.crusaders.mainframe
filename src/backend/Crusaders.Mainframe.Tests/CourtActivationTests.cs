@@ -449,4 +449,67 @@ public class CourtActivationTests
         Assert.Null(fresh.CheckedInAt);
         Assert.Null(fresh.LightsOnCuedAt);
     }
+
+    /// <summary>
+    /// Two of the member's bookings are in the window; the one they are standing on wins.
+    ///
+    /// <para>
+    /// The activation window runs from <c>now − grace</c> to <c>now + 2h</c>, which is wide
+    /// enough to hold two back-to-back slices — the ordinary shape under a per-day cap
+    /// measured in minutes. Neither selector ordered, so the row the store happened to
+    /// return first was checked in.
+    /// </para>
+    ///
+    /// <para>
+    /// Getting it wrong is not a cosmetic mix-up. The later booking is checked in early and
+    /// the earlier one never is, so the no-show sweep refunds it and charges a penalty for a
+    /// court the member is playing on — and a rescan cannot repair it, because the row is no
+    /// longer <c>Booked</c> and so no longer a candidate.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_earliest_booking_in_the_window_is_the_one_activated()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var court = f.Host.Courts[0];
+        var now = DateTimeOffset.UtcNow;
+        var earlier = now.AddMinutes(2);
+        var later = earlier.AddMinutes(15);
+
+        // Inserted latest-first, so a selector that takes whatever comes back first has every
+        // chance to take the wrong one.
+        foreach (var startsAt in new[] { later, earlier })
+        {
+            f.Db.Bookings.Add(new Booking
+            {
+                TenantId = f.Host.Tenant.Id,
+                CourtId = court.Id,
+                UserId = f.Host.PlayerUser.Id,
+                BookedByUserId = f.Host.PlayerUser.Id,
+                PaidByUserId = f.Host.PlayerUser.Id,
+                ActorUserId = f.Host.PlayerUser.Id,
+                StartsAt = startsAt,
+                EndsAt = startsAt.AddMinutes(15),
+                SliceMinutes = 15,
+                SliceCount = 1,
+                AmountChargedCredits = 8m,
+                Status = BookingStatus.Booked,
+                ChargedAt = now,
+            });
+        }
+        await f.Db.SaveChangesAsync();
+
+        var found = await f.Activation.FindForUserAsync(court.Id, f.Host.PlayerUser.Id, now, default);
+
+        Assert.NotNull(found);
+        Assert.Equal(earlier, found!.StartsAt);
+
+        // And the candidate list the biometric and PIN paths read is ordered the same way,
+        // since they select from it themselves.
+        var candidates = await f.Activation.CandidatesAsync(court.Id, now, default);
+        Assert.Equal(earlier, candidates[0].StartsAt);
+    }
 }

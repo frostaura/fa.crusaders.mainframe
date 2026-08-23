@@ -330,7 +330,24 @@ export type WebAuthnCredentialRow = {
 export type WalletReport = { from: string; to: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; penalty_count: number; count: number };
 export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; bookings: number; no_shows: number };
 export type DailyMePoint = { date: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; bookings: number; balance_credits: number };
-export type RevenueReport = { from: string; to: string; gross_topups_zar: number; reversals_zar: number; net_zar: number };
+/**
+ * Club revenue over a window, in BOTH units, because they are not interchangeable.
+ *
+ * The `_zar` fields are what members actually paid, from `LedgerEntry.ZarPaid`. The
+ * `_credits` fields are what those payments became at each member's class rate. The API
+ * used to send credits under the `_zar` names and this page printed them with a rand sign,
+ * so R1000 of income was reported as R1600 (Regular) or R2400 (League).
+ */
+export type RevenueReport = {
+  from: string;
+  to: string;
+  gross_topups_zar: number;
+  reversals_zar: number;
+  net_zar: number;
+  gross_topups_credits: number;
+  reversals_credits: number;
+  net_credits: number;
+};
 
 export async function uploadPhoto(file: File): Promise<{ url: string }> {
   const fd = new FormData();

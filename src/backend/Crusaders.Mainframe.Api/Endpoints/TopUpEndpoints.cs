@@ -166,7 +166,17 @@ public static partial class TopUpEndpoints
                 var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.UserId == pending.UserId, ct);
                 var memberClass = membership?.MemberClass ?? Crusaders.Mainframe.Api.Domain.MemberClass.Regular;
                 var rate = settings.ConversionRateFor(memberClass);
-                var credits = pending.AmountZar * rate;
+                // Rounded to the column, not by the column.
+                //
+                // ledger_entries.AmountCredits is numeric(10,2), so an unrounded product is
+                // rounded on the way in regardless — but the HTTP response, the
+                // credit.topped_up event and the ledger Reason string all quote the value
+                // this variable holds, so they quoted a figure the database had not stored.
+                // credits_per_zar_* accepts four decimals and admins bypass the block rule,
+                // which is all it takes for the two to diverge. AwayFromZero matches
+                // CreateWalkUpAsync and both penalty computations: the club does not round
+                // in its own favour by accident.
+                var credits = Math.Round(pending.AmountZar * rate, 2, MidpointRounding.AwayFromZero);
 
                 await ledger.PostAsync(new LedgerPosting(
                     UserId: pending.UserId,

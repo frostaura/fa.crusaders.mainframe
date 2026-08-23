@@ -69,6 +69,23 @@ public sealed class CourtActivationService
     }
 
     /// <summary>How far ahead of a slot someone may identify and have it count.</summary>
+    ///
+    /// <remarks>
+    /// Two hours is wide enough to hold <b>two</b> of a member's bookings at once, and
+    /// back-to-back slices are the ordinary shape under a per-day cap measured in minutes.
+    /// Both selectors below therefore order by <c>StartsAt</c> and take the earliest, which
+    /// is the one the player is standing on: a live booking always starts before a future
+    /// one.
+    ///
+    /// <para>
+    /// Neither used to order at all, and the row the database happened to return first won.
+    /// Pick the 17:15 slice when a member scans at 16:58 holding 17:00 and 17:15, and the
+    /// lights come on seventeen minutes early on the wrong row — while the 17:00 booking is
+    /// never checked in, is swept as a no-show at 17:05, and costs the member a penalty for
+    /// a court they are playing on. A rescan cannot repair it either: the status is no
+    /// longer <c>Booked</c>, so the row is not a candidate any more.
+    /// </para>
+    /// </remarks>
     private static readonly TimeSpan ForwardWindow = TimeSpan.FromHours(2);
 
     /// <summary>
@@ -99,6 +116,7 @@ public sealed class CourtActivationService
             .Where(b => b.CourtId == courtId
                         && b.Status == BookingStatus.Booked
                         && b.StartsAt < end && b.EndsAt > start)
+            .OrderBy(b => b.StartsAt)
             .ToListAsync(ct);
     }
 
@@ -108,10 +126,12 @@ public sealed class CourtActivationService
         var (start, end) = await WindowAsync(now, ct);
 
         return await _db.Bookings
-            .FirstOrDefaultAsync(b => b.CourtId == courtId
-                                      && b.UserId == userId
-                                      && b.Status == BookingStatus.Booked
-                                      && b.StartsAt < end && b.EndsAt > start, ct);
+            .Where(b => b.CourtId == courtId
+                        && b.UserId == userId
+                        && b.Status == BookingStatus.Booked
+                        && b.StartsAt < end && b.EndsAt > start)
+            .OrderBy(b => b.StartsAt)
+            .FirstOrDefaultAsync(ct);
     }
 
     /// <summary>

@@ -34,7 +34,7 @@ public static class AdminConfigEndpoints
             return Results.Ok(new
             {
                 slice_minutes = GetInt(doc, "slice_minutes", defaults.SliceMinutes),
-                slice_price_credits = GetDecimal(doc, "slice_price_credits", defaults.DefaultSlicePriceCredits),
+                slice_price_credits = GetDecimal(doc, "slice_price_credits", defaults.DefaultSlicePriceCredits),   // the default for a NEW court; existing courts carry their own
                 advance_booking_days = GetInt(doc, "advance_booking_days", defaults.AdvanceBookingDays),
                 day_start_minute = GetInt(doc, "day_start_minute", defaults.DayStartMinute),
                 day_end_minute = GetInt(doc, "day_end_minute", defaults.DayEndMinute),
@@ -125,10 +125,23 @@ public static class AdminConfigEndpoints
             }));
         });
 
-        courts.MapPost("/", async (CreateCourtRequest req, MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
+        courts.MapPost("/", async (
+            CreateCourtRequest req, MainframeDbContext db, ITenantContext tenant,
+            TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.Name)) return Results.BadRequest(new { error = "name_required" });
             if (req.SlicePriceCredits < 0) return Results.BadRequest(new { error = "price_negative" });
+
+            // The tenant's slice_price_credits is the default for a new court, and until now
+            // it was the default for nothing at all: every charge in the system reads
+            // court.SlicePriceCredits, and the setting was only ever read back to render the
+            // settings screen and written straight out again. The seed ships the setting at
+            // 8.00 and the courts at 50.00, so an admin looking at that number was looking at
+            // a price 6.25x away from what members actually pay, and editing it changed
+            // nobody's bill. Giving it one real job is what makes it honest.
+            var settings = await settingsAccessor.GetAsync(ct);
+            var priceCredits = req.SlicePriceCredits ?? settings.DefaultSlicePriceCredits;
+
             var maxNo = await db.Courts.IgnoreQueryFilters().Where(c => c.TenantId == tenant.TenantId).MaxAsync(c => (int?)c.CourtNumber, ct) ?? 0;
             var court = new Court
             {
@@ -136,7 +149,7 @@ public static class AdminConfigEndpoints
                 CourtNumber = maxNo + 1,
                 Name = req.Name.Trim(),
                 CourtType = Enum.TryParse<CourtType>(req.CourtType, true, out var t) ? t : CourtType.Squash,
-                SlicePriceCredits = req.SlicePriceCredits,
+                SlicePriceCredits = priceCredits,
                 IsActive = true,
             };
             db.Courts.Add(court);
@@ -272,5 +285,9 @@ public sealed record UpdateSettingsRequest(
     int? RetentionYears = null,
     int? NoShowLookbackDays = null);
 
-public sealed record CreateCourtRequest(string Name, string CourtType, decimal SlicePriceCredits);
+/// <summary>
+/// A new court. <c>SlicePriceCredits</c> is optional: left out, the court is priced at the
+/// tenant's <c>slice_price_credits</c> default.
+/// </summary>
+public sealed record CreateCourtRequest(string Name, string CourtType, decimal? SlicePriceCredits);
 public sealed record UpdateCourtRequest(string? Name, decimal? SlicePriceCredits, bool? IsActive);

@@ -232,8 +232,10 @@ public class WalkUpBookingTests
         Assert.Equal(BookingStatus.Booked, stored.Status);
         Assert.NotNull(stored.ChargedAt);
 
+        // LightsPurchase, not BookingCharge — see
+        // A_walk_up_is_a_lights_purchase_and_a_booked_slot_is_a_booking_charge.
         var charge = Assert.Single(await f.Db.LedgerEntries
-            .Where(l => l.RelatedBookingId == ok.Booking.Id && l.Type == LedgerEntryType.BookingCharge)
+            .Where(l => l.RelatedBookingId == ok.Booking.Id && l.Type == LedgerEntryType.LightsPurchase)
             .ToListAsync());
         Assert.Equal(-16m, charge.AmountCredits);
 
@@ -267,7 +269,7 @@ public class WalkUpBookingTests
 
         // Charged once, at creation — activation settles who pays, it does not re-charge.
         Assert.Single(await f.Db.LedgerEntries
-            .Where(l => l.RelatedBookingId == ok.Booking.Id && l.Type == LedgerEntryType.BookingCharge)
+            .Where(l => l.RelatedBookingId == ok.Booking.Id && l.Type == LedgerEntryType.LightsPurchase)
             .ToListAsync());
         Assert.Equal(200m - 16m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
     }
@@ -289,5 +291,108 @@ public class WalkUpBookingTests
 
         Assert.Empty(await f.Db.Bookings.ToListAsync());
         Assert.Equal(5m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+    }
+
+    /// <summary>
+    /// The two ways a member pays for court time, told apart in the ledger.
+    ///
+    /// <para>
+    /// <see cref="LedgerEntryType.LightsPurchase"/> was declared for exactly this — "light
+    /// time bought directly at the court, rather than as part of a booked slot… the club
+    /// wants to see the two apart in reporting" — and then nothing ever posted it. Every
+    /// walk-up landed as a <see cref="LedgerEntryType.BookingCharge"/>, so any report
+    /// filtering on it was guaranteed to be empty and the split the club asked for did not
+    /// exist in the data at all.
+    /// </para>
+    ///
+    /// <para>
+    /// Both types are in <c>LedgerEntryTypes.Spend</c>, so no bucket total moves and no
+    /// balance changes — which is precisely why nothing failed when it was wrong.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_walk_up_is_a_lights_purchase_and_a_booked_slot_is_a_booking_charge()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var walkUp = Assert.IsType<BookingResult.Ok>(await WalkUpAsync(f, 30));
+
+        var booked = Assert.IsType<BookingResult.Ok>(await f.Bookings.CreateAsync(
+            f.Host.Courts[1].Id, f.Host.PlayerUser.Id, f.Host.PlayerUser.Id,
+            TestHost.BookableSlot(3), sliceCount: 1, default));
+
+        var walkUpEntry = Assert.Single(await f.Db.LedgerEntries
+            .Where(l => l.RelatedBookingId == walkUp.Booking.Id).ToListAsync());
+        var bookedEntry = Assert.Single(await f.Db.LedgerEntries
+            .Where(l => l.RelatedBookingId == booked.Booking.Id).ToListAsync());
+
+        Assert.Equal(LedgerEntryType.LightsPurchase, walkUpEntry.Type);
+        Assert.Equal(LedgerEntryType.BookingCharge, bookedEntry.Type);
+
+        // Both still count as money spent, so the member's balance is unaffected by which
+        // name the row carries.
+        Assert.True(walkUpEntry.AmountCredits < 0 && bookedEntry.AmountCredits < 0);
+    }
+
+    /// <summary>
+    /// A negative slice count credits the member.
+    ///
+    /// <para>
+    /// <c>sliceCount</c> came straight off the request body unchecked, and the whole method
+    /// runs backwards on a negative one: <c>endsAt</c> lands before <c>startsAt</c>, the
+    /// overlap predicate cannot match an inverted range, the per-day cap sees negative
+    /// minutes and passes, <c>totalCost</c> comes out negative, and the balance guard
+    /// <c>balance &lt; totalCost</c> evaluates <c>0 &lt; -200</c> and passes as well. The
+    /// posting is then <c>-(-200)</c>, which pays the member for booking a court.
+    /// </para>
+    ///
+    /// <para>
+    /// What stopped it in production was Postgres refusing an inverted <c>tstzrange</c> while
+    /// maintaining the exclusion index — SQLSTATE 22000, not the 23P01 the overlap catch
+    /// filters on, so a 500 rather than a refusal. This test runs on the in-memory provider,
+    /// which has neither the constraint nor the numeric column, so before the guard it
+    /// genuinely credited the account.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(-4)]
+    [InlineData(-1)]
+    [InlineData(0)]
+    public async Task A_booking_of_no_positive_length_is_refused(int sliceCount)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var before = await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default);
+
+        var refused = Assert.IsType<BookingResult.InvalidDuration>(await f.Bookings.CreateAsync(
+            f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.PlayerUser.Id,
+            TestHost.BookableSlot(3), sliceCount, default));
+
+        Assert.Equal(sliceCount, refused.RequestedSlices);
+        Assert.Empty(await f.Db.Bookings.ToListAsync());
+        Assert.Equal(before, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+    }
+
+    /// <summary>
+    /// The other end of the same hole. An admin actor bypasses the per-day cap, so without an
+    /// upper bound a single booking can span years and be priced accordingly.
+    /// </summary>
+    [Fact]
+    public async Task A_booking_longer_than_a_day_is_refused()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var refused = Assert.IsType<BookingResult.InvalidDuration>(await f.Bookings.CreateAsync(
+            f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.AdminUser.Id,
+            TestHost.BookableSlot(3), sliceCount: 97, default));
+
+        Assert.Equal(96, refused.MaxSlices);
+        Assert.Empty(await f.Db.Bookings.ToListAsync());
     }
 }
