@@ -1,0 +1,9 @@
+{
+  "description": "PayFast signature corpus. Read by the .NET PayFastSignature tests.",
+  "authority": "PayFast developer documentation",
+  "case_count": {
+    "encode": 15,
+    "payment_request": 7,
+    "itn": 4
+  }
+}
