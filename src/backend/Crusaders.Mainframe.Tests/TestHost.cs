@@ -95,6 +95,7 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<LedgerService>();
         services.AddScoped<ScheduleService>();
         services.AddScoped<BookingService>();
+        services.AddScoped<CourtActivationService>();
         services.AddScoped<BiometricService>();
         services.AddScoped<AuthService>();
         services.AddScoped<MemberApprovalService>();

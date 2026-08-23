@@ -20,12 +20,11 @@ public sealed class BiometricService
     private readonly ITenantContext _tenant;
     private readonly IBiometricDevice _device;
     private readonly IEventBus _bus;
-    private readonly BookingService _bookingService;
-    private readonly IConfiguration _config;
+    private readonly CourtActivationService _activation;
     private readonly ILogger<BiometricService> _logger;
 
-    public BiometricService(MainframeDbContext db, ITenantContext tenant, IBiometricDevice device, IEventBus bus, BookingService bookingService, IConfiguration config, ILogger<BiometricService> logger)
-    { _db = db; _tenant = tenant; _device = device; _bus = bus; _bookingService = bookingService; _config = config; _logger = logger; }
+    public BiometricService(MainframeDbContext db, ITenantContext tenant, IBiometricDevice device, IEventBus bus, CourtActivationService activation, ILogger<BiometricService> logger)
+    { _db = db; _tenant = tenant; _device = device; _bus = bus; _activation = activation; _logger = logger; }
 
     public async Task<BiometricEnrollmentResult> EnrollAsync(Guid memberUserId, Guid adminUserId, string? fingerLabel, string consentReceiptHash, CancellationToken ct)
     {
@@ -70,9 +69,11 @@ public sealed class BiometricService
             return new BiometricMatchResult(false, null, null, 0, 0, 0);
 
         var now = DateTimeOffset.UtcNow;
-        var graceMin = _config.GetValue("Biometric:GraceMinutes", 5);
-        var windowStart = now.AddMinutes(-graceMin);
-        var windowEnd = now.AddHours(2);
+
+        // The window comes from CourtActivationService so biometric, PIN and QR agree with
+        // each other and with NoShowWorker. It used to read Biometric:GraceMinutes — a key
+        // absent from appsettings.json, so permanently its 5-minute default.
+        var (windowStart, windowEnd) = await _activation.WindowAsync(now, ct);
 
         // Candidate set: users with a Booked booking on this court touching the current grace+forward window.
         var candidates = await (
@@ -106,47 +107,20 @@ public sealed class BiometricService
             Outcome = match.Matched ? "match" : "no_match",
         });
 
-        if (booking is not null && booking.CheckedInAt is null)
+        await _db.SaveChangesAsync(ct);
+
+        if (booking is not null)
         {
-            booking.CheckedInAt = now;
-            if (booking.LightsOnCuedAt is null) booking.LightsOnCuedAt = now;
-
-            // Phase 8 — post the ledger debit at this moment (charge-on-lights-on per blueprint A.9).
-            // Supports payer override per blueprint B.2.
-            var chargeResult = await _bookingService.ChargeOnActivationAsync(
-                bookingId: booking.Id,
+            // Charge, check in and cue the lights through the shared path. Insufficient
+            // balance refuses here rather than logging and lighting the court anyway.
+            await _activation.ActivateAsync(
+                court, booking,
+                identifiedUserId: match.MatchedUserId ?? booking.UserId ?? Guid.Empty,
                 payerOverrideUserId: payerOverrideUserId,
-                actorUserId: match.MatchedUserId ?? booking.UserId ?? Guid.Empty,
+                method: "biometric",
                 ct);
-            switch (chargeResult)
-            {
-                case ChargeResult.InsufficientBalance ib:
-                    _logger.LogWarning("booking {BookingId} matched but payer {Payer} has insufficient balance ({Current} < {Required}) — lights will fire but ledger remained unposted",
-                        booking.Id, ib.PayerUserId, ib.Current, ib.Required);
-                    break;
-                case ChargeResult.Ok ok:
-                    _logger.LogInformation("booking {BookingId} charged {Amount} credits to {Payer}", booking.Id, ok.AmountCredits, ok.ChargedUserId);
-                    break;
-            }
-
-            await _bus.EmitAsync(new DomainEvent(
-                Id: $"evt_{Guid.NewGuid():N}",
-                Type: "booking.lights_on",
-                TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
-                OccurredAt: now, ActorUserId: booking.UserId, ActorIsAdmin: false, SubjectUserId: booking.UserId,
-                Data: new()
-                {
-                    ["booking_id"] = booking.Id,
-                    ["court_id"] = court.Id,
-                    ["court_number"] = court.CourtNumber,
-                    ["court_name"] = court.Name,
-                    ["user_id"] = booking.UserId,
-                    ["paid_by_user_id"] = booking.PaidByUserId,
-                    ["duration_seconds"] = Math.Max(0, (int)(booking.EndsAt - now).TotalSeconds),
-                }), ct);
         }
 
-        await _db.SaveChangesAsync(ct);
         return match;
     }
 }

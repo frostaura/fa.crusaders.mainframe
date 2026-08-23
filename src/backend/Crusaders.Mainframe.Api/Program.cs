@@ -171,6 +171,7 @@ builder.Services.AddSingleton<BalanceBroadcaster>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<BookingService>();
+builder.Services.AddScoped<CourtActivationService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<MemberApprovalService>();
 

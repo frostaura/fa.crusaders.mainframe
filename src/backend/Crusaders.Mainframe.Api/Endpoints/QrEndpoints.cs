@@ -4,6 +4,7 @@ using System.Text;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -64,6 +65,7 @@ public static class QrEndpoints
         app.MapPost("/api/v1/court/{courtNumber:int}/qr/match", async (
             int courtNumber, QrMatchRequest req,
             MainframeDbContext db, IConfiguration config,
+            CourtActivationService activation,
             CancellationToken ct) =>
         {
             if (string.IsNullOrEmpty(req.Token)) return Results.BadRequest(new { error = "token_required" });
@@ -98,23 +100,24 @@ public static class QrEndpoints
             var sub = principal.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? principal.FindFirstValue(ClaimTypes.NameIdentifier);
             if (!Guid.TryParse(sub, out var userId)) return Results.Ok(new { matched = false, reason = "no_sub" });
 
-            // Confirm the user has an active booking on this court within the grace window.
+            // Identify AND activate. This used to confirm a booking existed and return a
+            // user_id — no ledger post, no CheckedInAt, no event, no audit row. So a
+            // member who identified by QR played free and was swept as a no-show, since
+            // attendance is CheckedInAt and nothing here set it.
             var court = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == courtNumber, ct);
             if (court is null) return Results.NotFound();
 
             var now = DateTimeOffset.UtcNow;
-            var windowStart = now.AddMinutes(-30);
-            var windowEnd = now.AddHours(2);
 
-            var hasBooking = await db.Bookings.AnyAsync(b =>
-                b.CourtId == court.Id
-                && b.UserId == userId
-                && b.Status == BookingStatus.Booked
-                && b.StartsAt < windowEnd && b.EndsAt > windowStart, ct);
+            // Shared window: was hardcoded at -30 minutes here while the no-show sweep used
+            // the tenant's grace setting, so the two disagreed about the same booking.
+            var booking = await activation.FindForUserAsync(court.Id, userId, now, ct);
+            if (booking is null) return Results.Ok(new { matched = false, reason = "no_active_booking" });
 
-            if (!hasBooking) return Results.Ok(new { matched = false, reason = "no_active_booking" });
+            var result = await activation.ActivateAsync(
+                court, booking, identifiedUserId: userId, payerOverrideUserId: null, method: "qr", ct);
 
-            return Results.Ok(new { matched = true, user_id = userId });
+            return CourtActivationResponse.For(result, userId);
         }).RequireAuthorization(p => p.RequireRole("admin"))
           .RequireRateLimiting(RateLimitPolicies.Auth);
 

@@ -13,6 +13,14 @@ public sealed class TenantResolutionMiddleware
     private readonly RequestDelegate _next;
     private readonly ILogger<TenantResolutionMiddleware> _logger;
 
+    // NOTE: /api/v1/court/ is deliberately NOT here.
+    //
+    // It used to be, with the comment "admin auth, kiosk mode resolves tenant from JWT" —
+    // but this middleware IS what resolves the tenant from the JWT, so skipping it meant
+    // nothing ever called Set. TenantId stayed Guid.Empty, every global query filter
+    // matched nothing, and all three courtside endpoints returned 404 for a court that
+    // exists. They had never once worked against a real tenant; the first HTTP-level test
+    // of them found it immediately. The comment described an intention the code defeated.
     private static readonly string[] AnonymousPathPrefixes =
     {
         "/healthz",
@@ -22,7 +30,6 @@ public sealed class TenantResolutionMiddleware
         "/api/v1/credit/topup/callback",  // PeachPayments webhook — resolves tenant from query
         "/api/v1/uploads/",               // anonymous registration upload
         "/uploads/",                      // static-served media
-        "/api/v1/court/",                 // court-side endpoints — admin auth, kiosk mode resolves tenant from JWT
         "/api/v1/device/",                // device surface — DeviceAuthenticationHandler sets the tenant from the device row
     };
 
