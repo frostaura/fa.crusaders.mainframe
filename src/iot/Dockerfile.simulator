@@ -1,0 +1,26 @@
+# The native device simulator, containerised.
+#
+# A build stage and a runtime stage, because the PlatformIO toolchain is around a
+# gigabyte and the thing it produces is a single static-ish binary. The runtime image
+# carries the binary and nothing else.
+
+FROM python:3.12-slim AS build
+WORKDIR /src
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential git \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+RUN pio run -e simulator \
+ && cp .pio/build/simulator/program /out-simulator
+
+FROM debian:bookworm-slim
+RUN useradd --create-home --uid 10001 simulator
+COPY --from=build /out-simulator /usr/local/bin/simulator
+USER simulator
+EXPOSE 5555
+ENTRYPOINT ["/usr/local/bin/simulator"]

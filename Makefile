@@ -1,6 +1,6 @@
 .PHONY: install lint lint-backend lint-frontend lint-iot format-iot build build-iot \
         test test-iot test-iot-asan test-integration test-e2e complexity hooks \
-        ci-status up down down-reset clean
+        virt-up virt-down ci-status up down down-reset clean
 
 # IoT toolchain lives in a venv so `pio` and `lizard` are pinned per-checkout
 PIO ?= src/iot/.venv/bin/pio
@@ -65,9 +65,31 @@ test-iot-asan:
 test-integration:
 	cd src/backend && dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --filter "(FullyQualifiedName~ApiBoundaryTests|FullyQualifiedName~TenantIsolationTests)"
 
-# Tests — Playwright e2e
+# Tests — Playwright e2e.
+#
+# PLAYWRIGHT_CHROMIUM_PATH lets a runner that already ships a browser be used instead
+# of downloading a few hundred megabytes to get one that differs by a revision number.
+# Unset, Playwright uses its own and a developer machine needs no setup.
 test-e2e:
 	cd src/frontend && npx playwright test
+
+# Service virtualization as plain processes.
+#
+# Deliberately NOT Docker-only. The daemon is unavailable in some CI setups and a
+# suite that can only run under Docker is a suite that quietly stops running.
+# docker-compose.test.yml offers the same two services as sidecars for machines that
+# prefer them, reading the same imposter file.
+virt-up: build-iot
+	@command -v npx >/dev/null || (echo "npx is required for the PayFast imposter" && exit 1)
+	npx --yes mountebank@2.9.1 start --configfile test/virtualization/payfast/imposter.json --pidfile /tmp/crusaders-mb.pid &
+	src/iot/.pio/build/simulator/program --port $${SIMULATOR_PORT:-5555} & echo $$! > /tmp/crusaders-sim.pid
+	@echo "PayFast imposter on :4545 (admin :2525) · device simulator on :$${SIMULATOR_PORT:-5555}"
+	@echo "See test/virtualization/README.md for what each case is and how to provoke it."
+
+virt-down:
+	-@kill "$$(cat /tmp/crusaders-sim.pid 2>/dev/null)" 2>/dev/null || true
+	-@npx --yes mountebank@2.9.1 stop --pidfile /tmp/crusaders-mb.pid 2>/dev/null || true
+	-@rm -f /tmp/crusaders-sim.pid /tmp/crusaders-mb.pid
 
 # Complexity — one tool, three languages. Thresholds are measured, not decreed.
 complexity:

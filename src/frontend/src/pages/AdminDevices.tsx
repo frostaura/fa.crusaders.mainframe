@@ -274,6 +274,59 @@ function ConnectBoard({ onClaimed }: { onClaimed: () => void }) {
   );
 }
 
+// --- one board in the list --------------------------------------------------
+
+function DeviceRow({
+  device, onChannel, onRevoke,
+}: { device: AdminDevice; onChannel: (channel: string) => Promise<void>; onRevoke: () => Promise<void> }) {
+  const online = isOnline(device);
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {online
+          ? <Wifi className="h-4 w-4 text-emerald-500" aria-label="online" />
+          : <WifiOff className="h-4 w-4 text-slate-300" aria-label="offline" />}
+        <span className="font-medium">{device.name}</span>
+        <Badge tone={online ? "success" : "muted"}>
+          {online ? "online" : `last seen ${relative(device.last_seen_at)}`}
+        </Badge>
+        {device.revoked_at && <Badge tone="danger">revoked</Badge>}
+        {device.failed_version && (
+          // A build this box installed and could never work on. Loud, because a fleet
+          // quietly declining an update is the kind of silence noticed a week after the
+          // release was promoted everywhere.
+          <Badge tone="danger">firmware {device.failed_version} failed to start</Badge>
+        )}
+      </div>
+
+      <div className="mt-1 text-xs text-slate-500">
+        {device.device_code}
+        {device.court_number !== null ? ` · court ${device.court_number}` : ""}
+        {device.mac_address ? ` · ${device.mac_address}` : ""}
+        {device.last_ip_address ? ` · ${device.last_ip_address}` : ""}
+        {device.running_version ? ` · firmware ${device.running_version}` : ""}
+        {device.mega_version ? ` · Mega ${device.mega_version}` : ""}
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select
+          aria-label={`${device.name} update channel`}
+          className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+          value={device.ota_channel}
+          onChange={(e) => void onChannel(e.target.value)}
+        >
+          <option value="Stable">Stable</option>
+          <option value="Canary">Canary — takes new firmware first</option>
+          <option value="Pinned">Pinned — held at one version</option>
+        </select>
+
+        <ConfirmButton idleLabel="Revoke" confirmLabel="Really revoke?" onConfirm={onRevoke} />
+      </div>
+    </div>
+  );
+}
+
 // --- the page ---------------------------------------------------------------
 
 export function AdminDevicesPage() {
@@ -336,56 +389,16 @@ export function AdminDevicesPage() {
         ) : (
           <div className="space-y-3">
             {devices.map((device) => (
-              <div key={device.id} className="rounded-lg border border-slate-200 p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  {isOnline(device)
-                    ? <Wifi className="h-4 w-4 text-emerald-500" aria-label="online" />
-                    : <WifiOff className="h-4 w-4 text-slate-300" aria-label="offline" />}
-                  <span className="font-medium">{device.name}</span>
-                  <Badge tone={isOnline(device) ? "success" : "muted"}>
-                    {isOnline(device) ? "online" : `last seen ${relative(device.last_seen_at)}`}
-                  </Badge>
-                  {device.revoked_at && <Badge tone="danger">revoked</Badge>}
-                  {device.failed_version && (
-                    // A build this box installed and could never work on. Loud, because a
-                    // fleet quietly declining an update is the kind of silence noticed a
-                    // week after the release was promoted everywhere.
-                    <Badge tone="danger">firmware {device.failed_version} failed to start</Badge>
-                  )}
-                </div>
-
-                <div className="mt-1 text-xs text-slate-500">
-                  {device.device_code}
-                  {device.court_number !== null ? ` · court ${device.court_number}` : ""}
-                  {device.mac_address ? ` · ${device.mac_address}` : ""}
-                  {device.last_ip_address ? ` · ${device.last_ip_address}` : ""}
-                  {device.running_version ? ` · firmware ${device.running_version}` : ""}
-                  {device.mega_version ? ` · Mega ${device.mega_version}` : ""}
-                </div>
-
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <select
-                    aria-label={`${device.name} update channel`}
-                    className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm"
-                    value={device.ota_channel}
-                    onChange={(e) => void setChannel(device, e.target.value)}
-                  >
-                    <option value="Stable">Stable</option>
-                    <option value="Canary">Canary — takes new firmware first</option>
-                    <option value="Pinned">Pinned — held at one version</option>
-                  </select>
-
-                  <ConfirmButton
-                    idleLabel="Revoke"
-                    confirmLabel="Really revoke?"
-                    onConfirm={async () => {
-                      await endpoints.adminDeviceRevoke(device.id);
-                      toast.push({ tone: "success", text: `${device.name} revoked. It can no longer authenticate.` });
-                      await load();
-                    }}
-                  />
-                </div>
-              </div>
+              <DeviceRow
+                key={device.id}
+                device={device}
+                onChannel={(channel) => setChannel(device, channel)}
+                onRevoke={async () => {
+                  await endpoints.adminDeviceRevoke(device.id);
+                  toast.push({ tone: "success", text: `${device.name} revoked. It can no longer authenticate.` });
+                  await load();
+                }}
+              />
             ))}
           </div>
         )}

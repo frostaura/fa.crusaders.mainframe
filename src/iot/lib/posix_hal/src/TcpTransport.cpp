@@ -29,7 +29,7 @@ TcpTransport::~TcpTransport() {
   close();
 }
 
-bool TcpTransport::listen(uint16_t port) {
+bool TcpTransport::listen(uint16_t port, bool allInterfaces) {
   close();
   listenFd_ = ::socket(AF_INET, SOCK_STREAM, 0);
   if (listenFd_ < 0) {
@@ -42,9 +42,11 @@ bool TcpTransport::listen(uint16_t port) {
   memset(&addr, 0, sizeof(addr));
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
-  // Loopback, hardcoded. See the header: a simulated relay controller that
-  // answered on every interface would be an unauthenticated one.
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  // Loopback unless explicitly opted out of. See the header: a simulated relay
+  // controller answering on every interface is an unauthenticated one, and the
+  // only place that is acceptable is inside a container whose own loopback is
+  // unreachable from a port mapping.
+  addr.sin_addr.s_addr = htonl(allInterfaces ? INADDR_ANY : INADDR_LOOPBACK);
 
   if (::bind(listenFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
     close();

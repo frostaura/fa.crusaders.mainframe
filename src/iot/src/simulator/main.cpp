@@ -82,6 +82,8 @@ struct Options {
   uint16_t port = kDefaultPort;
   uint32_t startMs = 0U;
   const char* storeDir = kDefaultStoreDir;
+  /// See --bind-all. Off by default and it must stay that way.
+  bool bindAll = false;
 };
 
 bool parseOptions(int argc, char** argv, Options& out) {
@@ -90,6 +92,12 @@ bool parseOptions(int argc, char** argv, Options& out) {
     if (strcmp(argv[i], "--port") == 0 && hasValue) {
       out.port = static_cast<uint16_t>(strtoul(argv[i + 1], nullptr, 10));
       ++i;
+    } else if (strcmp(argv[i], "--bind-all") == 0) {
+      // Containers only. The container's loopback is its own, so a port mapping
+      // cannot reach a simulator bound to it; the container network is the
+      // boundary instead. On a developer machine or a club LAN this makes a
+      // relay controller anything can talk to.
+      out.bindAll = true;
     } else if (strcmp(argv[i], "--start-ms") == 0 && hasValue) {
       out.startMs = static_cast<uint32_t>(strtoul(argv[i + 1], nullptr, 10));
       ++i;
@@ -104,8 +112,10 @@ bool parseOptions(int argc, char** argv, Options& out) {
 }
 
 void usage() {
-  printf("usage: simulator [--port N] [--start-ms MS] [--store DIR]\n"
+  printf("usage: simulator [--port N] [--bind-all] [--start-ms MS] [--store DIR]\n"
          "  --port      TCP port on 127.0.0.1 for the bridge link (0 = pick one)\n"
+         "  --bind-all  listen on every interface. CONTAINERS ONLY -- a simulated\n"
+         "              relay controller on a LAN is one anything can switch on.\n"
          "  --start-ms  what the millis() clock reads at launch; 4294963200\n"
          "              puts the 49.7-day rollover four seconds from now\n"
          "  --store     directory for the persisted key/value store\n"
@@ -164,7 +174,7 @@ int main(int argc, char** argv) {
   posix_hal::FileStore store;
   posix_hal::StdinLines console;
 
-  if (!bridge.listen(options.port)) {
+  if (!bridge.listen(options.port, options.bindAll)) {
     fprintf(stderr, "[sim] cannot listen on 127.0.0.1:%u\n", static_cast<unsigned>(options.port));
     return 1;
   }

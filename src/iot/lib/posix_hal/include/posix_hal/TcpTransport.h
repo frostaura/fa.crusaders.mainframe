@@ -61,7 +61,15 @@ public:
   /// Start listening on 127.0.0.1:`port`. False on any failure, with the reason
   /// left in errno; the simulator prints it and exits rather than running as a
   /// court box nothing can talk to.
-  bool listen(uint16_t port);
+  ///
+  /// <b>`allInterfaces` is an opt-in and the default must stay false.</b> A
+  /// simulated relay controller answering on every interface is an
+  /// unauthenticated one: anything on the network could turn a court's lights on
+  /// by connecting to it. The one legitimate use is inside a container, whose
+  /// loopback is its own and therefore unreachable from a port mapping — and
+  /// there the container's network is the boundary instead. Passing it on a
+  /// developer machine or a club LAN is a mistake.
+  bool listen(uint16_t port, bool allInterfaces = false);
 
   /// The port actually bound. Differs from the requested one when 0 was passed
   /// to ask the kernel for a free port, which is how a test harness runs

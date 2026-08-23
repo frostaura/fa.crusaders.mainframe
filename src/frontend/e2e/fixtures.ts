@@ -1,0 +1,89 @@
+import { test as base, type Page } from "@playwright/test";
+
+/**
+ * The E2E fixtures.
+ *
+ * <p>
+ * These specs run against the real built frontend — real routing, real React, real
+ * CSS — with the API answered by route interception rather than by a live backend.
+ * That is a deliberate split, and worth being explicit about what it buys and what
+ * it does not.
+ * </p>
+ *
+ * <p>
+ * <b>What it proves:</b> that the screens compose, navigate, render the shapes the
+ * API actually returns, and put the right numbers in front of a member. Those are
+ * the failures that reach a person, and none of them are visible to a unit test.
+ * </p>
+ *
+ * <p>
+ * <b>What it does not prove:</b> anything about the server. The API's own behaviour
+ * is held by 473 backend tests including a Postgres-backed boundary suite; running a
+ * database, a migration and a seeded tenant per browser test would buy a slower copy
+ * of what those already cover.
+ * </p>
+ *
+ * <p>
+ * The interception is <b>strict</b>: an unrecognised call fails the test rather than
+ * being fulfilled with something plausible. A permissive stub hides exactly the
+ * mistake worth catching — a screen calling an endpoint nobody meant it to.
+ * </p>
+ */
+
+export type ApiRoute = { method?: string; path: string; status?: number; body: unknown };
+
+export const SESSION_ADMIN = {
+  tenant_slug: "crusaders",
+  tenant_id: "00000000-0000-0000-0000-000000000001",
+  user_id: "00000000-0000-0000-0000-000000000002",
+  is_authenticated: true,
+  is_admin: true,
+};
+
+export const SESSION_ANON = {
+  tenant_slug: "crusaders",
+  tenant_id: "00000000-0000-0000-0000-000000000001",
+  user_id: null,
+  is_authenticated: false,
+  is_admin: false,
+};
+
+export async function serveApi(page: Page, routes: ApiRoute[]) {
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method().toUpperCase();
+
+    // Longest prefix wins, so "/api/v1/admin/devices/" cannot swallow
+    // "/api/v1/admin/devices/discovered" depending on declaration order.
+    const match = routes
+      .filter((r) => (r.method ?? "GET").toUpperCase() === method && url.pathname.startsWith(r.path))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+
+    if (!match) {
+      await route.fulfill({
+        status: 501,
+        contentType: "application/json",
+        body: JSON.stringify({ error: `no route for ${method} ${url.pathname}` }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: match.status ?? 200,
+      contentType: "application/json",
+      body: JSON.stringify(match.body),
+    });
+  });
+}
+
+/** Signs in by planting the token the app looks for, rather than driving a login
+ *  form on every spec. The login flow has its own test; every other spec is about
+ *  what happens after it. */
+export async function signIn(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("crusaders.mainframe.token", "e2e-token");
+  });
+}
+
+export const test = base;
+export { expect } from "@playwright/test";
