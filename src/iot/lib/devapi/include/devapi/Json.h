@@ -51,6 +51,14 @@ size_t findKey(const char* body, size_t len, const char* key);
 /// would send a perfectly good board off to be re-claimed.
 bool stringField(const char* body, size_t len, const char* key, char* out, size_t outCap);
 
+/// Reads the unsigned integer value of `key`. False when the key is absent, the value is
+/// not a bare integer, or it would overflow.
+///
+/// <b>Saturating, never wrapping.</b> A body claiming 10^30 is nonsense; wrapping it
+/// produces a plausible small number, and a plausible small number for an image size
+/// passes the fit check and then runs out of flash halfway through a write.
+bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out);
+
 /// Position of the first element of the array under `key`, or kNotFound when the
 /// key is absent or its value is not an array.
 size_t findArray(const char* body, size_t len, const char* key);

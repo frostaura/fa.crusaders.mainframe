@@ -228,6 +228,18 @@ uint32_t gHeldSinceMs[4] = {0U, 0U, 0U, 0U};
 court::ButtonMap gButtons;
 court::WalkUpPad gPad;
 
+/// How long a scan is remembered for a following walk-up.
+///
+/// The same reasoning as the pad's own selection lapse, and it has to be at least as long or
+/// the two disagree: somebody who scans, wanders off and comes back to a different member's
+/// button presses must not have bought them court time. The QR itself expires in 60 seconds
+/// at the API, which is the real backstop.
+constexpr uint32_t kScanMemoryMs = 30000UL;
+
+/// The last thing the scanner read, verbatim. Cleared when it lapses or is spent.
+char gLastScan[proto::kMaxArgLen + 1] = {'\0'};
+tb::Deadline gScanAt;
+
 /// The guard that stops a broken build being taken twice.
 ///
 /// There is no reverting on this part — a 4M ESP carrying a 1 MB sketch and 2 MB
@@ -400,6 +412,12 @@ void applyOutcome(const court::Outcome& outcome) {
 }
 
 void handleScan(const proto::Frame& frame, uint32_t nowMs) {
+  // Remembered so a following walk-up knows WHO is buying. The scanned bytes, not the
+  // roster's token: a walk-up member has no booking and so no roster entry, and the API is
+  // the only thing that can verify a 60-second signed QR anyway.
+  snprintf(gLastScan, sizeof(gLastScan), "%s", frame.arg(0));
+  gScanAt.arm(nowMs, kScanMemoryMs);
+
   // The court a scan belongs to is the court the box is fitted at, which is the
   // court_number the API assigned it — not something in the scanned bytes. A
   // barcode that could name its own court would be a barcode that opens any
@@ -426,6 +444,11 @@ void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
       court, gHeldSinceMs[court] == 0U ? 0U : tb::since(nowMs, gHeldSinceMs[court]), nowMs));
   gHeldSinceMs[court] = 0U;
 }
+
+/// Forward declaration: the button handler sits with the rest of the uplink handling, and
+/// the walk-up request sits with the other API calls it shares helpers with. Moving either
+/// to satisfy the compiler would put it away from the code it belongs with.
+void requestWalkUp(const court::WalkUpIntent& intent);
 
 /// A debounced press, interpreted through the map the API pushed.
 ///
@@ -458,10 +481,7 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
   case court::PadResult::Requested:
-    // LATER (needs the walk-up POST): the intent goes to the API, which prices it
-    // and answers with what was actually sold. Until then the member is told the
-    // truth rather than being sold something on a guess.
-    static_cast<void>(sendToMega(proto::Frame::lcd("NOT AVAILABLE", "SEE THE DESK")));
+    requestWalkUp(gPad.intent());
     return;
   case court::PadResult::ReleaseRequested:
     static_cast<void>(sendToMega(proto::Frame::off(static_cast<proto::Court>(gPad.intent().court))));
@@ -610,6 +630,60 @@ uint16_t callApi(const char* method, const char* path, const char* body, char* o
   }
   http.end();
   return status > 0 ? static_cast<uint16_t>(status) : 0U;
+}
+
+/// Buys court time, which is the one court-box operation that needs the network.
+///
+/// The price is not decided here and cannot be: a walk-up is truncated at the next booking
+/// and charged pro rata, and the box knows neither the tariff nor the next booking. Guessing
+/// at either sells a member something the club did not agree to. So it asks, and shows what
+/// the API answered.
+void requestWalkUp(const court::WalkUpIntent& intent) {
+  if (gLastScan[0] == '\0') {
+    // Nobody has identified. The buttons alone cannot say WHO is buying, and a walk-up
+    // charged to the last person who happened to scan is worse than one refused.
+    static_cast<void>(sendToMega(proto::Frame::lcd("SCAN FIRST", "THEN PICK A TIME")));
+    return;
+  }
+
+  static_cast<void>(sendToMega(proto::Frame::lcd("ONE MOMENT", "")));
+
+  char body[320];
+  snprintf(body, sizeof(body), "{\"minutes\":%u,\"method\":\"qr\",\"token\":\"%s\"}",
+           static_cast<unsigned>(intent.minutes), gLastScan);
+
+  char response[256] = {};
+  const uint16_t status = callApi("POST", "/api/v1/device/walkup", body, response, sizeof(response));
+
+  if (status != 200U) {
+    // Every refusal reads differently to somebody standing in a corridor. 402 is the one
+    // they can act on themselves.
+    const char* line = status == 402U   ? "NOT ENOUGH CREDIT"
+                       : status == 409U ? "COURT NOT FREE"
+                       : status == 0U   ? "NO CONNECTION"
+                                        : "SEE THE DESK";
+    static_cast<void>(sendToMega(proto::Frame::lcd(line, "SCAN TO START")));
+    return;
+  }
+
+  // What was ACTUALLY sold, from the response — not what was asked for. Twenty minutes may
+  // be all there was, and telling the member sixty would be a complaint waiting to happen.
+  const size_t len = strlen(response);
+  uint32_t granted = intent.minutes;
+  static_cast<void>(devapi::json::unsignedField(response, strlen(response), "granted_minutes", granted));
+
+  char line2[court::kLineLen + 1U];
+  snprintf(line2, sizeof(line2), "%lu MIN", static_cast<unsigned long>(granted));
+
+  char line1[court::kLineLen + 1U] = "COURT ?";
+  line1[6] = static_cast<char>('A' + intent.court);
+  static_cast<void>(sendToMega(proto::Frame::lcd(line1, line2)));
+  static_cast<void>(sendToMega(
+      proto::Frame::on(static_cast<proto::Court>(intent.court), static_cast<uint16_t>(granted * 60U))));
+  if (intent.court < 4U) {
+    gHeldSinceMs[intent.court] = gClock.nowMs();
+  }
+  gLastScan[0] = '\0';
 }
 
 /// Persists what provisioning returned.
@@ -772,6 +846,76 @@ void considerUpdate(const char* body, size_t len) {
   }
 }
 
+/// One queued event as the upload endpoint's JSON.
+///
+/// `method` is omitted as a null rather than sent as the string "none", matching what
+/// eventq::methodName returns — a release has no identification method, and pretending it
+/// had one puts a fiction in the audit trail.
+void renderEvent(const eventq::Event& event, char* out, size_t outCap) {
+  char subject[eventq::kMaxSubjectLen + 1U] = {};
+  memcpy(subject, event.subject, event.subjectLen);
+
+  const char* method = eventq::methodName(event.method);
+  char methodJson[16] = "null";
+  if (method != nullptr) {
+    snprintf(methodJson, sizeof(methodJson), "\"%s\"", method);
+  }
+
+  snprintf(out, outCap,
+           "{\"uptime_ms\":%lu,\"events\":[{\"seq\":%lu,\"uptime_ms\":%lu,\"kind\":\"%s\","
+           "\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu}]}",
+           static_cast<unsigned long>(gUptime.value()), static_cast<unsigned long>(event.seq),
+           static_cast<unsigned long>(event.uptimeMs), eventq::kindName(event.kind),
+           event.court == eventq::Event::kNoCourt ? -1 : static_cast<int>(event.court), methodJson, subject,
+           static_cast<unsigned long>(event.durationMs));
+}
+
+/// Uploads what the box did, oldest first, and releases only what was acknowledged.
+///
+/// Peek-then-release rather than pop-then-upload: an event must not leave the queue until
+/// the API has taken it, or a flaky link loses exactly the events it produces. The response
+/// names the highest sequence accepted, so a partial success costs nothing — whatever came
+/// after simply stays queued and is offered again.
+void drainEvents() {
+  if (!gProvisioned || !gWifiUp || gQueue.empty()) {
+    return;
+  }
+
+  // One event per pass. A board back from a week offline has a full ring, and draining it
+  // all in one loop iteration would starve the Mega link — which is how a flooded uplink
+  // becomes a court whose lights stay on.
+  eventq::Event event;
+  if (!gQueue.peek(event)) {
+    return;
+  }
+
+  char body[384];
+  renderEvent(event, body, sizeof(body));
+
+  char response[192] = {};
+  devapi::Response result;
+  result.status = callApi("POST", "/api/v1/device/events", body, response, sizeof(response));
+  result.serverUnix = devapi::findServerUnix(response, strlen(response));
+
+  switch (gApi.react(result, static_cast<uint32_t>(gUptime.value()))) {
+  case devapi::Reaction::Accepted: {
+    uint32_t through = 0U;
+    if (devapi::json::unsignedField(response, strlen(response), "accepted_through", through)) {
+      static_cast<void>(gQueue.releaseThrough(through));
+    }
+    return;
+  }
+  case devapi::Reaction::Rejected:
+    // A 4xx the box caused. Retrying an identical request forever pins every later event
+    // behind one the server will never take, so it is dropped and the next one gets a turn.
+    static_cast<void>(gQueue.release());
+    return;
+  default:
+    // Transient, or the clock was corrected. Keep the event and try again next pass.
+    return;
+  }
+}
+
 void pumpHeartbeat(uint32_t nowMs) {
   if (!gHeartbeat.expired(nowMs)) {
     return;
@@ -855,6 +999,9 @@ void setup() {
   const uint32_t now = gClock.nowMs();
   gUptime.seed(now);
   gHeartbeat.arm(now, kHeartbeatMs);
+
+  gQueue.begin();
+  gSession.onBoot(now);
 }
 
 void loop() {
@@ -868,10 +1015,14 @@ void loop() {
   if (gPad.tick(now)) {
     static_cast<void>(sendToMega(proto::Frame::lcd("CRUSADERS COURTS", "SCAN TO START")));
   }
+  if (gLastScan[0] != '\0' && gScanAt.expired(now)) {
+    gLastScan[0] = '\0';
+  }
 
   pumpWifiLink(now);
   tryProvision();
   pumpMegaLink(now);
+  drainEvents();
   pumpHeartbeat(now);
   pumpOffers();
 

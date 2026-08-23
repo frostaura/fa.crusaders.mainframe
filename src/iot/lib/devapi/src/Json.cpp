@@ -86,6 +86,31 @@ bool stringField(const char* body, size_t len, const char* key, char* out, size_
   return out[0] != '\0';
 }
 
+bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
+  size_t at = findKey(body, len, key);
+  if (at == kNotFound) {
+    return false;
+  }
+  at = skipToValue(body, len, at);
+
+  uint32_t value = 0U;
+  size_t digits = 0U;
+  while (at < len && body[at] >= '0' && body[at] <= '9') {
+    const uint32_t digit = static_cast<uint32_t>(body[at] - '0');
+    if (value > (UINT32_MAX - digit) / 10U) {
+      return false;
+    }
+    value = value * 10U + digit;
+    ++digits;
+    ++at;
+  }
+  if (digits == 0U) {
+    return false;
+  }
+  out = value;
+  return true;
+}
+
 size_t findArray(const char* body, size_t len, const char* key) {
   size_t at = findKey(body, len, key);
   if (at == kNotFound) {

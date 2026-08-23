@@ -8,29 +8,11 @@ namespace ota {
 
 namespace {
 
-/// Reads an unsigned integer field. Zero when absent or unreadable, which every
-/// caller treats as "unusable" rather than as a legitimate zero.
-uint32_t unsignedField(const char* body, size_t len, const char* key) {
-  size_t at = devapi::json::findKey(body, len, key);
-  if (at == devapi::json::kNotFound) {
-    return 0U;
-  }
-  while (at < len && (body[at] == ' ' || body[at] == ':')) {
-    ++at;
-  }
-
+/// The manifest's size field. Absent, unreadable or absurd all read as zero, which every
+/// caller treats as "unusable" rather than as a legitimate zero-byte image.
+uint32_t sizeField(const char* body, size_t len, const char* key) {
   uint32_t value = 0U;
-  size_t digits = 0U;
-  while (at < len && body[at] >= '0' && body[at] <= '9') {
-    const uint32_t digit = static_cast<uint32_t>(body[at] - '0');
-    if (value > (UINT32_MAX - digit) / 10U) {
-      return 0U; // saturating, never wrapping into a plausible small size
-    }
-    value = value * 10U + digit;
-    ++digits;
-    ++at;
-  }
-  return digits == 0U ? 0U : value;
+  return devapi::json::unsignedField(body, len, key, value) ? value : 0U;
 }
 
 } // namespace
@@ -52,7 +34,7 @@ Manifest parseManifest(const char* body, size_t len) {
   static_cast<void>(
       devapi::json::stringField(body, len, "ota_version", manifest.version, sizeof(manifest.version)));
   static_cast<void>(devapi::json::stringField(body, len, "ota_url", manifest.url, sizeof(manifest.url)));
-  manifest.sizeBytes = unsignedField(body, len, "ota_size");
+  manifest.sizeBytes = sizeField(body, len, "ota_size");
   return manifest;
 }
 

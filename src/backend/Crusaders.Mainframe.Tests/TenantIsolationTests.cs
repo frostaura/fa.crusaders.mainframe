@@ -239,6 +239,68 @@ public class TenantIsolationTests
     }
 
     /// <summary>
+    /// Device event receipts — the newest tenant-scoped table.
+    ///
+    /// <para>
+    /// It exists to answer "have I already recorded this box's event number 7?", and its
+    /// unique index is on <c>(TenantId, DeviceId, Seq)</c>. Two clubs' boxes both start at
+    /// sequence 1, so a leak here does not merely expose a row — it would make one club's
+    /// upload look like a duplicate of another's and be <b>silently discarded</b>, which is
+    /// a court that was used and never charged for.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Device_event_receipts_are_filtered_by_current_tenant()
+    {
+        var (hostA, hostB) = await TwoTenantsAsync($"shared-{Guid.NewGuid():N}");
+        await using var a = hostA;
+        await using var b = hostB;
+
+        var deviceId = Guid.NewGuid();
+
+        using (var scope = hostA.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.DeviceEventReceipts.Add(new DeviceEventReceipt
+            {
+                TenantId = hostA.Tenant.Id,
+                DeviceId = deviceId,
+                Seq = 1,
+                Kind = "activation",
+                OccurredAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = hostB.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            Assert.Empty(await db.DeviceEventReceipts.ToListAsync());
+            // ...and it is demonstrably there, behind the filter.
+            Assert.NotEmpty(await db.DeviceEventReceipts.IgnoreQueryFilters().ToListAsync());
+
+            // The consequence spelled out: tenant B's box may use sequence 1 too, and that
+            // must be a new event rather than a duplicate of tenant A's.
+            db.DeviceEventReceipts.Add(new DeviceEventReceipt
+            {
+                TenantId = hostB.Tenant.Id,
+                DeviceId = deviceId,
+                Seq = 1,
+                Kind = "activation",
+                OccurredAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync();
+            Assert.Single(await db.DeviceEventReceipts.ToListAsync());
+        }
+
+        using (var scope = hostA.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            Assert.Single(await db.DeviceEventReceipts.ToListAsync());
+        }
+    }
+
+    /// <summary>
     /// Courts and tenant settings: the two tables a court box reads on every heartbeat.
     /// A leak here misprices another club's court.
     /// </summary>

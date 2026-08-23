@@ -162,7 +162,29 @@ recorded limitation and not a blocker. Item 8 makes it rarer.
 
 ---
 
-## 10. Real hardware, once
+## 10. Decide how a box identifies a member with no network
+
+`lib/roster` is built and tested, and nothing fills it — because the identifier it would
+hold has not been chosen, and that is a security trade rather than an implementation gap.
+
+The QR token is a **60-second signed JWT**: it cannot be pre-cached, by construction. A box
+holding a stable copy of somebody's identity is a box that opens a court for them forever.
+So the offline path needs a *stable* identifier — a PIN-derived token, or a printed
+membership code — and either one is something a stolen box could work against: a token it
+can compare against a typed four-digit PIN is a token it can brute-force over the 10,000
+space for the members in its cache.
+
+- [ ] Somebody decides: accept that a court box needs the network to admit a member, or pick
+      a stable identifier and accept the offline brute-force exposure that comes with it.
+
+**If skipped:** the box works — the online path is what runs today, and it is the one the
+club will use — but the WiFi going down takes the courts down with it, which is exactly the
+regression the local-decision design was built to avoid. The cache is ready for whichever
+answer comes back.
+
+---
+
+## 11. Real hardware, once
 
 Everything below the API is proven on the host with no board attached, which is what makes
 CI meaningful. It is not the same as having been run.

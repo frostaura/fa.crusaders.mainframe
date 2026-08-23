@@ -1188,6 +1188,34 @@ void test_json_absent_and_malformed_fields_report_absence() {
   TEST_ASSERT_FALSE(devapi::json::stringField(nullptr, 0U, "device_id", out, sizeof(out)));
 }
 
+void test_json_reads_an_unsigned_field_and_saturates_rather_than_wraps() {
+  const char body[] = "{\"accepted_through\":42,\"granted_minutes\": 20 }";
+  uint32_t value = 0U;
+
+  TEST_ASSERT_TRUE(devapi::json::unsignedField(body, sizeof(body) - 1U, "accepted_through", value));
+  TEST_ASSERT_EQUAL_UINT32(42U, value);
+
+  TEST_ASSERT_TRUE(devapi::json::unsignedField(body, sizeof(body) - 1U, "granted_minutes", value));
+  TEST_ASSERT_EQUAL_UINT32(20U, value);
+
+  // Absent leaves the caller's value alone, which is what lets a caller seed it with a
+  // sensible default and simply ignore the result.
+  value = 99U;
+  TEST_ASSERT_FALSE(devapi::json::unsignedField(body, sizeof(body) - 1U, "missing", value));
+  TEST_ASSERT_EQUAL_UINT32(99U, value);
+
+  // Wrapping an absurd number produces a plausible small one — and a plausible small image
+  // size passes the fit check and then runs out of flash halfway through a write.
+  const char absurd[] = "{\"ota_size\":99999999999999}";
+  value = 7U;
+  TEST_ASSERT_FALSE(devapi::json::unsignedField(absurd, sizeof(absurd) - 1U, "ota_size", value));
+  TEST_ASSERT_EQUAL_UINT32(7U, value);
+
+  const char notNumber[] = "{\"accepted_through\":\"42\"}";
+  TEST_ASSERT_FALSE(
+      devapi::json::unsignedField(notNumber, sizeof(notNumber) - 1U, "accepted_through", value));
+}
+
 void test_json_walks_an_array_of_strings() {
   const char body[] =
       "{\"config\":{\"slice_minutes\":15,\"button_map\":[\"court:A\",\"minutes:30\",\"off\"]}}";
@@ -1296,6 +1324,7 @@ int main(int, char**) {
   RUN_TEST(test_json_reads_a_string_field);
   RUN_TEST(test_json_a_field_that_would_not_fit_is_refused_not_truncated);
   RUN_TEST(test_json_absent_and_malformed_fields_report_absence);
+  RUN_TEST(test_json_reads_an_unsigned_field_and_saturates_rather_than_wraps);
   RUN_TEST(test_json_walks_an_array_of_strings);
   RUN_TEST(test_json_an_absent_or_non_array_value_is_reported_as_absent);
   RUN_TEST(test_json_a_key_that_is_a_prefix_of_another_does_not_match_it);

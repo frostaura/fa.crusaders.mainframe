@@ -26,6 +26,7 @@ public class MainframeDbContext : DbContext
     public DbSet<AuthToken> AuthTokens => Set<AuthToken>();
     public DbSet<Court> Courts => Set<Court>();
     public DbSet<Device> Devices => Set<Device>();
+    public DbSet<DeviceEventReceipt> DeviceEventReceipts => Set<DeviceEventReceipt>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<LedgerEntry> LedgerEntries => Set<LedgerEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -266,6 +267,20 @@ public class MainframeDbContext : DbContext
             e.HasIndex(d => new { d.TenantId, d.MacAddress })
                 .IsUnique()
                 .HasFilter("\"MacAddress\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<DeviceEventReceipt>(e =>
+        {
+            e.ToTable("device_event_receipts");
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Kind).HasMaxLength(32).IsRequired();
+            e.HasQueryFilter(r => r.TenantId == _tenant.TenantId);
+
+            // The whole reason this table exists. A box retrying an upload it never saw the
+            // response to is normal traffic, and a check-then-insert loses to two retries
+            // arriving together — both find nothing and both write. This makes the duplicate
+            // impossible rather than unlikely.
+            e.HasIndex(r => new { r.TenantId, r.DeviceId, r.Seq }).IsUnique();
         });
     }
 }

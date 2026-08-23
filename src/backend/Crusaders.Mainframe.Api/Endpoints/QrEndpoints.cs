@@ -64,41 +64,20 @@ public static class QrEndpoints
 
         app.MapPost("/api/v1/court/{courtNumber:int}/qr/match", async (
             int courtNumber, QrMatchRequest req,
-            MainframeDbContext db, IConfiguration config,
+            MainframeDbContext db,
+            IdentificationResolver identities,
             CourtActivationService activation,
             CancellationToken ct) =>
         {
             if (string.IsNullOrEmpty(req.Token)) return Results.BadRequest(new { error = "token_required" });
 
-            var secret = config["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret missing");
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
-            var handler = new JwtSecurityTokenHandler();
-
-            ClaimsPrincipal principal;
-            try
-            {
-                principal = handler.ValidateToken(req.Token, new TokenValidationParameters
-                {
-                    ValidateIssuer = true,
-                    ValidateAudience = true,
-                    ValidateLifetime = true,
-                    ValidateIssuerSigningKey = true,
-                    ValidIssuer = config["Jwt:Issuer"],
-                    ValidAudience = config["Jwt:Audience"],
-                    IssuerSigningKey = key,
-                    ClockSkew = TimeSpan.FromSeconds(10),
-                }, out _);
-            }
-            catch
-            {
-                return Results.Ok(new { matched = false, reason = "invalid_or_expired" });
-            }
-
-            var purpose = principal.FindFirstValue("purpose");
-            if (purpose != "qr_ident") return Results.Ok(new { matched = false, reason = "wrong_purpose" });
-
-            var sub = principal.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? principal.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!Guid.TryParse(sub, out var userId)) return Results.Ok(new { matched = false, reason = "no_sub" });
+            // Verified through the shared resolver rather than inline here. There were two
+            // copies of this — one for the courtside camera and one that would have been
+            // written for the court box's walk-up path — and two implementations of "is this
+            // token real" is one implementation more than a security check should ever have.
+            var resolved = identities.VerifyQrToken(req.Token);
+            if (resolved is null) return Results.Ok(new { matched = false, reason = "invalid_or_expired" });
+            var userId = resolved.Value;
 
             // Identify AND activate. This used to confirm a booking existed and return a
             // user_id — no ledger post, no CheckedInAt, no event, no audit row. So a

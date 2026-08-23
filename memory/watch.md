@@ -44,7 +44,17 @@ consequence of skipping each, in [`docs/go-live-checklist.md`](../docs/go-live-c
    against the parent mandate. Either adopt or record a rationale. The hand-rolled primitives
    now have tests, which is a mitigation and not a waiver — and those tests found two
    accessibility defects a library would have shipped correct.
-9. **No architecture doc exists for the backend.** `src/iot/README.md` covers the hardware
+9. **The roster is never pushed to a box, so the offline path is unreachable in practice.**
+   `lib/roster` is built and tested, but nothing populates it — and the reason is a design
+   question rather than a missing endpoint. The QR token is a **60-second signed JWT**, so it
+   cannot be pre-cached by construction; a box holding a stable copy of somebody's identity
+   is a box that opens a court for them forever. So an offline roster needs a *stable*
+   identifier — a PIN-derived token or a printed code — and that is a security trade nobody
+   has taken: a token the box can compare against a typed PIN is a token a stolen box can
+   brute-force over the 10,000 space for the members in its cache.
+   **Until that is decided, a court box needs the network to admit anybody.** What works
+   today is the online path: scan, POST, decide.
+10. **No architecture doc exists for the backend.** `src/iot/README.md` covers the hardware
    split thoroughly; nothing covers the API.
 
 ## Resolved since the last stamp
