@@ -1,0 +1,10 @@
+{
+  "name": "arduino_hal",
+  "version": "1.0.0",
+  "description": "Real drivers for the hal ports on the WeMos Mega 2560 and its onboard ESP8266. The ONLY place in lib/ allowed to include Arduino headers; every wiring fact lives here.",
+  "keywords": "hal, drivers, avr, esp8266",
+  "frameworks": "arduino",
+  "platforms": "atmelavr, espressif8266",
+  "dependencies": { "hal": "*" },
+  "build": { "flags": ["-I include"] }
+}

@@ -216,6 +216,68 @@ jobs:
             -x '*/bin/*' -x '*/obj/*' -x '*.test.tsx' -x '*.test.ts' -w
 
   # ============================================================================
+  # IoT firmware — compile every target board plus the native simulator.
+  #
+  # Separate from the `iot` job above because it proves a different thing. That
+  # one runs `pio test`, which builds lib/ and test/ for the HOST only: it never
+  # touches lib/arduino_hal/, never resolves a board dependency, and never links
+  # for AVR or Xtensa. tools/strict_compile.sh excludes those two directories on
+  # the stated grounds that `pio run` covers them — which was not true while
+  # `pio run` did not work, and this job is what makes it true.
+  #
+  # The failure it would have caught: [env:court_mega] pinned a LiquidCrystal_I2C
+  # coordinate that has never existed in the PlatformIO registry, so every board
+  # build failed at dependency resolution. Nothing in CI ran `pio run`, so
+  # nothing went red, for as long as that has been in the file.
+  #
+  # Deliberately has no `needs:`, matching the `iot` job: the backend carries
+  # pre-existing failures and chaining the firmware behind it would mean the
+  # firmware gate never runs.
+  # ============================================================================
+  iot-build:
+    name: IoT Firmware (board builds)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: src/iot/requirements.txt
+
+      # A separate cache entry from the `iot` job's on purpose. This one holds
+      # the AVR and Xtensa toolchains and the board framework packages, which
+      # are hundreds of megabytes the host-test job has no use for; sharing one
+      # key would make the two jobs fight over what the entry contains.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-boards-${{ runner.os }}-${{ hashFiles('src/iot/platformio.ini') }}
+          restore-keys: pio-boards-${{ runner.os }}-
+
+      - name: Install pinned toolchain
+        run: pip install -r src/iot/requirements.txt
+
+      - name: Build court_mega, court_bridge and the simulator
+        run: pio run -d src/iot -e court_mega -e court_bridge -e simulator
+
+      # The simulator is what the .NET integration tests talk to, so "it links"
+      # is not enough — it has to come up and bind its socket. --port 0 asks the
+      # kernel for a free one, so this cannot collide with anything on a runner.
+      - name: Simulator starts and binds
+        run: |
+          set -euo pipefail
+          out=$(timeout 10s src/iot/.pio/build/simulator/program \
+                  --port 0 --store "$RUNNER_TEMP/simstore" </dev/null || true)
+          echo "$out"
+          echo "$out" | grep -q '^\[sim\] listening on 127\.0\.0\.1:[0-9]\+$'
+
+  # ============================================================================
   # Security — npm audit + dotnet vulnerable package scan
   # ============================================================================
   security:
@@ -289,7 +351,7 @@ jobs:
     name: Build Backend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, backend-integration, iot, security]
+    needs: [backend, frontend, backend-integration, iot, iot-build, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -317,7 +379,7 @@ jobs:
     name: Build Backend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, backend-integration, iot, security]
+    needs: [backend, frontend, backend-integration, iot, iot-build, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -366,7 +428,7 @@ jobs:
     name: Build Frontend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, backend-integration, iot, security]
+    needs: [backend, frontend, backend-integration, iot, iot-build, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -396,7 +458,7 @@ jobs:
     name: Build Frontend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, backend-integration, iot, security]
+    needs: [backend, frontend, backend-integration, iot, iot-build, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code

@@ -1,0 +1,10 @@
+{
+  "name": "posix_hal",
+  "version": "1.0.0",
+  "description": "Host implementations of the hal ports for the native device simulator: monotonic clock, TCP transport, file-backed store, console relay/display/scanner/buttons.",
+  "keywords": "hal, simulator, posix",
+  "frameworks": "*",
+  "platforms": "native",
+  "dependencies": { "hal": "*", "timebase": "*" },
+  "build": { "flags": ["-I include"] }
+}

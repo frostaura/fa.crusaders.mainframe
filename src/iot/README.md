@@ -88,12 +88,18 @@ lib/           shared modules — PURE, no Arduino headers, host-compilable
   timebase/    rollover-safe millis() primitives   ← read this first
   hal/         port interfaces + null implementations
   hal_fakes/   recording test doubles
-  arduino_hal/ real drivers (AVR / ESP)
+  courtlogic/  the Mega's behaviour: auto-off timer, debounce, scan framing,
+               auth window, frame dispatch — everything main.cpp does NOT do
+  protocol/    Mega <-> ESP serial codec
+  discovery/   UDP beacon, claim commitment, announce schedule
+  devcrypto/   SHA-256 / HMAC / HKDF / request signer
+  fwversion/   the FW_VERSION_* string, alone so either half can carry it
+  arduino_hal/ real drivers (AVR / ESP)   ← the ONLY place Arduino headers live
   posix_hal/   host drivers, for the simulator
 src/
-  court_mega/    ATmega2560 firmware
-  court_bridge/  ESP8266 firmware
-  simulator/     native device simulator
+  court_mega/    ATmega2560 firmware — composition root only
+  court_bridge/  ESP8266 firmware — composition root only
+  simulator/     native device simulator — the same lib/ over posix_hal
 test/          Unity tests, run on the host
 tools/         strict compile gate, size budgets
 ```
@@ -102,6 +108,24 @@ Everything under `lib/` except `arduino_hal/` and `posix_hal/` is free of
 Arduino headers, so the same code compiles for AVR, Xtensa **and** the host test
 runner. That is what lets the whole logic layer be proven with no board
 attached. CI enforces the rule with a grep gate.
+
+`main.cpp` is the **only** composition root in each of the three targets: it
+chooses implementations and wires them, and it holds no behaviour. That is not a
+style preference — `pio test -e native` sets `build_src_filter = -<*>`, so
+anything written in `src/` is unreachable from the host suite, and the relay
+auto-off timer is not allowed to live where no test can drive it.
+
+### Running the simulator
+
+```bash
+pio run -e simulator
+.pio/build/simulator/program --port 0 --start-ms 4294963200
+```
+
+It prints the bound port on its first line, then speaks the real downlink
+protocol on that socket. `--start-ms 4294963200` puts the 49.7-day `millis()`
+rollover four seconds after launch, which is how a test reaches the wrap without
+waiting seven weeks. Console commands: `scan <code>`, `btn <A-D|1-4>`, `quit`.
 
 ## Working on it
 

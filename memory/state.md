@@ -1,15 +1,35 @@
 ---
 name: crusaders-mainframe-state
-description: "Backend 284/284 and firmware 85/85 green; Phases 0-4 done bar PayFast; device identity, SSRF guard, webhook retry and both halves of device discovery built; PR #1 open as draft on the court-hardware branch"
+description: "Firmware 147/147 green and all three PlatformIO targets now COMPILE — `make build` no longer fails at build-iot; backend 284/284 as of 2026-08-22; Phases 0-4 done bar PayFast; PR #1 open as draft on the court-hardware branch"
 type: state
-last_verified: 2026-08-22
+last_verified: 2026-08-23
 ---
 
 # Current state
 
-_Last verified: 2026-08-22 — every claim below was executed, not read. A .NET 10 SDK and PlatformIO were installed into this environment (neither was present), a real Postgres 16 was started locally, the full suite was run, the migration was applied to a fresh database, and each quality gate was deliberately broken to confirm it fails. Verify before trusting anything dated older than ~60 days._
+_Last verified: 2026-08-23 for everything firmware — the three board/simulator builds, the host
+suites under both native and ASAN/UBSAN, every lint gate, and a deliberate mutation of the relay
+auto-off timer were all executed in that session. **The backend and frontend claims still carry
+their 2026-08-22 verification**: `dotnet` is absent from a fresh remote session and was not
+installed on 2026-08-23, so nothing here re-ran them._
+
+_2026-08-22 — every claim below was executed, not read. A .NET 10 SDK and PlatformIO were installed into this environment (neither was present), a real Postgres 16 was started locally, the full suite was run, the migration was applied to a fresh database, and each quality gate was deliberately broken to confirm it fails. Verify before trusting anything dated older than ~60 days._
 
 **Backend 284/284 green** (46 need Postgres and skip cleanly without it), **firmware 85/85 green** under both native and ASAN/UBSAN with no board attached. The backend was 24/30 at the start of 2026-08-22. The working tree is clean and `main` is at `6ed1fea`; all work sits on `claude/squash-booking-system-design-dt7ja6`, pushed, with **PR #1 open as a draft** carrying a phase checklist. The delivery shape is one branch, one PR — agreed with the founder, so do not split it.
+
+### What changed on 2026-08-23
+
+- **`make build` passes its firmware leg for the first time.** See "Still red or unbuilt" below for the three
+  separate causes; the short version is a library owner prefix that never existed in the PlatformIO registry,
+  three empty source directories, and a `-std` flag that the Arduino builder had been silently overriding.
+- **`lib/arduino_hal` and `lib/posix_hal` are real.** Both were empty directories that `README.md` and
+  `lib/README.md` described as existing. All seven ports now have a driver on each side, and `pio run`
+  compiles all 16 of those source files — which is what `tools/strict_compile.sh` has always claimed when it
+  excludes those two directories, and was not true until now. Note the excluded set is compiled with
+  `-Wall -Wextra` only, not the strict gate's `-Werror -Wconversion -Wold-style-cast` set.
+- **`lib/courtlogic` is new** and holds everything the Mega does; the three `main.cpp` files hold only wiring.
+- **CI gained an `iot-build` job** that runs `pio run` for all three targets and starts the simulator to check
+  it binds. It gates the four Docker build jobs, so a broken firmware build now blocks a release.
 
 ### What changed on 2026-08-22
 
@@ -17,6 +37,7 @@ _Last verified: 2026-08-22 — every claim below was executed, not read. A .NET 
 - **The schema is deployable.** Confirmed empirically that a production boot against a fresh Postgres previously threw `PendingModelChangesWarning` and died. The migration is regenerated from the model (a real 26KB `InitialCreate` and a real 27KB snapshot, replacing hand-written SQL and a 52-line stub), the raw DDL block is gone from `Seeder.cs`, and all eight previously-orphaned columns plus `webauthn_credentials` are now migrated.
 - **The Mega <-> ESP serial protocol codec is built** — `src/iot/lib/protocol` (v2 `!VERB,args*CC\n` plus both-ways legacy compatibility), 22 Unity tests, and a 108-case shared corpus at `src/contracts/device-protocol/serial/`. The "no `ON` without a duration" rule is a static_assert and a required constructor argument, not a comment: weakening ON's row in `kVerbSpecs` fails the build. Confirmed by mutation — accepting a bad checksum and dropping the escaping each turn four tests red.
 - **`src/iot/` exists** — a PlatformIO project with `native`, `native_asan`, `native_cov`, `court_mega`, `court_bridge` and `simulator` environments, pinned platform versions, and `lib/timebase` (rollover-safe time, 10 tests at four clock bases). `src/firmware/lights-controller/` is deleted.
+- **The firmware itself is built and all three targets compile (2026-08-23).** `lib/courtlogic` holds the Mega's whole behaviour — the independent relay auto-off timer with its 90-minute hard cap, the 80 ms button debounce, scanner line assembly, the expiring authorisation window and the frame dispatcher — with 41 host tests run at four clock bases including the `millis()` wrap. `lib/arduino_hal` and `lib/posix_hal` now exist (they were empty directories the READMEs described): real drivers for relay, buttons, LCD, both UARTs, EEPROM and LittleFS, and host drivers behind a loopback TCP transport for the simulator. The three `main.cpp` files are composition roots and hold no behaviour, because `pio test -e native` filters `src/` out entirely. Confirmed by mutation — swapping `tb::Deadline::expired()` for the deleted sketch's `now >= expiresAt` turns two tests red, both of them wrap cases.
 - **Four CI defects fixed**, three of which were gates that could not fail: `backend-integration`'s `|| exit 0`; the coverage gate's `exit 0` on a missing report; and Security Scan, unreachable behind a permanently red backend. The fourth was `setup-python` lacking a dependency file.
 - **10 frontend advisories resolved** (9 undici, 2 vite; 3 low, 7 high) — surfaced only because the security gate became reachable. Lockfile-only, all semver-compatible.
 - **`NoShowWorker` no longer pays members for not showing up** — it refunded uncharged bookings, netting +70% of the booking value per no-show.
@@ -69,6 +90,6 @@ Three things worth knowing before touching it:
 
 The six Docker/Portainer Actions secrets remain unset, so the release chain still cannot run.
 
-**`make build` fails at `build-iot`** — the `court_mega`, `court_bridge` and `simulator` source directories do not exist yet, and the pinned `johnrickman/LiquidCrystal_I2C@1.1.4` does not resolve from the PlatformIO registry. CI does not currently run the firmware *build*, only its tests, so this is not visible there.
+~~**`make build` fails at `build-iot`**~~ — **FIXED 2026-08-23.** Both causes are gone: the library coordinate is now `marcoschwartz/LiquidCrystal_I2C@1.1.4` (same API, same version, the owner prefix was simply wrong — johnrickman's exists only in the Arduino Library Manager index, never in the PlatformIO registry), and all three source directories are populated. `pio run -e court_mega -e court_bridge -e simulator` succeeds; `court_mega` uses 23.7% of SRAM and 6.1% of flash. A third cause surfaced once the first was fixed: the Arduino AVR builder appends `-std=gnu++11` after `build_flags`, so `[common]`'s `-std=gnu++17` had never applied and lib/'s `inline constexpr` variables could not compile for the board — `build_unflags = -std=gnu++11` fixes it. A new `iot-build` CI job now runs `pio run` for all three targets and gates the four Docker jobs, so this cannot go quiet again.
 
 Not started: **PayFast** (the rest of Phase 2), **Phase 5** court firmware, **Phase 6** lights as a purchasable good, **Phase 7** charge-at-booking, **Phase 8** OTA, **Phase 9** admin UI. Gates are parked by decision — the hardware is undecided.
