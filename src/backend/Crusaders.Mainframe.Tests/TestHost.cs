@@ -68,6 +68,8 @@ public sealed class TestHost : IAsyncDisposable
         services.AddSingleton<IEmailService>(emailStub);
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
+        services.AddSingleton<Crusaders.Mainframe.Api.Lights.IRelayClient,
+                              Crusaders.Mainframe.Api.Lights.NullRelayClient>();
         // Mirrors Program.cs — the hardware abstraction and its key deriver must be
         // registered in both, or a test host diverges from the app it stands in for.
         services.AddSingleton<Crusaders.Mainframe.Api.Security.DeviceAuth.IDeviceKeyDeriver>(

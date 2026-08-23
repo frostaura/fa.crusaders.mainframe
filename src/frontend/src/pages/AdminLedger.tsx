@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { endpoints, type LedgerRow } from "../lib/api";
+import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
 import { Card } from "../components/Card";
 import { Input, Label } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
 import { useToast } from "../components/Toast";
 
-const TYPES = [
-  "AdminAdjustment", "BookingCharge", "CancellationRefund",
-  "LateCancellationPenalty", "NoShowPenalty", "PaymentReversal", "TopUp",
-];
+// Derived from the union in api.ts rather than hand-maintained here. This was a
+// literal array with no connection to the type, so a ledger type added on the
+// backend became unfilterable with nothing to warn anyone.
+const TYPES = LEDGER_ENTRY_TYPES;
 
 export default function AdminLedgerPage() {
   const toast = useToast();

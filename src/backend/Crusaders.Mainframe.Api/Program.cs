@@ -210,6 +210,10 @@ builder.Services.AddScoped<DeviceDiscoveryService>();
 
 // Phase 5 — biometric abstraction
 builder.Services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
+
+// Hardware abstractions ship before drivers, and CI must pass without touching a relay.
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Lights.IRelayClient,
+                              Crusaders.Mainframe.Api.Lights.NullRelayClient>();
 builder.Services.AddScoped<BiometricService>();
 
 // WebAuthn / passkeys

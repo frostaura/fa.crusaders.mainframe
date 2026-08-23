@@ -57,6 +57,42 @@ export const api = {
 
 export type WhoAmI = { tenant_slug: string; tenant_id: string; user_id: string | null; is_authenticated: boolean; is_admin: boolean };
 export type LoginResponse = { access_token: string; user_id: string; is_admin: boolean };
+/**
+ * Every ledger entry type the backend can emit.
+ *
+ * A real union rather than `string`, so adding a type on the backend without
+ * teaching the frontend about it is a compile error here rather than a silent
+ * gap in the admin filter. It was `string`, and the filter list below was a
+ * hand-maintained array that had no relationship to it — nothing connected the
+ * two, so a new type appeared in the ledger and was unfilterable, with no
+ * warning anywhere.
+ *
+ * Keep in step with `LedgerEntryType` in the backend domain. The backend's
+ * LedgerEntryTypeCoverageTests pins the member count, so the two cannot drift
+ * far without something going red.
+ */
+export type LedgerEntryType =
+  | "TopUp"
+  | "BookingCharge"
+  | "CancellationRefund"
+  | "NoShowPenalty"
+  | "LateCancellationPenalty"
+  | "AdminAdjustment"
+  | "PaymentReversal"
+  | "LightsPurchase";
+
+/** The filter list, derived from the union so the two cannot disagree. */
+export const LEDGER_ENTRY_TYPES: readonly LedgerEntryType[] = [
+  "AdminAdjustment",
+  "BookingCharge",
+  "CancellationRefund",
+  "LateCancellationPenalty",
+  "LightsPurchase",
+  "NoShowPenalty",
+  "PaymentReversal",
+  "TopUp",
+];
+
 export type LedgerRow = {
   id: string;
   at: string;
@@ -64,7 +100,7 @@ export type LedgerRow = {
   to: string;
   amountCredits: number;
   signedAmountCredits: number;
-  type: string;
+  type: LedgerEntryType;
   comment: string;
   subjectUserId: string;
   subjectName: string;
