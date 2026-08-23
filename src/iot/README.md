@@ -93,6 +93,11 @@ lib/           shared modules — PURE, no Arduino headers, host-compilable
   protocol/    Mega <-> ESP serial codec
   discovery/   UDP beacon, claim commitment, announce schedule
   devcrypto/   SHA-256 / HMAC / HKDF / request signer
+  roster/      who may open which court, cached and age-limited
+  eventq/      what the box DID, queued until the API can hear about it
+  court/       what a scan means; the button map; the walk-up pad
+  devapi/      signed requests, response policy, and a heapless JSON scanner
+  otacore/     whether to take an update, and surviving one that does not work
   fwversion/   the FW_VERSION_* string, alone so either half can carry it
   arduino_hal/ real drivers (AVR / ESP)   ← the ONLY place Arduino headers live
   posix_hal/   host drivers, for the simulator
@@ -123,7 +128,10 @@ pio run -e simulator
 ```
 
 It prints the bound port on its first line, then speaks the real downlink
-protocol on that socket. `--start-ms 4294963200` puts the 49.7-day `millis()`
+protocol on that socket. It binds **loopback only** unless `--bind-all` is passed,
+which exists for the container case and nothing else — a simulated relay controller
+answering on every interface is one anything on the network can switch a court on
+with. `--start-ms 4294963200` puts the 49.7-day `millis()`
 rollover four seconds after launch, which is how a test reaches the wrap without
 waiting seven weeks. Console commands: `scan <code>`, `btn <A-D|1-4>`, `quit`.
 
@@ -149,6 +157,66 @@ using `0` as a "disarmed" sentinel (0 is a legal `millis()` value) and comparing
 with `now >= expiresAt` (false for 49.7 days after the wrap, so the relay was
 never released). `make lint-iot` greps for raw comparisons against any
 `*deadline` / `*expires` / `*AtMs` identifier outside `lib/timebase`.
+
+## The court works when the network does not
+
+A scan is decided **on the box**, from the roster cache, in microseconds. Putting
+an HTTPS round trip on that path would make every activation depend on a consumer
+router and an ISP, and turn a DNS stall into a member standing in a dark corridor
+pressing the button again.
+
+So the box decides locally and records what it did; the API hears about it when it
+can. Three consequences worth knowing before changing any of it:
+
+- **A queued activation is not a charge.** Under charge-at-booking the member has
+  already been debited. The event is the evidence that stops the no-show sweep
+  reversing it — a court lit and never reported looks exactly like a member who
+  stayed home.
+- **A stale roster refuses rather than guesses.** Past `ROSTER_MAX_AGE_MS` the box
+  will not admit anybody, because a cancelled booking lingering in a cache lights a
+  court nobody is charged for. Note this is the **opposite** direction to the relay
+  timer, where failing closed would leave lights burning all night. Both live in
+  this box and they point different ways on purpose.
+- **Walk-ups need the network.** A walk-up is truncated at the next booking and
+  charged pro rata, and the box knows neither the tariff nor the next booking. That
+  is the right way round: refusing to sell new time is a member at the desk, where
+  refusing a booking they already paid for is a member in the dark.
+
+### What the event queue does not survive
+
+**A power cut.** The ring is in RAM. It survives the WiFi going away, a router
+reboot, a two-day outage — the box stays powered throughout — and it does not
+survive the breaker, because `hal::IStore` holds 32-byte values and an event is
+larger. Persisting them needs a block-oriented port.
+
+The cost when it happens: a court lit during an outage that ended in a power cut is
+never reported, so the sweep treats it as a no-show and refunds it less a penalty
+the member did not earn. Visible in the ledger, reversible by an admin, and in the
+go-live checklist. The **sequence number** does persist, in blocks of 64 — that is
+what the API's deduplication rests on, and reusing one loses a real event.
+
+## Over-the-air updates
+
+Signed with **RSA-2048/SHA-256** through the ESP8266 core's `Updater`, against a
+public key compiled into the image. The plan called for Ed25519 on the correct
+reasoning that an HMAC keyed with the device key would let one compromised box
+forge firmware for the fleet; BearSSL — already linked in for TLS — has no
+Ed25519, and vendoring a curve implementation into a court-lighting controller is
+the worse trade. **The property that mattered is unchanged**: the signing key is
+asymmetric and lives only where releases are built.
+
+**There is no rollback.** A 4M part carrying a 1 MB sketch and 2 MB of LittleFS has
+no second OTA slot, and the filesystem is not optional because it holds the device
+credential. What `ota::BootGuard` does instead is make sure a bad build is never
+installed **twice** — which is the failure that takes out a club, since every box
+heartbeats against the same manifest and would otherwise reflash in a loop, all at
+once. A box that will not boot at all still needs a USB cable.
+
+The guard clears on **evidence**: an API call the server accepted. "It booted" is
+not "it works" — a firmware that comes up and cannot authenticate looks alive and
+does nothing. Three boots are allowed before a build is condemned, because a
+brownout when four relay coils energise at once is a real thing on this hardware.
+The condemned version is reported on the heartbeat and shown on the Devices screen.
 
 ## Flashing
 

@@ -18,5 +18,12 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+
+    // vitest's default include is `**/*.{test,spec}.?(c|m)[jt]s?(x)` from the project
+    // root, which swallows the Playwright specs in e2e/ and then fails with
+    // "Playwright Test did not expect test() to be called here" — a message that
+    // reads as a broken Playwright install and is not one. Two runners, two
+    // directories: unit tests live under src/, browser tests under e2e/.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
   },
 });

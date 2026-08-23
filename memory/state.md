@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-state
-description: "Firmware 147/147 green and all three PlatformIO targets now COMPILE — `make build` no longer fails at build-iot; backend 284/284 as of 2026-08-22; Phases 0-4 done bar PayFast; PR #1 open as draft on the court-hardware branch"
+description: "Phases A-J of the court-hardware programme are code-complete: backend 473, firmware 231, frontend 28 unit + 8 Playwright, all green. Charge moved to booking, the court box decides scans offline, OTA and the admin Devices screen exist. What remains is physical and is in docs/go-live-checklist.md"
 type: state
 last_verified: 2026-08-23
 ---
@@ -16,6 +16,63 @@ installed on 2026-08-23, so nothing here re-ran them._
 _2026-08-22 — every claim below was executed, not read. A .NET 10 SDK and PlatformIO were installed into this environment (neither was present), a real Postgres 16 was started locally, the full suite was run, the migration was applied to a fresh database, and each quality gate was deliberately broken to confirm it fails. Verify before trusting anything dated older than ~60 days._
 
 **Backend 284/284 green** (46 need Postgres and skip cleanly without it), **firmware 85/85 green** under both native and ASAN/UBSAN with no board attached. The backend was 24/30 at the start of 2026-08-22. The working tree is clean and `main` is at `6ed1fea`; all work sits on `claude/squash-booking-system-design-dt7ja6`, pushed, with **PR #1 open as a draft** carrying a phase checklist. The delivery shape is one branch, one PR — agreed with the founder, so do not split it.
+
+### The court-hardware programme, phases A–J (2026-08-23)
+
+**Everything below was executed in this session, not read.** Backend 473/473 with a real
+Postgres attached (no skips), firmware 231/231 under both native and ASAN/UBSAN, frontend 28
+vitest + 8 Playwright across a mobile and a desktop project, all three PlatformIO targets
+building, every lint and complexity gate green.
+
+**The money model changed.** The debit now happens **at booking**, not at lights-on. That
+contradicts client blueprint A.9 — the customer's own words — so it is recorded as deviation
+**D-1** in `docs/specs/client-blueprint-deltas.md` and **needs committee sign-off before
+go-live**. `CLAUDE.md`'s third invariant was rewritten in the same commit. Cancelling refunds
+in full less the penalty; nothing comes back once somebody has checked in; attendance is
+`CheckedInAt` and never the clock, because `ChargedAt` is now set on every row.
+
+**Live money defects found and fixed**, each mutation-proven:
+
+- PIN and QR charged **nothing** — a member identifying that way got a free game *and* looked
+  like a no-show, because nothing set `CheckedInAt`. Only biometric ever charged.
+- Insufficient balance **lit the court anyway**: the charge failure was a `LogWarning` and
+  `CheckedInAt` was stamped regardless, which disqualified the booking from the no-show sweep.
+- `/api/v1/court/` **bypassed tenant resolution**, so all three courtside endpoints had never
+  worked — they resolved `TenantId == Guid.Empty` and 404'd forever.
+- Three disagreeing grace windows (5 from an app-config key absent from `appsettings.json`,
+  30 hardcoded twice, and the tenant setting) reconciled onto `grace_window_minutes`.
+- The admin settings GET invented its own defaults — 30 minutes and 50 credits where the engine
+  used 15 and 8 — so **opening the settings page and pressing save doubled every slice and
+  repriced every court**, silently.
+- Credits were rendered with a **rand sign in six places**. At 1.6–2.4 credits per rand that
+  overstates a balance by 60–140%. One call site was named `priceZar` while holding credits.
+- A GiST exclusion constraint now makes overlapping bookings unrepresentable. The check-then-
+  insert race was survivable when a booking took no money; under charge-at-booking both members
+  are debited before the collision is visible.
+
+**The ESP8266 half is built.** `lib/eventq`, `lib/roster`, `lib/court`, `lib/devapi`,
+`lib/otacore` — a scan is decided **on the box**, in microseconds, from an age-limited roster
+cache, and what it did is queued for the API. Heartbeat and provisioning are wired, so a board
+collects its own key with the claim code shown on its LCD.
+
+**Buttons are remappable from the admin panel**, and both implementations of the token grammar
+read `src/contracts/device-protocol/buttonmap/cases.json` — which caught a real drift on its
+first run (C# trims both ends, the firmware only trimmed the leading space).
+
+**OTA exists**, signed RSA-2048/SHA-256 through the ESP8266 core's `Updater`. Two honest limits,
+both recorded as **D-2**: it is not Ed25519 (BearSSL has none, and vendoring a curve into a
+court-lighting controller is the worse trade — the asymmetric property the plan wanted is
+unchanged), and there is **no rollback**, because a 4M part with 1 MB sketch and 2 MB LittleFS
+has no second slot. What `BootGuard` buys is that a bad build is never installed twice, which is
+the failure that takes a club out.
+
+**Two accessibility defects** were found by tests written against existing components:
+`ConfirmButton`'s accessible name was every copy of its label concatenated, and `AdminSettings`'
+`Field` rendered a label with no `htmlFor`, so every input on that page was unlabelled.
+
+**Known limit, accepted knowingly:** queued events are in RAM. They survive the WiFi going away
+and a two-day outage; they do not survive a power cut, because `hal::IStore` caps a value at 32
+bytes. Consequence and mitigation are in the go-live checklist.
 
 ### What changed on 2026-08-23
 

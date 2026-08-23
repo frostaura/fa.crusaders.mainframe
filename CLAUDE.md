@@ -64,7 +64,7 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 
 ## Where docs live
 
-- `docs/specs/` — `feature-spec.md` · `multi-tenancy.md` · `biometric-abstraction.md` · `lights-controller.md` · `payments-peachpayments.md` (**superseded** — the provider is PayFast; the replacement spec is outstanding) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
+- `docs/specs/` — `feature-spec.md` · `multi-tenancy.md` · `biometric-abstraction.md` · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
 - `docs/specs/client-blueprints/` — the verbatim client artifact plus its `.md` transcription. **The blueprint is the customer's word and outranks internal specs on economics.**
 - `docs/specs/client-blueprint-deltas.md` — line-by-line reconciliation of blueprint requirements against the build. The most reliable economics reference in the repo.
 - `docs/development-plan.md` — phased build sequence and parking-lot decisions. **Its status column understates reality; trust code over the plan** — see `MEMORY.md`.
