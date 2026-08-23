@@ -214,10 +214,24 @@ devapi::DeviceClient gApi(devapi::Credentials{}, gRequestEntropy);
 uint8_t gCourtNumber = 0U;
 
 /// When each court's lights went on, so a release can report how long it was
-/// actually held. Zero means not held. This is the number a dispute about a
-/// 45-minute booking turns on, and the Mega's own timer is what ends it — so
-/// the ESP has to watch for the end rather than schedule it.
-uint32_t gHeldSinceMs[4] = {0U, 0U, 0U, 0U};
+/// actually held. This is the number a dispute about a 45-minute booking turns
+/// on, and the Mega's own timer is what ends it — so the ESP has to watch for
+/// the end rather than schedule it.
+///
+/// `held` is a separate flag rather than "zero means not held", which is the
+/// rule TimeBase.h states outright: every possible uint32_t is a legal millis()
+/// reading, so no value is free to carry a second meaning. tb::Deadline carries
+/// its own `armed` flag for exactly this. A court lit in the one millisecond the
+/// clock reads zero — once per 49.7 days — reported a session of zero length,
+/// which is the same defect class the file exists to prevent, in the one file no
+/// gate covers. (The CI lint described in TimeBase.h matches identifiers ending
+/// Deadline|Expires|AtMs; `gHeldSinceMs` ends in SinceMs and slipped through.)
+struct HeldSince {
+  uint32_t sinceMs = 0U;
+  bool held = false;
+};
+
+HeldSince gHeld[4];
 
 /// What the eight buttons do, and the two presses that use them.
 ///
@@ -324,27 +338,63 @@ void broadcastAnnounce() {
   static_cast<void>(gUdp.endPacket());
 }
 
-void rememberApiUrl(const char* url) {
+/// Persists the API base URL. False when it will not fit the store.
+///
+/// The caller must honour that false rather than carrying on: gApiUrl is sized to
+/// the store's value cap, while an OFFER may carry up to discovery::kMaxValueLen.
+/// So a longer URL used to be silently truncated into RAM by snprintf while this
+/// function quietly declined to persist it — leaving the box calling a mangled
+/// host until the next reboot, and a different mangled host after it.
+bool rememberApiUrl(const char* url) {
   const size_t len = strlen(url);
   if (len == 0U || len > hal::kStoreMaxValueLen) {
-    return;
+    return false;
   }
-  static_cast<void>(gStore.put(kKeyApiUrl, reinterpret_cast<const uint8_t*>(url), static_cast<uint8_t>(len)));
+  return gStore.put(kKeyApiUrl, reinterpret_cast<const uint8_t*>(url), static_cast<uint8_t>(len)) ==
+         hal::StoreResult::kOk;
 }
 
 void handleOffer(const discovery::Packet& packet) {
-  // UnclaimedBox, not ClaimedBox: this board has no device key yet, so it has
-  // nothing to verify a signature with and says so through its type rather
-  // than through a comment. The moment provisioning lands, this becomes a
-  // ClaimedBox whose constructor REQUIRES the key — which is what makes "a
-  // claimed box refuses an unsigned OFFER" structural instead of an `if`.
-  const discovery::UnclaimedBox box(gNonceHex);
+  // The type carries the rule, which is the whole reason both types exist — and
+  // until now this built an UnclaimedBox unconditionally, so ClaimedBox was
+  // constructed nowhere in the firmware and its guarantee was a comment.
+  //
+  // What that cost: pumpOffers() runs on every loop() with WiFi up, provisioned
+  // or not, so a board already holding a device key still accepted any datagram
+  // on the discovery port that parsed as an OFFER and echoed its nonce — and the
+  // nonce is not a secret, it goes out in a broadcast ANNOUNCE every five
+  // seconds. Anyone on the club WiFi could repoint gApiUrl at a host they
+  // controlled, and from there drive walk-up grants — lights on, on any court,
+  // for as long as the cap allows, as often as they liked.
+  //
+  // An unclaimed board still accepts an unsigned OFFER: it has nothing to verify
+  // with, and refusing would mean an API that always signs could never claim a
+  // board. A claimed one verifies, always, because ClaimedBox has no overload
+  // that does otherwise.
   discovery::AcceptedOffer offer;
-  if (!box.accept(packet, offer)) {
+  if (gProvisioned) {
+    const discovery::ClaimedBox box(dc::ByteSpan{gDeviceKey, kDeviceKeyBytes}, gNonceHex);
+    if (!box.accept(packet, offer)) {
+      return;
+    }
+  } else {
+    const discovery::UnclaimedBox box(gNonceHex);
+    if (!box.accept(packet, offer)) {
+      return;
+    }
+  }
+
+  // Refused rather than truncated. A base URL this box cannot hold is one it
+  // cannot call correctly, and half of one is a request to somewhere else.
+  // gApiUrl is sized to the store's value cap while an OFFER may carry up to
+  // discovery::kMaxValueLen, so this is a real gap and not a defensive nicety.
+  const size_t urlLen = strlen(offer.url());
+  if (urlLen == 0U || urlLen >= sizeof(gApiUrl)) {
     return;
   }
-  rememberApiUrl(offer.url());
-  snprintf(gApiUrl, sizeof(gApiUrl), "%s", offer.url());
+  static_cast<void>(rememberApiUrl(offer.url()));
+  memcpy(gApiUrl, offer.url(), urlLen);
+  gApiUrl[urlLen] = '\0';
 }
 
 void pumpOffers() {
@@ -407,7 +457,7 @@ void applyOutcome(const court::Outcome& outcome) {
   const proto::Court court = static_cast<proto::Court>(outcome.court);
   static_cast<void>(sendToMega(proto::Frame::on(court, outcome.durationMs / 1000U)));
   if (outcome.court < 4U) {
-    gHeldSinceMs[outcome.court] = gClock.nowMs();
+    gHeld[outcome.court] = HeldSince{gClock.nowMs(), true};
   }
 }
 
@@ -440,9 +490,9 @@ void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
   const uint8_t court = static_cast<uint8_t>(courtText[0] - 'A');
-  applyOutcome(gSession.onRelease(
-      court, gHeldSinceMs[court] == 0U ? 0U : tb::since(nowMs, gHeldSinceMs[court]), nowMs));
-  gHeldSinceMs[court] = 0U;
+  applyOutcome(
+      gSession.onRelease(court, gHeld[court].held ? tb::since(nowMs, gHeld[court].sinceMs) : 0U, nowMs));
+  gHeld[court] = HeldSince{};
 }
 
 /// Forward declaration: the button handler sits with the rest of the uplink handling, and
@@ -458,18 +508,11 @@ void requestWalkUp(const court::WalkUpIntent& intent);
 /// network, which is the right way round: refusing to sell new time is a member at
 /// the desk, where refusing a booking they already paid for is a member in the dark.
 void handleButton(const proto::Frame& frame, uint32_t nowMs) {
-  const char* keyText = frame.arg(0);
-  if (keyText[0] < '0' || keyText[0] > '9') {
-    return;
-  }
-
-  // `!BTN` carries the physical key index, which is exactly what the map is keyed
-  // by — position 0 is the button on pin 22 whatever it now does.
+  // `!BTN` carries a key CHARACTER — 'A'-'D' then '1'-'4' — not a decimal index.
+  // The translation lives in lib/court so the corpus tests it; see
+  // court::buttonIndexFromWire for what reading it as decimal used to cost.
   uint8_t index = 0U;
-  for (size_t i = 0U; keyText[i] >= '0' && keyText[i] <= '9'; ++i) {
-    index = static_cast<uint8_t>(index * 10U + static_cast<uint8_t>(keyText[i] - '0'));
-  }
-  if (index >= court::kButtonCount) {
+  if (!court::buttonIndexFromWire(frame.arg(0), index)) {
     return;
   }
 
@@ -670,7 +713,7 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   // be all there was, and telling the member sixty would be a complaint waiting to happen.
   const size_t len = strlen(response);
   uint32_t granted = intent.minutes;
-  static_cast<void>(devapi::json::unsignedField(response, strlen(response), "granted_minutes", granted));
+  static_cast<void>(devapi::json::unsignedField(response, len, "granted_minutes", granted));
 
   char line2[court::kLineLen + 1U];
   snprintf(line2, sizeof(line2), "%lu MIN", static_cast<unsigned long>(granted));
@@ -678,10 +721,9 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   char line1[court::kLineLen + 1U] = "COURT ?";
   line1[6] = static_cast<char>('A' + intent.court);
   static_cast<void>(sendToMega(proto::Frame::lcd(line1, line2)));
-  static_cast<void>(sendToMega(
-      proto::Frame::on(static_cast<proto::Court>(intent.court), static_cast<uint16_t>(granted * 60U))));
+  static_cast<void>(sendToMega(proto::Frame::on(static_cast<proto::Court>(intent.court), granted * 60U)));
   if (intent.court < 4U) {
-    gHeldSinceMs[intent.court] = gClock.nowMs();
+    gHeld[intent.court] = HeldSince{gClock.nowMs(), true};
   }
   gLastScan[0] = '\0';
 }
@@ -814,6 +856,26 @@ void applyButtonMap(const char* body, size_t len) {
 
 /// Takes the update the heartbeat offered, if the policy says so.
 ///
+/// The public half of the firmware signing pair, compiled in at build time.
+///
+/// Empty by default, and an empty key means no update installs at all. Supply it
+/// with -DCRUSADERS_OTA_SIGNED=1 and -DCRUSADERS_OTA_PUBLIC_KEY='"...PEM..."'
+/// once the pair exists; generating it is go-live item 5. Ed25519 or RSA, not an
+/// HMAC with the device key — a shared secret means one compromised box can
+/// forge firmware for the whole fleet, which is the failure this is here to
+/// prevent.
+#ifndef CRUSADERS_OTA_SIGNED
+#define CRUSADERS_OTA_SIGNED 0
+#endif
+#ifndef CRUSADERS_OTA_PUBLIC_KEY
+#define CRUSADERS_OTA_PUBLIC_KEY ""
+#endif
+
+constexpr char kOtaPublicKey[] = CRUSADERS_OTA_PUBLIC_KEY;
+
+/// True only when this build carries a key it can verify against.
+constexpr bool kOtaSignatureEnforced = (CRUSADERS_OTA_SIGNED != 0) && (sizeof(kOtaPublicKey) > 1U);
+
 /// Every refusal reason is logged to the Mega's display rather than swallowed: a
 /// fleet quietly declining an update is exactly the silence that gets noticed a
 /// week after the release was promoted everywhere.
@@ -832,11 +894,38 @@ void considerUpdate(const char* body, size_t len) {
   gBootGuard.arm(manifest.version);
   static_cast<void>(sendToMega(proto::Frame::lcd("UPDATING", "DO NOT POWER OFF")));
 
+  // NOTHING IS INSTALLED UNTIL THERE IS A KEY TO VERIFY IT WITH.
+  //
+  // This used to carry a comment saying "the image is signature-checked by the
+  // core's Updater against a public key compiled into this build". It was not.
+  // There is no Update.installSignature call, no BearSSL::PublicKey, no
+  // SigningVerifier and no .pem anywhere in the tree — the key pair has never
+  // been generated, which is go-live item 5 and known. The comment described the
+  // intended design as though it were the shipped one, which is the worst kind of
+  // comment to leave on a security boundary: a reviewer reads it and signs off.
+  //
+  // What was actually there: a plain-HTTP fetch of a URL taken from an
+  // unauthenticated response body, flashed and rebooted into, on a board driving
+  // four mains lighting relays. Refusing is the only honest behaviour until the
+  // key exists, and refusing LOUDLY — on the display and through the boot guard —
+  // is what stops a fleet silently declining every release.
+  if (!kOtaSignatureEnforced) {
+    gBootGuard.confirm();
+    static_cast<void>(sendToMega(proto::Frame::lcd("UPDATE BLOCKED", "NO SIGNING KEY")));
+    return;
+  }
+
   WiFiClient client;
   ESPhttpUpdate.rebootOnUpdate(true);
-  // The image is signature-checked by the core's Updater against a public key
-  // compiled into this build; see the signing note in lib/otacore/UpdatePolicy.h.
-  // A box that has been stolen yields nothing that can sign firmware for any other.
+#if CRUSADERS_OTA_SIGNED
+  // Verified by the core's Updater against the key compiled into this build. A
+  // box that has been stolen yields nothing that can sign firmware for any other,
+  // which is why this is a public key here and not the device's HMAC secret.
+  static BearSSL::PublicKey otaKey(kOtaPublicKey);
+  static BearSSL::HashSHA256 otaHash;
+  static BearSSL::SigningVerifier otaVerifier(&otaKey);
+  Update.installSignature(&otaHash, &otaVerifier);
+#endif
   const t_httpUpdate_return outcome = ESPhttpUpdate.update(client, manifest.url);
   if (outcome == HTTP_UPDATE_FAILED) {
     // Never installed, so the marker would condemn a build that never ran. Clearing

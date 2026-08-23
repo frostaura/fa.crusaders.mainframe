@@ -212,7 +212,7 @@ Frame Frame::fromValidated(const VerbSpec& spec, const Arg* args, uint8_t argc) 
   return f;
 }
 
-Frame Frame::on(Court court, uint16_t seconds) {
+Frame Frame::on(Court court, uint32_t seconds) {
   Frame f = ofVerb(Verb::On);
   static_cast<void>(f.pushArgChar(courtChar(court)));
   static_cast<void>(f.pushArgU32(clampSeconds(seconds, kRelayMinSeconds)));
@@ -225,7 +225,7 @@ Frame Frame::off(Court court) {
   return f;
 }
 
-Frame Frame::ext(Court court, uint16_t seconds) {
+Frame Frame::ext(Court court, uint32_t seconds) {
   Frame f = ofVerb(Verb::Ext);
   static_cast<void>(f.pushArgChar(courtChar(court)));
   static_cast<void>(f.pushArgU32(clampSeconds(seconds, kRelayMinSeconds)));

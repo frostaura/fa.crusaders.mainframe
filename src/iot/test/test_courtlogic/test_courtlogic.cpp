@@ -41,6 +41,7 @@ constexpr size_t kBaseCount = sizeof(kBases) / sizeof(kBases[0]);
 
 constexpr uint8_t kCourtA = 0U;
 constexpr uint8_t kCourtB = 1U;
+constexpr uint8_t kCourtC = 2U;
 
 /// True when the transport's transcript contains a line starting with `prefix`.
 /// Prefix rather than equality because a frame carries a checksum, and pinning
@@ -732,6 +733,47 @@ void setUp(void) {
 void tearDown(void) {
 }
 
+/// A commanded release is reported, not just performed.
+///
+/// applyOff opened the relay and told nobody. The bridge has always tested for
+/// `!EVT,OFF,<court>` by name — handleMegaEvent looks for it alongside AUTOOFF —
+/// but the Mega only ever sent AUTOOFF, so a member who finished early and
+/// pressed release produced no release event at all and the session looked to
+/// the club like it had run its full booked length. That is the opposite of what
+/// the Mega's own timer exists to record.
+void test_box_a_commanded_off_reports_the_release(void) {
+  Box b(kBaseMid);
+
+  feedFrame(b.bridge, proto::Frame::on(proto::Court::C, 900U));
+  b.step(kBaseMid + 1U);
+  TEST_ASSERT_TRUE(b.relay.isOn(kCourtC));
+
+  feedFrame(b.bridge, proto::Frame::off(proto::Court::C));
+  b.step(kBaseMid + 2U);
+
+  TEST_ASSERT_FALSE(b.relay.isOn(kCourtC));
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!EVT,OFF,C"));
+}
+
+/// A duration too large for a uint16_t must clamp, not truncate.
+///
+/// Frame::on took a uint16_t while the clamp inside took a uint32_t, so the
+/// narrowing happened at the call site and the clamp then saw a small number and
+/// passed it through. 65,536 seconds became 0 and was raised to the one-second
+/// minimum: a court lit for a second on a booking of eighteen hours. Both
+/// failures are short rather than long, so neither could hold a court on — but a
+/// member standing in the dark is still a support call.
+void test_box_a_duration_past_a_uint16_clamps_rather_than_wrapping(void) {
+  Box b(kBaseMid);
+
+  // 65,536 s + 900 s. Truncated it is 900; clamped it is the hard cap.
+  feedFrame(b.bridge, proto::Frame::on(proto::Court::A, 66436U));
+  b.step(kBaseMid + 1U);
+
+  TEST_ASSERT_TRUE(b.relay.isOn(kCourtA));
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!STATE,1,5400,0,0,0"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -768,6 +810,8 @@ int main(int, char**) {
   RUN_TEST(test_auth_saturates_an_absurd_window);
 
   RUN_TEST(test_box_on_frame_lights_the_court_and_publishes_state);
+  RUN_TEST(test_box_a_commanded_off_reports_the_release);
+  RUN_TEST(test_box_a_duration_past_a_uint16_clamps_rather_than_wrapping);
   RUN_TEST(test_box_auto_off_emits_the_event_across_the_wrap);
   RUN_TEST(test_box_a_dead_bridge_still_loses_the_lights);
   RUN_TEST(test_box_drops_presses_outside_the_auth_window);

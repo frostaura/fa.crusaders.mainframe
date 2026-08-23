@@ -26,6 +26,7 @@
 #include "eventq/Event.h"
 #include "eventq/EventQueue.h"
 #include "fakes/FakeStore.h"
+#include "protocol/Protocol.h"
 #include "roster/Roster.h"
 #include "support/CorpusJson.h"
 
@@ -1268,6 +1269,88 @@ void setUp() {
 void tearDown() {
 }
 
+// --- !BTN decode ------------------------------------------------------------
+//
+// The bridge read this as a decimal index while the wire carries a key
+// CHARACTER, so the four court buttons were dropped and the four duration
+// buttons selected courts. The decode now lives in lib/court precisely so these
+// can exist: it used to sit in main.cpp, which `pio test` excludes and
+// strict_compile skips, and the pad tests fed physical indices straight in.
+
+void test_button_wire_maps_court_keys_to_the_first_four_positions() {
+  uint8_t index = 0xFFU;
+  TEST_ASSERT_TRUE(court::buttonIndexFromWire("A", index));
+  TEST_ASSERT_EQUAL_UINT8(0U, index);
+  TEST_ASSERT_TRUE(court::buttonIndexFromWire("D", index));
+  TEST_ASSERT_EQUAL_UINT8(3U, index);
+}
+
+void test_button_wire_maps_duration_keys_to_the_last_four_positions() {
+  uint8_t index = 0xFFU;
+  TEST_ASSERT_TRUE(court::buttonIndexFromWire("1", index));
+  TEST_ASSERT_EQUAL_UINT8(4U, index);
+  TEST_ASSERT_TRUE(court::buttonIndexFromWire("4", index));
+  TEST_ASSERT_EQUAL_UINT8(7U, index);
+}
+
+/// The exact defect: '1' is the FIRST duration button, not physical position 1.
+/// Read as decimal it came out as 1, which under the default map is "select
+/// court B" — so pressing 15 MIN at court A lit court B and charged for it.
+void test_button_wire_is_not_a_decimal_index() {
+  uint8_t index = 0xFFU;
+  TEST_ASSERT_TRUE(court::buttonIndexFromWire("1", index));
+  TEST_ASSERT_NOT_EQUAL(1U, index);
+
+  court::ButtonMap map;
+  map.reset();
+  TEST_ASSERT_TRUE(map[index].kind == court::ButtonKind::GrantMinutes);
+  TEST_ASSERT_EQUAL_UINT16(15U, map[index].minutes);
+}
+
+/// Round-trips against the encoder the Mega actually uses, so the two halves
+/// cannot drift apart without this failing.
+void test_button_wire_round_trips_every_key_the_mega_can_send() {
+  for (uint8_t physical = 0U; physical < court::kButtonCount; ++physical) {
+    const char wire[2] = {proto::keyChar(static_cast<proto::Key>(physical)), '\0'};
+    uint8_t decoded = 0xFFU;
+    TEST_ASSERT_TRUE(court::buttonIndexFromWire(wire, decoded));
+    TEST_ASSERT_EQUAL_UINT8(physical, decoded);
+  }
+}
+
+void test_button_wire_refuses_anything_that_is_not_one_key() {
+  uint8_t index = 0xFFU;
+  TEST_ASSERT_FALSE(court::buttonIndexFromWire("", index));
+  TEST_ASSERT_FALSE(court::buttonIndexFromWire("E", index));
+  TEST_ASSERT_FALSE(court::buttonIndexFromWire("0", index));
+  TEST_ASSERT_FALSE(court::buttonIndexFromWire("5", index));
+  // Two characters is a corrupted line, not a key. Guessing at the first of
+  // them is how a court gets lit by noise on a 9600 baud cable.
+  TEST_ASSERT_FALSE(court::buttonIndexFromWire("A2", index));
+  TEST_ASSERT_EQUAL_UINT8(0xFFU, index);
+}
+
+/// Session::record used to zero this one line after onScan set it, and
+/// EventQueue::push assigns only `seq` — so every activation and release went up
+/// as uptime_ms 0. The API stamps an event by subtracting its uptime from the
+/// box's uptime now, so a zero means "at boot": on a box up for forty days, a
+/// wall-clock time forty days in the past, on the field that decides whether the
+/// no-show sweep reverses a charge.
+void test_session_an_event_carries_when_it_happened() {
+  Cache cache(kSixHoursMs);
+  fakes::FakeStore store;
+  Queue queue(&store);
+  queue.begin();
+  Play play(cache, queue);
+
+  const uint32_t nowMs = kBaseMid + 987654UL;
+  play.onRelease(1U, 2400000UL, nowMs);
+
+  eventq::Event queued;
+  TEST_ASSERT_TRUE(queue.peek(queued));
+  TEST_ASSERT_EQUAL_UINT32(nowMs, queued.uptimeMs);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -1320,6 +1403,13 @@ int main(int, char**) {
   RUN_TEST(test_session_a_release_is_recorded_with_how_long_the_court_was_held);
   RUN_TEST(test_session_a_boot_event_explains_a_gap_in_the_sequence);
   RUN_TEST(test_session_a_full_queue_still_opens_the_court);
+  RUN_TEST(test_session_an_event_carries_when_it_happened);
+
+  RUN_TEST(test_button_wire_maps_court_keys_to_the_first_four_positions);
+  RUN_TEST(test_button_wire_maps_duration_keys_to_the_last_four_positions);
+  RUN_TEST(test_button_wire_is_not_a_decimal_index);
+  RUN_TEST(test_button_wire_round_trips_every_key_the_mega_can_send);
+  RUN_TEST(test_button_wire_refuses_anything_that_is_not_one_key);
 
   RUN_TEST(test_json_reads_a_string_field);
   RUN_TEST(test_json_a_field_that_would_not_fit_is_refused_not_truncated);

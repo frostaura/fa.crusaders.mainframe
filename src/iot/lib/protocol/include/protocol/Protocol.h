@@ -260,12 +260,23 @@ public:
   /// point of v2: the legacy `A` message had nowhere to put a duration, so an
   /// unattended court could burn for weeks. `seconds` is clamped into
   /// [kRelayMinSeconds, kRelayHardCapSeconds] rather than rejected.
-  static Frame on(Court court, uint16_t seconds);
+  /// Open a relay for `seconds`, clamped to [kRelayMinSeconds, kRelayHardCapSeconds].
+  ///
+  /// uint32_t, not uint16_t. The clamp inside has always taken a uint32_t, but the
+  /// parameter narrowed before it ever ran — so a caller holding a duration in
+  /// milliseconds, or minutes read off an API response, truncated at 65,536
+  /// seconds and the clamp then saw a small number and passed it through. Both
+  /// failures are short rather than long, so neither could hold a court on; a
+  /// booking of 65,536,000 ms came out as the one-second minimum, and a grant of
+  /// 1093 minutes lit the court for 44 seconds while the display promised
+  /// "1093 MIN". Taking the wide type is what makes the clamp mean what it says.
+  static Frame on(Court court, uint32_t seconds);
 
   static Frame off(Court court);
 
-  /// Extend an already-open relay's deadline to now + `seconds`. Clamped like on().
-  static Frame ext(Court court, uint16_t seconds);
+  /// Extend an already-open relay's deadline to now + `seconds`. Clamped like on(),
+  /// and wide for the same reason.
+  static Frame ext(Court court, uint32_t seconds);
 
   /// Two display lines. Text longer than kMaxArgLen is truncated — the panel is
   /// driven as 16 columns, so this loses nothing a player would have seen.

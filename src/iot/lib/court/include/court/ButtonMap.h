@@ -100,6 +100,28 @@ private:
 /// False leaves `out` untouched.
 bool parseButtonAction(const char* wire, ButtonAction& out);
 
+/// The physical button index a `!BTN` argument names. False when it names none.
+///
+/// THIS EXISTS BECAUSE THE BRIDGE GOT IT WRONG, IN THE ONE FILE NOTHING TESTS
+/// ---------------------------------------------------------------------------
+/// `!BTN` carries a key CHARACTER, not a decimal index: `proto::keyChar` renders
+/// physical 0-3 as 'A'-'D' and physical 4-7 as '1'-'4', and the shared corpus
+/// pins `!BTN,A*35` and `!BTN,3*47`. The bridge read it as decimal instead, so
+/// the four court buttons failed its leading-digit check and were dropped —
+/// court A could not be selected at all — while '1'-'4' parsed as indices
+/// 1,2,3,4, which under the default map are SelectCourt B, C, D and
+/// GrantMinutes 15. Pressing "15 MIN" selected court B; pressing "60 MIN" then
+/// bought fifteen minutes on it. A member at court A lit court B, possibly
+/// while somebody was playing on it, and paid for the privilege.
+///
+/// The decode lived in `main.cpp`, which `pio test` excludes via
+/// `build_src_filter` and `tools/strict_compile.sh` skips because it walks
+/// `lib/` only. The bridge tests drove `pad.press(map, 2U, ...)` with physical
+/// indices directly and so passed straight over it. Moving the translation here
+/// is the actual fix: it puts the one line that has to agree with the wire
+/// inside the half of the tree that the corpus tests.
+bool buttonIndexFromWire(const char* arg, uint8_t& out);
+
 } // namespace court
 
 #endif // CRUSADERS_COURT_BUTTONMAP_H

@@ -54,7 +54,27 @@ consequence of skipping each, in [`docs/go-live-checklist.md`](../docs/go-live-c
    brute-force over the 10,000 space for the members in its cache.
    **Until that is decided, a court box needs the network to admit anybody.** What works
    today is the online path: scan, POST, decide.
-10. **No architecture doc exists for the backend.** `src/iot/README.md` covers the hardware
+10. **A claimed box still announces itself as unclaimed.** `discovery::Packet::announceClaimed`
+   exists and is called nowhere; `broadcastAnnounce` always builds the unclaimed form, so a
+   provisioned board keeps broadcasting its claim nonce and commitment every five seconds and
+   keeps appearing in the admin's discoverable list. **Not exploitable**: the API answers a
+   second claim with `board_already_claimed`, and a provisioned box now verifies OFFER
+   signatures (`ClaimedBox`), so the repoint attack is closed. What blocks the fix is that the
+   device stores no tenant slug — `loadCredentials` reads the device id and key only — and
+   `announceClaimed` needs one. Adding slug storage is the work.
+11. **OTA is blocked in every shipped build, on purpose.** `considerUpdate` now refuses to
+   install unless a public key is compiled in, and none exists (item 5). Before this it flashed
+   an unsigned image fetched over plain HTTP from a URL taken out of an unauthenticated
+   response body, under a comment claiming the core verified it against a compiled-in key —
+   which was describing the intended design as though it were shipped. Boxes are USB-only
+   until the key pair is generated, and the display says `UPDATE BLOCKED / NO SIGNING KEY`
+   rather than failing quietly.
+12. **Blocking HTTP in `loop()` can drop Mega frames.** Every heartbeat and walk-up makes a
+   synchronous `http.POST`, and the ESP8266 UART RX ring is 256 bytes — 267 ms at 9600 baud —
+   against a 5 s HTTP timeout. The relay tick is unaffected (it runs on the Mega, which is the
+   point of the split), but `!SCAN` and `!EVT,AUTOOFF` can be lost mid-frame. `Serial.setRxBufferSize`
+   is never called; raising it is the cheap half of the fix.
+13. **No architecture doc exists for the backend.** `src/iot/README.md` covers the hardware
    split thoroughly; nothing covers the API.
 
 ## Resolved since the last stamp

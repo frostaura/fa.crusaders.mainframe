@@ -260,6 +260,21 @@ void CourtBox::applyOff(const proto::Frame& frame) {
     return;
   }
   static_cast<void>(relays_.off(static_cast<uint8_t>(court)));
+
+  // Report it, the same way an expiry is reported.
+  //
+  // A commanded OFF released a court and told nobody. The bridge has always
+  // accepted `!EVT,OFF,<court>` — handleMegaEvent tests for it by name — but the
+  // Mega only ever sent AUTOOFF, so a member who finished early and pressed the
+  // release button produced no release event at all. The session then looked to
+  // the club like it had run its full booked length, which is the opposite of
+  // what the Mega's timer exists to record: the court was used for the time it
+  // was used, not for the time it was booked.
+  //
+  // The relay is already open when this is sent, so an event that fails to
+  // encode cannot leave the court lit.
+  sendCourtEvent("OFF", court);
+
   // No publishState() here: the caller's pass ends with one, and an OFF that
   // is immediately followed by the periodic frame would put two `!STATE` on a
   // 9600 baud link for one change.

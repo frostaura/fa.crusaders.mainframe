@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "protocol/Protocol.h"
+
 namespace court {
 
 namespace {
@@ -158,6 +160,30 @@ bool ButtonMap::setFromWire(uint8_t index, const char* wire) {
 const ButtonAction& ButtonMap::operator[](uint8_t index) const {
   static const ButtonAction kNone;
   return index < kButtonCount ? actions_[index] : kNone;
+}
+
+bool buttonIndexFromWire(const char* arg, uint8_t& out) {
+  if (arg == nullptr || arg[0] == '\0') {
+    return false;
+  }
+  // Exactly one character, and it has to be one keyChar emits. A second
+  // character means the frame is not a key at all, and guessing at "A2" is how
+  // a court gets lit by a corrupted line.
+  if (arg[1] != '\0') {
+    return false;
+  }
+
+  proto::Key key = proto::Key::CourtA;
+  if (!proto::keyFromChar(arg[0], key)) {
+    return false;
+  }
+
+  const uint8_t index = static_cast<uint8_t>(key);
+  if (index >= kButtonCount) {
+    return false;
+  }
+  out = index;
+  return true;
 }
 
 } // namespace court

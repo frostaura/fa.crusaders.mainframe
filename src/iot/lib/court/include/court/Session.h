@@ -124,7 +124,19 @@ void linesFor(roster::Verdict verdict, const roster::Entry& entry, uint8_t court
 
 template <typename RosterT, typename QueueT>
 Outcome Session<RosterT, QueueT>::record(Outcome outcome, eventq::Event& event) {
-  event.uptimeMs = 0U;
+  // The caller's uptimeMs stands. This used to zero it, one line after onScan and
+  // onRelease had each set it to nowMs — and EventQueue::push assigns only `seq`,
+  // so nothing put it back. Every activation and release therefore went up as
+  // "uptime_ms": 0.
+  //
+  // That is not cosmetic. The API stamps an event against the server clock by
+  // subtracting its uptime from the box's uptime now (see eventq::Event), so a
+  // zero says "this happened at boot" — on a box that has been up forty days, a
+  // wall-clock time forty days in the past. Attendance is what stops the no-show
+  // sweep reversing a charge, so it lands on the money path.
+  //
+  // onBoot never went through here and kept its value, which is what shows this
+  // was a slip rather than a convention.
   const eventq::PushResult pushed = queue_.push(event);
   if (pushed == eventq::PushResult::Rejected) {
     outcome.recorded = false;
