@@ -129,6 +129,47 @@ public class OutboundGuardTests
         Assert.NotNull(guard.Check(IPAddress.Parse("169.254.169.254")));
     }
 
+
+    /// <summary>
+    /// The carve-out belongs to the club, not to whoever registered the endpoint.
+    ///
+    /// <para>
+    /// <c>POST /api/v1/webhooks</c> is authenticated but not admin-gated, and the only
+    /// destination check was the guard — which admits anything on the allow-list. So once
+    /// the operator names the board's LAN address, as the deployment requires, any member
+    /// could register a webhook aimed at <c>http://192.168.68.150/relay/on</c> and then
+    /// trigger delivery by making a booking of their own: <c>booking.created</c> carries
+    /// their own subject id, which is exactly what the owner filter matches on. The owner
+    /// filter restricts which events reach an endpoint, never where it points.
+    /// </para>
+    ///
+    /// <para>
+    /// Closing the carve-out is not an option — it exists so the API can reach the lights
+    /// controller, and <c>CLAUDE.md</c> says so outright. Scoping it is: admin-registered
+    /// endpoints keep it, member-registered ones do not.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void The_carve_out_applies_to_the_clubs_own_endpoints_and_not_to_a_members()
+    {
+        var guard = Guard(allowList: ["192.168.68.150/32"]);
+        var board = IPAddress.Parse("192.168.68.150");
+
+        // The club's own endpoint reaches its own hardware.
+        Assert.Null(guard.Check(board, honourAllowList: true));
+        Assert.Null(guard.CheckHostLiteral("192.168.68.150", honourAllowList: true));
+
+        // A member's does not, even though the address is allow-listed.
+        Assert.NotNull(guard.Check(board, honourAllowList: false));
+        Assert.NotNull(guard.CheckHostLiteral("192.168.68.150", honourAllowList: false));
+
+        // And the public internet is unaffected either way — this narrows one carve-out,
+        // it does not make the guard stricter about anything else. (Not a 203.0.113.x
+        // documentation address: those are restricted in their own right, which is correct
+        // and would make this assert for the wrong reason.)
+        Assert.Null(guard.Check(IPAddress.Parse("8.8.8.8"), honourAllowList: false));
+    }
+
     [Fact]
     public void A_carve_out_subnet_admits_its_whole_range_and_no_more()
     {

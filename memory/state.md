@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-state
-description: "Phases A-J of the court-hardware programme are code-complete: backend 473, firmware 231, frontend 28 unit + 8 Playwright, all green. Charge moved to booking, the court box decides scans offline, OTA and the admin Devices screen exist. What remains is physical and is in docs/go-live-checklist.md"
+description: "Phases A-J code-complete: backend 519, firmware 240, frontend 28 unit + 12 Playwright, all green including the 90 Postgres-backed boundary tests. Three adversarial audits then found sixteen defects in that already-green code — an IDOR, a tenant bypass, the wrong court lighting up, four money races — all fixed and mutation-proven. What remains is physical and is in docs/go-live-checklist.md"
 type: state
 last_verified: 2026-08-23
 ---
@@ -16,6 +16,37 @@ installed on 2026-08-23, so nothing here re-ran them._
 _2026-08-22 — every claim below was executed, not read. A .NET 10 SDK and PlatformIO were installed into this environment (neither was present), a real Postgres 16 was started locally, the full suite was run, the migration was applied to a fresh database, and each quality gate was deliberately broken to confirm it fails. Verify before trusting anything dated older than ~60 days._
 
 **Backend 284/284 green** (46 need Postgres and skip cleanly without it), **firmware 85/85 green** under both native and ASAN/UBSAN with no board attached. The backend was 24/30 at the start of 2026-08-22. The working tree is clean and `main` is at `6ed1fea`; all work sits on `claude/squash-booking-system-design-dt7ja6`, pushed, with **PR #1 open as a draft** carrying a phase checklist. The delivery shape is one branch, one PR — agreed with the founder, so do not split it.
+
+### The adversarial audit round (2026-08-23, later)
+
+Three agents were pointed at the money paths, the tenancy boundary and the firmware, each told
+to **refute** the claim that the branch was sound rather than confirm it, and to report nothing
+rather than invent a finding. Between them they found sixteen real defects in code that had 495
+passing tests, and this is the durable lesson: **a green suite is evidence about the tests, not
+about the code.**
+
+Fixed and pushed, every one pinned by a test that was watched to fail without its fix
+(18 mutations run; one survivor reported rather than papered over):
+
+- **Any member could cancel any other member's booking.** The member route passed the caller's
+  own id as the actor and the service read "not the owner" as an admin acting on their behalf.
+  Booking ids come free from `GET /api/v1/schedule`. The victim was also charged the
+  late-cancellation penalty, and the audit row named the attacker as an administrator.
+- **Registration wrote rows outside every tenant.** `/api/v1/auth/` skipped tenant resolution,
+  so users, memberships and audit rows landed on `Guid.Empty` — invisible to the admin screen
+  and to the duplicate-email check, which made it possible to register an address that already
+  belonged to a real member.
+- **Every platform admin sat inside every tenant** via the one query filter in the model with a
+  disjunction; **a QR token was never checked against the tenant that minted it**; and **the
+  payer override took a bare guid** with no second identification.
+- **The front panel lit the wrong court.** `!BTN` carries a key character (`A`-`D`, `1`-`4`) and
+  the bridge parsed it as a decimal index, so court buttons were dropped and duration buttons
+  selected courts. It lived in `main.cpp`, which `pio test` and `strict_compile` both skip.
+- **Four money races**: double-cancel refunded twice; the no-show sweep committed the money
+  before the status that makes it idempotent; payer reassignment was three independent commits
+  and not idempotent on retry; and two bookings by one member could both spend the same credits.
+- **`RetentionWorker` could stop the no-show sweep permanently** — it anonymises a booking to a
+  sentinel user id with no `users` row, and the sweep looked the subject up with `First()`.
 
 ### The court-hardware programme, phases A–J (2026-08-23)
 

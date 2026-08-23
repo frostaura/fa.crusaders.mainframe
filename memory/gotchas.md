@@ -33,6 +33,30 @@ last_verified: 2026-08-23
 - **vitest has no `localStorage` under Node ≥25 + jsdom 28** (jsdom 28 defers to Node's flag-gated built-in, which is undefined without `--localstorage-file`). Fixed 2026-08-21 with an in-memory Storage polyfill in `src/frontend/src/test/setup.ts` — keep it if that file is ever rewritten, or App.test.tsx fails on `localStorage.clear()`.
 - **Frontend `node_modules` on this iCloud path loses rollup's native optional dep** (build fails with a missing `rollup/dist/native.js` require). Recovery: `rm -rf node_modules && npm ci`.
 
+## A concurrency test on the EF in-memory provider proves the opposite of what it claims
+
+The in-memory provider has **no transactions** — it says so itself, via
+`InMemoryEventId.TransactionIgnoredWarning`. It applies each change entry by entry, so a
+`SaveChanges` that fails a concurrency check has *already inserted* the ledger rows before it
+throws. Every "the refusal takes the money down with it" test written against it passes while
+demonstrating exactly the failure it was meant to catch.
+
+Found the hard way: a double-cancel test asserted a balance of 200 and got 232 — one
+`CancellationResult.NotFound` and two committed refunds, simultaneously. Anything resting on
+one `SaveChanges` being one transaction belongs in the Postgres-backed suite. `TestHost` is
+in-memory; `TestWebAppFactory` + `PostgresFixture` is not.
+
+## Green is not evidence
+
+Three agents told to *refute* rather than confirm found sixteen defects in a branch with 495
+passing tests — including an IDOR any logged-in member could use, registration writing rows
+outside every tenant, and a front panel that lit the wrong court. Several were invisible by
+construction rather than by oversight: the button decode lived in `main.cpp`, which `pio test`
+excludes via `build_src_filter` and `tools/strict_compile.sh` skips because it walks `lib/`
+only. When a fix is "move the logic somewhere the tests can see it", that is the fix, not a
+tidy-up on the side.
+
+
 ## From the court-hardware programme (2026-08-23)
 
 - **A test that books `UtcNow.AddHours(3)` fails every afternoon.** The fixture's `peak_hours` is 16:00–19:00 with the tenant timezone at UTC, and blueprint A.12 refuses a Regular member a peak slot more than an hour ahead — so two cancellation tests passed all morning and failed after ~13:00 UTC with an `InvalidCastException` naming `PeakHoursLeagueOnly` inside a test about refunds. It reads as a broken cancellation and is not one. `TestHost.BookableSlot()` steps clear of the window, and `BookableSlotFrom(now, hours)` exists so the fix itself is tested at all 24 hours rather than at whichever one the suite runs.

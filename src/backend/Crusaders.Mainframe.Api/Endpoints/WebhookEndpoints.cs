@@ -27,7 +27,12 @@ public static class WebhookEndpoints
         g.MapPost("/", async (CreateWebhookRequest req, HttpContext ctx, MainframeDbContext db, ITenantContext tenant, IOutboundAddressGuard guard, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
-            var validation = ValidateUrl(req.UrlTemplate, guard);
+
+            // honourAllowList: false — a member does not get the lights-controller carve-out.
+            // This is the fast, legible refusal; the boundary is at the socket, in
+            // WebhookSender.PostAsync, because a name that resolves publicly today can
+            // resolve to the relay controller tomorrow.
+            var validation = ValidateUrl(req.UrlTemplate, guard, honourAllowList: false);
             if (validation is not null) return Results.BadRequest(new { error = validation });
 
             var endpoint = new WebhookEndpoint
@@ -141,13 +146,16 @@ public static class WebhookEndpoints
     /// </para>
     ///
     /// <para>
-    /// The previous signature took an <c>allowLan</c> flag that was hardcoded
-    /// <c>true</c> at both call sites and gated nothing but an https requirement. It is
-    /// gone: an argument that is always the same value is a comment pretending to be a
-    /// control.
+    /// An earlier signature took an <c>allowLan</c> flag that was hardcoded <c>true</c> at
+    /// both call sites and gated nothing but an https requirement, and it was removed on the
+    /// grounds that an argument which is always the same value is a comment pretending to be
+    /// a control. <paramref name="honourAllowList"/> is not that: it is <c>true</c> for the
+    /// admin route and <c>false</c> for the member route, and the difference is the whole
+    /// point. The private-network allow-list exists so the club can drive its own lights
+    /// controller; a member registering a destination does not inherit that licence.
     /// </para>
     /// </summary>
-    internal static string? ValidateUrl(string? url, IOutboundAddressGuard guard)
+    internal static string? ValidateUrl(string? url, IOutboundAddressGuard guard, bool honourAllowList = true)
     {
         if (string.IsNullOrWhiteSpace(url)) return "url_required";
 
@@ -167,7 +175,7 @@ public static class WebhookEndpoints
         if (!Uri.TryCreate(url.Replace("{", "%7B").Replace("}", "%7D"), UriKind.Absolute, out var u)) return "url_invalid";
         if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps) return "scheme_must_be_http_or_https";
 
-        return guard.CheckHostLiteral(u.Host);
+        return guard.CheckHostLiteral(u.Host, honourAllowList);
     }
 }
 

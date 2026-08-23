@@ -23,7 +23,14 @@ namespace Crusaders.Mainframe.Api.Security.Outbound;
 /// </summary>
 public static class GuardedHttpClient
 {
-    public static IHttpClientBuilder AddGuardedHttpClient(this IServiceCollection services, string name)
+    /// <param name="honourAllowList">
+    /// Whether <c>Webhooks:PrivateNetworkAllowList</c> applies to this client. The club's
+    /// own endpoints need it — that carve-out is what lets the API reach the lights
+    /// controller on the LAN. Endpoints registered by ordinary members do not, so they get
+    /// a client that refuses every restricted address whatever the allow-list says.
+    /// </param>
+    public static IHttpClientBuilder AddGuardedHttpClient(
+        this IServiceCollection services, string name, bool honourAllowList = true)
     {
         return services.AddHttpClient(name)
             .ConfigurePrimaryHttpMessageHandler(sp =>
@@ -58,7 +65,7 @@ public static class GuardedHttpClient
                         // the rebinding case, and picking the "good" one is the bug.
                         foreach (var address in addresses)
                         {
-                            var refusal = guard.Check(address);
+                            var refusal = guard.Check(address, honourAllowList);
                             if (refusal is null) continue;
 
                             logger.LogWarning(

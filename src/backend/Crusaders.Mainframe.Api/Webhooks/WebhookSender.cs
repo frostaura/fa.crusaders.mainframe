@@ -47,7 +47,7 @@ public sealed class WebhookSender
     /// </summary>
     public async Task AttemptAsync(WebhookDelivery delivery, WebhookEndpoint endpoint, string body, CancellationToken ct)
     {
-        var result = await PostAsync(delivery.Url, body, endpoint.Secret, ct);
+        var result = await PostAsync(delivery.Url, body, endpoint.Secret, endpoint.OwnerKind, ct);
 
         delivery.ResponseStatus = result.Status;
         delivery.LatencyMs = result.LatencyMs;
@@ -93,13 +93,36 @@ public sealed class WebhookSender
 
     private sealed record SendResult(int? Status, int LatencyMs, string? Excerpt, bool Blocked);
 
-    private async Task<SendResult> PostAsync(string url, string body, string secret, CancellationToken ct)
+    /// <summary>
+    /// One delivery attempt, on the client that matches who chose the destination.
+    ///
+    /// <para>
+    /// Two guarded clients, differing only in whether
+    /// <c>Webhooks:PrivateNetworkAllowList</c> applies. The club's own endpoints need it —
+    /// that carve-out is what lets the API reach the lights controller on the LAN, and
+    /// closing it would break the hardware. Endpoints an ordinary member registered do not:
+    /// <c>POST /api/v1/webhooks</c> is authenticated but not admin-gated, so any member could
+    /// aim one at the relay controller and then trigger delivery by making a booking of their
+    /// own — <c>booking.created</c> carries their own subject id, which is exactly what the
+    /// owner-kind filter matches on. The owner filter restricts which events reach an
+    /// endpoint, never where it points.
+    /// </para>
+    ///
+    /// <para>
+    /// Doing it at the socket rather than at registration is the point: a member can register
+    /// a name that resolves publicly today and to the relay controller tomorrow, and no
+    /// pre-flight check survives that.
+    /// </para>
+    /// </summary>
+    private async Task<SendResult> PostAsync(
+        string url, string body, string secret, WebhookOwnerKind ownerKind, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
-            var client = _http.CreateClient("webhooks");
+            var client = _http.CreateClient(
+                ownerKind == WebhookOwnerKind.Tenant ? "webhooks" : "webhooks-member");
             client.Timeout = TimeSpan.FromSeconds(10);
 
             using var req = new HttpRequestMessage(HttpMethod.Post, url)

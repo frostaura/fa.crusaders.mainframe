@@ -27,10 +27,25 @@ namespace Crusaders.Mainframe.Api.Security.Outbound;
 public interface IOutboundAddressGuard
 {
     /// <summary>Null when the address may be dialled; a machine-readable reason when it may not.</summary>
-    string? Check(IPAddress address);
+    ///
+    /// <param name="honourAllowList">
+    /// <c>true</c> — the default and the behaviour the lights controller depends on —
+    /// applies <c>Webhooks:PrivateNetworkAllowList</c>, so an operator can name the board's
+    /// LAN address and have the API reach it.
+    ///
+    /// <para>
+    /// <c>false</c> refuses every restricted address regardless of the allow-list. That is
+    /// for destinations chosen by somebody who is not an administrator. The carve-out exists
+    /// so the club can drive its own hardware; it is not a general licence to aim the API at
+    /// its own network, and a member-owned webhook endpoint pointed at the relay controller
+    /// is a member switching court lights on by creating a booking. Admin-owned endpoints
+    /// keep the carve-out; member-owned ones do not get to use it.
+    /// </para>
+    /// </param>
+    string? Check(IPAddress address, bool honourAllowList = true);
 
     /// <summary>Registration-time check of a host that has not been resolved yet.</summary>
-    string? CheckHostLiteral(string host);
+    string? CheckHostLiteral(string host, bool honourAllowList = true);
 }
 
 public sealed class OutboundAddressGuard : IOutboundAddressGuard
@@ -88,24 +103,30 @@ public sealed class OutboundAddressGuard : IOutboundAddressGuard
         return parsed;
     }
 
-    public string? Check(IPAddress address)
+    public string? Check(IPAddress address, bool honourAllowList = true)
     {
         // Unwrap ::ffff:10.0.0.1 before classifying. An IPv4-mapped IPv6 literal is the
         // standard way past a guard that only knows how to read IPv4.
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
 
         if (!IsRestricted(address)) return null;
-        if (IsAllowListed(address)) return null;
+        if (honourAllowList && IsAllowListed(address)) return null;
+
+        // The development escape hatch is deliberately still honoured here: a developer
+        // running the whole stack on one machine has every destination restricted, and a
+        // guard that cannot be switched off locally is one somebody removes instead.
         if (_allowPrivate) return null;
 
         return "destination_not_permitted";
     }
 
-    public string? CheckHostLiteral(string host)
+    public string? CheckHostLiteral(string host, bool honourAllowList = true)
     {
         // Only a literal can be judged here. A name is judged at connect time, on the
-        // address it actually resolves to — see WebhookConnectCallback.
-        return IPAddress.TryParse(host.Trim('[', ']'), out var address) ? Check(address) : null;
+        // address it actually resolves to — see GuardedHttpClient.
+        return IPAddress.TryParse(host.Trim('[', ']'), out var address)
+            ? Check(address, honourAllowList)
+            : null;
     }
 
     private bool IsAllowListed(IPAddress address) =>

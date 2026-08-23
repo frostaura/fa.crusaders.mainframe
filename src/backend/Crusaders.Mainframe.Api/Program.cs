@@ -184,7 +184,13 @@ builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
 // see GuardedHttpClient for why a pre-flight check is not a boundary.
 builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Outbound.IOutboundAddressGuard,
                               Crusaders.Mainframe.Api.Security.Outbound.OutboundAddressGuard>();
+// Two clients, differing only in whether the private-network allow-list applies.
+// "webhooks" honours it, because that carve-out is what lets the API reach the lights
+// controller on the club LAN. "webhooks-member" does not: a member-registered endpoint
+// has no business being aimed at the club's own network, and POST /api/v1/webhooks is
+// authenticated but not admin-gated. See WebhookSender.PostAsync.
 builder.Services.AddGuardedHttpClient("webhooks");
+builder.Services.AddGuardedHttpClient("webhooks-member", honourAllowList: false);
 builder.Services.AddSingleton<WebhookSender>();
 builder.Services.AddHostedService<WebhookDeliveryWorker>();
 builder.Services.AddHostedService<WebhookRetryWorker>();
