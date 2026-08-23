@@ -213,6 +213,154 @@ public sealed class AdminSettingsHttpTests
         Assert.Equal("none", after.Buttons.ToWire()[7]);
     }
 
+    /// <summary>
+    /// The nine keys the engine has always read and the admin API never showed. Until
+    /// now the only way to change one was to hand-edit a JSON column on a live money
+    /// system — no validation, no audit trail, and a conversion rate a typo away from
+    /// making every top-up worthless.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_economics_keys_are_readable_and_writable()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var shown = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+        Assert.Equal(1.6m, shown.GetProperty("credits_per_zar_regular").GetDecimal());
+        Assert.Equal(2.4m, shown.GetProperty("credits_per_zar_league").GetDecimal());
+        Assert.Equal("16:00-19:00", shown.GetProperty("peak_hours").GetString());
+        Assert.Equal(60, shown.GetProperty("member_per_day_max_minutes").GetInt32());
+
+        var save = await client.PutAsJsonAsync(SettingsPath, new
+        {
+            sliceMinutes = 15,
+            slicePriceCredits = 8m,
+            advanceBookingDays = 14,
+            dayStartMinute = 360,
+            dayEndMinute = 1320,
+            penaltyPct = 30m,
+            graceWindowMinutes = 5,
+            penaltyWindowMinutes = 15,
+            creditsPerZarLeague = 2.8m,
+            peakHours = "17:00-20:00",
+            memberPerDayMaxMinutes = 90,
+        });
+        Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<Api.Multitenancy.ITenantContext>();
+        tenantContext.Set(seeded.TenantId, seeded.Slug);
+        var after = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+
+        Assert.Equal(2.8m, after.CreditsPerZarLeague);
+        Assert.Equal("17:00-20:00", after.PeakHoursRange);
+        Assert.Equal(90, after.MemberPerDayMaxMinutes);
+
+        // Omitted means unchanged. The booking-settings form and the economics form are
+        // different screens; a save from one must not revert the other.
+        Assert.Equal(1.6m, after.CreditsPerZarRegular);
+        Assert.Equal(2, after.RetentionYears);
+    }
+
+    [SkippableTheory]
+    [InlineData("creditsPerZarRegular", 0, "credits_per_zar_regular_out_of_range")]
+    [InlineData("creditsPerZarRegular", -1, "credits_per_zar_regular_out_of_range")]
+    [InlineData("memberPerDayMaxMinutes", 2000, "member_per_day_max_minutes_out_of_range")]
+    [InlineData("retentionYears", 0, "retention_years_out_of_range")]
+    [InlineData("noShowLookbackDays", 0, "no_show_lookback_days_out_of_range")]
+    public async Task An_economics_value_that_would_break_the_club_is_refused(string field, double value, string expected)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        // A conversion rate of zero makes every top-up worthless; a negative one credits
+        // the member for paying. These are values a form should never be able to submit.
+        var payload = new Dictionary<string, object>
+        {
+            ["sliceMinutes"] = 15,
+            ["slicePriceCredits"] = 8m,
+            ["advanceBookingDays"] = 14,
+            ["dayStartMinute"] = 360,
+            ["dayEndMinute"] = 1320,
+            ["penaltyPct"] = 30m,
+            ["graceWindowMinutes"] = 5,
+            ["penaltyWindowMinutes"] = 15,
+            [field] = value,
+        };
+
+        var save = await client.PutAsJsonAsync(SettingsPath, payload);
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        var body = await save.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(expected, body.GetProperty("error").GetString());
+    }
+
+    [SkippableFact]
+    public async Task A_top_up_cap_below_the_block_size_is_refused()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        // No top-up would ever be legal, which reads to a member as the payment page
+        // being broken rather than as a setting being wrong.
+        var save = await client.PutAsJsonAsync(SettingsPath, new
+        {
+            sliceMinutes = 15,
+            slicePriceCredits = 8m,
+            advanceBookingDays = 14,
+            dayStartMinute = 360,
+            dayEndMinute = 1320,
+            penaltyPct = 30m,
+            graceWindowMinutes = 5,
+            penaltyWindowMinutes = 15,
+            topupBlockZar = 500m,
+            topupMaxZarPerMember = 100m,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        var body = await save.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("topup_max_below_block", body.GetProperty("error").GetString());
+    }
+
+    [SkippableTheory]
+    [InlineData("19:00-16:00")]
+    [InlineData("16:00")]
+    [InlineData("not a time-range")]
+    public async Task A_malformed_peak_window_is_refused(string range)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        // TenantSettingsAccessor.PeakHours() returns null on a malformed range and the
+        // booking rule then silently stops applying — league exclusivity would just
+        // quietly not happen, which nobody would notice until a member complained.
+        var save = await client.PutAsJsonAsync(SettingsPath, new
+        {
+            sliceMinutes = 15,
+            slicePriceCredits = 8m,
+            advanceBookingDays = 14,
+            dayStartMinute = 360,
+            dayEndMinute = 1320,
+            penaltyPct = 30m,
+            graceWindowMinutes = 5,
+            penaltyWindowMinutes = 15,
+            peakHours = range,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+    }
+
     [SkippableFact]
     public async Task An_invalid_button_map_is_refused_with_the_button_named()
     {

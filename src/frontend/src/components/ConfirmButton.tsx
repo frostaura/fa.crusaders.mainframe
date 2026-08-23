@@ -107,6 +107,13 @@ export function ConfirmButton({
         <span className="col-start-1 row-start-1 flex items-center justify-center gap-2">{confirmLabel}</span>
       </span>
       <span
+        // Hidden from assistive tech whenever it is not the label on show.
+        //
+        // The sibling spans already do this and this one did not, so the button's
+        // accessible name was every copy of the label concatenated — a screen-reader
+        // user heard "Revoke Really revoke?" on a control whose entire purpose is to
+        // say ONE of those two things at a time. Found by a test asserting the name.
+        aria-hidden={armed || pending}
         className={cn(
           "absolute inset-0 flex items-center justify-center px-3 transition-transform duration-200 ease-out",
           (armed || pending) ? "-translate-y-full opacity-0" : "translate-y-0 opacity-100",

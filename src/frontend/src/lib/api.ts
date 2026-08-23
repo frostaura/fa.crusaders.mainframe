@@ -141,6 +141,97 @@ export type AdminSettings = {
   grace_window_minutes: number;
   penalty_window_minutes: number;
   timezone: string;
+
+  /** What each of a court box's eight buttons does, by physical position. */
+  button_map: string[];
+
+  // The nine keys the engine has always read and this API never showed. Until they
+  // were surfaced the only way to change one was to hand-edit a JSON column on a
+  // live money system.
+  credits_per_zar_regular: number;
+  credits_per_zar_league: number;
+  topup_block_zar: number;
+  topup_max_zar_per_member: number;
+  member_per_day_max_minutes: number;
+  peak_hours: string;
+  peak_advance_hours_for_regular: number;
+  retention_years: number;
+  no_show_lookback_days: number;
+};
+
+/**
+ * What a settings save may carry. The eight booking fields are required because every
+ * form shows them; everything else is optional, and omitting it means unchanged.
+ */
+export type AdminSettingsSave =
+  Pick<AdminSettings, "slice_minutes" | "slice_price_credits" | "advance_booking_days"
+    | "day_start_minute" | "day_end_minute" | "penalty_pct" | "grace_window_minutes"
+    | "penalty_window_minutes">
+  & Partial<Omit<AdminSettings, "timezone">>;
+
+/** A court box or gate controller, as the admin surface sees it. */
+export type AdminDevice = {
+  id: string;
+  device_code: string;
+  name: string;
+  kind: string;
+  hardware: string;
+  court_number: number | null;
+  gate_key: string | null;
+  mac_address: string | null;
+  key_version: number;
+  enabled: boolean;
+  revoked_at: string | null;
+  last_seen_at: string | null;
+  last_ip_address: string | null;
+  running_version: string | null;
+  mega_version: string | null;
+  ota_channel: string;
+  pinned_version: string | null;
+  /** A build this box installed and could never make a working call on. */
+  failed_version: string | null;
+  created_at: string;
+};
+
+/** A board announcing itself on the LAN that has not been claimed yet. */
+export type DiscoveredBoard = {
+  mac: string;
+  address: string;
+  hardware: string;
+  firmware: string;
+  mega_version: string | null;
+  claimed: boolean;
+  claimable: boolean;
+  /** Null when there was nothing to verify. False means a board asserted an identity
+   *  it could not prove, which is what a spoof AND a rotated key both look like. */
+  signature_verified: boolean | null;
+  device_id: string | null;
+  tenant_slug: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+};
+
+export type DiscoveryStatus = {
+  state: string;
+  listening: boolean;
+  bound_endpoint: string | null;
+  detail: string | null;
+  packets_received: number;
+  packets_accepted: number;
+  packets_rejected: number;
+  last_packet_at: string | null;
+  started_at: string | null;
+  announcers: number;
+  capacity_reached: boolean;
+  hint: string | null;
+};
+
+export type ClaimResult = {
+  device: AdminDevice;
+  device_key: string;
+  key_version: number;
+  board: DiscoveredBoard;
+  note: string;
 };
 
 export type AdminCourt = {
@@ -352,7 +443,15 @@ export const endpoints = {
 
   // Admin: tenant-wide config
   adminSettingsGet: () => api.get<AdminSettings>("/api/v1/admin/settings/"),
-  adminSettingsSave: (req: Omit<AdminSettings, "timezone">) => api.put<{ saved: true }>("/api/v1/admin/settings/", {
+  /**
+   * Saves settings.
+   *
+   * Everything past the eight booking fields is optional and OMITTED WHEN UNDEFINED,
+   * because the API reads an absent key as "unchanged". That is what lets the booking
+   * form, the economics form and the button-map editor be three screens without any
+   * of them reverting the others' work on save.
+   */
+  adminSettingsSave: (req: AdminSettingsSave) => api.put<{ saved: true }>("/api/v1/admin/settings/", {
     sliceMinutes: req.slice_minutes,
     slicePriceCredits: req.slice_price_credits,
     advanceBookingDays: req.advance_booking_days,
@@ -361,7 +460,31 @@ export const endpoints = {
     penaltyPct: req.penalty_pct,
     graceWindowMinutes: req.grace_window_minutes,
     penaltyWindowMinutes: req.penalty_window_minutes,
+    ...(req.button_map !== undefined ? { buttonMap: req.button_map } : {}),
+    ...(req.credits_per_zar_regular !== undefined ? { creditsPerZarRegular: req.credits_per_zar_regular } : {}),
+    ...(req.credits_per_zar_league !== undefined ? { creditsPerZarLeague: req.credits_per_zar_league } : {}),
+    ...(req.topup_block_zar !== undefined ? { topupBlockZar: req.topup_block_zar } : {}),
+    ...(req.topup_max_zar_per_member !== undefined ? { topupMaxZarPerMember: req.topup_max_zar_per_member } : {}),
+    ...(req.member_per_day_max_minutes !== undefined ? { memberPerDayMaxMinutes: req.member_per_day_max_minutes } : {}),
+    ...(req.peak_hours !== undefined ? { peakHours: req.peak_hours } : {}),
+    ...(req.peak_advance_hours_for_regular !== undefined ? { peakAdvanceHoursForRegular: req.peak_advance_hours_for_regular } : {}),
+    ...(req.retention_years !== undefined ? { retentionYears: req.retention_years } : {}),
+    ...(req.no_show_lookback_days !== undefined ? { noShowLookbackDays: req.no_show_lookback_days } : {}),
   }),
+
+  // Admin: devices
+  adminDevicesList: () => api.get<AdminDevice[]>("/api/v1/admin/devices/"),
+  adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; courtNumber?: number | null; otaChannel?: string; pinnedVersion?: string | null }) =>
+    api.patch<{ saved: true }>(`/api/v1/admin/devices/${id}`, req),
+  adminDeviceRevoke: (id: string) => api.post<{ revoked: true }>(`/api/v1/admin/devices/${id}/revoke`, {}),
+  adminDeviceRotateKey: (id: string) =>
+    api.post<{ device_key: string; key_version: number }>(`/api/v1/admin/devices/${id}/rotate-key`, {}),
+
+  // Admin: connecting a board
+  adminDevicesDiscovered: () => api.get<DiscoveredBoard[]>("/api/v1/admin/devices/discovered"),
+  adminDiscoveryStatus: () => api.get<DiscoveryStatus>("/api/v1/admin/devices/discovery-status"),
+  adminDeviceClaim: (req: { mac: string; claimCode: string; name: string; courtNumber?: number | null }) =>
+    api.post<ClaimResult>("/api/v1/admin/devices/claim", req),
 
   // Admin: courts
   adminCourtsList: () => api.get<AdminCourt[]>("/api/v1/admin/courts/"),

@@ -43,6 +43,21 @@ public static class AdminConfigEndpoints
                 penalty_window_minutes = GetInt(doc, "penalty_window_minutes", defaults.PenaltyWindowMinutes),
                 timezone = GetString(doc, "timezone", defaults.Timezone),
                 button_map = defaults.Buttons.ToWire(),
+
+                // The nine keys the engine has always read and this endpoint never
+                // showed. They govern what a member is charged and when they may book,
+                // and until now the only way to change one was to edit a JSON column in
+                // the database by hand — on a live money system, with no audit trail and
+                // no validation.
+                credits_per_zar_regular = GetDecimal(doc, "credits_per_zar_regular", defaults.CreditsPerZarRegular),
+                credits_per_zar_league = GetDecimal(doc, "credits_per_zar_league", defaults.CreditsPerZarLeague),
+                topup_block_zar = GetDecimal(doc, "topup_block_zar", defaults.TopupBlockZar),
+                topup_max_zar_per_member = GetDecimal(doc, "topup_max_zar_per_member", defaults.TopupMaxZarPerMember),
+                member_per_day_max_minutes = GetInt(doc, "member_per_day_max_minutes", defaults.MemberPerDayMaxMinutes),
+                peak_hours = GetString(doc, "peak_hours", defaults.PeakHoursRange),
+                peak_advance_hours_for_regular = GetInt(doc, "peak_advance_hours_for_regular", defaults.PeakAdvanceHoursForRegular),
+                retention_years = GetInt(doc, "retention_years", defaults.RetentionYears),
+                no_show_lookback_days = GetInt(doc, "no_show_lookback_days", defaults.NoShowLookbackDays),
             });
         });
 
@@ -67,6 +82,9 @@ public static class AdminConfigEndpoints
                     return Results.BadRequest(new { error = "button_map_invalid", message = reason });
             }
 
+            var economicsError = ValidateEconomics(req);
+            if (economicsError is not null) return Results.BadRequest(new { error = economicsError });
+
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
             {
@@ -85,6 +103,7 @@ public static class AdminConfigEndpoints
             // Omitted means unchanged, not "reset to default": a screen that does not
             // yet edit the button map must not wipe one an admin set through another.
             if (buttons is not null) doc["button_map"] = ToElement(buttons.ToWire());
+            WriteOptionalEconomics(doc, req);
             row.SettingsJson = JsonSerializer.Serialize(doc);
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { saved = true });
@@ -153,6 +172,65 @@ public static class AdminConfigEndpoints
         return app;
     }
 
+    /// <summary>
+    /// Bounds on the nine economics keys. Every one of them is a number a member is
+    /// charged by or booked under, so the point is not tidiness — a conversion rate of
+    /// zero makes every top-up worthless, and a negative one credits the member for
+    /// paying. These are the values a form should never be able to submit.
+    /// </summary>
+    private static string? ValidateEconomics(UpdateSettingsRequest req)
+    {
+        if (req.CreditsPerZarRegular is <= 0 or > 1000) return "credits_per_zar_regular_out_of_range";
+        if (req.CreditsPerZarLeague is <= 0 or > 1000) return "credits_per_zar_league_out_of_range";
+        if (req.TopupBlockZar is <= 0 or > 100000) return "topup_block_zar_out_of_range";
+        if (req.TopupMaxZarPerMember is not null && req.TopupBlockZar is not null
+            && req.TopupMaxZarPerMember < req.TopupBlockZar)
+        {
+            // A cap below the block size means no top-up is ever legal, which reads to a
+            // member as the payment page being broken.
+            return "topup_max_below_block";
+        }
+        if (req.MemberPerDayMaxMinutes is < 0 or > 1440) return "member_per_day_max_minutes_out_of_range";
+        if (req.PeakAdvanceHoursForRegular is < 0 or > 336) return "peak_advance_hours_out_of_range";
+        if (req.RetentionYears is < 1 or > 50) return "retention_years_out_of_range";
+        if (req.NoShowLookbackDays is < 1 or > 365) return "no_show_lookback_days_out_of_range";
+
+        if (req.PeakHours is not null && !TryParsePeakHours(req.PeakHours)) return "peak_hours_invalid";
+        return null;
+    }
+
+    private static bool TryParsePeakHours(string range)
+    {
+        var parts = range.Split('-');
+        return parts.Length == 2
+            && TimeOnly.TryParse(parts[0].Trim(), out var start)
+            && TimeOnly.TryParse(parts[1].Trim(), out var end)
+            && start < end;
+    }
+
+    /// <summary>
+    /// Writes only the economics keys the caller actually sent.
+    ///
+    /// <para>
+    /// Omitted means unchanged, never "reset to default". The booking-settings form and
+    /// the economics form are different screens, and a save from one must not silently
+    /// revert the other — which is exactly what a wholesale write would do the first time
+    /// somebody edited the slice length.
+    /// </para>
+    /// </summary>
+    private static void WriteOptionalEconomics(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.CreditsPerZarRegular is not null) doc["credits_per_zar_regular"] = ToElement(req.CreditsPerZarRegular);
+        if (req.CreditsPerZarLeague is not null) doc["credits_per_zar_league"] = ToElement(req.CreditsPerZarLeague);
+        if (req.TopupBlockZar is not null) doc["topup_block_zar"] = ToElement(req.TopupBlockZar);
+        if (req.TopupMaxZarPerMember is not null) doc["topup_max_zar_per_member"] = ToElement(req.TopupMaxZarPerMember);
+        if (req.MemberPerDayMaxMinutes is not null) doc["member_per_day_max_minutes"] = ToElement(req.MemberPerDayMaxMinutes);
+        if (req.PeakHours is not null) doc["peak_hours"] = ToElement(req.PeakHours.Trim());
+        if (req.PeakAdvanceHoursForRegular is not null) doc["peak_advance_hours_for_regular"] = ToElement(req.PeakAdvanceHoursForRegular);
+        if (req.RetentionYears is not null) doc["retention_years"] = ToElement(req.RetentionYears);
+        if (req.NoShowLookbackDays is not null) doc["no_show_lookback_days"] = ToElement(req.NoShowLookbackDays);
+    }
+
     private static Dictionary<string, JsonElement> ParseObject(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return new();
@@ -179,7 +257,20 @@ public sealed record UpdateSettingsRequest(
     decimal PenaltyPct,
     int GraceWindowMinutes,
     int PenaltyWindowMinutes,
-    IReadOnlyList<string>? ButtonMap = null);
+    IReadOnlyList<string>? ButtonMap = null,
+
+    // The nine economics keys. All nullable, all optional: omitted means unchanged, so a
+    // screen that edits only booking settings cannot revert an economics change made from
+    // another one.
+    decimal? CreditsPerZarRegular = null,
+    decimal? CreditsPerZarLeague = null,
+    decimal? TopupBlockZar = null,
+    decimal? TopupMaxZarPerMember = null,
+    int? MemberPerDayMaxMinutes = null,
+    string? PeakHours = null,
+    int? PeakAdvanceHoursForRegular = null,
+    int? RetentionYears = null,
+    int? NoShowLookbackDays = null);
 
 public sealed record CreateCourtRequest(string Name, string CourtType, decimal SlicePriceCredits);
 public sealed record UpdateCourtRequest(string? Name, decimal? SlicePriceCredits, bool? IsActive);

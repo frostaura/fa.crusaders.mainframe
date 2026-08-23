@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon } from "lucide-react";
+import { LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
 import { useProfile } from "../lib/profile";
-import { cn } from "../lib/utils";
+import { cn, formatCredits } from "../lib/utils";
 
 export default function Layout() {
   const auth = useAuth();
@@ -64,7 +64,7 @@ export default function Layout() {
                 title={loading ? "Refreshing balance…" : "Wallet balance — tap to top up"}
               >
                 <WalletIcon size={14} strokeWidth={2.25} />
-                <span>{balance === null ? "R—" : `R${balance.toFixed(2)}`}</span>
+                <span>{balance === null ? "— cr" : formatCredits(balance)}</span>
               </NavLink>
             )}
             {auth.status === "authenticated" && (
@@ -109,6 +109,11 @@ export default function Layout() {
                           onClick={() => { setMenuOpen(false); nav("/admin/settings"); }}
                           icon={<SettingsIcon size={16} />}
                           label="Admin settings"
+                        />
+                        <MenuItem
+                          onClick={() => { setMenuOpen(false); nav("/admin/devices"); }}
+                          icon={<Cpu size={16} />}
+                          label="Devices"
                         />
                         <MenuItem
                           onClick={() => { setMenuOpen(false); nav("/admin/webhooks"); }}

@@ -6,7 +6,7 @@ import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
-import { cn } from "../lib/utils";
+import { cn, formatCredits } from "../lib/utils";
 
 const FINGER_OPTIONS = [
   "left-index", "left-middle", "left-pinky", "left-ring", "left-thumb",
@@ -115,7 +115,7 @@ export default function AdminMembersPage() {
       const r = await endpoints.adminAdjust(targetUserId, amount, creditReason);
       // Reflect the new balance in this row immediately — no list refetch, no reload.
       setMembers((prev) => prev?.map((m) => m.user_id === targetUserId ? { ...m, balance_credits: r.balance_after_credits } : m) ?? prev);
-      toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} R${Math.abs(amount).toFixed(2)}.` });
+      toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} ${formatCredits(Math.abs(amount))}.` });
       setCreditFor(null); setCreditAmount(""); setCreditReason("");
     } catch { toast.push({ tone: "danger", text: "Credit adjustment failed." }); }
     finally { setBusyId(null); }
@@ -242,7 +242,7 @@ export default function AdminMembersPage() {
                     <td className="px-4 py-3"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></td>
                     <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
                       <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
-                        R{m.balance_credits.toFixed(2)}
+                        {formatCredits(m.balance_credits)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-text-secondary whitespace-nowrap text-xs">

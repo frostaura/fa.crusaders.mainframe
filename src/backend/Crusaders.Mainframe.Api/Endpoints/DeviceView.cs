@@ -33,6 +33,10 @@ public static class DeviceView
         mega_version = d.MegaVersion,
         ota_channel = d.OtaChannel.ToString(),
         pinned_version = d.PinnedVersion,
+        // A build this box installed and could never make a working call on. Surfaced
+        // because a fleet quietly declining an update is the kind of silence noticed a
+        // week after the release was promoted everywhere.
+        failed_version = d.FailedVersion,
         created_at = d.CreatedAt,
     };
 }
