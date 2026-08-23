@@ -19,7 +19,20 @@ public class PayFastProviderTests
 {
     private static PayFastProvider Provider() => new(NullLogger<PayFastProvider>.Instance);
 
-    private static PerTenantCredentials Creds(string environment = "test", string passphrase = "jt7NOE43FZPn") =>
+    /// <summary>
+    /// Deliberately unmistakable as a fixture.
+    ///
+    /// <para>
+    /// This was a realistic-looking random string, and the secret scanner flagged every
+    /// occurrence — correctly. It was never a live credential, so nothing needed rotating,
+    /// but a test suite full of things that look like credentials is a test suite people
+    /// stop reading scanner output for. The value is arbitrary; the signatures derive from
+    /// it, so any string exercises the algorithm equally well.
+    /// </para>
+    /// </summary>
+    private const string TestPassphrase = "not-a-real-passphrase-test-fixture-only";
+
+    private static PerTenantCredentials Creds(string environment = "test", string passphrase = TestPassphrase) =>
         new("10000100", "46f0cd694581a", passphrase, environment);
 
     private static RegisterCheckoutRequest Request(decimal amount = 100m) => new(
@@ -146,7 +159,7 @@ public class PayFastProviderTests
 
     // ---- ITN interpretation ------------------------------------------------
 
-    private static string SignedItn(string status = "COMPLETE", string gross = "100.00", string passphrase = "jt7NOE43FZPn")
+    private static string SignedItn(string status = "COMPLETE", string gross = "100.00", string passphrase = TestPassphrase)
     {
         var fields = new List<KeyValuePair<string, string?>>
         {
@@ -167,7 +180,7 @@ public class PayFastProviderTests
             .Append($"signature={signature}"));
     }
 
-    private static CallbackPayload PayloadOf(string body, string passphrase = "jt7NOE43FZPn") =>
+    private static CallbackPayload PayloadOf(string body, string passphrase = TestPassphrase) =>
         new(Creds(passphrase: passphrase), body, "", TopUpEndpoints.ParseFormPreservingOrder(body));
 
     [Fact]
