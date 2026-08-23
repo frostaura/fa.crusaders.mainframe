@@ -43,7 +43,7 @@ public sealed class LedgerEntry : ITenantScoped
     public Guid? RelatedBookingId { get; set; }
     public Guid ActorUserId { get; set; }
     public string? Reason { get; set; }
-    public string? ExternalReference { get; set; } // unique on PeachPayments txn id etc.
+    public string? ExternalReference { get; set; } // unique on the gateway transaction id
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

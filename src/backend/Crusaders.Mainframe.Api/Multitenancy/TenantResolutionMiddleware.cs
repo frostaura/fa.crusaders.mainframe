@@ -27,7 +27,7 @@ public sealed class TenantResolutionMiddleware
         "/api/v1/whoami",
         "/api/v1/auth/",                  // login, register, magic-link callback
         "/api/v1/platform/",              // platform-admin endpoints scoped above tenant
-        "/api/v1/credit/topup/callback",  // PeachPayments webhook — resolves tenant from query
+        "/api/v1/credit/topup/callback",  // PayFast ITN — resolves tenant from query
         "/api/v1/uploads/",               // anonymous registration upload
         "/uploads/",                      // static-served media
         "/api/v1/device/",                // device surface — DeviceAuthenticationHandler sets the tenant from the device row

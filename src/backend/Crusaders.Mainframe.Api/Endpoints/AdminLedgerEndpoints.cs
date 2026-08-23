@@ -56,7 +56,7 @@ public static class AdminLedgerEndpoints
 public static class LedgerRowMapper
 {
     public const string Treasury = "Club treasury";
-    public const string PeachPayments = "PeachPayments";
+    public const string PaymentGateway = "PayFast";
 
     public static LedgerRowDto Build(LedgerEntry e, Func<Guid, string> nameFor)
     {
@@ -68,7 +68,7 @@ public static class LedgerRowMapper
         var (counterparty, comment) = e.Type switch
         {
             LedgerEntryType.TopUp =>
-                (PeachPayments, e.Reason ?? "Wallet top-up"),
+                (PaymentGateway, e.Reason ?? "Wallet top-up"),
             LedgerEntryType.BookingCharge =>
                 (Treasury, e.Reason ?? "Booking charge"),
             LedgerEntryType.CancellationRefund =>
@@ -80,7 +80,7 @@ public static class LedgerRowMapper
             LedgerEntryType.AdminAdjustment =>
                 (actor == subject ? Treasury : actor, e.Reason ?? "Admin adjustment"),
             LedgerEntryType.PaymentReversal =>
-                (PeachPayments, e.Reason ?? "Payment reversal"),
+                (PaymentGateway, e.Reason ?? "Payment reversal"),
             _ => (Treasury, e.Reason ?? e.Type.ToString()),
         };
 

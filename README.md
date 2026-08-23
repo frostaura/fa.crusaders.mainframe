@@ -7,7 +7,7 @@ A FrostAura Technologies project. Strategic context, charter, feature spec, desi
 ## Stack
 - **Backend:** ASP.NET Core 10, EF Core, PostgreSQL 16, JWT + Passkeys
 - **Frontend:** React 19 + TypeScript + Vite + Tailwind, with hand-rolled component primitives (Figtree, soft palette per [`docs/specs/design-system.md`](./docs/specs/design-system.md)). Note: **not** shadcn/ui — see `CLAUDE.md` § Known deviations
-- **Payments:** PeachPayments (ZAR) — see [`docs/specs/payments-peachpayments.md`](./docs/specs/payments-peachpayments.md)
+- **Payments:** PayFast (ZAR) — see [`docs/specs/payments-peachpayments.md`](./docs/specs/payments-peachpayments.md)
 - **Biometric peripheral:** abstracted via `IBiometricDevice` — see [`docs/specs/biometric-abstraction.md`](./docs/specs/biometric-abstraction.md)
 - **Lights:** WeMos Mega 2560 + ESP8266 court box driving a 4-channel relay board on the club LAN — see [`src/iot/README.md`](./src/iot/README.md)
 - **Deploy:** GitHub Actions → Docker Hub → Portainer re-pull → Cloudflared tunnel — see [`docs/specs/deployment.md`](./docs/specs/deployment.md)

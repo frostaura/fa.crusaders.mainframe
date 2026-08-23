@@ -59,7 +59,7 @@ const EVENTS: EventDef[] = [
   {
     name: "credit.topped_up",
     label: "Credit topped up",
-    description: "A successful PeachPayments top-up cleared.",
+    description: "A successful PayFast top-up cleared.",
     vars: ["topup_id", "zar_paid", "credits", "conversion_rate", "member_class", "external_reference"],
   },
 ];

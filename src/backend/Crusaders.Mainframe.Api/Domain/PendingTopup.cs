@@ -9,8 +9,8 @@ public enum TopUpStatus
 }
 
 /// <summary>
-/// One row per top-up attempt. Reconciles the PeachPayments callback to the ledger entry.
-/// Idempotent on <see cref="ExternalReference"/> (Peach payment id), enforced by a unique index.
+/// One row per top-up attempt. Reconciles the gateway callback to the ledger entry.
+/// Idempotent on <see cref="ExternalReference"/> (the gateway's payment id), enforced by a unique index.
 /// </summary>
 public sealed class PendingTopup : ITenantScoped
 {
@@ -20,8 +20,10 @@ public sealed class PendingTopup : ITenantScoped
 
     public decimal AmountZar { get; set; }
     public required string IdempotencyKey { get; set; }     // matches the merchantTransactionId
-    public string? PeachCheckoutId { get; set; }
-    public string? ExternalReference { get; set; }          // peach payment id, populated on completion
+    /// <summary>The gateway's own reference for this attempt. For PayFast this is the
+    /// m_payment_id we sent, since PayFast has no server-side checkout registration.</summary>
+    public string? GatewayCheckoutId { get; set; }
+    public string? ExternalReference { get; set; }          // gateway payment id (PayFast pf_payment_id), on completion
     public TopUpStatus Status { get; set; } = TopUpStatus.Pending;
     public string? FailureReason { get; set; }
 

@@ -68,10 +68,10 @@ public static class Seeder
                   },
                   "timezone": "Africa/Johannesburg",
                   "brand_accent_hex": "#7AB07A",
-                  "peach_payments": {
-                    "entity_id": "REPLACE_WITH_PEACH_ENTITY_ID",
-                    "access_token": "REPLACE_WITH_PEACH_ACCESS_TOKEN",
-                    "webhook_secret": "REPLACE_WITH_PEACH_WEBHOOK_SECRET",
+                  "payfast": {
+                    "merchant_id": "REPLACE_WITH_PAYFAST_MERCHANT_ID",
+                    "merchant_key": "REPLACE_WITH_PAYFAST_MERCHANT_KEY",
+                    "passphrase": "REPLACE_WITH_PAYFAST_PASSPHRASE",
                     "environment": "test"
                   }
                 }

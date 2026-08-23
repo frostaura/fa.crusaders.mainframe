@@ -211,7 +211,7 @@ public class MainframeDbContext : DbContext
             e.HasIndex(p => p.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
             e.Property(p => p.AmountZar).HasColumnType("numeric(10,2)");
             e.Property(p => p.IdempotencyKey).HasMaxLength(64).IsRequired();
-            e.Property(p => p.PeachCheckoutId).HasMaxLength(128);
+            e.Property(p => p.GatewayCheckoutId).HasMaxLength(128);
             e.Property(p => p.ExternalReference).HasMaxLength(255);
             e.Property(p => p.Status).HasConversion<int>();
             e.Property(p => p.FailureReason).HasMaxLength(512);

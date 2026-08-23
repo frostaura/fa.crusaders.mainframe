@@ -44,7 +44,7 @@ export default function TopUpStatusPage() {
         <h1 className="text-xl font-semibold mb-2">Top-up</h1>
         <p className="text-sm text-text-secondary mb-3">R{s.amount_zar.toFixed(2)}</p>
         <Badge tone={s.status === "Completed" ? "success" : s.status === "Failed" ? "danger" : "info"}>{s.status}</Badge>
-        {s.status === "Pending" && <p className="mt-3 text-sm text-text-secondary">Waiting for confirmation from PeachPayments…</p>}
+        {s.status === "Pending" && <p className="mt-3 text-sm text-text-secondary">Waiting for confirmation from PayFast…</p>}
         {s.status === "Failed" && s.failure_reason && <p className="mt-3 text-sm text-danger-strong">{s.failure_reason}</p>}
         {s.status === "Completed" && (
           <p className="mt-3 text-sm">Your wallet has been credited. <Link to="/wallet" className="text-accent-strong hover:underline">View wallet →</Link></p>
