@@ -1,0 +1,125 @@
+#include "court/Session.h"
+
+#include <string.h>
+
+namespace court {
+namespace detail {
+
+namespace {
+
+/// Minutes, rounded up. A member with 30 seconds left should read "1 MIN",
+/// not "0 MIN" — rounding down tells them their booking is over while the
+/// lights are still on.
+uint32_t minutesCeil(uint32_t ms) {
+  return static_cast<uint32_t>((ms + 59999U) / 60000U);
+}
+
+/// Appends a decimal number. Returns the new length. No printf: it costs about
+/// 1.5 KB of flash on the ESP to render an integer, and %lu is unreliable on
+/// AVR's cut-down libc.
+size_t appendUnsigned(char* dest, size_t at, size_t cap, uint32_t value) {
+  char digits[10];
+  size_t n = 0U;
+  do {
+    digits[n] = static_cast<char>('0' + (value % 10U));
+    value /= 10U;
+    ++n;
+  } while (value > 0U && n < sizeof(digits));
+
+  while (n > 0U && at + 1U < cap) {
+    --n;
+    dest[at] = digits[n];
+    ++at;
+  }
+  dest[at] = '\0';
+  return at;
+}
+
+size_t appendText(char* dest, size_t at, size_t cap, const char* text) {
+  while (text != nullptr && *text != '\0' && at + 1U < cap) {
+    dest[at] = *text;
+    ++at;
+    ++text;
+  }
+  dest[at] = '\0';
+  return at;
+}
+
+char courtLetter(uint8_t court) {
+  return court < 4U ? static_cast<char>('A' + court) : '?';
+}
+
+} // namespace
+
+void setLine(char* dest, const char* text) {
+  memset(dest, 0, kLineLen + 1U);
+  static_cast<void>(appendText(dest, 0U, kLineLen + 1U, text));
+}
+
+void setLineWithMinutes(char* dest, const char* prefix, uint32_t ms, const char* suffix) {
+  memset(dest, 0, kLineLen + 1U);
+  size_t at = appendText(dest, 0U, kLineLen + 1U, prefix);
+  at = appendUnsigned(dest, at, kLineLen + 1U, minutesCeil(ms));
+  static_cast<void>(appendText(dest, at, kLineLen + 1U, suffix));
+}
+
+void linesFor(roster::Verdict verdict, const roster::Entry& entry, uint8_t court, uint32_t ageMs, char* line1,
+              char* line2) {
+  memset(line1, 0, kLineLen + 1U);
+  memset(line2, 0, kLineLen + 1U);
+
+  switch (verdict) {
+  case roster::Verdict::Allow: {
+    // "COURT C" then "45 MIN" — the two facts a member checks before walking on.
+    size_t at = appendText(line1, 0U, kLineLen + 1U, "COURT ");
+    line1[at] = courtLetter(court);
+    line1[at + 1U] = '\0';
+    setLineWithMinutes(line2, "", entry.durationMs, " MIN");
+    return;
+  }
+
+  case roster::Verdict::TooEarly: {
+    setLine(line1, "TOO EARLY");
+    // How long to wait, not when it starts: the box has no wall clock, so
+    // "18:00" would be a number it cannot honestly produce.
+    const uint32_t waitMs = entry.opensAtMs > ageMs ? entry.opensAtMs - ageMs : 0U;
+    setLineWithMinutes(line2, "WAIT ", waitMs, " MIN");
+    return;
+  }
+
+  case roster::Verdict::TooLate:
+    setLine(line1, "BOOKING ENDED");
+    setLine(line2, "SEE THE DESK");
+    return;
+
+  case roster::Verdict::WrongCourt: {
+    setLine(line1, "WRONG COURT");
+    // Where to actually go. This is the refusal most worth being specific
+    // about — the member is thirty seconds from playing.
+    size_t at = appendText(line2, 0U, kLineLen + 1U, "YOU ARE ON ");
+    line2[at] = courtLetter(entry.court);
+    line2[at + 1U] = '\0';
+    return;
+  }
+
+  case roster::Verdict::Stale:
+    // Not the member's fault and not a booking problem, so it must not read
+    // like one. An admin seeing this knows to look at the WiFi.
+    setLine(line1, "NO CONNECTION");
+    setLine(line2, "SEE THE DESK");
+    return;
+
+  case roster::Verdict::Unknown:
+    setLine(line1, "NOT RECOGNISED");
+    setLine(line2, "SEE THE DESK");
+    return;
+  }
+
+  // Reachable only from a verdict byte this build does not know, which is what
+  // a downgrade produces. Deliberately outside the switch so -Wswitch-enum
+  // still fails on a genuinely unhandled enumerator.
+  setLine(line1, "SEE THE DESK");
+}
+
+} // namespace detail
+} // namespace court

@@ -1,0 +1,11 @@
+{
+  "name": "eventq",
+  "version": "1.0.0",
+  "description": "Durable, bounded queue of court events awaiting upload to the API.",
+  "dependencies": {
+    "hal": "*",
+    "timebase": "*",
+    "devcrypto": "*"
+  },
+  "build": { "flags": ["-I include"] }
+}

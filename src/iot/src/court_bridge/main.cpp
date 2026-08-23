@@ -30,43 +30,53 @@
 // Mega's frame decoder, which answers it with `!EVT,BADFRAME`. Diagnostics go
 // out as protocol frames or as the discovery beacon's fields, not as prose.
 //
+// THE COURT WORKS WHEN THE NETWORK DOES NOT
+// -----------------------------------------
+// A scan is decided HERE, from the roster cache, in microseconds. Putting an
+// HTTPS round trip on that path would make every activation depend on a
+// consumer router and an ISP, and turn a DNS stall into a member standing in a
+// dark corridor pressing the button again. So the box decides locally and
+// queues what it did; the API hears about it when it can.
+//
+// The event queue is therefore not a nicety. Under charge-at-booking the member
+// has ALREADY been debited, and the activation event is what stops the no-show
+// sweep reversing it — a court lit and never reported looks exactly like a
+// member who stayed home. See lib/eventq, which also states plainly what the
+// queue does not survive.
+//
 // WHAT THIS FIRMWARE DELIBERATELY DEFERS
 // --------------------------------------
-// These are LATER phases and the seams for them are marked, not built:
-//   * The session state machine. Nothing here turns a `!BTN` or a `!SCAN` into
-//     a booking; uplink frames are decoded, counted and dropped. That decision
-//     needs the roster and the ledger, which need the API client.
-//   * The roster cache and the event queue. ROSTER_MAX_AGE_MS and EVENTQ_SLOTS
-//     are already build flags with nothing reading them, on purpose: the queue
-//     is what makes a court usable while the WiFi is down, and it is worth
-//     building deliberately rather than as a side effect of this file.
-//   * Provisioning. The claim commitment is broadcast and the code is shown on
-//     the Mega's LCD, which is the half of claiming that belongs to the board.
-//     The `POST /api/v1/device/provision` fetch that collects the key, and the
-//     signed claimed-ANNOUNCE that follows it, need an HTTP client and the
-//     device key store — both of which exist as ports here already.
 //   * OTA. The whole reason this half is separate; it needs a signed-image
 //     policy decided before any code, not after.
+//   * Remappable buttons. `!BTN` frames are decoded and counted but do not yet
+//     choose a court or a duration — that map is a tenant setting and arrives
+//     on the heartbeat config payload.
 
 #include <Arduino.h>
+#include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "arduino_hal/ArduinoClock.h"
 #include "arduino_hal/LittleFsStore.h"
 #include "arduino_hal/SerialTransport.h"
+#include "court/Session.h"
+#include "devapi/DeviceClient.h"
 #include "devcrypto/Hex.h"
 #include "discovery/Announcer.h"
 #include "discovery/Beacon.h"
 #include "discovery/BeaconCodec.h"
 #include "discovery/Claim.h"
 #include "discovery/Offer.h"
+#include "eventq/EventQueue.h"
 #include "fwversion/Version.h"
 #include "protocol/Codec.h"
 #include "protocol/Protocol.h"
+#include "roster/Roster.h"
 #include "timebase/TimeBase.h"
 
 // secrets.h is gitignored and is absent on a CI runner, so its presence cannot
@@ -157,6 +167,42 @@ char gMegaVersion[proto::kMaxArgLen + 1] = {'\0'};
 uint32_t gMegaUptime = 0U;
 
 bool gWifiUp = false;
+
+/// The three things that let a court work with no network.
+///
+/// Sizes come from build flags so they are visible in platformio.ini next to
+/// the board they have to fit in, and so the linker can prove they do. 64 slots
+/// of ~48 bytes is about 3 KB — affordable on the ESP8266, and a whole busy
+/// evening's worth of events.
+constexpr uint8_t kRosterSlots = 32U;
+
+eventq::EventQueue<EVENTQ_SLOTS> gQueue(&gStore);
+roster::Roster<kRosterSlots> gRoster(ROSTER_MAX_AGE_MS);
+court::Session<roster::Roster<kRosterSlots>, eventq::EventQueue<EVENTQ_SLOTS>> gSession(gRoster, gQueue);
+
+/// Bytes for request nonces. Same register as the claim entropy, behind the
+/// client's own port — the two are separate interfaces because one is testable
+/// against a corpus and the other has to be, for the same reason.
+class RequestEntropy final : public devapi::IEntropySource {
+public:
+  uint8_t nextByte() override { return static_cast<uint8_t>(RANDOM_REG32 & 0xFFU); }
+};
+
+RequestEntropy gRequestEntropy;
+devapi::DeviceClient gApi(devapi::Credentials{}, gRequestEntropy);
+
+/// Which court this box is fitted at, from the heartbeat. 0-3 for A-D.
+///
+/// The API assigns it; the box does not guess. A default of 0 means an
+/// unprovisioned box would answer scans as court A — which is why the roster
+/// starts stale, and a stale roster refuses everything regardless of court.
+uint8_t gCourtNumber = 0U;
+
+/// When each court's lights went on, so a release can report how long it was
+/// actually held. Zero means not held. This is the number a dispute about a
+/// 45-minute booking turns on, and the Mega's own timer is what ends it — so
+/// the ESP has to watch for the end rather than schedule it.
+uint32_t gHeldSinceMs[4] = {0U, 0U, 0U, 0U};
 
 uint32_t uptimeSeconds() {
   return static_cast<uint32_t>(gUptime.value() / 1000ULL);
@@ -291,23 +337,79 @@ void noteMegaPong(const proto::Frame& frame) {
   gMegaUptime = seconds;
 }
 
-void handleUplink(const proto::Decoder::Result& result) {
-  if (!result.isFrame()) {
-    // LATER: `!EVT` and `!ERR` from the Mega belong in the event queue, which
-    // is what carries them to the API once the WiFi comes back. Dropped for now
-    // rather than half-queued.
+/// Paints an outcome and, when it is an activation, opens the court.
+///
+/// The LCD is written FIRST. If the `!ON` fails — a full TX ring, a dead cable
+/// — the member is looking at "COURT C 45 MIN" and no lights, which is a
+/// complaint with a clear cause. The other order gives them lights and a blank
+/// screen, which reads as the box being broken.
+void applyOutcome(const court::Outcome& outcome) {
+  static_cast<void>(sendToMega(proto::Frame::lcd(outcome.line1, outcome.line2)));
+  if (outcome.action != court::Action::TurnOn) {
     return;
   }
-  if (result.frame.verb() == proto::Verb::Pong) {
-    noteMegaPong(result.frame);
+  const proto::Court court = static_cast<proto::Court>(outcome.court);
+  static_cast<void>(sendToMega(proto::Frame::on(court, outcome.durationMs / 1000U)));
+  if (outcome.court < 4U) {
+    gHeldSinceMs[outcome.court] = gClock.nowMs();
   }
-  // LATER: `!BTN`, `!SCAN` and `!STATE` feed the session state machine. Nothing
-  // here decides what a scan means, because that needs the roster and the
-  // ledger, and a half-built version of it would turn the lights on for the
-  // wrong member rather than not at all.
 }
 
-void pumpMegaLink() {
+void handleScan(const proto::Frame& frame, uint32_t nowMs) {
+  // The court a scan belongs to is the court the box is fitted at, which is the
+  // court_number the API assigned it — not something in the scanned bytes. A
+  // barcode that could name its own court would be a barcode that opens any
+  // court in the club.
+  const court::Outcome outcome = gSession.onScan(frame.arg(0), gCourtNumber, eventq::Method::Qr, nowMs);
+  applyOutcome(outcome);
+}
+
+void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
+  // `!EVT,AUTOOFF,<court>` is the Mega's independent timer releasing a court on
+  // its own. It is the one event the ESP does not initiate and must not miss:
+  // it is how the club learns the court was used for the time it was used,
+  // rather than for the time it was booked.
+  const char* name = frame.arg(0);
+  if (strcmp(name, "AUTOOFF") != 0 && strcmp(name, "OFF") != 0) {
+    return;
+  }
+  const char* courtText = frame.arg(1);
+  if (courtText[0] < 'A' || courtText[0] > 'D') {
+    return;
+  }
+  const uint8_t court = static_cast<uint8_t>(courtText[0] - 'A');
+  applyOutcome(gSession.onRelease(
+      court, gHeldSinceMs[court] == 0U ? 0U : tb::since(nowMs, gHeldSinceMs[court]), nowMs));
+  gHeldSinceMs[court] = 0U;
+}
+
+void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
+  if (!result.isFrame()) {
+    // A line from the Mega that did not decode. Counted by the decoder; nothing
+    // to queue, because there is no event here — only a bad cable.
+    return;
+  }
+
+  switch (result.frame.verb()) {
+  case proto::Verb::Pong:
+    noteMegaPong(result.frame);
+    return;
+  case proto::Verb::Scan:
+    handleScan(result.frame, nowMs);
+    return;
+  case proto::Verb::Evt:
+    handleMegaEvent(result.frame, nowMs);
+    return;
+  default:
+    // `!BTN` and `!STATE` are decoded and ignored until the button map
+    // arrives on the heartbeat config payload. Ignoring them is deliberate:
+    // a half-built mapping opens the wrong court, which is worse than
+    // opening none.
+    return;
+  }
+}
+
+void pumpMegaLink(uint32_t nowMs) {
   uint8_t byte = 0U;
   for (uint16_t i = 0U; i < kBytesPerPass && gMega.read(byte); ++i) {
     if (!gUplink.feed(static_cast<char>(byte))) {
@@ -315,7 +417,7 @@ void pumpMegaLink() {
     }
     proto::Decoder::Result result;
     while (gUplink.pop(result)) {
-      handleUplink(result);
+      handleUplink(result, nowMs);
     }
   }
 }
@@ -376,7 +478,7 @@ void loop() {
   gUptime.tick(now);
 
   pumpWifiLink(now);
-  pumpMegaLink();
+  pumpMegaLink(now);
   pumpHeartbeat(now);
   pumpOffers();
 

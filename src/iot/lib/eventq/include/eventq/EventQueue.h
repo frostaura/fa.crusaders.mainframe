@@ -1,0 +1,268 @@
+// Crusaders Mainframe — the bounded, checksummed ring of events awaiting upload.
+//
+// WHAT IT GUARANTEES
+// ------------------
+//   * An event that was accepted is delivered at least once, unless the queue
+//     overflowed — and an overflow is reported, never silent.
+//   * At-least-once, NOT at-most-once. The API deduplicates on (device, seq).
+//     A queue that dropped an event to avoid a duplicate would be trading a
+//     charge the club can reverse for a game it never learns about.
+//   * A sequence number is never reused, across reboots included. That is what
+//     the deduplication rests on, and it is the one thing here that is
+//     persisted.
+//
+// WHAT IT DOES NOT GUARANTEE, SAID PLAINLY
+// ----------------------------------------
+// **The queued events are in RAM and do not survive a power cut.** The ring
+// survives what it was built to survive — the WiFi going away, the API being
+// down, a router reboot, a two-day outage — because the box stays powered
+// throughout. It does not survive the breaker going off.
+//
+// That boundary is a consequence of the store port: hal::IStore holds values of
+// at most 32 bytes and an Event is larger, so there is no way to write one
+// through it. Persisting them needs a block-oriented port, which is a change to
+// make deliberately rather than to smuggle in here.
+//
+// What it costs when it happens: a court that was lit during an offline window
+// that ended in a power cut is never reported, so the API still sees the
+// booking as un-attended and the no-show sweep refunds it less the penalty. The
+// member is charged a penalty for a game they played. That is wrong, it is
+// visible in the ledger, and an admin can reverse it — which is why this is a
+// recorded limitation rather than a blocker. It is in the go-live checklist.
+//
+// An earlier draft of this file carried a per-slot checksum and a header
+// claiming torn writes read back as absent. Nothing wrote to flash, so the
+// checksum guarded nothing and the claim was false. It was removed rather than
+// justified after the fact, when a mutation test showed no test could tell
+// whether it was there.
+//
+// WHY OLDEST-FIRST OVERWRITE
+// --------------------------
+// When the ring is full something has to give. The choice is between refusing
+// the new event and discarding the oldest, and the tie is broken by what each
+// costs: the oldest event is the one most likely to have already been uploaded
+// on a link that came back mid-drain, while the newest is the game happening
+// right now with a member standing on the court. So the oldest goes, and
+// `overflowed()` says so — a club that sees that counter move knows it lost
+// history and can go and ask why the box was offline for two days.
+//
+// WHY THE SEQUENCE NUMBER PERSISTS AND THE QUEUE'S CONTENTS NEED NOT
+// ------------------------------------------------------------------
+// `seq` is the idempotency key, so reusing one after a reboot would let the API
+// discard a genuine event as a duplicate of an unrelated older one. It is
+// therefore checkpointed to the store in blocks — see kSeqCheckpointStride —
+// rather than on every push, which would wear the flash out. A reboot resumes
+// from the checkpoint, which is at or AHEAD of the true last value: skipping
+// sequence numbers is free, reusing one is a lost event.
+//
+// WHY THERE IS NO ALLOCATOR AND NO std::deque
+// -------------------------------------------
+// This links into an ESP8266 with ~40 KB of usable heap shared with the TLS
+// stack, and the same code compiles for the ATmega's 8 KB of SRAM. The ring is
+// a member array whose size is a template parameter, so its cost is visible at
+// the composition root and the linker can prove it fits.
+//
+// No Arduino headers, no heap, no String. Compiles for AVR, Xtensa and the host.
+
+#ifndef CRUSADERS_EVENTQ_EVENTQUEUE_H
+#define CRUSADERS_EVENTQ_EVENTQUEUE_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "hal/Store.h"
+
+#include "eventq/Event.h"
+
+namespace eventq {
+
+/// How many sequence numbers a single checkpoint reserves.
+///
+/// The store is flash or EEPROM with finite endurance, and a checkpoint per
+/// event would write it once per scan. Reserving a block means one write per
+/// 64 events, at the cost of skipping up to 63 numbers on an unclean reboot —
+/// which costs nothing, because the API only cares that a number is never
+/// REUSED.
+inline constexpr uint32_t kSeqCheckpointStride = 64U;
+
+/// The store key holding the high-water sequence mark.
+inline constexpr char kSeqKey[] = "evq_seq";
+
+/// Why a push did not take.
+enum class PushResult : uint8_t {
+  /// Queued. The only result that means the event will be uploaded.
+  Ok = 0U,
+  /// Queued, but the oldest un-uploaded event was discarded to make room.
+  /// Still a success for the caller — the new event IS in the queue — and a
+  /// loud one for the operator.
+  OkOverwrote = 1U,
+  /// The subject was too long to store and was refused rather than truncated.
+  Rejected = 2U,
+};
+
+/// A fixed-capacity ring of events, with per-slot integrity.
+///
+/// `Slots` is a template parameter rather than a constructor argument so the
+/// storage is inline and its size is a compile-time fact. EVENTQ_SLOTS is the
+/// build flag that sets it at the composition root.
+template <uint16_t Slots> class EventQueue {
+public:
+  static_assert(Slots >= 2U, "a ring of one cannot distinguish full from empty");
+
+  explicit EventQueue(hal::IStore* store = nullptr) : store_(store) {}
+
+  /// Reads the persisted sequence high-water mark and resumes past it.
+  ///
+  /// Called once at boot, before any push. An absent or corrupt mark starts at
+  /// zero, which is correct for a box that has never run: the alternative —
+  /// refusing to start — would brick a court over a bookkeeping detail.
+  void begin();
+
+  /// Stamps `event` with the next sequence number and queues it.
+  ///
+  /// The caller fills everything except `seq`; anything it put there is
+  /// overwritten, because a sequence number chosen by a caller is a sequence
+  /// number that can repeat.
+  PushResult push(Event& event);
+
+  /// The oldest queued event, without removing it. False when empty.
+  ///
+  /// Peek-then-release rather than pop, because an event must not leave the
+  /// queue until the API has acknowledged it. Popping first and uploading
+  /// after is how a queue loses exactly the events a flaky link produces.
+  bool peek(Event& out) const;
+
+  /// Discards the oldest event, which the API has now acknowledged.
+  /// False when there was nothing to release.
+  bool release();
+
+  /// Discards up to `throughSeq` inclusive, for an upload that batched several.
+  /// Returns how many were discarded. Stops at the first event NEWER than
+  /// `throughSeq`, so an out-of-order acknowledgement cannot clear the ring.
+  uint16_t releaseThrough(uint32_t throughSeq);
+
+  uint16_t size() const { return count_; }
+
+  bool empty() const { return count_ == 0U; }
+
+  bool full() const { return count_ == Slots; }
+
+  static constexpr uint16_t capacity() { return Slots; }
+
+  /// Events discarded because the ring was full. A rising count is the club
+  /// losing history — it means the box has been unable to reach the API for
+  /// long enough to fill the queue.
+  uint32_t overflowed() const { return overflowed_; }
+
+  /// The last sequence number issued. Zero before the first push.
+  uint32_t lastSeq() const { return nextSeq_ - 1U; }
+
+private:
+  void reserveSequenceBlock(uint32_t upTo);
+
+  hal::IStore* store_;
+  Event ring_[Slots];
+  uint16_t head_ = 0U; ///< oldest
+  uint16_t count_ = 0U;
+  uint32_t nextSeq_ = 1U;
+  uint32_t reservedThrough_ = 0U;
+  uint32_t overflowed_ = 0U;
+};
+
+// --- implementation ---------------------------------------------------------
+//
+// In the header because it is a template. Kept short deliberately: everything
+// that does not depend on Slots lives in EventQueue.cpp as a free function.
+
+namespace detail {
+
+/// Reads the persisted high-water mark. Returns 0 when absent or damaged.
+uint32_t loadSeqMark(hal::IStore* store);
+
+/// Persists a high-water mark. Best-effort: a failed write costs a duplicate
+/// sequence range after an unclean reboot, which the API deduplicates, whereas
+/// refusing to continue would stop the court working.
+void storeSeqMark(hal::IStore* store, uint32_t value);
+
+} // namespace detail
+
+template <uint16_t Slots> void EventQueue<Slots>::begin() {
+  head_ = 0U;
+  count_ = 0U;
+  overflowed_ = 0U;
+
+  // Resume PAST the reserved block, not at it. The previous boot may have
+  // issued any number inside that block, and there is no way to know which.
+  const uint32_t mark = detail::loadSeqMark(store_);
+  nextSeq_ = mark + 1U;
+  reservedThrough_ = mark;
+}
+
+template <uint16_t Slots> void EventQueue<Slots>::reserveSequenceBlock(uint32_t upTo) {
+  if (upTo <= reservedThrough_) {
+    return;
+  }
+  // Round up to the next stride boundary so the number of writes is bounded by
+  // events/stride however the queue is driven.
+  const uint32_t blocks = (upTo + kSeqCheckpointStride - 1U) / kSeqCheckpointStride;
+  reservedThrough_ = blocks * kSeqCheckpointStride;
+  detail::storeSeqMark(store_, reservedThrough_);
+}
+
+template <uint16_t Slots> PushResult EventQueue<Slots>::push(Event& event) {
+  if (event.subjectLen > kMaxSubjectLen) {
+    return PushResult::Rejected;
+  }
+
+  event.seq = nextSeq_;
+  ++nextSeq_;
+  reserveSequenceBlock(event.seq);
+
+  bool overwrote = false;
+  uint16_t slot;
+  if (count_ == Slots) {
+    // Full: the oldest goes. head_ advances, count_ stays at Slots.
+    slot = head_;
+    head_ = static_cast<uint16_t>((head_ + 1U) % Slots);
+    ++overflowed_;
+    overwrote = true;
+  } else {
+    slot = static_cast<uint16_t>((head_ + count_) % Slots);
+    ++count_;
+  }
+
+  ring_[slot] = event;
+
+  return overwrote ? PushResult::OkOverwrote : PushResult::Ok;
+}
+
+template <uint16_t Slots> bool EventQueue<Slots>::peek(Event& out) const {
+  if (count_ == 0U) {
+    return false;
+  }
+  out = ring_[head_];
+  return true;
+}
+
+template <uint16_t Slots> bool EventQueue<Slots>::release() {
+  if (count_ == 0U) {
+    return false;
+  }
+  head_ = static_cast<uint16_t>((head_ + 1U) % Slots);
+  --count_;
+  return true;
+}
+
+template <uint16_t Slots> uint16_t EventQueue<Slots>::releaseThrough(uint32_t throughSeq) {
+  uint16_t released = 0U;
+  while (count_ > 0U && ring_[head_].seq <= throughSeq) {
+    static_cast<void>(release());
+    ++released;
+  }
+  return released;
+}
+
+} // namespace eventq
+
+#endif // CRUSADERS_EVENTQ_EVENTQUEUE_H
