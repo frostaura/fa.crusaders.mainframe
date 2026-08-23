@@ -2,6 +2,7 @@ using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
@@ -16,21 +17,32 @@ public static class AdminConfigEndpoints
     {
         var settings = app.MapGroup("/api/v1/admin/settings").RequireAuthorization(p => p.RequireRole("admin"));
 
-        settings.MapGet("/", async (MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
+        settings.MapGet("/", async (MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var row = await db.TenantSettings.AsNoTracking().FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             var doc = row is null ? new Dictionary<string, JsonElement>() : ParseObject(row.SettingsJson);
+
+            // Defaults come from TenantSettingsAccessor, never from literals here.
+            //
+            // They used to be written twice and had drifted: this endpoint answered 30
+            // minutes and 50 credits where the engine used 15 and 8. On a tenant with
+            // no explicit value that is not a cosmetic difference — the admin screen
+            // reads back what it was shown and PUTs it, so opening the settings page
+            // and pressing save doubled every slice and repriced every court, silently.
+            var defaults = await settingsAccessor.GetAsync(ct);
+
             return Results.Ok(new
             {
-                slice_minutes = GetInt(doc, "slice_minutes", 30),
-                slice_price_credits = GetDecimal(doc, "slice_price_credits", 50m),
-                advance_booking_days = GetInt(doc, "advance_booking_days", 14),
-                day_start_minute = GetInt(doc, "day_start_minute", 6 * 60),
-                day_end_minute = GetInt(doc, "day_end_minute", 22 * 60),
-                penalty_pct = GetDecimal(doc, "penalty_pct", 30m),
-                grace_window_minutes = GetInt(doc, "grace_window_minutes", 5),
-                penalty_window_minutes = GetInt(doc, "penalty_window_minutes", 15),
-                timezone = GetString(doc, "timezone", "Africa/Johannesburg"),
+                slice_minutes = GetInt(doc, "slice_minutes", defaults.SliceMinutes),
+                slice_price_credits = GetDecimal(doc, "slice_price_credits", defaults.DefaultSlicePriceCredits),
+                advance_booking_days = GetInt(doc, "advance_booking_days", defaults.AdvanceBookingDays),
+                day_start_minute = GetInt(doc, "day_start_minute", defaults.DayStartMinute),
+                day_end_minute = GetInt(doc, "day_end_minute", defaults.DayEndMinute),
+                penalty_pct = GetDecimal(doc, "penalty_pct", defaults.PenaltyPct),
+                grace_window_minutes = GetInt(doc, "grace_window_minutes", defaults.GraceWindowMinutes),
+                penalty_window_minutes = GetInt(doc, "penalty_window_minutes", defaults.PenaltyWindowMinutes),
+                timezone = GetString(doc, "timezone", defaults.Timezone),
+                button_map = defaults.Buttons.ToWire(),
             });
         });
 
@@ -44,6 +56,16 @@ public static class AdminConfigEndpoints
                 return Results.BadRequest(new { error = "operating_hours_invalid" });
             if (req.PenaltyPct is < 0 or > 100)
                 return Results.BadRequest(new { error = "penalty_pct_out_of_range" });
+
+            // Strict here, lenient on read. This is the one moment an admin is standing
+            // in front of the screen to be told what is wrong with their map; a box
+            // reading a broken one later has nobody to ask and must keep working.
+            ButtonMap? buttons = null;
+            if (req.ButtonMap is not null)
+            {
+                if (!ButtonMap.TryParse(req.ButtonMap, out buttons, out var reason))
+                    return Results.BadRequest(new { error = "button_map_invalid", message = reason });
+            }
 
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
@@ -60,6 +82,9 @@ public static class AdminConfigEndpoints
             doc["penalty_pct"] = ToElement(req.PenaltyPct);
             doc["grace_window_minutes"] = ToElement(req.GraceWindowMinutes);
             doc["penalty_window_minutes"] = ToElement(req.PenaltyWindowMinutes);
+            // Omitted means unchanged, not "reset to default": a screen that does not
+            // yet edit the button map must not wipe one an admin set through another.
+            if (buttons is not null) doc["button_map"] = ToElement(buttons.ToWire());
             row.SettingsJson = JsonSerializer.Serialize(doc);
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { saved = true });
@@ -153,7 +178,8 @@ public sealed record UpdateSettingsRequest(
     int DayEndMinute,
     decimal PenaltyPct,
     int GraceWindowMinutes,
-    int PenaltyWindowMinutes);
+    int PenaltyWindowMinutes,
+    IReadOnlyList<string>? ButtonMap = null);
 
 public sealed record CreateCourtRequest(string Name, string CourtType, decimal SlicePriceCredits);
 public sealed record UpdateCourtRequest(string? Name, decimal? SlicePriceCredits, bool? IsActive);

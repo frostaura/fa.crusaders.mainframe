@@ -77,6 +77,11 @@ public static class DeviceEndpoints
                 {
                     slice_minutes = s.SliceMinutes,
                     grace_window_minutes = s.GraceWindowMinutes,
+                    // What each of the eight buttons does, by physical position. Sent on
+                    // every heartbeat rather than only when it changes: a box that
+                    // rebooted and missed the change would otherwise open the wrong
+                    // court until somebody edited the setting again.
+                    button_map = s.Buttons.ToWire(),
                 },
             });
         });

@@ -45,6 +45,12 @@ public sealed class TenantSettingsAccessor
         int retentionYears = TryInt(root, "retention_years", 2);                             // D.1 — 2-year retention.
         int noShowLookbackDays = TryInt(root, "no_show_lookback_days", 7);                   // How far back the no-show sweep reaches; bounds a first-run backlog.
 
+        // What each of the court box's eight buttons does. The wiring is fixed and the
+        // meaning is not; the firmware learns this on the heartbeat. Lenient on read —
+        // a settings document somebody hand-edited into nonsense must not stop every
+        // box in the club from working. See ButtonMap.
+        var buttonMap = ButtonMap.FromSettings(root);
+
         return new TenantSettingsView(
             sliceMinutes, slicePrice, penaltyPct, graceMin, penaltyMin, advanceDays, tz,
             creditsPerZarRegular, creditsPerZarLeague,
@@ -53,7 +59,8 @@ public sealed class TenantSettingsAccessor
             peakHours, peakAdvanceHoursForRegular,
             retentionYears,
             dayStartMinute, dayEndMinute,
-            noShowLookbackDays);
+            noShowLookbackDays,
+            buttonMap);
     }
 
     private static int TryInt(JsonElement root, string name, int fallback)
@@ -82,7 +89,8 @@ public sealed record TenantSettingsView(
     int RetentionYears,
     int DayStartMinute,
     int DayEndMinute,
-    int NoShowLookbackDays)
+    int NoShowLookbackDays,
+    ButtonMap Buttons)
 {
     /// <summary>Returns credits-per-rand for a given member class. Defaults to <see cref="CreditsPerZarRegular"/> if unknown.</summary>
     public decimal ConversionRateFor(Crusaders.Mainframe.Api.Domain.MemberClass cls)

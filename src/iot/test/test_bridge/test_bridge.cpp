@@ -18,12 +18,16 @@
 #include <string.h>
 #include <unity.h>
 
+#include "court/ButtonMap.h"
 #include "court/Session.h"
+#include "court/WalkUpPad.h"
 #include "devapi/DeviceClient.h"
+#include "devapi/Json.h"
 #include "eventq/Event.h"
 #include "eventq/EventQueue.h"
 #include "fakes/FakeStore.h"
 #include "roster/Roster.h"
+#include "support/CorpusJson.h"
 
 namespace {
 
@@ -916,6 +920,318 @@ void test_session_a_full_queue_still_opens_the_court() {
   TEST_ASSERT_TRUE(queue.overflowed() > 0U);
 }
 
+// ---------------------------------------------------------------------------
+// Button map — driven from the shared corpus
+// ---------------------------------------------------------------------------
+
+corpus::File g_buttonCases;
+
+/// Every token in the corpus, parsed by the firmware, checked against what the
+/// corpus says the API accepts.
+///
+/// This is the anti-drift gate. The API validates a proposed map and the firmware
+/// parses the one it is handed, neither can see the other's source, and the
+/// failure they would produce is silent — a token one side accepts and the other
+/// ignores leaves a button that quietly still does what it did before an admin
+/// changed it. Both sides read this file, so drift turns a test red.
+void test_buttonmap_agrees_with_the_shared_corpus() {
+  TEST_ASSERT_TRUE_MESSAGE(g_buttonCases.load("buttonmap", "cases.json"),
+                           "button-map corpus not found — a skipped corpus proves nothing");
+
+  const char* actions = corpus::member(g_buttonCases.root(), "actions");
+  TEST_ASSERT_NOT_NULL(actions);
+
+  corpus::ArrayIter it(actions);
+  const char* element = nullptr;
+  int executed = 0;
+
+  while (it.next(&element)) {
+    char wire[128] = {};
+    const char* wireValue = corpus::member(element, "wire");
+    TEST_ASSERT_NOT_NULL(wireValue);
+    TEST_ASSERT_TRUE(corpus::stringValue(wireValue, wire, sizeof(wire), nullptr));
+
+    const char* validValue = corpus::skipWs(corpus::member(element, "valid"));
+    TEST_ASSERT_NOT_NULL(validValue);
+    const bool expectedValid = validValue[0] == 't';
+
+    court::ButtonAction parsed;
+    const bool actualValid = court::parseButtonAction(wire, parsed);
+    TEST_ASSERT_EQUAL_MESSAGE(expectedValid, actualValid, wire);
+
+    if (!expectedValid) {
+      ++executed;
+      continue;
+    }
+
+    char kind[32] = {};
+    const char* kindValue = corpus::member(element, "kind");
+    TEST_ASSERT_NOT_NULL(kindValue);
+    TEST_ASSERT_TRUE(corpus::stringValue(kindValue, kind, sizeof(kind), nullptr));
+
+    if (strcmp(kind, "none") == 0) {
+      TEST_ASSERT_TRUE(parsed.kind == court::ButtonKind::None);
+    } else if (strcmp(kind, "off") == 0) {
+      TEST_ASSERT_TRUE(parsed.kind == court::ButtonKind::TurnOff);
+    } else if (strcmp(kind, "court") == 0) {
+      TEST_ASSERT_TRUE(parsed.kind == court::ButtonKind::SelectCourt);
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(corpus::unsignedValue(corpus::member(element, "court"))),
+                              parsed.court);
+    } else if (strcmp(kind, "minutes") == 0) {
+      TEST_ASSERT_TRUE(parsed.kind == court::ButtonKind::GrantMinutes);
+      TEST_ASSERT_EQUAL_UINT16(
+          static_cast<uint16_t>(corpus::unsignedValue(corpus::member(element, "minutes"))), parsed.minutes);
+    } else {
+      TEST_FAIL_MESSAGE("corpus names a kind this build does not know");
+    }
+    ++executed;
+  }
+
+  // A corpus that loaded but yielded nothing passes every assertion above. The
+  // count is what makes an empty or reshaped file a failure rather than a
+  // silent success.
+  TEST_ASSERT_TRUE_MESSAGE(executed >= 20, "corpus yielded too few action cases");
+}
+
+void test_buttonmap_defaults_to_the_original_wiring() {
+  court::ButtonMap map;
+  TEST_ASSERT_FALSE(map.configured());
+
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    TEST_ASSERT_TRUE(map[i].kind == court::ButtonKind::SelectCourt);
+    TEST_ASSERT_EQUAL_UINT8(i, map[i].court);
+  }
+  const uint16_t expected[4] = {15U, 30U, 45U, 60U};
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    TEST_ASSERT_TRUE(map[static_cast<uint8_t>(4U + i)].kind == court::ButtonKind::GrantMinutes);
+    TEST_ASSERT_EQUAL_UINT16(expected[i], map[static_cast<uint8_t>(4U + i)].minutes);
+  }
+}
+
+void test_buttonmap_an_unknown_token_leaves_the_previous_entry_alone() {
+  court::ButtonMap map;
+  TEST_ASSERT_TRUE(map.setFromWire(0U, "court:D"));
+  TEST_ASSERT_EQUAL_UINT8(3U, map[0].court);
+
+  // What a downgrade looks like: a token written by a newer API. Keeping a
+  // working button beats blanking one.
+  TEST_ASSERT_FALSE(map.setFromWire(0U, "gate:open"));
+  TEST_ASSERT_TRUE(map[0].kind == court::ButtonKind::SelectCourt);
+  TEST_ASSERT_EQUAL_UINT8(3U, map[0].court);
+}
+
+void test_buttonmap_reset_clears_a_short_map_rather_than_leaving_stale_entries() {
+  court::ButtonMap map;
+  TEST_ASSERT_TRUE(map.setFromWire(7U, "off"));
+  TEST_ASSERT_TRUE(map.configured());
+
+  map.reset();
+  TEST_ASSERT_FALSE(map.configured());
+  TEST_ASSERT_TRUE(map[7].kind == court::ButtonKind::GrantMinutes);
+  TEST_ASSERT_EQUAL_UINT16(60U, map[7].minutes);
+}
+
+void test_buttonmap_an_out_of_range_index_reads_as_none() {
+  court::ButtonMap map;
+  TEST_ASSERT_FALSE(map.setFromWire(court::kButtonCount, "off"));
+  TEST_ASSERT_TRUE(map[court::kButtonCount].kind == court::ButtonKind::None);
+}
+
+// ---------------------------------------------------------------------------
+// Walk-up pad — the two presses that buy court time
+// ---------------------------------------------------------------------------
+
+void test_pad_court_then_duration_is_a_request() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    court::ButtonMap map;
+    court::WalkUpPad pad;
+
+    TEST_ASSERT_TRUE(pad.press(map, 2U, base) == court::PadResult::CourtSelected);
+    TEST_ASSERT_TRUE(pad.hasSelection());
+    TEST_ASSERT_EQUAL_UINT8(2U, pad.selectedCourt());
+
+    TEST_ASSERT_TRUE(pad.press(map, 6U, base + 3000U) == court::PadResult::Requested);
+    TEST_ASSERT_EQUAL_UINT8(2U, pad.intent().court);
+    TEST_ASSERT_EQUAL_UINT16(45U, pad.intent().minutes);
+
+    // Spent on the request, not on the answer: a second duration press while a
+    // slow POST is in flight would otherwise buy the court twice.
+    TEST_ASSERT_FALSE(pad.hasSelection());
+  }
+}
+
+void test_pad_a_duration_press_alone_does_nothing() {
+  court::ButtonMap map;
+  court::WalkUpPad pad;
+  // A stray press on an idle box. Not an error — on a panel with unused buttons
+  // this is the common case — and nothing is armed for the next person to finish.
+  TEST_ASSERT_TRUE(pad.press(map, 5U, kBaseMid) == court::PadResult::Ignored);
+  TEST_ASSERT_FALSE(pad.hasSelection());
+}
+
+void test_pad_a_selection_lapses_so_the_next_member_does_not_inherit_it() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    court::ButtonMap map;
+    court::WalkUpPad pad;
+
+    TEST_ASSERT_TRUE(pad.press(map, 1U, base) == court::PadResult::CourtSelected);
+
+    // Still live a moment before the deadline...
+    TEST_ASSERT_FALSE(pad.tick(base + court::kSelectionTtlMs - 1U));
+    TEST_ASSERT_TRUE(pad.hasSelection());
+
+    // ...and gone at it. The edge is reported exactly once so the caller can
+    // repaint the idle screen without doing it on every pass.
+    TEST_ASSERT_TRUE(pad.tick(base + court::kSelectionTtlMs));
+    TEST_ASSERT_FALSE(pad.tick(base + court::kSelectionTtlMs + 1U));
+    TEST_ASSERT_FALSE(pad.hasSelection());
+
+    // The member who walked away left nothing behind: a duration press now is
+    // a stray press, not a purchase in their name.
+    TEST_ASSERT_TRUE(pad.press(map, 4U, base + court::kSelectionTtlMs + 5000U) == court::PadResult::Ignored);
+  }
+}
+
+void test_pad_a_late_duration_press_does_not_complete_a_lapsed_selection() {
+  court::ButtonMap map;
+  court::WalkUpPad pad;
+
+  TEST_ASSERT_TRUE(pad.press(map, 0U, kBaseMid) == court::PadResult::CourtSelected);
+  // No tick() in between: the press itself must evaluate the lapse, or a box
+  // whose loop was busy would sell court A to whoever is standing there now.
+  TEST_ASSERT_TRUE(pad.press(map, 4U, kBaseMid + court::kSelectionTtlMs + 1U) == court::PadResult::Ignored);
+}
+
+void test_pad_a_second_court_press_replaces_the_first() {
+  court::ButtonMap map;
+  court::WalkUpPad pad;
+
+  TEST_ASSERT_TRUE(pad.press(map, 0U, kBaseMid) == court::PadResult::CourtSelected);
+  TEST_ASSERT_TRUE(pad.press(map, 3U, kBaseMid + 1000U) == court::PadResult::CourtSelected);
+  TEST_ASSERT_EQUAL_UINT8(3U, pad.selectedCourt());
+
+  TEST_ASSERT_TRUE(pad.press(map, 4U, kBaseMid + 2000U) == court::PadResult::Requested);
+  TEST_ASSERT_EQUAL_UINT8(3U, pad.intent().court);
+}
+
+void test_pad_honours_a_remapped_panel() {
+  court::ButtonMap map;
+  // The case the feature exists for: an admin reorders the panel from a browser.
+  TEST_ASSERT_TRUE(map.setFromWire(0U, "minutes:20"));
+  TEST_ASSERT_TRUE(map.setFromWire(4U, "court:D"));
+  TEST_ASSERT_TRUE(map.setFromWire(5U, "off"));
+
+  court::WalkUpPad pad;
+  TEST_ASSERT_TRUE(pad.press(map, 4U, kBaseMid) == court::PadResult::CourtSelected);
+  TEST_ASSERT_TRUE(pad.press(map, 0U, kBaseMid + 1000U) == court::PadResult::Requested);
+  TEST_ASSERT_EQUAL_UINT8(3U, pad.intent().court);
+  TEST_ASSERT_EQUAL_UINT16(20U, pad.intent().minutes);
+
+  TEST_ASSERT_TRUE(pad.press(map, 4U, kBaseMid + 2000U) == court::PadResult::CourtSelected);
+  TEST_ASSERT_TRUE(pad.press(map, 5U, kBaseMid + 3000U) == court::PadResult::ReleaseRequested);
+  TEST_ASSERT_EQUAL_UINT8(3U, pad.intent().court);
+}
+
+void test_pad_an_unmapped_button_is_inert() {
+  court::ButtonMap map;
+  TEST_ASSERT_TRUE(map.setFromWire(6U, "none"));
+
+  court::WalkUpPad pad;
+  TEST_ASSERT_TRUE(pad.press(map, 0U, kBaseMid) == court::PadResult::CourtSelected);
+  TEST_ASSERT_TRUE(pad.press(map, 6U, kBaseMid + 1000U) == court::PadResult::Ignored);
+  // ...and the selection survives an inert press, so a fat finger costs nothing.
+  TEST_ASSERT_TRUE(pad.hasSelection());
+}
+
+// ---------------------------------------------------------------------------
+// JSON scanning — three fields out of a small body, no parser, no heap
+// ---------------------------------------------------------------------------
+
+void test_json_reads_a_string_field() {
+  const char body[] = "{\"device_id\":\"11111111-2222\",\"tenant_slug\":\"crusaders\"}";
+  char out[64] = {};
+  TEST_ASSERT_TRUE(devapi::json::stringField(body, sizeof(body) - 1U, "device_id", out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("11111111-2222", out);
+
+  TEST_ASSERT_TRUE(devapi::json::stringField(body, sizeof(body) - 1U, "tenant_slug", out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("crusaders", out);
+}
+
+void test_json_a_field_that_would_not_fit_is_refused_not_truncated() {
+  const char body[] = "{\"device_key\":\"0011223344556677\"}";
+  char small[8] = {};
+  // Half a device key signs every request wrongly, and the 401 it earns reads
+  // exactly like a revoked credential — which sends a good board off to be
+  // re-claimed. Refusing is the only safe answer.
+  TEST_ASSERT_FALSE(devapi::json::stringField(body, sizeof(body) - 1U, "device_key", small, sizeof(small)));
+}
+
+void test_json_absent_and_malformed_fields_report_absence() {
+  const char body[] = "{\"device_id\":\"abc\"}";
+  char out[32] = {};
+
+  TEST_ASSERT_FALSE(devapi::json::stringField(body, sizeof(body) - 1U, "missing", out, sizeof(out)));
+
+  const char notString[] = "{\"device_id\":42}";
+  TEST_ASSERT_FALSE(
+      devapi::json::stringField(notString, sizeof(notString) - 1U, "device_id", out, sizeof(out)));
+
+  const char truncated[] = "{\"device_id\":\"abc";
+  TEST_ASSERT_FALSE(
+      devapi::json::stringField(truncated, sizeof(truncated) - 1U, "device_id", out, sizeof(out)));
+
+  const char empty[] = "{\"device_id\":\"\"}";
+  TEST_ASSERT_FALSE(devapi::json::stringField(empty, sizeof(empty) - 1U, "device_id", out, sizeof(out)));
+
+  TEST_ASSERT_FALSE(devapi::json::stringField(nullptr, 0U, "device_id", out, sizeof(out)));
+}
+
+void test_json_walks_an_array_of_strings() {
+  const char body[] =
+      "{\"config\":{\"slice_minutes\":15,\"button_map\":[\"court:A\",\"minutes:30\",\"off\"]}}";
+  size_t at = devapi::json::findArray(body, sizeof(body) - 1U, "button_map");
+  TEST_ASSERT_NOT_EQUAL(devapi::json::kNotFound, at);
+
+  const char* expected[] = {"court:A", "minutes:30", "off"};
+  char token[32] = {};
+  for (size_t i = 0U; i < 3U; ++i) {
+    TEST_ASSERT_TRUE(devapi::json::nextStringElement(body, sizeof(body) - 1U, at, token, sizeof(token)));
+    TEST_ASSERT_EQUAL_STRING(expected[i], token);
+  }
+  // ...and stops at the bracket rather than running into the rest of the document.
+  TEST_ASSERT_FALSE(devapi::json::nextStringElement(body, sizeof(body) - 1U, at, token, sizeof(token)));
+}
+
+void test_json_an_absent_or_non_array_value_is_reported_as_absent() {
+  const char noKey[] = "{\"slice_minutes\":15}";
+  TEST_ASSERT_EQUAL(devapi::json::kNotFound,
+                    devapi::json::findArray(noKey, sizeof(noKey) - 1U, "button_map"));
+
+  // Present but the wrong shape. Reported as absent so the caller keeps the map
+  // it already had, rather than replacing a working panel with nothing.
+  const char notArray[] = "{\"button_map\":\"court:A\"}";
+  TEST_ASSERT_EQUAL(devapi::json::kNotFound,
+                    devapi::json::findArray(notArray, sizeof(notArray) - 1U, "button_map"));
+
+  const char emptyArray[] = "{\"button_map\":[]}";
+  size_t at = devapi::json::findArray(emptyArray, sizeof(emptyArray) - 1U, "button_map");
+  TEST_ASSERT_NOT_EQUAL(devapi::json::kNotFound, at);
+  char token[8] = {};
+  TEST_ASSERT_FALSE(
+      devapi::json::nextStringElement(emptyArray, sizeof(emptyArray) - 1U, at, token, sizeof(token)));
+}
+
+void test_json_a_key_that_is_a_prefix_of_another_does_not_match_it() {
+  // "device_key" must not be found by looking for "device_id", nor the reverse,
+  // and a value that merely CONTAINS the key text must not be mistaken for it.
+  const char body[] = "{\"device_key_version\":\"1\",\"device_key\":\"abcd\"}";
+  char out[32] = {};
+  TEST_ASSERT_TRUE(devapi::json::stringField(body, sizeof(body) - 1U, "device_key", out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("abcd", out);
+}
+
 } // namespace
 
 void setUp() {
@@ -953,6 +1269,20 @@ int main(int, char**) {
   RUN_TEST(test_roster_reports_entries_that_did_not_fit);
   RUN_TEST(test_roster_token_copy_refuses_rather_than_truncates);
 
+  RUN_TEST(test_buttonmap_agrees_with_the_shared_corpus);
+  RUN_TEST(test_buttonmap_defaults_to_the_original_wiring);
+  RUN_TEST(test_buttonmap_an_unknown_token_leaves_the_previous_entry_alone);
+  RUN_TEST(test_buttonmap_reset_clears_a_short_map_rather_than_leaving_stale_entries);
+  RUN_TEST(test_buttonmap_an_out_of_range_index_reads_as_none);
+
+  RUN_TEST(test_pad_court_then_duration_is_a_request);
+  RUN_TEST(test_pad_a_duration_press_alone_does_nothing);
+  RUN_TEST(test_pad_a_selection_lapses_so_the_next_member_does_not_inherit_it);
+  RUN_TEST(test_pad_a_late_duration_press_does_not_complete_a_lapsed_selection);
+  RUN_TEST(test_pad_a_second_court_press_replaces_the_first);
+  RUN_TEST(test_pad_honours_a_remapped_panel);
+  RUN_TEST(test_pad_an_unmapped_button_is_inert);
+
   RUN_TEST(test_session_a_booked_member_gets_the_lights_and_an_activation_event);
   RUN_TEST(test_session_records_a_refused_scan_too);
   RUN_TEST(test_session_every_refusal_says_something_a_member_can_act_on);
@@ -962,6 +1292,13 @@ int main(int, char**) {
   RUN_TEST(test_session_a_release_is_recorded_with_how_long_the_court_was_held);
   RUN_TEST(test_session_a_boot_event_explains_a_gap_in_the_sequence);
   RUN_TEST(test_session_a_full_queue_still_opens_the_court);
+
+  RUN_TEST(test_json_reads_a_string_field);
+  RUN_TEST(test_json_a_field_that_would_not_fit_is_refused_not_truncated);
+  RUN_TEST(test_json_absent_and_malformed_fields_report_absence);
+  RUN_TEST(test_json_walks_an_array_of_strings);
+  RUN_TEST(test_json_an_absent_or_non_array_value_is_reported_as_absent);
+  RUN_TEST(test_json_a_key_that_is_a_prefix_of_another_does_not_match_it);
 
   RUN_TEST(test_client_refuses_to_sign_before_it_knows_the_time);
   RUN_TEST(test_client_signs_the_current_time_not_the_boot_time);

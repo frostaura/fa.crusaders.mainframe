@@ -144,6 +144,43 @@ public sealed class TestHost : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// A bookable slot at least <paramref name="hoursAhead"/> from now that is <b>not</b>
+    /// inside the fixture's peak window.
+    ///
+    /// <para>
+    /// <c>DateTimeOffset.UtcNow.AddHours(3)</c> looks harmless and is not. The fixture
+    /// sets <c>peak_hours</c> to 16:00–19:00 with the tenant timezone at UTC, and blueprint
+    /// A.12 refuses a Regular member a peak slot more than an hour before it starts — so a
+    /// test written that way passes all morning and fails every afternoon, with a cast
+    /// exception that names <c>PeakHoursLeagueOnly</c> and points at a cancellation test.
+    /// It cost a bisect that found nothing, because nothing had changed except the clock.
+    /// </para>
+    ///
+    /// <para>
+    /// Tests about peak hours should still construct their own times — the point of this is
+    /// that tests about <i>anything else</i> stop depending on what time the suite runs.
+    /// </para>
+    /// </summary>
+    public static DateTimeOffset BookableSlot(double hoursAhead = 2)
+        => BookableSlotFrom(DateTimeOffset.UtcNow, hoursAhead);
+
+    /// <summary>
+    /// The same rule with the clock passed in, so the fix for a time-dependent test can
+    /// itself be tested at every hour of the day rather than at whatever hour the suite
+    /// happens to run.
+    /// </summary>
+    public static DateTimeOffset BookableSlotFrom(DateTimeOffset now, double hoursAhead)
+    {
+        var slot = now.AddHours(hoursAhead);
+
+        // Step past the window rather than clamping to its edge: a slot starting at 15:59
+        // can still END inside peak, and while the rule is evaluated on the start, the
+        // intent here is to stay clear of it entirely.
+        while (slot.Hour is >= 15 and < 19) slot = slot.AddHours(1);
+        return slot;
+    }
+
     public IServiceScope NewScope() => Services.CreateScope();
 
     public async ValueTask DisposeAsync()

@@ -64,8 +64,11 @@
 #include "arduino_hal/ArduinoClock.h"
 #include "arduino_hal/LittleFsStore.h"
 #include "arduino_hal/SerialTransport.h"
+#include "court/ButtonMap.h"
 #include "court/Session.h"
+#include "court/WalkUpPad.h"
 #include "devapi/DeviceClient.h"
+#include "devapi/Json.h"
 #include "devcrypto/Hex.h"
 #include "discovery/Announcer.h"
 #include "discovery/Beacon.h"
@@ -108,6 +111,15 @@ constexpr size_t kNonceHexLen = dc::hex::encodedSize(kNonceBytes);
 
 /// Store keys. Short ASCII literals, well inside hal::kStoreMaxKeyLen.
 constexpr char kKeyApiUrl[] = "api_url";
+constexpr char kKeyDeviceId[] = "dev_id";
+constexpr char kKeyDeviceKey[] = "dev_key";
+
+/// The device key as hex, so it survives a byte-array store with no encoding of
+/// its own. 32 bytes of key is 64 characters, which is over hal::kStoreMaxValueLen
+/// — so the key is stored in two halves under one key each, which the store's
+/// 32-byte value limit forces and which is worth stating rather than discovering.
+constexpr char kKeyDeviceKey2[] = "dev_key2";
+constexpr size_t kDeviceKeyBytes = 32U;
 
 /// UDP datagrams handled per pass, so a flooded port cannot starve the Mega
 /// link. Discovery traffic is one packet every few seconds in normal service.
@@ -204,6 +216,25 @@ uint8_t gCourtNumber = 0U;
 /// the ESP has to watch for the end rather than schedule it.
 uint32_t gHeldSinceMs[4] = {0U, 0U, 0U, 0U};
 
+/// What the eight buttons do, and the two presses that use them.
+///
+/// The map starts as the original wiring — courts A-D then 15/30/45/60 — and is
+/// replaced from the heartbeat's config payload. A box that has never had a
+/// heartbeat therefore behaves exactly as the hand-built box did, which is what
+/// stops the first deploy changing every panel in the club.
+court::ButtonMap gButtons;
+court::WalkUpPad gPad;
+
+/// The credential, once provisioning has fetched it. Held as raw bytes plus the
+/// id text, because that is what dc::signer wants and re-decoding hex on every
+/// request would be work done four times a minute for no reason.
+char gDeviceId[devapi::kMaxDeviceIdLen + 1U] = {};
+uint8_t gDeviceKey[kDeviceKeyBytes] = {};
+bool gProvisioned = false;
+
+/// Where the API is, learned from the discovery OFFER or from provisioning.
+char gApiUrl[hal::kStoreMaxValueLen + 1U] = {};
+
 uint32_t uptimeSeconds() {
   return static_cast<uint32_t>(gUptime.value() / 1000ULL);
 }
@@ -289,6 +320,7 @@ void handleOffer(const discovery::Packet& packet) {
     return;
   }
   rememberApiUrl(offer.url());
+  snprintf(gApiUrl, sizeof(gApiUrl), "%s", offer.url());
 }
 
 void pumpOffers() {
@@ -383,6 +415,50 @@ void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
   gHeldSinceMs[court] = 0U;
 }
 
+/// A debounced press, interpreted through the map the API pushed.
+///
+/// The walk-up request is deliberately NOT priced here. A walk-up is truncated at
+/// the next booking and charged pro rata, and the box knows neither the tariff nor
+/// the next booking — so it asks. That makes walk-ups the one thing that needs the
+/// network, which is the right way round: refusing to sell new time is a member at
+/// the desk, where refusing a booking they already paid for is a member in the dark.
+void handleButton(const proto::Frame& frame, uint32_t nowMs) {
+  const char* keyText = frame.arg(0);
+  if (keyText[0] < '0' || keyText[0] > '9') {
+    return;
+  }
+
+  // `!BTN` carries the physical key index, which is exactly what the map is keyed
+  // by — position 0 is the button on pin 22 whatever it now does.
+  uint8_t index = 0U;
+  for (size_t i = 0U; keyText[i] >= '0' && keyText[i] <= '9'; ++i) {
+    index = static_cast<uint8_t>(index * 10U + static_cast<uint8_t>(keyText[i] - '0'));
+  }
+  if (index >= court::kButtonCount) {
+    return;
+  }
+
+  switch (gPad.press(gButtons, index, nowMs)) {
+  case court::PadResult::CourtSelected: {
+    char line[court::kLineLen + 1U] = "COURT ?";
+    line[6] = static_cast<char>('A' + gPad.selectedCourt());
+    static_cast<void>(sendToMega(proto::Frame::lcd(line, "CHOOSE TIME")));
+    return;
+  }
+  case court::PadResult::Requested:
+    // LATER (needs the walk-up POST): the intent goes to the API, which prices it
+    // and answers with what was actually sold. Until then the member is told the
+    // truth rather than being sold something on a guess.
+    static_cast<void>(sendToMega(proto::Frame::lcd("NOT AVAILABLE", "SEE THE DESK")));
+    return;
+  case court::PadResult::ReleaseRequested:
+    static_cast<void>(sendToMega(proto::Frame::off(static_cast<proto::Court>(gPad.intent().court))));
+    return;
+  case court::PadResult::Ignored:
+    return;
+  }
+}
+
 void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
   if (!result.isFrame()) {
     // A line from the Mega that did not decode. Counted by the decoder; nothing
@@ -400,11 +476,14 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
   case proto::Verb::Evt:
     handleMegaEvent(result.frame, nowMs);
     return;
+  case proto::Verb::Btn:
+    handleButton(result.frame, nowMs);
+    return;
   default:
-    // `!BTN` and `!STATE` are decoded and ignored until the button map
-    // arrives on the heartbeat config payload. Ignoring them is deliberate:
-    // a half-built mapping opens the wrong court, which is worse than
-    // opening none.
+    // `!STATE` is the Mega telling us which relays it believes are closed. Read for
+    // diagnostics only: the Mega's own timer is the authority on when a court goes
+    // dark, and second-guessing it from here is how the two halves start
+    // disagreeing about a live court.
     return;
   }
 }
@@ -419,6 +498,187 @@ void pumpMegaLink(uint32_t nowMs) {
     while (gUplink.pop(result)) {
       handleUplink(result, nowMs);
     }
+  }
+}
+
+/// Reads a stored value into a NUL-terminated buffer. False when absent.
+bool loadText(const char* key, char* out, size_t cap) {
+  uint8_t raw[hal::kStoreMaxValueLen];
+  uint8_t len = 0U;
+  if (gStore.get(key, raw, sizeof(raw), len) != hal::StoreResult::kOk || len == 0U || len + 1U > cap) {
+    return false;
+  }
+  memcpy(out, raw, len);
+  out[len] = '\0';
+  return true;
+}
+
+/// Rebuilds the credential from the store at boot.
+///
+/// Both halves of the key must be present and decode. A box holding half a key
+/// would sign every request wrongly and read the resulting 401 as a revoked
+/// credential — so a partial store is treated as no credential at all, and the
+/// box goes back to announcing itself for an admin to claim.
+bool loadCredentials() {
+  char keyHexA[hal::kStoreMaxValueLen + 1U] = {};
+  char keyHexB[hal::kStoreMaxValueLen + 1U] = {};
+  if (!loadText(kKeyDeviceId, gDeviceId, sizeof(gDeviceId)) ||
+      !loadText(kKeyDeviceKey, keyHexA, sizeof(keyHexA)) ||
+      !loadText(kKeyDeviceKey2, keyHexB, sizeof(keyHexB))) {
+    return false;
+  }
+
+  char keyHex[(kDeviceKeyBytes * 2U) + 1U] = {};
+  const size_t lenA = strlen(keyHexA);
+  const size_t lenB = strlen(keyHexB);
+  if (lenA + lenB != kDeviceKeyBytes * 2U) {
+    return false;
+  }
+  memcpy(keyHex, keyHexA, lenA);
+  memcpy(keyHex + lenA, keyHexB, lenB);
+
+  size_t decoded = 0U;
+  if (!dc::hex::decode(keyHex, kDeviceKeyBytes * 2U, gDeviceKey, sizeof(gDeviceKey), &decoded) ||
+      decoded != kDeviceKeyBytes) {
+    return false;
+  }
+
+  devapi::Credentials credentials;
+  credentials.deviceId = gDeviceId;
+  credentials.key = dc::ByteSpan{gDeviceKey, kDeviceKeyBytes};
+  gApi.setCredentials(credentials);
+  return true;
+}
+
+/// One signed call. Returns the HTTP status, or 0 when it never completed.
+///
+/// The response body is read into a caller buffer rather than a String: the ESP's
+/// heap is shared with the TLS stack, and a heartbeat that allocates four times a
+/// minute is a heap that fragments over a season in a cupboard.
+uint16_t callApi(const char* method, const char* path, const char* body, char* out, size_t outCap) {
+  if (gApiUrl[0] == '\0') {
+    return 0U;
+  }
+
+  devapi::Call call;
+  call.method = method;
+  call.pathAndQuery = path;
+  call.body = body;
+  call.bodyLen = body == nullptr ? 0U : strlen(body);
+
+  devapi::RequestBuffers buffers;
+  devapi::SignedRequest signed_;
+  if (!gApi.sign(call, static_cast<uint32_t>(gUptime.value()), buffers, signed_)) {
+    // No credential, or no clock yet. Both are local refusals on purpose — a
+    // request signed with a timestamp of zero comes back 401 and reads exactly
+    // like a revoked key.
+    return 0U;
+  }
+
+  char url[160];
+  snprintf(url, sizeof(url), "%s%s", gApiUrl, path);
+
+  WiFiClient client;
+  HTTPClient http;
+  if (!http.begin(client, url)) {
+    return 0U;
+  }
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader(devapi::kHeaderDeviceId, signed_.deviceId);
+  http.addHeader(devapi::kHeaderTimestamp, signed_.timestamp);
+  http.addHeader(devapi::kHeaderNonce, signed_.nonce);
+  http.addHeader(devapi::kHeaderSignature, signed_.signature);
+
+  const int status = http.POST(reinterpret_cast<const uint8_t*>(signed_.body), signed_.bodyLen);
+  if (status > 0 && out != nullptr && outCap > 0U) {
+    const String payload = http.getString();
+    const size_t n = payload.length() < outCap - 1U ? payload.length() : outCap - 1U;
+    memcpy(out, payload.c_str(), n);
+    out[n] = '\0';
+  }
+  http.end();
+  return status > 0 ? static_cast<uint16_t>(status) : 0U;
+}
+
+/// Persists what provisioning returned.
+///
+/// The key is written in two halves because hal::IStore caps a value at 32 bytes
+/// and 32 key bytes are 64 hex characters. Both halves and the id must land or
+/// the whole thing is treated as absent — see loadCredentials.
+bool storeProvisioning(const char* body, size_t len) {
+  char deviceId[devapi::kMaxDeviceIdLen + 1U] = {};
+  char keyHex[(kDeviceKeyBytes * 2U) + 1U] = {};
+  char baseUrl[hal::kStoreMaxValueLen + 1U] = {};
+
+  if (!devapi::json::stringField(body, len, "device_id", deviceId, sizeof(deviceId)) ||
+      !devapi::json::stringField(body, len, "device_key", keyHex, sizeof(keyHex))) {
+    return false;
+  }
+  if (strlen(keyHex) != kDeviceKeyBytes * 2U) {
+    return false;
+  }
+
+  const uint8_t half = static_cast<uint8_t>(kDeviceKeyBytes);
+  const bool ok =
+      gStore.put(kKeyDeviceId, reinterpret_cast<const uint8_t*>(deviceId),
+                 static_cast<uint8_t>(strlen(deviceId))) == hal::StoreResult::kOk &&
+      gStore.put(kKeyDeviceKey, reinterpret_cast<const uint8_t*>(keyHex), half) == hal::StoreResult::kOk &&
+      gStore.put(kKeyDeviceKey2, reinterpret_cast<const uint8_t*>(keyHex + half), half) ==
+          hal::StoreResult::kOk;
+
+  // An explicitly advertised base URL wins over the one discovery offered, for a
+  // club that fronts the API with a name the boards must use instead.
+  if (devapi::json::stringField(body, len, "api_base_url", baseUrl, sizeof(baseUrl))) {
+    rememberApiUrl(baseUrl);
+    snprintf(gApiUrl, sizeof(gApiUrl), "%s", baseUrl);
+  }
+  return ok;
+}
+
+/// The one unsigned call: collecting a device key with the claim code.
+///
+/// Unsigned because the box has nothing to sign with yet, which is the whole
+/// reason this endpoint is anonymous on the server. It also seeds the clock: the
+/// response carries server_unix, and without it the first signed request would be
+/// refused locally for having no clock at all.
+void tryProvision() {
+  if (gProvisioned || !gWifiUp || gApiUrl[0] == '\0') {
+    return;
+  }
+
+  char body[128];
+  snprintf(body, sizeof(body), "{\"mac\":\"%s\",\"claim_code\":\"%s\"}", gMacHex, gClaimCode.lcdText());
+
+  char url[160];
+  snprintf(url, sizeof(url), "%s/api/v1/device/provision", gApiUrl);
+
+  WiFiClient client;
+  HTTPClient http;
+  if (!http.begin(client, url)) {
+    return;
+  }
+  http.addHeader("Content-Type", "application/json");
+  const int status = http.POST(body);
+  if (status != 200) {
+    // A 404 is the normal answer: no admin has pressed "connect" yet. It is
+    // indistinguishable from a wrong code on purpose, so there is nothing to
+    // report and nothing to back off from beyond the announce interval.
+    http.end();
+    return;
+  }
+
+  const String payload = http.getString();
+  http.end();
+
+  gApi.adoptServerTime(devapi::findServerUnix(payload.c_str(), payload.length()),
+                       static_cast<uint32_t>(gUptime.value()));
+
+  if (!storeProvisioning(payload.c_str(), payload.length())) {
+    return;
+  }
+  gProvisioned = loadCredentials();
+  if (gProvisioned) {
+    static_cast<void>(sendToMega(proto::Frame::lcd("CONNECTED", "SCAN TO START")));
   }
 }
 
@@ -440,15 +700,78 @@ void pumpWifiLink(uint32_t nowMs) {
   gAnnouncer.linkDown();
 }
 
+/// Applies the `button_map` array out of a heartbeat response.
+///
+/// Reset first, so a response carrying fewer than eight entries cannot leave the
+/// tail of the previous map behind — a partial map is a panel where some buttons
+/// obey the admin and others obey whoever set them last.
+///
+/// An absent array leaves the working map alone. An older API that does not send
+/// one must not blank a panel an admin configured through a newer one.
+void applyButtonMap(const char* body, size_t len) {
+  size_t at = devapi::json::findArray(body, len, "button_map");
+  if (at == devapi::json::kNotFound) {
+    return;
+  }
+
+  gButtons.reset();
+  char token[32] = {};
+  for (uint8_t index = 0U; index < court::kButtonCount; ++index) {
+    if (!devapi::json::nextStringElement(body, len, at, token, sizeof(token))) {
+      break;
+    }
+    // A token this build does not understand leaves that entry at its default,
+    // which is a working button rather than a dead one.
+    static_cast<void>(gButtons.setFromWire(index, token));
+  }
+}
+
 void pumpHeartbeat(uint32_t nowMs) {
   if (!gHeartbeat.expired(nowMs)) {
     return;
   }
   gHeartbeat.arm(nowMs, kHeartbeatMs);
+
   // `!PING` is the only thing that tells this half whether the other half is
   // alive: a UART has no carrier, so silence and a dead peer look identical.
   // The answer also carries the Mega's firmware version for the beacon.
   static_cast<void>(sendToMega(proto::Frame::ping()));
+
+  if (!gProvisioned || !gWifiUp) {
+    return;
+  }
+
+  char body[192];
+  snprintf(body, sizeof(body),
+           "{\"running_version\":\"%s\",\"mega_version\":\"%s\",\"uptime_seconds\":%lu,\"wifi_rssi\":%ld}",
+           fw::kFirmwareVersion, gMegaVersion[0] == '\0' ? "" : gMegaVersion,
+           static_cast<unsigned long>(uptimeSeconds()), static_cast<long>(WiFi.RSSI()));
+
+  char response[512] = {};
+  devapi::Response result;
+  result.status = callApi("POST", "/api/v1/device/heartbeat", body, response, sizeof(response));
+  result.serverUnix = devapi::findServerUnix(response, strlen(response));
+
+  switch (gApi.react(result, static_cast<uint32_t>(gUptime.value()))) {
+  case devapi::Reaction::Accepted:
+    applyButtonMap(response, strlen(response));
+    return;
+  case devapi::Reaction::ClockCorrected:
+    // The offset is fixed and the next attempt is expected to work, so do not
+    // wait a full interval to find out.
+    gHeartbeat.arm(nowMs, 1000UL);
+    return;
+  case devapi::Reaction::Reprovision:
+    // The server does not accept this credential. Hammering it with a revoked key
+    // is how a board gets rate limited out of ever recovering, so the box goes
+    // back to announcing itself and waits to be claimed again.
+    gProvisioned = false;
+    showClaimPrompt();
+    return;
+  case devapi::Reaction::Rejected:
+  case devapi::Reaction::Retry:
+    return;
+  }
 }
 
 } // namespace
@@ -466,6 +789,12 @@ void setup() {
 
   setupIdentity();
 
+  // A box that has been claimed before comes back up already provisioned: the key
+  // is in flash and there is nothing for an admin to do. One that has not falls
+  // through to announcing itself, which is the same path a brand-new board takes.
+  static_cast<void>(loadText(kKeyApiUrl, gApiUrl, sizeof(gApiUrl)));
+  gProvisioned = loadCredentials();
+
   const uint32_t now = gClock.nowMs();
   gUptime.seed(now);
   gHeartbeat.arm(now, kHeartbeatMs);
@@ -477,7 +806,14 @@ void loop() {
   const uint32_t now = gClock.nowMs();
   gUptime.tick(now);
 
+  // A court selected and then abandoned lapses on its own, so the next member to
+  // press a duration button does not inherit somebody else's half-made purchase.
+  if (gPad.tick(now)) {
+    static_cast<void>(sendToMega(proto::Frame::lcd("CRUSADERS COURTS", "SCAN TO START")));
+  }
+
   pumpWifiLink(now);
+  tryProvision();
   pumpMegaLink(now);
   pumpHeartbeat(now);
   pumpOffers();

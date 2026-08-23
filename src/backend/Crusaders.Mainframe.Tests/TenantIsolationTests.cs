@@ -70,7 +70,7 @@ public class TenantIsolationTests
             var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
             var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
             await ledger.PostAsync(new LedgerPosting(hostA.PlayerUser.Id, LedgerEntryType.TopUp, 200m, hostA.PlayerUser.Id), default);
-            await booking.CreateAsync(hostA.Courts[0].Id, hostA.PlayerUser.Id, hostA.PlayerUser.Id, DateTimeOffset.UtcNow.AddHours(2), 1, default);
+            await booking.CreateAsync(hostA.Courts[0].Id, hostA.PlayerUser.Id, hostA.PlayerUser.Id, TestHost.BookableSlot(2), 1, default);
         }
 
         // Tenant B is looking at the same rows tenant A just wrote. The only thing

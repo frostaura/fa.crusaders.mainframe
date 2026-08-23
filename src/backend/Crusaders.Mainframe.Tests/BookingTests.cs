@@ -47,7 +47,7 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
         var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, sliceCount: 1, default);
 
         var ok = Assert.IsType<BookingResult.Ok>(result);
@@ -68,7 +68,7 @@ public class BookingTests
         using var scope = host.NewScope();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
         var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var ib = Assert.IsType<BookingResult.InsufficientBalance>(result);
@@ -85,7 +85,7 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
 
         // Two slices = 30 minutes, so a booking 15 minutes in genuinely overlaps.
         var first = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, sliceCount: 2, default);
@@ -104,7 +104,7 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
 
         Assert.IsType<BookingResult.Ok>(
             await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default));
@@ -153,7 +153,7 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(3);
+        var startsAt = TestHost.BookableSlot(3);
         var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, waivePenalty: false, default);
@@ -163,6 +163,35 @@ public class BookingTests
         Assert.Equal(SlicePriceCredits, cancelled.RefundedCredits);
         Assert.Equal(0m, cancelled.PenaltyCredits);
         Assert.Equal(200m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+    }
+
+    /// <summary>
+    /// The fix for a flake, tested at every hour instead of at the hour the suite runs.
+    ///
+    /// <para>
+    /// Two cancellation tests here booked <c>UtcNow.AddHours(3)</c> and failed every
+    /// afternoon, because the fixture's peak window is 16:00–19:00 UTC and blueprint A.12
+    /// refuses a Regular member a peak slot more than an hour ahead. The symptom was an
+    /// <c>InvalidCastException</c> naming <c>PeakHoursLeagueOnly</c> in a test about
+    /// refunds — which reads as a broken cancellation and is not one.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void A_bookable_slot_is_never_inside_peak_hours_whatever_time_it_is()
+    {
+        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+
+        for (var hour = 0; hour < 24; hour++)
+        {
+            foreach (var ahead in new[] { 1.0, 2.0, 3.0, 5.0 })
+            {
+                var slot = TestHost.BookableSlotFrom(midnight.AddHours(hour), ahead);
+
+                Assert.False(slot.Hour is >= 16 and < 19,
+                    $"slot at {slot:HH:mm} lands in peak (from {hour:00}:00, +{ahead}h)");
+                Assert.True(slot > midnight.AddHours(hour), "a bookable slot must be in the future");
+            }
+        }
     }
 
     /// <summary>

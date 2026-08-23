@@ -27,12 +27,12 @@
 #include <string.h>
 #include <unity.h>
 
-#include "CorpusJson.h"
 #include "devcrypto/Hex.h"
 #include "devcrypto/Hkdf.h"
 #include "devcrypto/HmacSha256.h"
 #include "devcrypto/RequestSigner.h"
 #include "devcrypto/Sha256.h"
+#include "support/CorpusJson.h"
 
 namespace {
 
@@ -156,9 +156,9 @@ const uint8_t* asBytes(const char* text) {
 // corpus that cannot be found must fail rather than quietly execute zero cases.
 
 void test_corpus_files_are_present(void) {
-  TEST_ASSERT_TRUE_MESSAGE(g_cases.load("cases.json"),
+  TEST_ASSERT_TRUE_MESSAGE(g_cases.load("http", "cases.json"),
                            "src/contracts/device-protocol/http/cases.json not found above cwd");
-  TEST_ASSERT_TRUE_MESSAGE(g_manifest.load("manifest.json"),
+  TEST_ASSERT_TRUE_MESSAGE(g_manifest.load("http", "manifest.json"),
                            "src/contracts/device-protocol/http/manifest.json not found above cwd");
 }
 

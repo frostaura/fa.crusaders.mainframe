@@ -101,7 +101,7 @@ public class Phase8Tests
         // Fund the player with 100 credits; slice price is 8.
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id, ZarPaid: 62.50m, ConversionRate: 1.6m), default);
 
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
         var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
         var ok = Assert.IsType<BookingResult.Ok>(result);
 
@@ -136,7 +136,7 @@ public class Phase8Tests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
         // Written directly, with no ledger entry and no ChargedAt: the shape of a row from
         // before charge-at-booking. Built rather than un-charged, because deleting a ledger
         // row to fake history is exactly what the ledger-only rule exists to prevent — even
@@ -182,7 +182,7 @@ public class Phase8Tests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         // Already charged at creation, so the very first activation is a no-op — and so is
@@ -211,7 +211,7 @@ public class Phase8Tests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(3); // outside penalty window
+        var startsAt = TestHost.BookableSlot(3); // outside penalty window
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.PlayerUser.Id, waivePenalty: false, default);
@@ -372,7 +372,7 @@ public class Phase8Tests
         await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 100m, host.LeaguePlayerUser.Id), default);
 
         // Booked by PlayerUser (Regular). Use admin actor so peak-hours/per-day cap don't interfere.
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.AdminUser.Id, startsAt, 1, default);
 
         // At the court, LeaguePlayerUser presses "I'll pay" — charge goes to them.
@@ -394,7 +394,7 @@ public class Phase8Tests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var fresh = await db.Bookings.AsNoTracking().FirstAsync(b => b.Id == created.Booking.Id);
