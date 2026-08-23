@@ -26,6 +26,14 @@ namespace Crusaders.Mainframe.Tests;
 /// </para>
 ///
 /// <para>
+/// Charge-at-booking narrows that path without closing it: an ordinary booking arrives at
+/// the court already paid for, so the refusal branch is now reached by a booking that was
+/// reserved without a debit, and by a volunteer pressing "I'll pay" who cannot afford it.
+/// Those are the two cases exercised below. The rule is unchanged and is what the tests
+/// hold to: <b>no charge, no lights, and no attendance stamp</b>.
+/// </para>
+///
+/// <para>
 /// <b>3. Three grace windows disagreed.</b> Biometric read <c>Biometric:GraceMinutes</c>
 /// from app config — a key absent from <c>appsettings.json</c>, so permanently its 5-minute
 /// default. PIN and QR each hardcoded 30 minutes. The no-show sweep used the tenant's
@@ -67,6 +75,37 @@ public class CourtActivationTests
             DateTimeOffset.UtcNow.AddMinutes(1), 1, default);
 
         return Assert.IsType<BookingResult.Ok>(result).Booking;
+    }
+
+    /// <summary>
+    /// A booking a player is standing in front of that carries no debit — the shape a row
+    /// has if it was reserved without charging, and the only shape that can still reach the
+    /// refusal branch now that <c>CreateAsync</c> charges. Written directly rather than
+    /// created-then-refunded: deleting a ledger row to manufacture history is what the
+    /// ledger-only rule exists to forbid, fixtures included.
+    /// </summary>
+    private static async Task<Booking> ReserveNowUnchargedAsync(Fixture f)
+    {
+        var startsAt = DateTimeOffset.UtcNow.AddMinutes(1);
+        var booking = new Booking
+        {
+            TenantId = f.Host.Tenant.Id,
+            CourtId = f.Host.Courts[0].Id,
+            UserId = f.Host.PlayerUser.Id,
+            BookedByUserId = f.Host.PlayerUser.Id,
+            PaidByUserId = f.Host.PlayerUser.Id,
+            ActorUserId = f.Host.PlayerUser.Id,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(15),
+            SliceMinutes = 15,
+            SliceCount = 1,
+            AmountChargedCredits = 8m,
+            Status = BookingStatus.Booked,
+            ChargedAt = null,
+        };
+        f.Db.Bookings.Add(booking);
+        await f.Db.SaveChangesAsync();
+        return booking;
     }
 
     private static Court CourtOf(Fixture f) => f.Host.Courts[0];
@@ -164,15 +203,12 @@ public class CourtActivationTests
     [InlineData("qr")]
     public async Task Insufficient_balance_refuses_and_cues_nothing(string method)
     {
-        // Enough to book (the hold only verifies affordability), then spent elsewhere.
-        var f = await CreateAsync(topUpCredits: 8m);
+        // A reservation carrying no debit, held by a member with nothing to pay it with.
+        var f = await CreateAsync(topUpCredits: 0m);
         await using var _ = f.Host;
         using var __ = f.Scope;
 
-        var booking = await BookNowAsync(f);
-
-        await f.Ledger.PostAsync(new LedgerPosting(
-            f.Host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, -8m, f.Host.AdminUser.Id), default);
+        var booking = await ReserveNowUnchargedAsync(f);
 
         var result = await f.Activation.ActivateAsync(
             CourtOf(f), booking, f.Host.PlayerUser.Id, null, method, default);
@@ -206,13 +242,11 @@ public class CourtActivationTests
     [Fact]
     public async Task A_refused_activation_remains_visible_to_the_no_show_sweep()
     {
-        var f = await CreateAsync(topUpCredits: 8m);
+        var f = await CreateAsync(topUpCredits: 0m);
         await using var _ = f.Host;
         using var __ = f.Scope;
 
-        var booking = await BookNowAsync(f);
-        await f.Ledger.PostAsync(new LedgerPosting(
-            f.Host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, -8m, f.Host.AdminUser.Id), default);
+        var booking = await ReserveNowUnchargedAsync(f);
 
         await f.Activation.ActivateAsync(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "pin", default);
 
@@ -332,5 +366,87 @@ public class CourtActivationTests
         // The booker keeps their credits; the volunteer pays.
         Assert.Equal(100m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
         Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.LeaguePlayerUser.Id, default));
+    }
+
+    /// <summary>
+    /// What charge-at-booking changed about B.2: the booker has <i>already paid</i> by the
+    /// time anyone volunteers, so honouring "I'll pay" means moving the money, not choosing
+    /// where to take it from. Both legs are posted in full and both are on the statement —
+    /// a netted row settles to the same balances and cannot say who paid for the court.
+    /// </summary>
+    [Fact]
+    public async Task A_payer_override_moves_the_charge_and_shows_both_legs()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        await f.Ledger.PostAsync(new LedgerPosting(
+            f.Host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 100m, f.Host.LeaguePlayerUser.Id), default);
+
+        var booking = await BookNowAsync(f);
+        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+
+        await f.Activation.ActivateAsync(
+            CourtOf(f), booking, f.Host.PlayerUser.Id,
+            payerOverrideUserId: f.Host.LeaguePlayerUser.Id, method: "qr", default);
+
+        var rows = await f.Db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id).ToListAsync();
+
+        // The booker: charged at booking, refunded at the court.
+        Assert.Equal(-8m, Assert.Single(rows, l =>
+            l.UserId == f.Host.PlayerUser.Id && l.Type == LedgerEntryType.BookingCharge).AmountCredits);
+        Assert.Equal(8m, Assert.Single(rows, l =>
+            l.UserId == f.Host.PlayerUser.Id && l.Type == LedgerEntryType.CancellationRefund).AmountCredits);
+
+        // The volunteer: charged once.
+        Assert.Equal(-8m, Assert.Single(rows, l =>
+            l.UserId == f.Host.LeaguePlayerUser.Id && l.Type == LedgerEntryType.BookingCharge).AmountCredits);
+
+        var fresh = await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
+        Assert.Equal(f.Host.LeaguePlayerUser.Id, fresh.PaidByUserId);
+
+        // Who paid for whom, in the audit trail, as {actor, subject}.
+        var reassigned = Assert.Single(
+            await f.Db.AuditLogs.Where(a => a.Action == "booking.payer_reassigned").ToListAsync());
+        Assert.Equal(f.Host.LeaguePlayerUser.Id, reassigned.SubjectUserId);
+    }
+
+    /// <summary>
+    /// The half-applied reassignment: refund the booker, then find the volunteer cannot pay,
+    /// and the court has been played on nobody's credits. Refusing up front is the only
+    /// answer that leaves the money where it was — so the booker must still be out of pocket
+    /// and still be the payer of record after the refusal.
+    /// </summary>
+    [Fact]
+    public async Task A_payer_override_by_someone_who_cannot_afford_it_changes_nothing()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        // The volunteer is funded and then isn't — 4 credits against a 8-credit slice.
+        await f.Ledger.PostAsync(new LedgerPosting(
+            f.Host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 4m, f.Host.LeaguePlayerUser.Id), default);
+
+        var booking = await BookNowAsync(f);
+
+        var result = await f.Activation.ActivateAsync(
+            CourtOf(f), booking, f.Host.PlayerUser.Id,
+            payerOverrideUserId: f.Host.LeaguePlayerUser.Id, method: "biometric", default);
+
+        var refused = Assert.IsType<ActivationResult.InsufficientBalance>(result);
+        Assert.Equal(f.Host.LeaguePlayerUser.Id, refused.PayerUserId);
+        Assert.Equal(4m, refused.Current);
+        Assert.Equal(8m, refused.Required);
+
+        // Nothing moved: no refund to the booker, no charge to the volunteer.
+        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Equal(4m, await f.Ledger.GetBalanceAsync(f.Host.LeaguePlayerUser.Id, default));
+
+        var fresh = await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
+        Assert.Equal(f.Host.PlayerUser.Id, fresh.PaidByUserId);
+        Assert.Null(fresh.CheckedInAt);
+        Assert.Null(fresh.LightsOnCuedAt);
     }
 }

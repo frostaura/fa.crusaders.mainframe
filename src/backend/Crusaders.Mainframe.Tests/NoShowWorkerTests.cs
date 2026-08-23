@@ -79,6 +79,41 @@ public class NoShowWorkerTests
     }
 
     /// <summary>
+    /// The same rule applied to what the member is <em>told</em>. The ledger rows are
+    /// suppressed on an uncharged booking, but the no-show email and the
+    /// <c>booking.no_show</c> webhook payload quote figures of their own — and quoting a
+    /// refund and a penalty that never happened is how a member arrives convinced they are
+    /// owed 5.60 credits. The numbers on the notice must be the numbers in the ledger.
+    /// </summary>
+    [Fact]
+    public async Task No_show_on_an_uncharged_booking_quotes_zero_refund_and_zero_penalty()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var bus = host.Services.GetRequiredService<IEventBus>();
+
+        await AddBookingAsync(host, db, charged: false);
+        await CreateWorker(host).TickAsync(default);
+
+        // Drain what the tick emitted. The bus is a channel, so this is everything and
+        // nothing else — no other producer ran.
+        var emitted = new List<DomainEvent>();
+        while (bus.Reader.TryRead(out var evt)) emitted.Add(evt);
+
+        var noShow = Assert.Single(emitted, e => e.Type == "booking.no_show");
+        Assert.Equal(0m, Assert.IsType<decimal>(noShow.Data["refund_credits"]));
+        Assert.Equal(0m, Assert.IsType<decimal>(noShow.Data["penalty_credits"]));
+
+        // And the email the member actually reads. 8 credits at 30% would print 2.40
+        // penalty and 5.60 back; neither figure may appear when nothing was taken.
+        var mail = Assert.Single(host.EmailService.Sent, m => m.Subject.Contains("ancel", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("2.40", mail.HtmlBody);
+        Assert.DoesNotContain("5.60", mail.HtmlBody);
+    }
+
+    /// <summary>
     /// Nothing was charged, so there is nothing to refund and nothing to take a
     /// penalty from. Posting either would invent money.
     /// </summary>

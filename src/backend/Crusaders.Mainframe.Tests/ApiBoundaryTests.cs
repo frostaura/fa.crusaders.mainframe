@@ -234,6 +234,86 @@ public sealed class ApiBoundaryTests
     }
 
     /// <summary>
+    /// The double-booking race, closed in the only place it can be.
+    ///
+    /// <para>
+    /// <c>BookingService.CreateAsync</c> checks for an overlap and then inserts, and under
+    /// READ COMMITTED two requests can both pass the check before either commits. The
+    /// in-memory provider enforces no exclusion constraint and speaks no SQL, so nothing in
+    /// the rest of the suite can see this — the same blind spot that hid the ExternalReference
+    /// index above.
+    /// </para>
+    ///
+    /// <para>
+    /// Four cases, because the constraint has to reject exactly one of them. Adjacency and
+    /// cancel-then-rebook are the ways a too-eager constraint breaks the club: back-to-back
+    /// bookings are the normal pattern on a busy evening, and a cancelled slot has to be
+    /// rebookable or a cancellation costs the court its hour.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task Overlapping_bookings_are_rejected_by_the_schema_and_adjacent_ones_are_not()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        await db.Database.MigrateAsync();
+
+        await using var conn = new NpgsqlConnection(_pg.ConnectionString);
+        await conn.OpenAsync();
+
+        var tenantId = Guid.NewGuid();
+        var courtId = Guid.NewGuid();
+        var baseline = new DateTimeOffset(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
+
+        async Task InsertAsync(Guid tenant, DateTimeOffset startsAt, DateTimeOffset endsAt, int status)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO bookings
+                    ("Id","TenantId","CourtId","ActorUserId","StartsAt","EndsAt","SliceMinutes",
+                     "SliceCount","AmountChargedCredits","Status","CancellationPenaltyWaived","CreatedAt")
+                VALUES
+                    (@id, @tenant, @court, @actor, @starts, @ends, 15, 2, 16.00, @status, false, now())
+                """;
+            cmd.Parameters.AddWithValue("id", Guid.NewGuid());
+            cmd.Parameters.AddWithValue("tenant", tenant);
+            cmd.Parameters.AddWithValue("court", courtId);
+            cmd.Parameters.AddWithValue("actor", Guid.NewGuid());
+            cmd.Parameters.AddWithValue("starts", startsAt);
+            cmd.Parameters.AddWithValue("ends", endsAt);
+            cmd.Parameters.AddWithValue("status", status);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await InsertAsync(tenantId, baseline, baseline.AddMinutes(30), status: 0);
+
+        // Overlaps by 15 minutes — the collision the constraint exists for.
+        var clash = await Assert.ThrowsAsync<PostgresException>(
+            () => InsertAsync(tenantId, baseline.AddMinutes(15), baseline.AddMinutes(45), status: 0));
+        Assert.Equal("23P01", clash.SqlState);
+        Assert.Equal("ck_bookings_no_overlapping_slot", clash.ConstraintName);
+
+        // Adjacent, not overlapping: the range is half-open, so 10:30 is free.
+        await InsertAsync(tenantId, baseline.AddMinutes(30), baseline.AddMinutes(45), status: 0);
+
+        // Another club's court number is another club's court.
+        await InsertAsync(Guid.NewGuid(), baseline, baseline.AddMinutes(30), status: 0);
+
+        // Cancelled rows are kept for the audit trail but release the slot.
+        await using (var cancel = conn.CreateCommand())
+        {
+            cancel.CommandText = @"UPDATE bookings SET ""Status"" = 1 WHERE ""TenantId"" = @t AND ""StartsAt"" = @s";
+            cancel.Parameters.AddWithValue("t", tenantId);
+            cancel.Parameters.AddWithValue("s", baseline);
+            Assert.Equal(1, await cancel.ExecuteNonQueryAsync());
+        }
+        await InsertAsync(tenantId, baseline, baseline.AddMinutes(30), status: 0);
+    }
+
+    /// <summary>
     /// A liveness probe must not depend on the database. Asserted over real HTTP so
     /// routing and middleware order are exercised, not just the handler.
     /// </summary>

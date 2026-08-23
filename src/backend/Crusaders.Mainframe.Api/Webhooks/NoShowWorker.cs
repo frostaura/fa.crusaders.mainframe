@@ -79,19 +79,26 @@ public sealed class NoShowWorker : BackgroundService
                 // Who pays is who was charged. Posting the penalty to the booker when
                 // someone else paid (blueprint B.2 payer override) debits the wrong person.
                 var payerUserId = b.PaidByUserId ?? b.UserId.Value;
-                var penalty = Math.Round(b.AmountChargedCredits * tSettings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero);
 
-                // The refund is guarded on an actual charge having happened.
+                // Both movements are guarded on an actual charge having happened.
                 //
-                // This previously posted a positive CancellationRefund for the full booking
-                // value whenever AmountChargedCredits > 0, with no check that anything had ever
-                // been debited. Under charge-on-activation a no-show by definition never
-                // checked in — CheckedInAt == null is the selection predicate above — so no
-                // BookingCharge existed to refund. The net effect was to CREDIT the player
-                // (100% refund minus a 30% penalty = +70% of the booking value) for failing
-                // to turn up. The stale comment describing "the original BookingCharge" dated
-                // from the charge-at-booking era and referred to a row that was not there.
+                // Under charge-at-booking that guard is true for every row CreateAsync writes,
+                // and the economics are the club's: the member paid at booking, did not turn
+                // up, and gets the slot back less the penalty — the blueprint's own words.
+                //
+                // The guard is not therefore redundant. A reservation carrying no debit still
+                // reaches this sweep, and refunding one credits a player for a slot nobody
+                // paid for. That was live once: the refund ran on AmountChargedCredits > 0
+                // alone, so under the old charge-on-activation model — where a no-show by
+                // definition never checked in and so was never charged — failing to turn up
+                // paid out 70% of the booking value.
                 var wasCharged = b.ChargedAt is not null;
+
+                // Zero rather than uncollected, so the email and the event quote it as zero
+                // too — a penalty nobody was charged is not a penalty.
+                var penalty = wasCharged
+                    ? Math.Round(b.AmountChargedCredits * tSettings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero)
+                    : 0m;
 
                 if (wasCharged && b.AmountChargedCredits > 0)
                 {
@@ -103,7 +110,7 @@ public sealed class NoShowWorker : BackgroundService
                 // A penalty is only collectable against money that moved. Charging one for a
                 // booking that was never paid for would drive the balance negative for a slot
                 // the club never received anything for.
-                if (wasCharged && penalty > 0)
+                if (penalty > 0)
                 {
                     await ledger.PostAsync(new LedgerPosting(
                         UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountCredits: -penalty,
@@ -115,7 +122,10 @@ public sealed class NoShowWorker : BackgroundService
 
                 var user = await db.Users.FirstAsync(u => u.Id == b.UserId, ct);
                 var court = await db.Courts.FirstAsync(c => c.Id == b.CourtId, ct);
-                var netRefund = b.AmountChargedCredits - penalty;
+                // What the member is actually left with, which is nothing at all if nothing was
+                // ever taken — quoting them a refund they did not receive is how a support
+                // ticket starts.
+                var netRefund = wasCharged ? b.AmountChargedCredits - penalty : 0m;
                 try
                 {
                     await email.SendAsync(EmailTemplates.BookingCancellation(user.Email, court.Name + " (no-show)", netRefund, penalty), ct);
