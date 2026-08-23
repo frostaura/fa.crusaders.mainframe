@@ -113,6 +113,21 @@ public sealed class Device : ITenantScoped
     public OtaChannel OtaChannel { get; set; } = OtaChannel.Stable;
     public string? PinnedVersion { get; set; }
 
+    /// <summary>
+    /// A version this box installed, rebooted through its allowance, and never once
+    /// managed a successful call on. Reported by the box itself, because the box is
+    /// the only thing that can know it.
+    ///
+    /// <para>
+    /// It is here so a human finds out. The firmware's own guard already refuses to
+    /// reinstall the build — that is what stops a whole club reflashing in a loop —
+    /// but a fleet quietly declining an update is exactly the kind of silence that
+    /// gets noticed a week later, by which time the release has been promoted
+    /// everywhere.
+    /// </para>
+    /// </summary>
+    public string? FailedVersion { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>A device may authenticate only while enabled and unrevoked.</summary>

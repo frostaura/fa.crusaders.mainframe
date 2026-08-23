@@ -159,6 +159,29 @@ penalty — is the same either way.
 `CancelAsync` plus the tests that pin them; the ledger types, the activation path and the
 court box are all indifferent to which end the debit is taken from.
 
+### D-2 — firmware is signed with RSA-2048, not Ed25519
+
+**Planned:** Ed25519 signatures on OTA images.
+**Built:** RSA-2048/SHA-256, via the ESP8266 Arduino core's supported signed-update path.
+**Decided by:** implementation constraint, 2026-08-23. **Not a product decision** — recorded
+here so nobody reads the plan later and assumes it was done.
+
+The reasoning behind "Ed25519, not HMAC" was that an HMAC keyed with the device key would let
+one compromised box forge firmware for the whole fleet — the signing key must be one no box
+holds. **That property is unchanged.** The signing key is asymmetric and lives only where
+releases are built, so a stolen board yields nothing that can sign firmware for any other.
+
+What differs is the algorithm. BearSSL — the TLS stack already linked into the image — has no
+Ed25519, and the alternative was vendoring a curve implementation into a court-lighting
+controller. A few hundred extra bytes per image is the better trade.
+
+**There is also no true rollback**, and that is worth stating plainly: a 4M ESP carrying a
+1 MB sketch and 2 MB of LittleFS has no second OTA slot, and the filesystem is not optional
+because it holds the device credential. What the boot guard does instead is stop a bad build
+being installed twice — which is the failure that takes out a club, since every box
+heartbeats against the same manifest and would otherwise reflash in a loop, all at once. A
+box that will not boot at all still needs a USB cable.
+
 ### Ratified, not open
 
 - **Penalty economics — 30% penalty, 5-minute grace, 15-minute penalty window.** Agreed with

@@ -276,6 +276,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("FailedVersion")
+                        .HasColumnType("text");
+
                     b.Property<string>("GateKey")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");

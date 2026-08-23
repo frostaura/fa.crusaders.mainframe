@@ -91,6 +91,7 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<DeviceDiscoveryService>();
         services.AddSingleton<BalanceBroadcaster>();
         services.AddScoped<TenantSettingsAccessor>();
+        services.AddSingleton<OtaCatalogue>();
         services.AddScoped<DeviceRegistryService>();
         services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.ProvisioningGrants>();
         services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();

@@ -39,6 +39,7 @@ public static class DeviceEndpoints
             MainframeDbContext db,
             ITenantContext tenant,
             TenantSettingsAccessor settings,
+            OtaCatalogue ota,
             HttpContext ctx,
             CancellationToken ct) =>
         {
@@ -57,6 +58,12 @@ public static class DeviceEndpoints
             if (!string.IsNullOrWhiteSpace(req.RunningVersion)) device.RunningVersion = req.RunningVersion.Trim();
             if (!string.IsNullOrWhiteSpace(req.MegaVersion)) device.MegaVersion = req.MegaVersion.Trim();
 
+            // A build the box installed and could never make a successful call on. Its
+            // own guard already refuses to reinstall it; this is so a human finds out,
+            // because a fleet quietly declining an update is the kind of silence that
+            // gets noticed a week after the release was promoted everywhere.
+            if (!string.IsNullOrWhiteSpace(req.FailedVersion)) device.FailedVersion = req.FailedVersion.Trim();
+
             await db.SaveChangesAsync(ct);
 
             var s = await settings.GetAsync(ct);
@@ -65,6 +72,17 @@ public static class DeviceEndpoints
             // with its own clock, so a box that has drifted past the skew window can
             // never call successfully — it re-syncs from the last good response, and
             // failing that from NTP.
+            // What this box should be running, or nothing at all.
+            //
+            // Omitted rather than sent-and-refused when the box already has it: the
+            // decision is the firmware's, but there is no reason to make every box in
+            // the club re-derive "I already have this" four times a minute, and an
+            // absent `ota` object is the ordinary heartbeat.
+            var release = ota.For(device);
+            var offerUpdate = release is not null
+                && !string.Equals(release.Version, device.RunningVersion, StringComparison.Ordinal)
+                && !string.Equals(release.Version, device.FailedVersion, StringComparison.Ordinal);
+
             return Results.Ok(new
             {
                 server_time = DateTimeOffset.UtcNow,
@@ -73,6 +91,14 @@ public static class DeviceEndpoints
                 device_code = device.DeviceCode,
                 court_number = device.CourtNumber,
                 heartbeat_seconds = 60,
+                ota = offerUpdate
+                    ? new
+                    {
+                        ota_version = release!.Version,
+                        ota_url = release.Url,
+                        ota_size = release.SizeBytes,
+                    }
+                    : null,
                 config = new
                 {
                     slice_minutes = s.SliceMinutes,
@@ -177,4 +203,7 @@ public sealed record HeartbeatRequest(
     [property: JsonPropertyName("running_version")] string? RunningVersion,
     [property: JsonPropertyName("mega_version")] string? MegaVersion,
     [property: JsonPropertyName("uptime_seconds")] long? UptimeSeconds,
-    [property: JsonPropertyName("wifi_rssi")] int? WifiRssi);
+    [property: JsonPropertyName("wifi_rssi")] int? WifiRssi,
+    /// <summary>A version this box installed and could never make a working call on.
+    /// Reported once, by the only thing that can know it.</summary>
+    [property: JsonPropertyName("failed_version")] string? FailedVersion = null);

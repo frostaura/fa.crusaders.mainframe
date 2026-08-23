@@ -161,6 +161,7 @@ builder.Services.AddScoped<IJwtIssuer, JwtIssuer>();
 // off the request thread without scope-disposal hazards.
 builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<TenantSettingsAccessor>();
+builder.Services.AddSingleton<OtaCatalogue>();
 builder.Services.AddScoped<DeviceRegistryService>();
 builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.ProvisioningGrants>();
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();

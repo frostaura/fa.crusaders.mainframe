@@ -55,6 +55,7 @@
 #include <Arduino.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266httpUpdate.h>
 #include <WiFiUdp.h>
 
 #include <stddef.h>
@@ -77,6 +78,8 @@
 #include "discovery/Offer.h"
 #include "eventq/EventQueue.h"
 #include "fwversion/Version.h"
+#include "otacore/BootGuard.h"
+#include "otacore/UpdatePolicy.h"
 #include "protocol/Codec.h"
 #include "protocol/Protocol.h"
 #include "roster/Roster.h"
@@ -224,6 +227,15 @@ uint32_t gHeldSinceMs[4] = {0U, 0U, 0U, 0U};
 /// stops the first deploy changing every panel in the club.
 court::ButtonMap gButtons;
 court::WalkUpPad gPad;
+
+/// The guard that stops a broken build being taken twice.
+///
+/// There is no reverting on this part — a 4M ESP carrying a 1 MB sketch and 2 MB
+/// of LittleFS has no second OTA slot, and the filesystem is not optional because
+/// it holds the device credential. What the guard buys instead is the thing that
+/// actually takes out a fleet: every box heartbeats against the same manifest, so
+/// without it a bad image would reflash itself forever on every board at once.
+ota::BootGuard gBootGuard(&gStore);
 
 /// The credential, once provisioning has fetched it. Held as raw bytes plus the
 /// id text, because that is what dc::signer wants and re-decoding hex on every
@@ -726,6 +738,40 @@ void applyButtonMap(const char* body, size_t len) {
   }
 }
 
+/// Takes the update the heartbeat offered, if the policy says so.
+///
+/// Every refusal reason is logged to the Mega's display rather than swallowed: a
+/// fleet quietly declining an update is exactly the silence that gets noticed a
+/// week after the release was promoted everywhere.
+void considerUpdate(const char* body, size_t len) {
+  const ota::Manifest manifest = ota::parseManifest(body, len);
+  const ota::Decision decision =
+      ota::decide(manifest, fw::kFirmwareVersion, gBootGuard, ESP.getFreeSketchSpace());
+
+  if (decision != ota::Decision::Install) {
+    return;
+  }
+
+  // Armed BEFORE the flash. An update interrupted mid-write leaves a box that may
+  // not come up at all, and this marker is the only thing that will tell the next
+  // working firmware what happened.
+  gBootGuard.arm(manifest.version);
+  static_cast<void>(sendToMega(proto::Frame::lcd("UPDATING", "DO NOT POWER OFF")));
+
+  WiFiClient client;
+  ESPhttpUpdate.rebootOnUpdate(true);
+  // The image is signature-checked by the core's Updater against a public key
+  // compiled into this build; see the signing note in lib/otacore/UpdatePolicy.h.
+  // A box that has been stolen yields nothing that can sign firmware for any other.
+  const t_httpUpdate_return outcome = ESPhttpUpdate.update(client, manifest.url);
+  if (outcome == HTTP_UPDATE_FAILED) {
+    // Never installed, so the marker would condemn a build that never ran. Clearing
+    // it by confirming is correct: nothing is pending.
+    gBootGuard.confirm();
+    static_cast<void>(sendToMega(proto::Frame::lcd("UPDATE FAILED", "SCAN TO START")));
+  }
+}
+
 void pumpHeartbeat(uint32_t nowMs) {
   if (!gHeartbeat.expired(nowMs)) {
     return;
@@ -743,9 +789,11 @@ void pumpHeartbeat(uint32_t nowMs) {
 
   char body[192];
   snprintf(body, sizeof(body),
-           "{\"running_version\":\"%s\",\"mega_version\":\"%s\",\"uptime_seconds\":%lu,\"wifi_rssi\":%ld}",
+           "{\"running_version\":\"%s\",\"mega_version\":\"%s\",\"uptime_seconds\":%lu,"
+           "\"wifi_rssi\":%ld,\"failed_version\":\"%s\"}",
            fw::kFirmwareVersion, gMegaVersion[0] == '\0' ? "" : gMegaVersion,
-           static_cast<unsigned long>(uptimeSeconds()), static_cast<long>(WiFi.RSSI()));
+           static_cast<unsigned long>(uptimeSeconds()), static_cast<long>(WiFi.RSSI()),
+           gBootGuard.badVersion());
 
   char response[512] = {};
   devapi::Response result;
@@ -754,7 +802,12 @@ void pumpHeartbeat(uint32_t nowMs) {
 
   switch (gApi.react(result, static_cast<uint32_t>(gUptime.value()))) {
   case devapi::Reaction::Accepted:
+    // The evidence that clears a pending update. Not "it booted" — a firmware that
+    // comes up and cannot authenticate looks alive and does nothing, which is worse
+    // than one that does not come up at all.
+    gBootGuard.confirm();
     applyButtonMap(response, strlen(response));
+    considerUpdate(response, strlen(response));
     return;
   case devapi::Reaction::ClockCorrected:
     // The offset is fixed and the next attempt is expected to work, so do not
@@ -792,6 +845,10 @@ void setup() {
   // A box that has been claimed before comes back up already provisioned: the key
   // is in flash and there is nothing for an admin to do. One that has not falls
   // through to announcing itself, which is the same path a brand-new board takes.
+  // Before anything else touches the store: this counts the boot against a pending
+  // update and may condemn a build that has never worked.
+  static_cast<void>(gBootGuard.begin());
+
   static_cast<void>(loadText(kKeyApiUrl, gApiUrl, sizeof(gApiUrl)));
   gProvisioned = loadCredentials();
 
