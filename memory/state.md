@@ -19,8 +19,8 @@ _2026-08-22 — every claim below was executed, not read. A .NET 10 SDK and Plat
 
 ### The court-hardware programme, phases A–J (2026-08-23)
 
-**Everything below was executed in this session, not read.** Backend 473/473 with a real
-Postgres attached (no skips), firmware 231/231 under both native and ASAN/UBSAN, frontend 28
+**Everything below was executed in this session, not read.** Backend 495/495 with a real
+Postgres attached (no skips), firmware 232/232 under both native and ASAN/UBSAN, frontend 28
 vitest + 8 Playwright across a mobile and a desktop project, all three PlatformIO targets
 building, every lint and complexity gate green.
 
@@ -50,10 +50,23 @@ in full less the penalty; nothing comes back once somebody has checked in; atten
   insert race was survivable when a booking took no money; under charge-at-booking both members
   are debited before the collision is visible.
 
-**The ESP8266 half is built.** `lib/eventq`, `lib/roster`, `lib/court`, `lib/devapi`,
-`lib/otacore` — a scan is decided **on the box**, in microseconds, from an age-limited roster
-cache, and what it did is queued for the API. Heartbeat and provisioning are wired, so a board
-collects its own key with the claim code shown on its LCD.
+**The ESP8266 half is built and connected.** `lib/eventq`, `lib/roster`, `lib/court`,
+`lib/devapi`, `lib/otacore`, plus four device endpoints — heartbeat, provision, events and
+walk-up. A board collects its own key with the claim code shown on its LCD, uploads what it
+did, and buys court time at the pad.
+
+Two things fell out of connecting it, both constraints rather than choices:
+
+- **A PIN cannot identify a walk-up.** A PIN is checked against the handful of members with a
+  booking on that court, which is what makes four digits usable. A walk-up has no booking, so
+  the same check against the whole roll is a 10,000-space oracle over a club with far fewer
+  than 10,000 members. Only QR identifies globally, and there is a test on the rule itself.
+- **The roster is still never pushed, and that is a security trade nobody has taken.** A QR
+  token is a 60-second signed JWT and cannot be pre-cached by construction. An offline roster
+  therefore needs a *stable* identifier, and a token a box can compare against a typed PIN is
+  one a stolen box can brute-force. **Until that is decided a court box needs the network to
+  admit anybody** — the online path is what runs today. `lib/roster` is built and tested and
+  waiting on the answer. Item 10 on the go-live checklist.
 
 **Buttons are remappable from the admin panel**, and both implementations of the token grammar
 read `src/contracts/device-protocol/buttonmap/cases.json` — which caught a real drift on its
