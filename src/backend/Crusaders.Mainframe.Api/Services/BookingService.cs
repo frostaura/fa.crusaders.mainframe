@@ -239,6 +239,30 @@ public sealed class BookingService
         var userId = booking.UserId!.Value;
         var actorId = booking.ActorUserId;
 
+        // Balance is checked TWICE, and the second one is the one that counts.
+        //
+        // The caller's check is a fast refusal on the common case — a member who plainly
+        // cannot afford the court should not have a booking row built for them. But it reads
+        // an unlocked SUM, so two requests from the same member both saw 200, both found it
+        // sufficient, and both debited 200: one member, two courts, a balance of −200.
+        // Nothing in the schema refused it, because there is no stored balance to constrain
+        // and there must not be one.
+        //
+        // So the authoritative check happens here, under a lock on the payer, in the same
+        // transaction as the debit. See PayerLock for why it locks the payer rather than the
+        // court, and why the key is derived rather than hashed.
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, userId, ct);
+
+        var openingBalance = await _ledger.GetBalanceAsync(userId, ct);
+        if (openingBalance < spec.TotalCost)
+        {
+            // Detached, not left tracked: the row was built optimistically and this request
+            // is over. Leaving it attached would have the next SaveChanges on this context
+            // insert a booking nobody paid for.
+            _db.Entry(booking).State = EntityState.Detached;
+            return new BookingResult.InsufficientBalance(openingBalance, spec.TotalCost);
+        }
+
         // The debit, at booking time.
         //
         // This reverses the previous "booking is a hold" model, per the founder's decision.
@@ -306,6 +330,12 @@ public sealed class BookingService
         // Re-read after the charge: the member has just paid, and the confirmation and the
         // booking.created event must show what they have left rather than what they had.
         var balance = await _ledger.GetBalanceAsync(userId, ct);
+
+        // Published here, before the notifications. Everything below is telling people what
+        // happened; holding a lock on the member's wallet while an email is composed and an
+        // event is queued would serialise their bookings behind work that cannot fail the
+        // booking anyway.
+        await payerLock.CommitAsync(ct);
 
         var user = await _db.Users.FirstAsync(u => u.Id == userId, ct);
         // Build the message in the request scope; dispatch in the background so SMTP latency

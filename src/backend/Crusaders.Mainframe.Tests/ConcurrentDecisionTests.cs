@@ -400,4 +400,78 @@ public sealed class ConcurrentDecisionTests
         Assert.Equal(BookingStatus.NoShow, (await bookings.FirstAsync(x => x.Id == intact)).Status);
         Assert.Equal(1, await CountAsync(factory, club, intact, LedgerEntryType.NoShowPenalty));
     }
+
+    /// <summary>
+    /// A member cannot spend the same credits on two courts at once.
+    ///
+    /// <para>
+    /// Balance is the sum of immutable ledger entries and never a stored field, so there is
+    /// no row to constrain: <c>GetBalanceAsync</c> is an unlocked <c>SUM</c>. Two requests
+    /// for the same member on different courts both read the same balance, both find it
+    /// sufficient, and both debit — leaving a member who could afford one court holding two
+    /// and a balance of −32. The GiST exclusion constraint protects the slot; nothing
+    /// protected the wallet.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>This one has to be genuinely concurrent.</b> Run in sequence it passes either way,
+    /// because the second request reads the balance the first already spent — the bug only
+    /// exists in the window between the read and the write. So the two run in parallel from a
+    /// shared start signal, and the assertion is on the outcome rather than the timing:
+    /// exactly one booking, and a balance that never goes below zero.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_member_cannot_spend_the_same_credits_on_two_courts_at_once()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+
+        // Spend the member down to exactly one booking's worth.
+        using (var scope = RequestScope(factory, club))
+        {
+            await scope.ServiceProvider.GetRequiredService<LedgerService>().PostAsync(
+                new LedgerPosting(club.MemberId, LedgerEntryType.AdminAdjustment, -(200m - BookingCost), club.MemberId,
+                    Reason: "spend down to one booking"), default);
+        }
+        Assert.Equal(BookingCost, await BalanceAsync(factory, club, club.MemberId));
+
+        var courtIds = new List<Guid>();
+        using (var scope = RequestScope(factory, club))
+        {
+            courtIds = await scope.ServiceProvider.GetRequiredService<MainframeDbContext>()
+                .Courts.OrderBy(c => c.CourtNumber).Select(c => c.Id).ToListAsync();
+        }
+
+        var startsAt = TestHost.BookableSlot(72);
+        using var gate = new SemaphoreSlim(0);
+
+        async Task<BookingResult> Attempt(Guid courtId)
+        {
+            using var scope = RequestScope(factory, club);
+            var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+            await gate.WaitAsync();
+            return await bookings.CreateAsync(courtId, club.MemberId, club.MemberId, startsAt, sliceCount: 4, default);
+        }
+
+        var first = Attempt(courtIds[0]);
+        var second = Attempt(courtIds[1]);
+        gate.Release(2);
+        var results = await Task.WhenAll(first, second);
+
+        // One court, not two — and it does not matter which.
+        Assert.Equal(1, results.Count(r => r is BookingResult.Ok));
+        Assert.Equal(1, results.Count(r => r is BookingResult.InsufficientBalance));
+
+        // The invariant that actually matters, whichever way the race fell.
+        var balance = await BalanceAsync(factory, club, club.MemberId);
+        Assert.True(balance >= 0m, $"balance went negative: {balance}");
+        Assert.Equal(0m, balance);
+
+        using var check = RequestScope(factory, club);
+        var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(1, await db.Bookings.CountAsync(b => b.UserId == club.MemberId && b.StartsAt == startsAt));
+    }
 }
