@@ -115,9 +115,13 @@ void test_deadline_arms_expires_and_disarms_at_every_base(void) {
 // clock reads 0 must behave like any other — this is the sentinel bug.
 void test_deadline_at_clock_zero_is_not_treated_as_disarmed(void) {
   tb::Deadline d;
-  d.arm(0xFFFFFC18U, 1000U); // arms such that `at` lands exactly on 0
-  TEST_ASSERT_EQUAL_UINT32(0U, d.at);
+  d.arm(0xFFFFFC18U, 1000U); // arms such that the deadline lands exactly on 0
+
+  // Asserted through the contract rather than the stored field. `at` is private
+  // precisely so `now >= d.at` cannot be written, and a test that reaches around
+  // that would be asserting the representation instead of the behaviour.
   TEST_ASSERT_TRUE(d.isArmed());
+  TEST_ASSERT_EQUAL_UINT32(1000U, d.remaining(0xFFFFFC18U));
   TEST_ASSERT_FALSE(d.expired(0xFFFFFC18U));
   TEST_ASSERT_TRUE(d.expired(0U));
 }
@@ -140,10 +144,11 @@ void test_deadline_remaining_saturates_and_is_wrap_correct(void) {
 void test_deadline_rearm_extends_from_now(void) {
   tb::Deadline d;
   d.arm(1000U, 5000U);
-  TEST_ASSERT_EQUAL_UINT32(6000U, d.at);
+  TEST_ASSERT_EQUAL_UINT32(5000U, d.remaining(1000U));
+  TEST_ASSERT_TRUE(d.expired(6000U));
 
   d.arm(4000U, 5000U);
-  TEST_ASSERT_EQUAL_UINT32(9000U, d.at);
+  TEST_ASSERT_EQUAL_UINT32(5000U, d.remaining(4000U));
   TEST_ASSERT_FALSE(d.expired(8999U));
   TEST_ASSERT_TRUE(d.expired(9000U));
 }

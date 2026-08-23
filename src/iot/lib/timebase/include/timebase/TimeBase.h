@@ -49,10 +49,8 @@ inline uint32_t since(uint32_t now, uint32_t mark) {
 /// UINT32_MAX) to mean "disarmed" is the bug described at the top of this file:
 /// every possible uint32_t is a legal millis() reading, so no value is free to
 /// carry a second meaning.
-struct Deadline {
-  uint32_t at = 0;
-  bool armed = false;
-
+class Deadline {
+public:
   void arm(uint32_t now, uint32_t inMs) {
     at = now + inMs;
     armed = true;
@@ -77,6 +75,24 @@ struct Deadline {
     const int32_t delta = static_cast<int32_t>(at - now);
     return delta <= 0 ? 0U : static_cast<uint32_t>(delta);
   }
+
+private:
+  /// Deliberately private.
+  ///
+  /// These were public, and that made the canonical bug writable again:
+  ///
+  ///     if (d.isArmed() && now >= d.at)   // wrong at the wrap
+  ///
+  /// which is exactly what this type exists to prevent, and exactly what the
+  /// deleted lights-controller sketch did. The lint gate did not catch it
+  /// either — it matches identifier NAMES ending in Deadline/Expires/AtMs, and
+  /// `d.at` matches none of them. Only a test caught it, and only because
+  /// someone thought to write one at the wrap.
+  ///
+  /// Private, the unsafe comparison does not compile. Use expired() or
+  /// remaining(); both go through reached(), which uses signed difference.
+  uint32_t at = 0;
+  bool armed = false;
 };
 
 /// Accumulates a 64-bit millisecond counter from a wrapping 32-bit source, so

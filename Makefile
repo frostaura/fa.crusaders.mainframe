@@ -32,7 +32,7 @@ lint-iot:
 	@! grep -rn --include=*.h --include=*.cpp -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal)' \
 	    src/iot/lib --exclude-dir=arduino_hal --exclude-dir=posix_hal \
 	  || (echo 'pure lib/ must not include Arduino headers' && exit 1)
-	@! grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)' \
+	@! grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)|millis\(\) *(>=|<=|>|<)|(>=|<=|>|<) *millis\(\)|(>=|<=|>|<) *[A-Za-z_][A-Za-z0-9_]*\.at\b' \
 	    src/iot/lib src/iot/src --include=*.cpp --include=*.h 2>/dev/null | grep -v 'lib/timebase' \
 	  || (echo 'raw deadline comparison — use tb::reached / tb::Deadline' && exit 1)
 

@@ -429,7 +429,10 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasIndex("TenantId", "UserId", "CreatedAt");
 
-                    b.ToTable("ledger_entries", (string)null);
+                    b.ToTable("ledger_entries", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_ledger_entries_type_range", "\"Type\" BETWEEN 0 AND 7");
+                        });
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.Membership", b =>

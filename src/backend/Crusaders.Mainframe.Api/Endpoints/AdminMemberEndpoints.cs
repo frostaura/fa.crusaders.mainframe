@@ -140,12 +140,12 @@ public static class AdminMemberEndpoints
                 .Select(g2 => new
                 {
                     month = $"{g2.Key.Year:0000}-{g2.Key.Month:00}",
-                    top_ups_credits = g2.Where(e => e.Type == LedgerEntryType.TopUp).Sum(e => e.AmountCredits),
-                    top_ups_zar = g2.Where(e => e.Type == LedgerEntryType.TopUp).Sum(e => e.ZarPaid ?? 0m),
-                    spent_credits = -g2.Where(e => e.Type == LedgerEntryType.BookingCharge).Sum(e => e.AmountCredits),
-                    refunds_credits = g2.Where(e => e.Type == LedgerEntryType.CancellationRefund).Sum(e => e.AmountCredits),
-                    penalties_credits = -g2.Where(e => e.Type == LedgerEntryType.NoShowPenalty || e.Type == LedgerEntryType.LateCancellationPenalty).Sum(e => e.AmountCredits),
-                    adjustments_credits = g2.Where(e => e.Type == LedgerEntryType.AdminAdjustment).Sum(e => e.AmountCredits),
+                    top_ups_credits = g2.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    top_ups_zar = g2.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.ZarPaid ?? 0m),
+                    spent_credits = -g2.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    refunds_credits = g2.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    penalties_credits = -g2.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    adjustments_credits = g2.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountCredits),
                     net_credits = g2.Sum(e => e.AmountCredits),
                     movement_count = g2.Count(),
                 })
@@ -165,11 +165,16 @@ public static class AdminMemberEndpoints
                 },
                 totals = new
                 {
-                    top_ups_credits = entries.Where(e => e.Type == LedgerEntryType.TopUp).Sum(e => e.AmountCredits),
-                    top_ups_zar = entries.Where(e => e.Type == LedgerEntryType.TopUp).Sum(e => e.ZarPaid ?? 0m),
-                    spent_credits = -entries.Where(e => e.Type == LedgerEntryType.BookingCharge).Sum(e => e.AmountCredits),
-                    refunds_credits = entries.Where(e => e.Type == LedgerEntryType.CancellationRefund).Sum(e => e.AmountCredits),
-                    penalties_credits = -entries.Where(e => e.Type == LedgerEntryType.NoShowPenalty || e.Type == LedgerEntryType.LateCancellationPenalty).Sum(e => e.AmountCredits),
+                    top_ups_credits = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    top_ups_zar = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.ZarPaid ?? 0m),
+                    spent_credits = -entries.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    refunds_credits = entries.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountCredits),
+                    penalties_credits = -entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountCredits),
+
+                    // Present in the monthly breakdown above and absent here until now, so
+                    // the columns did not sum to the total. A pre-existing inconsistency,
+                    // not one introduced by the LightsPurchase sweep.
+                    adjustments_credits = entries.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountCredits),
                     net_credits = entries.Sum(e => e.AmountCredits),
                     movement_count = entries.Count,
                 },

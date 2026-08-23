@@ -9,6 +9,71 @@ public enum LedgerEntryType
     LateCancellationPenalty = 4,
     AdminAdjustment = 5,
     PaymentReversal = 6,
+
+    /// <summary>
+    /// Light time bought directly at the court, rather than as part of a booked slot.
+    ///
+    /// <para>
+    /// Economically distinct from <see cref="BookingCharge"/>: a member topping up a
+    /// running session is not reserving anything, and the club wants to see the two apart
+    /// in reporting. Both are money spent on court time, so both live in
+    /// <see cref="LedgerEntryTypes.Spend"/>.
+    /// </para>
+    /// </summary>
+    LightsPurchase = 7,
+}
+
+/// <summary>
+/// Report buckets, declared once.
+///
+/// <para>
+/// <b>This exists because adding an enum member used to be silently dangerous.</b> There
+/// is no database CHECK constraint on the column, no TypeScript union, and
+/// <c>LedgerService.PostAsync</c> is type-blind — so a new member moved balances correctly
+/// and appeared in <c>net_credits</c>, while being invisible in fifteen
+/// <c>Where(Type == X)</c> bucket sums across two endpoint files. Nothing failed to
+/// compile. No test failed. The numbers just quietly stopped adding up.
+/// </para>
+///
+/// <para>
+/// Every member must appear in exactly one bucket, and
+/// <c>LedgerEntryTypeCoverageTests</c> fails if one does not — so the next person to add a
+/// type is asked the question at compile-and-test time rather than discovering it in a
+/// month-end report.
+/// </para>
+/// </summary>
+public static class LedgerEntryTypes
+{
+    /// <summary>Money in: a member funding their account.</summary>
+    public static readonly LedgerEntryType[] Funding = [LedgerEntryType.TopUp];
+
+    /// <summary>Money out for court time. Both booked slots and light time bought at the court.</summary>
+    public static readonly LedgerEntryType[] Spend =
+        [LedgerEntryType.BookingCharge, LedgerEntryType.LightsPurchase];
+
+    /// <summary>Money back to the member.</summary>
+    public static readonly LedgerEntryType[] Refund = [LedgerEntryType.CancellationRefund];
+
+    /// <summary>Money kept by the club for a missed or late-cancelled booking.</summary>
+    public static readonly LedgerEntryType[] Penalty =
+        [LedgerEntryType.NoShowPenalty, LedgerEntryType.LateCancellationPenalty];
+
+    /// <summary>An admin moving credits by hand, in either direction.</summary>
+    public static readonly LedgerEntryType[] Adjustment = [LedgerEntryType.AdminAdjustment];
+
+    /// <summary>A payment clawed back after the fact.</summary>
+    public static readonly LedgerEntryType[] Reversal = [LedgerEntryType.PaymentReversal];
+
+    /// <summary>Every bucket, for the coverage test that keeps this honest.</summary>
+    public static readonly IReadOnlyList<(string Name, LedgerEntryType[] Members)> All =
+    [
+        (nameof(Funding), Funding),
+        (nameof(Spend), Spend),
+        (nameof(Refund), Refund),
+        (nameof(Penalty), Penalty),
+        (nameof(Adjustment), Adjustment),
+        (nameof(Reversal), Reversal),
+    ];
 }
 
 /// <summary>

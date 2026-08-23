@@ -130,6 +130,17 @@ public class MainframeDbContext : DbContext
             e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
             e.Property(l => l.ConversionRate).HasColumnType("numeric(8,4)");
             e.Property(l => l.Type).HasConversion<int>();
+
+            // A CHECK constraint on the enum's range. The column is a plain integer, so
+            // without this a bad write — a bug, a bad migration, a hand-run UPDATE —
+            // persists a value no code can interpret, and it lands in net_credits while
+            // matching no bucket. The database is the last place that can refuse it.
+            //
+            // Widen this when the enum grows: LedgerEntryTypeCoverageTests pins the count,
+            // so the two cannot drift apart silently.
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_ledger_entries_type_range",
+                $"\"Type\" BETWEEN 0 AND {(int)Enum.GetValues<LedgerEntryType>().Max()}"));
             e.Property(l => l.Reason).HasMaxLength(512);
             e.Property(l => l.ExternalReference).HasMaxLength(255);
             e.HasQueryFilter(l => l.TenantId == _tenant.TenantId);

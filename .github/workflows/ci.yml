@@ -193,9 +193,18 @@ jobs:
             exit 1
           fi
 
+      # Defence in depth only. The PRIMARY defence is that tb::Deadline keeps its
+      # `at` field private, so `now >= d.at` does not compile.
+      #
+      # This gate is name-based and was therefore blind to exactly the bug it
+      # exists for: a mutation reintroducing `d.isArmed() && now >= d.at` — the
+      # deleted sketch's bug, verbatim — passed it silently, because `at` matches
+      # none of the identifier patterns. Only a test at the wrap caught it. The
+      # millis() and `.at` alternatives below close that specific hole, but the
+      # lesson stands: a regex guessing at names cannot be the real guard.
       - name: Rollover gate — no raw deadline comparisons
         run: |
-          if grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)' \
+          if grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)|millis\(\) *(>=|<=|>|<)|(>=|<=|>|<) *millis\(\)|(>=|<=|>|<) *[A-Za-z_][A-Za-z0-9_]*\.at\b' \
                src/iot/lib src/iot/src --include=*.cpp --include=*.h 2>/dev/null \
                | grep -v 'lib/timebase'; then
             echo "::error::use tb::reached() or tb::Deadline — a direct comparison breaks at the 49.7-day millis() wrap"

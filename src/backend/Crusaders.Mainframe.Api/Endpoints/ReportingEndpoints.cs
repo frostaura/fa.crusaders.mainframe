@@ -35,8 +35,8 @@ public static class ReportingEndpoints
         {
             var (f, t) = ResolveRange(from, to);
             var rows = await db.LedgerEntries.Where(l => l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
-            var topUps = rows.Where(r => r.Type == LedgerEntryType.TopUp).Sum(r => r.AmountCredits);
-            var reversals = rows.Where(r => r.Type == LedgerEntryType.PaymentReversal).Sum(r => r.AmountCredits);
+            var topUps = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type)).Sum(r => r.AmountCredits);
+            var reversals = rows.Where(r => LedgerEntryTypes.Reversal.Contains(r.Type)).Sum(r => r.AmountCredits);
             return Results.Ok(new { from = f, to = t, gross_topups_zar = topUps, reversals_zar = reversals, net_zar = topUps + reversals });
         });
 
@@ -115,10 +115,10 @@ public static class ReportingEndpoints
                 return new
                 {
                     date = d.ToString("yyyy-MM-dd"),
-                    top_ups_credits = le.Where(x => x.Type == LedgerEntryType.TopUp).Sum(x => x.AmountCredits),
-                    booking_charges_credits = -le.Where(x => x.Type == LedgerEntryType.BookingCharge).Sum(x => x.AmountCredits),
-                    refunds_credits = le.Where(x => x.Type == LedgerEntryType.CancellationRefund).Sum(x => x.AmountCredits),
-                    penalties_credits = -le.Where(x => x.Type == LedgerEntryType.NoShowPenalty || x.Type == LedgerEntryType.LateCancellationPenalty).Sum(x => x.AmountCredits),
+                    top_ups_credits = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    booking_charges_credits = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    refunds_credits = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    penalties_credits = -le.Where(x => LedgerEntryTypes.Penalty.Contains(x.Type)).Sum(x => x.AmountCredits),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
                     no_shows = bk.Count(b => b.Status == BookingStatus.NoShow),
                 };
@@ -151,9 +151,9 @@ public static class ReportingEndpoints
                 return new
                 {
                     date = d.ToString("yyyy-MM-dd"),
-                    top_ups_credits = le.Where(x => x.Type == LedgerEntryType.TopUp).Sum(x => x.AmountCredits),
-                    spent_credits = -le.Where(x => x.Type == LedgerEntryType.BookingCharge).Sum(x => x.AmountCredits),
-                    refunds_credits = le.Where(x => x.Type == LedgerEntryType.CancellationRefund).Sum(x => x.AmountCredits),
+                    top_ups_credits = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    spent_credits = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    refunds_credits = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountCredits),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
                     balance_credits = running,
                 };
@@ -180,10 +180,10 @@ public static class ReportingEndpoints
 
     private static object BuildWalletReport(List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to)
     {
-        var topUps = entries.Where(e => e.Type == LedgerEntryType.TopUp).Sum(e => e.AmountCredits);
-        var spent = -entries.Where(e => e.Type == LedgerEntryType.BookingCharge).Sum(e => e.AmountCredits);
-        var refunds = entries.Where(e => e.Type == LedgerEntryType.CancellationRefund).Sum(e => e.AmountCredits);
-        var penalties = entries.Where(e => e.Type == LedgerEntryType.NoShowPenalty || e.Type == LedgerEntryType.LateCancellationPenalty).Count();
+        var topUps = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var spent = -entries.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var refunds = entries.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var penalties = entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Count();
         return new { from, to, top_ups_credits = topUps, spent_credits = spent, refunds_credits = refunds, penalty_count = penalties, count = entries.Count };
     }
 
