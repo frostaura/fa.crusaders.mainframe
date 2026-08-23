@@ -428,27 +428,16 @@ public sealed class BookingService
         var (refundAmount, penaltyAmount) =
             SettleCancellation(booking, settings, insidePenaltyWindow, waivePenalty);
 
+        // Status first, then the money.
+        //
+        // LedgerService.PostAsync saves through this same tracked context, so the first post
+        // carries the status change with it — and the concurrency token on Booking means a
+        // second cancellation of the same row matches nothing and throws rather than posting
+        // a second refund. Set the status after the posts and the refund would be durable
+        // while the status was not, which is how one cancellation pays out twice.
         booking.Status = BookingStatus.Cancelled;
         booking.CancelledAt = DateTimeOffset.UtcNow;
         booking.CancellationPenaltyWaived = waivePenalty && insidePenaltyWindow;
-
-        if (refundAmount > 0)
-            await _ledger.PostAsync(new LedgerPosting(
-                UserId: payerUserId,
-                Type: LedgerEntryType.CancellationRefund,
-                AmountCredits: refundAmount,
-                ActorUserId: actorId,
-                RelatedBookingId: booking.Id,
-                Reason: "Cancellation refund"), ct);
-
-        if (penaltyAmount > 0)
-            await _ledger.PostAsync(new LedgerPosting(
-                UserId: payerUserId,
-                Type: LedgerEntryType.LateCancellationPenalty,
-                AmountCredits: -penaltyAmount,
-                ActorUserId: actorId,
-                RelatedBookingId: booking.Id,
-                Reason: $"Late-cancellation penalty {settings.PenaltyPct}%"), ct);
 
         _db.AuditLogs.Add(new AuditLog
         {
@@ -459,7 +448,49 @@ public sealed class BookingService
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { booking_id = booking.Id, refund = refundAmount, penalty = penaltyAmount, waived = waivePenalty, was_charged = booking.ChargedAt is not null }),
         });
 
-        await _db.SaveChangesAsync(ct);
+        // Both movements and the status in ONE save.
+        //
+        // Two rows rather than a netted one, because "money is ledger-only… disputes are
+        // resolved by replaying the ledger" and a single net row cannot answer "how much
+        // penalty did I pay?". Posting them together is what keeps that from costing
+        // atomicity: PostManyAsync stages both and saves once, carrying the status change
+        // with them, so the concurrency token decides the whole cancellation at once.
+        var postings = new List<LedgerPosting>(2);
+        if (refundAmount > 0)
+        {
+            postings.Add(new LedgerPosting(
+                UserId: payerUserId,
+                Type: LedgerEntryType.CancellationRefund,
+                AmountCredits: refundAmount,
+                ActorUserId: actorId,
+                RelatedBookingId: booking.Id,
+                Reason: "Cancellation refund"));
+        }
+        if (penaltyAmount > 0)
+        {
+            postings.Add(new LedgerPosting(
+                UserId: payerUserId,
+                Type: LedgerEntryType.LateCancellationPenalty,
+                AmountCredits: -penaltyAmount,
+                ActorUserId: actorId,
+                RelatedBookingId: booking.Id,
+                Reason: $"Late-cancellation penalty {settings.PenaltyPct}%"));
+        }
+
+        try
+        {
+            await _ledger.PostManyAsync(postings, ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Somebody else decided this booking between our read and our write — the other
+            // half of a double-tap on the PWA, an admin cancelling at the same moment, or a
+            // check-in at the pad. Nothing was written, including the ledger rows, because
+            // they save through this context. NotFound is the same answer a second
+            // cancellation gets when it loses cleanly, which is what this is.
+            _logger.LogInformation("Cancellation of {BookingId} lost a concurrent write", booking.Id);
+            return new CancellationResult.NotFound();
+        }
 
         var court = await _db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
         var user = await _db.Users.FirstAsync(u => u.Id == booking.UserId, ct);
@@ -536,22 +567,6 @@ public sealed class BookingService
                     reassignTo.Value, volunteerBalance, booking.AmountChargedCredits);
             }
 
-            await _ledger.PostAsync(new LedgerPosting(
-                UserId: currentPayer,
-                Type: LedgerEntryType.CancellationRefund,
-                AmountCredits: booking.AmountChargedCredits,
-                ActorUserId: actorUserId,
-                RelatedBookingId: booking.Id,
-                Reason: $"Payer changed at court — refunded, {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}"), ct);
-
-            await _ledger.PostAsync(new LedgerPosting(
-                UserId: reassignTo.Value,
-                Type: LedgerEntryType.BookingCharge,
-                AmountCredits: -booking.AmountChargedCredits,
-                ActorUserId: actorUserId,
-                RelatedBookingId: booking.Id,
-                Reason: $"Paid at court on behalf of another member — {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}"), ct);
-
             booking.PaidByUserId = reassignTo.Value;
 
             _db.AuditLogs.Add(new AuditLog
@@ -569,7 +584,51 @@ public sealed class BookingService
                 }),
             });
 
-            await _db.SaveChangesAsync(ct);
+            // Refund, charge and the field recording who now pays, in ONE save.
+            //
+            // These were three independent commits, and the failure mode was not exotic: all
+            // three took the HTTP request's cancellation token, so a courtside client
+            // disconnecting between the first and the second was enough. That left the booker
+            // refunded, the volunteer charged nothing, and PaidByUserId still the booker — a
+            // court played for free.
+            //
+            // Worse, it was not idempotent. On a rescan with the same volunteer, the
+            // guard above compares reassignTo against a currentPayer that the failed attempt
+            // never committed, so it looked like a fresh reassignment: the booker was
+            // refunded a SECOND time. Over the two attempts they netted 200 credits from
+            // nothing against a single charge. Two concurrent scans carrying the same payer
+            // produced the same result with no failure at all, both reading state the other
+            // had not committed yet.
+            //
+            // One save closes both: the guard now reads committed state, and the concurrency
+            // token on Booking means the second of two racing scans matches nothing and
+            // throws rather than posting a second pair.
+            try
+            {
+                await _ledger.PostManyAsync(
+                [
+                    new LedgerPosting(
+                        UserId: currentPayer,
+                        Type: LedgerEntryType.CancellationRefund,
+                        AmountCredits: booking.AmountChargedCredits,
+                        ActorUserId: actorUserId,
+                        RelatedBookingId: booking.Id,
+                        Reason: $"Payer changed at court — refunded, {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}"),
+                    new LedgerPosting(
+                        UserId: reassignTo.Value,
+                        Type: LedgerEntryType.BookingCharge,
+                        AmountCredits: -booking.AmountChargedCredits,
+                        ActorUserId: actorUserId,
+                        RelatedBookingId: booking.Id,
+                        Reason: $"Paid at court on behalf of another member — {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}"),
+                ], ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                _logger.LogInformation("Payer reassignment on {BookingId} lost a concurrent write", booking.Id);
+                return new ChargeResult.NotChargeable();
+            }
+
             return new ChargeResult.Ok(booking, reassignTo.Value, booking.AmountChargedCredits);
         }
 

@@ -141,6 +141,7 @@ public class MainframeDbContext : DbContext
             e.Property(b => b.Status).HasConversion<int>();
             e.Property(b => b.BlockLabel).HasMaxLength(128);
             e.Property(b => b.CancellationReason).HasMaxLength(512);
+            e.Property(b => b.Version).IsConcurrencyToken();
             e.HasQueryFilter(b => b.TenantId == _tenant.TenantId);
         });
 
@@ -305,5 +306,40 @@ public class MainframeDbContext : DbContext
             // impossible rather than unlikely.
             e.HasIndex(r => new { r.TenantId, r.DeviceId, r.Seq }).IsUnique();
         });
+    }
+
+    /// <summary>
+    /// Bumps <see cref="Booking.Version"/> on every modified booking, then saves.
+    ///
+    /// <para>
+    /// Done here rather than at each call site because a concurrency token nobody remembers
+    /// to increment is a concurrency token that silently does nothing. There are several
+    /// places a booking's state changes — cancel, admin cancel, check-in, the no-show sweep,
+    /// the lights cue, payer reassignment — and the guarantee has to hold for all of them,
+    /// including the next one somebody writes.
+    /// </para>
+    /// </summary>
+    private void BumpBookingVersions()
+    {
+        foreach (var entry in ChangeTracker.Entries<Booking>())
+        {
+            if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.Version++;
+            }
+        }
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        BumpBookingVersions();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        BumpBookingVersions();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }
