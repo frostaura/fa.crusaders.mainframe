@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Crusaders.Mainframe.Api.Multitenancy;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Crusaders.Mainframe.Api.Services;
@@ -28,8 +29,10 @@ namespace Crusaders.Mainframe.Api.Services;
 public sealed class IdentificationResolver
 {
     private readonly IConfiguration _config;
+    private readonly ITenantContext _tenant;
 
-    public IdentificationResolver(IConfiguration config) => _config = config;
+    public IdentificationResolver(IConfiguration config, ITenantContext tenant)
+    { _config = config; _tenant = tenant; }
 
     /// <summary>Methods that can identify a member without a booking to check against.</summary>
     public static bool CanIdentifyGlobally(string? method)
@@ -87,6 +90,22 @@ public sealed class IdentificationResolver
         // The purpose claim is what stops a login JWT — same key, same issuer, much longer
         // life — being held up to a camera.
         if (principal.FindFirstValue("purpose") != "qr_ident") return null;
+
+        // The token is minted with a tenant on it; until now nothing read it back, so a
+        // member of one club could present their QR at another club's court box and be
+        // resolved to their own user id. What stopped a booking appearing was incidental
+        // rather than deliberate — the balance query is tenant-filtered, so a foreign user
+        // reads as zero credits and the walk-up ends in 402 — but a court priced at zero
+        // would have written the cross-tenant row, and the 400-vs-402 split was already a
+        // usable oracle for "is this a live member token of some other club?".
+        //
+        // Isolation is structural, so it is checked here rather than left resting on an
+        // arithmetic accident downstream.
+        if (!Guid.TryParse(principal.FindFirstValue("tenant_id"), out var tokenTenantId)
+            || tokenTenantId != _tenant.TenantId)
+        {
+            return null;
+        }
 
         var sub = principal.FindFirstValue(JwtRegisteredClaimNames.Sub)
                   ?? principal.FindFirstValue(ClaimTypes.NameIdentifier);

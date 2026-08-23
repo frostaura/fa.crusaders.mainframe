@@ -327,13 +327,74 @@ public sealed class BookingService
         return actorId == userId ? "booking.created" : "booking.created_on_behalf";
     }
 
-    public async Task<CancellationResult> CancelAsync(Guid bookingId, Guid actorId, bool waivePenalty, CancellationToken ct)
+    /// <summary>
+    /// What a cancellation is worth: the refund, and the penalty deducted from it.
+    ///
+    /// <para>
+    /// The debit has ALWAYS happened by now under charge-at-booking, so the old
+    /// <c>ChargedAt is not null</c> branch would be the path every cancellation takes — and
+    /// it refunded a pro-rata slice of wall-clock time, which for someone who never turned
+    /// up is simply the wrong question. The decision that governs this is "no refund once
+    /// the lights have been on", and the source of truth for that is attendance:
+    /// </para>
+    ///
+    /// <list type="bullet">
+    ///   <item>never checked in, outside the penalty window — full refund</item>
+    ///   <item>never checked in, inside the penalty window — refund less the penalty</item>
+    ///   <item>checked in (the lights have been on) — no refund at all</item>
+    /// </list>
+    ///
+    /// <para>
+    /// <see cref="Booking.CheckedInAt"/> rather than <c>LightsOnCuedAt</c>: the latter is a
+    /// cue marker and its own doc comment warns it is not an attendance proxy.
+    /// </para>
+    ///
+    /// <para>
+    /// Both movements come back separately and the caller posts them separately, never
+    /// netted into one. "Money is ledger-only… disputes are resolved by replaying the
+    /// ledger" — and a single net row cannot answer "how much penalty did I pay?", which is
+    /// precisely the question a disputed cancellation asks. Two rows cost one line on a
+    /// statement and keep the ledger self-explaining; presenting them together is the UI's
+    /// job.
+    /// </para>
+    /// </summary>
+    private static (decimal Refund, decimal Penalty) SettleCancellation(
+        Booking booking, TenantSettingsView settings, bool insidePenaltyWindow, bool waivePenalty)
+    {
+        var lightsHaveBeenOn = booking.CheckedInAt is not null;
+        if (lightsHaveBeenOn) return (0m, 0m);
+
+        var penalty = insidePenaltyWindow && !waivePenalty
+            ? Math.Round(booking.AmountChargedCredits * settings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero)
+            : 0m;
+
+        return (booking.AmountChargedCredits, penalty);
+    }
+
+    public async Task<CancellationResult> CancelAsync(Guid bookingId, Guid actorId, bool actorIsAdmin, bool waivePenalty, CancellationToken ct)
     {
         var booking = await _db.Bookings.FirstOrDefaultAsync(b => b.Id == bookingId, ct);
         if (booking is null || booking.Status != BookingStatus.Booked) return new CancellationResult.NotFound();
         if (booking.UserId is null) return new CancellationResult.NotFound();
 
         var isSelfCancel = actorId == booking.UserId.Value;
+
+        // Whether the actor is an admin is the ROUTE's answer, never inferred from whether
+        // they happen to own the booking.
+        //
+        // Inferring it was an in-tenant IDOR of the worst shape: the member cancel route
+        // passed the caller's own id as the actor, so "actor is not the owner" — the test
+        // used to spot an admin acting on behalf — was equally true of a stranger. Any
+        // member could read a victim's booking id straight off GET /api/v1/schedule and
+        // cancel it: the AlreadyStarted guard below is skipped for non-owners, so even a
+        // booking in progress went, the victim was charged the late-cancellation penalty,
+        // and the audit row recorded the attacker as an administrator.
+        //
+        // NotFound rather than Forbidden, deliberately: a distinct 403 would confirm to a
+        // stranger that the booking id is real and, from the penalty in the response, what
+        // it cost.
+        if (!actorIsAdmin && !isSelfCancel) return new CancellationResult.NotFound();
+
         if (isSelfCancel && booking.StartsAt <= DateTimeOffset.UtcNow)
             return new CancellationResult.AlreadyStarted();
 
@@ -341,42 +402,9 @@ public sealed class BookingService
         var minutesUntilStart = (booking.StartsAt - DateTimeOffset.UtcNow).TotalMinutes;
         var insidePenaltyWindow = minutesUntilStart < settings.PenaltyWindowMinutes;
 
-        // Cancel semantics under charge-at-booking.
-        //
-        // The debit has ALWAYS happened by now, so the old `ChargedAt is not null` branch
-        // would be the path every cancellation takes — and it refunded a pro-rata slice of
-        // wall-clock time, which for someone who never turned up is simply the wrong
-        // question. The decision that governs this is "no refund once the lights have been
-        // on", and the source of truth for that is attendance, not the clock.
-        //
-        //   never checked in, outside the penalty window  -> full refund
-        //   never checked in, inside the penalty window    -> refund less the penalty
-        //   checked in (the lights have been on)           -> no refund at all
-        //
-        // CheckedInAt rather than LightsOnCuedAt: the latter is a cue marker and its own
-        // doc comment warns it is not an attendance proxy.
-        decimal penaltyAmount = 0m;
-        decimal refundAmount = 0m;
         var payerUserId = booking.PaidByUserId ?? booking.UserId.Value;
-        var lightsHaveBeenOn = booking.CheckedInAt is not null;
-
-        if (!lightsHaveBeenOn)
-        {
-            // Both movements are posted in full, not netted into one.
-            //
-            // "Money is ledger-only... disputes are resolved by replaying the ledger" — and
-            // a single net row cannot answer "how much penalty did I pay?", which is
-            // precisely the question a disputed cancellation asks. Two rows cost one line
-            // on a statement and keep the ledger self-explaining. Presenting them together
-            // is the UI's job.
-            refundAmount = booking.AmountChargedCredits;
-
-            if (insidePenaltyWindow && !waivePenalty)
-            {
-                penaltyAmount = Math.Round(
-                    booking.AmountChargedCredits * settings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero);
-            }
-        }
+        var (refundAmount, penaltyAmount) =
+            SettleCancellation(booking, settings, insidePenaltyWindow, waivePenalty);
 
         booking.Status = BookingStatus.Cancelled;
         booking.CancelledAt = DateTimeOffset.UtcNow;
@@ -421,7 +449,7 @@ public sealed class BookingService
             Type: penaltyAmount > 0 ? "booking.late_cancellation" : "booking.cancelled",
             TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
             OccurredAt: DateTimeOffset.UtcNow,
-            ActorUserId: actorId, ActorIsAdmin: actorId != booking.UserId,
+            ActorUserId: actorId, ActorIsAdmin: actorIsAdmin,
             SubjectUserId: booking.UserId,
             Data: new()
             {

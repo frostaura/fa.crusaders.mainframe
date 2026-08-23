@@ -28,7 +28,7 @@ public static class BookingEndpoints
         g.MapPost("/{bookingId:guid}/cancel", async (Guid bookingId, HttpContext ctx, BookingService svc, CancellationToken ct) =>
         {
             var actorId = ctx.User.Id() ?? Guid.Empty;
-            var result = await svc.CancelAsync(bookingId, actorId, waivePenalty: false, ct);
+            var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: false, waivePenalty: false, ct);
             return result switch
             {
                 CancellationResult.Ok ok => Results.Ok(new { refunded_credits = ok.RefundedCredits, penalty_credits = ok.PenaltyCredits }),
@@ -60,7 +60,7 @@ public static class BookingEndpoints
         admin.MapPost("/{bookingId:guid}/cancel", async (Guid bookingId, AdminCancelRequest? req, HttpContext ctx, BookingService svc, CancellationToken ct) =>
         {
             var actorId = ctx.User.Id() ?? Guid.Empty;
-            var result = await svc.CancelAsync(bookingId, actorId, waivePenalty: req?.WaivePenalty ?? false, ct);
+            var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: true, waivePenalty: req?.WaivePenalty ?? false, ct);
             return result switch
             {
                 CancellationResult.Ok ok => Results.Ok(new { refunded_credits = ok.RefundedCredits, penalty_credits = ok.PenaltyCredits }),

@@ -37,6 +37,28 @@ public class MainframeDbContext : DbContext
     public DbSet<PendingTopup> PendingTopups => Set<PendingTopup>();
     public DbSet<WebAuthnCredential> WebAuthnCredentials => Set<WebAuthnCredential>();
 
+    /// <summary>
+    /// Builds the model, including the global query filter on every tenant-scoped entity.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the <c>users</c> filter is a plain equality and must stay one.</b></para>
+    ///
+    /// <para>
+    /// It used to read <c>u.TenantId == _tenant.TenantId || u.IsPlatformAdmin</c> — the only
+    /// disjunction in the model — which put every platform-admin row in the deployment inside
+    /// every tenant's <c>db.Users</c>. That was reachable, not theoretical: the existence
+    /// check in <c>POST /api/v1/admin/credit/{userId}/adjust</c> passed on a foreign row, so a
+    /// tenant admin could post ledger entries in their own tenant against a user who was not
+    /// in it, and those entries then counted in that tenant's revenue report.
+    /// </para>
+    ///
+    /// <para>
+    /// Nothing needed the escape: no platform admin is seeded, and the <c>/api/v1/platform/</c>
+    /// endpoints it existed for are not mapped. When they are, they belong on a
+    /// filter-bypassing repository of their own rather than on a hole punched through every
+    /// tenant's user list.
+    /// </para>
+    /// </remarks>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -66,7 +88,8 @@ public class MainframeDbContext : DbContext
             e.HasIndex(u => new { u.TenantId, u.Email }).IsUnique();
             e.Property(u => u.Email).HasMaxLength(320).IsRequired();
             e.Property(u => u.Status).HasMaxLength(32).IsRequired();
-            e.HasQueryFilter(u => u.TenantId == _tenant.TenantId || u.IsPlatformAdmin);
+            // Plain equality. See the remarks on OnModelCreating for why it must stay one.
+            e.HasQueryFilter(u => u.TenantId == _tenant.TenantId);
             e.HasOne(u => u.Membership)
              .WithOne(m => m.User!)
              .HasForeignKey<Membership>(m => m.UserId);

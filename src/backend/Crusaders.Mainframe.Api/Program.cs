@@ -162,7 +162,7 @@ builder.Services.AddScoped<IJwtIssuer, JwtIssuer>();
 builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<TenantSettingsAccessor>();
 builder.Services.AddSingleton<OtaCatalogue>();
-builder.Services.AddSingleton<IdentificationResolver>();
+builder.Services.AddScoped<IdentificationResolver>();
 builder.Services.AddScoped<DeviceRegistryService>();
 builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.ProvisioningGrants>();
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();

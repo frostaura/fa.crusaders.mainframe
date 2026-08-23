@@ -127,7 +127,7 @@ public class BookingTests
         var startsAt = DateTimeOffset.UtcNow.AddMinutes(5);
         var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
-        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, waivePenalty: false, default);
+        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
 
         // The 8 credits taken at booking come back in full, and the penalty is taken as
         // its own movement rather than netted off the refund: a single net row cannot
@@ -156,7 +156,7 @@ public class BookingTests
         var startsAt = TestHost.BookableSlot(3);
         var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
-        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, waivePenalty: false, default);
+        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
 
         // Cancelled in good time: the booking charge comes straight back and no penalty
         // is taken, so the member is where they started.
@@ -225,7 +225,7 @@ public class BookingTests
         await db.SaveChangesAsync();
 
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(
-            booked.Booking.Id, host.AdminUser.Id, waivePenalty: false, default);
+            booked.Booking.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: false, default);
 
         Assert.Equal(0m, cancelled.RefundedCredits);
         Assert.Equal(0m, cancelled.PenaltyCredits);

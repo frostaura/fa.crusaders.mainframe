@@ -6,7 +6,8 @@ namespace Crusaders.Mainframe.Api.Multitenancy;
 /// <summary>
 /// Resolves the current tenant from (in order) the JWT 'tenant_slug' claim and the Host header subdomain.
 /// If both are present they must agree; mismatch returns 403.
-/// Endpoints under /healthz, /api/v1/whoami, and /api/v1/platform/** bypass tenant resolution.
+/// Paths in <see cref="TenantlessPathPrefixes"/> bypass resolution entirely; those in
+/// <see cref="AnonymousTenantScopedPrefixes"/> take no token but still resolve a tenant.
 /// </summary>
 public sealed class TenantResolutionMiddleware
 {
@@ -21,16 +22,53 @@ public sealed class TenantResolutionMiddleware
     // matched nothing, and all three courtside endpoints returned 404 for a court that
     // exists. They had never once worked against a real tenant; the first HTTP-level test
     // of them found it immediately. The comment described an intention the code defeated.
-    private static readonly string[] AnonymousPathPrefixes =
+    /// <summary>
+    /// Paths that genuinely have no tenant, or that resolve their own.
+    ///
+    /// <para>
+    /// These skip resolution entirely, which means <see cref="ITenantContext.TenantId"/>
+    /// stays <see cref="Guid.Empty"/> for the request. That is only safe where nothing
+    /// touches a tenant-scoped table, or where the handler sets the tenant itself.
+    /// </para>
+    /// </summary>
+    private static readonly string[] TenantlessPathPrefixes =
     {
         "/healthz",
         "/api/v1/whoami",
-        "/api/v1/auth/",                  // login, register, magic-link callback
         "/api/v1/platform/",              // platform-admin endpoints scoped above tenant
         "/api/v1/credit/topup/callback",  // PayFast ITN — resolves tenant from query
-        "/api/v1/uploads/",               // anonymous registration upload
         "/uploads/",                      // static-served media
         "/api/v1/device/",                // device surface — DeviceAuthenticationHandler sets the tenant from the device row
+    };
+
+    /// <summary>
+    /// Paths that take no token but are still very much inside a tenant.
+    ///
+    /// <para>
+    /// These used to sit in the bypass list, and the consequence was not a 404 the way a
+    /// missing tenant usually shows up — it was <b>rows written outside every tenant</b>.
+    /// <c>AuthService</c> stamps <c>TenantId = _tenant.TenantId</c> on the user, the
+    /// membership and the audit row, so every registration landed on
+    /// <c>00000000-0000-0000-0000-000000000000</c>: invisible to the club's admin screen,
+    /// therefore never approvable, and invisible to the duplicate-email check, which is
+    /// filtered to the same empty tenant. That last part is the sharp end — an anonymous
+    /// caller could register an address that already belongs to a real member (the unique
+    /// index is <c>(TenantId, Email)</c>, so it does not collide), and login's
+    /// <c>IgnoreQueryFilters</c> lookup by email alone would then pick between the two rows
+    /// by whatever order the database felt like.
+    /// </para>
+    ///
+    /// <para>
+    /// So they resolve a tenant like anything else — from the JWT if one is present, then
+    /// the host subdomain, then <c>Tenancy:DefaultTenantSlug</c>. The configured default is
+    /// read <b>only</b> here: falling back to it on an authenticated path would quietly
+    /// undo the mismatch check below.
+    /// </para>
+    /// </summary>
+    private static readonly string[] AnonymousTenantScopedPrefixes =
+    {
+        "/api/v1/auth/",                  // login, register, magic-link callback
+        "/api/v1/uploads/",               // anonymous registration upload
     };
 
     public TenantResolutionMiddleware(RequestDelegate next, ILogger<TenantResolutionMiddleware> logger)
@@ -39,10 +77,10 @@ public sealed class TenantResolutionMiddleware
         _logger = logger;
     }
 
-    public async Task InvokeAsync(HttpContext context, ITenantContext tenantContext, MainframeDbContext db)
+    public async Task InvokeAsync(HttpContext context, ITenantContext tenantContext, MainframeDbContext db, IConfiguration config)
     {
         var path = context.Request.Path.Value ?? string.Empty;
-        if (AnonymousPathPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+        if (TenantlessPathPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
         {
             await _next(context);
             return;
@@ -50,8 +88,11 @@ public sealed class TenantResolutionMiddleware
 
         var jwtSlug = context.User?.FindFirst("tenant_slug")?.Value;
         var hostSlug = ExtractHostSubdomain(context.Request.Host.Host);
+        var defaultSlug = AnonymousTenantScopedPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+            ? config["Tenancy:DefaultTenantSlug"]
+            : null;
 
-        var resolvedSlug = jwtSlug ?? hostSlug;
+        var resolvedSlug = jwtSlug ?? hostSlug ?? defaultSlug;
         if (string.IsNullOrWhiteSpace(resolvedSlug))
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;

@@ -214,7 +214,7 @@ public class Phase8Tests
         var startsAt = TestHost.BookableSlot(3); // outside penalty window
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
-        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.PlayerUser.Id, waivePenalty: false, default);
+        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
         Assert.Equal(8m, cancelled.RefundedCredits);
         Assert.Equal(0m, cancelled.PenaltyCredits);
 
@@ -248,7 +248,7 @@ public class Phase8Tests
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         // Use admin actor so the "can't self-cancel after start" guard doesn't trip on edge timing.
-        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.AdminUser.Id, waivePenalty: false, default);
+        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(created.Booking.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: false, default);
         Assert.Equal(8m, cancelled.RefundedCredits);     // the booking charge, in full
         Assert.Equal(2.4m, cancelled.PenaltyCredits);    // 30% of 8 credits = 2.4
 
