@@ -631,6 +631,58 @@ void test_decoder_recovers_from_arbitrary_garbage(void) {
   TEST_ASSERT_EQUAL_UINT16(0, d.droppedResults());
 }
 
+/// A byte lost mid-frame costs that one frame and no more.
+///
+/// This is the correctness property the ESP8266's enlarged receive ring rests
+/// on. The ring is a mitigation — it holds the frames that arrive during a
+/// blocking HTTP call — but a call that overruns it still drops bytes, and the
+/// question is whether a dropped byte corrupts a cascade or just the one frame it
+/// fell out of. It is the latter: the damaged frame fails its checksum and is
+/// discarded, and the next intact frame decodes. `!EVT,AUTOOFF` — the one event
+/// the ESP must not miss — is short, so it is either whole or gone, never merged
+/// into whatever follows.
+void test_a_byte_lost_mid_frame_costs_only_that_frame(void) {
+  char damaged[kScratch];
+  char intact[kScratch];
+  static_cast<void>(v2Line("EVT,AUTOOFF,A", "\n", damaged));
+  static_cast<void>(v2Line("SCAN,MEM-0042", "\n", intact));
+
+  // Drop a byte from the middle of the first frame's body — an overflow ate it.
+  // The checksum no longer matches, so the frame is not acted on.
+  const size_t drop = 6;
+  char stream[kScratch];
+  size_t n = 0;
+  for (size_t i = 0; damaged[i] != '\0'; ++i) {
+    if (i == drop) {
+      continue;
+    }
+    stream[n++] = damaged[i];
+  }
+  for (size_t i = 0; intact[i] != '\0'; ++i) {
+    stream[n++] = intact[i];
+  }
+  stream[n] = '\0';
+
+  proto::Decoder d(Link::Uplink);
+  proto::Decoder::Result got[4];
+  const size_t results = feedAll(d, stream, got, 4);
+
+  // The intact SCAN frame is recovered — that is the point.
+  bool sawScan = false;
+  bool sawBadAutoOff = false;
+  for (size_t i = 0; i < results && i < 4; ++i) {
+    if (got[i].isFrame() && strcmp(proto::verbName(got[i].frame.verb()), "SCAN") == 0) {
+      sawScan = true;
+    }
+    // The damaged AUTOOFF must NOT surface as a valid frame.
+    if (got[i].isFrame() && got[i].frame.argCount() >= 1 && strcmp(got[i].frame.arg(0), "AUTOOFF") == 0) {
+      sawBadAutoOff = true;
+    }
+  }
+  TEST_ASSERT_TRUE_MESSAGE(sawScan, "the frame after a mid-frame byte drop was not recovered");
+  TEST_ASSERT_FALSE_MESSAGE(sawBadAutoOff, "a checksum-damaged frame was acted on");
+}
+
 void test_reset_discards_a_partial_line(void) {
   char whole[kScratch];
   const size_t n = v2Line("ON,A,1800", "\n", whole);
@@ -797,6 +849,7 @@ int main(int, char**) {
   RUN_TEST(test_crlf_is_one_terminator_not_two);
   RUN_TEST(test_overrun_is_reported_and_never_yields_a_frame);
   RUN_TEST(test_decoder_recovers_from_arbitrary_garbage);
+  RUN_TEST(test_a_byte_lost_mid_frame_costs_only_that_frame);
   RUN_TEST(test_reset_discards_a_partial_line);
   RUN_TEST(test_undrained_results_are_dropped_and_counted);
   RUN_TEST(test_legacy_direction_collision_is_preserved);

@@ -130,6 +130,25 @@ constexpr size_t kDeviceKeyBytes = 32U;
 /// "connect a board" list as though it were still up for grabs.
 constexpr char kKeyTenantSlug[] = "ten_slug";
 
+/// The receive ring for bytes coming FROM the Mega, sized to the worst-case
+/// blocking HTTP window.
+///
+/// The ESP8266 makes synchronous HTTP calls in its main loop, and its UART fills
+/// this ring by interrupt while a call is in flight. The core default is 256
+/// bytes — ~267 ms at 9600 baud — so a scan or an `!EVT,AUTOOFF` release arriving
+/// during a heartbeat or walk-up POST was dropped mid-frame. At 960 bytes/s, this
+/// holds ~4.3 s, which covers a call bounded by kHttpTimeoutMs even if the ring
+/// was not freshly drained. It is a mitigation, not a cure: only non-blocking
+/// HTTP removes the window entirely, and a call that exceeds the timeout can
+/// still overrun this. The per-frame cost of an overrun is bounded to one frame
+/// regardless, because the decoder resynchronises on the next delimiter.
+constexpr size_t kMegaRxBufferBytes = 4096U;
+
+/// Blocking HTTP is bounded so the window above stays inside the ring. Shorter
+/// than the core's 5 s default; a genuinely slow response is retried on the next
+/// heartbeat rather than allowed to starve the Mega link for five seconds.
+constexpr uint16_t kHttpTimeoutMs = 4000U;
+
 /// UDP datagrams handled per pass, so a flooded port cannot starve the Mega
 /// link. Discovery traffic is one packet every few seconds in normal service.
 constexpr uint8_t kPacketsPerPass = 4U;
@@ -708,6 +727,7 @@ uint16_t callApi(const char* method, const char* path, const char* body, char* o
   if (!http.begin(client, url)) {
     return 0U;
   }
+  http.setTimeout(kHttpTimeoutMs);
   http.addHeader("Content-Type", "application/json");
   http.addHeader(devapi::kHeaderDeviceId, signed_.deviceId);
   http.addHeader(devapi::kHeaderTimestamp, signed_.timestamp);
@@ -847,6 +867,7 @@ void tryProvision() {
   if (!http.begin(client, url)) {
     return;
   }
+  http.setTimeout(kHttpTimeoutMs);
   http.addHeader("Content-Type", "application/json");
   const int status = http.POST(body);
   if (status != 200) {
@@ -1125,7 +1146,10 @@ void pumpHeartbeat(uint32_t nowMs) {
 } // namespace
 
 void setup() {
-  gMega.begin();
+  // A large receive ring, because this loop blocks on HTTP and the UART fills the
+  // ring meanwhile — see kMegaRxBufferBytes. The Mega, which never blocks, opens
+  // its own link with the core default.
+  gMega.begin(kMegaRxBufferBytes);
   static_cast<void>(gStore.begin());
 
   WiFi.persistent(false);
@@ -1171,8 +1195,15 @@ void loop() {
   }
 
   pumpWifiLink(now);
-  tryProvision();
+
+  // Drain the Mega link BEFORE the blocking calls below, so the receive ring
+  // starts each HTTP call as empty as possible and has the whole kMegaRxBufferBytes
+  // to absorb what arrives during it. tryProvision, drainEvents and pumpHeartbeat
+  // all block on HTTP; pumping first is what keeps a scan or an auto-off release
+  // that arrived a moment ago from sharing the ring with the frames the call is
+  // about to let pile up.
   pumpMegaLink(now);
+  tryProvision();
   drainEvents();
   pumpHeartbeat(now);
   pumpOffers();

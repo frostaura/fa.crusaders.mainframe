@@ -11,7 +11,17 @@ namespace arduino_hal {
 SerialTransport::SerialTransport(HardwareSerial& port) : port_(port), open_(false) {
 }
 
-void SerialTransport::begin() {
+void SerialTransport::begin(size_t rxBufferBytes) {
+#if defined(ESP8266)
+  // Must precede begin(): the ESP8266 core allocates the ring inside begin(), so
+  // a later call would be ignored. Guarded to the ESP because AVR's HardwareSerial
+  // has no setRxBufferSize.
+  if (rxBufferBytes > 0U) {
+    port_.setRxBufferSize(rxBufferBytes);
+  }
+#else
+  (void)rxBufferBytes;
+#endif
   port_.begin(kBridgeBaud);
   open_ = true;
 }

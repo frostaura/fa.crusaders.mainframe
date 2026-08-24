@@ -37,7 +37,19 @@ public:
   explicit SerialTransport(HardwareSerial& port);
 
   /// Open the UART at the link's fixed 9600 baud.
-  void begin();
+  ///
+  /// <para>
+  /// <paramref name="rxBufferBytes"/> sizes the receive ring, and only the ESP8266
+  /// honours it (the ATmega's HardwareSerial has no such control and ignores it).
+  /// It matters on the ESP because that half makes blocking HTTP calls in its main
+  /// loop: the UART fills the ring by interrupt while a POST is in flight, and the
+  /// default 256-byte ring is ~267 ms at 9600 baud against a multi-second call, so
+  /// a scan or an auto-off release arriving mid-call was dropped. A larger ring
+  /// holds the frames that arrive during a normal call; it does not make the call
+  /// non-blocking, so a full timeout can still exceed it. Zero keeps the core
+  /// default, which is right for the Mega.
+  /// </para>
+  void begin(size_t rxBufferBytes = 0U);
 
   bool connected() override;
 
