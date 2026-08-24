@@ -260,6 +260,11 @@ jobs:
             exit 1
           fi
 
+      - name: OTA signer roundtrip
+        # The release-signing step is what a board's signature check trusts, so it
+        # is a gate. Proves a signed image verifies and a tampered one is rejected.
+        run: python3 src/iot/tools/sign_firmware.py --selftest
+
       - name: Unit tests (host)
         run: pio test -d src/iot -e native
 

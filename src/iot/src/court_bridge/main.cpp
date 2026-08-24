@@ -937,27 +937,30 @@ void applyButtonMap(const char* body, size_t len) {
   }
 }
 
-/// Takes the update the heartbeat offered, if the policy says so.
+/// The public half of the firmware signing pair, compiled in when it exists.
 ///
-/// The public half of the firmware signing pair, compiled in at build time.
+/// Enforcement is driven by the PRESENCE of the committed public-key header: if
+/// otacore/OtaPublicKey.h is there, OTA verifies every image against it; if it is
+/// not, OTA refuses every image. There is no build flag to forget — checking the
+/// key in is what turns signing on, which is exactly the state you want to be
+/// unambiguous on a mains-lighting controller.
 ///
-/// Empty by default, and an empty key means no update installs at all. Supply it
-/// with -DCRUSADERS_OTA_SIGNED=1 and -DCRUSADERS_OTA_PUBLIC_KEY='"...PEM..."'
-/// once the pair exists; generating it is go-live item 5. Ed25519 or RSA, not an
-/// HMAC with the device key — a shared secret means one compromised box can
-/// forge firmware for the whole fleet, which is the failure this is here to
-/// prevent.
-#ifndef CRUSADERS_OTA_SIGNED
+/// RSA-2048, not an HMAC with the device key: a shared secret means one
+/// compromised box can forge firmware for the whole fleet, which is the failure
+/// this is here to prevent. The private half is not in this repository and never
+/// will be — it signs releases from wherever the operator keeps it. See
+/// src/iot/tools/sign_firmware.py and the header's own comment.
+#if __has_include("otacore/OtaPublicKey.h")
+#include "otacore/OtaPublicKey.h"
+#define CRUSADERS_OTA_SIGNED 1
+constexpr const char* kOtaPublicKey = otacore::kOtaPublicKeyPem;
+#else
 #define CRUSADERS_OTA_SIGNED 0
+constexpr const char* kOtaPublicKey = "";
 #endif
-#ifndef CRUSADERS_OTA_PUBLIC_KEY
-#define CRUSADERS_OTA_PUBLIC_KEY ""
-#endif
-
-constexpr char kOtaPublicKey[] = CRUSADERS_OTA_PUBLIC_KEY;
 
 /// True only when this build carries a key it can verify against.
-constexpr bool kOtaSignatureEnforced = (CRUSADERS_OTA_SIGNED != 0) && (sizeof(kOtaPublicKey) > 1U);
+constexpr bool kOtaSignatureEnforced = (CRUSADERS_OTA_SIGNED != 0) && (kOtaPublicKey[0] != '\0');
 
 /// Every refusal reason is logged to the Mega's display rather than swallowed: a
 /// fleet quietly declining an update is exactly the silence that gets noticed a

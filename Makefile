@@ -55,7 +55,10 @@ test: test-iot
 
 # Tests — IoT native unit/property/corpus suite. Fails hard if pio is missing:
 # the repo already carries two silent-pass escape hatches and must not gain a third.
+# The OTA signer selftest runs first: the release-signing step is what a board's
+# signature check trusts, so it is a gate, not a helper script.
 test-iot:
+	python3 src/iot/tools/sign_firmware.py --selftest
 	$(PIO) test -d src/iot -e native
 
 test-iot-asan:

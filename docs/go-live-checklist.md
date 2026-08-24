@@ -105,17 +105,28 @@ long it takes to find a USB-TTL adapter.
 ## 6. Firmware signing key
 
 OTA images are signed with RSA-2048/SHA-256 and verified against a public key compiled into
-the firmware. Neither key exists yet.
+the firmware. The signing pipeline is built and gated; the club must generate its **own** key
+pair — the one committed to the repository is a working default, and a default private key is
+no secret. Until the club generates its own, anyone with the repository can sign firmware the
+boards will accept.
 
-- [ ] Generate the key pair on a machine that is not a court box.
-- [ ] The **private** key goes to the release pipeline's secret store and nowhere else.
-- [ ] The public key is compiled into the firmware.
+- [ ] Run `src/iot/tools/generate_ota_keys.sh /secure/path/ota_private_key.pem`. This writes a
+      fresh private key where you point it and regenerates the committed public-key header
+      (`src/iot/lib/otacore/include/otacore/OtaPublicKey.h`).
+- [ ] Commit the regenerated public-key header. The **private** key goes to the release
+      pipeline's secret store and nowhere else — it is gitignored, and must never be committed.
+- [ ] Set `OTA_PRIVATE_KEY` in the release job to that key's path. The build then produces
+      `firmware.signed.bin` automatically (`src/iot/tools/pio_sign_post.py`); an unsigned build
+      is fine for USB but OTA refuses it.
+- [ ] Re-flash **every** board once over USB with the new-key firmware before relying on OTA —
+      a board only trusts images signed by the key it was built with.
 - [ ] Publish `Ota:Stable:Version`, `Ota:Stable:Url` and `Ota:Stable:SizeBytes` in the
       deployment's configuration.
 
-**If skipped:** no updates can be shipped, and the boards are USB-only forever. Note the
-private key is what a stolen board must *not* yield — that is the whole reason the signature
-is asymmetric rather than an HMAC keyed with the device key.
+**If skipped (own key not generated):** OTA works, but against the repository's default key,
+so anyone with the repo can push firmware to the fleet. The private key is what a stolen board
+must *not* yield — that is the whole reason the signature is asymmetric rather than an HMAC
+keyed with the device key.
 
 ---
 
