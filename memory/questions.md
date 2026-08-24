@@ -2,7 +2,7 @@
 name: crusaders-mainframe-questions
 description: "SAFETY: do the relays switch a contactor or the lighting load directly? Also: PIN length, gate policy vocabulary, revoked-card window, biometric vendor SDK, SaaS pricing, go-live date"
 type: question
-last_verified: 2026-08-22
+last_verified: 2026-08-24
 ---
 
 # Open questions
@@ -11,8 +11,8 @@ last_verified: 2026-08-22
 - **PIN policy.** The club's existing codes are 4 digits with no uniqueness constraint, and matching is first-verify-wins with no deterministic ordering. Once a PIN authorises a debit, a collision charges the wrong member. Six digits with a blocklist, or keep four and accept it? Owner: Dean.
 - **Gate policy vocabulary.** "Per-gate and admin-configurable" settles the shape but not the predicates — active membership, time of day, member class, a booking within N minutes? Needed before gates are built. Owner: Dean.
 - **How long may a revoked card still open a gate**, given devices cache and may be offline? A policy call, not a technical one. Owner: Dean.
-- **Is the fitted LCD really the 20×4**, or was that a bench substitute? Firmware drives 16×2 either way, so this only decides whether screen real estate is being wasted. Owner: Carl.
-- **The first ESP8266 flash may need a USB-TTL adapter.** The documented DIP positions cover Serial3↔ESP and USB↔Mega but not USB↔ESP8266 with GPIO0 low. Every flash after the first is OTA. Verify on the physical board before trusting a schedule. Owner: Carl.
+- ~~**Is the fitted LCD really the 20×4**, or was that a bench substitute?~~ Resolved 2026-08-24: build photo IMG_1161 confirms a 2004A (20×4). Firmware drives it as 16×2 by decision.
+- ~~**The first ESP8266 flash may need an external serial adapter.**~~ Resolved 2026-08-24: the canonical wiring sheet documents the ESP-upload position — DIP 5, 6, 7 ON, others OFF — differing from ESP run/monitor only in DIP 7 (flash-mode). No adapter, ever.
 
 - **Which biometric vendor SDK?** The abstraction is complete; the driver decision is the blocker and no evaluation doc exists. Owner: Dean.
 - ~~**Arduino fail-safe on network loss.**~~ Resolved by design 2026-08-22: the Mega holds an independent per-relay auto-off timer, so existing sessions run to completion and nothing strands a lit court — fail-safe A, with the existing buttons serving as the physical override C. No new wiring.

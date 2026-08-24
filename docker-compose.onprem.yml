@@ -99,6 +99,12 @@ services:
       # the backend's own 5000. Keep this in step with GATEWAY_PORT.
       Discovery__AdvertisedPort: "${GATEWAY_PORT:-8088}"
 
+      # LAN webhook consumers — see go-live checklist item 12. The court box is
+      # pull-only and never a webhook destination; uncomment only for a genuine
+      # LAN consumer, on a DHCP reservation.
+      # Webhooks__AllowPrivateNetworks: "false"
+      # Webhooks__PrivateNetworkAllowList__0: "10.0.40.7/32"
+
   gateway:
     # nginx proxies to http://backend:5000. With the backend on the host that
     # name no longer resolves through docker DNS, so it is pointed at the host

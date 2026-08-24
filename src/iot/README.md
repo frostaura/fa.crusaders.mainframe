@@ -1,8 +1,8 @@
 # `src/iot` — court-control firmware
 
 Firmware for the Crusaders court box: a **WeMos Mega 2560 + onboard ESP8266**
-driving four court-light relays, a 16×2 LCD, an eight-button panel and a QR
-scanner.
+driving four court-light relays, a 20×4 LCD (2004A, driven as 16×2), an
+eight-button panel and a QR scanner.
 
 **The wiring is fixed and cannot change.** Every pin, serial port, baud rate and
 DIP position below reflects hardware that is already built and working. Firmware
@@ -70,16 +70,13 @@ From the project wiring sheet:
 | Mega ↔ ESP8266 internal serial (Serial3) | **1 ON, 2 ON** |
 | Upload to Mega over USB | 1 OFF, 2 OFF, **3 ON, 4 ON**, 5–8 OFF |
 | Run (normal operation) | **1 ON, 2 ON, 3 ON, 4 ON**, 5–8 OFF |
+| Upload to ESP8266 over USB (first flash) | 1 OFF, 2 OFF, 3 OFF, 4 OFF, **5 ON, 6 ON, 7 ON**, 8 OFF |
 | ESP run/monitor over USB | **5 ON, 6 ON**, 7 OFF, others OFF |
 
-> **Unverified, and it affects the schedule.** The sheet documents positions for
-> Serial3↔ESP and USB↔Mega, but not for USB↔ESP8266 with GPIO0 pulled low —
-> which is what a *first* ESP8266 flash needs. If the board has no such position,
-> the initial flash requires an external USB-TTL adapter on the ESP module's
-> TX/RX pads with GPIO0 grounded. Every flash after that is OTA.
->
-> **Check this on the physical board before trusting any schedule**, and record
-> the answer here.
+The sheet documents the ESP-upload position directly: it differs from ESP
+run/monitor only in **DIP 7**, which is the flash-mode line. No external serial
+adapter, no soldering and no pad access is ever needed — the first flash is a
+DIP change like every other mode.
 
 ## Layout
 
@@ -220,9 +217,10 @@ The condemned version is reported on the heartbeat and shown on the Devices scre
 
 ## Flashing
 
-**Mega** — DIP 3,4 ON, then `pio run -e court_mega -t upload`.
+**Mega** — DIP 1,2 OFF; 3,4 ON, then `pio run -e court_mega -t upload`.
 
-**ESP8266** — normally OTA. For a first flash, see the DIP caveat above.
+**ESP8266** — normally OTA. For a first flash, set the ESP-upload DIP row above
+(5, 6, 7 ON, others OFF), then restore the run positions.
 
 Copy `src/common/secrets.h.example` to `secrets.h` and fill it before flashing.
 `secrets.h` is gitignored; it was committable until this project closed that gap.

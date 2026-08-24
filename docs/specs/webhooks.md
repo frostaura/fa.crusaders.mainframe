@@ -146,13 +146,15 @@ Also:
 ### The LAN carve-out
 
 `Webhooks:PrivateNetworkAllowList` is a list of CIDRs, so
-`"192.168.68.150/32"` admits one court box rather than the entire private internet.
+`"10.0.40.7/32"` admits one LAN consumer rather than the entire private internet.
 `Webhooks:AllowPrivateNetworks` disables the guard wholesale and defaults to **on in
 Development only** — the dev loop runs against MailHog, a local API and a simulator on
 localhost.
 
-`CLAUDE.md` states this carve-out must not be closed. It exists because a court box
-lives at a fixed RFC1918 address on the club LAN and there is nowhere else for it to be.
+`CLAUDE.md` states this carve-out must not be closed. It exists for legitimate LAN
+consumers a club points a webhook at — reached by DHCP reservation, since the network is
+DHCP everywhere. The court box is **not** one of them: it is pull-only, has no inbound
+HTTP listener, and can never be a webhook destination.
 
 ### Other
 

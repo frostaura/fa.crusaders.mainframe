@@ -313,7 +313,7 @@ ul.tight li{margin:5px 0}
 
       <g font-size="11" fill="currentColor">
         <rect x="1088" y="150" width="120" height="38" rx="7" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.3"/>
-        <text x="1148" y="168" text-anchor="middle" font-weight="700">LCD 16×2</text>
+        <text x="1148" y="168" text-anchor="middle" font-weight="700">LCD 2004A</text>
         <text x="1148" y="181" text-anchor="middle" font-size="9.5" class="m" opacity=".7">I²C 0x27</text>
         <rect x="1088" y="210" width="120" height="38" rx="7" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.3"/>
         <text x="1148" y="228" text-anchor="middle" font-weight="700">Buttons ×8</text>
@@ -404,7 +404,7 @@ ul.tight li{margin:5px 0}
 <section id="courtbox">
   <div class="eyebrow">Hardware · Overview</div>
   <h2>The court box</h2>
-  <p class="lede">A WeMos Mega 2560 with its onboard ESP8266, driving four court-light relays, a 16×2-driven LCD, an eight-button panel and a QR scanner. The wiring is fixed and cannot change — every pin, serial port, baud rate and DIP position below reflects hardware already built and working. Firmware adapts to the hardware, never the reverse.</p>
+  <p class="lede">A WeMos Mega 2560 with its onboard ESP8266, driving four court-light relays, a 20×4 2004A LCD driven as 16×2, an eight-button panel and a QR scanner. The wiring is fixed and cannot change — every pin, serial port, baud rate and DIP position below reflects hardware already built and working. Firmware adapts to the hardware, never the reverse.</p>
 
   <div class="grid2">
     <div class="card pad">
@@ -621,14 +621,15 @@ ul.tight li{margin:5px 0}
       <button data-dip="1,2,3,4" data-note="<b>Run (normal operation)</b> — Mega ↔ ESP8266 on Serial3 <em>and</em> Mega reachable over USB. This is how the box sits in the cupboard." class="on">Run</button>
       <button data-dip="1,2" data-note="<b>Mega ↔ ESP8266 internal serial only</b> — the two computers talk on Serial3; USB path open.">Internal serial</button>
       <button data-dip="3,4" data-note="<b>Upload to Mega over USB</b> — 1+2 OFF isolates the ESP so avrdude owns the line. <span class='mono'>pio run -e court_mega -t upload</span>">USB → Mega</button>
+      <button data-dip="5,6,7" data-note="<b>Upload to ESP8266 over USB (first flash)</b> — DIP 7 is the flash-mode line; every flash after the first is OTA.">ESP upload</button>
       <button data-dip="5,6" data-note="<b>ESP8266 run / monitor over USB</b> — watch the bridge's console from a laptop.">ESP monitor</button>
     </div>
     <div class="dipbank" id="dipbank" aria-hidden="true"></div>
     <div class="dipnote" id="dipnote"></div>
   </div>
-  <div class="callout danger">
-    <div class="t">Unverified, and it affects the schedule</div>
-    <p>The wiring sheet documents no position for <b>USB ↔ ESP8266 with GPIO0 pulled low</b> — which is what a <em>first</em> ESP8266 flash needs. If the board has no such position, the initial flash requires an external USB-TTL adapter on the ESP module's TX/RX pads with GPIO0 grounded. Every flash after that is OTA. Check on the physical board before trusting any schedule.</p>
+  <div class="callout good">
+    <div class="t">The first ESP8266 flash is documented</div>
+    <p>The wiring sheet carries a dedicated <b>USB ↔ ESP8266 upload</b> position — <b>5, 6, 7 ON</b>, others OFF — differing from ESP run/monitor only in <b>DIP 7</b>, the flash-mode line. No external serial adapter, no soldering, no pad access is ever needed. Every flash after the first is OTA.</p>
   </div>
 </section>
 
@@ -961,7 +962,7 @@ ul.tight li{margin:5px 0}
         <p style="font-size:13px">Implemented in <span class="mono">OutboundAddressGuard</span> inside the socket's <b>ConnectCallback</b>, against the address about to be dialled — registration-time checks can't survive DNS rebinding. Refused unless allow-listed: loopback, RFC1918, link-local <span class="mono">169.254/16</span> (the cloud-metadata range an RFC1918-only guard misses), CGNAT <span class="mono">100.64/10</span>, multicast/reserved, IPv6 equivalents, and IPv4-mapped IPv6 unwrapped before classification. <b>Every</b> resolved address must pass; redirects are never followed.</p>
         <div class="callout" style="margin:12px 0 0">
           <div class="t">The LAN carve-out — do not close it</div>
-          <p><span class="mono">Webhooks:PrivateNetworkAllowList</span> is CIDR-scoped — <span class="mono">192.168.68.150/32</span> admits one court box, not the private internet. <span class="mono">AllowPrivateNetworks</span> (guard off wholesale) defaults on in Development only.</p>
+          <p><span class="mono">Webhooks:PrivateNetworkAllowList</span> is CIDR-scoped — <span class="mono">10.0.40.7/32</span> admits one LAN consumer, not the private internet. <span class="mono">AllowPrivateNetworks</span> (guard off wholesale) defaults on in Development only.</p>
         </div>
       </div>
       <div class="card pad" style="margin-top:16px">
@@ -1263,7 +1264,7 @@ ul.tight li{margin:5px 0}
         <tr><td class="num">1</td><td><b>Relay → contactor, or relay → load?</b></td><td><span class="pill risk">Safety</span></td><td>Gates go-live. If the 10 A relays switch the lighting load directly, a qualified electrician is required. No software decision touches this.</td></tr>
         <tr><td class="num">2</td><td>6 GitHub Actions secrets unset</td><td><span class="pill sw">Release</span></td><td>Docker Hub + Portainer creds — until set, the push-to-live chain has never run end-to-end.</td></tr>
         <tr><td class="num">3</td><td>Committee sign-off: charge-at-booking</td><td><span class="pill sw">Decision</span></td><td>Founder decision contradicts blueprint A.9 (charge-on-lights-on); recorded in the deltas doc, needs client sign-off before go-live.</td></tr>
-        <tr><td class="num">4</td><td>First-ESP-flash DIP position</td><td><span class="pill hw">Hardware</span></td><td>Unverified; may require USB-TTL on the ESP pads with GPIO0 grounded. Moves the schedule.</td></tr>
+        <tr><td class="num">4</td><td>First-ESP-flash DIP position</td><td><span class="pill hw">Hardware</span></td><td>Documented on the wiring sheet: 5, 6, 7 ON, others OFF — DIP 7 is the flash-mode line. No adapter or physical intervention needed; verify the physical DIP against the sheet once.</td></tr>
         <tr><td class="num">5</td><td>Firmware signing key</td><td><span class="pill hw">Hardware</span></td><td>Does not exist yet; OTA chain is designed but unkeyed.</td></tr>
         <tr><td class="num">6</td><td>Unwaivered frontend deviation</td><td><span class="pill sw">Governance</span></td><td>Hand-rolled primitives + context state vs the shadcn/Redux mandate — adopt or record a rationale.</td></tr>
         <tr><td class="num">7</td><td>PIN length · gate vocabulary · revoked-card window · biometric vendor SDK · go-live date</td><td><span class="pill sw">Open</span></td><td>Smaller open questions, tracked in project memory.</td></tr>

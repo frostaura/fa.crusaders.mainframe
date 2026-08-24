@@ -1,6 +1,9 @@
 # Go-live checklist
 
-Everything on this branch is code-complete and green. **Nothing here is code.** Each item
+The 2026-08-24 adversarial E2E review ([`reviews/e2e-adversarial-review-2026-08-24.md`](reviews/e2e-adversarial-review-2026-08-24.md))
+found the end-to-end path unbuilt; this checklist is valid only at the tip of the fix
+programme's branch/PR, and the code-complete claim returns only when the closing re-review
+passes. **Nothing here is code.** Each item
 needs physical access, a live credential, or a person's decision — and each one, left
 undone, breaks the club in a specific way that is written next to it.
 
@@ -30,18 +33,19 @@ the API. The box has no readback and cannot even detect it.
 
 ---
 
-## 2. Deploy secrets — six unset
+## 2. Deploy secrets — seven unset
 
 The release chain builds multi-arch images, pushes to Docker Hub and redeploys through
-Portainer. It has never run, because six repository secrets are unset and
+Portainer. It has never run, because seven repository secrets are unset and
 `workflow_dispatch` cannot trigger a deploy — only a real push to `main`.
 
 - [ ] `DOCKERHUB_USERNAME`
 - [ ] `DOCKERHUB_TOKEN`
 - [ ] `PORTAINER_URL`
-- [ ] `PORTAINER_API_KEY`
+- [ ] `PORTAINER_TOKEN`
 - [ ] `PORTAINER_STACK_ID`
 - [ ] `PORTAINER_ENDPOINT_ID`
+- [ ] `OTA_PRIVATE_KEY` — the PEM content of the firmware signing key (item 6)
 
 **If skipped:** the deploy job is skipped silently on every push and the club never gets a
 build. **The release chain stays unproven until these are set and one real push to `main`
@@ -87,46 +91,47 @@ indifferent to which end the debit is taken from.
 
 ## 5. The first ESP8266 flash
 
-Every flash after the first is over the air. The first one may not be.
+Every flash after the first is over the air. The first one is a DIP change like every
+other mode — the wiring sheet documents it directly:
 
-The project wiring sheet documents DIP positions for Serial3↔ESP and USB↔Mega, but **not
-for USB↔ESP8266 with GPIO0 pulled low**, which is what a first flash needs.
+> Upload to ESP8266 over USB (first flash) — 1 OFF, 2 OFF, 3 OFF, 4 OFF, **5 ON, 6 ON,
+> 7 ON**, 8 OFF
 
-- [ ] Check the physical board for such a position.
-- [ ] If there is none: an external USB-TTL adapter on the ESP module's TX/RX pads with
-      GPIO0 grounded, once per board.
-- [ ] Record the answer in `src/iot/README.md`.
+It differs from ESP run/monitor only in DIP 7, the flash-mode line. No external adapter,
+no soldering, no physical intervention.
 
-**If skipped:** the boards cannot be flashed at all and the schedule is wrong by however
-long it takes to find a USB-TTL adapter.
+- [ ] Generate the signing key first — item 6 is a hard prerequisite of this flash.
+- [ ] Set DIP 5, 6, 7 ON (all others OFF), `pio run -e court_bridge -t upload`.
+- [ ] Restore the run positions (1, 2, 3, 4 ON, 5–8 OFF).
+
+**If skipped:** the ESP cannot take its first image — but no adapter hunt and no physical
+intervention is ever needed; the fix is three DIP switches.
 
 ---
 
-## 6. Firmware signing key
+## 6. Firmware signing key — mint it before the first flash
 
 OTA images are signed with RSA-2048/SHA-256 and verified against a public key compiled into
-the firmware. The signing pipeline is built and gated; the club must generate its **own** key
-pair — the one committed to the repository is a working default, and a default private key is
-no secret. Until the club generates its own, anyone with the repository can sign firmware the
-boards will accept.
+the firmware. Only the **public** half is in the repository
+(`src/iot/lib/otacore/include/otacore/OtaPublicKey.h`); the matching private key does not
+exist anywhere. A board flashed with the current header will therefore reject **every**
+image until a key pair is minted and the header regenerated — which makes key generation a
+hard prerequisite of item 5, not a hardening step after it.
 
 - [ ] Run `src/iot/tools/generate_ota_keys.sh /secure/path/ota_private_key.pem`. This writes a
-      fresh private key where you point it and regenerates the committed public-key header
-      (`src/iot/lib/otacore/include/otacore/OtaPublicKey.h`).
-- [ ] Commit the regenerated public-key header. The **private** key goes to the release
-      pipeline's secret store and nowhere else — it is gitignored, and must never be committed.
-- [ ] Set `OTA_PRIVATE_KEY` in the release job to that key's path. The build then produces
-      `firmware.signed.bin` automatically (`src/iot/tools/pio_sign_post.py`); an unsigned build
-      is fine for USB but OTA refuses it.
-- [ ] Re-flash **every** board once over USB with the new-key firmware before relying on OTA —
-      a board only trusts images signed by the key it was built with.
+      fresh private key where you point it and regenerates the committed public-key header.
+- [ ] Commit the regenerated public-key header. The **private** key goes into the
+      `OTA_PRIVATE_KEY` repository secret (PEM content, item 2) and nowhere else — it is
+      gitignored, and must never be committed.
+- [ ] The `iot-sign` CI job then produces `firmware.signed.bin` (`src/iot/tools/pio_sign_post.py`)
+      and bakes it into the API image, served at `/firmware/` — that URL is what
+      `Ota:Stable:Url` points at.
 - [ ] Publish `Ota:Stable:Version`, `Ota:Stable:Url` and `Ota:Stable:SizeBytes` in the
       deployment's configuration.
 
-**If skipped (own key not generated):** OTA works, but against the repository's default key,
-so anyone with the repo can push firmware to the fleet. The private key is what a stolen board
-must *not* yield — that is the whole reason the signature is asymmetric rather than an HMAC
-keyed with the device key.
+**If skipped:** OTA is impossible for boards flashed with this key — every later update is a
+USB/DIP visit. The private key is what a stolen board must *not* yield — that is the whole
+reason the signature is asymmetric rather than an HMAC keyed with the device key.
 
 ---
 
@@ -143,14 +148,19 @@ than one machine.
 
 ---
 
-## 8. Power — two ESP nodes on one 5V rail
+## 8. Power — measure both rails under load
 
-Two ESP nodes share an LM2596 rail with relay coils, the LCD backlight and the scanner. An
-ESP8266 draws ~350 mA in transmit bursts and a browning-out rail produces exactly the
-intermittent faults that get blamed on software.
+The supply is a Mean Well PSU feeding two fused LM2596 bucks: a **5V rail** carrying the
+relay coils, the LCD backlight and the scanner, and a **9V rail** into the Mega's VIN,
+whose onboard regulators feed the ESP8266 half of the WeMos board. An ESP8266 draws
+~350 mA in transmit bursts and a browning-out rail produces exactly the intermittent
+faults that get blamed on software.
 
-- [ ] Measure the 5V rail under load: all four relays energised, LCD lit, WiFi transmitting.
-- [ ] If it sags below ~4.7V, split the rail or fit a larger regulator.
+- [ ] Measure the 5V rail under full load: all four relays energised, LCD lit, scanner
+      active.
+- [ ] Measure the Mega's VIN/5V during ESP WiFi transmit bursts — the ESP hangs off the
+      Mega's onboard regulators, not the LM2596 5V rail.
+- [ ] If either sags below ~4.7V at the 5V point, split the load or fit a larger regulator.
 
 **If skipped:** boards reset at random. The OTA boot guard will read three of those as a
 failed firmware and condemn a perfectly good build — the symptom will look like a bad
@@ -173,25 +183,23 @@ recorded limitation and not a blocker. Item 8 makes it rarer.
 
 ---
 
-## 10. Decide how a box identifies a member with no network
+## 10. Offline identification — the decided design, verified once
 
-`lib/roster` is built and tested, and nothing fills it — because the identifier it would
-hold has not been chosen, and that is a security trade rather than an implementation gap.
+The design is decided: each booking mints a **short access code**, scoped to that booking
+and expiring with it. The box works **online-first** — a scan hits the activation endpoint
+when the network is up — and falls back to the **heartbeat roster** of those codes when it
+is not. A permanent identity is never cached on the box, by construction.
 
-The QR token is a **60-second signed JWT**: it cannot be pre-cached, by construction. A box
-holding a stable copy of somebody's identity is a box that opens a court for them forever.
-So the offline path needs a *stable* identifier — a PIN-derived token, or a printed
-membership code — and either one is something a stolen box could work against: a token it
-can compare against a typed four-digit PIN is a token it can brute-force over the 10,000
-space for the members in its cache.
+The accepted trade: a stolen box caches only booking-scoped, expiring codes — nothing in
+its memory opens a court beyond the bookings it was already holding, and nothing it holds
+is a member's identity.
 
-- [ ] Somebody decides: accept that a court box needs the network to admit a member, or pick
-      a stable identifier and accept the offline brute-force exposure that comes with it.
+- [ ] One activation confirmed through the online path.
+- [ ] One activation confirmed from the roster fallback with the WAN deliberately down.
+- [ ] The roster confirmed to age out (`ROSTER_MAX_AGE_MS`) and refuse rather than guess.
 
-**If skipped:** the box works — the online path is what runs today, and it is the one the
-club will use — but the WiFi going down takes the courts down with it, which is exactly the
-regression the local-decision design was built to avoid. The cache is ready for whichever
-answer comes back.
+**If skipped:** the fallback path goes live unproven, and the first WiFi outage is the
+first test of the exact regression the local-decision design was built to avoid.
 
 ---
 
@@ -205,3 +213,39 @@ CI meaningful. It is not the same as having been run.
 - [ ] The Mega's auto-off timer confirmed with the ESP **unplugged** — that is the whole
       point of it being independent.
 - [ ] One no-show left to expire and the refund-less-penalty checked in the ledger.
+
+The 2026-08-24 review's §4 adds seven checks that no software answer can close — eyes and
+a multimeter on the actual box:
+
+- [ ] Power topology confirmed: which LM2596 output feeds the ESP8266 side, and that rail
+      measured during WiFi transmit bursts (item 8).
+- [ ] The physical 8-way DIP verified against the wiring sheet for all four modes — Mega
+      upload, ESP upload, ESP USB monitor, run.
+- [ ] All firmware screens confirmed legible on the physical 20×4 glass (driven as 16×2 —
+      no wrapped or orphaned half-lines).
+- [ ] A real minted membership QR fed to the physical scanner and its TX output captured:
+      terminator, whether a ~200+ character payload emits at all, where it truncates.
+- [ ] Scanner confirmed factory-set to 9600 baud on both fixed links; `monitor_speed 115200`
+      confirmed to be monitor-side only.
+- [ ] Relay board JD-VCC jumper confirmed (which 5V feeds coil vs logic), and active-LOW
+      behaviour re-confirmed end to end on all four channels.
+- [ ] Physical A/B/C/D and 15/30/45/60 buttons confirmed on pins 22/24/26/28 and
+      30/32/34/36 in that order — a swapped pair sells the wrong duration or court.
+
+---
+
+## 12. LAN webhook consumers — the private-network allow-list
+
+Production rejects RFC1918 webhook destinations unless the endpoint is on
+`Webhooks:PrivateNetworkAllowList` (a CIDR list), with `Webhooks:AllowPrivateNetworks` as
+the master switch. The court box is **not** a webhook destination — it is pull-only, with
+no inbound HTTP listener — so nothing about the box needs this. The allow-list exists for
+any *other* legitimate LAN consumer the club points a webhook at.
+
+- [ ] For each legitimate LAN consumer: give it a DHCP reservation (the network is DHCP
+      everywhere — no static addresses), and add its address as a CIDR entry, e.g.
+      `Webhooks:PrivateNetworkAllowList:0 = 10.0.40.7/32`.
+- [ ] Leave `Webhooks:AllowPrivateNetworks` false unless a consumer genuinely needs it.
+
+**If skipped:** any webhook pointed at a LAN address is refused by the SSRF guard — which
+is the correct default, and only wrong if the club actually has such a consumer.

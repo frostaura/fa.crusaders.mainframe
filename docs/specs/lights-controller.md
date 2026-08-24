@@ -18,7 +18,7 @@
 > carried into `src/iot`. Kept for the design rationale and the fail-safe
 > discussion.
 
-The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
+[Superseded design] The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
 
 ## Why this shape
 - **No new abstraction.** The mainframe already has a webhook delivery worker with signing, retries, and per-endpoint queues. The Arduino is registered as a webhook endpoint per tenant; lights events fire to it like any other consumer.

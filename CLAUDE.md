@@ -2,7 +2,7 @@
 
 ## What this is
 
-A mobile-first, multi-tenant SaaS for racquet-sport clubs that runs **court-light scheduling on a credit-based booking model**. Players top up in ZAR via **PayFast**, the top-up converts to **credits** at a member-class-specific rate, and they reserve court time slices. At the court a physical peripheral — biometric, PIN or QR — identifies the player, which turns the lights on via a relay webhook and posts the ledger debit.
+A mobile-first, multi-tenant SaaS for racquet-sport clubs that runs **court-light scheduling on a credit-based booking model**. Players top up in ZAR via **PayFast**, the top-up converts to **credits** at a member-class-specific rate, and they reserve court time slices. At the court a physical peripheral — biometric, PIN or QR — identifies the player, and the box decides locally: it switches the lights on through its own relay bank — via online activation or its cached roster — and the attendance event posts to the API.
 
 First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is structural from day one, not a later port.
 
@@ -44,7 +44,7 @@ State these honestly rather than repeating the aspiration:
 ## Conventions and non-obvious rules
 
 - **Free-tier-first external dependencies.** IANA tzdb, libphonenumber, the Gravatar public URL pattern for avatar fallback, `CultureInfo("en-ZA")`, regex + DNS MX for email validation. **SMTP and PayFast are the only paid third parties**, and both are tenant-controlled.
-- **SSRF guard with a deliberate carve-out:** production rejects RFC1918 webhook destinations *unless* the endpoint is on an internal-LAN allow-list. That carve-out exists specifically for the lights controller — do not close it.
+- **SSRF guard with a deliberate carve-out:** production rejects RFC1918 webhook destinations *unless* the endpoint is on an internal-LAN allow-list. That carve-out exists for legitimate LAN consumers a club points a webhook at — the court box itself is pull-only and never a webhook destination — do not close it.
 - **Webhook delivery:** HMAC-SHA256 in `X-Crusaders-Signature`, timestamp in `X-Crusaders-Timestamp`, per-endpoint queue, backoff 1m/5m/30m/2h/12h/24h, auto-disable after 6 failures plus an email to the owner. A missing template variable is a **config error, not a retryable failure**.
 - **Docker device passthrough:** the .NET service runs in a container but must reach a USB/serial biometric device on the host — needs `--device` passthrough or `privileged: true` with the specific device path.
 - Deploy follows the standard FrostAura pattern and this repo's own `.github/workflows/ci.yml` now carries the full chain (multi-arch → Docker Hub → `deploy-portainer`); it is the reference to keep in sync, not `fa.startup`'s. The JWT + WebAuthn auth pattern was lifted from `fa.startup` — note that repo pins `Fido2.AspNet` 4.x while this one uses the base `Fido2` 3.0.1 package, so controller code is not portable either way.

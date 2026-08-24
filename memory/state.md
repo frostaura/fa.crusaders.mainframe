@@ -15,7 +15,7 @@ installed on 2026-08-23, so nothing here re-ran them._
 
 _2026-08-22 — every claim below was executed, not read. A .NET 10 SDK and PlatformIO were installed into this environment (neither was present), a real Postgres 16 was started locally, the full suite was run, the migration was applied to a fresh database, and each quality gate was deliberately broken to confirm it fails. Verify before trusting anything dated older than ~60 days._
 
-**Backend 284/284 green** (46 need Postgres and skip cleanly without it), **firmware 85/85 green** under both native and ASAN/UBSAN with no board attached. The backend was 24/30 at the start of 2026-08-22. The working tree is clean and `main` is at `6ed1fea`; all work sits on `claude/squash-booking-system-design-dt7ja6`, pushed, with **PR #1 open as a draft** carrying a phase checklist. The delivery shape is one branch, one PR — agreed with the founder, so do not split it.
+**Backend 284/284 green** (46 need Postgres and skip cleanly without it), **firmware 85/85 green** under both native and ASAN/UBSAN with no board attached. The backend was 24/30 at the start of 2026-08-22. **PR #1 is merged** (`0176d44`); `main` also carries `eacb20a` (the review record). The fix programme runs on `claude/e2e-fix-programme`. The delivery shape is one branch, one PR — agreed with the founder, so do not split it.
 
 ### The adversarial E2E review, round 2 (2026-08-24) — the system is not end-to-end
 
@@ -127,9 +127,11 @@ Two things fell out of connecting it, both constraints rather than choices:
 - **The roster is still never pushed, and that is a security trade nobody has taken.** A QR
   token is a 60-second signed JWT and cannot be pre-cached by construction. An offline roster
   therefore needs a *stable* identifier, and a token a box can compare against a typed PIN is
-  one a stolen box can brute-force. **Until that is decided a court box needs the network to
-  admit anybody** — the online path is what runs today. `lib/roster` is built and tested and
-  waiting on the answer. Item 10 on the go-live checklist.
+  one a stolen box can brute-force. ⟨corrected 2026-08-24⟩ The review falsified the claim
+  that the online path was what ran — no online scan path existed either. The decision is now
+  taken: the fix programme implements **online-first activation plus a roster fallback of
+  per-booking, expiring access codes**, so a stolen box caches only booking-scoped codes.
+  `lib/roster` is built and tested. Item 10 on the go-live checklist.
 
 **Buttons are remappable from the admin panel**, and both implementations of the token grammar
 read `src/contracts/device-protocol/buttonmap/cases.json` — which caught a real drift on its
@@ -140,7 +142,9 @@ both recorded as **D-2**: it is not Ed25519 (BearSSL has none, and vendoring a c
 court-lighting controller is the worse trade — the asymmetric property the plan wanted is
 unchanged), and there is **no rollback**, because a 4M part with 1 MB sketch and 2 MB LittleFS
 has no second slot. What `BootGuard` buys is that a bad build is never installed twice, which is
-the failure that takes a club out.
+the failure that takes a club out. ⟨corrected 2026-08-24⟩ The signing pipeline *code* exists, but
+the private key is unlocatable and no release job signs or hosts an image — OTA is unsignable
+until the key is minted (watch item 5, review A2-2/A2-3).
 
 **Two accessibility defects** were found by tests written against existing components:
 `ConfirmButton`'s accessible name was every copy of its label concatenated, and `AdminSettings`'
@@ -218,7 +222,9 @@ Three things worth knowing before touching it:
 
 ### Still red or unbuilt
 
-The six Docker/Portainer Actions secrets remain unset, so the release chain still cannot run.
+The seven Actions secrets remain unset (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `PORTAINER_URL`,
+`PORTAINER_TOKEN`, `PORTAINER_STACK_ID`, `PORTAINER_ENDPOINT_ID`, `OTA_PRIVATE_KEY`), so the
+release chain still cannot run.
 
 ~~**`make build` fails at `build-iot`**~~ — **FIXED 2026-08-23.** Both causes are gone: the library coordinate is now `marcoschwartz/LiquidCrystal_I2C@1.1.4` (same API, same version, the owner prefix was simply wrong — johnrickman's exists only in the Arduino Library Manager index, never in the PlatformIO registry), and all three source directories are populated. `pio run -e court_mega -e court_bridge -e simulator` succeeds; `court_mega` uses 23.7% of SRAM and 6.1% of flash. A third cause surfaced once the first was fixed: the Arduino AVR builder appends `-std=gnu++11` after `build_flags`, so `[common]`'s `-std=gnu++17` had never applied and lib/'s `inline constexpr` variables could not compile for the board — `build_unflags = -std=gnu++11` fixes it. A new `iot-build` CI job now runs `pio run` for all three targets and gates the four Docker jobs, so this cannot go quiet again.
 
