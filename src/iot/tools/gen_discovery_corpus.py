@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -32,7 +33,10 @@ from typing import Any
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 CORPUS_DIR = REPO_ROOT / "src" / "contracts" / "device-protocol" / "discovery"
 OUT_PATH = REPO_ROOT / "src" / "iot" / "test" / "test_discovery" / "corpus_generated.h"
-CLANG_FORMAT = REPO_ROOT / "src" / "iot" / ".venv" / "bin" / "clang-format"
+# Prefer the per-checkout pinned binary; CI installs the same pinned version
+# onto PATH instead of into a venv, and both must format identically.
+_VENV_CLANG_FORMAT = REPO_ROOT / "src" / "iot" / ".venv" / "bin" / "clang-format"
+CLANG_FORMAT = _VENV_CLANG_FORMAT if _VENV_CLANG_FORMAT.exists() else shutil.which("clang-format")
 
 # The signed claimed ANNOUNCE is the widest packet in the protocol at 11 fields.
 MAX_FIELDS = 12
@@ -213,7 +217,7 @@ def main() -> int:
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text("\n".join(lines) + "\n")
 
-    if CLANG_FORMAT.exists():
+    if CLANG_FORMAT:
         subprocess.run([str(CLANG_FORMAT), "-i", str(OUT_PATH)], check=True)
     else:
         print("gen_discovery_corpus: clang-format not found; output written unformatted", file=sys.stderr)

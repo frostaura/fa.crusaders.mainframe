@@ -191,7 +191,11 @@ jobs:
           API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=crusaders_mainframe_test;Username=crusaders;Password=crusaders_test_pw
           # Asserts the boundary tests actually run here rather than skipping quietly.
           REQUIRE_BOUNDARY_TESTS: "true"
-        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --filter "(FullyQualifiedName~ApiBoundaryTests|FullyQualifiedName~TenantIsolationTests)"
+        # No --filter: xUnit collections are not filterable by name, and a
+        # class-name list rots the day a new Postgres-backed class is added —
+        # which is exactly how the postgres-http tier silently ran in CI never.
+        # The in-memory tests re-run here; the `backend` job stays the fast gate.
+        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
 
   # ============================================================================
   # IoT firmware — host-compiled unit tests, no hardware required.
@@ -264,6 +268,18 @@ jobs:
         # The release-signing step is what a board's signature check trusts, so it
         # is a gate. Proves a signed image verifies and a tampered one is rejected.
         run: python3 src/iot/tools/sign_firmware.py --selftest
+
+      - name: Generated corpus headers are current
+        # The serial/discovery corpora are baked into headers by generators that
+        # nothing else runs — a contributor who edits cases.json and forgets to
+        # regenerate gets a green C++ suite testing the old vectors.
+        run: |
+          python3 src/iot/tools/gen_corpus.py
+          python3 src/iot/tools/gen_discovery_corpus.py
+          git diff --exit-code -- \
+            src/iot/test/test_protocol/corpus_generated.h \
+            src/iot/test/test_discovery/corpus_generated.h \
+            || { echo "::error::generated corpus headers are stale — rerun the generators and commit"; exit 1; }
 
       - name: Unit tests (host)
         run: pio test -d src/iot -e native

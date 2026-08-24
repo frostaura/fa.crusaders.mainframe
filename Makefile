@@ -1,5 +1,5 @@
 .PHONY: install lint lint-backend lint-frontend lint-iot format-iot build build-iot \
-        test test-iot test-iot-asan test-integration test-e2e complexity hooks \
+        test test-iot test-iot-asan test-integration test-e2e complexity corpus-check \
         virt-up virt-down ci-status up down down-reset clean
 
 # IoT toolchain lives in a venv so `pio` and `lizard` are pinned per-checkout
@@ -64,9 +64,20 @@ test-iot:
 test-iot-asan:
 	$(PIO) test -d src/iot -e native_asan
 
-# Tests — integration (postgres-backed boundary tests)
+# Tests — integration. Runs the WHOLE suite with Postgres reachable: the
+# Postgres-backed classes gate themselves on API_BOUNDARY_TEST_CONNECTION_STRING,
+# and a class-name filter here is how the postgres-http tier silently ran nowhere.
 test-integration:
-	cd src/backend && dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --filter "(FullyQualifiedName~ApiBoundaryTests|FullyQualifiedName~TenantIsolationTests)"
+	cd src/backend && dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
+
+# Regenerate the corpus-baked headers and fail if the committed copies are stale.
+# Nothing else runs the generators, so an edited cases.json with a forgotten
+# regeneration leaves the C++ suite green against the old vectors.
+corpus-check:
+	$(PY) src/iot/tools/gen_corpus.py
+	$(PY) src/iot/tools/gen_discovery_corpus.py
+	git diff --exit-code -- src/iot/test/test_protocol/corpus_generated.h src/iot/test/test_discovery/corpus_generated.h \
+	  || (echo "generated corpus headers are stale — rerun the generators and commit" && exit 1)
 
 # Tests — Playwright e2e.
 #
@@ -100,11 +111,6 @@ complexity:
 	  -C 15 -L 200 -a 6 -W whitelizard.txt \
 	  -x '*/Migrations/*' -x '*/node_modules/*' -x '*/.pio/*' -x '*/.venv/*' \
 	  -x '*/bin/*' -x '*/obj/*' -x '*.test.tsx' -x '*.test.ts' -w
-
-# Opt-in git hooks. Documented, not mandatory: hooks people bypass are theatre,
-# and CI enforces the same gates anyway.
-hooks:
-	$(PY) -m pip install --quiet pre-commit && src/iot/.venv/bin/pre-commit install
 
 # CI status (latest workflow run)
 ci-status:
