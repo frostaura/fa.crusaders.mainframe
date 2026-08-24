@@ -63,9 +63,13 @@ public sealed class ConcurrentDecisionTests
         db.TenantSettings.Add(new TenantSettings
         {
             TenantId = tenant.Id,
-            // A wide advance window and no peak-hours block, so these tests are about the
-            // race rather than about the booking rules.
-            SettingsJson = """{"slice_minutes":15,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":15,"advance_booking_days":30,"timezone":"UTC"}""",
+            // A wide advance window, a high per-day cap and no peak-hours block, so these
+            // tests are about the RACE and not about the booking rules. The cap especially:
+            // two 60-minute bookings total 120 minutes, and the default 60-minute cap would
+            // otherwise refuse the second for the cap rather than the balance — and which
+            // limit a concurrent attempt hits first is exactly the timing this test must not
+            // depend on.
+            SettingsJson = """{"slice_minutes":15,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":15,"advance_booking_days":30,"member_per_day_max_minutes":600,"timezone":"UTC"}""",
         });
 
         var member = new User { TenantId = tenant.Id, Email = $"m-{slug}@test.local", PasswordHash = "x", EmailVerified = true };
@@ -462,8 +466,9 @@ public sealed class ConcurrentDecisionTests
         var results = await Task.WhenAll(first, second);
 
         // One court, not two — and it does not matter which.
-        Assert.Equal(1, results.Count(r => r is BookingResult.Ok));
-        Assert.Equal(1, results.Count(r => r is BookingResult.InsufficientBalance));
+        var shape = string.Join(", ", results.Select(r => r.GetType().Name));
+        Assert.True(results.Count(r => r is BookingResult.Ok) == 1, $"results were: {shape}");
+        Assert.True(results.Count(r => r is BookingResult.InsufficientBalance) == 1, $"results were: {shape}");
 
         // The invariant that actually matters, whichever way the race fell.
         var balance = await BalanceAsync(factory, club, club.MemberId);
