@@ -679,6 +679,55 @@ void test_the_claim_code_never_reaches_the_wire(void) {
   TEST_ASSERT_EQUAL_size_t(0, discovery::encode(Packet(), wire, sizeof(wire)));
 }
 
+/// A claimed board announces itself claimed, and the server can tell.
+///
+/// The bug this pins: a provisioned board kept broadcasting the UNCLAIMED beacon
+/// forever, because the choice of which announce to send lived in main.cpp where
+/// nothing tested it — so an already-connected board kept appearing in the
+/// admin's "connect a board" list as though it were still up for grabs. The
+/// decision is now Packet::shouldAnnounceClaimed, and this exercises it plus the
+/// full announce → sign → verify roundtrip the server does.
+void test_a_provisioned_board_announces_itself_claimed(void) {
+  const char* kNonce = "a1b2c3d4e5f60718";
+  const char* kDeviceId = "11111111-2222-3333-4444-555555555555";
+  const char* kSlug = "crusaders";
+
+  // The decision. All three inputs required; a missing slug falls back so the
+  // board stays discoverable rather than sending a claimed announce with no
+  // tenant on it.
+  TEST_ASSERT_TRUE(Packet::shouldAnnounceClaimed(true, kDeviceId, kSlug));
+  TEST_ASSERT_FALSE(Packet::shouldAnnounceClaimed(false, kDeviceId, kSlug));
+  TEST_ASSERT_FALSE(Packet::shouldAnnounceClaimed(true, "", kSlug));
+  TEST_ASSERT_FALSE(Packet::shouldAnnounceClaimed(true, kDeviceId, ""));
+
+  Identity id;
+  id.mac = "5ccf7f1a2b3c";
+  id.hardware = "esp8266";
+  id.firmware = "1.0.0";
+
+  Packet claimed = Packet::announceClaimed(id, kNonce, kDeviceId, kSlug, 99U);
+  TEST_ASSERT_FALSE(claimed.empty());
+
+  // st=claimed is what drops it out of the discoverable-as-claimable list.
+  TEST_ASSERT_EQUAL_STRING("claimed", claimed.find("st"));
+  TEST_ASSERT_EQUAL_STRING(kDeviceId, claimed.find("dev"));
+  TEST_ASSERT_EQUAL_STRING(kSlug, claimed.find("ten"));
+
+  // Signed with the device key, and it verifies against that key — which is what
+  // stops anyone on the WiFi asserting device X moved to their address.
+  TEST_ASSERT_TRUE(discovery::sign(claimed, signingKey()));
+  TEST_ASSERT_TRUE(claimed.isSigned());
+  TEST_ASSERT_TRUE(discovery::verify(claimed, signingKey()));
+
+  // The claim code and commitment do not appear on a claimed announce — that is
+  // an unclaimed-board concern only.
+  char wire[kScratch];
+  const size_t n = discovery::encode(claimed, wire, sizeof(wire));
+  TEST_ASSERT_TRUE(n > 0);
+  wire[n] = '\0';
+  TEST_ASSERT_NULL(strstr(wire, "cch="));
+}
+
 // --- codec properties ------------------------------------------------------
 
 /// Encoding is all or nothing at EVERY capacity. A truncated datagram still has
@@ -891,6 +940,7 @@ int main(int, char**) {
   RUN_TEST(test_an_offer_must_echo_this_boots_nonce);
   RUN_TEST(test_an_unclaimed_box_takes_an_unsigned_offer_but_not_any_packet);
   RUN_TEST(test_the_claim_code_never_reaches_the_wire);
+  RUN_TEST(test_a_provisioned_board_announces_itself_claimed);
   RUN_TEST(test_encode_is_all_or_nothing_at_every_capacity);
   RUN_TEST(test_oversized_packets_are_refused_rather_than_truncated);
   RUN_TEST(test_a_trailing_terminator_is_optional);

@@ -186,6 +186,17 @@ public:
   /// OFFER captured today cannot be replayed at the board's next boot.
   static Packet offer(const char* url, uint64_t unixSeconds, const char* nonceHex);
 
+  /// Whether a board in this state should announce itself CLAIMED.
+  ///
+  /// The decision is small but it is a decision, and it used to live in main.cpp
+  /// where nothing tested it — so a provisioned board went on broadcasting the
+  /// unclaimed beacon and kept appearing in the admin's "connect a board" list.
+  /// All three inputs must hold: the board is provisioned, it knows its device
+  /// id, and it knows its tenant. A missing slug falls back to unclaimed rather
+  /// than sending a claimed announce with an empty `ten` field — the smaller
+  /// wrong is "listed as connectable", not "vanishes from the admin's view".
+  static bool shouldAnnounceClaimed(bool provisioned, const char* deviceId, const char* tenantSlug);
+
   // --- accessors -----------------------------------------------------------
 
   Verb verb() const { return verb_; }

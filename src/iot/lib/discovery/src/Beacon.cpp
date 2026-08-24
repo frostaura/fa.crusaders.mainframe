@@ -207,6 +207,11 @@ Packet Packet::announceClaimed(const Identity& id, const char* nonceHex, const c
   return ok ? p : Packet();
 }
 
+bool Packet::shouldAnnounceClaimed(bool provisioned, const char* deviceId, const char* tenantSlug) {
+  return provisioned && deviceId != nullptr && deviceId[0] != '\0' && tenantSlug != nullptr &&
+         tenantSlug[0] != '\0';
+}
+
 Packet Packet::offer(const char* url, uint64_t unixSeconds, const char* nonceHex) {
   Packet p = ofVerb(Verb::Offer);
   bool ok = p.add("v", kProtocolVersion);

@@ -124,6 +124,12 @@ constexpr char kKeyDeviceKey[] = "dev_key";
 constexpr char kKeyDeviceKey2[] = "dev_key2";
 constexpr size_t kDeviceKeyBytes = 32U;
 
+/// The tenant this board belongs to, stored so a claimed board can announce
+/// itself as claimed. Without it a provisioned box kept broadcasting the
+/// unclaimed beacon every five seconds and kept appearing in the admin's
+/// "connect a board" list as though it were still up for grabs.
+constexpr char kKeyTenantSlug[] = "ten_slug";
+
 /// UDP datagrams handled per pass, so a flooded port cannot starve the Mega
 /// link. Discovery traffic is one packet every few seconds in normal service.
 constexpr uint8_t kPacketsPerPass = 4U;
@@ -270,6 +276,11 @@ char gDeviceId[devapi::kMaxDeviceIdLen + 1U] = {};
 uint8_t gDeviceKey[kDeviceKeyBytes] = {};
 bool gProvisioned = false;
 
+/// The tenant slug, present once provisioned. Empty falls the announce back to
+/// the unclaimed form — a claimed board that somehow lost its slug is better
+/// listed as connectable than not listed at all.
+char gTenantSlug[hal::kStoreMaxValueLen + 1U] = {};
+
 /// Where the API is, learned from the discovery OFFER or from provisioning.
 char gApiUrl[hal::kStoreMaxValueLen + 1U] = {};
 
@@ -321,9 +332,40 @@ discovery::Identity identity() {
   return id;
 }
 
+/// The announce this board should be sending right now.
+///
+/// A provisioned board announces CLAIMED, signed with its device key, and the
+/// server drops a claimed announce out of the "connect a board" list — which is
+/// the whole point. Before this it always announced unclaimed, so a board that
+/// was already connected kept advertising itself as available every five seconds.
+///
+/// The fallback to unclaimed is deliberate rather than defensive: a board with a
+/// device id and key but no tenant slug (provisioned before the slug was stored)
+/// still works, and being listed as connectable is a smaller wrong than
+/// vanishing from the admin's view entirely.
+discovery::Packet buildAnnounce() {
+  const bool canAnnounceClaimed =
+      discovery::Packet::shouldAnnounceClaimed(gProvisioned, gDeviceId, gTenantSlug);
+  if (!canAnnounceClaimed) {
+    return discovery::Packet::announceUnclaimed(identity(), gNonceHex, gCommitment, uptimeSeconds());
+  }
+
+  discovery::Packet packet =
+      discovery::Packet::announceClaimed(identity(), gNonceHex, gDeviceId, gTenantSlug, uptimeSeconds());
+
+  // Signed, without which anyone on the WiFi could assert this device had moved
+  // to their address — the server verifies the signature against the device key
+  // and marks an unsigned or wrongly-signed claimed announce unverified.
+  if (!discovery::sign(packet, dc::ByteSpan{gDeviceKey, kDeviceKeyBytes})) {
+    // A packet that will not sign is not sent claimed-but-unsigned; fall back to
+    // the unclaimed form, which at least keeps the board discoverable.
+    return discovery::Packet::announceUnclaimed(identity(), gNonceHex, gCommitment, uptimeSeconds());
+  }
+  return packet;
+}
+
 void broadcastAnnounce() {
-  const discovery::Packet packet =
-      discovery::Packet::announceUnclaimed(identity(), gNonceHex, gCommitment, uptimeSeconds());
+  const discovery::Packet packet = buildAnnounce();
   char buf[discovery::kMaxPacketLen];
   const size_t len = discovery::encode(packet, buf, sizeof(buf));
   if (len == 0U) {
@@ -618,6 +660,14 @@ bool loadCredentials() {
     return false;
   }
 
+  // Best-effort: a board provisioned before the slug was stored still runs, it
+  // just falls back to the unclaimed announce until it is re-provisioned. The
+  // device id and key are what make it FUNCTION; the slug only changes what it
+  // says about itself.
+  if (!loadText(kKeyTenantSlug, gTenantSlug, sizeof(gTenantSlug))) {
+    gTenantSlug[0] = '\0';
+  }
+
   devapi::Credentials credentials;
   credentials.deviceId = gDeviceId;
   credentials.key = dc::ByteSpan{gDeviceKey, kDeviceKeyBytes};
@@ -747,12 +797,24 @@ bool storeProvisioning(const char* body, size_t len) {
   }
 
   const uint8_t half = static_cast<uint8_t>(kDeviceKeyBytes);
-  const bool ok =
+  bool ok =
       gStore.put(kKeyDeviceId, reinterpret_cast<const uint8_t*>(deviceId),
                  static_cast<uint8_t>(strlen(deviceId))) == hal::StoreResult::kOk &&
       gStore.put(kKeyDeviceKey, reinterpret_cast<const uint8_t*>(keyHex), half) == hal::StoreResult::kOk &&
       gStore.put(kKeyDeviceKey2, reinterpret_cast<const uint8_t*>(keyHex + half), half) ==
           hal::StoreResult::kOk;
+
+  // The tenant slug, so the board can announce as claimed. Part of the credential
+  // set: a stored key with no slug beside it cannot say which club it belongs to,
+  // and would go on advertising itself as unclaimed.
+  char tenantSlug[hal::kStoreMaxValueLen + 1U] = {};
+  if (devapi::json::stringField(body, len, "tenant_slug", tenantSlug, sizeof(tenantSlug)) &&
+      tenantSlug[0] != '\0') {
+    ok = ok && gStore.put(kKeyTenantSlug, reinterpret_cast<const uint8_t*>(tenantSlug),
+                          static_cast<uint8_t>(strlen(tenantSlug))) == hal::StoreResult::kOk;
+  } else {
+    ok = false;
+  }
 
   // An explicitly advertised base URL wins over the one discovery offered, for a
   // club that fronts the API with a name the boards must use instead.
