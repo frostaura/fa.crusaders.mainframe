@@ -406,6 +406,53 @@ public sealed class ConcurrentDecisionTests
     }
 
     /// <summary>
+    /// A settled no-show releases the court at the schema layer too (review H5, decision
+    /// 2026-08-24).
+    ///
+    /// <para>
+    /// The GiST exclusion constraint exempts only Cancelled, and that is deliberate — a
+    /// NoShow row must keep holding its slot until the sweep has settled the money. What
+    /// frees the tail is the sweep truncating <c>EndsAt</c> to its own clock in the same
+    /// save as the settlement. This runs the whole chain against real Postgres: sweep,
+    /// truncation, then a rebooking over the freed tail that has to pass both the
+    /// application overlap predicate and <c>ck_bookings_no_overlapping_slot</c> — the
+    /// in-memory variant in <c>NoShowWorkerTests</c> cannot see the constraint at all.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task Rebooking_after_swept_no_show_passes_the_exclusion_constraint()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+
+        // Starts 30 minutes ago, ends 30 minutes from now — swept mid-slot.
+        var bookingId = await SeedDueNoShowAsync(factory, club);
+
+        await Worker(factory).TickAsync(default);
+
+        using (var check = RequestScope(factory, club))
+        {
+            var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var swept = await db.Bookings.AsNoTracking().FirstAsync(x => x.Id == bookingId);
+            Assert.Equal(BookingStatus.NoShow, swept.Status);
+            Assert.True(swept.EndsAt <= DateTimeOffset.UtcNow, "the sweep must truncate EndsAt to its own clock");
+        }
+
+        // Rebook inside the swept booking's original hour. CommitAsync surfaces a 23P01
+        // from the exclusion constraint as SlotTaken, so Ok here proves the schema admitted
+        // the row, not merely that the application predicate did.
+        using var scope = RequestScope(factory, club);
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var result = await bookings.CreateAsync(
+            club.CourtId, club.MemberId, club.MemberId,
+            DateTimeOffset.UtcNow.AddMinutes(5), sliceCount: 1, default);
+
+        Assert.IsType<BookingResult.Ok>(result);
+    }
+
+    /// <summary>
     /// A member cannot spend the same credits on two courts at once.
     ///
     /// <para>

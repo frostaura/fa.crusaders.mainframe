@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-decisions
-description: "Court-hardware programme agreed 2026-08-22: charge AT BOOKING (supersedes charge-on-lights-on), PayFast not Peach, brains on the ESP8266, walk-ups create bookings, gates parked; blueprint Rev 2 economics otherwise stand"
+description: "Court-hardware programme agreed 2026-08-22: charge AT BOOKING (supersedes charge-on-lights-on), PayFast not Peach, brains on the ESP8266, walk-ups create bookings, gates parked; blueprint Rev 2 economics otherwise stand; 2026-08-24: no-show settlement releases the court via EndsAt truncation"
 type: decision
-last_verified: 2026-08-22
+last_verified: 2026-08-24
 ---
 
 # Live decisions
@@ -42,3 +42,8 @@ Agreed across a working session with the founder. These supersede earlier entrie
 - **Gates are parked.** Hardware undecided, possibly a plain ESP per gate. The device model stays open so they slot in later without redesign.
 - **Delivery is one branch, one PR** (`claude/squash-booking-system-design-dt7ja6`, PR #1). Do not split it.
 - **Fix everything found, related or not**, with adversarial QA rounds rather than a fixed number of passes.
+
+## No-show slot release (2026-08-24, review H5)
+
+- **A settled no-show releases the court.** `NoShowWorker.SweepOneAsync` truncates the row's `EndsAt` to the sweep's clock in the same save as the status change and the money, so the row keeps only its elapsed portion. Why this shape: the GiST exclusion constraint and every overlap predicate exempt only Cancelled, and adding a NoShow exemption to each would let a fresh no-show be overwritten *before* settlement; truncation frees the tail without touching either, and the "penalty period ends → court is released" rule agreed 2026-08-22 finally has a mechanism. Before it, a swept no-show blocked its whole slot until the original EndsAt — refund paid, court dark, slot unsellable.
+- **No "un-no-show" admin endpoint.** A wrongly-swept member is compensated through the existing admin ledger adjustment surface; reconstituting the booking row (and un-truncating a slot that may since have been resold) is not worth the conflict surface it creates.

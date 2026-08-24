@@ -31,7 +31,8 @@ public class NoShowWorkerTests
         new(host.Services, host.Services.GetRequiredService<IEventBus>(), NullLogger<NoShowWorker>.Instance);
 
     private static async Task<Booking> AddBookingAsync(
-        TestHost host, MainframeDbContext db, bool charged, decimal amount = 8m)
+        TestHost host, MainframeDbContext db, bool charged, decimal amount = 8m,
+        DateTimeOffset? startsAt = null, DateTimeOffset? endsAt = null)
     {
         var booking = new Booking
         {
@@ -40,8 +41,8 @@ public class NoShowWorkerTests
             UserId = host.PlayerUser.Id,
             BookedByUserId = host.PlayerUser.Id,
             PaidByUserId = host.PlayerUser.Id,
-            StartsAt = DateTimeOffset.UtcNow.AddHours(-1),
-            EndsAt = DateTimeOffset.UtcNow.AddMinutes(-45),
+            StartsAt = startsAt ?? DateTimeOffset.UtcNow.AddHours(-1),
+            EndsAt = endsAt ?? DateTimeOffset.UtcNow.AddMinutes(-45),
             SliceMinutes = 15,
             SliceCount = 1,
             AmountChargedCredits = amount,
@@ -177,6 +178,65 @@ public class NoShowWorkerTests
         // still holds the pre-tick entity. Reload rather than read the cached copy.
         await db.Entry(booking).ReloadAsync();
         Assert.Equal(BookingStatus.NoShow, booking.Status);
+    }
+
+    /// <summary>
+    /// Settling a no-show releases the court (review H5, decision 2026-08-24). The sweep
+    /// truncates <c>EndsAt</c> to its own clock in the same save as the status change, so
+    /// the row keeps only its elapsed portion and the rest of the slot is free to resell —
+    /// without it, a member no-showing an hour keeps the club's court dark and unsellable
+    /// until the original EndsAt, refund already paid.
+    /// </summary>
+    [Fact]
+    public async Task Sweep_truncates_ends_at_to_now()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        // Past the grace window, but with most of the slot still ahead of it.
+        var start = DateTimeOffset.UtcNow.AddMinutes(-30);
+        var booking = await AddBookingAsync(host, db, charged: true,
+            startsAt: start, endsAt: start.AddMinutes(60));
+
+        var beforeTick = DateTimeOffset.UtcNow;
+        await CreateWorker(host).TickAsync(default);
+        var afterTick = DateTimeOffset.UtcNow;
+
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.NoShow, booking.Status);
+        Assert.InRange(booking.EndsAt, beforeTick, afterTick);
+        Assert.True(booking.EndsAt > booking.StartsAt, "the row must keep a non-empty elapsed portion");
+    }
+
+    /// <summary>
+    /// The point of the truncation: the freed tail is genuinely rebookable through
+    /// <c>BookingService.CreateAsync</c>'s overlap predicate, which exempts only Cancelled.
+    /// Booked as an admin actor so the member-class rules stay out of the way — the overlap
+    /// predicate is the thing under test.
+    /// </summary>
+    [Fact]
+    public async Task Booking_after_swept_no_show_succeeds()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+
+        var start = DateTimeOffset.UtcNow.AddMinutes(-30);
+        await AddBookingAsync(host, db, charged: true, startsAt: start, endsAt: start.AddMinutes(60));
+
+        await CreateWorker(host).TickAsync(default);
+
+        // Inside the swept booking's original window — only the truncation makes this free.
+        var result = await bookings.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.AdminUser.Id,
+            DateTimeOffset.UtcNow.AddMinutes(5), sliceCount: 1, default);
+
+        Assert.IsType<BookingResult.Ok>(result);
     }
 
     /// <summary>

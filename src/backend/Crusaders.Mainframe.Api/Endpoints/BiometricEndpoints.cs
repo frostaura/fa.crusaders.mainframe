@@ -107,18 +107,36 @@ public static class BiometricEndpoints
                 if (payerUserId is null) return Results.BadRequest(new { error = "payer_not_recognised" });
             }
 
-            var match = await svc.MatchAtCourtAsync(courtNumber, payerUserId, ct);
-            return Results.Ok(new
-            {
-                matched = match.Matched,
-                user_id = match.MatchedUserId,
-                confidence = match.Confidence,
-                liveness = match.LivenessScore,
-                latency_ms = match.LatencyMs,
-            });
+            var (match, activation) = await svc.MatchAtCourtAsync(courtNumber, payerUserId, ct);
+            return MatchResponse(match, activation);
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// Identified: the shared courtside contract with the read-quality extras appended. A
+    /// refusal (insufficient balance, not chargeable) surfaces as <c>activated:false</c> +
+    /// <c>reason</c> at HTTP 200, exactly as the PIN and QR endpoints answer it — this used
+    /// to discard the activation outcome and report a refusal as a plain successful match.
+    /// No match: the original shape, unchanged.
+    /// </summary>
+    private static IResult MatchResponse(BiometricMatchResult match, ActivationResult? activation)
+    {
+        if (match.Matched && match.MatchedUserId is Guid matchedUserId && activation is not null)
+        {
+            return CourtActivationResponse.For(
+                activation, matchedUserId, match.Confidence, match.LivenessScore, match.LatencyMs);
+        }
+
+        return Results.Ok(new
+        {
+            matched = false,
+            user_id = (Guid?)null,
+            confidence = match.Confidence,
+            liveness = match.LivenessScore,
+            latency_ms = match.LatencyMs,
+        });
     }
 }
 

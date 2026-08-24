@@ -507,8 +507,10 @@ public class CourtActivationTests
         Assert.NotNull(found);
         Assert.Equal(earlier, found!.StartsAt);
 
-        // And the candidate list the biometric and PIN paths read is ordered the same way,
-        // since they select from it themselves.
+        // And the candidate list the PIN path selects from is ordered the same way. The
+        // biometric path now routes through CandidatesAsync too — MatchAtCourtAsync takes
+        // the first candidate whose user matched, rather than building an unordered query
+        // of its own — and BiometricServiceTests pins that end to end.
         var candidates = await f.Activation.CandidatesAsync(court.Id, now, default);
         Assert.Equal(earlier, candidates[0].StartsAt);
     }
