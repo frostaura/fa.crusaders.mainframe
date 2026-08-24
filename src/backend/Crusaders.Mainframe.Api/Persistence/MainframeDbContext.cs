@@ -25,6 +25,8 @@ public class MainframeDbContext : DbContext
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<AuthToken> AuthTokens => Set<AuthToken>();
     public DbSet<Court> Courts => Set<Court>();
+    public DbSet<Device> Devices => Set<Device>();
+    public DbSet<DeviceEventReceipt> DeviceEventReceipts => Set<DeviceEventReceipt>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<LedgerEntry> LedgerEntries => Set<LedgerEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -35,6 +37,28 @@ public class MainframeDbContext : DbContext
     public DbSet<PendingTopup> PendingTopups => Set<PendingTopup>();
     public DbSet<WebAuthnCredential> WebAuthnCredentials => Set<WebAuthnCredential>();
 
+    /// <summary>
+    /// Builds the model, including the global query filter on every tenant-scoped entity.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the <c>users</c> filter is a plain equality and must stay one.</b></para>
+    ///
+    /// <para>
+    /// It used to read <c>u.TenantId == _tenant.TenantId || u.IsPlatformAdmin</c> — the only
+    /// disjunction in the model — which put every platform-admin row in the deployment inside
+    /// every tenant's <c>db.Users</c>. That was reachable, not theoretical: the existence
+    /// check in <c>POST /api/v1/admin/credit/{userId}/adjust</c> passed on a foreign row, so a
+    /// tenant admin could post ledger entries in their own tenant against a user who was not
+    /// in it, and those entries then counted in that tenant's revenue report.
+    /// </para>
+    ///
+    /// <para>
+    /// Nothing needed the escape: no platform admin is seeded, and the <c>/api/v1/platform/</c>
+    /// endpoints it existed for are not mapped. When they are, they belong on a
+    /// filter-bypassing repository of their own rather than on a hole punched through every
+    /// tenant's user list.
+    /// </para>
+    /// </remarks>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -64,7 +88,8 @@ public class MainframeDbContext : DbContext
             e.HasIndex(u => new { u.TenantId, u.Email }).IsUnique();
             e.Property(u => u.Email).HasMaxLength(320).IsRequired();
             e.Property(u => u.Status).HasMaxLength(32).IsRequired();
-            e.HasQueryFilter(u => u.TenantId == _tenant.TenantId || u.IsPlatformAdmin);
+            // Plain equality. See the remarks on OnModelCreating for why it must stay one.
+            e.HasQueryFilter(u => u.TenantId == _tenant.TenantId);
             e.HasOne(u => u.Membership)
              .WithOne(m => m.User!)
              .HasForeignKey<Membership>(m => m.UserId);
@@ -93,6 +118,8 @@ public class MainframeDbContext : DbContext
             e.HasQueryFilter(t => t.TenantId == _tenant.TenantId);
         });
 
+        ConfigureDevices(modelBuilder);
+
         modelBuilder.Entity<Court>(e =>
         {
             e.ToTable("courts");
@@ -100,7 +127,7 @@ public class MainframeDbContext : DbContext
             e.HasIndex(c => new { c.TenantId, c.CourtNumber }).IsUnique();
             e.Property(c => c.Name).HasMaxLength(128).IsRequired();
             e.Property(c => c.CourtType).HasConversion<int>();
-            e.Property(c => c.SlicePriceZar).HasColumnType("numeric(10,2)");
+            e.Property(c => c.SlicePriceCredits).HasColumnType("numeric(10,2)");
             e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
         });
 
@@ -110,10 +137,11 @@ public class MainframeDbContext : DbContext
             e.HasKey(b => b.Id);
             e.HasIndex(b => new { b.TenantId, b.CourtId, b.StartsAt });
             e.HasIndex(b => new { b.TenantId, b.UserId, b.StartsAt });
-            e.Property(b => b.AmountChargedZar).HasColumnType("numeric(10,2)");
+            e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
             e.Property(b => b.Status).HasConversion<int>();
             e.Property(b => b.BlockLabel).HasMaxLength(128);
             e.Property(b => b.CancellationReason).HasMaxLength(512);
+            e.Property(b => b.Version).IsConcurrencyToken();
             e.HasQueryFilter(b => b.TenantId == _tenant.TenantId);
         });
 
@@ -123,10 +151,21 @@ public class MainframeDbContext : DbContext
             e.HasKey(l => l.Id);
             e.HasIndex(l => new { l.TenantId, l.UserId, l.CreatedAt });
             e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
-            e.Property(l => l.AmountZar).HasColumnType("numeric(10,2)");
+            e.Property(l => l.AmountCredits).HasColumnType("numeric(10,2)");
             e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
             e.Property(l => l.ConversionRate).HasColumnType("numeric(8,4)");
             e.Property(l => l.Type).HasConversion<int>();
+
+            // A CHECK constraint on the enum's range. The column is a plain integer, so
+            // without this a bad write — a bug, a bad migration, a hand-run UPDATE —
+            // persists a value no code can interpret, and it lands in net_credits while
+            // matching no bucket. The database is the last place that can refuse it.
+            //
+            // Widen this when the enum grows: LedgerEntryTypeCoverageTests pins the count,
+            // so the two cannot drift apart silently.
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_ledger_entries_type_range",
+                $"\"Type\" BETWEEN 0 AND {(int)Enum.GetValues<LedgerEntryType>().Max()}"));
             e.Property(l => l.Reason).HasMaxLength(512);
             e.Property(l => l.ExternalReference).HasMaxLength(255);
             e.HasQueryFilter(l => l.TenantId == _tenant.TenantId);
@@ -208,11 +247,99 @@ public class MainframeDbContext : DbContext
             e.HasIndex(p => p.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
             e.Property(p => p.AmountZar).HasColumnType("numeric(10,2)");
             e.Property(p => p.IdempotencyKey).HasMaxLength(64).IsRequired();
-            e.Property(p => p.PeachCheckoutId).HasMaxLength(128);
+            e.Property(p => p.GatewayCheckoutId).HasMaxLength(128);
             e.Property(p => p.ExternalReference).HasMaxLength(255);
             e.Property(p => p.Status).HasConversion<int>();
             e.Property(p => p.FailureReason).HasMaxLength(512);
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
         });
+    }
+
+    /// <summary>
+    /// The devices table, lifted out of <c>OnModelCreating</c>.
+    ///
+    /// <para>
+    /// Extracted because adding the MAC index pushed that method past the 200-line
+    /// ceiling. Splitting one entity out is the honest fix — a whitelizard entry would
+    /// have frozen a method that only ever grows, since every new table lands in it.
+    /// </para>
+    /// </summary>
+    private void ConfigureDevices(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Device>(e =>
+        {
+            e.ToTable("devices");
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => new { d.TenantId, d.DeviceCode }).IsUnique();
+            e.HasIndex(d => new { d.TenantId, d.Kind });
+            e.Property(d => d.DeviceCode).HasMaxLength(64).IsRequired();
+            e.Property(d => d.Name).HasMaxLength(128).IsRequired();
+            e.Property(d => d.GateKey).HasMaxLength(64);
+            e.Property(d => d.LastIpAddress).HasMaxLength(64);
+            e.Property(d => d.RunningVersion).HasMaxLength(32);
+            e.Property(d => d.MegaVersion).HasMaxLength(32);
+            e.Property(d => d.PinnedVersion).HasMaxLength(32);
+            e.Property(d => d.Kind).HasConversion<int>();
+            e.Property(d => d.Hardware).HasConversion<int>();
+            e.Property(d => d.OtaChannel).HasConversion<int>();
+            e.HasQueryFilter(d => d.TenantId == _tenant.TenantId);
+
+            // Filtered unique: one row per physical board per tenant, while leaving
+            // hand-registered devices (which have no MAC) unconstrained. Without it the
+            // "already registered" check below is advisory — two concurrent claims for the
+            // same board would both pass it and both insert.
+            e.HasIndex(d => new { d.TenantId, d.MacAddress })
+                .IsUnique()
+                .HasFilter("\"MacAddress\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<DeviceEventReceipt>(e =>
+        {
+            e.ToTable("device_event_receipts");
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Kind).HasMaxLength(32).IsRequired();
+            e.HasQueryFilter(r => r.TenantId == _tenant.TenantId);
+
+            // The whole reason this table exists. A box retrying an upload it never saw the
+            // response to is normal traffic, and a check-then-insert loses to two retries
+            // arriving together — both find nothing and both write. This makes the duplicate
+            // impossible rather than unlikely.
+            e.HasIndex(r => new { r.TenantId, r.DeviceId, r.Seq }).IsUnique();
+        });
+    }
+
+    /// <summary>
+    /// Bumps <see cref="Booking.Version"/> on every modified booking, then saves.
+    ///
+    /// <para>
+    /// Done here rather than at each call site because a concurrency token nobody remembers
+    /// to increment is a concurrency token that silently does nothing. There are several
+    /// places a booking's state changes — cancel, admin cancel, check-in, the no-show sweep,
+    /// the lights cue, payer reassignment — and the guarantee has to hold for all of them,
+    /// including the next one somebody writes.
+    /// </para>
+    /// </summary>
+    private void BumpBookingVersions()
+    {
+        foreach (var entry in ChangeTracker.Entries<Booking>())
+        {
+            if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.Version++;
+            }
+        }
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        BumpBookingVersions();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        BumpBookingVersions();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

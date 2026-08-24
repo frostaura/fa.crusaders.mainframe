@@ -19,6 +19,7 @@ import AdminSettingsPage from "./pages/AdminSettings";
 import AdminLedgerPage from "./pages/AdminLedger";
 import ProfilePage from "./pages/Profile";
 import ReportsPage from "./pages/Reports";
+import { AdminDevicesPage } from "./pages/AdminDevices";
 
 export default function App() {
   return (
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/admin/members" element={<RequireAuth admin><AdminMembersPage /></RequireAuth>} />
             <Route path="/admin/webhooks" element={<RequireAuth admin><AdminWebhooksPage /></RequireAuth>} />
             <Route path="/admin/biometric" element={<Navigate to="/admin/members" replace />} />
+            <Route path="/admin/devices" element={<RequireAuth admin><AdminDevicesPage /></RequireAuth>} />
             <Route path="/admin/settings" element={<RequireAuth admin><AdminSettingsPage /></RequireAuth>} />
             <Route path="/admin/ledger" element={<RequireAuth admin><AdminLedgerPage /></RequireAuth>} />
             <Route path="*" element={<Navigate to="/" replace />} />

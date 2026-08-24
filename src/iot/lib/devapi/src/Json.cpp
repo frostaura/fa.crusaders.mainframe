@@ -1,0 +1,139 @@
+#include "devapi/Json.h"
+
+#include <string.h>
+
+namespace devapi {
+namespace json {
+
+namespace {
+
+/// Longest key this ever looks for, plus its quotes and a terminator.
+constexpr size_t kMaxNeedle = 40U;
+
+bool buildNeedle(const char* key, char* out, size_t outCap, size_t& len) {
+  const size_t keyLen = key == nullptr ? 0U : strlen(key);
+  if (keyLen == 0U || keyLen + 3U > outCap) {
+    return false;
+  }
+  out[0] = '"';
+  memcpy(out + 1U, key, keyLen);
+  out[keyLen + 1U] = '"';
+  out[keyLen + 2U] = '\0';
+  len = keyLen + 2U;
+  return true;
+}
+
+/// Skips the whitespace and the colon between a key and its value.
+size_t skipToValue(const char* body, size_t len, size_t at) {
+  while (at < len &&
+         (body[at] == ' ' || body[at] == '\t' || body[at] == '\n' || body[at] == '\r' || body[at] == ':')) {
+    ++at;
+  }
+  return at;
+}
+
+/// Copies the quoted string starting at the opening quote. `at` ends past the
+/// closing quote. False on overflow or an unterminated string.
+bool copyQuoted(const char* body, size_t len, size_t& at, char* out, size_t outCap) {
+  if (at >= len || body[at] != '"' || outCap == 0U) {
+    return false;
+  }
+  ++at;
+
+  size_t n = 0U;
+  while (at < len && body[at] != '"') {
+    if (n + 1U >= outCap) {
+      return false;
+    }
+    out[n] = body[at];
+    ++n;
+    ++at;
+  }
+  if (at >= len) {
+    return false; // unterminated: a truncated body, reported rather than half-read
+  }
+  ++at;
+  out[n] = '\0';
+  return true;
+}
+
+} // namespace
+
+size_t findKey(const char* body, size_t len, const char* key) {
+  char needle[kMaxNeedle];
+  size_t needleLen = 0U;
+  if (body == nullptr || !buildNeedle(key, needle, sizeof(needle), needleLen) || len < needleLen) {
+    return kNotFound;
+  }
+
+  for (size_t i = 0U; i + needleLen <= len; ++i) {
+    if (memcmp(body + i, needle, needleLen) == 0) {
+      return i + needleLen;
+    }
+  }
+  return kNotFound;
+}
+
+bool stringField(const char* body, size_t len, const char* key, char* out, size_t outCap) {
+  size_t at = findKey(body, len, key);
+  if (at == kNotFound) {
+    return false;
+  }
+  at = skipToValue(body, len, at);
+  if (!copyQuoted(body, len, at, out, outCap)) {
+    return false;
+  }
+  return out[0] != '\0';
+}
+
+bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
+  size_t at = findKey(body, len, key);
+  if (at == kNotFound) {
+    return false;
+  }
+  at = skipToValue(body, len, at);
+
+  uint32_t value = 0U;
+  size_t digits = 0U;
+  while (at < len && body[at] >= '0' && body[at] <= '9') {
+    const uint32_t digit = static_cast<uint32_t>(body[at] - '0');
+    if (value > (UINT32_MAX - digit) / 10U) {
+      return false;
+    }
+    value = value * 10U + digit;
+    ++digits;
+    ++at;
+  }
+  if (digits == 0U) {
+    return false;
+  }
+  out = value;
+  return true;
+}
+
+size_t findArray(const char* body, size_t len, const char* key) {
+  size_t at = findKey(body, len, key);
+  if (at == kNotFound) {
+    return kNotFound;
+  }
+  at = skipToValue(body, len, at);
+  if (at >= len || body[at] != '[') {
+    // Present but not an array. Reported as absent so the caller leaves whatever
+    // it already had alone, rather than replacing it with nothing.
+    return kNotFound;
+  }
+  return at + 1U;
+}
+
+bool nextStringElement(const char* body, size_t len, size_t& at, char* out, size_t outCap) {
+  while (at < len && body[at] != '"' && body[at] != ']') {
+    ++at;
+  }
+  if (at >= len || body[at] == ']') {
+    return false;
+  }
+  return copyQuoted(body, len, at, out, outCap);
+}
+
+} // namespace json
+} // namespace devapi

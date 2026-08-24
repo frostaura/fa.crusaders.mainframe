@@ -1,3 +1,13 @@
+> # ⚠️ SUPERSEDED
+>
+> The provider is **PayFast**, by founder decision on 2026-08-22. This document describes
+> PeachPayments and is kept only so the decision has something to point at.
+>
+> **Read [`payments-payfast.md`](./payments-payfast.md) instead.**
+>
+> Nothing was ever built against PeachPayments beyond an `IPaymentProvider` implementation,
+> which is why the switch cost a spec rather than a migration.
+
 # Payments — PeachPayments Integration
 
 Top-ups are processed via [PeachPayments](https://peachpayments.com/) (ZAR). PeachPayments is the payment processor the Crusaders pilot expects; the integration is per-tenant so other tenants can use their own merchant account.

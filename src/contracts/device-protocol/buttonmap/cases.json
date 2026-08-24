@@ -1,0 +1,81 @@
+{
+  "_comment": [
+    "The button-map token grammar, agreed between the admin API and the firmware.",
+    "",
+    "The API validates a proposed map (Services/ButtonMap.cs) and the firmware parses",
+    "the one it is handed on the heartbeat (lib/court/ButtonMap.cpp). Neither can see",
+    "the other's source, and the failure they would produce is silent: a token one side",
+    "accepts and the other quietly ignores leaves a button that does nothing, or worse,",
+    "one that still does what it did before an admin changed it.",
+    "",
+    "Both sides read this file. Drift turns a test red instead of turning a court off."
+  ],
+  "max_grant_minutes": 240,
+  "button_count": 8,
+  "actions": [
+    { "wire": "none",         "kind": "none",     "valid": true },
+    { "wire": "",             "kind": "none",     "valid": true, "note": "empty is none, so a blank field in an admin form is not an error" },
+    { "wire": "off",          "kind": "off",      "valid": true },
+    { "wire": "OFF",          "kind": "off",      "valid": true, "note": "case-insensitive on both sides" },
+    { "wire": "court:A",      "kind": "court",    "valid": true, "court": 0 },
+    { "wire": "court:D",      "kind": "court",    "valid": true, "court": 3 },
+    { "wire": "COURT:B",      "kind": "court",    "valid": true, "court": 1 },
+    { "wire": "court:c",      "kind": "court",    "valid": true, "court": 2 },
+    { "wire": " court:A ",    "kind": "court",    "valid": true, "court": 0, "note": "leading and trailing space tolerated; a hand-edited row has both" },
+    { "wire": "minutes:15",   "kind": "minutes",  "valid": true, "minutes": 15 },
+    { "wire": "minutes:1",    "kind": "minutes",  "valid": true, "minutes": 1 },
+    { "wire": "minutes:240",  "kind": "minutes",  "valid": true, "minutes": 240, "note": "the cap itself is legal" },
+    { "wire": "Minutes: 45",  "kind": "minutes",  "valid": true, "minutes": 45 },
+
+    { "wire": "court:E",      "valid": false, "why": "courts are A-D and there is no fifth relay" },
+    { "wire": "court:",       "valid": false, "why": "no letter at all" },
+    { "wire": "court:AB",     "valid": false, "why": "one letter, not a range" },
+    { "wire": "minutes:0",    "valid": false, "why": "a zero-minute grant is a button that lights a court and immediately releases it" },
+    { "wire": "minutes:241",  "valid": false, "why": "past the cap" },
+    { "wire": "minutes:-5",   "valid": false, "why": "no sign; a negative duration is a wrap on the device side" },
+    { "wire": "minutes:",     "valid": false, "why": "no digits" },
+    { "wire": "minutes:abc",  "valid": false, "why": "not a number" },
+    { "wire": "minutes:60x",  "valid": false, "why": "a trailing character must not be ignored — 6000x silently becoming 6000 is four days of lights" },
+    { "wire": "minutes:99999", "valid": false, "why": "overflow, refused rather than wrapped" },
+    { "wire": "explode",      "valid": false, "why": "unknown verb" },
+    { "wire": "court",        "valid": false, "why": "verb without its argument" }
+  ],
+  "maps": [
+    {
+      "name": "default",
+      "note": "what the hand-built box already did; any other default would change every box's behaviour on first deploy",
+      "wire": ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
+      "valid": true
+    },
+    {
+      "name": "swapped-courts",
+      "note": "the case the whole feature exists for: an admin reorders courts without touching a wire",
+      "wire": ["court:D", "court:C", "court:B", "court:A", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
+      "valid": true
+    },
+    {
+      "name": "two-court-club",
+      "note": "unused buttons are legal, and the same action may appear twice",
+      "wire": ["court:A", "court:B", "minutes:30", "minutes:60", "off", "none", "none", "none"],
+      "valid": true
+    },
+    {
+      "name": "no-court-button",
+      "wire": ["minutes:15", "minutes:30", "minutes:45", "minutes:60", "off", "none", "none", "none"],
+      "valid": false,
+      "why": "nothing can start a walk-up; almost certainly a half-finished edit"
+    },
+    {
+      "name": "no-duration-button",
+      "wire": ["court:A", "court:B", "court:C", "court:D", "off", "none", "none", "none"],
+      "valid": false,
+      "why": "nothing can finish a walk-up"
+    },
+    {
+      "name": "too-few-entries",
+      "wire": ["court:A", "court:B", "court:C", "court:D"],
+      "valid": false,
+      "why": "eight buttons are soldered to the board; four entries leaves half the panel undefined"
+    }
+  ]
+}

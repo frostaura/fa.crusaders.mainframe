@@ -3,6 +3,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis, Line, LineChart,
 } from "recharts";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
+import { formatCredits } from "../lib/utils";
 
 const ACCENT = "#0369A1";        // accent-strong
 const ACCENT_SOFT = "#E0F2FE";    // accent-soft
@@ -19,7 +20,10 @@ const tooltipStyle = {
   labelStyle: { color: TEXT_MUTED, fontWeight: 500, marginBottom: 2 },
 } as const;
 
-const fmtZar = (v: number | string) => `R${Number(v).toFixed(0)}`;
+// Credits, not rand. These charts plot ledger movements and court spend, both of
+// which are credit-denominated — a rand sign here overstates every bar by the
+// conversion rate.
+const fmtCredits = (v: number | string) => formatCredits(Number(v));
 const fmtDate = (d: string) => {
   const dt = new Date(d + "T00:00:00Z");
   return dt.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
@@ -38,9 +42,9 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Area type="monotone" dataKey="top_ups_zar" name="Top-ups" stroke={ACCENT} fill="url(#revFill)" strokeWidth={2} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
+          <Area type="monotone" dataKey="top_ups_credits" name="Top-ups" stroke={ACCENT} fill="url(#revFill)" strokeWidth={2} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -54,12 +58,12 @@ export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Bar dataKey="top_ups_zar" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="booking_charges_zar" name="Bookings" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="penalties_zar" name="Penalties" stackId="b" fill={WARNING} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="booking_charges_credits" name="Bookings" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="penalties_credits" name="Penalties" stackId="b" fill={WARNING} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -84,16 +88,16 @@ export function BookingsLineChart({ data }: { data: DailyAdminPoint[] }) {
   );
 }
 
-export function CourtsRevenueBarChart({ data }: { data: { court_name: string; revenue_zar: number; bookings: number }[] }) {
+export function CourtsRevenueBarChart({ data }: { data: { court_name: string; revenue_credits: number; bookings: number }[] }) {
   return (
     <div style={{ height: CHART_HEIGHT }}>
       <ResponsiveContainer>
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="court_name" fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} />
-          <Bar dataKey="revenue_zar" name="Revenue" fill={ACCENT} radius={[6, 6, 0, 0]} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} />
+          <Bar dataKey="revenue_credits" name="Revenue" fill={ACCENT} radius={[6, 6, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -134,9 +138,9 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Area type="monotone" dataKey="balance_zar" name="Balance" stroke={ACCENT} fill="url(#balFill)" strokeWidth={2} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
+          <Area type="monotone" dataKey="balance_credits" name="Balance" stroke={ACCENT} fill="url(#balFill)" strokeWidth={2} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -150,12 +154,12 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtZar} fontSize={11} stroke={TEXT_MUTED} width={48} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtZar(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Bar dataKey="top_ups_zar" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="refunds_zar" name="Refunds" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="spent_zar" name="Spent" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="refunds_credits" name="Refunds" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="spent_credits" name="Spent" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

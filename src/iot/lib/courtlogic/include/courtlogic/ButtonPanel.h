@@ -1,0 +1,87 @@
+// Crusaders Mainframe — debouncing the eight-button panel.
+//
+// WHY THE RULE IS HERE AND NOT IN THE PORT
+// ----------------------------------------
+// hal::IButtonPort reports the raw, bouncing pin level on purpose (see
+// hal/Button.h). Mechanical contacts chatter for a few milliseconds on every
+// press and every release, and turning that chatter into exactly one press
+// event is the only interesting thing anyone does with these pins. Putting it
+// in the driver would put it below the host test boundary, where a bouncing
+// edge cannot be fed to it.
+//
+// The cost of getting it wrong is not a stray keystroke. One extra press is one
+// extra `!BTN` frame, which is one extra court-hour billed to a member.
+//
+// WHY "STABLE FOR 80 ms" AND NOT A SAMPLE COUNTER
+// -----------------------------------------------
+// A counter ("four agreeing samples") is a statement about the loop rate, not
+// about the switch. This loop's rate is not fixed: a pass that services a
+// 40-byte frame at 9600 baud is far longer than one that does not, and an OTA
+// on the ESP changes it again. So the window is measured in milliseconds
+// against hal::IClock, through tb::Deadline — which also means the 49.7-day
+// millis() wrap cannot turn a press into a stuck button.
+//
+// WHY A BITMASK AND NOT ONE EVENT PER CALL
+// ----------------------------------------
+// Two buttons can settle on the same pass — a court button and a duration
+// button pressed together is how an impatient member uses this panel. Returning
+// one event would silently drop the second and leave it looking like a
+// debounce fault. The mask reports every press that completed on this pass.
+//
+// No Arduino headers, no heap, no String/std::string/std::vector.
+
+#ifndef CRUSADERS_COURTLOGIC_BUTTONPANEL_H
+#define CRUSADERS_COURTLOGIC_BUTTONPANEL_H
+
+#include <stdint.h>
+
+#include "hal/Button.h"
+#include "hal/PinLevel.h"
+
+#include "timebase/TimeBase.h"
+
+namespace courtlogic {
+
+/// A level must hold this long before it counts. 80 ms is well past the ~10 ms
+/// a tactile switch chatters for, and well under the ~200 ms at which a human
+/// notices the panel feeling slow.
+inline constexpr uint32_t kDebounceMs = 80UL;
+
+/// Bit `n` of a button mask is channel `n`: 0-3 courts A-D, 4-7 slots 1-4.
+constexpr uint8_t buttonBit(uint8_t channel) {
+  return static_cast<uint8_t>(1U << channel);
+}
+
+class ButtonPanel {
+public:
+  explicit ButtonPanel(hal::IButtonPort& buttons);
+
+  /// Sample every channel exactly once and return a mask of the channels whose
+  /// press completed on this pass.
+  ///
+  /// Only the press edge is reported. A release is not an event this protocol
+  /// has a frame for, and inventing one would double the traffic on a 9600 baud
+  /// link for something no consumer reads.
+  uint8_t poll(uint32_t nowMs);
+
+  /// Debounced level, not the raw pin. True while the switch is held.
+  bool isPressed(uint8_t channel) const;
+
+private:
+  /// The reading a channel starts from before anything has been sampled.
+  ///
+  /// Released, so a button that is genuinely held down at boot produces a press
+  /// once it has been stable for the window — rather than being swallowed as
+  /// "no change". A boot-time press is a real event: it is a member leaning on
+  /// the panel while the box resets.
+  static constexpr bool kInitialPressed = false;
+
+  hal::IButtonPort& buttons_;
+  tb::Deadline settle_[hal::kButtonCount];
+  bool candidate_[hal::kButtonCount];
+  bool stable_[hal::kButtonCount];
+};
+
+} // namespace courtlogic
+
+#endif // CRUSADERS_COURTLOGIC_BUTTONPANEL_H

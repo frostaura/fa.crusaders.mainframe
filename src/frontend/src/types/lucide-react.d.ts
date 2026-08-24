@@ -80,6 +80,10 @@ declare module "lucide-react" {
   export const Trophy: LucideIcon;
   export const Smartphone: LucideIcon;
   export const QrCode: LucideIcon;
+  export const Cpu: LucideIcon;
+  export const Radio: LucideIcon;
+  export const Wifi: LucideIcon;
+  export const WifiOff: LucideIcon;
   // Fall-through for anything else — any other icon name resolves to LucideIcon.
   const _fallback: { [icon: string]: LucideIcon };
 }

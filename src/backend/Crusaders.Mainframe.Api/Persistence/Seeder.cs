@@ -22,44 +22,14 @@ public static class Seeder
         var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
 
-        // Ensure DB exists (no-op if EF migrations already ran).
-        await db.Database.EnsureCreatedAsync();
-
-        // Lightweight schema patches for fields added after the initial create. PostgreSQL's
-        // IF NOT EXISTS makes these safe to re-run on every boot, and avoids requiring a
-        // proper migration step in dev where the schema is still in flux.
-        await db.Database.ExecuteSqlRawAsync(@"
-            ALTER TABLE bookings ADD COLUMN IF NOT EXISTS ""CheckedInAt"" timestamp with time zone NULL;
-
-            -- Phase 8 client deltas (blueprint Rev 2, 2026-05-09)
-            ALTER TABLE memberships     ADD COLUMN IF NOT EXISTS ""MemberClass""        integer NOT NULL DEFAULT 0;
-            ALTER TABLE ledger_entries  ADD COLUMN IF NOT EXISTS ""ZarPaid""            numeric(10,2) NULL;
-            ALTER TABLE ledger_entries  ADD COLUMN IF NOT EXISTS ""ConversionRate""     numeric(8,4)  NULL;
-            ALTER TABLE bookings        ADD COLUMN IF NOT EXISTS ""BookedByUserId""     uuid NULL;
-            ALTER TABLE bookings        ADD COLUMN IF NOT EXISTS ""PaidByUserId""       uuid NULL;
-            ALTER TABLE bookings        ADD COLUMN IF NOT EXISTS ""ChargedAt""          timestamp with time zone NULL;
-            ALTER TABLE users           ADD COLUMN IF NOT EXISTS ""PinHash""            varchar(256) NULL;
-            UPDATE bookings SET ""BookedByUserId"" = ""UserId"" WHERE ""BookedByUserId"" IS NULL AND ""UserId"" IS NOT NULL;
-            UPDATE bookings SET ""PaidByUserId""   = ""UserId"" WHERE ""PaidByUserId""   IS NULL AND ""UserId"" IS NOT NULL;
-
-            CREATE TABLE IF NOT EXISTS webauthn_credentials (
-                ""Id""           uuid PRIMARY KEY,
-                ""TenantId""     uuid NOT NULL,
-                ""UserId""       uuid NOT NULL,
-                ""CredentialId"" bytea NOT NULL,
-                ""PublicKey""    bytea NOT NULL,
-                ""UserHandle""   bytea NOT NULL,
-                ""SignCount""    bigint NOT NULL DEFAULT 0,
-                ""AaGuid""       uuid NOT NULL,
-                ""Transports""   varchar(128) NULL,
-                ""Label""        varchar(255) NOT NULL DEFAULT 'Passkey',
-                ""CreatedAt""    timestamp with time zone NOT NULL,
-                ""LastUsedAt""   timestamp with time zone NULL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS ""IX_webauthn_credentials_CredentialId"" ON webauthn_credentials (""CredentialId"");
-            CREATE INDEX IF NOT EXISTS ""IX_webauthn_credentials_UserHandle"" ON webauthn_credentials (""UserHandle"");
-            CREATE INDEX IF NOT EXISTS ""IX_webauthn_credentials_TenantId_UserId"" ON webauthn_credentials (""TenantId"", ""UserId"");
-        ");
+        // Schema comes from EF migrations under Migrations/ — nothing is patched here.
+        //
+        // This block previously carried ~35 lines of raw ALTER TABLE / CREATE TABLE
+        // that ran in Development only, which meant eight columns and the whole
+        // webauthn_credentials table existed on developer machines and nowhere else.
+        // A production boot against a fresh database could not work, and CI never
+        // noticed because the tests run on the in-memory provider. The migration now
+        // covers all of it; re-adding DDL here is choosing that defect again.
 
         // Use IgnoreQueryFilters everywhere here — we're operating above tenancy.
         var tenant = await db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Slug == CrusadersSlug);
@@ -78,7 +48,7 @@ public static class Seeder
                 SettingsJson = """
                 {
                   "slice_minutes": 15,
-                  "slice_price_zar": 8.00,
+                  "slice_price_credits": 8.00,
                   "penalty_pct": 30.0,
                   "grace_window_minutes": 5,
                   "penalty_window_minutes": 15,
@@ -98,10 +68,10 @@ public static class Seeder
                   },
                   "timezone": "Africa/Johannesburg",
                   "brand_accent_hex": "#7AB07A",
-                  "peach_payments": {
-                    "entity_id": "REPLACE_WITH_PEACH_ENTITY_ID",
-                    "access_token": "REPLACE_WITH_PEACH_ACCESS_TOKEN",
-                    "webhook_secret": "REPLACE_WITH_PEACH_WEBHOOK_SECRET",
+                  "payfast": {
+                    "merchant_id": "REPLACE_WITH_PAYFAST_MERCHANT_ID",
+                    "merchant_key": "REPLACE_WITH_PAYFAST_MERCHANT_KEY",
+                    "passphrase": "REPLACE_WITH_PAYFAST_PASSPHRASE",
                     "environment": "test"
                   }
                 }
@@ -160,7 +130,7 @@ public static class Seeder
                     CourtNumber = i,
                     Name = $"Court {i}",
                     CourtType = CourtType.Squash,
-                    SlicePriceZar = 50.00m,
+                    SlicePriceCredits = 50.00m,
                 });
             }
             await db.SaveChangesAsync();
@@ -224,7 +194,7 @@ public static class Seeder
                 TenantId = tenantId,
                 UserId = user.Id,
                 Type = Domain.LedgerEntryType.AdminAdjustment,
-                AmountZar = 500m,
+                AmountCredits = 500m,
                 ActorUserId = adminUserId,
                 Reason = "sample seed opening balance",
             });
@@ -273,42 +243,42 @@ public static class Seeder
             var dayPlan = Enumerable.Range(0, take)
                 .Select(i => basePlan[(i + offset) % basePlan.Length]);
             foreach (var p in dayPlan)
-        {
-            var court = courts[p.CourtIndex];
-            var startsAtUtc = new DateTimeOffset(date.AddHours(p.Hour).AddMinutes(p.Minute), TimeSpan.Zero) - sast;
-            var endsAtUtc = startsAtUtc.AddMinutes(30);
-
-            var alreadyBooked = await db.Bookings.AnyAsync(b =>
-                b.CourtId == court.Id && b.StartsAt == startsAtUtc && b.Status == Domain.BookingStatus.Booked);
-            if (alreadyBooked) continue;
-
-            if (!memberIdByNumber.TryGetValue(p.MembershipNumber, out var userId)) continue;
-
-            var booking = new Domain.Booking
             {
-                TenantId = tenantId,
-                CourtId = court.Id,
-                UserId = userId,
-                ActorUserId = adminUserId,
-                StartsAt = startsAtUtc,
-                EndsAt = endsAtUtc,
-                SliceMinutes = 30,
-                SliceCount = 1,
-                AmountChargedZar = court.SlicePriceZar,
-                Status = Domain.BookingStatus.Booked,
-            };
-            db.Bookings.Add(booking);
-            db.LedgerEntries.Add(new Domain.LedgerEntry
-            {
-                TenantId = tenantId,
-                UserId = userId,
-                Type = Domain.LedgerEntryType.BookingCharge,
-                AmountZar = -court.SlicePriceZar,
-                RelatedBookingId = booking.Id,
-                ActorUserId = adminUserId,
-                Reason = $"Booking {court.Name} {startsAtUtc:yyyy-MM-dd HH:mm}",
-            });
-            bookingsCreated++;
+                var court = courts[p.CourtIndex];
+                var startsAtUtc = new DateTimeOffset(date.AddHours(p.Hour).AddMinutes(p.Minute), TimeSpan.Zero) - sast;
+                var endsAtUtc = startsAtUtc.AddMinutes(30);
+
+                var alreadyBooked = await db.Bookings.AnyAsync(b =>
+                    b.CourtId == court.Id && b.StartsAt == startsAtUtc && b.Status == Domain.BookingStatus.Booked);
+                if (alreadyBooked) continue;
+
+                if (!memberIdByNumber.TryGetValue(p.MembershipNumber, out var userId)) continue;
+
+                var booking = new Domain.Booking
+                {
+                    TenantId = tenantId,
+                    CourtId = court.Id,
+                    UserId = userId,
+                    ActorUserId = adminUserId,
+                    StartsAt = startsAtUtc,
+                    EndsAt = endsAtUtc,
+                    SliceMinutes = 30,
+                    SliceCount = 1,
+                    AmountChargedCredits = court.SlicePriceCredits,
+                    Status = Domain.BookingStatus.Booked,
+                };
+                db.Bookings.Add(booking);
+                db.LedgerEntries.Add(new Domain.LedgerEntry
+                {
+                    TenantId = tenantId,
+                    UserId = userId,
+                    Type = Domain.LedgerEntryType.BookingCharge,
+                    AmountCredits = -court.SlicePriceCredits,
+                    RelatedBookingId = booking.Id,
+                    ActorUserId = adminUserId,
+                    Reason = $"Booking {court.Name} {startsAtUtc:yyyy-MM-dd HH:mm}",
+                });
+                bookingsCreated++;
             }
         }
         await db.SaveChangesAsync();

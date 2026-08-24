@@ -14,7 +14,7 @@ These hold across every phase:
 2. **Tenant isolation is structural.** Every persisted entity carries `tenant_id`. Every API endpoint resolves the tenant first. Cross-tenant injection tests are mandatory before any merge that touches a tenant-scoped table.
 3. **Money is ledger-only.** Balance is the sum of immutable ledger entries — never a stored field. Every credit movement has `actor`, `subject`, `reason`, `external_reference`. Disputes are resolved by replaying the ledger.
 4. **Email is the contractual comms channel.** Every player-affecting event sends an email. Webhooks mirror the same event stream programmatically — they never replace email.
-5. **Public + free defaults for external data.** No paid data feeds, no proprietary geocoders, no premium phone-validation services. We use IANA tzdb (built-in), libphonenumber (OSS), Gravatar's public URL pattern for avatar fallback, public IP-based locale detection only if free-tier suffices. SMTP and PeachPayments are the only third-party paid dependencies; both are tenant-controlled (per-tenant accounts).
+5. **Public + free defaults for external data.** No paid data feeds, no proprietary geocoders, no premium phone-validation services. We use IANA tzdb (built-in), libphonenumber (OSS), Gravatar's public URL pattern for avatar fallback, public IP-based locale detection only if free-tier suffices. SMTP and **PayFast** are the only third-party paid dependencies; both are tenant-controlled (per-tenant accounts). *(This said PeachPayments until 2026-08-23; the provider changed, and `docs/specs/payments-peachpayments.md` is superseded.)*
 6. **Hardware abstractions ship before drivers.** `IBiometricDevice` and the lights webhook contract exist before any vendor SDK is integrated. `NullBiometricDevice` and `MockSimulatorBiometricDevice` are first-class implementations — CI must pass without touching real hardware.
 7. **CI green is the gate, not "it built locally."** No phase advances until CI is green on `main`.
 8. **Pilot-first.** Crusaders Squash Club is the first real tenant. Every decision asks "does this serve the pilot?" before "does this serve future tenants?". Multi-tenancy is structural so onboarding tenant 2 is a config exercise, not a rewrite.
@@ -28,7 +28,7 @@ Per principle 5, all external dependencies are either tenant-controlled paid ser
 | Concern | Choice | Why |
 | --- | --- | --- |
 | Email delivery | Reuse FrostAura GoDaddy SMTP (`smtpout.secureserver.net`, creds in `.env`, mirrored from `fa.startup/.env`) for dev/staging; per-tenant SMTP for production. | Already paid for; keeps cost zero for dev. Per-tenant production gives clubs control over deliverability and from-address branding. |
-| Payment processing | PeachPayments Hosted Checkout (per-tenant merchant entity). | South African processor, ZAR-native, hosted checkout keeps PCI scope minimal. |
+| Payment processing | **PayFast** hosted checkout (per-tenant merchant entity). | South African processor, ZAR-native, hosted checkout keeps PCI scope minimal. Superseded PeachPayments 2026-08-22 by founder decision. |
 | Phone validation | `libphonenumber` (Google's OSS port — `PhoneNumbers` NuGet package). | Free, accurate, offline. |
 | Avatar fallback (when player photo missing or fails to load) | Gravatar public URL pattern (`https://www.gravatar.com/avatar/<md5(email)>?d=identicon`). No API key required. | Free, public, predictable. Players can opt out by setting `?d=blank`. |
 | Time zones | IANA tzdb (built into .NET 10 / Linux). | Free, authoritative. |
@@ -41,19 +41,78 @@ Anything that becomes load-bearing later goes through this same test before adop
 
 ---
 
-## Status snapshot (2026-05-06)
+## Where things actually stand (2026-08-23)
 
-| Phase | State |
+> **This table replaced a phase-level status snapshot that was wrong for months.** It said
+> things like "Phase 4 — Implemented (slice)" while the webhook retry it described was
+> unimplemented and the SSRF guard it implied did not exist. `CLAUDE.md` still carries the
+> rule that grew out of that: **never treat this document's phase statuses as ground truth —
+> grep the code before building anything it calls unbuilt.** A per-deliverable table is
+> harder to be vaguely wrong about, which is the whole reason for the shape.
+>
+> Every row below was executed in the session that wrote it, not read off a previous status.
+
+### Built and covered
+
+| Deliverable | Where | Held by |
+| --- | --- | --- |
+| Members, auth, email verification, admin approval | `Endpoints/AuthEndpoints.cs`, `Services/MemberApprovalService.cs` | backend suite |
+| WebAuthn passkeys | `Endpoints/WebAuthnEndpoints.cs` | backend suite |
+| Credit ledger, balance as a sum | `Services/LedgerService.cs` | backend suite + cross-tenant tests |
+| **Charge at booking**, cancellation refund, late penalty | `Services/BookingService.cs` | mutation-proven; **deviates from blueprint A.9 — see D-1** |
+| Walk-ups: truncated at the next booking, charged pro rata | `BookingService.CreateWalkUpAsync` | `WalkUpBookingTests` |
+| Double-booking made unrepresentable | GiST exclusion constraint, `AddBookingOverlapExclusion` | Postgres boundary suite |
+| No-show sweep: refund less penalty | `Webhooks/NoShowWorker.cs` | `NoShowWorkerTests` |
+| One courtside activation path for biometric, PIN and QR | `Services/CourtActivationService.cs` | `CourtActivationTests`, parameterised per method |
+| At-court payer override, including reassignment after charge | `BookingService.ChargeOnActivationAsync` | mutation-proven |
+| PayFast provider + ITN handling | `Payments/PayFast/` | fixture corpus from an independent implementation |
+| Webhook delivery with HMAC, backoff and auto-disable | `Webhooks/` | backend suite |
+| SSRF guard on outbound webhooks | `Security/OutboundAddressGuard` | `OutboundGuardTests` |
+| Device auth, discovery, claim-by-code, provisioning | `Security/DeviceAuth/`, `Security/Discovery/` | shared corpus, both sides |
+| OTA release catalogue and per-device pinning | `Services/OtaCatalogue.cs` | `OtaCatalogueTests` |
+| Reporting endpoints + CSV | `Endpoints/ReportingEndpoints.cs` | backend suite |
+| Admin: members, ledger, webhooks, settings, **devices** | `src/frontend/src/pages/` | vitest route tests + Playwright |
+| All 18 tenant settings editable from the admin panel | `Endpoints/AdminConfigEndpoints.cs` | `AdminSettingsHttpTests` |
+| Mega firmware: relays, buttons, scanner, LCD, **independent auto-off** | `src/iot/lib/courtlogic` | Unity suite at four clock bases including the wrap |
+| ESP8266: roster cache, event queue, session, signed API client | `src/iot/lib/{roster,eventq,court,devapi}` | Unity suite + ASAN/UBSAN |
+| Remappable buttons, walk-up pad | `src/iot/lib/court`, `Services/ButtonMap.cs` | shared corpus read by both sides |
+| Signed OTA + boot guard | `src/iot/lib/otacore` | Unity suite; **no rollback — see D-2** |
+
+### Built, not yet exercised against reality
+
+| Deliverable | What is missing |
 | --- | --- |
-| 0 — Foundation | **Implemented (slice)** — `EnsureCreated` in place; real `dotnet ef migrations add Initial` deferred to first host build |
-| 1 — Members & Auth | **Implemented (slice)** — register/verify/login/forgot/reset/magic-link, admin approve/reject, real SMTP verified |
-| 2 — Credit Ledger | **Partial** — ledger + admin manual adjustment landed; PeachPayments hosted-checkout + webhook callback deferred |
-| 3 — Schedule & Booking | **Implemented (slice)** — atomic create with ledger debit, cancellation with penalty math, schedule grid |
-| 4 — Webhooks & Lights | **Implemented (slice)** — `IEventBus` + `WebhookDeliveryWorker` with URL-templating + HMAC sig + retry, `LightsCueWorker` emits `booking.lights_on/off` at slice boundaries, `NoShowWorker` applies grace-window penalty, ESP32 firmware sketch under `src/firmware/lights-controller/` |
-| 5 — Biometric | **Implemented (slice)** — `IBiometricDevice` + `NullBiometricDevice` + `BiometricService.MatchAtCourtAsync` resolves candidate set from current bookings, admin enrollment endpoint, audit-logged. Vendor SDK swap-in is the only remaining work |
-| 6 — Reporting | **Implemented (slice)** — wallet/revenue/utilisation/no-show/peripheral-health endpoints, CSV export. XLSX + PDF deferred |
-| 7 — Pilot launch hardening | **Open** — first-host build, structured-log upgrade (Serilog → JSON), more cross-tenant tests, real Crusaders cutover |
-| 8 — **Client deltas** (blueprint 2026-05-09 Rev 2) | **Specified** — credits unit, member classes, charge-on-lights-on, per-day cap, peak-hours rule, payer override at court, PIN/QR identification, monthly reports preset, 2-year retention. See [`./specs/client-blueprint-deltas.md`](./specs/client-blueprint-deltas.md) |
+| PayFast | A live transaction. The algorithm is pinned by a corpus; the first real R100 is a milestone. |
+| The release chain | Six unset Actions secrets, and `workflow_dispatch` cannot trigger a deploy. |
+| OTA | The signing key pair does not exist yet. |
+| The court box | Has never been flashed. Everything is proven on the host with no board attached. |
+
+### Deliberately not built
+
+| Deliverable | Why |
+| --- | --- |
+| Gates | Parked by the founder. `Device` already carries `Gate`/`GateKey`; nothing else exists. |
+| Biometric vendor SDK | `IBiometricDevice` + `NullBiometricDevice` ship first, by invariant. CI must pass with no hardware. |
+| Event queue persistence across a power cut | `hal::IStore` caps a value at 32 bytes. Needs a block-oriented port; consequence recorded in the go-live checklist. |
+| Face recognition | Deferred until a vendor SDK exists. PIN and QR cover the triple stack. |
+| XLSX / PDF reports | CSV covers the pilot. |
+
+### The two open deviations
+
+Both are in [`./specs/client-blueprint-deltas.md`](./specs/client-blueprint-deltas.md).
+
+- **D-1 — the debit happens at booking, not at lights-on.** Contradicts the customer's own
+  written brief. **Needs committee sign-off before go-live.**
+- **D-2 — firmware is signed with RSA-2048, not Ed25519, and there is no rollback.** An
+  implementation constraint rather than a product decision; the security property the plan
+  asked for is unchanged.
+
+### What actually blocks go-live
+
+Nothing in this document. See **[`./go-live-checklist.md`](./go-live-checklist.md)** — every
+remaining item needs physical access, a live credential, or a person's decision.
+
+---
 
 ## Phase 0 — Foundation **(in progress, mostly done)**
 
@@ -122,7 +181,10 @@ The flow that lets any human exist in the system. Spec: [`feature-spec.md`](./sp
 
 ---
 
-## Phase 2 — Credit Ledger & PeachPayments (M)
+## Phase 2 — Credit Ledger & PayFast (M)
+
+> Written before the provider changed. `PeachPayments` below reads `PayFast`; the shape of the
+> work was the same and the implementation is under `Payments/PayFast/`.
 
 Money. Spec: [`feature-spec.md`](./specs/feature-spec.md) §4 + [`payments-peachpayments.md`](./specs/payments-peachpayments.md).
 

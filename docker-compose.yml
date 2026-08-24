@@ -50,7 +50,6 @@ services:
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
       WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-Crusaders Mainframe}
       MEDIA_STORAGE_PATH: ${MEDIA_STORAGE_PATH:-/app/media}
-      PEACH_PAYMENTS_BASE_URL: ${PEACH_PAYMENTS_BASE_URL:-https://test.oppwa.com}
       BIOMETRIC_DRIVER: ${BIOMETRIC_DRIVER:-Null}
       BIOMETRIC_TEMPLATE_STORE_PATH: ${BIOMETRIC_TEMPLATE_STORE_PATH:-/app/biometric/templates}
     expose:

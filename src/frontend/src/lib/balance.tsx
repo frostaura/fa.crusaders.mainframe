@@ -29,7 +29,7 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       const w = await endpoints.wallet();
-      setBalance(w.balance_zar);
+      setBalance(w.balance_credits);
     } catch {
       // Silent — header pill simply won't update on transient failure.
     } finally {
@@ -71,8 +71,8 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
       es = new EventSource(`/api/v1/wallet/stream?access_token=${encodeURIComponent(token)}`);
       es.onmessage = (e) => {
         try {
-          const msg = JSON.parse(e.data) as { balance_zar: number };
-          if (typeof msg.balance_zar === "number") setBalance(msg.balance_zar);
+          const msg = JSON.parse(e.data) as { balance_credits: number };
+          if (typeof msg.balance_credits === "number") setBalance(msg.balance_credits);
           backoffMs = 1000; // reset backoff on successful message
         } catch { /* keep-alive comments and malformed payloads are ignored */ }
       };

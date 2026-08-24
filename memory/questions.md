@@ -1,14 +1,21 @@
 ---
 name: crusaders-mainframe-questions
-description: "Biometric vendor SDK; Arduino fail-safe; SaaS pricing beyond Crusaders; member-data migration; go-live this quarter or park with a date"
+description: "SAFETY: do the relays switch a contactor or the lighting load directly? Also: PIN length, gate policy vocabulary, revoked-card window, biometric vendor SDK, SaaS pricing, go-live date"
 type: question
-last_verified: 2026-07-24
+last_verified: 2026-08-22
 ---
 
 # Open questions
 
+- **SAFETY — do the court relays switch a contactor coil, or the lighting load directly?** The fitted module is rated 10A/250VAC, which is plausible for one modern LED bank and inadequate for older metal-halide. If it is direct, that needs a qualified electrician before anything ships. **No software decision changes this, and it gates go-live.** Owner: Dean.
+- **PIN policy.** The club's existing codes are 4 digits with no uniqueness constraint, and matching is first-verify-wins with no deterministic ordering. Once a PIN authorises a debit, a collision charges the wrong member. Six digits with a blocklist, or keep four and accept it? Owner: Dean.
+- **Gate policy vocabulary.** "Per-gate and admin-configurable" settles the shape but not the predicates — active membership, time of day, member class, a booking within N minutes? Needed before gates are built. Owner: Dean.
+- **How long may a revoked card still open a gate**, given devices cache and may be offline? A policy call, not a technical one. Owner: Dean.
+- **Is the fitted LCD really the 20×4**, or was that a bench substitute? Firmware drives 16×2 either way, so this only decides whether screen real estate is being wasted. Owner: Carl.
+- **The first ESP8266 flash may need a USB-TTL adapter.** The documented DIP positions cover Serial3↔ESP and USB↔Mega but not USB↔ESP8266 with GPIO0 low. Every flash after the first is OTA. Verify on the physical board before trusting a schedule. Owner: Carl.
+
 - **Which biometric vendor SDK?** The abstraction is complete; the driver decision is the blocker and no evaluation doc exists. Owner: Dean.
-- **Arduino fail-safe on network loss.** Parking-lot decision #1; default A+C (maintain-on plus a physical override pad) is assumed but never confirmed. Owner: Crusaders committee.
+- ~~**Arduino fail-safe on network loss.**~~ Resolved by design 2026-08-22: the Mega holds an independent per-relay auto-off timer, so existing sessions run to completion and nothing strands a lit court — fail-safe A, with the existing buttons serving as the physical override C. No new wiring.
 - **SaaS pricing for tenant #2 onwards.** Free for Crusaders; everything else TBD. Owner: Dean.
 - **Crusaders' existing member-data migration.** TBD with the committee.
 - **Crusaders go-live:** does the club go live this quarter, or is the project formally parked with a date? This is the division's leading cash-engine candidate, so the answer is portfolio-relevant. Owner: Dean.

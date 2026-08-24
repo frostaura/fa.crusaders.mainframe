@@ -1,6 +1,7 @@
 using Crusaders.Mainframe.Api.Biometric;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
@@ -77,12 +78,36 @@ public static class BiometricEndpoints
         // Court-side match endpoint — admin or kiosk role
         var court = app.MapGroup("/api/v1/court").RequireAuthorization(p => p.RequireRole("admin"));
 
-        court.MapPost("/{courtNumber:int}/biometric/match", async (int courtNumber, CourtMatchRequest? req, BiometricService svc, CancellationToken ct) =>
+        court.MapPost("/{courtNumber:int}/biometric/match", async (
+            int courtNumber, CourtMatchRequest? req, BiometricService svc, IdentificationResolver identities, CancellationToken ct) =>
         {
-            // Per blueprint B.2 — optional at-court payer override. The courtside UI resolves the
-            // second player via biometric / PIN / QR and passes their user_id as payer_user_id;
-            // the booking_charge then debits that user's account instead of the booked player's.
-            var match = await svc.MatchAtCourtAsync(courtNumber, req?.PayerUserId, ct);
+            // Blueprint B.2 — the at-court payer override, and the volunteer has to prove
+            // who they are.
+            //
+            // This used to take a bare `payer_user_id` off the request body, which moved a
+            // full court charge onto any member in the tenant with no second identification
+            // and no consent artefact of any kind. The ids needed are not secret either —
+            // GET /api/v1/schedule hands every authenticated member the owner id of every
+            // slot. The role gate was no defence: `admin` is what the shared courtside
+            // kiosk runs as, so it is exactly the session an opportunist has access to.
+            //
+            // So the volunteer presents the same thing a walk-up presents: a token this
+            // server minted, for this tenant, that expires in sixty seconds. QR only, for
+            // the reason IdentificationResolver spells out — a PIN checked against the
+            // whole roll rather than against a booking's candidates is a 10,000-space
+            // oracle over every member.
+            Guid? payerUserId = null;
+            if (!string.IsNullOrWhiteSpace(req?.PayerToken))
+            {
+                payerUserId = await identities.ResolveAsync(req.PayerMethod ?? "qr", req.PayerToken, ct);
+
+                // Refused rather than quietly falling back to charging the booked player.
+                // Silently ignoring an unreadable volunteer token bills the wrong person
+                // and tells nobody.
+                if (payerUserId is null) return Results.BadRequest(new { error = "payer_not_recognised" });
+            }
+
+            var match = await svc.MatchAtCourtAsync(courtNumber, payerUserId, ct);
             return Results.Ok(new
             {
                 matched = match.Matched,
@@ -98,4 +123,13 @@ public static class BiometricEndpoints
 }
 
 public sealed record EnrollRequest(Guid UserId, string? FingerLabel, string? ConsentReceiptHash);
-public sealed record CourtMatchRequest(Guid? PayerUserId);
+/// <summary>
+/// The optional payer override at the court.
+///
+/// <para>
+/// A token rather than a user id, deliberately: see the handler. <c>PayerMethod</c> exists
+/// so the field means the same thing here as everywhere else a member identifies, and so
+/// the refusal of a non-QR method is explicit rather than implied.
+/// </para>
+/// </summary>
+public sealed record CourtMatchRequest(string? PayerMethod, string? PayerToken);

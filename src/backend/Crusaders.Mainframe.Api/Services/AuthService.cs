@@ -24,6 +24,36 @@ public sealed class AuthService
         _email = email; _config = config; _logger = logger;
     }
 
+    /// <summary>
+    /// Sends, and treats a mail failure as a mail failure rather than as a failed request.
+    ///
+    /// <para>
+    /// These sends come <b>after</b> the SaveChanges that creates the account, so letting an
+    /// SMTP exception out returned 500 for a registration that had already succeeded. The
+    /// member is told it failed, tries again, and is met with "email already registered" —
+    /// with no way forward, because the address is genuinely taken by their own invisible
+    /// account. An unreachable mail server is a support call; it is not a reason to refuse
+    /// somebody an account that already exists.
+    /// </para>
+    ///
+    /// <para>
+    /// This does not soften "every player-affecting event sends an email". The send is still
+    /// attempted and a failure is still logged loudly; what changes is that the ledger of
+    /// record and the mail server are allowed to fail independently, which they will.
+    /// </para>
+    /// </summary>
+    private async Task SendOrLogAsync(EmailMessage message, string what, CancellationToken ct)
+    {
+        try
+        {
+            await _email.SendAsync(message, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Email failed: {What}", what);
+        }
+    }
+
     public async Task<RegistrationResult> RegisterAsync(string email, string password, string fullName, string membershipNumber, string? photoUrl, CancellationToken ct)
     {
         email = email.Trim().ToLowerInvariant();
@@ -70,8 +100,8 @@ public sealed class AuthService
         await _db.SaveChangesAsync(ct);
 
         var verifyUrl = $"{PublicBaseUrl()}/verify-email/{token}";
-        await _email.SendAsync(EmailTemplates.VerifyEmail(email, verifyUrl), ct);
-        await _email.SendAsync(EmailTemplates.MembershipPending(email), ct);
+        await SendOrLogAsync(EmailTemplates.VerifyEmail(email, verifyUrl), $"verification for {email}", ct);
+        await SendOrLogAsync(EmailTemplates.MembershipPending(email), $"pending-approval notice for {email}", ct);
 
         return new RegistrationResult.Created(user.Id);
     }
@@ -140,7 +170,7 @@ public sealed class AuthService
         await _db.SaveChangesAsync(ct);
 
         var resetUrl = $"{PublicBaseUrl()}/reset-password/{token}";
-        await _email.SendAsync(EmailTemplates.PasswordReset(email, resetUrl), ct);
+        await SendOrLogAsync(EmailTemplates.PasswordReset(email, resetUrl), $"password reset for {email}", ct);
         return true;
     }
 

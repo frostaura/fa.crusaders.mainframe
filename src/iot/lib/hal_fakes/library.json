@@ -1,0 +1,10 @@
+{
+  "name": "hal_fakes",
+  "version": "1.0.0",
+  "description": "Recording fakes for the hal ports. Host test infrastructure: no Arduino headers, no heap, fixed capacities with explicit overflow flags.",
+  "keywords": "hal, fakes, testing",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": { "hal": "*" },
+  "build": { "flags": ["-I include"] }
+}

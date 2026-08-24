@@ -1,0 +1,7 @@
+{
+  "name": "roster",
+  "version": "1.0.0",
+  "description": "The court box's local cache of who may open which court, and until when.",
+  "dependencies": { "timebase": "*" },
+  "build": { "flags": ["-I include"] }
+}

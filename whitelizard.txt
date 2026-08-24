@@ -1,0 +1,37 @@
+# Complexity baseline — a RATCHET, not an amnesty.
+#
+# Every function listed here already exceeded the gate (CCN 15 / length 200 /
+# 6 params) when the gate was introduced. Listing them freezes the debt: they
+# cannot get worse without being noticed, and NEW code is held to the real
+# threshold from day one.
+#
+# The right way to remove a line from this file is to simplify the function.
+# Adding a line requires a reviewer to agree the complexity is essential.
+#
+# A note on the Minimal API entries: lizard scores `MapXxxEndpoints` as one
+# function, but it is really N independent route handlers, each individually
+# simple. Those are measurement artifacts rather than genuine complexity, and
+# they resolve naturally as endpoints are split out during the device work.
+AdminConfigEndpoints::MapAdminConfigEndpoints
+AdminMemberEndpoints::MapAdminMemberEndpoints
+AdminMembersPage
+AdminWebhooksPage
+AuthService::AuthService
+BiometricService::BiometricService
+BiometricService::MatchAtCourtAsync
+BookingService::BookingService
+BookingService::CreateAsync
+ConfirmButton
+DataTable
+Layout
+MeProfileEndpoints::MapMeProfileEndpoints
+PinEndpoints::MapPinEndpoints
+ProfilePage
+QrEndpoints::MapQrEndpoints
+ReportingEndpoints::MapReportingEndpoints
+SmtpEmailService::SendAsync
+SortHeader
+TopUpEndpoints::MapTopUpEndpoints
+WebAuthnEndpoints::MapWebAuthnEndpoints
+adjust
+load

@@ -13,3 +13,6 @@
 **/TestResults
 **/.DS_Store
 docs/
+src/iot
+src/firmware
+src/contracts

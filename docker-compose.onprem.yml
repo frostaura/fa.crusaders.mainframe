@@ -1,0 +1,107 @@
+# On-premises overlay — apply at the club, on top of the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.onprem.yml up -d
+#
+# ---------------------------------------------------------------------------
+# Why this file exists
+# ---------------------------------------------------------------------------
+# The base compose file puts the backend on a bridge network. Broadcast and
+# multicast frames from the club LAN do not cross a bridge, so the UDP discovery
+# listener inside that container receives nothing at all — not intermittently,
+# *never*. A court box announcing on 255.255.255.255:48653 is heard by every
+# device on the LAN except the one that needs to hear it.
+#
+# There is no bridge-network workaround. `ports: 48653:48653/udp` publishes a
+# port for *inbound unicast*; it does not put the container on the LAN's
+# broadcast domain. A macvlan network would work and was rejected: it needs the
+# host interface name baked into the compose file, breaks on any host with a
+# different NIC name, and is silently non-functional on WiFi, which is what the
+# clubhouse box is likely to be on.
+#
+# So the backend runs with host networking here. Development is unaffected — the
+# base file is unchanged and still uses the bridge, where discovery reports
+# itself as "listening, nothing received" rather than pretending to work.
+#
+# ---------------------------------------------------------------------------
+# What this breaks, and what to set because of it
+# ---------------------------------------------------------------------------
+# 1. Service-name DNS. A host-networked container is not on the compose bridge,
+#    so `postgres`, `mailhog` and `frontend` no longer resolve from the backend.
+#    Postgres and MailHog therefore publish to the host loopback below, and the
+#    backend addresses them as 127.0.0.1.
+#
+# 2. The reverse proxy's upstream. nginx still resolves `backend`, so the
+#    gateway gets an extra_hosts entry pointing that name at the docker host.
+#    nginx.conf is untouched.
+#
+# 3. Port conflicts are now real. 5000/tcp and 48653/udp must be free on the
+#    host. A second stack on the same machine will not start, which is correct.
+#
+# 4. **The API is exposed on every host interface on :5000**, not only through
+#    the gateway on :8088. That is the price of host networking. Firewall 5000
+#    at the host, or accept that the LAN can reach the API directly — it is the
+#    same API either way, with the same authentication, but it bypasses any rate
+#    limiting or TLS the gateway would add.
+#
+# ---------------------------------------------------------------------------
+# Checking it worked
+# ---------------------------------------------------------------------------
+#   curl -s http://localhost:8088/api/v1/admin/devices/discovery-status \
+#        -H "Authorization: Bearer $ADMIN_JWT" | jq
+#
+#   state              "Listening"        -> the socket is open
+#   bound_endpoint     "0.0.0.0:48653"    -> on the right port
+#   packets_received   > 0                -> boards are actually reaching it
+#
+# `Listening` with `packets_received: 0` means the API is fine and nothing is
+# arriving: check that the boards are powered and associated, then check the
+# access point for broadcast/multicast filtering, which consumer routers ship
+# switched on. `Failed` means the bind itself failed and `detail` says why.
+#
+#   sudo tcpdump -ni any udp port 48653
+#
+# confirms from outside the stack whether beacons are on the wire at all.
+
+services:
+  postgres:
+    # Reachable from the host-networked backend. Bound to loopback rather than
+    # 0.0.0.0 so the club LAN cannot reach the database directly.
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  mailhog:
+    ports:
+      - "127.0.0.1:11025:1025"
+      - "127.0.0.1:8025:8025"
+
+  backend:
+    network_mode: host
+    environment:
+      # Service names are gone with the bridge; everything is loopback now.
+      ConnectionStrings__DefaultConnection: Host=127.0.0.1;Port=5432;Database=${POSTGRES_DB:-crusaders_mainframe};Username=${POSTGRES_USER:-crusaders};Password=${POSTGRES_PASSWORD}
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: 11025
+
+      # The listener. 48653 is fixed by the wire protocol — the firmware
+      # hardcodes it — so it is here to be read, not to be changed.
+      Discovery__Enabled: "true"
+      Discovery__Port: "48653"
+      Discovery__BindAddress: "0.0.0.0"
+
+      # Left empty on purpose: the OFFER then carries the address of whichever
+      # local interface can actually reach the announcing board, which is the
+      # only value that is right on a multi-homed box. Set it explicitly only if
+      # the club reaches the API through a name or a reverse proxy the boards
+      # must use instead.
+      Discovery__AdvertisedBaseUrl: "${DISCOVERY_ADVERTISED_BASE_URL:-}"
+
+      # The port a board should call back on: the gateway's published port, not
+      # the backend's own 5000. Keep this in step with GATEWAY_PORT.
+      Discovery__AdvertisedPort: "${GATEWAY_PORT:-8088}"
+
+  gateway:
+    # nginx proxies to http://backend:5000. With the backend on the host that
+    # name no longer resolves through docker DNS, so it is pointed at the host
+    # gateway address instead and nginx.conf stays as it is.
+    extra_hosts:
+      - "backend:host-gateway"

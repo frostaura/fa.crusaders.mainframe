@@ -3,11 +3,16 @@ using System.Security.Claims;
 using System.Text;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Security;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
+
+
 
 /// <summary>
 /// Phase 8.6 — QR identification (third leg of blueprint B.1's triple-stack alongside biometric + PIN).
@@ -54,63 +59,46 @@ public static class QrEndpoints
             var jwt = new JwtSecurityTokenHandler().WriteToken(token);
 
             return Results.Ok(new { token = jwt, expires_in_seconds = 60 });
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .RequireRateLimiting(RateLimitPolicies.Auth);
 
         app.MapPost("/api/v1/court/{courtNumber:int}/qr/match", async (
             int courtNumber, QrMatchRequest req,
-            MainframeDbContext db, IConfiguration config,
+            MainframeDbContext db,
+            IdentificationResolver identities,
+            CourtActivationService activation,
             CancellationToken ct) =>
         {
             if (string.IsNullOrEmpty(req.Token)) return Results.BadRequest(new { error = "token_required" });
 
-            var secret = config["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret missing");
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
-            var handler = new JwtSecurityTokenHandler();
+            // Verified through the shared resolver rather than inline here. There were two
+            // copies of this — one for the courtside camera and one that would have been
+            // written for the court box's walk-up path — and two implementations of "is this
+            // token real" is one implementation more than a security check should ever have.
+            var resolved = identities.VerifyQrToken(req.Token);
+            if (resolved is null) return Results.Ok(new { matched = false, reason = "invalid_or_expired" });
+            var userId = resolved.Value;
 
-            ClaimsPrincipal principal;
-            try
-            {
-                principal = handler.ValidateToken(req.Token, new TokenValidationParameters
-                {
-                    ValidateIssuer = true,
-                    ValidateAudience = true,
-                    ValidateLifetime = true,
-                    ValidateIssuerSigningKey = true,
-                    ValidIssuer = config["Jwt:Issuer"],
-                    ValidAudience = config["Jwt:Audience"],
-                    IssuerSigningKey = key,
-                    ClockSkew = TimeSpan.FromSeconds(10),
-                }, out _);
-            }
-            catch
-            {
-                return Results.Ok(new { matched = false, reason = "invalid_or_expired" });
-            }
-
-            var purpose = principal.FindFirstValue("purpose");
-            if (purpose != "qr_ident") return Results.Ok(new { matched = false, reason = "wrong_purpose" });
-
-            var sub = principal.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? principal.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!Guid.TryParse(sub, out var userId)) return Results.Ok(new { matched = false, reason = "no_sub" });
-
-            // Confirm the user has an active booking on this court within the grace window.
+            // Identify AND activate. This used to confirm a booking existed and return a
+            // user_id — no ledger post, no CheckedInAt, no event, no audit row. So a
+            // member who identified by QR played free and was swept as a no-show, since
+            // attendance is CheckedInAt and nothing here set it.
             var court = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == courtNumber, ct);
             if (court is null) return Results.NotFound();
 
             var now = DateTimeOffset.UtcNow;
-            var windowStart = now.AddMinutes(-30);
-            var windowEnd = now.AddHours(2);
 
-            var hasBooking = await db.Bookings.AnyAsync(b =>
-                b.CourtId == court.Id
-                && b.UserId == userId
-                && b.Status == BookingStatus.Booked
-                && b.StartsAt < windowEnd && b.EndsAt > windowStart, ct);
+            // Shared window: was hardcoded at -30 minutes here while the no-show sweep used
+            // the tenant's grace setting, so the two disagreed about the same booking.
+            var booking = await activation.FindForUserAsync(court.Id, userId, now, ct);
+            if (booking is null) return Results.Ok(new { matched = false, reason = "no_active_booking" });
 
-            if (!hasBooking) return Results.Ok(new { matched = false, reason = "no_active_booking" });
+            var result = await activation.ActivateAsync(
+                court, booking, identifiedUserId: userId, payerOverrideUserId: null, method: "qr", ct);
 
-            return Results.Ok(new { matched = true, user_id = userId });
-        }).RequireAuthorization(p => p.RequireRole("admin"));
+            return CourtActivationResponse.For(result, userId);
+        }).RequireAuthorization(p => p.RequireRole("admin"))
+          .RequireRateLimiting(RateLimitPolicies.Auth);
 
         return app;
     }

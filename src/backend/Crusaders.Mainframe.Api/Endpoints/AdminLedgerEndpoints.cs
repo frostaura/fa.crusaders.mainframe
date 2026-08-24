@@ -56,7 +56,7 @@ public static class AdminLedgerEndpoints
 public static class LedgerRowMapper
 {
     public const string Treasury = "Club treasury";
-    public const string PeachPayments = "PeachPayments";
+    public const string PaymentGateway = "PayFast";
 
     public static LedgerRowDto Build(LedgerEntry e, Func<Guid, string> nameFor)
     {
@@ -68,7 +68,7 @@ public static class LedgerRowMapper
         var (counterparty, comment) = e.Type switch
         {
             LedgerEntryType.TopUp =>
-                (PeachPayments, e.Reason ?? "Wallet top-up"),
+                (PaymentGateway, e.Reason ?? "Wallet top-up"),
             LedgerEntryType.BookingCharge =>
                 (Treasury, e.Reason ?? "Booking charge"),
             LedgerEntryType.CancellationRefund =>
@@ -80,11 +80,11 @@ public static class LedgerRowMapper
             LedgerEntryType.AdminAdjustment =>
                 (actor == subject ? Treasury : actor, e.Reason ?? "Admin adjustment"),
             LedgerEntryType.PaymentReversal =>
-                (PeachPayments, e.Reason ?? "Payment reversal"),
+                (PaymentGateway, e.Reason ?? "Payment reversal"),
             _ => (Treasury, e.Reason ?? e.Type.ToString()),
         };
 
-        var (fromLabel, toLabel) = e.AmountZar >= 0
+        var (fromLabel, toLabel) = e.AmountCredits >= 0
             ? (counterparty, subject)   // money flowed INTO subject
             : (subject, counterparty);  // money flowed OUT of subject
 
@@ -93,8 +93,8 @@ public static class LedgerRowMapper
             At: e.CreatedAt,
             From: fromLabel,
             To: toLabel,
-            AmountZar: Math.Abs(e.AmountZar),
-            SignedAmountZar: e.AmountZar,
+            AmountCredits: Math.Abs(e.AmountCredits),
+            SignedAmountCredits: e.AmountCredits,
             Type: e.Type.ToString(),
             Comment: comment,
             SubjectUserId: e.UserId,
@@ -110,8 +110,21 @@ public sealed record LedgerRowDto(
     DateTimeOffset At,
     string From,
     string To,
-    decimal AmountZar,
-    decimal SignedAmountZar,
+    decimal AmountCredits,
+
+    /// <summary>
+    /// The same amount, keeping its sign, so a reader can tell money in from money out
+    /// without re-deriving it from the type.
+    ///
+    /// <para>
+    /// This was <c>SignedAmountZar</c> while holding credits — the unit lie
+    /// <c>CLAUDE.md</c> says must never be added a second time. It was also simply broken:
+    /// the frontend has always read <c>signedAmountCredits</c>, so the field arrived
+    /// undefined, every row in the admin ledger and the member wallet rendered with a minus
+    /// sign, and the credits/debits totals on the admin ledger page were both zero.
+    /// </para>
+    /// </summary>
+    decimal SignedAmountCredits,
     string Type,
     string Comment,
     Guid SubjectUserId,

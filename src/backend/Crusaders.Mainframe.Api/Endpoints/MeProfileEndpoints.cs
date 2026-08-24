@@ -80,7 +80,10 @@ public static class MeProfileEndpoints
 
             var ext = file.ContentType switch
             {
-                "image/jpeg" => "jpg", "image/png" => "png", "image/webp" => "webp", "image/gif" => "gif",
+                "image/jpeg" => "jpg",
+                "image/png" => "png",
+                "image/webp" => "webp",
+                "image/gif" => "gif",
                 _ => "bin",
             };
             var storageRoot = config["Media:StoragePath"] ?? "./media";

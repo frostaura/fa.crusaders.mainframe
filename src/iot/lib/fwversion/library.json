@@ -1,0 +1,9 @@
+{
+  "name": "fwversion",
+  "version": "1.0.0",
+  "description": "The firmware version string, assembled from the FW_VERSION_* build flags. Its own library so either firmware can carry it without compiling the other's application.",
+  "keywords": "version, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": { "flags": ["-I include"] }
+}

@@ -1,0 +1,105 @@
+#include "eventq/EventQueue.h"
+
+#include <string.h>
+
+namespace eventq {
+namespace detail {
+
+namespace {
+
+/// The mark is stored as eight lowercase hex characters plus a two-character
+/// Fletcher-16 tail. Hex rather than raw bytes because the store's value is a
+/// byte array with no encoding of its own, and a raw uint32 read back from a
+/// partially-written record is indistinguishable from a legitimate small
+/// number — whereas a hex record with a bad tail is obviously damaged.
+constexpr uint8_t kMarkDigits = 8U;
+constexpr uint8_t kMarkCheckDigits = 2U;
+constexpr uint8_t kMarkLen = kMarkDigits + kMarkCheckDigits;
+
+char hexDigit(uint32_t nibble) {
+  return static_cast<char>(nibble < 10U ? ('0' + nibble) : ('a' + (nibble - 10U)));
+}
+
+bool hexValue(char c, uint32_t& out) {
+  if (c >= '0' && c <= '9') {
+    out = static_cast<uint32_t>(c - '0');
+    return true;
+  }
+  if (c >= 'a' && c <= 'f') {
+    out = static_cast<uint32_t>(c - 'a') + 10U;
+    return true;
+  }
+  return false;
+}
+
+uint8_t markCheck(const char* digits) {
+  uint8_t sum = 0U;
+  for (uint8_t i = 0U; i < kMarkDigits; ++i) {
+    sum = static_cast<uint8_t>((sum + static_cast<uint8_t>(digits[i])) & 0xFFU);
+  }
+  return sum;
+}
+
+} // namespace
+
+uint32_t loadSeqMark(hal::IStore* store) {
+  if (store == nullptr) {
+    return 0U;
+  }
+
+  uint8_t raw[kMarkLen];
+  uint8_t len = 0U;
+  if (store->get(kSeqKey, raw, sizeof(raw), len) != hal::StoreResult::kOk || len != kMarkLen) {
+    return 0U;
+  }
+
+  const char* text = reinterpret_cast<const char*>(raw);
+  const uint8_t expected = markCheck(text);
+
+  uint32_t high = 0U;
+  uint32_t low = 0U;
+  if (!hexValue(text[kMarkDigits], high) || !hexValue(text[kMarkDigits + 1U], low)) {
+    return 0U;
+  }
+  if (static_cast<uint8_t>((high << 4) | low) != expected) {
+    // A torn write. Treated as absent, which restarts numbering from 1 — and
+    // is the one case where the box CAN reissue a sequence number. It is
+    // survivable because the API stamps its own receipt time and the operator
+    // sees a Boot event immediately before the repeat; the alternative, a box
+    // that refuses to run, is not.
+    return 0U;
+  }
+
+  uint32_t value = 0U;
+  for (uint8_t i = 0U; i < kMarkDigits; ++i) {
+    uint32_t nibble = 0U;
+    if (!hexValue(text[i], nibble)) {
+      return 0U;
+    }
+    value = (value << 4) | nibble;
+  }
+  return value;
+}
+
+void storeSeqMark(hal::IStore* store, uint32_t value) {
+  if (store == nullptr) {
+    return;
+  }
+
+  char text[kMarkLen];
+  for (uint8_t i = 0U; i < kMarkDigits; ++i) {
+    const uint32_t shift = static_cast<uint32_t>((kMarkDigits - 1U - i) * 4U);
+    text[i] = hexDigit((value >> shift) & 0xFU);
+  }
+  const uint8_t check = markCheck(text);
+  text[kMarkDigits] = hexDigit((static_cast<uint32_t>(check) >> 4) & 0xFU);
+  text[kMarkDigits + 1U] = hexDigit(static_cast<uint32_t>(check) & 0xFU);
+
+  // Best effort. A failure here costs a duplicate sequence range after an
+  // unclean reboot, which the API deduplicates; refusing to continue would
+  // stop the court working over a bookkeeping detail.
+  static_cast<void>(store->put(kSeqKey, reinterpret_cast<const uint8_t*>(text), kMarkLen));
+}
+
+} // namespace detail
+} // namespace eventq

@@ -1,0 +1,84 @@
+// Crusaders Mainframe — the small-key/value persistence port.
+//
+// WHY THIS EXISTS
+// ---------------
+// Two very different devices have to persist the same handful of facts: the
+// device identity, its bridge credential, the WiFi details and the court
+// mapping. On the ATmega2560 that is 4 KB of EEPROM written a byte at a time;
+// on the ESP8266 it is LittleFS on flash. Everything above this port is
+// indifferent to which, and the host tests use neither.
+//
+// WHY A TORN WRITE IS PART OF THE CONTRACT
+// ----------------------------------------
+// A court box is powered from the same board as four switching relay coils and
+// lives in a cupboard with a breaker in it. Power going away in the middle of a
+// write is a normal event over a device's life, and both backends leave the
+// same evidence: some bytes of the record updated, the rest still holding the
+// previous value, with nothing anywhere announcing that it happened.
+//
+// So put() may return kWriteFailed with the stored value PARTIALLY UPDATED, and
+// callers must store an integrity check alongside the value and treat a
+// mismatch as absent. That obligation is why the interface says so out loud and
+// why the recording fake can produce it on demand — an untested recovery path
+// on a credential store is a device that bricks itself in the field.
+//
+// WHY uint8_t LENGTHS
+// -------------------
+// Values here are identifiers and tokens, never blobs. size_t is 16-bit on AVR
+// and 32-bit elsewhere, so a size_t-based API sprinkles conversions through
+// every call site for a range nothing uses. kStoreMaxValueLen caps it instead.
+//
+// No Arduino headers. Compiles for AVR, Xtensa and the host test runner.
+
+#ifndef CRUSADERS_HAL_STORE_H
+#define CRUSADERS_HAL_STORE_H
+
+#include <stdint.h>
+
+namespace hal {
+
+/// Longest value the port accepts. Sized for a device id plus a bridge token.
+constexpr uint8_t kStoreMaxValueLen = 32U;
+
+/// Longest key, excluding the terminator. Keys are short ASCII literals.
+constexpr uint8_t kStoreMaxKeyLen = 15U;
+
+enum class StoreResult : uint8_t {
+  kOk = 0U,
+  /// No record under that key. Distinct from a zero-length value.
+  kNotFound = 1U,
+  /// Key or value violates kStoreMaxKeyLen / kStoreMaxValueLen, or the caller's
+  /// read buffer is smaller than the stored value. Nothing was changed.
+  kTooLarge = 2U,
+  /// The backing store has no room for a new key. Nothing was changed.
+  kNoSpace = 3U,
+  /// The write did not complete. The stored value may be partially updated;
+  /// see the file header. Verify with a checksum, never assume either outcome.
+  kWriteFailed = 4U,
+  /// The cell has exceeded its erase/write endurance. Note that real flash and
+  /// EEPROM usually do NOT report this — the write reports success and the cell
+  /// reads back stale — so code that only handles this enumerator is not
+  /// actually handling wear-out.
+  kWornOut = 5U
+};
+
+class IStore {
+public:
+  virtual ~IStore() = default;
+
+  /// Create or replace the record under `key`. See kWriteFailed.
+  virtual StoreResult put(const char* key, const uint8_t* value, uint8_t len) = 0;
+
+  /// Copy the record under `key` into `out` (capacity `cap`), setting `outLen`.
+  /// `outLen` is set to 0 on any non-kOk result.
+  virtual StoreResult get(const char* key, uint8_t* out, uint8_t cap, uint8_t& outLen) = 0;
+
+  /// Remove the record. kNotFound when there was nothing to remove — erasing an
+  /// absent key is reported, not silently treated as success, because it is how
+  /// a key typo shows up in the factory-reset path.
+  virtual StoreResult erase(const char* key) = 0;
+};
+
+} // namespace hal
+
+#endif // CRUSADERS_HAL_STORE_H

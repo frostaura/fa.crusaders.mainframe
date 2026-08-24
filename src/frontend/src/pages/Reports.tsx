@@ -5,6 +5,7 @@ import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { Carousel, type CarouselSlide } from "../components/Carousel";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { formatCredits, formatZar } from "../lib/utils";
 import {
   RevenueAreaChart, DailyFlowBarChart, BookingsLineChart, CourtsRevenueBarChart,
   NoShowDonut, MyBalanceLineChart, MyFlowBarChart, MyBookingsBarChart,
@@ -12,7 +13,7 @@ import {
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
-type UtilRow = { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_zar: number };
+type UtilRow = { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_credits: number };
 
 export default function ReportsPage() {
   const auth = useAuth();
@@ -48,15 +49,15 @@ export default function ReportsPage() {
 
   const tiles = isAdmin
     ? [
-        { label: "Net revenue", value: revenue ? `R${revenue.net_zar.toFixed(0)}` : "—", tone: "accent" as const },
-        { label: "Top-ups", value: revenue ? `R${revenue.gross_topups_zar.toFixed(0)}` : "—", tone: "success" as const },
+        { label: "Net revenue", value: revenue ? formatZar(revenue.net_zar) : "—", tone: "accent" as const },
+        { label: "Top-ups", value: revenue ? formatCredits(revenue.gross_topups_credits) : "—", tone: "success" as const },
         { label: "Bookings", value: dailyAdmin ? String(dailyAdmin.reduce((s, d) => s + d.bookings, 0)) : "—", tone: "neutral" as const },
         { label: "No-show rate", value: noShow ? `${noShow.no_show_pct.toFixed(1)}%` : "—", tone: noShow && noShow.no_show_pct > 5 ? "warning" as const : "neutral" as const },
       ]
     : [
-        { label: "Top-ups", value: wallet ? `R${wallet.top_ups_zar.toFixed(0)}` : "—", tone: "success" as const },
-        { label: "Spent", value: wallet ? `R${wallet.spent_zar.toFixed(0)}` : "—", tone: "accent" as const },
-        { label: "Refunds", value: wallet ? `R${wallet.refunds_zar.toFixed(0)}` : "—", tone: "neutral" as const },
+        { label: "Top-ups", value: wallet ? formatCredits(wallet.top_ups_credits) : "—", tone: "success" as const },
+        { label: "Spent", value: wallet ? formatCredits(wallet.spent_credits) : "—", tone: "accent" as const },
+        { label: "Refunds", value: wallet ? formatCredits(wallet.refunds_credits) : "—", tone: "neutral" as const },
         { label: "Movements", value: wallet ? String(wallet.count) : "—", tone: "neutral" as const },
       ];
 
@@ -121,9 +122,9 @@ export default function ReportsPage() {
         <Card>
           <h2 className="font-semibold mb-3">My wallet — totals</h2>
           <dl className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
-            <Stat label="Top-ups" value={`R${wallet.top_ups_zar.toFixed(2)}`} />
-            <Stat label="Spent" value={`R${wallet.spent_zar.toFixed(2)}`} />
-            <Stat label="Refunds" value={`R${wallet.refunds_zar.toFixed(2)}`} />
+            <Stat label="Top-ups" value={formatCredits(wallet.top_ups_credits)} />
+            <Stat label="Spent" value={formatCredits(wallet.spent_credits)} />
+            <Stat label="Refunds" value={formatCredits(wallet.refunds_credits)} />
             <Stat label="Penalty count" value={String(wallet.penalty_count)} />
             <Stat label="Movements" value={String(wallet.count)} />
           </dl>
@@ -148,13 +149,13 @@ export default function ReportsPage() {
             rows={util.by_court}
             rowKey={(r) => r.court_id}
             search={{ placeholder: "Filter by court name…", fields: (r) => r.court_name }}
-            defaultSort={{ key: "revenue_zar", dir: "desc" }}
+            defaultSort={{ key: "revenue_credits", dir: "desc" }}
             emptyTitle="No bookings in this window."
             columns={[
               { key: "court_name", header: "Court", cell: (r) => r.court_name },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
               { key: "slices", header: "Slices", align: "right", cell: (r) => r.slices, sortValue: (r) => r.slices },
-              { key: "revenue_zar", header: "Revenue", align: "right", cell: (r) => `R${r.revenue_zar.toFixed(2)}`, sortValue: (r) => r.revenue_zar },
+              { key: "revenue_credits", header: "Revenue", align: "right", cell: (r) => formatCredits(r.revenue_credits), sortValue: (r) => r.revenue_credits },
             ] satisfies DataColumn<UtilRow>[]}
           />
         </Card>
@@ -174,10 +175,10 @@ export default function ReportsPage() {
             maxHeight="60vh"
             columns={[
               { key: "date", header: "Date", cell: (r) => prettyDate(r.date), sortValue: (r) => r.date, width: 130 },
-              { key: "top_ups_zar", header: "Top-ups", align: "right", cell: (r) => zar(r.top_ups_zar), sortValue: (r) => r.top_ups_zar },
-              { key: "booking_charges_zar", header: "Charges", align: "right", cell: (r) => zar(r.booking_charges_zar), sortValue: (r) => r.booking_charges_zar },
-              { key: "refunds_zar", header: "Refunds", align: "right", cell: (r) => zar(r.refunds_zar), sortValue: (r) => r.refunds_zar },
-              { key: "penalties_zar", header: "Penalties", align: "right", cell: (r) => zar(r.penalties_zar), sortValue: (r) => r.penalties_zar },
+              { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => cr(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
+              { key: "booking_charges_credits", header: "Charges", align: "right", cell: (r) => cr(r.booking_charges_credits), sortValue: (r) => r.booking_charges_credits },
+              { key: "refunds_credits", header: "Refunds", align: "right", cell: (r) => cr(r.refunds_credits), sortValue: (r) => r.refunds_credits },
+              { key: "penalties_credits", header: "Penalties", align: "right", cell: (r) => cr(r.penalties_credits), sortValue: (r) => r.penalties_credits },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
               { key: "no_shows", header: "No-shows", align: "right", cell: (r) => r.no_shows, sortValue: (r) => r.no_shows },
             ] satisfies DataColumn<DailyAdminPoint>[]}
@@ -199,11 +200,11 @@ export default function ReportsPage() {
             maxHeight="60vh"
             columns={[
               { key: "date", header: "Date", cell: (r) => prettyDate(r.date), sortValue: (r) => r.date, width: 130 },
-              { key: "top_ups_zar", header: "Top-ups", align: "right", cell: (r) => zar(r.top_ups_zar), sortValue: (r) => r.top_ups_zar },
-              { key: "spent_zar", header: "Spent", align: "right", cell: (r) => zar(r.spent_zar), sortValue: (r) => r.spent_zar },
-              { key: "refunds_zar", header: "Refunds", align: "right", cell: (r) => zar(r.refunds_zar), sortValue: (r) => r.refunds_zar },
+              { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => cr(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
+              { key: "spent_credits", header: "Spent", align: "right", cell: (r) => cr(r.spent_credits), sortValue: (r) => r.spent_credits },
+              { key: "refunds_credits", header: "Refunds", align: "right", cell: (r) => cr(r.refunds_credits), sortValue: (r) => r.refunds_credits },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
-              { key: "balance_zar", header: "Balance", align: "right", cell: (r) => zar(r.balance_zar), sortValue: (r) => r.balance_zar },
+              { key: "balance_credits", header: "Balance", align: "right", cell: (r) => cr(r.balance_credits), sortValue: (r) => r.balance_credits },
             ] satisfies DataColumn<DailyMePoint>[]}
           />
         </Card>
@@ -213,7 +214,12 @@ export default function ReportsPage() {
   );
 }
 
-const zar = (v: number) => `R${v.toFixed(2)}`;
+/**
+ * Every column this formats is credit-denominated, and it used to print a rand sign over
+ * all eight of them. Credits are the unit of account; rand is only ever what was paid at
+ * the till. Kept as a local alias so the call sites stay short.
+ */
+const cr = (v: number) => formatCredits(v);
 const prettyDate = (s: string) => new Date(s + "T00:00:00Z").toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 
 function Tile({ label, value, tone }: { label: string; value: string; tone: "accent" | "success" | "warning" | "neutral" }) {

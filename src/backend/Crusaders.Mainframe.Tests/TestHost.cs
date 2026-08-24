@@ -34,9 +34,15 @@ public sealed class TestHost : IAsyncDisposable
         Courts = courts; Services = services; EmailService = emailService;
     }
 
-    public static async Task<TestHost> CreateAsync(string? tenantSlug = null)
+    /// <summary>
+    /// Builds an isolated host. Pass <paramref name="sharedDatabaseName"/> to place two
+    /// tenants in the SAME database, which is the only way a cross-tenant test proves
+    /// anything: with a database per host, tenant B is empty because it is a different
+    /// store, and the assertion holds even with every query filter deleted.
+    /// </summary>
+    public static async Task<TestHost> CreateAsync(string? tenantSlug = null, string? sharedDatabaseName = null)
     {
-        var dbName = $"crusaders-test-{Guid.NewGuid():N}";
+        var dbName = sharedDatabaseName ?? $"crusaders-test-{Guid.NewGuid():N}";
         var slug = tenantSlug ?? "crusaders";
 
         var services = new ServiceCollection();
@@ -45,9 +51,11 @@ public sealed class TestHost : IAsyncDisposable
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Jwt:Secret"] = "TEST_SECRET_THAT_IS_DEFINITELY_LONG_ENOUGH_FOR_HS256",
-                ["Jwt:Issuer"] = "test", ["Jwt:Audience"] = "test",
+                ["Jwt:Issuer"] = "test",
+                ["Jwt:Audience"] = "test",
                 ["App:PublicBaseUrl"] = "http://localhost:8088",
-                ["Smtp:Host"] = "stub", ["Smtp:From"] = "noreply@test.local",
+                ["Smtp:Host"] = "stub",
+                ["Smtp:From"] = "noreply@test.local",
             }).Build());
         services.AddDbContext<MainframeDbContext>(o => o.UseInMemoryDatabase(dbName));
 
@@ -60,11 +68,38 @@ public sealed class TestHost : IAsyncDisposable
         services.AddSingleton<IEmailService>(emailStub);
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
+        services.AddSingleton<Crusaders.Mainframe.Api.Lights.IRelayClient,
+                              Crusaders.Mainframe.Api.Lights.NullRelayClient>();
+        // Mirrors Program.cs — the hardware abstraction and its key deriver must be
+        // registered in both, or a test host diverges from the app it stands in for.
+        services.AddSingleton<Crusaders.Mainframe.Api.Security.DeviceAuth.IDeviceKeyDeriver>(
+            _ => new Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyDeriver(
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Devices:MasterKey"] = "test-only-device-master-key-thirty-two-plus-bytes",
+                    }).Build()));
+        services.AddMemoryCache();
+        // Discovery: the bounded LAN store and the claim service that reads it. Registered
+        // here for the same reason the key deriver is — a test host that lacks something
+        // Program.cs registers is a host that diverges from the app it stands in for. The
+        // listener itself is not registered: it opens a UDP socket, which belongs to the
+        // tests that drive one deliberately.
+        services.AddSingleton(_ => new Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions());
+        services.AddSingleton(sp => new Crusaders.Mainframe.Api.Security.Discovery.DiscoveryStore(
+            sp.GetRequiredService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions>()));
+        services.AddScoped<DeviceDiscoveryService>();
         services.AddSingleton<BalanceBroadcaster>();
         services.AddScoped<TenantSettingsAccessor>();
+        services.AddSingleton<OtaCatalogue>();
+        services.AddScoped<IdentificationResolver>();
+        services.AddScoped<DeviceRegistryService>();
+        services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.ProvisioningGrants>();
+        services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();
         services.AddScoped<LedgerService>();
         services.AddScoped<ScheduleService>();
         services.AddScoped<BookingService>();
+        services.AddScoped<CourtActivationService>();
         services.AddScoped<BiometricService>();
         services.AddScoped<AuthService>();
         services.AddScoped<MemberApprovalService>();
@@ -89,7 +124,7 @@ public sealed class TestHost : IAsyncDisposable
                 //  - block R100 cap R1000, per-day cap 60 min
                 //  - peak 16:00-19:00, regular-advance 1h
                 // Test fixture uses UTC for deterministic time-math.
-                SettingsJson = """{"slice_minutes":15,"slice_price_zar":8,"penalty_pct":30,"grace_window_minutes":5,"penalty_window_minutes":15,"advance_booking_days":14,"timezone":"UTC","credits_per_zar_regular":1.6,"credits_per_zar_league":2.4,"topup_block_zar":100,"topup_max_zar_per_member":1000,"member_per_day_max_minutes":60,"peak_hours":"16:00-19:00","peak_advance_hours_for_regular":1,"retention_years":2}""",
+                SettingsJson = """{"slice_minutes":15,"slice_price_credits":8,"penalty_pct":30,"grace_window_minutes":5,"penalty_window_minutes":15,"advance_booking_days":14,"timezone":"UTC","credits_per_zar_regular":1.6,"credits_per_zar_league":2.4,"topup_block_zar":100,"topup_max_zar_per_member":1000,"member_per_day_max_minutes":60,"peak_hours":"16:00-19:00","peak_advance_hours_for_regular":1,"retention_years":2}""",
             });
 
             var admin = new User { TenantId = tenant.Id, Email = $"admin-{slug}@test.local", PasswordHash = hasher.Hash("AdminPass!"), EmailVerified = true, IsAdmin = true };
@@ -102,13 +137,50 @@ public sealed class TestHost : IAsyncDisposable
                 new Membership { TenantId = tenant.Id, UserId = league.Id, FullName = "Test League", MembershipNumber = "LEAGUE-1", Status = MembershipStatus.Active, MemberClass = MemberClass.LeagueOrSenior }
             );
             var courts = new List<Court>();
-            for (var i = 1; i <= 4; i++) courts.Add(new Court { TenantId = tenant.Id, CourtNumber = i, Name = $"Court {i}", SlicePriceZar = 8m });
+            for (var i = 1; i <= 4; i++) courts.Add(new Court { TenantId = tenant.Id, CourtNumber = i, Name = $"Court {i}", SlicePriceCredits = 8m });
             db.Courts.AddRange(courts);
             await db.SaveChangesAsync();
 
             tenantContext.Set(tenant.Id, tenant.Slug);
             return new TestHost(dbName, tenant, admin, player, league, courts, sp, emailStub);
         }
+    }
+
+    /// <summary>
+    /// A bookable slot at least <paramref name="hoursAhead"/> from now that is <b>not</b>
+    /// inside the fixture's peak window.
+    ///
+    /// <para>
+    /// <c>DateTimeOffset.UtcNow.AddHours(3)</c> looks harmless and is not. The fixture
+    /// sets <c>peak_hours</c> to 16:00–19:00 with the tenant timezone at UTC, and blueprint
+    /// A.12 refuses a Regular member a peak slot more than an hour before it starts — so a
+    /// test written that way passes all morning and fails every afternoon, with a cast
+    /// exception that names <c>PeakHoursLeagueOnly</c> and points at a cancellation test.
+    /// It cost a bisect that found nothing, because nothing had changed except the clock.
+    /// </para>
+    ///
+    /// <para>
+    /// Tests about peak hours should still construct their own times — the point of this is
+    /// that tests about <i>anything else</i> stop depending on what time the suite runs.
+    /// </para>
+    /// </summary>
+    public static DateTimeOffset BookableSlot(double hoursAhead = 2)
+        => BookableSlotFrom(DateTimeOffset.UtcNow, hoursAhead);
+
+    /// <summary>
+    /// The same rule with the clock passed in, so the fix for a time-dependent test can
+    /// itself be tested at every hour of the day rather than at whatever hour the suite
+    /// happens to run.
+    /// </summary>
+    public static DateTimeOffset BookableSlotFrom(DateTimeOffset now, double hoursAhead)
+    {
+        var slot = now.AddHours(hoursAhead);
+
+        // Step past the window rather than clamping to its edge: a slot starting at 15:59
+        // can still END inside peak, and while the rule is evaluated on the start, the
+        // intent here is to stay clear of it entirely.
+        while (slot.Hour is >= 15 and < 19) slot = slot.AddHours(1);
+        return slot;
     }
 
     public IServiceScope NewScope() => Services.CreateScope();

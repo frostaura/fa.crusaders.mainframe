@@ -25,7 +25,7 @@ public sealed class TenantSettingsAccessor
         var root = doc.RootElement;
 
         int sliceMinutes = TryInt(root, "slice_minutes", 15);                       // Blueprint B.4 — 15-minute default for Crusaders.
-        decimal slicePrice = TryDecimal(root, "slice_price_zar", 8m);                // Now read as credits per slice.
+        decimal slicePrice = TryDecimal(root, "slice_price_credits", 8m);                // Now read as credits per slice.
         decimal penaltyPct = TryDecimal(root, "penalty_pct", 30m);
         int graceMin = TryInt(root, "grace_window_minutes", 5);
         int penaltyMin = TryInt(root, "penalty_window_minutes", 15);
@@ -43,6 +43,13 @@ public sealed class TenantSettingsAccessor
         string peakHours = TryString(root, "peak_hours", "16:00-19:00");                     // A.12 — peak window.
         int peakAdvanceHoursForRegular = TryInt(root, "peak_advance_hours_for_regular", 1);  // A.12 — Regular members may grab a still-empty peak slot within 1h of start.
         int retentionYears = TryInt(root, "retention_years", 2);                             // D.1 — 2-year retention.
+        int noShowLookbackDays = TryInt(root, "no_show_lookback_days", 7);                   // How far back the no-show sweep reaches; bounds a first-run backlog.
+
+        // What each of the court box's eight buttons does. The wiring is fixed and the
+        // meaning is not; the firmware learns this on the heartbeat. Lenient on read —
+        // a settings document somebody hand-edited into nonsense must not stop every
+        // box in the club from working. See ButtonMap.
+        var buttonMap = ButtonMap.FromSettings(root);
 
         return new TenantSettingsView(
             sliceMinutes, slicePrice, penaltyPct, graceMin, penaltyMin, advanceDays, tz,
@@ -51,7 +58,9 @@ public sealed class TenantSettingsAccessor
             memberPerDayMaxMinutes,
             peakHours, peakAdvanceHoursForRegular,
             retentionYears,
-            dayStartMinute, dayEndMinute);
+            dayStartMinute, dayEndMinute,
+            noShowLookbackDays,
+            buttonMap);
     }
 
     private static int TryInt(JsonElement root, string name, int fallback)
@@ -64,7 +73,7 @@ public sealed class TenantSettingsAccessor
 
 public sealed record TenantSettingsView(
     int SliceMinutes,
-    decimal DefaultSlicePriceZar,           // Unit is credits per blueprint A.8/A.9. Legacy field name kept.
+    decimal DefaultSlicePriceCredits,           // Unit is credits per blueprint A.8/A.9. Legacy field name kept.
     decimal PenaltyPct,
     int GraceWindowMinutes,
     int PenaltyWindowMinutes,
@@ -79,7 +88,9 @@ public sealed record TenantSettingsView(
     int PeakAdvanceHoursForRegular,
     int RetentionYears,
     int DayStartMinute,
-    int DayEndMinute)
+    int DayEndMinute,
+    int NoShowLookbackDays,
+    ButtonMap Buttons)
 {
     /// <summary>Returns credits-per-rand for a given member class. Defaults to <see cref="CreditsPerZarRegular"/> if unknown.</summary>
     public decimal ConversionRateFor(Crusaders.Mainframe.Api.Domain.MemberClass cls)

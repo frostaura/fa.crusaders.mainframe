@@ -1,0 +1,26 @@
+// The button panel driver. See include/arduino_hal/ArduinoButtons.h.
+
+#include "arduino_hal/ArduinoButtons.h"
+
+#include <Arduino.h>
+
+#include "arduino_hal/Pins.h"
+
+namespace arduino_hal {
+
+void ArduinoButtons::begin() {
+  for (uint8_t i = 0U; i < hal::kButtonCount; ++i) {
+    pinMode(kButtonPins[i], INPUT_PULLUP);
+  }
+}
+
+hal::PinLevel ArduinoButtons::read(uint8_t channel) {
+  if (channel >= hal::kButtonCount) {
+    // A pin that does not exist must never look pressed: a phantom press
+    // starts a court and spends a member's credits.
+    return hal::kButtonReleasedLevel;
+  }
+  return digitalRead(kButtonPins[channel]) == LOW ? hal::PinLevel::kLow : hal::PinLevel::kHigh;
+}
+
+} // namespace arduino_hal

@@ -1,0 +1,33 @@
+#include "roster/Roster.h"
+
+#include <string.h>
+
+namespace roster {
+namespace detail {
+
+bool copyToken(char* dest, size_t destCap, const char* src) {
+  if (dest == nullptr || destCap == 0U) {
+    return false;
+  }
+  memset(dest, 0, destCap);
+  if (src == nullptr) {
+    return false;
+  }
+
+  size_t i = 0U;
+  while (src[i] != '\0') {
+    if (i + 1U >= destCap) {
+      // Refuse rather than truncate. A truncated token is a token that matches
+      // a DIFFERENT member — the one failure mode worth losing a scan over.
+      memset(dest, 0, destCap);
+      return false;
+    }
+    dest[i] = src[i];
+    ++i;
+  }
+  dest[i] = '\0';
+  return true;
+}
+
+} // namespace detail
+} // namespace roster

@@ -43,7 +43,7 @@ public sealed class Booking : ITenantScoped
     public int SliceCount { get; set; } = 1;
 
     /// <summary>The price quoted to the player at booking time, locked in until cancellation. In credits (legacy column name kept for migration stability).</summary>
-    public decimal AmountChargedZar { get; set; }
+    public decimal AmountChargedCredits { get; set; }
 
     public BookingStatus Status { get; set; } = BookingStatus.Booked;
 
@@ -62,6 +62,36 @@ public sealed class Booking : ITenantScoped
     // fingerprint matches their booking. NoShowWorker uses this (NOT LightsOnCuedAt)
     // as the source of truth for "did the player show up?".
     public DateTimeOffset? CheckedInAt { get; set; }
+
+    /// <summary>
+    /// Optimistic concurrency token. Incremented by <c>MainframeDbContext.SaveChanges</c> on
+    /// every modification, so no caller has to remember to.
+    ///
+    /// <para>
+    /// A booking is decided by several actors at once — the member cancelling, an admin
+    /// cancelling on their behalf, the court box checking somebody in, and the no-show sweep
+    /// reversing a charge — and every one of them read the row, decided, and wrote, with
+    /// nothing in between. Two of those raced into real money:
+    /// </para>
+    ///
+    /// <list type="bullet">
+    ///   <item>A double-tap on the PWA's cancel button had both requests load a
+    ///   <c>Booked</c> row and both post a full refund, so a 200-credit booking paid back 400.</item>
+    ///   <item>The no-show sweep materialises its due list once per tick and never re-reads
+    ///   <c>CheckedInAt</c>. With a blocking email send per booking in between, a member who
+    ///   identified at the pad seconds after the tick began was refunded and penalised for a
+    ///   court they were playing on — leaving a row that is checked in and <c>NoShow</c> at
+    ///   the same time, which nothing else in the system expects.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// EF puts the original value in the UPDATE's WHERE clause, so the second writer matches
+    /// no rows and throws <c>DbUpdateConcurrencyException</c> instead of overwriting. Because
+    /// <c>LedgerService.PostAsync</c> saves through the same tracked context, the refusal
+    /// takes the ledger rows down with it: either the whole decision lands or none of it does.
+    /// </para>
+    /// </summary>
+    public int Version { get; set; }
 
     /// <summary>Set when the booking_charge ledger entry has been posted. Prevents double-charge if the player taps the pad twice.</summary>
     public DateTimeOffset? ChargedAt { get; set; }

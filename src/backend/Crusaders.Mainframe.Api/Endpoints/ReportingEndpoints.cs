@@ -35,9 +35,30 @@ public static class ReportingEndpoints
         {
             var (f, t) = ResolveRange(from, to);
             var rows = await db.LedgerEntries.Where(l => l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
-            var topUps = rows.Where(r => r.Type == LedgerEntryType.TopUp).Sum(r => r.AmountZar);
-            var reversals = rows.Where(r => r.Type == LedgerEntryType.PaymentReversal).Sum(r => r.AmountZar);
-            return Results.Ok(new { from = f, to = t, gross_topups_zar = topUps, reversals_zar = reversals, net_zar = topUps + reversals });
+            var funding = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type)).ToList();
+            var reversed = rows.Where(r => LedgerEntryTypes.Reversal.Contains(r.Type)).ToList();
+
+            // Rand comes from ZarPaid; credits come from AmountCredits. They are not
+            // interchangeable and this endpoint used to treat them as though they were —
+            // it summed AmountCredits and labelled the result gross_topups_zar, which the
+            // admin revenue page then printed with a rand sign. A Regular member's R1000
+            // top-up posts 1600 credits and a League member's posts 2400, so the club was
+            // shown R1600–R2400 of income for R1000 actually received, and no amount of
+            // arithmetic downstream could unmix the two classes once summed.
+            //
+            // Both figures are now reported side by side, each under a name that says what
+            // unit it is in — which is the same rule AdminMemberEndpoints already followed.
+            return Results.Ok(new
+            {
+                from = f,
+                to = t,
+                gross_topups_zar = funding.Sum(SignedZar),
+                reversals_zar = reversed.Sum(SignedZar),
+                net_zar = funding.Sum(SignedZar) + reversed.Sum(SignedZar),
+                gross_topups_credits = funding.Sum(r => r.AmountCredits),
+                reversals_credits = reversed.Sum(r => r.AmountCredits),
+                net_credits = funding.Sum(r => r.AmountCredits) + reversed.Sum(r => r.AmountCredits),
+            });
         });
 
         admin.MapGet("/utilisation", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, CancellationToken ct) =>
@@ -57,7 +78,7 @@ public static class ReportingEndpoints
                         court_name = meta.Name,
                         slices = g.Sum(b => b.SliceCount),
                         bookings = g.Count(),
-                        revenue_zar = g.Sum(b => b.AmountChargedZar),
+                        revenue_credits = g.Sum(b => b.AmountChargedCredits),
                     };
                 })
                 .OrderBy(r => r.court_number)
@@ -115,10 +136,10 @@ public static class ReportingEndpoints
                 return new
                 {
                     date = d.ToString("yyyy-MM-dd"),
-                    top_ups_zar = le.Where(x => x.Type == LedgerEntryType.TopUp).Sum(x => x.AmountZar),
-                    booking_charges_zar = -le.Where(x => x.Type == LedgerEntryType.BookingCharge).Sum(x => x.AmountZar),
-                    refunds_zar = le.Where(x => x.Type == LedgerEntryType.CancellationRefund).Sum(x => x.AmountZar),
-                    penalties_zar = -le.Where(x => x.Type == LedgerEntryType.NoShowPenalty || x.Type == LedgerEntryType.LateCancellationPenalty).Sum(x => x.AmountZar),
+                    top_ups_credits = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    booking_charges_credits = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    refunds_credits = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    penalties_credits = -le.Where(x => LedgerEntryTypes.Penalty.Contains(x.Type)).Sum(x => x.AmountCredits),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
                     no_shows = bk.Count(b => b.Status == BookingStatus.NoShow),
                 };
@@ -140,28 +161,46 @@ public static class ReportingEndpoints
 
             decimal running = 0m;
             // Seed running balance with everything before the window so the chart line starts at the right value.
-            running = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt < f).SumAsync(x => (decimal?)x.AmountZar, ct) ?? 0m;
+            running = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt < f).SumAsync(x => (decimal?)x.AmountCredits, ct) ?? 0m;
 
             var rows = allDays.Select(d =>
             {
                 var le = ledgerByDay.GetValueOrDefault(d) ?? new();
                 var bk = bookingsByDay.GetValueOrDefault(d) ?? new();
-                var dayDelta = le.Sum(x => x.AmountZar);
+                var dayDelta = le.Sum(x => x.AmountCredits);
                 running += dayDelta;
                 return new
                 {
                     date = d.ToString("yyyy-MM-dd"),
-                    top_ups_zar = le.Where(x => x.Type == LedgerEntryType.TopUp).Sum(x => x.AmountZar),
-                    spent_zar = -le.Where(x => x.Type == LedgerEntryType.BookingCharge).Sum(x => x.AmountZar),
-                    refunds_zar = le.Where(x => x.Type == LedgerEntryType.CancellationRefund).Sum(x => x.AmountZar),
+                    top_ups_credits = le.Where(x => LedgerEntryTypes.Funding.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    spent_credits = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    refunds_credits = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountCredits),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
-                    balance_zar = running,
+                    balance_credits = running,
                 };
             }).ToList();
             return Results.Ok(rows);
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// The rand a ledger row moved, signed the way its credits are.
+    ///
+    /// <para>
+    /// <c>ZarPaid</c> records what the member actually paid and is populated on funding and
+    /// reversal rows. Its stored sign cannot be relied on — <c>PaymentReversal</c> has no
+    /// producer yet, so no convention has been set by real data — while the credit amount's
+    /// sign is load-bearing everywhere else in this file. Taking the direction from the
+    /// credits keeps a reversal subtracting from revenue whichever way the rand figure is
+    /// eventually written.
+    /// </para>
+    /// </summary>
+    private static decimal SignedZar(LedgerEntry e)
+    {
+        var rand = Math.Abs(e.ZarPaid ?? 0m);
+        return e.AmountCredits < 0 ? -rand : rand;
     }
 
     private static IEnumerable<DateOnly> EnumerateDays(DateTimeOffset from, DateTimeOffset to)
@@ -180,22 +219,22 @@ public static class ReportingEndpoints
 
     private static object BuildWalletReport(List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to)
     {
-        var topUps = entries.Where(e => e.Type == LedgerEntryType.TopUp).Sum(e => e.AmountZar);
-        var spent = -entries.Where(e => e.Type == LedgerEntryType.BookingCharge).Sum(e => e.AmountZar);
-        var refunds = entries.Where(e => e.Type == LedgerEntryType.CancellationRefund).Sum(e => e.AmountZar);
-        var penalties = entries.Where(e => e.Type == LedgerEntryType.NoShowPenalty || e.Type == LedgerEntryType.LateCancellationPenalty).Count();
-        return new { from, to, top_ups_zar = topUps, spent_zar = spent, refunds_zar = refunds, penalty_count = penalties, count = entries.Count };
+        var topUps = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var spent = -entries.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var refunds = entries.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var penalties = entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Count();
+        return new { from, to, top_ups_credits = topUps, spent_credits = spent, refunds_credits = refunds, penalty_count = penalties, count = entries.Count };
     }
 
     private static string LedgerCsv(IEnumerable<LedgerEntry> entries)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("created_at,type,amount_zar,reason,external_reference,related_booking_id");
+        sb.AppendLine("created_at,type,amount_credits,reason,external_reference,related_booking_id");
         foreach (var e in entries)
         {
             sb.Append(e.CreatedAt.ToString("o", CultureInfo.InvariantCulture)).Append(',');
             sb.Append(e.Type).Append(',');
-            sb.Append(e.AmountZar.ToString(CultureInfo.InvariantCulture)).Append(',');
+            sb.Append(e.AmountCredits.ToString(CultureInfo.InvariantCulture)).Append(',');
             sb.Append(Csv(e.Reason)).Append(',');
             sb.Append(Csv(e.ExternalReference)).Append(',');
             sb.AppendLine(e.RelatedBookingId?.ToString() ?? "");

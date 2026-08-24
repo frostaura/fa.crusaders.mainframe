@@ -27,7 +27,7 @@ public sealed class LedgerService
     {
         var sum = await _db.LedgerEntries
             .Where(l => l.UserId == userId)
-            .SumAsync(l => (decimal?)l.AmountZar, ct);
+            .SumAsync(l => (decimal?)l.AmountCredits, ct);
         return sum ?? 0m;
     }
 
@@ -37,6 +37,61 @@ public sealed class LedgerService
               .OrderByDescending(l => l.CreatedAt)
               .ToListAsync(ct);
 
+    /// <summary>
+    /// Posts several movements as one unit of work.
+    ///
+    /// <para>
+    /// <see cref="PostAsync"/> saves per call, which is right when a caller has one movement
+    /// to make and wrong when it has two that must not come apart. A cancellation posts a
+    /// refund and a penalty separately — deliberately, because a netted row cannot answer
+    /// "how much penalty did I pay?" — and posting them in two saves meant a failure between
+    /// them left a full refund with no penalty. Payer reassignment had the same shape and a
+    /// worse consequence: a refund to the booker, then a charge to the volunteer, then the
+    /// field recording who now pays, in three independent commits.
+    /// </para>
+    ///
+    /// <para>
+    /// One save also means one concurrency check. Anything else the caller has changed on the
+    /// tracked context — a booking's status, its payer — goes in the same statement batch, so
+    /// the whole decision lands or none of it does.
+    /// </para>
+    ///
+    /// <para>
+    /// An empty list still saves: the caller's own pending changes are the point of the call
+    /// as much as the postings are.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<LedgerEntry>> PostManyAsync(
+        IReadOnlyList<LedgerPosting> postings, CancellationToken ct)
+    {
+        var entries = postings.Select(Build).ToList();
+        _db.LedgerEntries.AddRange(entries);
+        await _db.SaveChangesAsync(ct);
+
+        // One broadcast per affected user rather than one per row: two movements on the same
+        // wallet are one balance change as far as a live subscriber is concerned.
+        foreach (var userId in postings.Select(p => p.UserId).Distinct())
+        {
+            _broadcaster.Publish(userId, await GetBalanceAsync(userId, ct));
+        }
+
+        return entries;
+    }
+
+    private LedgerEntry Build(LedgerPosting posting) => new()
+    {
+        TenantId = _tenant.TenantId,
+        UserId = posting.UserId,
+        Type = posting.Type,
+        AmountCredits = posting.AmountCredits,
+        ZarPaid = posting.ZarPaid,
+        ConversionRate = posting.ConversionRate,
+        RelatedBookingId = posting.RelatedBookingId,
+        ActorUserId = posting.ActorUserId,
+        Reason = posting.Reason,
+        ExternalReference = posting.ExternalReference,
+    };
+
     public async Task<LedgerEntry> PostAsync(LedgerPosting posting, CancellationToken ct)
     {
         var entry = new LedgerEntry
@@ -44,7 +99,7 @@ public sealed class LedgerService
             TenantId = _tenant.TenantId,
             UserId = posting.UserId,
             Type = posting.Type,
-            AmountZar = posting.AmountZar,
+            AmountCredits = posting.AmountCredits,
             ZarPaid = posting.ZarPaid,
             ConversionRate = posting.ConversionRate,
             RelatedBookingId = posting.RelatedBookingId,
@@ -66,7 +121,7 @@ public sealed class LedgerService
 public sealed record LedgerPosting(
     Guid UserId,
     LedgerEntryType Type,
-    decimal AmountZar,                 // signed credits amount (legacy field name)
+    decimal AmountCredits,                 // signed credits amount (legacy field name)
     Guid ActorUserId,
     Guid? RelatedBookingId = null,
     string? Reason = null,

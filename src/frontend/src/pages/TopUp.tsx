@@ -65,7 +65,7 @@ export default function TopUpPage() {
     <div className="max-w-md mx-auto px-4">
       <Card>
         <h1 className="text-xl font-semibold mb-1">Top up</h1>
-        <p className="text-sm text-text-secondary mb-5">Pay in ZAR via PeachPayments — your wallet is credited in <strong>credits</strong> at your member-class rate.</p>
+        <p className="text-sm text-text-secondary mb-5">Pay in ZAR via PayFast — your wallet is credited in <strong>credits</strong> at your member-class rate.</p>
         <form onSubmit={submit} className="space-y-4">
           <div>
             <Label>Amount (ZAR)</Label>
@@ -96,7 +96,7 @@ export default function TopUpPage() {
           </div>
 
           {error && <p className="text-sm text-danger-strong">{error}</p>}
-          <Button type="submit" disabled={loading || !validAmount} className="w-full">{loading ? "Redirecting…" : "Continue to PeachPayments"}</Button>
+          <Button type="submit" disabled={loading || !validAmount} className="w-full">{loading ? "Redirecting…" : "Continue to PayFast"}</Button>
           <Button type="button" variant="ghost" onClick={() => nav("/wallet")} className="w-full">Cancel</Button>
         </form>
       </Card>

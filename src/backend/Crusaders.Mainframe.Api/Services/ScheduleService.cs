@@ -60,7 +60,7 @@ public sealed class ScheduleService
             DayStartMinute: settings.DayStartMinute,
             DayEndMinute: settings.DayEndMinute,
             AdvanceBookingDays: settings.AdvanceBookingDays,
-            Courts: courts.Select(c => new ScheduleCourt(c.Id, c.CourtNumber, c.Name, c.SlicePriceZar)).ToList(),
+            Courts: courts.Select(c => new ScheduleCourt(c.Id, c.CourtNumber, c.Name, c.SlicePriceCredits)).ToList(),
             Slots: slots);
     }
 
@@ -87,7 +87,7 @@ public sealed record ScheduleDay(
     List<ScheduleCourt> Courts,
     List<ScheduleSlot> Slots);
 
-public sealed record ScheduleCourt(Guid Id, int CourtNumber, string Name, decimal SlicePriceZar);
+public sealed record ScheduleCourt(Guid Id, int CourtNumber, string Name, decimal SlicePriceCredits);
 
 public sealed record ScheduleSlot(
     Guid CourtId,

@@ -1,0 +1,33 @@
+---
+# Crusaders Mainframe — C/C++ style for src/iot.
+# IndentWidth matches .editorconfig's global indent_size = 2.
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 110
+PointerAlignment: Left
+ReferenceAlignment: Left
+AccessModifierOffset: -2
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+# A missing brace on a single-statement if is a firmware bug class. Always brace.
+InsertBraces: true
+SeparateDefinitionBlocks: Always
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<(Arduino|WiFi|ESP8266|ESP32|Wire|LiquidCrystal).*>'
+    Priority: 1
+  - Regex: '^<.*\.h>'
+    Priority: 2
+  - Regex: '^<.*>'
+    Priority: 3
+  - Regex: '^"hal/'
+    Priority: 4
+  - Regex: '.*'
+    Priority: 5
+DerivePointerAlignment: false
+InsertNewlineAtEOF: true

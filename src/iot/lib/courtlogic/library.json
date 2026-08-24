@@ -1,0 +1,10 @@
+{
+  "name": "courtlogic",
+  "version": "1.0.0",
+  "description": "Mega-side court box behaviour: independent relay auto-off timer, button debounce, scanner line assembly, auth window and the frame dispatcher. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
+  "keywords": "relay, safety, debounce, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": { "hal": "*", "protocol": "*", "timebase": "*", "fwversion": "*" },
+  "build": { "flags": ["-I include"] }
+}

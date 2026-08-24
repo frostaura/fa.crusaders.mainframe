@@ -57,14 +57,50 @@ export const api = {
 
 export type WhoAmI = { tenant_slug: string; tenant_id: string; user_id: string | null; is_authenticated: boolean; is_admin: boolean };
 export type LoginResponse = { access_token: string; user_id: string; is_admin: boolean };
+/**
+ * Every ledger entry type the backend can emit.
+ *
+ * A real union rather than `string`, so adding a type on the backend without
+ * teaching the frontend about it is a compile error here rather than a silent
+ * gap in the admin filter. It was `string`, and the filter list below was a
+ * hand-maintained array that had no relationship to it — nothing connected the
+ * two, so a new type appeared in the ledger and was unfilterable, with no
+ * warning anywhere.
+ *
+ * Keep in step with `LedgerEntryType` in the backend domain. The backend's
+ * LedgerEntryTypeCoverageTests pins the member count, so the two cannot drift
+ * far without something going red.
+ */
+export type LedgerEntryType =
+  | "TopUp"
+  | "BookingCharge"
+  | "CancellationRefund"
+  | "NoShowPenalty"
+  | "LateCancellationPenalty"
+  | "AdminAdjustment"
+  | "PaymentReversal"
+  | "LightsPurchase";
+
+/** The filter list, derived from the union so the two cannot disagree. */
+export const LEDGER_ENTRY_TYPES: readonly LedgerEntryType[] = [
+  "AdminAdjustment",
+  "BookingCharge",
+  "CancellationRefund",
+  "LateCancellationPenalty",
+  "LightsPurchase",
+  "NoShowPenalty",
+  "PaymentReversal",
+  "TopUp",
+];
+
 export type LedgerRow = {
   id: string;
   at: string;
   from: string;
   to: string;
-  amountZar: number;
-  signedAmountZar: number;
-  type: string;
+  amountCredits: number;
+  signedAmountCredits: number;
+  type: LedgerEntryType;
   comment: string;
   subjectUserId: string;
   subjectName: string;
@@ -74,7 +110,7 @@ export type LedgerRow = {
 };
 
 export type WalletResponse = {
-  balance_zar: number;
+  balance_credits: number;
   entries: LedgerRow[];
 };
 export type ScheduleSlot = {
@@ -88,7 +124,7 @@ export type ScheduleSlot = {
   bookingId: string | null;
   blockLabel: string | null;
 };
-export type ScheduleCourt = { id: string; courtNumber: number; name: string; slicePriceZar: number };
+export type ScheduleCourt = { id: string; courtNumber: number; name: string; slicePriceCredits: number };
 export type ScheduleDay = {
   date: string; timezone: string; sliceMinutes: number;
   dayStartMinute: number; dayEndMinute: number; advanceBookingDays: number;
@@ -97,7 +133,7 @@ export type ScheduleDay = {
 
 export type AdminSettings = {
   slice_minutes: number;
-  slice_price_zar: number;
+  slice_price_credits: number;
   advance_booking_days: number;
   day_start_minute: number;
   day_end_minute: number;
@@ -105,6 +141,97 @@ export type AdminSettings = {
   grace_window_minutes: number;
   penalty_window_minutes: number;
   timezone: string;
+
+  /** What each of a court box's eight buttons does, by physical position. */
+  button_map: string[];
+
+  // The nine keys the engine has always read and this API never showed. Until they
+  // were surfaced the only way to change one was to hand-edit a JSON column on a
+  // live money system.
+  credits_per_zar_regular: number;
+  credits_per_zar_league: number;
+  topup_block_zar: number;
+  topup_max_zar_per_member: number;
+  member_per_day_max_minutes: number;
+  peak_hours: string;
+  peak_advance_hours_for_regular: number;
+  retention_years: number;
+  no_show_lookback_days: number;
+};
+
+/**
+ * What a settings save may carry. The eight booking fields are required because every
+ * form shows them; everything else is optional, and omitting it means unchanged.
+ */
+export type AdminSettingsSave =
+  Pick<AdminSettings, "slice_minutes" | "slice_price_credits" | "advance_booking_days"
+    | "day_start_minute" | "day_end_minute" | "penalty_pct" | "grace_window_minutes"
+    | "penalty_window_minutes">
+  & Partial<Omit<AdminSettings, "timezone">>;
+
+/** A court box or gate controller, as the admin surface sees it. */
+export type AdminDevice = {
+  id: string;
+  device_code: string;
+  name: string;
+  kind: string;
+  hardware: string;
+  court_number: number | null;
+  gate_key: string | null;
+  mac_address: string | null;
+  key_version: number;
+  enabled: boolean;
+  revoked_at: string | null;
+  last_seen_at: string | null;
+  last_ip_address: string | null;
+  running_version: string | null;
+  mega_version: string | null;
+  ota_channel: string;
+  pinned_version: string | null;
+  /** A build this box installed and could never make a working call on. */
+  failed_version: string | null;
+  created_at: string;
+};
+
+/** A board announcing itself on the LAN that has not been claimed yet. */
+export type DiscoveredBoard = {
+  mac: string;
+  address: string;
+  hardware: string;
+  firmware: string;
+  mega_version: string | null;
+  claimed: boolean;
+  claimable: boolean;
+  /** Null when there was nothing to verify. False means a board asserted an identity
+   *  it could not prove, which is what a spoof AND a rotated key both look like. */
+  signature_verified: boolean | null;
+  device_id: string | null;
+  tenant_slug: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+};
+
+export type DiscoveryStatus = {
+  state: string;
+  listening: boolean;
+  bound_endpoint: string | null;
+  detail: string | null;
+  packets_received: number;
+  packets_accepted: number;
+  packets_rejected: number;
+  last_packet_at: string | null;
+  started_at: string | null;
+  announcers: number;
+  capacity_reached: boolean;
+  hint: string | null;
+};
+
+export type ClaimResult = {
+  device: AdminDevice;
+  device_key: string;
+  key_version: number;
+  board: DiscoveredBoard;
+  note: string;
 };
 
 export type AdminCourt = {
@@ -112,7 +239,7 @@ export type AdminCourt = {
   court_number: number;
   name: string;
   court_type: string;
-  slice_price_zar: number;
+  slice_price_credits: number;
   is_active: boolean;
 };
 export type MyProfile = {
@@ -131,14 +258,14 @@ export type AdminMember = {
   full_name: string; membership_number: string; photo_url: string | null;
   status: string; created_at: string; rejection_reason: string | null;
   member_class?: "Regular" | "LeagueOrSenior";   // Phase 8.1
-  balance_zar: number;
+  balance_credits: number;
 };
 
 // Phase 8 — per-member spend drill-down (blueprint C.3).
 export type MemberSpendMonth = {
   month: string;
-  top_ups_credits: number;
-  top_ups_zar: number;
+  top_ups_credits: number;   // credits added to the wallet
+  top_ups_zar: number;       // actual rand paid, for reconciliation
   spent_credits: number;
   refunds_credits: number;
   penalties_credits: number;
@@ -200,10 +327,27 @@ export type WebAuthnCredentialRow = {
   last_used_at: string | null;
 };
 
-export type WalletReport = { from: string; to: string; top_ups_zar: number; spent_zar: number; refunds_zar: number; penalty_count: number; count: number };
-export type DailyAdminPoint = { date: string; top_ups_zar: number; booking_charges_zar: number; refunds_zar: number; penalties_zar: number; bookings: number; no_shows: number };
-export type DailyMePoint = { date: string; top_ups_zar: number; spent_zar: number; refunds_zar: number; bookings: number; balance_zar: number };
-export type RevenueReport = { from: string; to: string; gross_topups_zar: number; reversals_zar: number; net_zar: number };
+export type WalletReport = { from: string; to: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; penalty_count: number; count: number };
+export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; bookings: number; no_shows: number };
+export type DailyMePoint = { date: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; bookings: number; balance_credits: number };
+/**
+ * Club revenue over a window, in BOTH units, because they are not interchangeable.
+ *
+ * The `_zar` fields are what members actually paid, from `LedgerEntry.ZarPaid`. The
+ * `_credits` fields are what those payments became at each member's class rate. The API
+ * used to send credits under the `_zar` names and this page printed them with a rand sign,
+ * so R1000 of income was reported as R1600 (Regular) or R2400 (League).
+ */
+export type RevenueReport = {
+  from: string;
+  to: string;
+  gross_topups_zar: number;
+  reversals_zar: number;
+  net_zar: number;
+  gross_topups_credits: number;
+  reversals_credits: number;
+  net_credits: number;
+};
 
 export async function uploadPhoto(file: File): Promise<{ url: string }> {
   const fd = new FormData();
@@ -245,14 +389,14 @@ export const endpoints = {
   wallet: () => api.get<WalletResponse>("/api/v1/wallet"),
   schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}`),
   book: (courtId: string, startsAt: string, sliceCount: number) =>
-    api.post<{ booking_id: string; balance_after_zar: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),
-  cancelBooking: (bookingId: string) => api.post<{ refunded_zar: number; penalty_zar: number }>(`/api/v1/bookings/${bookingId}/cancel`),
+    api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),
+  cancelBooking: (bookingId: string) => api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/bookings/${bookingId}/cancel`),
 
   adminMembers: (status?: string) => api.get<AdminMember[]>(`/api/v1/admin/members/${status ? `?status=${status}` : ""}`),
   adminApprove: (memberId: string) => api.post<{ approved: boolean }>(`/api/v1/admin/members/${memberId}/approve`),
   adminReject: (memberId: string, reason: string) => api.post<{ rejected: boolean }>(`/api/v1/admin/members/${memberId}/reject`, { reason }),
-  adminAdjust: (userId: string, amountZar: number, reason: string) =>
-    api.post<{ entry_id: string; amount_zar: number; balance_after_zar: number }>(`/api/v1/admin/credit/${userId}/adjust`, { amountZar, reason }),
+  adminAdjust: (userId: string, amountCredits: number, reason: string) =>
+    api.post<{ entry_id: string; amount_credits: number; balance_after_credits: number }>(`/api/v1/admin/credit/${userId}/adjust`, { amountCredits, reason }),
   adminResetMemberPassword: (memberId: string) =>
     api.post<{ temp_password: string; email_sent_to: string; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
 
@@ -279,7 +423,7 @@ export const endpoints = {
     api.post<{ matched: boolean; user_id?: string; reason?: string }>(`/api/v1/court/${courtNumber}/qr/match`, { token }),
 
   // Top-up
-  topupStart: (amountZar: number) => api.post<{ topup_id: string; checkout_id: string; redirect_url: string }>("/api/v1/credit/topup", { amountZar }),
+  topupStart: (amountCredits: number) => api.post<{ topup_id: string; checkout_id: string; redirect_url: string }>("/api/v1/credit/topup", { amountCredits }),
   topupStatus: (topupId: string) => api.get<{ id: string; status: string; amount_zar: number; failure_reason: string | null }>(`/api/v1/credit/topup/${topupId}`),
 
   // Webhooks (admin)
@@ -306,7 +450,7 @@ export const endpoints = {
   reportRevenue: (from?: string, to?: string) =>
     api.get<RevenueReport>(`/api/v1/admin/reports/revenue${qs({ from, to })}`),
   reportUtilisation: (from?: string, to?: string) =>
-    api.get<{ from: string; to: string; by_court: { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_zar: number }[] }>(`/api/v1/admin/reports/utilisation${qs({ from, to })}`),
+    api.get<{ from: string; to: string; by_court: { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_credits: number }[] }>(`/api/v1/admin/reports/utilisation${qs({ from, to })}`),
   reportNoShows: (from?: string, to?: string) =>
     api.get<{ from: string; to: string; total: number; no_show: number; no_show_pct: number }>(`/api/v1/admin/reports/no-shows${qs({ from, to })}`),
   reportDailyAdmin: (from?: string, to?: string) =>
@@ -316,22 +460,54 @@ export const endpoints = {
 
   // Admin: tenant-wide config
   adminSettingsGet: () => api.get<AdminSettings>("/api/v1/admin/settings/"),
-  adminSettingsSave: (req: Omit<AdminSettings, "timezone">) => api.put<{ saved: true }>("/api/v1/admin/settings/", {
+  /**
+   * Saves settings.
+   *
+   * Everything past the eight booking fields is optional and OMITTED WHEN UNDEFINED,
+   * because the API reads an absent key as "unchanged". That is what lets the booking
+   * form, the economics form and the button-map editor be three screens without any
+   * of them reverting the others' work on save.
+   */
+  adminSettingsSave: (req: AdminSettingsSave) => api.put<{ saved: true }>("/api/v1/admin/settings/", {
     sliceMinutes: req.slice_minutes,
-    slicePriceZar: req.slice_price_zar,
+    slicePriceCredits: req.slice_price_credits,
     advanceBookingDays: req.advance_booking_days,
     dayStartMinute: req.day_start_minute,
     dayEndMinute: req.day_end_minute,
     penaltyPct: req.penalty_pct,
     graceWindowMinutes: req.grace_window_minutes,
     penaltyWindowMinutes: req.penalty_window_minutes,
+    ...(req.button_map !== undefined ? { buttonMap: req.button_map } : {}),
+    ...(req.credits_per_zar_regular !== undefined ? { creditsPerZarRegular: req.credits_per_zar_regular } : {}),
+    ...(req.credits_per_zar_league !== undefined ? { creditsPerZarLeague: req.credits_per_zar_league } : {}),
+    ...(req.topup_block_zar !== undefined ? { topupBlockZar: req.topup_block_zar } : {}),
+    ...(req.topup_max_zar_per_member !== undefined ? { topupMaxZarPerMember: req.topup_max_zar_per_member } : {}),
+    ...(req.member_per_day_max_minutes !== undefined ? { memberPerDayMaxMinutes: req.member_per_day_max_minutes } : {}),
+    ...(req.peak_hours !== undefined ? { peakHours: req.peak_hours } : {}),
+    ...(req.peak_advance_hours_for_regular !== undefined ? { peakAdvanceHoursForRegular: req.peak_advance_hours_for_regular } : {}),
+    ...(req.retention_years !== undefined ? { retentionYears: req.retention_years } : {}),
+    ...(req.no_show_lookback_days !== undefined ? { noShowLookbackDays: req.no_show_lookback_days } : {}),
   }),
+
+  // Admin: devices
+  adminDevicesList: () => api.get<AdminDevice[]>("/api/v1/admin/devices/"),
+  adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; courtNumber?: number | null; otaChannel?: string; pinnedVersion?: string | null }) =>
+    api.patch<{ saved: true }>(`/api/v1/admin/devices/${id}`, req),
+  adminDeviceRevoke: (id: string) => api.post<{ revoked: true }>(`/api/v1/admin/devices/${id}/revoke`, {}),
+  adminDeviceRotateKey: (id: string) =>
+    api.post<{ device_key: string; key_version: number }>(`/api/v1/admin/devices/${id}/rotate-key`, {}),
+
+  // Admin: connecting a board
+  adminDevicesDiscovered: () => api.get<DiscoveredBoard[]>("/api/v1/admin/devices/discovered"),
+  adminDiscoveryStatus: () => api.get<DiscoveryStatus>("/api/v1/admin/devices/discovery-status"),
+  adminDeviceClaim: (req: { mac: string; claimCode: string; name: string; courtNumber?: number | null }) =>
+    api.post<ClaimResult>("/api/v1/admin/devices/claim", req),
 
   // Admin: courts
   adminCourtsList: () => api.get<AdminCourt[]>("/api/v1/admin/courts/"),
-  adminCourtsCreate: (req: { name: string; courtType?: string; slicePriceZar: number }) =>
-    api.post<{ id: string; court_number: number }>("/api/v1/admin/courts/", { name: req.name, courtType: req.courtType ?? "Squash", slicePriceZar: req.slicePriceZar }),
-  adminCourtsUpdate: (id: string, req: { name?: string; slicePriceZar?: number; isActive?: boolean }) =>
+  adminCourtsCreate: (req: { name: string; courtType?: string; slicePriceCredits: number }) =>
+    api.post<{ id: string; court_number: number }>("/api/v1/admin/courts/", { name: req.name, courtType: req.courtType ?? "Squash", slicePriceCredits: req.slicePriceCredits }),
+  adminCourtsUpdate: (id: string, req: { name?: string; slicePriceCredits?: number; isActive?: boolean }) =>
     api.patch<{ saved: true }>(`/api/v1/admin/courts/${id}`, req),
   adminCourtsDelete: (id: string) => api.del<{ deactivated: true }>(`/api/v1/admin/courts/${id}`),
 

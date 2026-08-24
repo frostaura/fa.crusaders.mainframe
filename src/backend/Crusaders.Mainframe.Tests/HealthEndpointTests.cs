@@ -4,11 +4,11 @@ using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Crusaders.Mainframe.Tests;
 
-public class HealthEndpointTests : IClassFixture<WebApplicationFactory<Program>>
+public class HealthEndpointTests : IClassFixture<TestWebAppFactory>
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestWebAppFactory _factory;
 
-    public HealthEndpointTests(WebApplicationFactory<Program> factory) => _factory = factory;
+    public HealthEndpointTests(TestWebAppFactory factory) => _factory = factory;
 
     [Fact]
     public async Task Healthz_returns_ok_payload()

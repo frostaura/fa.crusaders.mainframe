@@ -1,10 +1,15 @@
 # Client Blueprint — Implementation Deltas
 
-A line-by-line reconciliation of [`client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md`](./client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md) against the build as of 2026-05-09. Three columns:
+A line-by-line reconciliation of [`client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md`](./client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md) against the build as of 2026-08-23. Four columns:
 
 - ✅ **Done** — implemented and matches the client's requirement.
 - 🟡 **Adjust** — implemented but the client requirement narrows / changes the parameters.
 - 🆕 **New** — not in the current build; needs design and code.
+- ⚠️ **Deviation** — built deliberately **against** the blueprint. The blueprint is the
+  customer's own word and outranks internal specs on economics, so a deviation is not a
+  decision this repo gets to make alone: each one is listed under
+  [Deviations needing committee sign-off](#deviations-needing-committee-sign-off) and
+  **must be signed off before go-live**.
 
 ## Reconciliation table
 
@@ -18,7 +23,7 @@ A line-by-line reconciliation of [`client-blueprints/Crusaders-Blueprint-2026-05
 | A.6 — admin override unlimited | ✅ | Admin booking endpoint bypasses windows + caps. |
 | A.7 — **two member classes:** member, league/65+ | 🆕 | Add `MemberClass` enum to `Membership` (`Regular`, `LeagueOrSenior`). Default `Regular`. Admin assigns class. |
 | A.8 — **differential top-up rates by class:** R100 → 160 credits (Regular) / 240 credits (League/65+) | 🆕 | Major model change — the ledger unit is **credits**, not ZAR. Top-up converts at class-specific rate. ZAR amount is captured on the `PendingTopup` row for reconciliation; ledger entry is denominated in credits. Slice prices are also in credits. |
-| A.9 — **debit on lights-on**, not on booking | 🆕 | Booking creation today posts a `BookingCharge` debit immediately. **Change:** booking creates a *hold* (verify balance, reserve slot, no ledger entry); the lights-on event posts the debit. No-show within grace = `NoShowPenalty` partial debit. Cancellation before lights-on = no debit at all (no refund needed). |
+| A.9 — **debit on lights-on**, not on booking | ⚠️ | **Built the other way, on purpose.** `CreateAsync` posts the `BookingCharge` debit at booking time; the court settles only *who* pays. See [D-1](#d-1--the-debit-happens-at-booking-not-at-lights-on) — **needs committee sign-off**. |
 | A.10 — league games booked by admin, paid by member | ✅ | Admin booking-on-behalf charges the member's credit. |
 | A.11 — admin override for control | ✅ | Audit-logged. |
 | A.12 — **peak-hours league exclusivity (16:00–19:00)** | 🆕 | At booking-create, if the slot is in peak hours **and** any league/65+ member could plausibly want it, refuse Regular bookings. Implementation: simple rule — Regular members cannot book peak slots earlier than `T-now` (e.g. earlier than 1 hour before slot start). Inside the last hour, peak slots open up to anyone if still empty. Configurable. |
@@ -54,28 +59,45 @@ The ledger is denominated in **credits**. Top-ups convert ZAR → credits at the
 
 **Top-up flow:**
 1. Player clicks Top Up → enters R-amount (must be a multiple of `topup_block_zar`, default R100, ≤ `topup_max_zar_per_member`, default R1000).
-2. PeachPayments hosted checkout completes.
+2. PayFast hosted checkout completes.
 3. Callback writes `LedgerEntry { Type: TopUp, AmountCredits: zar * rate, ZarPaid: zar, ConversionRate: rate }`.
 
 **Display:** balance shown in credits (not rand) on the wallet UI. Rand only appears on top-up screens and admin reports.
 
-### 2. Charge on lights-on, not on booking
+### 2. Charge at booking — ⚠️ a deviation from A.9
 
-Booking is a *hold*, not a charge.
+**This section described the opposite until 2026-08-23.** The blueprint asks for the debit
+at lights-on; the founder's decision is to take it at booking. What follows is what the code
+now does. The reasoning, and what the committee is being asked to approve, is in
+[D-1](#d-1--the-debit-happens-at-booking-not-at-lights-on).
 
 **State machine:**
-- `BookingStatus.Booked` — slot reserved, balance verified, **no ledger entry yet**.
-- `BookingStatus.Active` (new) — lights-on fired; debit posted to ledger.
-- `BookingStatus.Completed` — slice ended after Active.
-- `BookingStatus.NoShow` — grace expired without lights-on; penalty entry posted.
-- `BookingStatus.Cancelled` — cancelled before lights-on; **no ledger entry** at all.
+- `BookingStatus.Booked` — slot reserved **and charged**; `ChargedAt` stamped.
+- `BookingStatus.Completed` — the slice ended and somebody had checked in.
+- `BookingStatus.NoShow` — grace expired without a check-in; the charge is refunded and
+  `NoShowPenalty` posted.
+- `BookingStatus.Cancelled` — cancelled; refunded per the rules below.
+
+There is no `Active` status. Attendance is the `CheckedInAt` stamp written by
+`CourtActivationService`, not a status — a status would have to be maintained by something,
+and the only honest witness to attendance is the identification event itself.
 
 **Implications:**
-- Cancellation before grace window = clean (no refund row, because no charge ever happened).
-- Cancellation inside the grace window = `LateCancellationPenalty` row posted.
-- No-show = `NoShowPenalty` row posted.
+- Cancellation outside the penalty window — full refund; the member is where they started.
+- Cancellation inside the penalty window — full refund **and** a `LateCancellationPenalty`
+  row. Two rows, not one net row: a netted movement settles to the same balance and cannot
+  answer "how much penalty did I pay?", which is precisely what a disputed cancellation asks.
+- Cancellation after check-in — **no refund**. This is the one rule that survives unchanged
+  from the lights-on model.
+- No-show — `CancellationRefund` for the full amount plus `NoShowPenalty`, which is the
+  blueprint's own description: the penalty is kept and "the remainder of the fee then gets
+  returned to the user that didn't pitch".
+- At-court payer override — the booker has *already paid*, so honouring "I'll pay" refunds
+  the booker and charges the volunteer. If the volunteer cannot afford it the whole
+  reassignment is refused rather than half-applied.
 
-This is a meaningful simplification of the ledger flow.
+**Walk-ups** are ordinary bookings on this path: created at the court, truncated at whatever
+booking comes next, and charged **pro rata** — the first fractional price in the system.
 
 ### 3. Member classes drive pricing AND access
 
@@ -106,9 +128,72 @@ This handles guest play, doubles, league-night billing splits, etc.
 - **Member-spend drill-down:** new admin page `/admin/members/{id}/spend` that filters the wallet ledger to that member with monthly buckets.
 - **2-year retention worker:** nightly job that anonymises bookings older than `retention_years` (default 2) — clear `user_id` to a sentinel "former-member" UUID, keep aggregate counts for analytics.
 
+## Deviations needing committee sign-off
+
+The blueprint is the customer's word. Where the build departs from it, that departure is
+recorded here rather than absorbed silently, and it is **not settled until the committee
+says so**.
+
+### D-1 — the debit happens at booking, not at lights-on
+
+**Blueprint A.9:** the member's account is debited "on putting lights on".
+**Built:** the debit is posted when the booking is created.
+**Decided by:** the founder, 2026-08-22. **Status: awaiting committee sign-off.**
+
+*Why it was changed.* Under charge-on-lights-on a booking holds a court while taking
+nothing, so the failure mode is a member who books four peak slots, turns up to one, and has
+had four courts out of circulation at no cost. It also splits the money story across two
+events that can disagree: the code shipped with a grace window that meant a member could be
+inside the activation window and already swept as a no-show, unpaid, with the lights on.
+
+*What it costs.* A member who books and cancels in good time sees two ledger rows — a charge
+and a refund — where the blueprint promised none. Their balance is unchanged, but their
+statement is busier. That is a real difference to what the club was told, and it is the
+thing to put to the committee.
+
+*What is unaffected.* No refund once the lights have been on. The 30% / 5-minute / 15-minute
+penalty economics. Who pays under the at-court override. The no-show outcome — refund less
+penalty — is the same either way.
+
+*If the committee says no*, the reversal is `BookingService.CreateAsync` and
+`CancelAsync` plus the tests that pin them; the ledger types, the activation path and the
+court box are all indifferent to which end the debit is taken from.
+
+### D-2 — firmware is signed with RSA-2048, not Ed25519
+
+**Planned:** Ed25519 signatures on OTA images.
+**Built:** RSA-2048/SHA-256, via the ESP8266 Arduino core's supported signed-update path.
+**Decided by:** implementation constraint, 2026-08-23. **Not a product decision** — recorded
+here so nobody reads the plan later and assumes it was done.
+
+The reasoning behind "Ed25519, not HMAC" was that an HMAC keyed with the device key would let
+one compromised box forge firmware for the whole fleet — the signing key must be one no box
+holds. **That property is unchanged.** The signing key is asymmetric and lives only where
+releases are built, so a stolen board yields nothing that can sign firmware for any other.
+
+What differs is the algorithm. BearSSL — the TLS stack already linked into the image — has no
+Ed25519, and the alternative was vendoring a curve implementation into a court-lighting
+controller. A few hundred extra bytes per image is the better trade.
+
+**There is also no true rollback**, and that is worth stating plainly: a 4M ESP carrying a
+1 MB sketch and 2 MB of LittleFS has no second OTA slot, and the filesystem is not optional
+because it holds the device credential. What the boot guard does instead is stop a bad build
+being installed twice — which is the failure that takes out a club, since every box
+heartbeats against the same manifest and would otherwise reflash in a loop, all at once. A
+box that will not boot at all still needs a USB cable.
+
+### Ratified, not open
+
+- **Penalty economics — 30% penalty, 5-minute grace, 15-minute penalty window.** Agreed with
+  the founder and **not** a deviation; recorded here so it is not re-litigated as one. The
+  numbers are `tenant_settings` keys (`penalty_pct`, `grace_window_minutes`,
+  `penalty_window_minutes`), so the club can move them without a deploy.
+- **Walk-ups are real bookings**, in the member's name and visible online immediately, rather
+  than an anonymous cash sale at the court.
+
 ## Open product questions to bring back to the committee
 
-1. **Saved cards / one-tap top-up.** PeachPayments supports tokenised cards. Yes/no?
+1. **Saved cards / one-tap top-up.** PayFast supports tokenised recurring billing. Yes/no?
 2. **What exactly is "league player / over 65's"?** Is over-65 the only senior class, or any senior membership category at the club? Confirm.
 3. **Peak-hours definition** — is 16:00–19:00 every weekday, or also weekends? Same rule on Saturday morning?
 4. **Per-day cap exceptions** — does the 1-hour cap apply to admin-booked bookings (e.g. league nights)? Likely no but confirm.
@@ -122,7 +207,7 @@ This whole block is best treated as one phase — call it **Phase 8 — Client d
 
 - 8.1 Member classes (schema + admin UI to assign).
 - 8.2 Credits model (rename + conversion + top-up flow + display).
-- 8.3 Charge-on-lights-on (booking state machine + ledger flow rewrite).
+- 8.3 Charge **at booking** (booking state machine + ledger flow rewrite) — ⚠️ deviates from A.9, see D-1.
 - 8.4 Per-day cap + peak-hours rule + admin overrides.
 - 8.5 At-court payer override (courtside flow + booking schema field).
 - 8.6 Identification PIN + QR (defer face).

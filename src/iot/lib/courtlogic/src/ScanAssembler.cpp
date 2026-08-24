@@ -1,0 +1,101 @@
+// Scanner line assembly. See include/courtlogic/ScanAssembler.h.
+
+#include "courtlogic/ScanAssembler.h"
+
+namespace courtlogic {
+
+namespace {
+
+/// The scanner is configured for printable ASCII terminated by \r or \n.
+/// Everything below 0x20 that is not a terminator, and 0x7F, is line noise from
+/// the relay coils rather than part of a member's code.
+bool isPayloadByte(uint8_t byte) {
+  return byte >= 0x20U && byte != 0x7FU;
+}
+
+bool isTerminator(uint8_t byte) {
+  return byte == static_cast<uint8_t>('\r') || byte == static_cast<uint8_t>('\n');
+}
+
+} // namespace
+
+ScanAssembler::ScanAssembler()
+    : buf_(), len_(0U), poisoned_(false), lastWasCr_(false), holding_(false), lastReject_(ScanReject::None),
+      rejected_(0U) {
+  buf_[0] = '\0';
+}
+
+void ScanAssembler::reset() {
+  len_ = 0U;
+  poisoned_ = false;
+  lastWasCr_ = false;
+  holding_ = false;
+  buf_[0] = '\0';
+}
+
+void ScanAssembler::reject(ScanReject why) {
+  if (poisoned_) {
+    // One count per LINE, not per byte. An over-long code keeps arriving after
+    // the limit is hit, and counting each byte would turn a single bad scan
+    // into a number that looks like a failing cable.
+    return;
+  }
+  poisoned_ = true;
+  lastReject_ = why;
+  if (rejected_ < UINT16_MAX) {
+    ++rejected_;
+  }
+}
+
+bool ScanAssembler::feed(uint8_t byte) {
+  const bool afterCr = lastWasCr_;
+  lastWasCr_ = byte == static_cast<uint8_t>('\r');
+
+  if (byte == static_cast<uint8_t>('\n') && afterCr) {
+    // The tail of a CRLF. One terminator, not two — treating it as a second
+    // one would end an empty line on every single scan.
+    return false;
+  }
+  if (isTerminator(byte)) {
+    return endLine();
+  }
+  if (holding_) {
+    // The previous code has now been superseded; this byte begins the next one.
+    holding_ = false;
+    len_ = 0U;
+    poisoned_ = false;
+  }
+  if (!isPayloadByte(byte)) {
+    reject(ScanReject::Corrupt);
+    return false;
+  }
+  if (len_ >= kMaxScanLen) {
+    // Poison rather than truncate. A truncated member code does not fail, it
+    // identifies somebody else, and the ledger debit follows it.
+    reject(ScanReject::TooLong);
+    return false;
+  }
+  buf_[len_] = static_cast<char>(byte);
+  ++len_;
+  return false;
+}
+
+bool ScanAssembler::endLine() {
+  if (holding_) {
+    // A terminator with no payload since the last complete code: a blank line
+    // between scans. Nothing to report and nothing to discard.
+    return false;
+  }
+  const bool ok = len_ > 0U && !poisoned_;
+  poisoned_ = false;
+  if (!ok) {
+    len_ = 0U;
+    buf_[0] = '\0';
+    return false;
+  }
+  buf_[len_] = '\0';
+  holding_ = true;
+  return true;
+}
+
+} // namespace courtlogic

@@ -20,19 +20,34 @@ public sealed class TenantSecretsAccessor
     public TenantSecretsAccessor(MainframeDbContext db, ITenantContext tenant, IConfiguration config)
     { _db = db; _tenant = tenant; _config = config; }
 
-    public async Task<PerTenantCredentials?> GetPeachAsync(CancellationToken ct)
+    /// <summary>
+    /// This tenant's payment-gateway credentials, or null when the tenant has not been
+    /// configured for payments.
+    ///
+    /// <para>
+    /// Note the passphrase is deliberately NOT required: PayFast lets a merchant run
+    /// without one, and demanding it here would lock out a legitimately-configured club.
+    /// The signature is computed without the pair in that case, which is a different string
+    /// and is what PayFast expects.
+    /// </para>
+    /// </summary>
+    public async Task<PerTenantCredentials?> GetPaymentsAsync(CancellationToken ct)
     {
         var row = await _db.TenantSettings.AsNoTracking().FirstOrDefaultAsync(s => s.TenantId == _tenant.TenantId, ct);
         if (row is null) return null;
-        using var doc = JsonDocument.Parse(row.SettingsJson);
-        if (!doc.RootElement.TryGetProperty("peach_payments", out var peach)) return null;
 
-        string Get(string n) => peach.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
-        var entityId = Get("entity_id");
-        var token = Get("access_token");
-        var secret = Get("webhook_secret");
+        using var doc = JsonDocument.Parse(row.SettingsJson);
+        if (!doc.RootElement.TryGetProperty("payfast", out var payfast)) return null;
+
+        string Get(string n) => payfast.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+
+        var merchantId = Get("merchant_id");
+        var merchantKey = Get("merchant_key");
+        var passphrase = Get("passphrase");
         var env = Get("environment");
-        if (string.IsNullOrEmpty(entityId) || string.IsNullOrEmpty(token)) return null;
-        return new PerTenantCredentials(entityId, token, secret, string.IsNullOrEmpty(env) ? "test" : env);
+
+        if (string.IsNullOrEmpty(merchantId) || string.IsNullOrEmpty(merchantKey)) return null;
+
+        return new PerTenantCredentials(merchantId, merchantKey, passphrase, string.IsNullOrEmpty(env) ? "test" : env);
     }
 }

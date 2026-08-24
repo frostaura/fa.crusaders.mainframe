@@ -31,7 +31,8 @@ public sealed class LightsCueWorker : BackgroundService
         }
     }
 
-    private async Task TickAsync(CancellationToken ct)
+    /// <summary>Internal so tests drive one tick directly rather than waiting on the timer.</summary>
+    internal async Task TickAsync(CancellationToken ct)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -39,22 +40,33 @@ public sealed class LightsCueWorker : BackgroundService
 
         var now = DateTimeOffset.UtcNow;
 
-        // Bookings whose start has just passed and we haven't cued yet.
-        var dueOn = await db.Bookings.IgnoreQueryFilters()
-            .Where(b => b.Status == BookingStatus.Booked
-                && b.LightsOnCuedAt == null
-                && b.StartsAt <= now && b.EndsAt > now)
-            .ToListAsync(ct);
-
-        foreach (var b in dueOn)
-        {
-            await FireLightsAsync(db, tenant, b, on: true, ct);
-            b.LightsOnCuedAt = now;
-        }
+        // NOTE: this worker no longer cues lights ON.
+        //
+        // It used to, on a pure clock: any Booked row whose start had passed, with no
+        // reference to attendance, payment or balance. So a court lit itself for a member
+        // who never arrived, for a booking that was never paid for, and for a no-show whose
+        // credits were about to be refunded — every one of them, every fifteen seconds.
+        //
+        // Lights-on now belongs to CourtActivationService, which fires it when somebody
+        // actually identifies themselves at the court AND the charge succeeds. That is
+        // what CLAUDE.md means by "the at-court identification event is the source of
+        // truth for attendance", and it is why LightsOnCuedAt carries a comment warning it
+        // is not an attendance proxy.
+        //
+        // The OFF sweep stays, and matters more than it did: it is now the backstop that
+        // releases a court whose session ended, including one this worker never lit.
 
         // Bookings that have just ended and we haven't cued off.
+        //
+        // Widened to include NoShow, so a no-show's lights stop too. Previously the sweep
+        // only looked at Booked and Completed, and NoShowWorker sets NoShow — so a booking
+        // swept as a no-show before this ran was never cued off at all. The court box's own
+        // timer would eventually release it, but the backend would believe the lights were
+        // still on and the event stream would never say otherwise.
         var dueOff = await db.Bookings.IgnoreQueryFilters()
-            .Where(b => (b.Status == BookingStatus.Booked || b.Status == BookingStatus.Completed)
+            .Where(b => (b.Status == BookingStatus.Booked
+                         || b.Status == BookingStatus.Completed
+                         || b.Status == BookingStatus.NoShow)
                 && b.LightsOffCuedAt == null
                 && b.EndsAt <= now)
             .ToListAsync(ct);
@@ -63,10 +75,18 @@ public sealed class LightsCueWorker : BackgroundService
         {
             await FireLightsAsync(db, tenant, b, on: false, ct);
             b.LightsOffCuedAt = now;
-            if (b.Status == BookingStatus.Booked) b.Status = BookingStatus.Completed;
+
+            // Only promote a booking that was actually attended. Flipping an
+            // un-checked-in Booked row to Completed here is what raced NoShowWorker, whose
+            // predicate is Status == Booked: whichever ran first decided whether the member
+            // was a no-show or had simply finished, and the 15-second tick usually won.
+            if (b.Status == BookingStatus.Booked && b.CheckedInAt is not null)
+            {
+                b.Status = BookingStatus.Completed;
+            }
         }
 
-        if (dueOn.Count + dueOff.Count > 0) await db.SaveChangesAsync(ct);
+        if (dueOff.Count > 0) await db.SaveChangesAsync(ct);
     }
 
     private async Task FireLightsAsync(MainframeDbContext db, ITenantContext tenant, Booking b, bool on, CancellationToken ct)

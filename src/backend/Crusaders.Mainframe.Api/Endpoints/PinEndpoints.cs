@@ -1,10 +1,14 @@
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
+
+
 
 /// <summary>
 /// Phase 8.6 — PIN identification endpoints (per blueprint B.1).
@@ -31,7 +35,9 @@ public static class PinEndpoints
             user.PinHash = hasher.Hash(req.Pin!);
             db.AuditLogs.Add(new AuditLog
             {
-                TenantId = user.TenantId, ActorUserId = userId, SubjectUserId = userId,
+                TenantId = user.TenantId,
+                ActorUserId = userId,
+                SubjectUserId = userId,
                 Action = "user.pin_set",
             });
             await db.SaveChangesAsync(ct);
@@ -46,7 +52,9 @@ public static class PinEndpoints
             user.PinHash = null;
             db.AuditLogs.Add(new AuditLog
             {
-                TenantId = user.TenantId, ActorUserId = userId, SubjectUserId = userId,
+                TenantId = user.TenantId,
+                ActorUserId = userId,
+                SubjectUserId = userId,
                 Action = "user.pin_cleared",
             });
             await db.SaveChangesAsync(ct);
@@ -81,10 +89,17 @@ public static class PinEndpoints
         // Court-side — identify by PIN. Returns the matched user_id if any active-booking holder's
         // PIN matches the input; otherwise no_match. Restricted to admin (the courtside terminal runs
         // in admin mode).
+        // Court-side — identify by PIN and ACTIVATE the court.
+        //
+        // This used to be a pure identity oracle: it returned a user_id and did nothing
+        // else. No ledger post, no CheckedInAt, no event, no audit row — so a member who
+        // identified by PIN played free AND was swept as a no-show, because attendance is
+        // CheckedInAt and nothing set it. Only the biometric path ever charged. The
+        // blueprint calls these a triple stack; in the money model they were not one.
         app.MapPost("/api/v1/court/{courtNumber:int}/pin/match", async (
             int courtNumber, PinMatchRequest req,
             MainframeDbContext db, IPasswordHasher hasher,
-            Crusaders.Mainframe.Api.Multitenancy.ITenantContext tenant,
+            CourtActivationService activation,
             CancellationToken ct) =>
         {
             if (string.IsNullOrEmpty(req.Pin)) return Results.BadRequest(new { error = "pin_required" });
@@ -93,29 +108,35 @@ public static class PinEndpoints
             if (court is null) return Results.NotFound();
 
             var now = DateTimeOffset.UtcNow;
-            var windowStart = now.AddMinutes(-30);
-            var windowEnd = now.AddHours(2);
 
-            // Candidate set: users with a booked-or-active booking on this court within the window
-            // who have a PIN set.
-            var candidates = await (
-                from b in db.Bookings
-                where b.CourtId == court.Id
-                    && b.Status == BookingStatus.Booked
-                    && b.StartsAt < windowEnd && b.EndsAt > windowStart
-                join u in db.Users on b.UserId equals u.Id
-                where u.PinHash != null
-                select new { u.Id, u.PinHash }
-            ).Distinct().ToListAsync(ct);
+            // The window is the tenant's grace setting, shared with biometric, QR and the
+            // no-show sweep. It was hardcoded at 30 minutes here while the sweep used 5,
+            // so a member could be inside this window and already marked a no-show.
+            var candidateBookings = await activation.CandidatesAsync(court.Id, now, ct);
+            var candidateUserIds = candidateBookings.Select(b => b.UserId).Distinct().ToList();
+
+            var candidates = await db.Users
+                .Where(u => candidateUserIds.Contains(u.Id) && u.PinHash != null)
+                .Select(u => new { u.Id, u.PinHash })
+                .ToListAsync(ct);
 
             foreach (var c in candidates)
             {
-                if (c.PinHash is null) continue;
-                if (hasher.Verify(req.Pin, c.PinHash))
-                    return Results.Ok(new { matched = true, user_id = c.Id });
+                if (c.PinHash is null || !hasher.Verify(req.Pin, c.PinHash)) continue;
+
+                var booking = candidateBookings.FirstOrDefault(b => b.UserId == c.Id);
+                if (booking is null) continue;
+
+                var result = await activation.ActivateAsync(
+                    court, booking, identifiedUserId: c.Id, payerOverrideUserId: null, method: "pin", ct);
+
+                return CourtActivationResponse.For(result, c.Id);
             }
+
             return Results.Ok(new { matched = false, user_id = (Guid?)null });
-        }).RequireAuthorization(p => p.RequireRole("admin"));
+        }).RequireAuthorization(p => p.RequireRole("admin"))
+          // A four-digit PIN is a 10,000-space oracle. Unlimited, it falls in minutes.
+          .RequireRateLimiting(RateLimitPolicies.Auth);
 
         return app;
     }

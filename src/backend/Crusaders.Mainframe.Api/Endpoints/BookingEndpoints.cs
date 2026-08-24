@@ -15,12 +15,13 @@ public static class BookingEndpoints
             var result = await svc.CreateAsync(req.CourtId, userId, userId, req.StartsAt, req.SliceCount, ct);
             return result switch
             {
-                BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_zar = ok.BalanceAfterZar }),
+                BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
                 BookingResult.NotFound => Results.NotFound(),
                 BookingResult.PastTime => Results.BadRequest(new { error = "past_time" }),
                 BookingResult.TooFarAhead => Results.BadRequest(new { error = "too_far_ahead" }),
                 BookingResult.SlotTaken => Results.Conflict(new { error = "slot_taken" }),
-                BookingResult.InsufficientBalance ib => Results.Json(new { error = "insufficient_balance", current_zar = ib.CurrentZar, required_zar = ib.RequiredZar }, statusCode: 402),
+                BookingResult.InvalidDuration id => Results.BadRequest(new { error = "invalid_duration", requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
+                BookingResult.InsufficientBalance ib => Results.Json(new { error = "insufficient_balance", current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
                 _ => Results.Problem("Unexpected"),
             };
         });
@@ -28,10 +29,10 @@ public static class BookingEndpoints
         g.MapPost("/{bookingId:guid}/cancel", async (Guid bookingId, HttpContext ctx, BookingService svc, CancellationToken ct) =>
         {
             var actorId = ctx.User.Id() ?? Guid.Empty;
-            var result = await svc.CancelAsync(bookingId, actorId, waivePenalty: false, ct);
+            var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: false, waivePenalty: false, ct);
             return result switch
             {
-                CancellationResult.Ok ok => Results.Ok(new { refunded_zar = ok.RefundedZar, penalty_zar = ok.PenaltyZar }),
+                CancellationResult.Ok ok => Results.Ok(new { refunded_credits = ok.RefundedCredits, penalty_credits = ok.PenaltyCredits }),
                 CancellationResult.NotFound => Results.NotFound(),
                 CancellationResult.AlreadyStarted => Results.BadRequest(new { error = "already_started" }),
                 _ => Results.Problem("Unexpected"),
@@ -47,12 +48,13 @@ public static class BookingEndpoints
             var result = await svc.CreateAsync(req.CourtId, req.UserId, actorId, req.StartsAt, req.SliceCount, ct);
             return result switch
             {
-                BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_zar = ok.BalanceAfterZar }),
+                BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
                 BookingResult.NotFound => Results.NotFound(),
                 BookingResult.PastTime => Results.BadRequest(new { error = "past_time" }),
                 BookingResult.TooFarAhead => Results.BadRequest(new { error = "too_far_ahead" }),
                 BookingResult.SlotTaken => Results.Conflict(new { error = "slot_taken" }),
-                BookingResult.InsufficientBalance ib => Results.Json(new { error = "insufficient_balance", current_zar = ib.CurrentZar, required_zar = ib.RequiredZar }, statusCode: 402),
+                BookingResult.InvalidDuration id => Results.BadRequest(new { error = "invalid_duration", requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
+                BookingResult.InsufficientBalance ib => Results.Json(new { error = "insufficient_balance", current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
                 _ => Results.Problem("Unexpected"),
             };
         });
@@ -60,10 +62,10 @@ public static class BookingEndpoints
         admin.MapPost("/{bookingId:guid}/cancel", async (Guid bookingId, AdminCancelRequest? req, HttpContext ctx, BookingService svc, CancellationToken ct) =>
         {
             var actorId = ctx.User.Id() ?? Guid.Empty;
-            var result = await svc.CancelAsync(bookingId, actorId, waivePenalty: req?.WaivePenalty ?? false, ct);
+            var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: true, waivePenalty: req?.WaivePenalty ?? false, ct);
             return result switch
             {
-                CancellationResult.Ok ok => Results.Ok(new { refunded_zar = ok.RefundedZar, penalty_zar = ok.PenaltyZar }),
+                CancellationResult.Ok ok => Results.Ok(new { refunded_credits = ok.RefundedCredits, penalty_credits = ok.PenaltyCredits }),
                 CancellationResult.NotFound => Results.NotFound(),
                 _ => Results.Problem("Unexpected"),
             };

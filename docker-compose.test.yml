@@ -1,0 +1,41 @@
+# Service virtualization as sidecars.
+#
+# The same two services `make virt-up` runs as plain processes, in containers for the
+# club's own machine and for CI runners that prefer them. Deliberately the SAME
+# configuration read from the SAME files — the imposter is mounted rather than
+# restated, so there is no second copy to drift.
+#
+# Nothing in the test suite depends on this file. The Docker daemon is unavailable in
+# some CI setups and in the environment much of this was built in, and a suite that
+# only runs under Docker is a suite that quietly stops running.
+
+name: crusaders-test
+
+services:
+  # Stands in for PayFast. See test/virtualization/README.md for what this does and
+  # does not prove — the signature algorithm is pinned by a fixture corpus, not here.
+  payfast:
+    image: bbyars/mountebank:2.9.1
+    command: ["mb", "start", "--configfile", "/imposters/imposter.json", "--allowInjection"]
+    ports:
+      - "${MB_ADMIN_PORT:-2525}:2525"
+      - "${MB_IMPOSTER_PORT:-4545}:4545"
+    volumes:
+      - ./test/virtualization/payfast:/imposters:ro
+    healthcheck:
+      # The admin port answering is not enough — the imposter itself has to be up, or
+      # a test starts against a mountebank that has not loaded the config yet.
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2525/imposters/4545"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # The court box's Mega half, built from src/iot. Not a stub: the same CourtBox, the
+  # same protocol codec and the same relay timer the real board runs.
+  device:
+    build:
+      context: ./src/iot
+      dockerfile: Dockerfile.simulator
+    command: ["--port", "5555", "--bind-all"]
+    ports:
+      - "${SIMULATOR_PORT:-5555}:5555"

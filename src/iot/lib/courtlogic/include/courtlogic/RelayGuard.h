@@ -1,0 +1,139 @@
+// Crusaders Mainframe — the Mega's INDEPENDENT relay auto-off timer.
+//
+// WHY THIS EXISTS
+// ---------------
+// This is the single most important object in the firmware. In the system it
+// replaces there is no timer in the device at all: `A` closes relay A and the
+// matching off command is scheduled inside a VBA macro on a Windows PC. Close
+// the workbook, sleep the laptop, or lose the network, and a court burns until
+// somebody walks past it. That is not an implementation slip — the legacy
+// message has nowhere to put a duration, so no amount of care on the PC side
+// fixes it.
+//
+// So the deadline lives HERE, on the ATmega, behind nothing. It does not
+// consult the ESP, the WiFi, the API or a booking. Unplug the bridge mid-game
+// and the relay still opens on schedule; that property is the reason the
+// Mega/ESP split exists at all.
+//
+// WHY THE HARD CAP IS RE-APPLIED HERE
+// -----------------------------------
+// proto::Frame already clamps every duration on the wire, so a second clamp in
+// this class looks redundant. It is not, and removing it would quietly undo the
+// independence this file is about:
+//
+//   * a legacy `A` downlink carries NO duration, and the compatibility table
+//     maps it to the hard cap — which means the cap has to exist somewhere that
+//     is not the decoder's clamp;
+//   * the simulator, a bench harness and any future caller reach these methods
+//     directly, not through the wire;
+//   * "the Mega's timer is independent of what the ESP believes" is only true if
+//     the Mega does not take the ESP's number on trust.
+//
+// The cap is therefore stated once, here, and cross-checked at compile time
+// against both the court_mega build flag and proto::kRelayHardCapSeconds.
+//
+// WHAT THIS DELIBERATELY DOES NOT DO
+// ----------------------------------
+// It does not cap CUMULATIVE on-time. Each !EXT is capped at 90 minutes from
+// now, exactly as the protocol spec words it, so a bridge that sends !EXT in a
+// loop can hold a court on indefinitely. That is a known residual and it is the
+// honest boundary of this mechanism: the Mega's timer defends against a bridge
+// that has DIED, not against one that is lying. Defending against the second
+// needs the backend's ledger, which is where a booking's real length lives.
+// Rejected: a cumulative budget here. It would release a court mid-game on a
+// legitimate long booking, which is a visible failure traded for an attack
+// nobody can mount without already holding the device key.
+//
+// No Arduino headers, no heap, no String/std::string/std::vector.
+
+#ifndef CRUSADERS_COURTLOGIC_RELAYGUARD_H
+#define CRUSADERS_COURTLOGIC_RELAYGUARD_H
+
+#include <stdint.h>
+
+#include "hal/Relay.h"
+
+#include "timebase/TimeBase.h"
+
+namespace courtlogic {
+
+/// 90 minutes. The longest a relay can be closed by any single command, from
+/// any source, over any link.
+inline constexpr uint32_t kRelayHardCapMs = 5400000UL;
+
+/// Zero seconds is not a relay duration; it is an OFF wearing an ON's clothes,
+/// and a consumer that read it as "no limit" would be the legacy bug again.
+inline constexpr uint32_t kRelayMinMs = 1000UL;
+
+#ifdef RELAY_HARD_CAP_MS
+static_assert(RELAY_HARD_CAP_MS == kRelayHardCapMs,
+              "kRelayHardCapMs and the court_mega RELAY_HARD_CAP_MS build flag have drifted apart");
+#endif
+
+/// Bit `n` of a channel mask is court A+n. Same order as `!STATE,<mask>`.
+constexpr uint8_t relayBit(uint8_t channel) {
+  return static_cast<uint8_t>(1U << channel);
+}
+
+/// Owns the four court relays and the four deadlines that release them.
+///
+/// The port is held by reference and the deadlines are held here rather than in
+/// the port, because a deadline in the driver would be below the host test
+/// boundary — and the rollover behaviour of this timer is precisely the thing
+/// worth proving with no board attached.
+class RelayGuard {
+public:
+  explicit RelayGuard(hal::IRelayPort& relay);
+
+  /// Close `channel` for at most `seconds`, clamped into
+  /// [kRelayMinMs, kRelayHardCapMs]. Clamped, never refused: a clamped light is
+  /// a wrong-length game, a refused one is a dark court with a member in it.
+  ///
+  /// False only for a channel that does not exist — never clamped to a
+  /// neighbouring court, because that would drive a real, wrong relay.
+  bool on(uint8_t channel, uint32_t seconds, uint32_t nowMs);
+
+  /// Open `channel` now and disarm its deadline.
+  bool off(uint8_t channel);
+
+  /// Move `channel`'s deadline to now + `seconds`, clamped the same way.
+  ///
+  /// Refused when the relay is already open: !EXT extends a session in
+  /// progress, and treating it as an implicit !ON would let a dropped !OFF turn
+  /// into lights that come back on by themselves.
+  bool extend(uint8_t channel, uint32_t seconds, uint32_t nowMs);
+
+  /// Open every channel. The single cheapest way to make the building dark.
+  void allOff();
+
+  /// Release every channel whose deadline has passed.
+  ///
+  /// Returns a mask of the channels released BY THIS CALL, so the caller emits
+  /// exactly one `!EVT,AUTOOFF` per court per expiry. A caller that ignored the
+  /// return value would still be safe — the relay is already open by then —
+  /// which is the ordering this method commits to: open first, report second.
+  uint8_t tick(uint32_t nowMs);
+
+  /// Bitmask of channels currently commanded on. This is what `!STATE` carries.
+  uint8_t mask() const;
+
+  /// Whole seconds left on `channel`, rounded DOWN, 0 when off or expired.
+  /// Rounding down means `!STATE` never promises time the relay will not serve.
+  uint16_t remainingSeconds(uint8_t channel, uint32_t nowMs) const;
+
+  /// Auto-offs since boot. Diagnostics: a court that auto-offs every session is
+  /// a court whose bridge is not sending `!OFF`, which is invisible otherwise.
+  uint16_t autoOffCount() const { return autoOffs_; }
+
+private:
+  /// Shared by on() and extend() so there is one clamp, not two that can drift.
+  static uint32_t clampMs(uint32_t seconds);
+
+  hal::IRelayPort& relay_;
+  tb::Deadline until_[hal::kRelayChannelCount];
+  uint16_t autoOffs_;
+};
+
+} // namespace courtlogic
+
+#endif // CRUSADERS_COURTLOGIC_RELAYGUARD_H

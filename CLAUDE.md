@@ -2,7 +2,7 @@
 
 ## What this is
 
-A mobile-first, multi-tenant SaaS for racquet-sport clubs that runs **court-light scheduling on a credit-based booking model**. Players top up in ZAR via PeachPayments, the top-up converts to **credits** at a member-class-specific rate, and they reserve court time slices. At the court a physical peripheral — biometric, PIN or QR — identifies the player, which turns the lights on via a relay webhook and posts the ledger debit.
+A mobile-first, multi-tenant SaaS for racquet-sport clubs that runs **court-light scheduling on a credit-based booking model**. Players top up in ZAR via **PayFast**, the top-up converts to **credits** at a member-class-specific rate, and they reserve court time slices. At the court a physical peripheral — biometric, PIN or QR — identifies the player, which turns the lights on via a relay webhook and posts the ledger debit.
 
 First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is structural from day one, not a later port.
 
@@ -11,7 +11,13 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
 - **`src/backend/Crusaders.Mainframe.Api`** — .NET 10 Minimal APIs, EF Core, PostgreSQL 16. Folder-layered (`Endpoints/ Domain/ Services/ Persistence/ Security/ Webhooks/ Biometric/ Multitenancy/ Payments/ Workers/`) inside a **single flat project**. Auth is JWT HS256 + WebAuthn passkeys (Fido2).
 - **`src/backend/Crusaders.Mainframe.Tests`** — xUnit, in-process `TestHost`. Cross-tenant injection tests are part of the suite and are non-negotiable.
 - **`src/frontend`** — React 19 + TypeScript + Vite 7 + Tailwind, mobile-first PWA. **Figtree** font, Monday.com-style soft palette. State is React context (`lib/auth.tsx`, `lib/profile.tsx`, `lib/balance.tsx`).
-- **`src/firmware/lights-controller`** — ESP32 sketch driving the relay board. Off the SaaS critical path.
+- **`src/iot`** — PlatformIO project for the court-control hardware: a WeMos Mega 2560 + onboard ESP8266.
+  The **Mega is a thin I/O layer** (buttons, scanner, relays, LCD, plus an *independent* auto-off timer) and
+  **all volatile logic lives on the ESP8266**, because the ATmega cannot be flashed over WiFi — its ESP sits
+  on Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET. Everything under `lib/` except
+  `arduino_hal/` and `posix_hal/` is free of Arduino headers so it compiles for the host test runner.
+- **`src/contracts/device-protocol`** — the wire-protocol fixture corpus, consumed by *both* the C++ and the
+  .NET tests. Neutral ground: neither side may drift from the other without a test going red.
 
 ### Known deviations from the FrostAura mandate
 
@@ -25,7 +31,7 @@ State these honestly rather than repeating the aspiration:
 
 - **Money is ledger-only.** Balance is the sum of immutable ledger entries and is never a stored field. Every movement carries actor, subject, reason and external reference. Disputes are resolved by replaying the ledger.
 - **Credits are the unit of account, not rand.** ZAR is captured on the `PendingTopup` row for reconciliation; the ledger entry and all court pricing are credit-denominated. A field that mixes the two units is a money-correctness bug.
-- **Charge on lights-on, not on booking.** A booking creates a *hold* — balance verified, slot reserved, **no ledger entry**. The lights-on event posts the debit. Cancellation before lights-on therefore needs no refund at all. This is what keeps the ledger simple; do not "fix" it by debiting at booking time.
+- **Charge at booking, refund on cancellation, nothing back once the lights have been on.** `CreateAsync` reserves the slot and posts the `BookingCharge` debit in the same unit of work — the booking row and the ledger row flush together, so a lost slot race cannot leave a member paying for a court they did not get. Cancelling refunds in full, less the late-cancellation penalty inside the penalty window; both movements are posted as separate rows rather than netted, because a single net row cannot answer "how much penalty did I pay?". Once someone has checked in there is no refund at all — and **attendance means `CheckedInAt`, never the clock and never `ChargedAt`**, which under this model is set on every row. This **contradicts client blueprint A.9**, which debits on lights-on; the deviation is the founder's decision, is recorded in `docs/specs/client-blueprint-deltas.md`, and **needs committee sign-off before go-live**.
 - **Tenant isolation is structural.** Every persisted entity carries `tenant_id`; every endpoint resolves tenant first. Cross-tenant leakage is a **P0 security incident**, not polish.
 - **The at-court identification event is the source of truth for attendance.** A no-show is the *absence* of a successful match within the grace window — never inferred from booking metadata.
 - **Hardware abstractions ship before drivers.** `IBiometricDevice` + `NullBiometricDevice` + a mock simulator are first-class, and **CI must pass without touching real hardware**.
@@ -37,7 +43,7 @@ State these honestly rather than repeating the aspiration:
 
 ## Conventions and non-obvious rules
 
-- **Free-tier-first external dependencies.** IANA tzdb, libphonenumber, the Gravatar public URL pattern for avatar fallback, `CultureInfo("en-ZA")`, regex + DNS MX for email validation. **SMTP and PeachPayments are the only paid third parties**, and both are tenant-controlled.
+- **Free-tier-first external dependencies.** IANA tzdb, libphonenumber, the Gravatar public URL pattern for avatar fallback, `CultureInfo("en-ZA")`, regex + DNS MX for email validation. **SMTP and PayFast are the only paid third parties**, and both are tenant-controlled.
 - **SSRF guard with a deliberate carve-out:** production rejects RFC1918 webhook destinations *unless* the endpoint is on an internal-LAN allow-list. That carve-out exists specifically for the lights controller — do not close it.
 - **Webhook delivery:** HMAC-SHA256 in `X-Crusaders-Signature`, timestamp in `X-Crusaders-Timestamp`, per-endpoint queue, backoff 1m/5m/30m/2h/12h/24h, auto-disable after 6 failures plus an email to the owner. A missing template variable is a **config error, not a retryable failure**.
 - **Docker device passthrough:** the .NET service runs in a container but must reach a USB/serial biometric device on the host — needs `--device` passthrough or `privileged: true` with the specific device path.
@@ -58,7 +64,7 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 
 ## Where docs live
 
-- `docs/specs/` — `feature-spec.md` · `multi-tenancy.md` · `biometric-abstraction.md` · `lights-controller.md` · `payments-peachpayments.md` · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
+- `docs/specs/` — `feature-spec.md` · `multi-tenancy.md` · `biometric-abstraction.md` · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
 - `docs/specs/client-blueprints/` — the verbatim client artifact plus its `.md` transcription. **The blueprint is the customer's word and outranks internal specs on economics.**
 - `docs/specs/client-blueprint-deltas.md` — line-by-line reconciliation of blueprint requirements against the build. The most reliable economics reference in the repo.
 - `docs/development-plan.md` — phased build sequence and parking-lot decisions. **Its status column understates reality; trust code over the plan** — see `MEMORY.md`.

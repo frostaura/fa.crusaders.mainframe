@@ -1,5 +1,23 @@
 # Lights Controller (Arduino + 6-channel relay)
 
+> **Superseded — read [`src/iot/README.md`](../../src/iot/README.md) instead.**
+>
+> This spec describes a greenfield ESP32 relay box driven entirely through the
+> outbound webhook system. The hardware actually installed at Crusaders is a
+> WeMos Mega 2560 + ESP8266 court box with an LCD, an eight-button panel and a QR
+> scanner, and its wiring cannot change.
+>
+> Two conclusions here proved wrong in practice and are corrected in `src/iot`:
+> the sketch this spec produced authenticated on a `secret` field in the body
+> while the webhook worker sends an HMAC header, so **every delivery would have
+> 401'd**; and relay commands cannot ride the webhook bus at all, because that
+> bus is a single serial dispatcher with a 10s per-endpoint timeout and no
+> working retry. Actuation is a direct client on the request path instead.
+>
+> The parts that held up — the local auto-off timer, `/health`, `/status` — are
+> carried into `src/iot`. Kept for the design rationale and the fail-safe
+> discussion.
+
 The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
 
 ## Why this shape

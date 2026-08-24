@@ -36,7 +36,7 @@ public static class WalletEndpoints
 
             return Results.Ok(new
             {
-                balance_zar = balance,
+                balance_credits = balance,
                 entries = rows,
             });
         });
@@ -93,18 +93,18 @@ public static class WalletEndpoints
 
         admin.MapPost("/{userId:guid}/adjust", async (Guid userId, AdjustRequest req, HttpContext ctx, LedgerService ledger, MainframeDbContext db, CancellationToken ct) =>
         {
-            if (req.AmountZar == 0) return Results.BadRequest(new { error = "amount_zero" });
+            if (req.AmountCredits == 0) return Results.BadRequest(new { error = "amount_zero" });
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
             var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
             if (user is null) return Results.NotFound();
             var entry = await ledger.PostAsync(new LedgerPosting(
                 UserId: userId,
                 Type: LedgerEntryType.AdminAdjustment,
-                AmountZar: req.AmountZar,
+                AmountCredits: req.AmountCredits,
                 ActorUserId: ctx.User.Id() ?? Guid.Empty,
                 Reason: req.Reason), ct);
             var balanceAfter = await ledger.GetBalanceAsync(userId, ct);
-            return Results.Ok(new { entry_id = entry.Id, amount_zar = entry.AmountZar, balance_after_zar = balanceAfter });
+            return Results.Ok(new { entry_id = entry.Id, amount_credits = entry.AmountCredits, balance_after_credits = balanceAfter });
         });
 
         return app;
@@ -112,10 +112,10 @@ public static class WalletEndpoints
 
     private static async Task WriteEventAsync(HttpContext ctx, decimal balance, CancellationToken ct)
     {
-        var payload = JsonSerializer.Serialize(new { balance_zar = balance });
+        var payload = JsonSerializer.Serialize(new { balance_credits = balance });
         await ctx.Response.WriteAsync($"data: {payload}\n\n", ct);
         await ctx.Response.Body.FlushAsync(ct);
     }
 }
 
-public sealed record AdjustRequest(decimal AmountZar, string Reason);
+public sealed record AdjustRequest(decimal AmountCredits, string Reason);

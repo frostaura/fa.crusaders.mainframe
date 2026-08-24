@@ -1,0 +1,527 @@
+{
+  "description": "UDP discovery beacon: CRSDR1 <VERB> k=v ...*CC. Encode cases are fields -> exact bytes; decode cases are bytes -> fields or an error.",
+  "authority": "docs/specs/device-discovery.md",
+  "signing_key_hex": "00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f",
+  "claim": {
+    "alphabet": "ABCDEFGHJKLMNPQRSTUVWXYZ23456789",
+    "code_length": 8,
+    "commitment_hex_length": 16,
+    "examples": [
+      {
+        "code": "K7RM4XPT",
+        "nonce": "a1b2c3d4e5f60718",
+        "commitment": "a13aa6c2c45e1b1c"
+      },
+      {
+        "code": "AAAAAAAA",
+        "nonce": "0000000000000000",
+        "commitment": "1f0a7dc05a65cec5"
+      },
+      {
+        "code": "99999999",
+        "nonce": "ffffffffffffffff",
+        "commitment": "65d9283c05645737"
+      }
+    ]
+  },
+  "encode": [
+    {
+      "id": "enc-announce-unclaimed",
+      "kind": "encode",
+      "verb": "ANNOUNCE",
+      "fields": [
+        {
+          "key": "v",
+          "value": "1"
+        },
+        {
+          "key": "mac",
+          "value": "5ccf7f1a2b3c"
+        },
+        {
+          "key": "hw",
+          "value": "esp8266"
+        },
+        {
+          "key": "fw",
+          "value": "1.0.0"
+        },
+        {
+          "key": "st",
+          "value": "unclaimed"
+        },
+        {
+          "key": "n",
+          "value": "a1b2c3d4e5f60718"
+        },
+        {
+          "key": "cch",
+          "value": "a13aa6c2c45e1b1c"
+        },
+        {
+          "key": "up",
+          "value": "42"
+        }
+      ],
+      "wire": "CRSDR1 ANNOUNCE v=1 mac=5ccf7f1a2b3c hw=esp8266 fw=1.0.0 st=unclaimed n=a1b2c3d4e5f60718 cch=a13aa6c2c45e1b1c up=42*77\n",
+      "canonical": "ANNOUNCE\ncch=a13aa6c2c45e1b1c\nfw=1.0.0\nhw=esp8266\nmac=5ccf7f1a2b3c\nn=a1b2c3d4e5f60718\nst=unclaimed\nup=42\nv=1",
+      "note": "First boot. No sig: an unclaimed board has no key. The claim code itself is never on the wire."
+    },
+    {
+      "id": "enc-announce-claimed",
+      "kind": "encode",
+      "verb": "ANNOUNCE",
+      "fields": [
+        {
+          "key": "v",
+          "value": "1"
+        },
+        {
+          "key": "mac",
+          "value": "5ccf7f1a2b3c"
+        },
+        {
+          "key": "hw",
+          "value": "esp8266"
+        },
+        {
+          "key": "fw",
+          "value": "1.0.0"
+        },
+        {
+          "key": "mega",
+          "value": "0.9.1"
+        },
+        {
+          "key": "st",
+          "value": "claimed"
+        },
+        {
+          "key": "n",
+          "value": "a1b2c3d4e5f60718"
+        },
+        {
+          "key": "dev",
+          "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        },
+        {
+          "key": "ten",
+          "value": "crusaders"
+        },
+        {
+          "key": "up",
+          "value": "86400"
+        },
+        {
+          "key": "sig",
+          "value": "47f850306320a76f69d4f0230a8a3ac4c53baa239059252e517cf3aaf5644c56"
+        }
+      ],
+      "wire": "CRSDR1 ANNOUNCE v=1 mac=5ccf7f1a2b3c hw=esp8266 fw=1.0.0 mega=0.9.1 st=claimed n=a1b2c3d4e5f60718 dev=3fa85f64-5717-4562-b3fc-2c963f66afa6 ten=crusaders up=86400 sig=47f850306320a76f69d4f0230a8a3ac4c53baa239059252e517cf3aaf5644c56*4D\n",
+      "canonical": "ANNOUNCE\ndev=3fa85f64-5717-4562-b3fc-2c963f66afa6\nfw=1.0.0\nhw=esp8266\nmac=5ccf7f1a2b3c\nmega=0.9.1\nn=a1b2c3d4e5f60718\nst=claimed\nten=crusaders\nup=86400\nv=1",
+      "note": "Signed, so an attacker cannot assert that device X moved to their address."
+    },
+    {
+      "id": "enc-offer-unsigned",
+      "kind": "encode",
+      "verb": "OFFER",
+      "fields": [
+        {
+          "key": "v",
+          "value": "1"
+        },
+        {
+          "key": "url",
+          "value": "http://192.168.68.20:8088"
+        },
+        {
+          "key": "t",
+          "value": "1755900000"
+        },
+        {
+          "key": "n",
+          "value": "a1b2c3d4e5f60718"
+        }
+      ],
+      "wire": "CRSDR1 OFFER v=1 url=http://192.168.68.20:8088 t=1755900000 n=a1b2c3d4e5f60718*20\n",
+      "canonical": "OFFER\nn=a1b2c3d4e5f60718\nt=1755900000\nurl=http://192.168.68.20:8088\nv=1",
+      "note": "Answering an unclaimed board: nothing to sign with yet."
+    },
+    {
+      "id": "enc-offer-signed",
+      "kind": "encode",
+      "verb": "OFFER",
+      "fields": [
+        {
+          "key": "v",
+          "value": "1"
+        },
+        {
+          "key": "url",
+          "value": "http://192.168.68.20:8088"
+        },
+        {
+          "key": "t",
+          "value": "1755900000"
+        },
+        {
+          "key": "n",
+          "value": "a1b2c3d4e5f60718"
+        },
+        {
+          "key": "sig",
+          "value": "3cdaeca2f6fff8ad7f919b4db2efec613665072b2148e46fdef97ba44500d48c"
+        }
+      ],
+      "wire": "CRSDR1 OFFER v=1 url=http://192.168.68.20:8088 t=1755900000 n=a1b2c3d4e5f60718 sig=3cdaeca2f6fff8ad7f919b4db2efec613665072b2148e46fdef97ba44500d48c*40\n",
+      "canonical": "OFFER\nn=a1b2c3d4e5f60718\nt=1755900000\nurl=http://192.168.68.20:8088\nv=1",
+      "note": "Answering a claimed board. Unsigned OFFERs must be refused by a claimed box, or a rogue on the LAN redirects it."
+    },
+    {
+      "id": "enc-announce-no-mega",
+      "kind": "encode",
+      "verb": "ANNOUNCE",
+      "fields": [
+        {
+          "key": "v",
+          "value": "1"
+        },
+        {
+          "key": "mac",
+          "value": "001122334455"
+        },
+        {
+          "key": "hw",
+          "value": "esp32"
+        },
+        {
+          "key": "fw",
+          "value": "2.0.0"
+        },
+        {
+          "key": "st",
+          "value": "unclaimed"
+        },
+        {
+          "key": "n",
+          "value": "0000000000000000"
+        },
+        {
+          "key": "cch",
+          "value": "1f0a7dc05a65cec5"
+        },
+        {
+          "key": "up",
+          "value": "0"
+        }
+      ],
+      "wire": "CRSDR1 ANNOUNCE v=1 mac=001122334455 hw=esp32 fw=2.0.0 st=unclaimed n=0000000000000000 cch=1f0a7dc05a65cec5 up=0*16\n",
+      "canonical": "ANNOUNCE\ncch=1f0a7dc05a65cec5\nfw=2.0.0\nhw=esp32\nmac=001122334455\nn=0000000000000000\nst=unclaimed\nup=0\nv=1",
+      "note": "Mega version omitted before the first serial handshake; up=0 at the instant of link-up."
+    }
+  ],
+  "decode": [
+    {
+      "id": "dec-announce-unclaimed",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE v=1 mac=5ccf7f1a2b3c hw=esp8266 fw=1.0.0 st=unclaimed n=a1b2c3d4e5f60718 cch=a13aa6c2c45e1b1c up=42*77\n",
+      "expect": {
+        "ok": true,
+        "verb": "ANNOUNCE",
+        "fields": [
+          {
+            "key": "v",
+            "value": "1"
+          },
+          {
+            "key": "mac",
+            "value": "5ccf7f1a2b3c"
+          },
+          {
+            "key": "hw",
+            "value": "esp8266"
+          },
+          {
+            "key": "fw",
+            "value": "1.0.0"
+          },
+          {
+            "key": "st",
+            "value": "unclaimed"
+          },
+          {
+            "key": "n",
+            "value": "a1b2c3d4e5f60718"
+          },
+          {
+            "key": "cch",
+            "value": "a13aa6c2c45e1b1c"
+          },
+          {
+            "key": "up",
+            "value": "42"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dec-announce-claimed",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE v=1 mac=5ccf7f1a2b3c hw=esp8266 fw=1.0.0 mega=0.9.1 st=claimed n=a1b2c3d4e5f60718 dev=3fa85f64-5717-4562-b3fc-2c963f66afa6 ten=crusaders up=86400 sig=47f850306320a76f69d4f0230a8a3ac4c53baa239059252e517cf3aaf5644c56*4D\n",
+      "expect": {
+        "ok": true,
+        "verb": "ANNOUNCE",
+        "fields": [
+          {
+            "key": "v",
+            "value": "1"
+          },
+          {
+            "key": "mac",
+            "value": "5ccf7f1a2b3c"
+          },
+          {
+            "key": "hw",
+            "value": "esp8266"
+          },
+          {
+            "key": "fw",
+            "value": "1.0.0"
+          },
+          {
+            "key": "mega",
+            "value": "0.9.1"
+          },
+          {
+            "key": "st",
+            "value": "claimed"
+          },
+          {
+            "key": "n",
+            "value": "a1b2c3d4e5f60718"
+          },
+          {
+            "key": "dev",
+            "value": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+          },
+          {
+            "key": "ten",
+            "value": "crusaders"
+          },
+          {
+            "key": "up",
+            "value": "86400"
+          },
+          {
+            "key": "sig",
+            "value": "47f850306320a76f69d4f0230a8a3ac4c53baa239059252e517cf3aaf5644c56"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dec-offer-unsigned",
+      "kind": "decode",
+      "wire": "CRSDR1 OFFER v=1 url=http://192.168.68.20:8088 t=1755900000 n=a1b2c3d4e5f60718*20\n",
+      "expect": {
+        "ok": true,
+        "verb": "OFFER",
+        "fields": [
+          {
+            "key": "v",
+            "value": "1"
+          },
+          {
+            "key": "url",
+            "value": "http://192.168.68.20:8088"
+          },
+          {
+            "key": "t",
+            "value": "1755900000"
+          },
+          {
+            "key": "n",
+            "value": "a1b2c3d4e5f60718"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dec-offer-signed",
+      "kind": "decode",
+      "wire": "CRSDR1 OFFER v=1 url=http://192.168.68.20:8088 t=1755900000 n=a1b2c3d4e5f60718 sig=3cdaeca2f6fff8ad7f919b4db2efec613665072b2148e46fdef97ba44500d48c*40\n",
+      "expect": {
+        "ok": true,
+        "verb": "OFFER",
+        "fields": [
+          {
+            "key": "v",
+            "value": "1"
+          },
+          {
+            "key": "url",
+            "value": "http://192.168.68.20:8088"
+          },
+          {
+            "key": "t",
+            "value": "1755900000"
+          },
+          {
+            "key": "n",
+            "value": "a1b2c3d4e5f60718"
+          },
+          {
+            "key": "sig",
+            "value": "3cdaeca2f6fff8ad7f919b4db2efec613665072b2148e46fdef97ba44500d48c"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dec-announce-no-mega",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE v=1 mac=001122334455 hw=esp32 fw=2.0.0 st=unclaimed n=0000000000000000 cch=1f0a7dc05a65cec5 up=0*16\n",
+      "expect": {
+        "ok": true,
+        "verb": "ANNOUNCE",
+        "fields": [
+          {
+            "key": "v",
+            "value": "1"
+          },
+          {
+            "key": "mac",
+            "value": "001122334455"
+          },
+          {
+            "key": "hw",
+            "value": "esp32"
+          },
+          {
+            "key": "fw",
+            "value": "2.0.0"
+          },
+          {
+            "key": "st",
+            "value": "unclaimed"
+          },
+          {
+            "key": "n",
+            "value": "0000000000000000"
+          },
+          {
+            "key": "cch",
+            "value": "1f0a7dc05a65cec5"
+          },
+          {
+            "key": "up",
+            "value": "0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dec-bad-magic",
+      "kind": "decode",
+      "wire": "NOTUS1 ANNOUNCE v=1*00\n",
+      "expect": {
+        "ok": false,
+        "error": "bad_magic"
+      },
+      "note": "Ignored without parsing. Port 48653 will receive unrelated traffic on a club LAN."
+    },
+    {
+      "id": "dec-bad-checksum",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE v=1 mac=5ccf7f1a2b3c*00\n",
+      "expect": {
+        "ok": false,
+        "error": "bad_checksum"
+      }
+    },
+    {
+      "id": "dec-lowercase-checksum",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE v=1 mac=5ccf7f1a2b3c*5a\n",
+      "expect": {
+        "ok": false,
+        "error": "bad_checksum"
+      },
+      "note": "Uppercase only, same rule as the serial protocol: widening the accept set defeats the field."
+    },
+    {
+      "id": "dec-no-checksum",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE v=1 mac=5ccf7f1a2b3c\n",
+      "expect": {
+        "ok": false,
+        "error": "bad_frame"
+      }
+    },
+    {
+      "id": "dec-unknown-verb",
+      "kind": "decode",
+      "wire": "CRSDR1 SHOUT v=1*7A\n",
+      "expect": {
+        "ok": false,
+        "error": "bad_verb"
+      }
+    },
+    {
+      "id": "dec-empty-body",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE *00\n",
+      "expect": {
+        "ok": false,
+        "error": "bad_frame"
+      }
+    },
+    {
+      "id": "dec-field-without-equals",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE v=1 orphan*50\n",
+      "expect": {
+        "ok": false,
+        "error": "bad_frame"
+      }
+    },
+    {
+      "id": "dec-duplicate-key",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE v=1 st=claimed st=unclaimed*61\n",
+      "expect": {
+        "ok": false,
+        "error": "duplicate_key"
+      },
+      "note": "A duplicate key is refused rather than last-wins: two values for st is not a packet anyone meant to send."
+    },
+    {
+      "id": "dec-truncated",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNO",
+      "expect": {
+        "ok": false,
+        "error": "bad_frame"
+      }
+    },
+    {
+      "id": "dec-empty-packet",
+      "kind": "decode",
+      "wire": "",
+      "expect": {
+        "ok": false,
+        "error": "bad_frame"
+      }
+    },
+    {
+      "id": "dec-single-bit-flip",
+      "kind": "decode",
+      "wire": "CRSDR1 ANNOUNCE v=1 Mac=5ccf7f1a2b3c st=unclaimed*30\n",
+      "expect": {
+        "ok": false,
+        "error": "bad_checksum"
+      },
+      "note": "A one-bit corruption of the body against the original checksum."
+    }
+  ]
+}

@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { endpoints, type LedgerRow } from "../lib/api";
+import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
+import { formatCredits } from "../lib/utils";
 import { Card } from "../components/Card";
 import { Input, Label } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
 import { useToast } from "../components/Toast";
 
-const TYPES = [
-  "AdminAdjustment", "BookingCharge", "CancellationRefund",
-  "LateCancellationPenalty", "NoShowPenalty", "PaymentReversal", "TopUp",
-];
+// Derived from the union in api.ts rather than hand-maintained here. This was a
+// literal array with no connection to the type, so a ledger type added on the
+// backend became unfilterable with nothing to warn anyone.
+const TYPES = LEDGER_ENTRY_TYPES;
 
 export default function AdminLedgerPage() {
   const toast = useToast();
@@ -54,8 +55,8 @@ export default function AdminLedgerPage() {
   }, [rows, userQuery]);
 
   const totals = useMemo(() => {
-    const credits = filtered.filter((r) => r.signedAmountZar > 0).reduce((s, r) => s + r.amountZar, 0);
-    const debits = filtered.filter((r) => r.signedAmountZar < 0).reduce((s, r) => s + r.amountZar, 0);
+    const credits = filtered.filter((r) => r.signedAmountCredits > 0).reduce((s, r) => s + r.amountCredits, 0);
+    const debits = filtered.filter((r) => r.signedAmountCredits < 0).reduce((s, r) => s + r.amountCredits, 0);
     return { credits, debits, net: credits - debits, count: filtered.length };
   }, [filtered]);
 
@@ -99,9 +100,9 @@ export default function AdminLedgerPage() {
       <Card className="!p-0 flex flex-col flex-1 min-h-0">
         <div className="px-4 sm:px-6 pt-4 pb-2 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm shrink-0">
           <Stat label="Movements" value={String(totals.count)} />
-          <Stat label="Credits" value={`+R${totals.credits.toFixed(2)}`} tone="success" />
-          <Stat label="Debits" value={`−R${totals.debits.toFixed(2)}`} tone="warning" />
-          <Stat label="Net" value={`${totals.net >= 0 ? "+" : "−"}R${Math.abs(totals.net).toFixed(2)}`} tone={totals.net >= 0 ? "success" : "warning"} />
+          <Stat label="Credits" value={`+${formatCredits(totals.credits)}`} tone="success" />
+          <Stat label="Debits" value={`−${formatCredits(totals.debits)}`} tone="warning" />
+          <Stat label="Net" value={`${totals.net >= 0 ? "+" : "−"}${formatCredits(Math.abs(totals.net))}`} tone={totals.net >= 0 ? "success" : "warning"} />
         </div>
         <LedgerTable rows={filtered} emptyText={loading ? "Loading…" : "No movements match these filters."} fill />
       </Card>

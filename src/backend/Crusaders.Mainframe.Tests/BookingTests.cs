@@ -1,11 +1,43 @@
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Crusaders.Mainframe.Tests;
 
+/// <summary>
+/// Booking semantics as they actually are.
+///
+/// <para>
+/// These five tests were left deliberately red for months (recorded in
+/// <c>memory/decisions.md</c>) because they encoded the pre-blueprint economics:
+/// R50 per 30-minute slice. The fixture has since moved to <b>8 credits per
+/// 15-minute slice</b>, so they were asserting a system that no longer existed.
+/// </para>
+///
+/// <para>
+/// Worth noting for anyone reading the old failures: the overlap test was failing
+/// because at 15-minute slices a booking at <c>startsAt + 15</c> is <em>adjacent</em>
+/// to one at <c>startsAt</c>, not overlapping — accepting it was correct. It was
+/// not, as it first appeared, a double-booking bug.
+/// </para>
+///
+/// <para>
+/// <b>The debit happens at booking.</b> That is the founder's decision and it
+/// contradicts blueprint A.9, which debits on lights-on; the deviation is recorded
+/// in <c>docs/specs/client-blueprint-deltas.md</c> for committee sign-off, and the
+/// <c>CLAUDE.md</c> invariant was rewritten in the commit that moved it. What that
+/// buys is a cancellation story with only one moving part: refund what was taken,
+/// less a penalty if it is late, and refund nothing at all once someone has actually
+/// checked in.
+/// </para>
+/// </summary>
 public class BookingTests
 {
+    // TestHost fixture: slice_minutes 15, court price 8 credits, penalty_pct 30,
+    // penalty_window_minutes 15.
+    private const decimal SlicePriceCredits = 8m;
+
     [Fact]
     public async Task Booking_succeeds_when_balance_covers_cost_and_slot_free()
     {
@@ -15,12 +47,18 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
         var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, sliceCount: 1, default);
 
         var ok = Assert.IsType<BookingResult.Ok>(result);
-        Assert.Equal(150m, ok.BalanceAfterZar);
         Assert.Equal(BookingStatus.Booked, ok.Booking.Status);
+
+        // Booking reserves the slot AND debits, in one unit of work. The balance
+        // returned is what the member has left, which is what the confirmation email
+        // and the booking.created event both quote.
+        Assert.Equal(200m - SlicePriceCredits, ok.BalanceAfterCredits);
+        Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.NotNull(ok.Booking.ChargedAt);
     }
 
     [Fact]
@@ -30,12 +68,12 @@ public class BookingTests
         using var scope = host.NewScope();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
+        var startsAt = TestHost.BookableSlot(2);
         var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var ib = Assert.IsType<BookingResult.InsufficientBalance>(result);
-        Assert.Equal(0m, ib.CurrentZar);
-        Assert.Equal(50m, ib.RequiredZar);
+        Assert.Equal(0m, ib.CurrentCredits);
+        Assert.Equal(SlicePriceCredits, ib.RequiredCredits);
     }
 
     [Fact]
@@ -47,16 +85,37 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(2);
-        var first = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
+        var startsAt = TestHost.BookableSlot(2);
+
+        // Two slices = 30 minutes, so a booking 15 minutes in genuinely overlaps.
+        var first = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, sliceCount: 2, default);
         Assert.IsType<BookingResult.Ok>(first);
 
-        var second = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt.AddMinutes(15), 1, default);
-        Assert.IsType<BookingResult.SlotTaken>(second);
+        var overlapping = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt.AddMinutes(15), 1, default);
+        Assert.IsType<BookingResult.SlotTaken>(overlapping);
     }
 
     [Fact]
-    public async Task Cancellation_inside_penalty_window_keeps_30pct_as_penalty()
+    public async Task Booking_immediately_after_another_is_allowed()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+        var startsAt = TestHost.BookableSlot(2);
+
+        Assert.IsType<BookingResult.Ok>(
+            await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default));
+
+        // Back-to-back, not overlapping — the first ends exactly where this begins.
+        Assert.IsType<BookingResult.Ok>(
+            await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt.AddMinutes(15), 1, default));
+    }
+
+    [Fact]
+    public async Task Cancellation_inside_penalty_window_charges_the_penalty_only()
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -64,23 +123,29 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
-        // Book starting in 5 minutes — well within the 15-minute penalty window.
+        // Starts in 5 minutes — inside the 15-minute penalty window.
         var startsAt = DateTimeOffset.UtcNow.AddMinutes(5);
         var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
-        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, waivePenalty: false, default);
+        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
 
-        // 30% of R50 = R15 penalty; refund = R35
-        Assert.Equal(35m, cancelled.RefundedZar);
-        Assert.Equal(15m, cancelled.PenaltyZar);
+        // The 8 credits taken at booking come back in full, and the penalty is taken as
+        // its own movement rather than netted off the refund: a single net row cannot
+        // answer "how much penalty did I pay?", which is the question a disputed
+        // cancellation actually asks. 30% of 8 credits = 2.40.
+        Assert.Equal(SlicePriceCredits, cancelled.RefundedCredits);
+        Assert.Equal(2.40m, cancelled.PenaltyCredits);
+        Assert.Equal(200m - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
-        var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
-        // 200 - 50 (booking) + 35 (refund) = 185
-        Assert.Equal(185m, balance);
+        // Both movements are on the statement, in full.
+        var entries = await ledger.GetEntriesAsync(
+            host.PlayerUser.Id, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), default);
+        Assert.Contains(entries, e => e.Type == LedgerEntryType.CancellationRefund && e.AmountCredits == SlicePriceCredits);
+        Assert.Contains(entries, e => e.Type == LedgerEntryType.LateCancellationPenalty && e.AmountCredits == -2.40m);
     }
 
     [Fact]
-    public async Task Cancellation_outside_penalty_window_refunds_full_amount()
+    public async Task Cancellation_outside_penalty_window_costs_nothing()
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -88,15 +153,82 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
-        var startsAt = DateTimeOffset.UtcNow.AddHours(3);
+        var startsAt = TestHost.BookableSlot(3);
         var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
-        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, waivePenalty: false, default);
+        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
 
-        Assert.Equal(50m, cancelled.RefundedZar);
-        Assert.Equal(0m, cancelled.PenaltyZar);
+        // Cancelled in good time: the booking charge comes straight back and no penalty
+        // is taken, so the member is where they started.
+        Assert.Equal(SlicePriceCredits, cancelled.RefundedCredits);
+        Assert.Equal(0m, cancelled.PenaltyCredits);
+        Assert.Equal(200m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+    }
 
-        var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
-        Assert.Equal(200m, balance);
+    /// <summary>
+    /// The fix for a flake, tested at every hour instead of at the hour the suite runs.
+    ///
+    /// <para>
+    /// Two cancellation tests here booked <c>UtcNow.AddHours(3)</c> and failed every
+    /// afternoon, because the fixture's peak window is 16:00–19:00 UTC and blueprint A.12
+    /// refuses a Regular member a peak slot more than an hour ahead. The symptom was an
+    /// <c>InvalidCastException</c> naming <c>PeakHoursLeagueOnly</c> in a test about
+    /// refunds — which reads as a broken cancellation and is not one.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void A_bookable_slot_is_never_inside_peak_hours_whatever_time_it_is()
+    {
+        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+
+        for (var hour = 0; hour < 24; hour++)
+        {
+            foreach (var ahead in new[] { 1.0, 2.0, 3.0, 5.0 })
+            {
+                var slot = TestHost.BookableSlotFrom(midnight.AddHours(hour), ahead);
+
+                Assert.False(slot.Hour is >= 16 and < 19,
+                    $"slot at {slot:HH:mm} lands in peak (from {hour:00}:00, +{ahead}h)");
+                Assert.True(slot > midnight.AddHours(hour), "a bookable slot must be in the future");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The one decision that survives from "charge on lights-on": <b>no refund once the
+    /// lights have been on</b>. Under charge-at-booking that is the only branch where the
+    /// member keeps nothing, so it is the branch worth guarding — get it wrong and every
+    /// played game is refundable.
+    ///
+    /// <para>
+    /// Cancelled by an admin, because a member cannot self-cancel a booking whose start
+    /// has passed. Attendance is read from <c>CheckedInAt</c>, never from the clock.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Cancellation_after_check_in_refunds_nothing()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var db = scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Persistence.MainframeDbContext>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        var booked = (BookingResult.Ok)await booking.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, DateTimeOffset.UtcNow.AddMinutes(30), 1, default);
+        Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+
+        // They turned up and played. The clock is irrelevant; this stamp is not.
+        var row = await db.Bookings.FirstAsync(b => b.Id == booked.Booking.Id);
+        row.CheckedInAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        var cancelled = (CancellationResult.Ok)await booking.CancelAsync(
+            booked.Booking.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: false, default);
+
+        Assert.Equal(0m, cancelled.RefundedCredits);
+        Assert.Equal(0m, cancelled.PenaltyCredits);
+        Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 }

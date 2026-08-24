@@ -1,0 +1,56 @@
+---
+# Crusaders Mainframe — static analysis for src/iot.
+#
+# WarningsAsErrors is deliberately narrow: the checks listed there are ones that
+# cause FIELD failures on a relay controller, not style preferences. In particular
+# bugprone-implicit-widening-of-multiplication-result catches the `durationSec * 1000UL`
+# overflow class that the deleted lights-controller sketch shipped with.
+Checks: >
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-narrowing-conversions,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-slicing,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-braces-around-statements,
+  -readability-uppercase-literal-suffix,
+  -misc-non-private-member-variables-in-classes,
+  -misc-include-cleaner,
+  -bugprone-easily-swappable-parameters,
+  -cert-err58-cpp
+WarningsAsErrors: >
+  bugprone-integer-division,
+  bugprone-implicit-widening-of-multiplication-result,
+  bugprone-narrowing-conversions,
+  bugprone-signed-char-misuse,
+  bugprone-not-null-terminated-result,
+  bugprone-misplaced-widening-cast,
+  bugprone-sizeof-expression,
+  bugprone-string-constructor,
+  bugprone-suspicious-memory-comparison,
+  bugprone-unhandled-self-assignment,
+  bugprone-branch-clone,
+  cert-err34-c,
+  cert-flp30-c,
+  clang-analyzer-*,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-pro-type-member-init,
+  misc-uniqueptr-reset-release,
+  performance-*,
+  readability-function-cognitive-complexity
+HeaderFilterRegex: 'src/iot/(lib|src)/.*'
+CheckOptions:
+  - key: readability-function-cognitive-complexity.Threshold
+    value: '25'
+  - key: readability-function-cognitive-complexity.IgnoreMacros
+    value: 'true'
+  - key: readability-identifier-naming.ClassCase
+    value: 'CamelCase'

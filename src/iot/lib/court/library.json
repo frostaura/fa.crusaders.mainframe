@@ -1,0 +1,7 @@
+{
+  "name": "court",
+  "version": "1.0.0",
+  "description": "The bridge-side decision: what a scan at a court means, and what the box does about it.",
+  "dependencies": { "roster": "*", "eventq": "*", "protocol": "*", "timebase": "*" },
+  "build": { "flags": ["-I include"] }
+}
