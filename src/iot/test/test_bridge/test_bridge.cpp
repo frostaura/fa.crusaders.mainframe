@@ -23,6 +23,7 @@
 #include "court/WalkUpPad.h"
 #include "devapi/DeviceClient.h"
 #include "devapi/Json.h"
+#include "devcrypto/Hex.h"
 #include "eventq/Event.h"
 #include "eventq/EventQueue.h"
 #include "fakes/FakeStore.h"
@@ -733,6 +734,229 @@ void test_find_server_unix_reads_the_field_and_refuses_nonsense() {
 }
 
 // ---------------------------------------------------------------------------
+// Device client — clock bootstrap (probe) against the shared corpus
+// ---------------------------------------------------------------------------
+
+corpus::File g_httpCases;
+
+/// Replays exactly the bytes it was handed. The corpus vector pins a SPECIFIC
+/// nonce, and ScriptedEntropy's incrementing stream cannot produce it.
+class ReplayEntropy final : public devapi::IEntropySource {
+public:
+  ReplayEntropy(const uint8_t* bytes, size_t len) : bytes_(bytes), len_(len) {}
+
+  uint8_t nextByte() override {
+    const uint8_t b = bytes_[at_ % len_];
+    ++at_;
+    return b;
+  }
+
+private:
+  const uint8_t* bytes_;
+  size_t len_;
+  size_t at_ = 0U;
+};
+
+/// Decodes a hex-valued corpus field into `out`, returning its length in bytes.
+size_t corpusHexField(const char* object, const char* name, uint8_t* out, size_t outCap) {
+  static char text[2048];
+  const char* value = corpus::member(object, name);
+  TEST_ASSERT_NOT_NULL_MESSAGE(value, name);
+  size_t textLen = 0U;
+  TEST_ASSERT_TRUE_MESSAGE(corpus::stringValue(value, text, sizeof(text), &textLen), name);
+  size_t byteLen = 0U;
+  TEST_ASSERT_TRUE_MESSAGE(dc::hex::decode(text, textLen, out, outCap, &byteLen), name);
+  return byteLen;
+}
+
+/// The clock-bootstrap probe, byte for byte against the shared corpus.
+///
+/// The fixture is the `requests` vector whose nonce is the pinned
+/// feedface… value — found by nonce rather than by index, so a reordered
+/// corpus cannot silently detach this test from its vector. The server executes
+/// the same vector from the other side; a probe whose canonical string differs
+/// by one byte fails here rather than as a field 401 with no diagnostic.
+void test_client_probe_renders_unix_seconds_zero_with_a_real_hmac() {
+  TEST_ASSERT_TRUE_MESSAGE(g_httpCases.load("http", "cases.json"),
+                           "http corpus not found — a skipped corpus proves nothing");
+
+  const char* requests = corpus::member(g_httpCases.root(), "requests");
+  TEST_ASSERT_NOT_NULL(requests);
+
+  static const char kProbeNonce[] = "feedfacefeedfacefeedfacefeedface";
+  corpus::ArrayIter it(requests);
+  const char* element = nullptr;
+  const char* vector = nullptr;
+  char nonce[64] = {};
+  while (it.next(&element)) {
+    const char* nonceValue = corpus::member(element, "nonce");
+    TEST_ASSERT_NOT_NULL(nonceValue);
+    TEST_ASSERT_TRUE(corpus::stringValue(nonceValue, nonce, sizeof(nonce), nullptr));
+    if (strcmp(nonce, kProbeNonce) == 0) {
+      vector = element;
+      break;
+    }
+  }
+  TEST_ASSERT_NOT_NULL_MESSAGE(vector, "corpus lost its clock-bootstrap probe vector");
+  TEST_ASSERT_EQUAL_UINT64(0ULL, corpus::unsignedValue(corpus::member(vector, "unix_seconds")));
+
+  // The signing key, the path, the body and the expected signature all come
+  // from the corpus — this test hardcodes nothing the two sides must agree on.
+  uint8_t keyBytes[32] = {};
+  size_t keyLen = 0U;
+  {
+    const char* keyValue = corpus::member(g_httpCases.root(), "signing_key_hex");
+    TEST_ASSERT_NOT_NULL(keyValue);
+    char keyText[128] = {};
+    size_t keyTextLen = 0U;
+    TEST_ASSERT_TRUE(corpus::stringValue(keyValue, keyText, sizeof(keyText), &keyTextLen));
+    TEST_ASSERT_TRUE(dc::hex::decode(keyText, keyTextLen, keyBytes, sizeof(keyBytes), &keyLen));
+  }
+
+  char path[128] = {};
+  TEST_ASSERT_TRUE(
+      corpus::stringValue(corpus::member(vector, "path_and_query"), path, sizeof(path), nullptr));
+  TEST_ASSERT_EQUAL_STRING("/api/v1/device/heartbeat", path);
+
+  uint8_t bodyBytes[128] = {};
+  const size_t bodyLen = corpusHexField(vector, "body_hex", bodyBytes, sizeof(bodyBytes) - 1U);
+  char body[128] = {};
+  memcpy(body, bodyBytes, bodyLen);
+  TEST_ASSERT_EQUAL_STRING("{\"running_version\":\"1.0.0\"}", body);
+
+  char expectedSignature[dc::signer::kSignatureBufSize] = {};
+  TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(vector, "signature"), expectedSignature,
+                                       sizeof(expectedSignature), nullptr));
+
+  uint8_t nonceBytes[devapi::kNonceBytes] = {};
+  size_t nonceLen = 0U;
+  TEST_ASSERT_TRUE(dc::hex::decode(nonce, strlen(nonce), nonceBytes, sizeof(nonceBytes), &nonceLen));
+  TEST_ASSERT_EQUAL_size_t(devapi::kNonceBytes, nonceLen);
+
+  ReplayEntropy entropy(nonceBytes, nonceLen);
+  devapi::Credentials c;
+  c.deviceId = "11111111-2222-3333-4444-555555555555";
+  c.key = dc::ByteSpan{keyBytes, keyLen};
+  devapi::DeviceClient client(c, entropy);
+
+  devapi::Call call;
+  call.method = "POST";
+  call.pathAndQuery = path;
+  call.body = body;
+  call.bodyLen = bodyLen;
+
+  // The scenario probe() exists for: provisioned, power-cycled, no clock.
+  // sign() must still refuse — its refusal protects every NORMAL call — while
+  // probe() renders the zero-timestamp request whose 401 carries the clock.
+  TEST_ASSERT_FALSE(client.clockKnown());
+  devapi::RequestBuffers refused;
+  devapi::SignedRequest refusedRequest;
+  TEST_ASSERT_FALSE(client.sign(call, 5000U, refused, refusedRequest));
+
+  devapi::RequestBuffers buffers;
+  devapi::SignedRequest request;
+  TEST_ASSERT_TRUE(client.probe(call, 5000U, buffers, request));
+
+  TEST_ASSERT_EQUAL_STRING("0", request.timestamp);
+  TEST_ASSERT_EQUAL_STRING(kProbeNonce, request.nonce);
+  TEST_ASSERT_EQUAL_STRING(expectedSignature, request.signature);
+}
+
+void test_client_a_probe_401_with_time_seeds_the_clock() {
+  ScriptedEntropy entropy;
+  devapi::DeviceClient client(credentials(), entropy);
+  TEST_ASSERT_FALSE(client.clockKnown());
+
+  // What the probe's expected rejection looks like: 401, body carrying
+  // server_unix. That closes the loop — corrected offset, ClockCorrected,
+  // immediate re-arm — without ever abandoning the credential.
+  devapi::Response rejected;
+  rejected.status = 401U;
+  rejected.serverUnix = 1750000000ULL;
+  TEST_ASSERT_TRUE(client.react(rejected, 3000U) == devapi::Reaction::ClockCorrected);
+  TEST_ASSERT_TRUE(client.clockKnown());
+  TEST_ASSERT_EQUAL_UINT64(1750000000ULL, client.unixNow(3000U));
+}
+
+void test_client_drift_the_server_refuses_is_read_as_skew_not_a_dead_key() {
+  // The server refuses signatures from 120 s of drift (DeviceVerifier
+  // ClockSkew); the local threshold must sit BELOW that window, at 90 s. When
+  // it sat above (300 s), a board drifted 2–5 minutes got the 401, measured a
+  // correction under its own threshold, concluded "not skew" and abandoned a
+  // healthy credential. 121 s is the smallest whole-second drift the server
+  // always refuses — it must be read as a clock problem.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    ScriptedEntropy entropy;
+    devapi::DeviceClient client(credentials(), entropy);
+    client.adoptServerTime(1750000000ULL, kBases[i]);
+
+    devapi::Response rejected;
+    rejected.status = 401U;
+    rejected.serverUnix = 1750000121ULL; // the box is 121 s behind the server
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
+  }
+}
+
+void test_client_drift_inside_the_local_window_still_means_the_key_is_gone() {
+  // The other side of the 90 s boundary: 30 s of drift is inside the server's
+  // window, so the signature was verifiable and the 401 was about the key.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    ScriptedEntropy entropy;
+    devapi::DeviceClient client(credentials(), entropy);
+    client.adoptServerTime(1750000000ULL, kBases[i]);
+
+    devapi::Response rejected;
+    rejected.status = 401U;
+    rejected.serverUnix = 1750000030ULL; // 30 s out — under the 90 s threshold
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::Reprovision);
+  }
+}
+
+void test_find_server_unix_agrees_with_the_shared_response_corpus() {
+  TEST_ASSERT_TRUE_MESSAGE(g_httpCases.load("http", "cases.json"),
+                           "http corpus not found — a skipped corpus proves nothing");
+
+  const char* responses = corpus::member(g_httpCases.root(), "responses");
+  TEST_ASSERT_NOT_NULL_MESSAGE(responses, "corpus has no responses section");
+
+  corpus::ArrayIter it(responses);
+  const char* element = nullptr;
+  int executed = 0;
+  bool sawProvision = false;
+  bool sawChallenge = false;
+
+  while (it.next(&element)) {
+    static uint8_t bodyBytes[1024];
+    const size_t bodyLen = corpusHexField(element, "body_hex", bodyBytes, sizeof(bodyBytes));
+
+    const char* expect = corpus::member(element, "expect");
+    TEST_ASSERT_NOT_NULL(expect);
+    const uint64_t expected = corpus::unsignedValue(corpus::member(expect, "server_unix"));
+
+    char kind[32] = {};
+    TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(element, "kind"), kind, sizeof(kind), nullptr));
+    if (strcmp(kind, "provision") == 0) {
+      // The first clock seed a fresh board ever sees.
+      TEST_ASSERT_EQUAL_UINT64(1700000123ULL, expected);
+      sawProvision = true;
+    } else if (strcmp(kind, "challenge") == 0) {
+      // The 401 body that lets a skewed or clockless box recover.
+      TEST_ASSERT_EQUAL_UINT64(1700000456ULL, expected);
+      sawChallenge = true;
+    }
+
+    TEST_ASSERT_EQUAL_UINT64(expected,
+                             devapi::findServerUnix(reinterpret_cast<const char*>(bodyBytes), bodyLen));
+    ++executed;
+  }
+
+  // A corpus that loaded but yielded nothing passes every assertion above.
+  TEST_ASSERT_EQUAL(2, executed);
+  TEST_ASSERT_TRUE(sawProvision);
+  TEST_ASSERT_TRUE(sawChallenge);
+}
+
+// ---------------------------------------------------------------------------
 // Session — the decision a scan produces
 // ---------------------------------------------------------------------------
 
@@ -1431,6 +1655,12 @@ int main(int, char**) {
   RUN_TEST(test_client_transient_failures_keep_the_event_and_permanent_ones_do_not);
   RUN_TEST(test_client_a_response_without_a_clock_does_not_reset_a_good_one);
   RUN_TEST(test_find_server_unix_reads_the_field_and_refuses_nonsense);
+
+  RUN_TEST(test_client_probe_renders_unix_seconds_zero_with_a_real_hmac);
+  RUN_TEST(test_client_a_probe_401_with_time_seeds_the_clock);
+  RUN_TEST(test_client_drift_the_server_refuses_is_read_as_skew_not_a_dead_key);
+  RUN_TEST(test_client_drift_inside_the_local_window_still_means_the_key_is_gone);
+  RUN_TEST(test_find_server_unix_agrees_with_the_shared_response_corpus);
 
   return UNITY_END();
 }

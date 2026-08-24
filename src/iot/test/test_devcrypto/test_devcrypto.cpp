@@ -27,6 +27,7 @@
 #include <string.h>
 #include <unity.h>
 
+#include "devapi/DeviceClient.h"
 #include "devcrypto/Hex.h"
 #include "devcrypto/Hkdf.h"
 #include "devcrypto/HmacSha256.h"
@@ -477,6 +478,38 @@ void test_hkdf_expand_chains_blocks_and_respects_its_ceiling(void) {
   TEST_ASSERT_FALSE(dc::hkdf::expand(prk, inputs.info, longOut, (255U * 32U) + 1U));
 }
 
+// --- response bodies --------------------------------------------------------
+//
+// The other direction of the contract: not what the firmware sends but what it
+// reads back. Each `responses` vector is a body the server actually produces —
+// the provision response that seeds a fresh board's clock, and the Device-scheme
+// 401 body that lets a skewed or clockless box recover — and the firmware-side
+// reader must pull the same server_unix out of it that the server put in.
+
+void test_find_server_unix_matches_every_response_vector(void) {
+  size_t executed = 0;
+  corpus::ArrayIter it(section("responses"));
+  const char* testCase = nullptr;
+
+  while (it.next(&testCase)) {
+    const size_t bodyLen = hexField(testCase, "body_hex", g_bytesA, sizeof(g_bytesA));
+
+    const char* expect = corpus::member(testCase, "expect");
+    TEST_ASSERT_NOT_NULL_MESSAGE(expect, "responses case has no expect object");
+
+    const uint64_t actual = devapi::findServerUnix(reinterpret_cast<const char*>(g_bytesA), bodyLen);
+    TEST_ASSERT_EQUAL_UINT64(unsignedField(expect, "server_unix"), actual);
+    // A vector whose expectation is 0 would pass against a reader that finds
+    // nothing at all; the corpus only carries bodies where the field is present.
+    TEST_ASSERT_NOT_EQUAL(0U, actual);
+
+    ++executed;
+  }
+
+  TEST_ASSERT_EQUAL_size_t(declaredCount("responses"), executed);
+  g_ledger.record("responses", executed);
+}
+
 // --- hex and constant-time comparison ---------------------------------------
 
 void test_hex_encodes_lowercase_and_round_trips(void) {
@@ -599,6 +632,7 @@ int main(int, char**) {
   RUN_TEST(test_unsigned_formatting_spans_the_32_bit_boundary);
   RUN_TEST(test_hkdf_matches_every_vector);
   RUN_TEST(test_hkdf_expand_chains_blocks_and_respects_its_ceiling);
+  RUN_TEST(test_find_server_unix_matches_every_response_vector);
   RUN_TEST(test_hex_encodes_lowercase_and_round_trips);
   RUN_TEST(test_constant_time_compare_rejects_length_mismatch_and_flipped_bits);
   RUN_TEST(test_every_corpus_section_is_declared_and_executed);

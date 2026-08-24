@@ -9,10 +9,17 @@ namespace devapi {
 
 namespace {
 
-/// Seconds the box may be out before the server refuses the signature. Mirrors
-/// the server's window; used only to decide whether a 401 is worth retrying
-/// immediately, never to accept or refuse anything locally.
-constexpr int64_t kSkewToleranceSeconds = 300;
+/// Correction size below which a 401-with-time is judged "not a clock problem".
+///
+/// This MUST be strictly below the server's own skew window (120 s,
+/// DeviceVerifier ClockSkew) — the asymmetry is the whole point. The server
+/// starts refusing at 120 s of drift; a local threshold at or above that (this
+/// used to be 300) opens a dead band: a board drifted 2–5 minutes gets the
+/// 401, adopts the server time, measures a correction smaller than the local
+/// threshold, concludes "not skew", and re-provisions over a perfectly healthy
+/// credential. At 90 s, every drift the server can refuse for skew corrects by
+/// more than this and is read as the clock problem it is.
+constexpr int64_t kSkewToleranceSeconds = 90;
 
 bool isDigit(char c) {
   return c >= '0' && c <= '9';
@@ -22,14 +29,36 @@ bool isDigit(char c) {
 
 bool DeviceClient::sign(const Call& call, uint32_t uptimeMs, RequestBuffers& buffers,
                         SignedRequest& out) const {
-  if (!credentials_.usable() || call.method == nullptr || call.pathAndQuery == nullptr) {
-    return false;
-  }
   if (!clockKnown_) {
     // Refuse locally rather than sign with a timestamp of zero. A zero
     // timestamp is a guaranteed 401, and a 401 is indistinguishable from a
     // revoked key — which would send the box off to re-provision over what is
-    // only an unsynchronised clock.
+    // only an unsynchronised clock. A caller that WANTS the zero-timestamp
+    // 401, because the 401 body carries the clock, says so with probe().
+    return false;
+  }
+
+  // offset + uptime, through the one helper that knows the rule. Signing the
+  // offset alone would be signing the epoch second at BOOT — correct for about
+  // as long as it takes to notice nothing is wrong, then a permanent 401.
+  const uint64_t seconds = unixNow(uptimeMs);
+  if (seconds == 0U) {
+    return false;
+  }
+  return render(call, seconds, buffers, out);
+}
+
+bool DeviceClient::probe(const Call& call, uint32_t uptimeMs, RequestBuffers& buffers,
+                         SignedRequest& out) const {
+  // Present only so probe() and sign() are call-compatible; there is no clock
+  // for the uptime to be added to, and the timestamp is 0 by contract.
+  static_cast<void>(uptimeMs);
+  return render(call, 0U, buffers, out);
+}
+
+bool DeviceClient::render(const Call& call, uint64_t unixSeconds, RequestBuffers& buffers,
+                          SignedRequest& out) const {
+  if (!credentials_.usable() || call.method == nullptr || call.pathAndQuery == nullptr) {
     return false;
   }
 
@@ -41,21 +70,14 @@ bool DeviceClient::sign(const Call& call, uint32_t uptimeMs, RequestBuffers& buf
     return false;
   }
 
-  // offset + uptime, through the one helper that knows the rule. Signing the
-  // offset alone would be signing the epoch second at BOOT — correct for about
-  // as long as it takes to notice nothing is wrong, then a permanent 401.
-  const uint64_t seconds = unixNow(uptimeMs);
-  if (seconds == 0U) {
-    return false;
-  }
-  if (dc::signer::formatUnsigned(seconds, buffers.timestamp, sizeof(buffers.timestamp)) == 0U) {
+  if (dc::signer::formatUnsigned(unixSeconds, buffers.timestamp, sizeof(buffers.timestamp)) == 0U) {
     return false;
   }
 
   dc::DeviceRequest request;
   request.method = call.method;
   request.pathAndQuery = call.pathAndQuery;
-  request.unixSeconds = seconds;
+  request.unixSeconds = unixSeconds;
   request.nonce = buffers.nonce;
 
   const dc::ByteSpan bodySpan{reinterpret_cast<const uint8_t*>(call.body),

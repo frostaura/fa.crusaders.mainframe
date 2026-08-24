@@ -295,6 +295,14 @@ char gDeviceId[devapi::kMaxDeviceIdLen + 1U] = {};
 uint8_t gDeviceKey[kDeviceKeyBytes] = {};
 bool gProvisioned = false;
 
+/// Consecutive heartbeat ClockCorrected reactions. A ClockCorrected is supposed
+/// to be self-curing — the very next attempt carries the adopted time and is
+/// accepted — so two in a row means the server keeps 401ing WITH a time
+/// attached, and a box that trusts that forever retries at 1 s for the rest of
+/// its life. Two strikes and the 401 is treated as the credential problem it
+/// evidently is. Reset by any Accepted heartbeat.
+uint8_t gClockCorrectedStreak = 0U;
+
 /// The tenant slug, present once provisioned. Empty falls the announce back to
 /// the unclaimed form — a claimed board that somehow lost its slug is better
 /// listed as connectable than not listed at all.
@@ -443,6 +451,17 @@ void handleOffer(const discovery::Packet& packet) {
     if (!box.accept(packet, offer)) {
       return;
     }
+  }
+
+  if (gProvisioned) {
+    // Verified-offer time ONLY. For a provisioned box the OFFER above was
+    // HMAC-verified and nonce-replay-bound before any of its fields became
+    // readable, so its clock is as trustworthy as a signed response body — and
+    // it is how a power-cycled board recovers its clock without touching the
+    // API. An unclaimed box's offer is unsigned and attacker-suppliable, so
+    // its time is never adopted; an unclaimed box also needs no clock, because
+    // its only call, /provision, is unsigned and the response seeds the clock.
+    gApi.adoptServerTime(offer.unixSeconds(), static_cast<uint32_t>(gUptime.value()));
   }
 
   // Refused rather than truncated. A base URL this box cannot hold is one it
@@ -696,10 +715,17 @@ bool loadCredentials() {
 
 /// One signed call. Returns the HTTP status, or 0 when it never completed.
 ///
+/// `asProbe` renders the request through probe() — a real HMAC over a zero
+/// timestamp — instead of sign(). It exists for exactly one caller: the
+/// heartbeat of a provisioned box that has no clock yet, whose expected 401
+/// carries `server_unix` and closes the clock-recovery loop. Every other call
+/// passes false and keeps sign()'s refuse-without-a-clock protection.
+///
 /// The response body is read into a caller buffer rather than a String: the ESP's
 /// heap is shared with the TLS stack, and a heartbeat that allocates four times a
 /// minute is a heap that fragments over a season in a cupboard.
-uint16_t callApi(const char* method, const char* path, const char* body, char* out, size_t outCap) {
+uint16_t callApi(const char* method, const char* path, const char* body, char* out, size_t outCap,
+                 bool asProbe = false) {
   if (gApiUrl[0] == '\0') {
     return 0U;
   }
@@ -712,10 +738,14 @@ uint16_t callApi(const char* method, const char* path, const char* body, char* o
 
   devapi::RequestBuffers buffers;
   devapi::SignedRequest signed_;
-  if (!gApi.sign(call, static_cast<uint32_t>(gUptime.value()), buffers, signed_)) {
+  const uint32_t uptimeMs = static_cast<uint32_t>(gUptime.value());
+  const bool rendered =
+      asProbe ? gApi.probe(call, uptimeMs, buffers, signed_) : gApi.sign(call, uptimeMs, buffers, signed_);
+  if (!rendered) {
     // No credential, or no clock yet. Both are local refusals on purpose — a
     // request signed with a timestamp of zero comes back 401 and reads exactly
-    // like a revoked key.
+    // like a revoked key. The probe path opts out of the clock refusal, and
+    // only the heartbeat is allowed to.
     return 0U;
   }
 
@@ -1116,11 +1146,19 @@ void pumpHeartbeat(uint32_t nowMs) {
 
   char response[512] = {};
   devapi::Response result;
-  result.status = callApi("POST", "/api/v1/device/heartbeat", body, response, sizeof(response));
+  // A provisioned box with no clock — a power cycle, since the offset lives in
+  // RAM — cannot sign, and before probe() existed that was a deadlock: the only
+  // clock sources needed a signed call. The probe's zero timestamp draws the
+  // 401 whose body carries `server_unix`; react() adopts it and answers
+  // ClockCorrected, and the 1 s re-arm below retries as a normally signed
+  // heartbeat.
+  const bool asProbe = !gApi.clockKnown();
+  result.status = callApi("POST", "/api/v1/device/heartbeat", body, response, sizeof(response), asProbe);
   result.serverUnix = devapi::findServerUnix(response, strlen(response));
 
   switch (gApi.react(result, static_cast<uint32_t>(gUptime.value()))) {
   case devapi::Reaction::Accepted:
+    gClockCorrectedStreak = 0U;
     // The evidence that clears a pending update. Not "it booted" — a firmware that
     // comes up and cannot authenticate looks alive and does nothing, which is worse
     // than one that does not come up at all.
@@ -1129,6 +1167,18 @@ void pumpHeartbeat(uint32_t nowMs) {
     considerUpdate(response, strlen(response));
     return;
   case devapi::Reaction::ClockCorrected:
+    // ClockCorrected is self-curing by design: the retry below carries the
+    // adopted time and should be accepted. A SECOND one in a row means the
+    // server keeps rejecting-with-time — a box that believes it indefinitely
+    // hammers at 1 s forever — so two strikes read as the credential problem
+    // Reprovision handles.
+    ++gClockCorrectedStreak;
+    if (gClockCorrectedStreak >= 2U) {
+      gClockCorrectedStreak = 0U;
+      gProvisioned = false;
+      showClaimPrompt();
+      return;
+    }
     // The offset is fixed and the next attempt is expected to work, so do not
     // wait a full interval to find out.
     gHeartbeat.arm(nowMs, 1000UL);
@@ -1136,7 +1186,9 @@ void pumpHeartbeat(uint32_t nowMs) {
   case devapi::Reaction::Reprovision:
     // The server does not accept this credential. Hammering it with a revoked key
     // is how a board gets rate limited out of ever recovering, so the box goes
-    // back to announcing itself and waits to be claimed again.
+    // back to announcing itself and waits to be claimed again. The streak is
+    // cleared so a future credential does not inherit half a strike.
+    gClockCorrectedStreak = 0U;
     gProvisioned = false;
     showClaimPrompt();
     return;

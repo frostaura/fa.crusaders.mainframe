@@ -207,6 +207,33 @@ public class DeviceProtocolCorpusTests
         Assert.Equal(Declared("hkdf"), executed);
     }
 
+    // ---- Response clock seeds ----------------------------------------------
+
+    /// <summary>
+    /// The other direction of the wire. The <c>requests</c> section is what the
+    /// firmware signs; these are the two responses it reads its clock from — the
+    /// provision body (the first seed a fresh board ever sees) and the Device-scheme
+    /// 401 body (how a skewed box recovers without reprovisioning). Each body must
+    /// parse as JSON and carry the declared <c>server_unix</c>; the live serializers
+    /// are held to the same key by the HTTP tests in <c>ProvisioningHttpTests</c> and
+    /// <c>DeviceAuthHttpTests</c>.
+    /// </summary>
+    [Fact]
+    public void Response_bodies_carry_the_declared_server_unix()
+    {
+        var executed = 0;
+        foreach (var c in Corpus.GetProperty("responses").EnumerateArray())
+        {
+            using var body = JsonDocument.Parse(Hex(c, "body_hex"));
+            Assert.Equal(
+                c.GetProperty("expect").GetProperty("server_unix").GetInt64(),
+                body.RootElement.GetProperty("server_unix").GetInt64());
+            executed++;
+        }
+
+        Assert.Equal(Declared("responses"), executed);
+    }
+
     /// <summary>
     /// The anti-drift assertion itself. A section present in the corpus but absent
     /// from the manifest — or vice versa — means someone added cases without

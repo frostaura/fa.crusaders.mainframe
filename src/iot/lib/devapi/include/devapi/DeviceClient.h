@@ -169,6 +169,22 @@ public:
   /// 401 that reads as a revoked key and sends the box off to re-provision.
   bool sign(const Call& call, uint32_t uptimeMs, RequestBuffers& buffers, SignedRequest& out) const;
 
+  /// Renders one clock-probe request: identical to sign() in every byte except
+  /// that the signed timestamp is literally 0. The HMAC is real — signing needs
+  /// no clock, only a timestamp VALUE, and 0 is the value the server's
+  /// clock-bootstrap contract expects: it refuses the request for skew and the
+  /// 401 body's `server_unix` seeds the clock.
+  ///
+  /// This is how a power-cycled provisioned board recovers its clock without
+  /// abandoning its credential. sign() still refuses without a clock — that
+  /// refusal protects every NORMAL call from reading its own 401 as a revoked
+  /// key; a probe is the one call whose 401 is the point.
+  ///
+  /// Same shape as sign() so a call site can use either interchangeably.
+  /// `uptimeMs` is unused (there is no clock to add it to) and accepted only
+  /// for that symmetry.
+  bool probe(const Call& call, uint32_t uptimeMs, RequestBuffers& buffers, SignedRequest& out) const;
+
   /// The box's best guess at Unix time. Zero until a response has been seen —
   /// and a zero timestamp is deliberately NOT signable, so an unsynchronised
   /// box fails locally rather than by 401.
@@ -193,6 +209,11 @@ public:
   const Credentials& credentials() const { return credentials_; }
 
 private:
+  /// The one place a request is rendered: nonce, timestamp formatting, HMAC,
+  /// output. sign() and probe() differ ONLY in the timestamp value they pass,
+  /// so the canonical string cannot drift between them.
+  bool render(const Call& call, uint64_t unixSeconds, RequestBuffers& buffers, SignedRequest& out) const;
+
   Credentials credentials_;
   IEntropySource& entropy_;
 

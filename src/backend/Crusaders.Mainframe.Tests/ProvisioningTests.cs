@@ -220,6 +220,30 @@ public sealed class ProvisioningHttpTests
     }
 
     /// <summary>
+    /// The first clock seed a fresh board ever sees. The box has no RTC and cannot
+    /// sign a request until it knows the time, so a provision response without the
+    /// server's clock hands out a key the board can never use — it would deadlock
+    /// on 401s until someone reprovisioned it (finding C1).
+    /// </summary>
+    [SkippableFact]
+    public async Task Provision_response_carries_server_unix()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var client = factory.CreateClient();
+        Seed(factory, "5ccf7f1a2b3c", "K7RM4XPT");
+
+        var response = await client.PostAsJsonAsync(Path, new { mac = "5ccf7f1a2b3c", claim_code = "K7RM4XPT" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        Assert.InRange(json.GetProperty("server_unix").GetInt64(), now - 60, now + 60);
+        Assert.True(json.TryGetProperty("server_time", out _));
+    }
+
+    /// <summary>
     /// The endpoint is anonymous by necessity — a board collecting its first key has no
     /// credential to present. So it must not become an oracle for which boards are
     /// mid-claim: a wrong code, an unknown MAC and no grant at all look identical.

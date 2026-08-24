@@ -165,6 +165,12 @@ public static class DeviceEndpoints
 
         return Results.Ok(new
         {
+            // The first clock seed a fresh board ever sees. The box has no RTC and
+            // cannot sign a request until it knows the time — a provision response
+            // without the clock hands out a key the board can never use, and it
+            // deadlocks on 401s until someone reprovisions it.
+            server_time = DateTimeOffset.UtcNow,
+            server_unix = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             device_id = grant.DeviceId,
             tenant_slug = grant.TenantSlug,
             key_version = grant.KeyVersion,

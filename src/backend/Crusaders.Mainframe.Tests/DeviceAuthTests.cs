@@ -481,6 +481,32 @@ public sealed class DeviceAuthHttpTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    /// <summary>
+    /// The recovery path for a rejected clock. The box has no RTC; a board whose clock
+    /// has drifted past the skew window can never sign a valid request again, so an
+    /// empty 401 would strand it until someone reprovisioned (finding C1). The
+    /// challenge body carries the server's own clock — and nothing else, because why
+    /// the request failed is for the log, never for the response.
+    /// </summary>
+    [SkippableFact]
+    public async Task Stale_timestamp_gets_401_with_server_unix_body()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var p = await ProvisionAsync(factory, "alpha");
+        var client = factory.CreateClient();
+
+        var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 300;   // outside the two-minute window
+        var response = await client.SendAsync(Signed(p, unixSeconds: ts));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        Assert.InRange(json.GetProperty("server_unix").GetInt64(), now - 60, now + 60);
+    }
+
     [SkippableFact]
     public async Task Disabled_device_is_rejected()
     {

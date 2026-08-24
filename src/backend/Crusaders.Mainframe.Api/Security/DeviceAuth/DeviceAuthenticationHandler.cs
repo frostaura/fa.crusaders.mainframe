@@ -79,6 +79,25 @@ public sealed class DeviceAuthenticationHandler : AuthenticationHandler<DeviceAu
             new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
     }
 
+    /// <summary>
+    /// Every Device-scheme 401 carries the server's clock in its body. The box has no
+    /// RTC: a board whose clock has skewed past the verifier's window can never sign a
+    /// valid request again, so an empty 401 would strand it until someone reprovisioned
+    /// it. The firmware (<c>DeviceClient::react</c>) reads <c>server_unix</c> from this
+    /// body, re-seeds its clock and retries. Nothing else goes in the body — why
+    /// authentication failed is for the log, never for the response (see
+    /// <see cref="DeviceVerification"/>).
+    /// </summary>
+    protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
+    {
+        Response.StatusCode = StatusCodes.Status401Unauthorized;
+        Response.Headers.WWWAuthenticate = SchemeName;
+        Response.ContentType = "application/json";
+        await Response.WriteAsync(
+            $"{{\"server_unix\":{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}",
+            Context.RequestAborted);
+    }
+
     /// <summary>Returns null when the headers are absent or unusable — the caller distinguishes the two.</summary>
     private static async Task<DeviceCredential?> ReadCredentialAsync(HttpRequest req)
     {
