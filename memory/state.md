@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-state
-description: "Phases A-J code-complete: backend 519, firmware 240, frontend 28 unit + 12 Playwright, all green including the 90 Postgres-backed boundary tests. Three adversarial audits then found sixteen defects in that already-green code — an IDOR, a tenant bypass, the wrong court lighting up, four money races — all fixed and mutation-proven. What remains is physical and is in docs/go-live-checklist.md"
+description: "Phases A-J green — but the 2026-08-24 two-round adversarial E2E review (55 agents, against the fixed wiring schematic, old sketches and build photos) confirmed 30 defects incl. 7 critical: the book-online → scan → lights-on path does not exist end to end. Full evidence: docs/reviews/e2e-adversarial-review-2026-08-24.md. NOT go-live-ready for booked members"
 type: state
-last_verified: 2026-08-23
+last_verified: 2026-08-24
 ---
 
 # Current state
@@ -16,6 +16,38 @@ installed on 2026-08-23, so nothing here re-ran them._
 _2026-08-22 — every claim below was executed, not read. A .NET 10 SDK and PlatformIO were installed into this environment (neither was present), a real Postgres 16 was started locally, the full suite was run, the migration was applied to a fresh database, and each quality gate was deliberately broken to confirm it fails. Verify before trusting anything dated older than ~60 days._
 
 **Backend 284/284 green** (46 need Postgres and skip cleanly without it), **firmware 85/85 green** under both native and ASAN/UBSAN with no board attached. The backend was 24/30 at the start of 2026-08-22. The working tree is clean and `main` is at `6ed1fea`; all work sits on `claude/squash-booking-system-design-dt7ja6`, pushed, with **PR #1 open as a draft** carrying a phase checklist. The delivery shape is one branch, one PR — agreed with the founder, so do not split it.
+
+### The adversarial E2E review, round 2 (2026-08-24) — the system is not end-to-end
+
+A two-round, 55-agent adversarial review was run against the **fixed wiring** as the immutable
+contract: inputs were the canonical `Light Project Wiring.xlsx` (both sheets), the old
+proven-working sketches from Dean.zip (`Squash_Court_System_FINAL_WORKING_2026-07-14`), five
+photos of the actual build, and this repo. Every finding was independently verified by refuters;
+**30 confirmed (7 critical, 7 high, 12 medium, 4 low), 1 refuted, 7 physical-verification
+items**. Full evidence, file-and-line: [`docs/reviews/e2e-adversarial-review-2026-08-24.md`](../docs/reviews/e2e-adversarial-review-2026-08-24.md).
+
+**The wiring layer is sound** — `Pins.h` matches the schematic and old sketches exactly; not
+one finding is electrical. But the headline flow — book online, scan at the box, lights on —
+**does not exist in the shipped code and cannot succeed by any path**. The seven criticals:
+(1) clock-seed deadlock — provision never sends `server_unix`, so a real board can never make
+its first signed API call; (2) nothing ever populates the roster, so every member scan is
+refused; (3) no device-reachable activation endpoint exists and a member's walk-up fallback is
+blocked by their own booking; (4) one box serves four courts but the device model is per-court
+and `gCourtNumber` is never adopted; (5) walk-up charges `device.CourtNumber` while the box
+lights the pressed button's court; (6) activation events never become attendance — **shipping
+the roster fix alone converts every attended check-in into a refund plus penalty**; (7) no QR
+token both fits the 24-byte scanner pipeline and passes backend JWT validation. Highs include:
+the bridge never sends `!AUTH` (button panel dead), walk-up purchase not idempotent, the
+biometric path still carries the wrong-row bug fixed elsewhere, a settled no-show holds the
+slot to EndsAt, OTA is unsignable (private key unlocatable, no CI release job). All fail on
+real hardware while the suites stay green, because tests inject exactly the data no production
+path supplies — the same lesson as 2026-08-23, one layer up.
+
+This round also falsified several claims earlier in this file and in the watch list (corrected
+in place, marked ⟨corrected 2026-08-24⟩): the closing "Still red or unbuilt" list, the "no MAC
+column" and "claim flow stops at returning the key" notes, the "repo-default OTA key" story and
+the "first-ESP-flash DIP undocumented" claim — the wiring sheet documents it (Upload DIP
+5+6+7 ON); the README dropped that exact row.
 
 ### The adversarial audit round (2026-08-23, later)
 
@@ -177,15 +209,12 @@ Three things worth knowing before touching it:
 - **`docker-compose.onprem.yml` is new and is not optional at the club.** On the base compose
   file the backend is on a bridge, so the listener receives nothing, ever. The status endpoint
   reports that state rather than letting it look like a firmware fault.
-- **The claim flow stops at returning the key.** The spec has the API POST the key and the
-  claim code to the board's address; that outbound step is deliberately not built, because the
-  address came from an unauthenticated UDP packet and the outbound guard's private-network
-  allow-list is what stands between this API and being an SSRF proxy for the LAN. Someone has
-  to decide how the board is provisioned — an admin-confirmed push, or the technician pasting
-  the key — before it ships.
-- **`Device` has no MAC column**, so a claimed board cannot be tied back to the physical box it
-  came from except through the audit row. Correlation after claiming goes through the device id
-  the board announces. Adding one is a migration nobody has needed yet.
+- ⟨corrected 2026-08-24⟩ **The claim flow no longer stops at returning the key** —
+  `POST /api/v1/device/provision` exists (`DeviceEndpoints.cs:119`) and the board fetches its
+  own key. But the provision response omits `server_unix`, which is critical finding C1 of the
+  2026-08-24 review: the board can never seed its clock and never signs a request.
+- ⟨corrected 2026-08-24⟩ **`Device` has a MAC column** — migration
+  `20260822235151_AddDeviceMacAddress`, `Domain/Device.cs:86`, with tests.
 
 ### Still red or unbuilt
 
@@ -193,4 +222,9 @@ The six Docker/Portainer Actions secrets remain unset, so the release chain stil
 
 ~~**`make build` fails at `build-iot`**~~ — **FIXED 2026-08-23.** Both causes are gone: the library coordinate is now `marcoschwartz/LiquidCrystal_I2C@1.1.4` (same API, same version, the owner prefix was simply wrong — johnrickman's exists only in the Arduino Library Manager index, never in the PlatformIO registry), and all three source directories are populated. `pio run -e court_mega -e court_bridge -e simulator` succeeds; `court_mega` uses 23.7% of SRAM and 6.1% of flash. A third cause surfaced once the first was fixed: the Arduino AVR builder appends `-std=gnu++11` after `build_flags`, so `[common]`'s `-std=gnu++17` had never applied and lib/'s `inline constexpr` variables could not compile for the board — `build_unflags = -std=gnu++11` fixes it. A new `iot-build` CI job now runs `pio run` for all three targets and gates the four Docker jobs, so this cannot go quiet again.
 
-Not started: **PayFast** (the rest of Phase 2), **Phase 5** court firmware, **Phase 6** lights as a purchasable good, **Phase 7** charge-at-booking, **Phase 8** OTA, **Phase 9** admin UI. Gates are parked by decision — the hardware is undecided.
+⟨corrected 2026-08-24⟩ The "Not started" list that closed this file was falsified by this
+file's own earlier sections and by inspection (`Payments/PayFast/` exists, three firmware
+targets compile, signed OTA is built): PayFast, court firmware, charge-at-booking and OTA are
+all built. What is genuinely not working end to end is catalogued, with evidence, in
+[`docs/reviews/e2e-adversarial-review-2026-08-24.md`](../docs/reviews/e2e-adversarial-review-2026-08-24.md).
+Gates remain parked by decision — the hardware is undecided.

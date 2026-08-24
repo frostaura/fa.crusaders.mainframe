@@ -1,0 +1,1397 @@
+<title>Crusaders Mainframe Blueprint</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --paper:#F4F7F9; --card:#FFFFFF; --card2:#EDF1F4; --ink:#17222D; --muted:#5C6E7E;
+  --line:#D3DDE5; --line2:#BCC9D4;
+  --amber:#B8770E; --amber-fill:#E9A23B; --amber-soft:#F7E7C8;
+  --blue:#2E6FAE; --blue-fill:#4A87C2; --blue-soft:#DCE8F4;
+  --red:#BE4128; --red-soft:#F6DFD8;
+  --green:#2C8A5F; --green-soft:#DCEEE4;
+  --violet:#6B5AA8; --violet-soft:#E6E1F3;
+  --code-bg:#1B2733; --code-ink:#D8E2EC;
+  --shadow:0 1px 2px rgba(23,34,45,.06), 0 8px 24px rgba(23,34,45,.07);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0F151C; --card:#17202A; --card2:#121A22; --ink:#E6ECF2; --muted:#93A3B2;
+    --line:#2B3844; --line2:#3A4A59;
+    --amber:#F0A83C; --amber-fill:#C98A22; --amber-soft:#3A2E17;
+    --blue:#6FA9E2; --blue-fill:#3E6E9E; --blue-soft:#1B2C3E;
+    --red:#E2755F; --red-soft:#3D211B;
+    --green:#57BB8E; --green-soft:#1B3226;
+    --violet:#A395D6; --violet-soft:#2A2440;
+    --code-bg:#0B1117; --code-ink:#C6D2DE;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0F151C; --card:#17202A; --card2:#121A22; --ink:#E6ECF2; --muted:#93A3B2;
+  --line:#2B3844; --line2:#3A4A59;
+  --amber:#F0A83C; --amber-fill:#C98A22; --amber-soft:#3A2E17;
+  --blue:#6FA9E2; --blue-fill:#3E6E9E; --blue-soft:#1B2C3E;
+  --red:#E2755F; --red-soft:#3D211B;
+  --green:#57BB8E; --green-soft:#1B3226;
+  --violet:#A395D6; --violet-soft:#2A2440;
+  --code-bg:#0B1117; --code-ink:#C6D2DE;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:'Archivo',system-ui,-apple-system,sans-serif;
+  font-size:15.5px; line-height:1.55;
+}
+.mono{font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace}
+a{color:var(--blue)}
+h1,h2,h3,h4{text-wrap:balance; margin:0}
+p{max-width:72ch}
+
+/* ---------- shell: rail + content ---------- */
+.shell{display:grid; grid-template-columns:216px minmax(0,1fr); max-width:1340px; margin:0 auto}
+nav.rail{
+  position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto;
+  padding:26px 10px 26px 22px; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; gap:2px;
+}
+.rail .brand{font-weight:900; letter-spacing:-.02em; font-size:15px; margin-bottom:14px; line-height:1.2}
+.rail .brand .mono{display:block; font-size:10px; font-weight:500; color:var(--muted); letter-spacing:.08em; margin-top:4px}
+.rail a{
+  display:block; padding:6px 10px; border-radius:6px; text-decoration:none; color:var(--muted);
+  font-size:12.5px; font-weight:600; letter-spacing:.01em; border-left:2px solid transparent;
+}
+.rail a:hover{color:var(--ink); background:var(--card2)}
+.rail a.active{color:var(--ink); background:var(--card2); border-left-color:var(--amber-fill)}
+.rail .grp{font-family:'IBM Plex Mono',monospace; font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin:14px 0 4px 10px; opacity:.8}
+main{min-width:0; padding:0 40px 90px}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr}
+  nav.rail{position:static; height:auto; flex-direction:row; flex-wrap:wrap; border-right:0; border-bottom:1px solid var(--line); padding:14px 16px}
+  .rail .grp{display:none}
+  .rail .brand{width:100%}
+  main{padding:0 16px 70px}
+}
+
+/* ---------- sections ---------- */
+section{padding-top:64px}
+.eyebrow{font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--amber); margin-bottom:8px}
+.eyebrow.sw{color:var(--blue)} .eyebrow.safe{color:var(--red)} .eyebrow.fe{color:var(--green)} .eyebrow.data{color:var(--violet)}
+h2{font-size:30px; font-weight:800; letter-spacing:-.025em; line-height:1.1; margin-bottom:10px}
+h3{font-size:17px; font-weight:800; letter-spacing:-.01em; margin:26px 0 8px}
+.lede{color:var(--muted); font-size:16px; max-width:66ch; margin:0 0 22px}
+.card{background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow)}
+.pad{padding:18px 20px}
+.scroll{overflow-x:auto}
+figure{margin:18px 0}
+figcaption{font-size:12.5px; color:var(--muted); margin-top:8px; max-width:78ch}
+svg text{font-family:'Archivo',sans-serif}
+svg .m{font-family:'IBM Plex Mono',monospace}
+
+/* ---------- hero ---------- */
+header.hero{padding:56px 0 8px}
+.hero h1{font-size:clamp(34px,5vw,54px); font-weight:900; letter-spacing:-.035em; line-height:1.02}
+.hero .sub{color:var(--muted); font-size:17px; max-width:64ch; margin:14px 0 4px}
+.hero .stamp{display:inline-flex; gap:8px; align-items:center; font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.1em; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:5px 12px; margin-bottom:18px}
+.hero .stamp b{color:var(--amber); font-weight:600}
+.tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin:26px 0 6px}
+.tile{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px}
+.tile .v{font-family:'IBM Plex Mono',monospace; font-size:21px; font-weight:600; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+.tile .k{font-size:11px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; margin-top:2px}
+.tile.hw .v{color:var(--amber)} .tile.sw .v{color:var(--blue)} .tile.ok .v{color:var(--green)}
+
+/* ---------- legend ---------- */
+.legend{display:flex; flex-wrap:wrap; gap:14px; align-items:center; font-size:12px; color:var(--muted); margin:8px 0 0}
+.legend i{display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px}
+
+/* ---------- tables ---------- */
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+th{font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); text-align:left; font-weight:600; padding:8px 12px; border-bottom:1.5px solid var(--line2)}
+td{padding:7px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.mono, .num{font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-variant-numeric:tabular-nums}
+.pin{display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; background:var(--amber-soft); color:var(--amber); border-radius:4px; padding:1px 7px; margin:1px 2px 1px 0}
+.pill{display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; border-radius:999px; padding:2px 9px}
+.pill.hw{background:var(--amber-soft); color:var(--amber)}
+.pill.sw{background:var(--blue-soft); color:var(--blue)}
+.pill.ok{background:var(--green-soft); color:var(--green)}
+.pill.risk{background:var(--red-soft); color:var(--red)}
+.pill.data{background:var(--violet-soft); color:var(--violet)}
+
+/* ---------- callouts ---------- */
+.callout{border-left:3px solid var(--amber-fill); background:var(--card); border-radius:0 10px 10px 0; padding:14px 18px; margin:16px 0; border-top:1px solid var(--line); border-right:1px solid var(--line); border-bottom:1px solid var(--line)}
+.callout.danger{border-left-color:var(--red)}
+.callout.good{border-left-color:var(--green)}
+.callout .t{font-weight:800; font-size:13.5px; letter-spacing:.01em; margin-bottom:4px}
+.callout.danger .t{color:var(--red)}
+.callout p{margin:4px 0; font-size:13.5px}
+
+/* ---------- code ---------- */
+pre.code{background:var(--code-bg); color:var(--code-ink); border-radius:10px; padding:14px 18px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; line-height:1.6; overflow-x:auto; margin:12px 0}
+code{font-family:'IBM Plex Mono',monospace; font-size:.92em; background:var(--card2); border:1px solid var(--line); border-radius:4px; padding:0 5px}
+pre.code code{background:none;border:0;padding:0}
+
+/* ---------- widgets ---------- */
+.widget{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; box-shadow:var(--shadow)}
+.widget .wt{font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-bottom:10px}
+.seg{display:inline-flex; flex-wrap:wrap; gap:6px}
+.seg button{
+  font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; cursor:pointer;
+  background:var(--card2); color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:6px 12px;
+}
+.seg button:hover{color:var(--ink); border-color:var(--line2)}
+.seg button.on{background:var(--amber-soft); color:var(--amber); border-color:var(--amber-fill)}
+.seg button:focus-visible, .rail a:focus-visible, input:focus-visible{outline:2px solid var(--blue); outline-offset:2px}
+.frame-out{font-family:'IBM Plex Mono',monospace; font-size:17px; background:var(--code-bg); color:var(--code-ink); border-radius:8px; padding:12px 16px; margin-top:12px; overflow-x:auto; white-space:nowrap}
+.frame-out .fs{color:#F0A83C}.frame-out .fv{color:#7FD1A7}.frame-out .fa{color:#8FBCE8}.frame-out .fc{color:#E58D77}
+.frow{display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; margin-top:6px}
+.frow label{display:block; font-size:11px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; margin-bottom:5px}
+.frow input[type=range]{width:180px; accent-color:var(--amber-fill)}
+.fnote{font-size:12px; color:var(--muted); margin-top:10px; max-width:70ch}
+
+/* DIP widget */
+.dipbank{display:flex; gap:7px; margin:14px 0 4px}
+.dip{width:26px; border-radius:5px; background:var(--card2); border:1px solid var(--line2); padding:3px; text-align:center}
+.dip .slot{height:38px; border-radius:3px; background:var(--code-bg); position:relative}
+.dip .knob{position:absolute; left:3px; right:3px; height:15px; border-radius:2px; background:#5A6B7C; transition:top .18s}
+.dip.on .knob{top:3px; background:var(--amber-fill)}
+.dip:not(.on) .knob{top:20px}
+.dip .lbl{font-family:'IBM Plex Mono',monospace; font-size:9.5px; color:var(--muted); margin-top:3px}
+.dipnote{font-size:13px; margin-top:8px}
+
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; align-items:start}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; align-items:start}
+.kv{font-size:13px}
+.kv b{font-weight:700}
+ul.tight{margin:6px 0; padding-left:20px; font-size:13.5px}
+ul.tight li{margin:5px 0}
+.footer{margin-top:70px; padding-top:18px; border-top:1px solid var(--line); font-size:12px; color:var(--muted); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px}
+</style>
+
+<div class="shell">
+<nav class="rail" aria-label="Sections">
+  <div class="brand">Crusaders Mainframe<span class="mono">SYSTEM BLUEPRINT · REV 2026-08-24</span></div>
+  <div class="grp">System</div>
+  <a href="#overview">Topology</a>
+  <div class="grp">Hardware</div>
+  <a href="#courtbox">The court box</a>
+  <a href="#pins">GPIO &amp; wiring</a>
+  <a href="#dip">DIP switches</a>
+  <a href="#firmware">Firmware split</a>
+  <div class="grp">Protocols</div>
+  <a href="#serial">Serial protocol</a>
+  <a href="#discovery">Discovery &amp; claim</a>
+  <div class="grp">Server side</div>
+  <a href="#webhooks">Webhooks &amp; guards</a>
+  <a href="#backend">Backend</a>
+  <a href="#database">Database</a>
+  <a href="#payments">Payments</a>
+  <div class="grp">Edges</div>
+  <a href="#frontend">Frontend</a>
+  <a href="#deploy">Deployment</a>
+  <a href="#risks">Watch list</a>
+</nav>
+<main>
+
+<header class="hero" id="top">
+  <div style="height:42px"></div>
+  <div class="stamp"><b>●</b> ON-PREM SAAS · CLUB LAN · 4 COURTS</div>
+  <h1>Crusaders Mainframe Blueprint</h1>
+  <p class="sub">The full system on one page — a multi-tenant booking SaaS whose last hop is a relay coil: React PWA → .NET 10 API → PostgreSQL ledger → outbound webhooks → an ESP8266 bridge → an ATmega2560 that physically switches the court lights.</p>
+  <div class="tiles">
+    <div class="tile hw"><div class="v">4</div><div class="k">Court relays A–D</div></div>
+    <div class="tile hw"><div class="v">9600</div><div class="k">Baud, both serial links</div></div>
+    <div class="tile hw"><div class="v">90 min</div><div class="k">Relay hard cap</div></div>
+    <div class="tile sw"><div class="v">15 min</div><div class="k">Booking slice</div></div>
+    <div class="tile sw"><div class="v">16</div><div class="k">Webhook event types</div></div>
+    <div class="tile ok"><div class="v">799</div><div class="k">Tests green (519 + 240 + 40)</div></div>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--amber-fill)"></i>Hardware / court box</span>
+    <span><i style="background:var(--blue-fill)"></i>Backend / software</span>
+    <span><i style="background:var(--green)"></i>Member-facing</span>
+    <span><i style="background:var(--violet)"></i>Data</span>
+    <span><i style="background:var(--red)"></i>Safety / risk</span>
+  </div>
+</header>
+
+<!-- ================= TOPOLOGY ================= -->
+<section id="overview">
+  <div class="eyebrow">System · End to end</div>
+  <h2>Topology — from tap to relay coil</h2>
+  <p class="lede">Everything runs on one on-prem machine at the club behind a Cloudflare tunnel; the court box is the only other computer. The API never dials the box for actuation decisions that matter — the box decides locally from a cached roster, and the mains-side safety timer lives one hop further down, on the Mega itself.</p>
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 1240 620" role="img" aria-label="System topology: member PWA through Cloudflare tunnel to the on-prem Docker stack (gateway, frontend, backend API, PostgreSQL), and across the club LAN to the court box, where an ESP8266 bridge talks over Serial3 to an ATmega2560 driving four relays, LCD, buttons and QR scanner" style="min-width:1000px;max-width:100%;height:auto">
+    <defs>
+      <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+      <marker id="arwA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--amber-fill)"/></marker>
+      <marker id="arwR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--red)"/></marker>
+    </defs>
+    <g fill="none" stroke="currentColor" stroke-opacity=".28" stroke-dasharray="5 5">
+      <rect x="14" y="30" width="360" height="560" rx="10"/>
+      <rect x="404" y="30" width="450" height="560" rx="10"/>
+      <rect x="884" y="30" width="342" height="560" rx="10"/>
+    </g>
+    <g class="m" font-size="10.5" fill="currentColor" opacity=".55" letter-spacing="2">
+      <text x="30" y="52">INTERNET</text>
+      <text x="420" y="52">CLUB LAN — ON-PREM MACHINE (DOCKER / PORTAINER)</text>
+      <text x="900" y="52">ELECTRICAL CUPBOARD — COURT BOX</text>
+    </g>
+
+    <!-- member -->
+    <g>
+      <rect x="34" y="82" width="170" height="62" rx="8" fill="var(--card2)" stroke="var(--green)" stroke-width="1.6"/>
+      <text x="119" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">Member PWA</text>
+      <text x="119" y="126" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".65">React 19 · Vite · installable</text>
+      <rect x="34" y="452" width="170" height="58" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+      <text x="119" y="476" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">PayFast</text>
+      <text x="119" y="494" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".65">hosted checkout + ITN</text>
+      <rect x="238" y="82" width="130" height="62" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+      <text x="303" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">Cloudflare</text>
+      <text x="303" y="126" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".65">DNS + tunnel edge</text>
+    </g>
+
+    <!-- docker stack -->
+    <g>
+      <rect x="424" y="82" width="150" height="48" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+      <text x="499" y="102" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">cloudflared</text>
+      <text x="499" y="118" text-anchor="middle" font-size="10" fill="currentColor" opacity=".65">systemd, tunnel ingress</text>
+
+      <rect x="424" y="168" width="150" height="52" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="499" y="189" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">nginx gateway</text>
+      <text x="499" y="206" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".65">:8088 → / and /api</text>
+
+      <rect x="424" y="262" width="150" height="46" rx="8" fill="var(--card2)" stroke="var(--green)" stroke-width="1.6"/>
+      <text x="499" y="281" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">frontend</text>
+      <text x="499" y="297" text-anchor="middle" font-size="10" fill="currentColor" opacity=".65">nginx + static React build</text>
+
+      <rect x="636" y="150" width="196" height="150" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="734" y="172" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">backend · .NET 10</text>
+      <text x="734" y="188" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".65">Minimal APIs · :5000</text>
+      <g font-size="10.5" fill="currentColor">
+        <rect x="650" y="200" width="168" height="24" rx="4" fill="none" stroke="var(--blue)" stroke-opacity=".55"/>
+        <text x="734" y="216" text-anchor="middle">webhook delivery workers</text>
+        <rect x="650" y="230" width="168" height="24" rx="4" fill="none" stroke="var(--blue)" stroke-opacity=".55"/>
+        <text x="734" y="246" text-anchor="middle">device API + provisioning</text>
+        <rect x="650" y="260" width="168" height="24" rx="4" fill="none" stroke="var(--blue)" stroke-opacity=".55"/>
+        <text x="734" y="276" text-anchor="middle">no-show sweep · retry sweep</text>
+      </g>
+
+      <rect x="636" y="340" width="196" height="52" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="734" y="361" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">PostgreSQL 16</text>
+      <text x="734" y="378" text-anchor="middle" font-size="10" fill="currentColor" opacity=".65">ledger-only money · tenant_id everywhere</text>
+
+      <rect x="424" y="356" width="150" height="60" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6" stroke-dasharray="4 3"/>
+      <text x="499" y="378" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">discovery listener</text>
+      <text x="499" y="393" text-anchor="middle" font-size="9.5" class="m" fill="currentColor" opacity=".65">UDP 48653 · host network</text>
+      <text x="499" y="406" text-anchor="middle" font-size="9.5" fill="currentColor" opacity=".65">(onprem compose override)</text>
+
+      <rect x="424" y="470" width="150" height="46" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+      <text x="499" y="489" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">SMTP</text>
+      <text x="499" y="505" text-anchor="middle" font-size="10" fill="currentColor" opacity=".65">every player-affecting event</text>
+    </g>
+
+    <!-- court box -->
+    <g>
+      <rect x="902" y="82" width="140" height="60" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="2"/>
+      <text x="972" y="106" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">ESP8266</text>
+      <text x="972" y="123" text-anchor="middle" font-size="10" fill="currentColor" opacity=".7">all the brains · OTA</text>
+
+      <rect x="902" y="228" width="140" height="64" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="2"/>
+      <text x="972" y="252" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">ATmega2560</text>
+      <text x="972" y="269" text-anchor="middle" font-size="10" fill="currentColor" opacity=".7">thin I/O · auto-off timer</text>
+
+      <rect x="902" y="356" width="140" height="46" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.6"/>
+      <text x="972" y="375" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Relay board ×4</text>
+      <text x="972" y="391" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">pins 2·3·4·5 — active LOW</text>
+
+      <rect x="1088" y="356" width="120" height="46" rx="8" fill="var(--card2)" stroke="var(--red)" stroke-width="1.8"/>
+      <text x="1148" y="375" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Court lights</text>
+      <text x="1148" y="391" text-anchor="middle" font-size="10" fill="currentColor" opacity=".7">A · B · C · D</text>
+
+      <g font-size="11" fill="currentColor">
+        <rect x="1088" y="150" width="120" height="38" rx="7" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.3"/>
+        <text x="1148" y="168" text-anchor="middle" font-weight="700">LCD 16×2</text>
+        <text x="1148" y="181" text-anchor="middle" font-size="9.5" class="m" opacity=".7">I²C 0x27</text>
+        <rect x="1088" y="210" width="120" height="38" rx="7" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.3"/>
+        <text x="1148" y="228" text-anchor="middle" font-weight="700">Buttons ×8</text>
+        <text x="1148" y="241" text-anchor="middle" font-size="9.5" class="m" opacity=".7">pins 22–36</text>
+        <rect x="1088" y="270" width="120" height="38" rx="7" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.3"/>
+        <text x="1148" y="288" text-anchor="middle" font-weight="700">QR scanner</text>
+        <text x="1148" y="301" text-anchor="middle" font-size="9.5" class="m" opacity=".7">Serial2 @9600</text>
+      </g>
+
+      <rect x="902" y="470" width="306" height="52" rx="8" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-width="1.3"/>
+      <text x="1055" y="491" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">Mean Well PSU → 2× fused LM2596</text>
+      <text x="1055" y="507" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">5 V rail · 9 V rail</text>
+    </g>
+
+    <!-- arrows -->
+    <g stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#arw)">
+      <path d="M204 113 H236"/>
+      <path d="M368 113 Q400 113 422 106"/>
+      <path d="M499 132 V166"/>
+      <path d="M499 222 V260"/>
+      <path d="M576 194 Q610 194 634 200"/>
+      <path d="M734 302 V338"/>
+      <path d="M119 146 V450"/>
+    </g>
+    <g class="m" font-size="10" fill="currentColor" opacity=".75">
+      <text x="207" y="105">HTTPS</text>
+      <text x="376" y="98">tunnel</text>
+      <text x="506" y="150">http</text>
+      <text x="508" y="244">/ static</text>
+      <text x="584" y="188">/api</text>
+      <text x="742" y="326">EF Core</text>
+      <text x="127" y="300">tops up (ZAR)</text>
+    </g>
+    <!-- payfast ITN -->
+    <path d="M204 481 Q420 540 634 296" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#arw)" stroke-dasharray="6 4"/>
+    <text x="330" y="538" class="m" font-size="10" fill="currentColor" opacity=".75">ITN (server→server, MD5-signed, retried)</text>
+
+    <!-- backend <-> ESP -->
+    <g stroke="var(--amber-fill)" stroke-width="1.8" fill="none">
+      <path d="M834 212 Q880 200 900 152 Q908 132 902 118" marker-end="url(#arwA)"/>
+      <path d="M902 96 Q860 60 834 160" marker-end="url(#arwA)" stroke-dasharray="6 4"/>
+    </g>
+    <text x="845" y="120" class="m" font-size="10" fill="var(--amber)" text-anchor="end">lights on/off — direct signed HTTP (LAN)</text>
+    <text x="845" y="70" class="m" font-size="10" fill="var(--amber)" text-anchor="end">heartbeat · queued events · OTA poll</text>
+
+    <!-- discovery dashed -->
+    <path d="M576 386 Q740 420 900 112" stroke="var(--amber-fill)" stroke-width="1.4" fill="none" stroke-dasharray="3 4" marker-end="url(#arwA)"/>
+    <text x="700" y="428" class="m" font-size="10" fill="var(--amber)">UDP 48653 · ANNOUNCE ⇄ OFFER (broadcast)</text>
+
+    <!-- serial + relays -->
+    <g stroke="var(--amber-fill)" stroke-width="1.8" fill="none">
+      <path d="M972 144 V226" marker-end="url(#arwA)"/>
+      <path d="M958 226 V150" marker-end="url(#arwA)"/>
+      <path d="M972 294 V354" marker-end="url(#arwA)"/>
+    </g>
+    <text x="982" y="190" class="m" font-size="10" fill="var(--amber)">Serial3 · 9600 8N1</text>
+    <text x="982" y="330" class="m" font-size="10" fill="var(--amber)">drive LOW = on</text>
+    <g stroke="var(--amber-fill)" stroke-width="1.4" fill="none" marker-end="url(#arwA)">
+      <path d="M1088 169 Q1060 169 1044 240"/>
+      <path d="M1088 229 Q1066 236 1044 252"/>
+      <path d="M1088 289 Q1066 282 1044 268"/>
+    </g>
+    <path d="M1042 379 H1086" stroke="var(--red)" stroke-width="2" fill="none" marker-end="url(#arwR)"/>
+    <text x="1064" y="371" class="m" font-size="9.5" fill="var(--red)" text-anchor="middle">230 VAC</text>
+    <text x="1064" y="418" font-size="9.5" fill="var(--red)" text-anchor="middle">via contactor? — open</text>
+  </svg>
+  <figcaption>One machine runs the whole SaaS; the court box is the only peripheral computer. Amber paths are club-LAN hardware traffic: direct signed HTTP for actuation, UDP broadcast for discovery, and the box phoning home with heartbeats and its offline event queue. The red hop is mains voltage — its contactor question is the top item on the <a href="#risks">watch list</a>.</figcaption>
+  </figure>
+  </div>
+
+  <div class="grid3" style="margin-top:18px">
+    <div class="callout good" style="margin:0">
+      <div class="t">The court works when the network does not</div>
+      <p>A scan is decided <em>on the box</em>, from a cached roster, in microseconds. The API hears about it when it can, via a sequence-numbered event queue.</p>
+    </div>
+    <div class="callout" style="margin:0">
+      <div class="t">Charge at booking — decided 2026-08-22</div>
+      <p>Booking posts the <span class="mono">BookingCharge</span> debit in the same unit of work as the slot. Supersedes the blueprint's charge-on-lights-on; committee sign-off pending.</p>
+    </div>
+    <div class="callout danger" style="margin:0">
+      <div class="t">Two fail-safes point opposite ways — on purpose</div>
+      <p>The relay timer <b>fails open</b> (lights off even if everything above dies). The roster cache <b>fails closed</b> (a stale roster refuses entry). Both are correct.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= COURT BOX ================= -->
+<section id="courtbox">
+  <div class="eyebrow">Hardware · Overview</div>
+  <h2>The court box</h2>
+  <p class="lede">A WeMos Mega 2560 with its onboard ESP8266, driving four court-light relays, a 16×2-driven LCD, an eight-button panel and a QR scanner. The wiring is fixed and cannot change — every pin, serial port, baud rate and DIP position below reflects hardware already built and working. Firmware adapts to the hardware, never the reverse.</p>
+
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin-top:0">Why the brains live on the ESP8266</h3>
+      <p style="font-size:13.5px">The ATmega2560 cannot be flashed over WiFi: its ESP8266 sits on <b>Serial3</b>, not the Serial0 bootloader port, and no GPIO reaches the Mega's RESET pin — adding one would be a wiring change. So the split is deliberate:</p>
+      <table style="margin-top:10px">
+        <thead><tr><th></th><th>ATmega2560</th><th>ESP8266</th></tr></thead>
+        <tbody>
+          <tr><td><b>Role</b></td><td>thin I/O, near-static</td><td>all the brains</td></tr>
+          <tr><td><b>Owns</b></td><td>buttons, scanner framing, relay drive, LCD, <b>independent auto-off timer</b></td><td>protocol, state machine, device auth, heartbeat, roster cache, event queue, OTA</td></tr>
+          <tr><td><b>Updated by</b></td><td>USB, rarely</td><td><b>over the air</b></td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:13px; margin-top:10px; color:var(--muted)">In the system this replaces, the off command was scheduled inside an Excel macro on a Windows PC — close the workbook mid-session and a court burned until somebody noticed. The Mega's timer is independent precisely so that if the ESP hangs, WiFi drops and the backend dies, <b>the lights still go off</b>.</p>
+    </div>
+    <div>
+      <div class="callout danger" style="margin-top:0">
+        <div class="t">⚠ Relays — open safety question, gates go-live</div>
+        <p>The relay module is rated <b>10 A @ 250 VAC</b>. Plausible for one modern LED court bank; inadequate for older metal-halide. Standard practice is relay → <b>contactor coil</b>, contactor carries the lighting load. <b>Not yet confirmed on the installed hardware.</b> If relays switch lighting directly, a qualified electrician is required before anything ships. No software decision changes this.</p>
+      </div>
+      <div class="callout">
+        <div class="t">The display is 20×4 driven as 16×2</div>
+        <p>The physical panel is a 2004A, but firmware drives it as 16×2 by decision — works on either panel. Geometry is a compile-time constant (<code>LCD_COLS</code>/<code>LCD_ROWS</code>): widening later is a one-line change plus a corpus update.</p>
+      </div>
+      <div class="callout good">
+        <div class="t">Hard limits burned into the Mega</div>
+        <p><span class="mono">RELAY_HARD_CAP_MS</span> = 90 min — no frame can express indefinite-on. <span class="mono">AUTH_TTL_MS</span> = 30 s — button authorisation expires. Both hold regardless of what the ESP, network or backend believe.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PINS ================= -->
+<section id="pins">
+  <div class="eyebrow">Hardware · GPIO map</div>
+  <h2>GPIO &amp; wiring</h2>
+  <p class="lede">Every peripheral hangs off fixed Mega pins. Relays are <b>active LOW</b> — driving the pin low energises the coil — and all buttons use <code>INPUT_PULLUP</code>, so a press reads low.</p>
+
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 1120 560" role="img" aria-label="Pin map of the WeMos Mega 2560 court box: relays on pins 2 to 5, status LED on 13, LCD on I2C pins 20 and 21, court buttons on 22 to 28, duration buttons on 30 to 36, QR scanner on Serial2 pins 16 and 17, and the onboard ESP8266 on Serial3 pins 14 and 15" style="min-width:940px;max-width:100%;height:auto">
+    <defs>
+      <marker id="parw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--amber-fill)"/></marker>
+    </defs>
+
+    <!-- board -->
+    <rect x="416" y="46" width="290" height="480" rx="12" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="2"/>
+    <text x="561" y="76" text-anchor="middle" font-size="14.5" font-weight="800" fill="currentColor">WeMos Mega 2560</text>
+    <text x="561" y="93" text-anchor="middle" font-size="10.5" class="m" fill="currentColor" opacity=".6">one board, two computers</text>
+
+    <!-- ESP subboard -->
+    <rect x="446" y="110" width="230" height="64" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="1.6"/>
+    <text x="561" y="136" text-anchor="middle" font-size="12.5" font-weight="800" fill="currentColor">ESP8266 (onboard)</text>
+    <text x="561" y="153" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">WiFi · OTA · discovery · auth</text>
+
+    <!-- internal serial3 -->
+    <g stroke="var(--amber-fill)" stroke-width="1.6" fill="none">
+      <path d="M547 174 V212"/><path d="M575 212 V174" marker-end="url(#parw)"/>
+      <path d="M547 174 V212" marker-end="url(#parw)"/>
+    </g>
+    <rect x="446" y="212" width="230" height="46" rx="8" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-width="1.3"/>
+    <text x="561" y="231" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">Serial3 — TX 14 / RX 15</text>
+    <text x="561" y="247" text-anchor="middle" font-size="9.5" class="m" fill="currentColor" opacity=".65">9600 8N1 · routed by DIP 1+2 · wiring fixed</text>
+
+    <!-- left pins -->
+    <g class="m" font-size="11" font-weight="600">
+      <g fill="var(--amber-soft)" stroke="var(--amber-fill)">
+        <rect x="398" y="292" width="38" height="20" rx="4"/><rect x="398" y="318" width="38" height="20" rx="4"/>
+        <rect x="398" y="344" width="38" height="20" rx="4"/><rect x="398" y="370" width="38" height="20" rx="4"/>
+        <rect x="398" y="422" width="38" height="20" rx="4"/>
+        <rect x="398" y="464" width="38" height="20" rx="4"/><rect x="398" y="490" width="38" height="20" rx="4"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="417" y="306">D2</text><text x="417" y="332">D3</text><text x="417" y="358">D4</text><text x="417" y="384">D5</text>
+        <text x="417" y="436">D13</text>
+        <text x="417" y="478">20</text><text x="417" y="504">21</text>
+      </g>
+    </g>
+
+    <!-- right pins -->
+    <g class="m" font-size="11" font-weight="600">
+      <g fill="var(--amber-soft)" stroke="var(--amber-fill)">
+        <rect x="686" y="286" width="38" height="20" rx="4"/><rect x="686" y="312" width="38" height="20" rx="4"/>
+        <rect x="686" y="338" width="38" height="20" rx="4"/><rect x="686" y="364" width="38" height="20" rx="4"/>
+        <rect x="686" y="402" width="38" height="20" rx="4"/><rect x="686" y="428" width="38" height="20" rx="4"/>
+        <rect x="686" y="454" width="38" height="20" rx="4"/><rect x="686" y="480" width="38" height="20" rx="4"/>
+        <rect x="686" y="122" width="38" height="20" rx="4"/><rect x="686" y="148" width="38" height="20" rx="4"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="705" y="300">22</text><text x="705" y="326">24</text><text x="705" y="352">26</text><text x="705" y="378">28</text>
+        <text x="705" y="416">30</text><text x="705" y="442">32</text><text x="705" y="468">34</text><text x="705" y="494">36</text>
+        <text x="705" y="136">17</text><text x="705" y="162">16</text>
+      </g>
+    </g>
+
+    <!-- left peripherals -->
+    <rect x="40" y="270" width="290" height="130" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="185" y="294" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">Relay board — courts A–D</text>
+    <g font-size="10.5" class="m" fill="currentColor" opacity=".8" text-anchor="middle">
+      <text x="112" y="318">A ← D2</text><text x="258" y="318">B ← D3</text>
+      <text x="112" y="340">C ← D4</text><text x="258" y="340">D ← D5</text>
+    </g>
+    <text x="185" y="368" text-anchor="middle" font-size="10.5" fill="var(--red)" font-weight="700">ACTIVE LOW · 10 A @ 250 VAC · contactor TBC</text>
+    <text x="185" y="386" text-anchor="middle" font-size="9.5" class="m" fill="currentColor" opacity=".6">coil driven via on-board transistors</text>
+
+    <rect x="40" y="412" width="290" height="40" rx="10" fill="var(--card)" stroke="currentColor" stroke-opacity=".4" stroke-width="1.3"/>
+    <text x="185" y="437" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Status LED <tspan class="m" font-size="10" opacity=".65">← D13</tspan></text>
+
+    <rect x="40" y="462" width="290" height="60" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="185" y="486" text-anchor="middle" font-size="12.5" font-weight="800" fill="currentColor">LCD 2004A — driven 16×2</text>
+    <text x="185" y="506" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">I²C addr 0x27 · SDA 20 · SCL 21</text>
+
+    <!-- right peripherals -->
+    <rect x="790" y="266" width="290" height="118" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="935" y="290" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">Court buttons (green) ×4</text>
+    <g font-size="10.5" class="m" fill="currentColor" opacity=".8" text-anchor="middle">
+      <text x="862" y="314">A ← 22</text><text x="1008" y="314">B ← 24</text>
+      <text x="862" y="336">C ← 26</text><text x="1008" y="336">D ← 28</text>
+    </g>
+    <text x="935" y="366" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".65">INPUT_PULLUP · debounced in courtlogic</text>
+
+    <rect x="790" y="396" width="290" height="104" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="935" y="420" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">Duration buttons (black) ×4</text>
+    <g font-size="10.5" class="m" fill="currentColor" opacity=".8" text-anchor="middle">
+      <text x="862" y="444">15 m ← 30</text><text x="1008" y="444">30 m ← 32</text>
+      <text x="862" y="466">45 m ← 34</text><text x="1008" y="466">60 m ← 36</text>
+    </g>
+    <text x="935" y="488" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".65">INPUT_PULLUP</text>
+
+    <rect x="790" y="96" width="290" height="86" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="935" y="122" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">QR scanner</text>
+    <text x="935" y="142" text-anchor="middle" font-size="10.5" class="m" fill="currentColor" opacity=".75">Serial2 · RX 17 / TX 16 · 9600</text>
+    <text x="935" y="162" text-anchor="middle" font-size="10" fill="currentColor" opacity=".65">emits one line per scan → framed by the Mega</text>
+
+    <!-- leaders -->
+    <g stroke="var(--amber-fill)" stroke-width="1.5" fill="none" marker-end="url(#parw)">
+      <path d="M396 302 Q370 302 332 320"/>
+      <path d="M396 380 Q370 380 332 360"/>
+      <path d="M396 432 H334"/>
+      <path d="M396 474 Q372 474 332 486"/>
+      <path d="M726 296 Q756 296 788 310"/>
+      <path d="M726 470 Q756 470 788 452"/>
+      <path d="M726 132 Q756 132 788 132"/>
+    </g>
+  </svg>
+  <figcaption>The fixed pin map. The ESP8266 rides the same PCB but is a separate computer — everything it knows about the physical world arrives as checksummed frames over Serial3. The QR scanner talks only to the Mega; the Mega frames each scan line and forwards it upstream as <span class="mono">!SCAN</span>.</figcaption>
+  </figure>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Wiring table (fixed)</h3>
+      <table>
+        <thead><tr><th>Function</th><th>Connection</th></tr></thead>
+        <tbody>
+          <tr><td>Court relays A–D</td><td><span class="pin">2</span><span class="pin">3</span><span class="pin">4</span><span class="pin">5</span> — <b>active LOW</b></td></tr>
+          <tr><td>Court buttons A–D (green)</td><td><span class="pin">22</span><span class="pin">24</span><span class="pin">26</span><span class="pin">28</span> <code>INPUT_PULLUP</code></td></tr>
+          <tr><td>Duration buttons 15/30/45/60 m (black)</td><td><span class="pin">30</span><span class="pin">32</span><span class="pin">34</span><span class="pin">36</span> <code>INPUT_PULLUP</code></td></tr>
+          <tr><td>Status LED</td><td><span class="pin">13</span></td></tr>
+          <tr><td>LCD</td><td>I²C <span class="pin">0x27</span> · SDA <span class="pin">20</span> / SCL <span class="pin">21</span></td></tr>
+          <tr><td>QR scanner</td><td><b>Serial2</b> — RX <span class="pin">17</span> / TX <span class="pin">16</span> @ 9600</td></tr>
+          <tr><td>ESP8266 bridge</td><td><b>Serial3</b> — TX <span class="pin">14</span> / RX <span class="pin">15</span> @ 9600 8N1</td></tr>
+          <tr><td>Power</td><td>Mean Well PSU → 2× fused LM2596 → 5 V and 9 V rails</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Power tree</h3>
+      <figure style="margin:6px 0 0">
+      <svg viewBox="0 0 460 240" role="img" aria-label="Power tree: mains to Mean Well PSU, then two fused LM2596 buck converters producing a 5 volt rail and a 9 volt rail; the relay contacts switch mains to the court lights separately" style="max-width:100%;height:auto">
+        <defs><marker id="pwr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <rect x="14" y="20" width="120" height="44" rx="8" fill="var(--card2)" stroke="var(--red)" stroke-width="1.6"/>
+        <text x="74" y="39" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">Mains 230 VAC</text>
+        <text x="74" y="54" text-anchor="middle" font-size="9" class="m" fill="currentColor" opacity=".6">lighting circuit</text>
+        <rect x="180" y="20" width="120" height="44" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+        <text x="240" y="39" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">Mean Well PSU</text>
+        <text x="240" y="54" text-anchor="middle" font-size="9" class="m" fill="currentColor" opacity=".6">DC bus</text>
+        <rect x="180" y="96" width="120" height="40" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+        <text x="240" y="113" text-anchor="middle" font-size="10.5" font-weight="700" fill="currentColor">fuse + LM2596 №1</text>
+        <text x="240" y="128" text-anchor="middle" font-size="9" class="m" fill="currentColor" opacity=".6">buck</text>
+        <rect x="180" y="152" width="120" height="40" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+        <text x="240" y="169" text-anchor="middle" font-size="10.5" font-weight="700" fill="currentColor">fuse + LM2596 №2</text>
+        <text x="240" y="184" text-anchor="middle" font-size="9" class="m" fill="currentColor" opacity=".6">buck</text>
+        <rect x="344" y="96" width="100" height="40" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="1.6"/>
+        <text x="394" y="120" text-anchor="middle" font-size="12" font-weight="800" class="m" fill="currentColor">5 V rail</text>
+        <rect x="344" y="152" width="100" height="40" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="1.6"/>
+        <text x="394" y="176" text-anchor="middle" font-size="12" font-weight="800" class="m" fill="currentColor">9 V rail</text>
+        <g stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#pwr)">
+          <path d="M134 42 H178"/>
+          <path d="M240 64 V94"/>
+          <path d="M220 64 Q206 80 214 150"/>
+          <path d="M300 116 H342"/>
+          <path d="M300 172 H342"/>
+        </g>
+        <path d="M74 64 Q74 210 178 214" stroke="var(--red)" stroke-width="1.8" fill="none" stroke-dasharray="6 4" marker-end="url(#pwr)"/>
+        <text x="60" y="150" font-size="9.5" fill="var(--red)" class="m">switched by</text>
+        <text x="60" y="163" font-size="9.5" fill="var(--red)" class="m">relay contacts</text>
+        <text x="196" y="222" font-size="10" fill="var(--red)" font-weight="700">→ court lights (electrician-only zone)</text>
+      </svg>
+      <figcaption>Low-voltage logic and mains never share a path: the PSU feeds two independently fused buck rails, while relay <em>contacts</em> switch the lighting circuit. Mains wiring is a qualified-electrician job by rule.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DIP ================= -->
+<section id="dip">
+  <div class="eyebrow">Hardware · Config</div>
+  <h2>DIP switches</h2>
+  <p class="lede">One 8-way DIP block routes the serial lines. Pick a mode to see the required positions — taken from the project wiring sheet.</p>
+  <div class="widget">
+    <div class="wt">DIP MODE SELECTOR</div>
+    <div class="seg" role="group" aria-label="DIP mode">
+      <button data-dip="1,2,3,4" data-note="<b>Run (normal operation)</b> — Mega ↔ ESP8266 on Serial3 <em>and</em> Mega reachable over USB. This is how the box sits in the cupboard." class="on">Run</button>
+      <button data-dip="1,2" data-note="<b>Mega ↔ ESP8266 internal serial only</b> — the two computers talk on Serial3; USB path open.">Internal serial</button>
+      <button data-dip="3,4" data-note="<b>Upload to Mega over USB</b> — 1+2 OFF isolates the ESP so avrdude owns the line. <span class='mono'>pio run -e court_mega -t upload</span>">USB → Mega</button>
+      <button data-dip="5,6" data-note="<b>ESP8266 run / monitor over USB</b> — watch the bridge's console from a laptop.">ESP monitor</button>
+    </div>
+    <div class="dipbank" id="dipbank" aria-hidden="true"></div>
+    <div class="dipnote" id="dipnote"></div>
+  </div>
+  <div class="callout danger">
+    <div class="t">Unverified, and it affects the schedule</div>
+    <p>The wiring sheet documents no position for <b>USB ↔ ESP8266 with GPIO0 pulled low</b> — which is what a <em>first</em> ESP8266 flash needs. If the board has no such position, the initial flash requires an external USB-TTL adapter on the ESP module's TX/RX pads with GPIO0 grounded. Every flash after that is OTA. Check on the physical board before trusting any schedule.</p>
+  </div>
+</section>
+
+<!-- ================= FIRMWARE ================= -->
+<section id="firmware">
+  <div class="eyebrow">Hardware · Firmware</div>
+  <h2>Firmware — one logic layer, three targets</h2>
+  <p class="lede">Everything under <code>lib/</code> except the two HALs is free of Arduino headers, so the same code compiles for AVR, Xtensa <em>and</em> the host test runner — 240 Unity tests prove the logic with no board attached, and CI enforces purity with a grep gate. <code>main.cpp</code> is a composition root only; behaviour is not allowed to live where no test can drive it.</p>
+
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin-top:0">Module map — <span class="mono" style="font-size:13px">src/iot/lib/</span></h3>
+      <table>
+        <thead><tr><th>Module</th><th>Owns</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">timebase/</td><td>rollover-safe <code>millis()</code> primitives — read first</td></tr>
+          <tr><td class="mono">courtlogic/</td><td>the Mega's behaviour: auto-off timer, debounce, scan framing, auth window, frame dispatch</td></tr>
+          <tr><td class="mono">protocol/</td><td>Mega ↔ ESP serial codec</td></tr>
+          <tr><td class="mono">discovery/</td><td>UDP beacon, claim commitment, announce schedule</td></tr>
+          <tr><td class="mono">devcrypto/</td><td>SHA-256 / HMAC / HKDF / request signer</td></tr>
+          <tr><td class="mono">roster/</td><td>who may open which court — cached, age-limited</td></tr>
+          <tr><td class="mono">eventq/</td><td>what the box DID, queued until the API can hear</td></tr>
+          <tr><td class="mono">court/</td><td>what a scan means; button map; walk-up pad</td></tr>
+          <tr><td class="mono">devapi/</td><td>signed requests, response policy, heapless JSON scanner</td></tr>
+          <tr><td class="mono">otacore/</td><td>whether to take an update; surviving one that doesn't work</td></tr>
+          <tr><td class="mono">hal/ + hal_fakes/</td><td>port interfaces, nulls, recording test doubles</td></tr>
+          <tr><td class="mono">arduino_hal/ · posix_hal/</td><td>the only places Arduino / POSIX headers live</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:10px">Targets: <span class="mono">court_mega</span> (AVR) · <span class="mono">court_bridge</span> (ESP8266) · <span class="mono">simulator</span> (native, speaks the real downlink protocol on a loopback socket).</p>
+    </div>
+
+    <div>
+      <div class="card pad" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Offline behaviour — three deliberate directions</h3>
+        <table>
+          <thead><tr><th>Subsystem</th><th>On failure</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Relay timer</td><td><span class="pill ok">fails open</span></td><td>lights off even if ESP, WiFi and backend are all gone — the most expensive failure is a court burning all night</td></tr>
+            <tr><td>Roster cache</td><td><span class="pill risk">fails closed</span></td><td>past <span class="mono">ROSTER_MAX_AGE_MS</span> the box admits nobody — a cancelled booking lingering in cache lights a court nobody is charged for</td></tr>
+            <tr><td>Walk-ups</td><td><span class="pill sw">need network</span></td><td>the box knows neither tariff nor next booking; refusing to sell new time is a member at the desk, refusing paid time is a member in the dark</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card pad" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Event queue</h3>
+        <p style="font-size:13.5px">A RAM ring of what the box did, drained to the API when reachable. Survives WiFi loss, router reboots, a two-day outage — <b>not a power cut</b> (events outsize the 32-byte <code>hal::IStore</code> slots). The <b>sequence number does persist</b>, in blocks of 64 — that's what API-side deduplication rests on. A queued activation is evidence, not a charge: it stops the no-show sweep reversing a debit that was already posted at booking.</p>
+      </div>
+      <div class="card pad">
+        <h3 style="margin-top:0">The rollover rule</h3>
+        <p style="font-size:13.5px"><code>millis()</code> wraps every ~49.7 days and a box in a cupboard is normally up that long. <b>Never compare times directly</b> — use <code>tb::reached(now, deadline)</code> / <code>tb::Deadline</code>. The predecessor firmware got it wrong in both directions on adjacent lines (0-as-sentinel, and <code>now &gt;= expiresAt</code> — false for 49.7 days after the wrap, so the relay was never released). <code>make lint-iot</code> greps for raw deadline comparisons outside <code>lib/timebase</code>.</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>Over-the-air updates (ESP8266 only)</h3>
+  <div class="grid3">
+    <div class="card pad kv">
+      <span class="pill hw">Signing</span>
+      <p style="font-size:13.5px;margin:8px 0 0"><b>RSA-2048 / SHA-256</b> via the ESP8266 core's <code>Updater</code>, against a public key compiled into the image. Ed25519 was the plan; BearSSL has no Ed25519 and vendoring a curve into a court-lighting controller is the worse trade. The property that mattered survives: the signing key is asymmetric and lives only where releases are built.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill risk">No rollback</span>
+      <p style="font-size:13.5px;margin:8px 0 0">A 4 MB part with a 1 MB sketch + 2 MB LittleFS has no second OTA slot, and the filesystem holds the device credential. A box that won't boot at all still needs a USB cable.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill ok">BootGuard</span>
+      <p style="font-size:13.5px;margin:8px 0 0">Ensures a bad build is never installed <b>twice</b> — the fleet-killer, since every box heartbeats the same manifest. Clears on <em>evidence</em> (an API call the server accepted), not on "it booted". Three boots allowed before a build is condemned — brownouts are real when four relay coils energise at once. Condemned versions surface on the Devices screen.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SERIAL ================= -->
+<section id="serial">
+  <div class="eyebrow">Protocols · Wire format №1</div>
+  <h2>Serial protocol v2 — Mega ↔ ESP8266</h2>
+  <p class="lede">9600 8N1 over Serial3, line-terminated, NMEA-style XOR checksum. v2 exists because the legacy protocol had two defects that can't survive being driven by a server: <b>ON had no duration</b> (the off command lived in a VBA macro on a Windows PC) and <b>no integrity</b> (a corrupted <span class="mono">a</span> arriving as <span class="mono">A</span> turns lights on and leaves them on). v2 is additive — every legacy verb still works in both directions.</p>
+
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 900 170" role="img" aria-label="Anatomy of a v2 serial frame: exclamation sentinel, verb, comma-separated arguments, star, two hex checksum digits, newline" style="min-width:700px;max-width:100%;height:auto">
+    <g class="m" font-size="30" font-weight="600">
+      <text x="40" y="70" fill="var(--amber)">!</text>
+      <text x="70" y="70" fill="var(--green)">ON</text>
+      <text x="125" y="70" fill="currentColor" opacity=".5">,</text>
+      <text x="145" y="70" fill="var(--blue)">A</text>
+      <text x="172" y="70" fill="currentColor" opacity=".5">,</text>
+      <text x="192" y="70" fill="var(--blue)">1800</text>
+      <text x="285" y="70" fill="var(--amber)">*</text>
+      <text x="310" y="70" fill="var(--red)">4C</text>
+      <text x="365" y="70" fill="currentColor" opacity=".5">\n</text>
+    </g>
+    <g stroke="currentColor" stroke-opacity=".4" fill="none">
+      <path d="M46 84 V100"/><path d="M95 84 V100"/><path d="M225 84 V100"/><path d="M292 84 V100"/><path d="M330 84 V100"/><path d="M380 84 V100"/>
+    </g>
+    <g font-size="11" fill="currentColor" opacity=".85" text-anchor="middle">
+      <text x="46" y="118">sentinel — no legacy</text><text x="46" y="132">message starts with it</text>
+      <text x="95" y="118">VERB, 2–5 chars</text>
+      <text x="205" y="118">args · court A–D ·</text><text x="205" y="132">seconds clamped 1–5400</text>
+      <text x="311" y="118">XOR of bytes between</text><text x="311" y="132">! and *, exclusive —</text><text x="311" y="146">uppercase hex only</text>
+      <text x="395" y="118">\r, \n or \r\n</text>
+    </g>
+    <g font-size="11.5" fill="currentColor">
+      <text x="560" y="40" font-weight="800">Escaping (LCD text only)</text>
+      <text x="560" y="60" class="m" font-size="11">, → %2C&#160;&#160;&#160;% → %25</text>
+      <text x="560" y="92" font-weight="800">On checksum failure</text>
+      <text x="560" y="112">dropped silently and counted — never guessed at:</text>
+      <text x="560" y="128">a half-understood relay command is worse</text>
+      <text x="560" y="144">than a missing one</text>
+    </g>
+  </svg>
+  <figcaption>Frame anatomy. Checksum is uppercase-only on receipt — <span class="mono">*4a</span> is a bad frame, because <span class="mono">a</span> differs from <span class="mono">A</span> by a single bit: the exact corruption the checksum exists to catch.</figcaption>
+  </figure>
+  </div>
+
+  <div class="widget" style="margin-top:16px">
+    <div class="wt">LIVE FRAME BUILDER — real XOR checksum, computed as you click</div>
+    <div class="frow">
+      <div><label>Verb</label>
+        <span class="seg" id="fb-verb">
+          <button class="on" data-v="ON">ON</button><button data-v="OFF">OFF</button><button data-v="EXT">EXT</button><button data-v="AUTH">AUTH</button><button data-v="LCD">LCD</button><button data-v="RST">RST</button><button data-v="PING">PING</button>
+        </span>
+      </div>
+      <div id="fb-courtwrap"><label>Court</label>
+        <span class="seg" id="fb-court">
+          <button class="on" data-c="A">A</button><button data-c="B">B</button><button data-c="C">C</button><button data-c="D">D</button>
+        </span>
+      </div>
+      <div id="fb-secwrap"><label for="fb-sec">Seconds <span class="mono" id="fb-secv">1800</span></label>
+        <input type="range" id="fb-sec" min="60" max="6000" step="60" value="1800" aria-label="Duration seconds">
+      </div>
+    </div>
+    <div class="frame-out" id="fb-out" aria-live="polite"></div>
+    <div class="fnote" id="fb-note"></div>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Downlink — bridge → Mega</h3>
+      <table>
+        <thead><tr><th>Frame</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">!ON,&lt;court&gt;,&lt;seconds&gt;</td><td>Close relay for <b>at most</b> that long. Duration is <b>mandatory</b></td></tr>
+          <tr><td class="mono">!OFF,&lt;court&gt;</td><td>Open the relay now</td></tr>
+          <tr><td class="mono">!EXT,&lt;court&gt;,&lt;seconds&gt;</td><td>Extend deadline to now + s. Refused if relay is open</td></tr>
+          <tr><td class="mono">!LCD,&lt;line1&gt;,&lt;line2&gt;</td><td>Display; truncated to 16 columns</td></tr>
+          <tr><td class="mono">!AUTH,&lt;seconds&gt;</td><td>Accept button input this long; <span class="mono">0</span> disarms</td></tr>
+          <tr><td class="mono">!RST</td><td>Relays open, buttons disarmed, default screen</td></tr>
+          <tr><td class="mono">!PING</td><td>Answered with <span class="mono">!PONG</span></td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Seconds are <b>clamped, never rejected</b> (saturating, not wrapping): a clamped light is a wrong-length game; a rejected one is a dark court. <span class="mono">AUTH</span> clamps 0–5400; <span class="mono">ON</span>/<span class="mono">EXT</span> clamp 1–5400 — zero is an OFF wearing an ON's clothes.</p>
+    </div>
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Uplink — Mega → bridge</h3>
+      <table>
+        <thead><tr><th>Frame</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">!BTN,&lt;key&gt;</td><td>Debounced press, key ∈ A–D, 1–4</td></tr>
+          <tr><td class="mono">!SCAN,&lt;code&gt;</td><td>Complete line from the QR scanner</td></tr>
+          <tr><td class="mono">!STATE,&lt;mask&gt;,&lt;remA..D&gt;</td><td>Relay bitmask + seconds remaining — on change and every 10 s</td></tr>
+          <tr><td class="mono">!PONG,&lt;ver&gt;,&lt;uptime&gt;</td><td>Answer to PING</td></tr>
+          <tr><td class="mono">!EVT,&lt;name&gt;,&lt;detail&gt;</td><td>AUTOOFF · AUTHEXPIRED · BADFRAME · OVERRUN</td></tr>
+          <tr><td class="mono">!ERR,&lt;code&gt;</td><td>BADCRC · BADVERB · BADARG · NOCOURT</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Bounds: <span class="mono">kMaxArgLen 24</span>, <span class="mono">kMaxFrameLen 192</span>. Over-long LCD text is truncated (the panel cuts it anyway); an over-long SCAN is <b>refused</b> — a truncated member code doesn't fail, it identifies a <em>different member</em>.</p>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="callout good" style="margin:0">
+      <div class="t">The two safety rules live on the Mega</div>
+      <p>1 — <b>Every ON carries a deadline.</b> v2 cannot express indefinite-on; <span class="mono">RELAY_HARD_CAP_MS</span> (90 min) caps even a frame that asks for more. A Mega whose bridge is unplugged still opens its relays. 2 — <b>Authorisation expires.</b> <span class="mono">!AUTH</span> arms buttons for a bounded window (default 30 s); the legacy <span class="mono">authenticated</span> flag had no expiry, so a button pressed hours after someone else's scan fired a relay on their credit.</p>
+    </div>
+    <div class="card pad scroll" style="margin:0">
+      <h3 style="margin-top:0">Legacy compatibility (both directions)</h3>
+      <table>
+        <thead><tr><th>Legacy</th><th>v2 equivalent</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">A…D ↓</td><td class="mono">!ON,&lt;court&gt;,&lt;HARD_CAP&gt; — a legacy on gets the cap, because the alternative is forever</td></tr>
+          <tr><td class="mono">a…d ↓</td><td class="mono">!OFF,&lt;court&gt;</td></tr>
+          <tr><td class="mono">RESET · ENTER CODE</td><td class="mono">!RST</td></tr>
+          <tr><td class="mono">INVALID CODE / LOW BALANCE / DENIED</td><td class="mono">!LCD with fixed second lines (TRY AGAIN / TOP UP / —)</td></tr>
+          <tr><td class="mono">&lt;l1&gt;|&lt;l2&gt;</td><td class="mono">!LCD,&lt;l1&gt;,&lt;l2&gt; + !AUTH,30</td></tr>
+          <tr><td class="mono">A…D, 1…4 ↑</td><td class="mono">!BTN,&lt;key&gt;</td></tr>
+          <tr><td class="mono">CHECK:&lt;code&gt; ↑</td><td class="mono">!SCAN,&lt;code&gt;</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">The legacy up/down collision (<span class="mono">A</span> = button up, relay down) is preserved, not fixed — each end only reads one direction, and fixing it would break the compatibility the table exists for.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DISCOVERY ================= -->
+<section id="discovery">
+  <div class="eyebrow">Protocols · Wire format №2</div>
+  <h2>Discovery &amp; claiming — UDP 48653</h2>
+  <p class="lede">DHCP everywhere, no static addresses on either side. The constraint that shapes everything: the API runs in a Docker container on a <b>bridge network</b>, and broadcast/multicast frames from the club LAN never cross a bridge — so the discovery listener ships as a host-networking override (<code>docker-compose.onprem.yml</code>), and every automatic path has a manual equivalent that always works.</p>
+
+  <div class="grid2">
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Layered discovery — tried in order</h3>
+      <table>
+        <thead><tr><th>#</th><th>Mechanism</th><th>Why it is here</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td><b>Remembered address</b></td><td>covers the steady state; discovery is a first-run and recovery problem</td></tr>
+          <tr><td class="num">2</td><td><b>UDP broadcast beacon</b></td><td>primary — one ANNOUNCE⇄OFFER exchange solves both directions at once</td></tr>
+          <tr><td class="num">3</td><td><b>mDNS</b> <span class="mono" style="font-size:11px">_crusaders-box._tcp</span></td><td>interop — any Bonjour browser proves "the board is fine, the API can't hear it"</td></tr>
+          <tr><td class="num">4</td><td><b>Subnet sweep</b> (~12 s)</td><td>the only layer that survives an AP with multicast filtering on — a shipped-enabled router checkbox</td></tr>
+          <tr><td class="num">5</td><td><b>Manual entry</b></td><td>always available — an automatic path that sometimes works is worse than a manual one that always does</td></tr>
+        </tbody>
+      </table>
+      <h3>Packet format</h3>
+      <pre class="code">CRSDR1 &lt;VERB&gt; key=value key=value ... *CC\n</pre>
+      <p style="font-size:13px">Same shape as the serial protocol, one mental model for both links. Limits: ≤12 fields, key ≤8, value ≤64, datagram ≤320 bytes. Empty value = <span class="mono">bad_frame</span> (absent and blank are different statements). Error precedence: <span class="mono">bad_frame → bad_magic → bad_checksum → bad_verb → duplicate_key</span>.</p>
+      <h3>ANNOUNCE / OFFER</h3>
+      <p style="font-size:13px"><b>ANNOUNCE</b> (box → broadcast): every 5 s unclaimed, 60 s claimed, and on link-up. Carries <span class="mono">mac hw fw mega st n cch|dev+ten up sig</span>. <b>OFFER</b> (API → unicast): <span class="mono">url t n sig</span> — the nonce echo kills replay across boots, and <b>a claimed box refuses any unsigned or bad-signature OFFER</b>, or anyone on the club WiFi could redirect a board to their own mainframe by answering faster.</p>
+    </div>
+
+    <div class="card pad scroll">
+      <figure style="margin:0">
+      <svg viewBox="0 0 560 640" role="img" aria-label="Claiming sequence: the box displays an 8-character claim code on its LCD and broadcasts only a commitment hash; the admin types the code from the LCD; the API matches the commitment, issues a ten-minute single-use provisioning grant, and the board fetches its own key" style="min-width:480px;max-width:100%;height:auto">
+        <defs><marker id="sarw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <g font-size="12.5" font-weight="800" fill="currentColor" text-anchor="middle">
+          <text x="90" y="30">Court box</text>
+          <text x="280" y="30">Admin (phone)</text>
+          <text x="470" y="30">API</text>
+        </g>
+        <g stroke="currentColor" stroke-opacity=".3" stroke-dasharray="3 5">
+          <path d="M90 42 V610"/><path d="M280 42 V610"/><path d="M470 42 V610"/>
+        </g>
+        <g font-size="10.5" fill="currentColor">
+          <rect x="20" y="60" width="140" height="46" rx="6" fill="var(--amber-soft)" stroke="var(--amber-fill)"/>
+          <text x="90" y="79" text-anchor="middle" font-weight="700">boot: generate code</text>
+          <text x="90" y="94" text-anchor="middle" class="m" font-size="9.5">alphabet has no I O 0 1</text>
+          <rect x="20" y="118" width="140" height="34" rx="6" fill="var(--card2)" stroke="currentColor" stroke-opacity=".4"/>
+          <text x="90" y="139" text-anchor="middle" class="m" font-size="10">LCD: “K7NW 4QRZ”</text>
+        </g>
+        <path d="M100 176 H458" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#sarw)"/>
+        <text x="278" y="168" text-anchor="middle" class="m" font-size="10" fill="currentColor">ANNOUNCE · cch = SHA256(code:n)[0..16]</text>
+        <text x="278" y="192" text-anchor="middle" font-size="10" fill="var(--green)" font-weight="700">the code itself is never on the wire</text>
+
+        <path d="M460 226 H290" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#sarw)"/>
+        <text x="375" y="218" text-anchor="middle" font-size="10" fill="currentColor">board list: MAC · hw · fw</text>
+        <path d="M270 262 Q180 258 100 254" stroke="currentColor" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/>
+        <text x="196" y="246" text-anchor="middle" font-size="10" fill="currentColor">reads code off the LCD</text>
+        <path d="M290 296 H458" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#sarw)"/>
+        <text x="375" y="288" text-anchor="middle" font-size="10" fill="currentColor">types claim code</text>
+
+        <g font-size="10.5" fill="currentColor">
+          <rect x="392" y="316" width="156" height="62" rx="6" fill="var(--blue-soft)" stroke="var(--blue)"/>
+          <text x="470" y="334" text-anchor="middle" font-weight="700">recompute commitment</text>
+          <text x="470" y="349" text-anchor="middle">for each announcer;</text>
+          <text x="470" y="364" text-anchor="middle">duplicate cch → refuse, loudly</text>
+        </g>
+        <g font-size="10.5" fill="currentColor">
+          <rect x="392" y="392" width="156" height="48" rx="6" fill="var(--blue-soft)" stroke="var(--blue)"/>
+          <text x="470" y="410" text-anchor="middle" font-weight="700">Device row + grant</text>
+          <text x="470" y="426" text-anchor="middle" class="m" font-size="9.5">single-use · 10 min · MAC-keyed</text>
+        </g>
+
+        <path d="M100 478 H458" stroke="var(--amber-fill)" stroke-width="1.8" fill="none" marker-end="url(#parw)"/>
+        <text x="278" y="470" text-anchor="middle" class="m" font-size="10" fill="var(--amber)">POST /api/v1/device/provision {mac, claim_code}</text>
+        <path d="M458 512 H100" stroke="var(--amber-fill)" stroke-width="1.8" fill="none" marker-end="url(#parw)"/>
+        <text x="278" y="504" text-anchor="middle" class="m" font-size="10" fill="var(--amber)">device key (uniform refusals; wrong guess burns grant)</text>
+
+        <g font-size="10.5" fill="currentColor">
+          <rect x="20" y="534" width="140" height="48" rx="6" fill="var(--green-soft)" stroke="var(--green)"/>
+          <text x="90" y="553" text-anchor="middle" font-weight="700">persist key</text>
+          <text x="90" y="568" text-anchor="middle" class="m" font-size="9.5">st=claimed · sig on announces</text>
+        </g>
+        <text x="278" y="604" text-anchor="middle" font-size="10" fill="currentColor" opacity=".7">3 wrong codes → claiming locked until reboot · 32⁸ ≈ 1.1×10¹² codes, new commitment each boot</text>
+      </svg>
+      <figcaption><b>The board fetches; the API never pushes.</b> The obvious design — POST the key to the announced address — would dial an address that arrived in an unauthenticated UDP datagram, carving a member-reachable hole through the SSRF guard. Inverting the direction leaves the API's outbound posture untouched; the claim code (generated on the board, displayed on its LCD, never on the wire) is what authenticates the fetch. The key is also shown to the admin once — the serial-cable fallback for a board that can't reach the API yet.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ================= WEBHOOKS ================= -->
+<section id="webhooks">
+  <div class="eyebrow sw">Server side · Eventing</div>
+  <h2>Webhooks, web servers &amp; the SSRF guard</h2>
+  <p class="lede">Every system event fans out to user- and admin-registered HTTP endpoints, HMAC-signed and retried per-endpoint. Webhooks are a programmatic <em>mirror</em> of the event stream — every player-affecting event also sends an email, never a substitute. Lights <b>actuation</b> is deliberately <em>not</em> on this bus: the webhook dispatcher is a store-and-forward worker with a 10 s timeout, wrong for a request-path relay flip, so actuation is a direct signed client call.</p>
+
+  <div class="grid2">
+    <div>
+      <div class="card pad scroll">
+        <h3 style="margin-top:0">Delivery semantics</h3>
+        <table>
+          <tbody>
+            <tr><td><b>Ordering</b></td><td>at-least-once; receivers idempotent on <span class="mono">event id</span></td></tr>
+            <tr><td><b>Signature</b></td><td class="mono">X-Crusaders-Signature: sha256=&lt;hex&gt; (HMAC-SHA256 of raw body)</td></tr>
+            <tr><td><b>Timestamp</b></td><td class="mono">X-Crusaders-Timestamp — reject &gt;5 min old (replay)</td></tr>
+            <tr><td><b>Timeout</b></td><td>10 s per attempt; per-endpoint queue so a slow endpoint blocks nobody</td></tr>
+            <tr><td><b>Retry sweep</b></td><td><span class="mono">WebhookRetryWorker</span> every 30 s, batches of 50</td></tr>
+            <tr><td><b>Give-up</b></td><td>after 6 failures: endpoint auto-disabled + owner emailed</td></tr>
+            <tr><td><b>Log retention</b></td><td>status, latency, retry count — 30 days, admin-visible</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure class="card pad" style="margin:16px 0 0">
+        <svg viewBox="0 0 520 190" role="img" aria-label="Retry backoff chart: attempts at 1 minute, 5 minutes, 30 minutes, 2 hours, 12 hours and 24 hours, drawn on a square-root time scale">
+          <g font-size="10.5" class="m" fill="currentColor">
+            <text x="10" y="20" font-weight="600" letter-spacing="1.5" opacity=".6">EXPONENTIAL BACKOFF — 6 ATTEMPTS OVER ~38.6 H</text>
+          </g>
+          <g>
+            <rect x="10" y="40"  width="22"  height="16" rx="3" fill="var(--blue-fill)"/><text x="40"  y="52" font-size="10.5" class="m" fill="currentColor">1 m</text>
+            <rect x="10" y="62"  width="49"  height="16" rx="3" fill="var(--blue-fill)"/><text x="67"  y="74" font-size="10.5" class="m" fill="currentColor">5 m</text>
+            <rect x="10" y="84"  width="120" height="16" rx="3" fill="var(--blue-fill)"/><text x="138" y="96" font-size="10.5" class="m" fill="currentColor">30 m</text>
+            <rect x="10" y="106" width="240" height="16" rx="3" fill="var(--blue-fill)"/><text x="258" y="118" font-size="10.5" class="m" fill="currentColor">2 h</text>
+            <rect x="10" y="128" width="416" height="16" rx="3" fill="var(--blue-fill)"/><text x="434" y="140" font-size="10.5" class="m" fill="currentColor">12 h</text>
+            <rect x="10" y="150" width="470" height="16" rx="3" fill="var(--amber-fill)"/><text x="488" y="162" font-size="10.5" class="m" fill="currentColor">24 h</text>
+          </g>
+          <text x="10" y="184" font-size="9.5" fill="currentColor" opacity=".6">√time scale · final bar amber: after it, auto-disable + email</text>
+        </svg>
+        <figcaption>Backoff ladder per endpoint. A <b>blocked destination</b> (SSRF guard) and a <b>missing template variable</b> are config errors, not transient failures — abandoned on first attempt, never retried.</figcaption>
+      </figure>
+    </div>
+
+    <div>
+      <div class="card pad">
+        <h3 style="margin-top:0">URL templating</h3>
+        <pre class="code">http://box.local/court/<span style="color:#F0A83C">{court_number}</span>/turn/on</pre>
+        <p style="font-size:13px">Single-brace placeholders resolved per-event from the payload — one config covers every court; adding court 5 is a database row, not a webhook change. Variables always available: <span class="mono">tenant_id · tenant_slug · event_id · event_type · occurred_at(_unix)</span> plus every flattened <span class="mono">data</span> key. Validated at save-time against the endpoint's event filter. <b>A variable in the host is refused</b> — payload fields carry member-supplied values, and a host assembled from those is a destination nobody chose.</p>
+      </div>
+      <div class="card pad" style="margin-top:16px">
+        <h3 style="margin-top:0">SSRF guard — decided at the socket</h3>
+        <p style="font-size:13px">Implemented in <span class="mono">OutboundAddressGuard</span> inside the socket's <b>ConnectCallback</b>, against the address about to be dialled — registration-time checks can't survive DNS rebinding. Refused unless allow-listed: loopback, RFC1918, link-local <span class="mono">169.254/16</span> (the cloud-metadata range an RFC1918-only guard misses), CGNAT <span class="mono">100.64/10</span>, multicast/reserved, IPv6 equivalents, and IPv4-mapped IPv6 unwrapped before classification. <b>Every</b> resolved address must pass; redirects are never followed.</p>
+        <div class="callout" style="margin:12px 0 0">
+          <div class="t">The LAN carve-out — do not close it</div>
+          <p><span class="mono">Webhooks:PrivateNetworkAllowList</span> is CIDR-scoped — <span class="mono">192.168.68.150/32</span> admits one court box, not the private internet. <span class="mono">AllowPrivateNetworks</span> (guard off wholesale) defaults on in Development only.</p>
+        </div>
+      </div>
+      <div class="card pad" style="margin-top:16px">
+        <h3 style="margin-top:0">Scoping</h3>
+        <p style="font-size:13px"><b>Player endpoints</b> (≤5): only events where the player is subject or actor. <b>Tenant-admin</b> (≤20): all tenant events. <b>Platform-admin</b>: cross-tenant, for the observability stack.</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>Event catalogue — 16 types</h3>
+  <div class="card pad scroll">
+    <table>
+      <thead><tr><th>Member</th><th>Booking</th><th>Credit</th><th>System</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">member.registered<br>member.approved<br>member.rejected<br>member.suspended</td>
+          <td class="mono">booking.created<br>booking.cancelled<br>booking.late_cancellation<br>booking.no_show<br>booking.lights_on<br>booking.completed</td>
+          <td class="mono">credit.topped_up<br>credit.refunded<br>credit.penalty_applied<br>credit.adjusted</td>
+          <td class="mono">peripheral.unhealthy<br>webhook.test</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Payload: <span class="mono">{id: evt_&lt;uuid&gt;, type, tenant_id, occurred_at, data{…}, actor{user_id, is_admin, is_platform_admin}}</span></p>
+  </div>
+</section>
+
+<!-- ================= BACKEND ================= -->
+<section id="backend">
+  <div class="eyebrow sw">Server side · API</div>
+  <h2>Backend — .NET 10, one flat project</h2>
+  <p class="lede"><span class="mono">Crusaders.Mainframe.Api</span>: Minimal APIs + EF Core on PostgreSQL 16, folder-layered inside a single assembly. Auth is JWT HS256 plus WebAuthn passkeys (Fido2). 519 xUnit tests run in-process against a TestHost; cross-tenant injection tests are non-negotiable for every tenant-scoped table.</p>
+
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin-top:0">Folder layers</h3>
+      <pre class="code">Crusaders.Mainframe.Api/
+├── Endpoints/      # Minimal API route groups
+├── Domain/         # entities + invariants
+├── Services/       # booking, ledger, no-show sweep
+├── Persistence/    # EF Core, migrations (mandatory)
+├── Security/       # JWT · WebAuthn · OutboundAddressGuard
+├── Webhooks/       # catalogue, delivery + retry workers
+├── Biometric/      # IBiometricDevice · Null · simulator
+├── Multitenancy/   # tenant resolution, tenant_settings
+├── Payments/       # PayFast provider, ITN pipeline
+└── Workers/        # background sweeps</pre>
+      <p style="font-size:13px;color:var(--muted)">Hardware abstractions ship before drivers: <span class="mono">IBiometricDevice</span> + <span class="mono">NullBiometricDevice</span> + a mock simulator are first-class, and CI passes without touching real hardware. Known, tracked deviations from the FrostAura mandate: no shadcn/Radix, no Redux Toolkit, folder layering rather than iDesign separation.</p>
+    </div>
+    <div class="card pad">
+      <h3 style="margin-top:0">Invariants — violating any is a defect</h3>
+      <ul class="tight">
+        <li><b>Money is ledger-only.</b> Balance = sum of immutable entries, never a stored field. Every movement carries actor, subject, reason, external reference; disputes replay the ledger.</li>
+        <li><b>Credits are the unit of account.</b> ZAR exists only on <span class="mono">PendingTopup</span> for reconciliation. A field mixing units is a money-correctness bug.</li>
+        <li><b>Charge at booking; refund on cancel; nothing back once checked in.</b> Booking row + <span class="mono">BookingCharge</span> debit flush in one unit of work — a lost slot race can't leave a member paying for a court they didn't get. Penalty and refund post as separate rows, never netted.</li>
+        <li><b>Attendance means <span class="mono">CheckedInAt</span></b> — never the clock, never <span class="mono">ChargedAt</span>. A no-show is the <em>absence</em> of an identification match in the grace window.</li>
+        <li><b>Tenant isolation is structural.</b> <span class="mono">tenant_id</span> on every entity; leakage is a P0 incident.</li>
+        <li><b>Admins act on behalf of users</b> — every action representable as <span class="mono">{actor, subject}</span> in the audit trail.</li>
+        <li><b>Every configurable number is <span class="mono">tenant_settings.&lt;key&gt;</span>.</b></li>
+        <li><b>Every player-affecting event emails.</b> Webhooks mirror, never replace.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DATABASE ================= -->
+<section id="database">
+  <div class="eyebrow data">Server side · Data</div>
+  <h2>Database — PostgreSQL 16, ledger at the centre</h2>
+  <p class="lede">Multi-tenant by column, not by schema: every row carries <code>tenant_id</code> and every endpoint resolves tenant first. The ledger is append-only; schema changes require an EF migration — <code>EnsureCreated</code> is not a strategy for a money-handling system.</p>
+
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 1120 480" role="img" aria-label="Core entity relationships: tenants own users, courts, devices, settings and webhook endpoints; users hold memberships with a member class; bookings join users and courts and reference both a booked-by and an optional paid-by user; ledger entries record credit movements including booking charges and top-ups; pending topups carry the ZAR amount and conversion rate" style="min-width:940px;max-width:100%;height:auto">
+    <defs><marker id="earw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--violet)"/></marker></defs>
+    <g font-size="10.5" class="m">
+      <!-- tenants -->
+      <rect x="20" y="40" width="180" height="86" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="110" y="60" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">tenants</text>
+      <text x="32" y="80" fill="currentColor" opacity=".75">id · slug · branding</text>
+      <text x="32" y="96" fill="currentColor" opacity=".75">payfast creds (wrapped)</text>
+      <text x="32" y="112" fill="currentColor" opacity=".75">tenant_settings.&lt;key&gt;*</text>
+      <!-- users -->
+      <rect x="260" y="40" width="190" height="86" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="355" y="60" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">users</text>
+      <text x="272" y="80" fill="currentColor" opacity=".75">jwt + webauthn passkeys</text>
+      <text x="272" y="96" fill="currentColor" opacity=".75">photo (mandatory)</text>
+      <text x="272" y="112" fill="currentColor" opacity=".75">tenant_id</text>
+      <!-- memberships -->
+      <rect x="510" y="40" width="200" height="86" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="610" y="60" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">memberships</text>
+      <text x="522" y="80" fill="currentColor" opacity=".75">member_class:</text>
+      <text x="522" y="96" fill="currentColor" opacity=".75">Regular | LeagueOrSenior</text>
+      <text x="522" y="112" fill="currentColor" opacity=".75">class changes audit-logged</text>
+      <!-- courts -->
+      <rect x="20" y="180" width="180" height="70" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="110" y="200" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">courts</text>
+      <text x="32" y="220" fill="currentColor" opacity=".75">court_number 1–4</text>
+      <text x="32" y="236" fill="currentColor" opacity=".75">slice price (credits)</text>
+      <!-- bookings -->
+      <rect x="260" y="170" width="230" height="120" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="2.2"/>
+      <text x="375" y="190" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">bookings</text>
+      <text x="272" y="210" fill="currentColor" opacity=".75">starts_at · ends_at · slices ×15 min</text>
+      <text x="272" y="226" fill="currentColor" opacity=".75">booked_by_user_id</text>
+      <text x="272" y="242" fill="currentColor" opacity=".75">paid_by_user_id (at-court “I'll pay”)</text>
+      <text x="272" y="258" fill="currentColor" opacity=".75">charged_at (set at booking)</text>
+      <text x="272" y="274" fill="currentColor" opacity=".75">checked_in_at ← attendance truth</text>
+      <!-- ledger -->
+      <rect x="550" y="170" width="250" height="120" rx="8" fill="var(--violet-soft)" stroke="var(--violet)" stroke-width="2.2"/>
+      <text x="675" y="190" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">ledger_entries — append-only</text>
+      <text x="562" y="210" fill="currentColor" opacity=".8">amount_credits · reason</text>
+      <text x="562" y="226" fill="currentColor" opacity=".8">actor · subject · booking_ref</text>
+      <text x="562" y="242" fill="currentColor" opacity=".8">external_reference</text>
+      <text x="562" y="258" fill="currentColor" opacity=".8">└ filtered UNIQUE — the only DB-level</text>
+      <text x="562" y="274" fill="currentColor" opacity=".8">   guarantee against double-credit ITNs</text>
+      <!-- pending topups -->
+      <rect x="860" y="170" width="230" height="100" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="975" y="190" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">pending_topups</text>
+      <text x="872" y="210" fill="currentColor" opacity=".75">zar_paid · conversion_rate</text>
+      <text x="872" y="226" fill="currentColor" opacity=".75">R100 blocks · cap R1000 (non-admin)</text>
+      <text x="872" y="242" fill="currentColor" opacity=".75">reconciliation only —</text>
+      <text x="872" y="258" fill="currentColor" opacity=".75">ZAR never reaches the ledger</text>
+      <!-- devices -->
+      <rect x="20" y="330" width="220" height="100" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+      <text x="130" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">devices (court boxes)</text>
+      <text x="32" y="370" fill="currentColor" opacity=".75">mac · hw · fw · mega_fw</text>
+      <text x="32" y="386" fill="currentColor" opacity=".75">device key (HKDF-derived)</text>
+      <text x="32" y="402" fill="currentColor" opacity=".75">last_ip — observability only,</text>
+      <text x="32" y="418" fill="currentColor" opacity=".75">never an authorisation input</text>
+      <!-- webhooks -->
+      <rect x="300" y="330" width="220" height="100" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.8"/>
+      <text x="410" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">webhook_endpoints</text>
+      <text x="312" y="370" fill="currentColor" opacity=".75">url template · event_filter</text>
+      <text x="312" y="386" fill="currentColor" opacity=".75">secret · enabled · scope</text>
+      <text x="312" y="402" fill="currentColor" opacity=".75">+ webhook_deliveries log</text>
+      <text x="312" y="418" fill="currentColor" opacity=".75">(status · latency · retries, 30 d)</text>
+      <!-- audit -->
+      <rect x="580" y="330" width="220" height="100" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="690" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">audit trail</text>
+      <text x="592" y="370" fill="currentColor" opacity=".75">{actor, subject} on every</text>
+      <text x="592" y="386" fill="currentColor" opacity=".75">admin action · class changes</text>
+      <text x="592" y="402" fill="currentColor" opacity=".75">2-year retention with</text>
+      <text x="592" y="418" fill="currentColor" opacity=".75">anonymisation (blueprint)</text>
+    </g>
+    <g stroke="var(--violet)" stroke-width="1.4" fill="none" marker-end="url(#earw)">
+      <path d="M200 83 H258"/>
+      <path d="M450 83 H508"/>
+      <path d="M110 178 V128"/>
+      <path d="M200 215 H258"/>
+      <path d="M355 168 V128"/>
+      <path d="M490 230 H548"/>
+      <path d="M858 220 H802"/>
+      <path d="M675 168 Q660 140 610 128"/>
+      <path d="M130 328 Q120 290 110 252"/>
+      <path d="M410 328 V292"/>
+    </g>
+    <g font-size="9.5" class="m" fill="var(--violet)">
+      <text x="212" y="76">1‥n</text>
+      <text x="462" y="76">1‥1</text>
+      <text x="205" y="208">1‥n</text>
+      <text x="500" y="222">posts</text>
+      <text x="822" y="212">confirms</text>
+    </g>
+  </svg>
+  <figcaption>Core entities. The one violet-filled table is the point of the schema: <span class="mono">ledger_entries</span> is append-only, credit-denominated, and its filtered unique index on <span class="mono">external_reference</span> is what makes a retried PayFast ITN safe rather than a double credit.</figcaption>
+  </figure>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <figure class="card pad" style="margin:0">
+      <svg viewBox="0 0 480 170" role="img" aria-label="Credit conversion chart: 100 rand becomes 160 credits for Regular members and 240 credits for League or Senior members">
+        <text x="10" y="20" font-size="10.5" class="m" fill="currentColor" font-weight="600" letter-spacing="1.5" opacity=".6">R100 TOP-UP → CREDITS, BY MEMBER CLASS</text>
+        <rect x="10" y="44" width="280" height="26" rx="4" fill="var(--blue-fill)"/>
+        <text x="300" y="62" font-size="12" class="m" fill="currentColor">160 · Regular (×1.6)</text>
+        <rect x="10" y="82" width="420" height="26" rx="4" fill="var(--amber-fill)"/>
+        <text x="20" y="100" font-size="12" class="m" font-weight="600" fill="#1A1305">240 · League / Senior (×2.4)</text>
+        <text x="10" y="140" font-size="10.5" fill="currentColor" opacity=".7">Rates are tenant_settings; classes also gate peak hours 16:00–19:00</text>
+        <text x="10" y="156" font-size="10.5" fill="currentColor" opacity=".7">(League/Senior exclusive until 1 h before slot start)</text>
+      </svg>
+      <figcaption>Member class drives both the conversion rate and peak-hour access — the two effects that make it an architectural column, not a tag.</figcaption>
+    </figure>
+    <div class="card pad">
+      <h3 style="margin-top:0">Booking economics (as decided)</h3>
+      <ul class="tight">
+        <li>Default slice <b>15 minutes</b>; 1-hour-per-day cap per member, relaxed same-day if courts are otherwise empty.</li>
+        <li><b>Charge at booking</b> (2026-08-22 decision) — cancel refunds in full, less the late-cancel penalty inside the window; no refund after check-in.</li>
+        <li>Walk-ups create <b>real bookings</b>, truncated at the next booking and charged pro rata — which is why they need the network.</li>
+        <li>Top-ups in R100 blocks, capped at R1000 for non-admins.</li>
+        <li>Reports: monthly presets + per-member spend drill-down; 2-year retention with anonymisation.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PAYMENTS ================= -->
+<section id="payments">
+  <div class="eyebrow sw">Server side · Money in</div>
+  <h2>Payments — PayFast hosted checkout + ITN</h2>
+  <p class="lede">The member never types a card number into anything this project serves — PCI scope stays a redirect. <b>The redirect is not the notification</b>: the server-to-server ITN is what moves money; the return URL only decides which screen the member sees.</p>
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin-top:0">Receiving an ITN — in order, always</h3>
+      <table>
+        <thead><tr><th>#</th><th>Step</th><th>Skipping it costs</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td>Verify MD5 signature (fields in posted order, tenant passphrase)</td><td>forged notifications</td></tr>
+          <tr><td class="num">2</td><td>Check source host (advisory, configurable)</td><td>only defence for a passphrase-less merchant</td></tr>
+          <tr><td class="num">3</td><td>Check amount vs <span class="mono">PendingTopup</span></td><td>authentic message, wrong amount</td></tr>
+          <tr><td class="num">4</td><td><span class="mono">payment_status == COMPLETE</span> only</td><td>crediting a member for a FAILED payment</td></tr>
+          <tr><td class="num">5</td><td>Post credits idempotently (unique <span class="mono">ExternalReference</span>)</td><td>PayFast retries ITNs by design → double credit</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card pad">
+      <h3 style="margin-top:0">The signature is PHP-shaped</h3>
+      <p style="font-size:13px">MD5 over the parameter string <b>in posted order</b> (why <span class="mono">CallbackPayload.Fields</span> is an ordered list, not a dictionary), URL-encoded the way PHP's <code>urlencode</code> does it — which .NET does not:</p>
+      <table style="margin-top:8px">
+        <thead><tr><th></th><th>PHP urlencode</th><th>.NET EscapeDataString</th></tr></thead>
+        <tbody>
+          <tr><td>space</td><td class="mono">+</td><td class="mono">%20</td></tr>
+          <tr><td class="mono">~</td><td class="mono">%7E</td><td class="mono">~</td></tr>
+          <tr><td>hex case</td><td class="mono">UPPER</td><td class="mono">UPPER</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:13px;margin-top:8px">Passphrase appended as <span class="mono">&amp;passphrase=…</span> when present, omitted entirely when not — empty string ≠ absent. The fixture corpus in <span class="mono">src/contracts/payfast/</span> (15 encode + 7 request + 4 ITN cases, generated by an independent implementation) is the authority, not prose. Passphrase is optional at PayFast, <b>required here</b>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FRONTEND ================= -->
+<section id="frontend">
+  <div class="eyebrow fe">Edges · Member-facing</div>
+  <h2>Frontend — mobile-first PWA</h2>
+  <div class="grid3">
+    <div class="card pad kv">
+      <span class="pill ok">Stack</span>
+      <p style="font-size:13.5px;margin:8px 0 0">React 19 + TypeScript + Vite 7 + Tailwind, installable PWA. Figtree type, Monday.com-style soft palette. State is React context (<span class="mono">lib/auth · lib/profile · lib/balance</span>) — a tracked deviation from the Redux Toolkit mandate, as is the fully hand-rolled primitive set (<span class="mono">Button, Card, Modal, Toast, DataTable, Carousel, ConfirmButton, LedgerTable, Charts</span>) in place of shadcn/Radix.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill ok">Wallet UI</span>
+      <p style="font-size:13.5px;margin:8px 0 0"><b>Credits are primary everywhere</b>; ZAR appears only on top-up screens. The booking grid shows <b>photo + name only</b> — no email, phone or membership number visible to other players, which is why photo upload is mandatory at registration.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill ok">Verified by</span>
+      <p style="font-size:13.5px;margin:8px 0 0">28 unit tests + 12 Playwright e2e, bundle-size gate in CI. Auth: JWT sessions with WebAuthn passkeys for step-up.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DEPLOY ================= -->
+<section id="deploy">
+  <div class="eyebrow sw">Edges · Ship it</div>
+  <h2>Deployment — one machine at the club</h2>
+  <p class="lede">Standard FrostAura pattern: push → CI gates → multi-arch images → Docker Hub → Portainer API redeploy. The deploy target is the same physical machine that has the peripherals attached, reached from the internet only through a Cloudflare tunnel — no inbound ports.</p>
+
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 1120 150" role="img" aria-label="CI and deploy chain: git push to main, GitHub Actions gates for backend, frontend, firmware and security, multi-architecture image build pushed to Docker Hub, then a Portainer API call re-pulls and recreates containers on the club machine" style="min-width:940px;max-width:100%;height:auto">
+    <defs><marker id="darw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--blue)"/></marker></defs>
+    <g font-size="11.5" fill="currentColor">
+      <rect x="14" y="34" width="130" height="54" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="79" y="57" text-anchor="middle" font-weight="700">git push</text>
+      <text x="79" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">main</text>
+      <rect x="186" y="22" width="240" height="82" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="306" y="44" text-anchor="middle" font-weight="700">GitHub Actions — ci.yml</text>
+      <text x="306" y="62" text-anchor="middle" font-size="10" opacity=".75">backend lint·unit·integration·coverage</text>
+      <text x="306" y="77" text-anchor="middle" font-size="10" opacity=".75">frontend lint·unit·e2e·bundle gate</text>
+      <text x="306" y="92" text-anchor="middle" font-size="10" opacity=".75">firmware purity+rollover gates · audits</text>
+      <rect x="468" y="34" width="170" height="54" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="553" y="57" text-anchor="middle" font-weight="700">multi-arch build</text>
+      <text x="553" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">amd64 + arm64 manifest</text>
+      <rect x="680" y="34" width="140" height="54" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="750" y="57" text-anchor="middle" font-weight="700">Docker Hub</text>
+      <text x="750" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">frostaura/…:latest</text>
+      <rect x="862" y="22" width="244" height="82" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+      <text x="984" y="44" text-anchor="middle" font-weight="700">Portainer @ club machine</text>
+      <text x="984" y="62" text-anchor="middle" class="m" font-size="10" opacity=".75">PUT /api/stacks/{id}?pullImage=true</text>
+      <text x="984" y="78" text-anchor="middle" font-size="10" opacity=".75">re-pull · recreate · live</text>
+      <text x="984" y="93" text-anchor="middle" font-size="10" opacity=".75">+ onprem override: host-net discovery</text>
+    </g>
+    <g stroke="var(--blue)" stroke-width="1.6" fill="none" marker-end="url(#darw)">
+      <path d="M144 61 H184"/><path d="M426 61 H466"/><path d="M638 61 H678"/><path d="M820 61 H860"/>
+    </g>
+    <text x="560" y="130" text-anchor="middle" font-size="10.5" fill="var(--red)" font-weight="700">⚠ the 6 Portainer/Docker Hub Actions secrets are still unset — the release chain is unproven end-to-end</text>
+  </svg>
+  <figcaption>Push-to-live chain. The stack: nginx gateway :8088 → frontend (static) + backend :5000 → postgres:16-alpine, with MailHog in dev. Biometric USB devices reach the container via <span class="mono">--device</span> passthrough. Backups: nightly encrypted <span class="mono">pg_dump</span> offsite; the <span class="mono">MASTER_SECRETS_ENCRYPTION_KEY</span> that wraps tenant secrets lives in a password manager <em>off</em> the host, so losing the machine doesn't lose the keys.</figcaption>
+  </figure>
+  </div>
+</section>
+
+<!-- ================= RISKS ================= -->
+<section id="risks">
+  <div class="eyebrow safe">Status · Ordered by risk</div>
+  <h2>Watch list &amp; open questions</h2>
+  <p class="lede">Phases A–J are code-complete and green — 519 backend + 240 firmware + 40 frontend tests. Then three adversarial audits pointed at the money, tenancy and firmware paths found <b>sixteen more defects in code that was already green</b> (an IDOR, registration outside every tenant, the panel lighting the wrong court, four money-moving races) — all fixed and mutation-proven. Green is not evidence; audits are. What remains needs physical access or a live credential.</p>
+  <div class="card pad scroll">
+    <table>
+      <thead><tr><th>#</th><th>Item</th><th>Class</th><th>Why it matters</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td><b>Relay → contactor, or relay → load?</b></td><td><span class="pill risk">Safety</span></td><td>Gates go-live. If the 10 A relays switch the lighting load directly, a qualified electrician is required. No software decision touches this.</td></tr>
+        <tr><td class="num">2</td><td>6 GitHub Actions secrets unset</td><td><span class="pill sw">Release</span></td><td>Docker Hub + Portainer creds — until set, the push-to-live chain has never run end-to-end.</td></tr>
+        <tr><td class="num">3</td><td>Committee sign-off: charge-at-booking</td><td><span class="pill sw">Decision</span></td><td>Founder decision contradicts blueprint A.9 (charge-on-lights-on); recorded in the deltas doc, needs client sign-off before go-live.</td></tr>
+        <tr><td class="num">4</td><td>First-ESP-flash DIP position</td><td><span class="pill hw">Hardware</span></td><td>Unverified; may require USB-TTL on the ESP pads with GPIO0 grounded. Moves the schedule.</td></tr>
+        <tr><td class="num">5</td><td>Firmware signing key</td><td><span class="pill hw">Hardware</span></td><td>Does not exist yet; OTA chain is designed but unkeyed.</td></tr>
+        <tr><td class="num">6</td><td>Unwaivered frontend deviation</td><td><span class="pill sw">Governance</span></td><td>Hand-rolled primitives + context state vs the shadcn/Redux mandate — adopt or record a rationale.</td></tr>
+        <tr><td class="num">7</td><td>PIN length · gate vocabulary · revoked-card window · biometric vendor SDK · go-live date</td><td><span class="pill sw">Open</span></td><td>Smaller open questions, tracked in project memory.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout good">
+    <div class="t">Launch bar (working set)</div>
+    <p>100% of bookings in-system within 60 days · ≥95% lights-on match rate · ≥70% of members holding positive credit · second club onboarded in &lt;2 h · ≥99.5% uptime during club hours.</p>
+  </div>
+  <div class="footer">
+    <span>Crusaders Mainframe · FrostAura Technologies · sources: <span class="mono">docs/specs/*</span>, <span class="mono">src/iot/README.md</span>, project memory</span>
+    <span class="mono">REV 2026-08-24</span>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+(function(){
+  // ---------- scroll-spy ----------
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.rail a'));
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+  var secs = Array.prototype.slice.call(document.querySelectorAll('section[id], header[id]'));
+  try{
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting && map[e.target.id]){
+          links.forEach(function(a){ a.classList.remove('active'); });
+          map[e.target.id].classList.add('active');
+        }
+      });
+    }, {rootMargin:'-20% 0px -70% 0px'});
+    secs.forEach(function(s){ obs.observe(s); });
+  }catch(err){}
+
+  // ---------- DIP widget ----------
+  var bank = document.getElementById('dipbank');
+  var note = document.getElementById('dipnote');
+  if(bank){
+    for(var i=1;i<=8;i++){
+      var d = document.createElement('div');
+      d.className='dip'; d.id='dip'+i;
+      d.innerHTML='<div class="slot"><div class="knob"></div></div><div class="lbl">'+i+'</div>';
+      bank.appendChild(d);
+    }
+    var dipButtons = Array.prototype.slice.call(document.querySelectorAll('#dip .seg button'));
+    function setDip(btn){
+      dipButtons.forEach(function(b){ b.classList.toggle('on', b===btn); });
+      var on = btn.getAttribute('data-dip').split(',');
+      for(var i=1;i<=8;i++){
+        document.getElementById('dip'+i).classList.toggle('on', on.indexOf(String(i))>=0);
+      }
+      note.innerHTML = btn.getAttribute('data-note') + ' <span style="color:var(--muted)">— switches ' + on.join(', ') + ' ON, rest OFF.</span>';
+    }
+    dipButtons.forEach(function(b){ b.addEventListener('click', function(){ setDip(b); }); });
+    setDip(dipButtons[0]);
+  }
+
+  // ---------- frame builder ----------
+  var verbBtns = Array.prototype.slice.call(document.querySelectorAll('#fb-verb button'));
+  var courtBtns = Array.prototype.slice.call(document.querySelectorAll('#fb-court button'));
+  var sec = document.getElementById('fb-sec');
+  var secv = document.getElementById('fb-secv');
+  var out = document.getElementById('fb-out');
+  var fnote = document.getElementById('fb-note');
+  var courtWrap = document.getElementById('fb-courtwrap');
+  var secWrap = document.getElementById('fb-secwrap');
+  if(out){
+    var state = {verb:'ON', court:'A', sec:1800};
+    var needs = {
+      ON:{court:true, sec:true}, OFF:{court:true, sec:false}, EXT:{court:true, sec:true},
+      AUTH:{court:false, sec:true}, LCD:{court:false, sec:false}, RST:{court:false, sec:false}, PING:{court:false, sec:false}
+    };
+    var notes = {
+      ON:'The Mega closes the relay and arms its <b>own</b> deadline — auto-off happens even if the ESP, the WiFi and the backend are all gone. Duration is mandatory: v2 has nowhere to put an indefinite-on.',
+      OFF:'Opens the relay now. Also fired early on cancellation.',
+      EXT:'Extends the deadline to now + seconds — how back-to-back bookings flow through without flicker. Refused if the relay is open.',
+      AUTH:'Arms the button panel for a bounded window (default 30 s). Zero disarms — the one verb where 0 is legal.',
+      LCD:'Two display lines, truncated to 16 columns. Commas ride as %2C, percent as %25 — the only frames that ever need escaping.',
+      RST:'Relays open, buttons disarmed, default screen.',
+      PING:'Answered with <span class="mono">!PONG,&lt;version&gt;,&lt;uptime&gt;</span>.'
+    };
+    function xor(s){
+      var c=0; for(var i=0;i<s.length;i++){ c ^= s.charCodeAt(i); }
+      var h=c.toString(16).toUpperCase(); return h.length<2 ? '0'+h : h;
+    }
+    function clamp(v, verb){
+      var lo = verb==='AUTH' ? 0 : 1;
+      var hi = 5400;
+      return Math.max(lo, Math.min(hi, v));
+    }
+    function render(){
+      var n = needs[state.verb];
+      courtWrap.style.display = n.court ? '' : 'none';
+      secWrap.style.display = n.sec ? '' : 'none';
+      var raw = Number(sec.value);
+      var eff = clamp(raw, state.verb);
+      secv.textContent = raw;
+      var args=[];
+      if(state.verb==='LCD'){ args=['LOW BALANCE','TOP UP']; }
+      else{
+        if(n.court) args.push(state.court);
+        if(n.sec) args.push(String(eff));
+      }
+      var body = state.verb + (args.length ? ','+args.join(',') : '');
+      var cc = xor(body);
+      out.innerHTML = '<span class="fs">!</span><span class="fv">'+state.verb+'</span>'
+        + args.map(function(a){return '<span style="opacity:.5">,</span><span class="fa">'+a+'</span>';}).join('')
+        + '<span class="fs">*</span><span class="fc">'+cc+'</span><span style="opacity:.5">\\n</span>';
+      var extra = '';
+      if(n.sec && raw !== eff){
+        extra = ' <b style="color:var(--amber)">Clamped '+raw+' → '+eff+' (saturating, never wrapping — and never rejected: a clamped light is a wrong-length game, a rejected one is a dark court).</b>';
+      }
+      fnote.innerHTML = 'Checksum <span class="mono">'+cc+'</span> = XOR of every byte in “<span class="mono">'+body+'</span>”. ' + notes[state.verb] + extra;
+    }
+    verbBtns.forEach(function(b){ b.addEventListener('click', function(){
+      verbBtns.forEach(function(x){ x.classList.remove('on'); }); b.classList.add('on');
+      state.verb = b.getAttribute('data-v'); render();
+    });});
+    courtBtns.forEach(function(b){ b.addEventListener('click', function(){
+      courtBtns.forEach(function(x){ x.classList.remove('on'); }); b.classList.add('on');
+      state.court = b.getAttribute('data-c'); render();
+    });});
+    sec.addEventListener('input', render);
+    render();
+  }
+})();
+</script>
