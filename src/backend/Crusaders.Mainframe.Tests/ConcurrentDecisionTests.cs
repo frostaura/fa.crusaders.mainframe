@@ -165,6 +165,48 @@ public sealed class ConcurrentDecisionTests
         return booking.Id;
     }
 
+    /// <summary>
+    /// Two back-to-back bookings on one court, both long finished — the shape the sweep meets
+    /// after an API outage, when the lookback reaches bookings past their own end.
+    /// </summary>
+    private static async Task<(Guid First, Guid Second, DateTimeOffset FirstEnd)> SeedTwoEndedBookingsAsync(
+        TestWebAppFactory factory, Club club)
+    {
+        using var scope = RequestScope(factory, club);
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var firstStart = DateTimeOffset.UtcNow.AddHours(-3);
+        var firstEnd = firstStart.AddMinutes(60);
+        var ids = new List<Guid>();
+        foreach (var (start, end) in new[] { (firstStart, firstEnd), (firstEnd, firstEnd.AddMinutes(60)) })
+        {
+            var booking = new Booking
+            {
+                TenantId = club.TenantId,
+                CourtId = club.CourtId,
+                UserId = club.MemberId,
+                BookedByUserId = club.MemberId,
+                PaidByUserId = club.MemberId,
+                ActorUserId = club.MemberId,
+                StartsAt = start,
+                EndsAt = end,
+                SliceMinutes = 15,
+                SliceCount = 4,
+                AmountChargedCredits = BookingCost,
+                Status = BookingStatus.Booked,
+                ChargedAt = DateTimeOffset.UtcNow,
+            };
+            db.Bookings.Add(booking);
+            db.LedgerEntries.Add(new LedgerEntry
+            {
+                TenantId = club.TenantId, UserId = club.MemberId, Type = LedgerEntryType.BookingCharge,
+                AmountCredits = -BookingCost, ActorUserId = club.MemberId, RelatedBookingId = booking.Id, Reason = "seed charge",
+            });
+            ids.Add(booking.Id);
+        }
+        await db.SaveChangesAsync();
+        return (ids[0], ids[1], firstEnd);
+    }
+
     private static NoShowWorker Worker(TestWebAppFactory factory) =>
         new(factory.Services,
             factory.Services.GetRequiredService<IEventBus>(),
@@ -831,5 +873,33 @@ public sealed class ConcurrentDecisionTests
         using var check = RequestScope(factory, club);
         var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
         Assert.Equal(1, await db.Bookings.CountAsync(b => b.PaidByUserId == club.VolunteerId));
+    }
+
+    /// <summary>
+    /// The sweep truncates a no-show's EndsAt to free the tail — and must never EXTEND one.
+    /// A booking swept after its own end (the worker was down; the lookback reached it late)
+    /// that had its EndsAt pushed forward to the sweep clock grew into the next booking on
+    /// the court, the exclusion constraint threw inside the tick, and the sweep stalled for
+    /// every tenant. Only Postgres enforces the constraint, so only this suite can prove it.
+    /// Found by the end-to-end scenario, not by a unit test.
+    /// </summary>
+    [SkippableFact]
+    public async Task Sweeping_bookings_after_their_end_never_extends_one_into_the_next()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        var (first, second, firstEnd) = await SeedTwoEndedBookingsAsync(factory, club);
+
+        await Worker(factory).TickAsync(default);
+
+        using var scope = RequestScope(factory, club);
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var rows = await db.Bookings.Where(b => b.Id == first || b.Id == second).ToListAsync();
+        Assert.All(rows, b => Assert.Equal(BookingStatus.NoShow, b.Status));
+        Assert.Equal(firstEnd, rows.Single(b => b.Id == first).EndsAt);
+        Assert.Equal(1, await CountAsync(factory, club, first, LedgerEntryType.NoShowPenalty));
+        Assert.Equal(1, await CountAsync(factory, club, second, LedgerEntryType.NoShowPenalty));
     }
 }
