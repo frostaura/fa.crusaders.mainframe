@@ -60,7 +60,7 @@ export default function AdminSettingsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Admin · Settings</h1>
-        <p className="text-sm text-text-secondary">Court schedule, booking limits, and penalty policy for this tenant.</p>
+        <p className="text-sm text-text-secondary">Court schedule, booking limits, penalty policy and court-box behaviour for this tenant.</p>
       </div>
 
       <Card className="space-y-5">
@@ -149,6 +149,8 @@ export default function AdminSettingsPage() {
         </div>
       </Card>
 
+      <DeviceNumbersSection settings={settings} onChange={setSettings} />
+
       <Card className="space-y-5">
         <h2 className="text-base font-semibold">Records</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -168,6 +170,53 @@ export default function AdminSettingsPage() {
 
       <CourtsSection courts={courts} reload={load} />
     </div>
+  );
+}
+
+/**
+ * The six court-box and identification numbers.
+ *
+ * Served by GET /admin/settings since the programme added them, and until now absent
+ * from this page — an admin could change none of them. Bounds are the API's own
+ * (AdminConfigEndpoints.ValidateDeviceNumbers); the cue window is additionally capped
+ * at the forward window here because the API refuses the pair otherwise, and a refusal
+ * after Save is a worse place to learn that than a disabled spinner.
+ */
+function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings; onChange: (next: AdminSettings) => void }) {
+  const set = (patch: Partial<AdminSettings>) => onChange({ ...settings, ...patch });
+  return (
+    <Card className="space-y-5">
+      <h2 className="text-base font-semibold">Court boxes &amp; identification</h2>
+      <p className="text-sm text-text-secondary">
+        How the boxes at the courts behave. Boxes pick a change up on their next heartbeat.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Walk-up maximum (minutes)" hint="1–90. The most court time a walk-up can buy at the box in one go; 90 is the relay's hard cap.">
+          <Input type="number" min={1} max={90} value={settings.walk_up_max_minutes}
+            onChange={(e) => set({ walk_up_max_minutes: Number(e.target.value) })} />
+        </Field>
+        <Field label="Heartbeat interval (seconds)" hint="10–3600. How often a box calls in for its roster and button map.">
+          <Input type="number" min={10} max={3600} value={settings.heartbeat_seconds}
+            onChange={(e) => set({ heartbeat_seconds: Number(e.target.value) })} />
+        </Field>
+        <Field label="Activation window before a booking (minutes)" hint="1–1440. How early a scan may switch a booking's lights on.">
+          <Input type="number" min={1} max={1440} value={settings.activation_forward_window_minutes}
+            onChange={(e) => set({ activation_forward_window_minutes: Number(e.target.value) })} />
+        </Field>
+        <Field label="Lights cue before a booking (minutes)" hint={`0–${settings.activation_forward_window_minutes}. Must not exceed the activation window.`}>
+          <Input type="number" min={0} max={settings.activation_forward_window_minutes} value={settings.activation_cue_window_minutes}
+            onChange={(e) => set({ activation_cue_window_minutes: Number(e.target.value) })} />
+        </Field>
+        <Field label="Court code lifetime (seconds)" hint="15–3600. How long a member's walk-up code stays valid; the app fetches a new one as it runs out.">
+          <Input type="number" min={15} max={3600} value={settings.qr_lifetime_seconds}
+            onChange={(e) => set({ qr_lifetime_seconds: Number(e.target.value) })} />
+        </Field>
+        <Field label="Offline roster reach (minutes)" hint="5–1440. How far ahead a box's cached roster lets it admit booked members when the API is unreachable.">
+          <Input type="number" min={5} max={1440} value={settings.roster_window_minutes}
+            onChange={(e) => set({ roster_window_minutes: Number(e.target.value) })} />
+        </Field>
+      </div>
+    </Card>
   );
 }
 
@@ -234,7 +283,7 @@ function CourtsSection({ courts, reload }: { courts: AdminCourt[]; reload: () =>
         <Field label="New court name">
           <Input placeholder="Court 5" value={newName} onChange={(e) => setNewName(e.target.value)} />
         </Field>
-        <Field label="Price per slice (R)">
+        <Field label="Price per slice (credits)" hint="Credits, not rand. Members are charged this per slice; rand only ever buys credits.">
           <Input type="number" min={0} value={newPrice} onChange={(e) => setNewPrice(Number(e.target.value))} />
         </Field>
         <Button onClick={create} disabled={adding}>{adding ? "Adding…" : "Add court"}</Button>
@@ -273,7 +322,7 @@ function CourtRow({ court, reload }: { court: AdminCourt; reload: () => Promise<
   return (
     <div className={`grid grid-cols-1 sm:grid-cols-[1fr_140px_auto_auto] gap-2 sm:items-center p-3 rounded-md border border-border ${court.is_active ? "bg-bg-surface" : "bg-bg-muted/40"}`}>
       <Input value={name} onChange={(e) => setName(e.target.value)} disabled={!court.is_active} />
-      <Input type="number" min={0} value={price} onChange={(e) => setPrice(Number(e.target.value))} disabled={!court.is_active} />
+      <Input type="number" min={0} aria-label={`${court.name} price per slice (credits)`} value={price} onChange={(e) => setPrice(Number(e.target.value))} disabled={!court.is_active} />
       <Button variant="outline" onClick={save} disabled={!dirty || busy || !court.is_active}>Save</Button>
       {court.is_active ? (
         <ConfirmButton

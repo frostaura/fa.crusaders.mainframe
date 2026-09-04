@@ -355,6 +355,166 @@ describe("AdminDevices", () => {
     });
   });
 
+  it("shows the claim's one-time key until dismissed, and keeps it out of storage", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
+      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
+      {
+        method: "POST",
+        path: "/api/v1/admin/devices/claim",
+        body: { device: deviceFixture({ name: "Court 2 box" }), device_key: "c0ffee1234", key_version: 1, board: boardFixture({ claimed: true }), note: "Store this key on the board now." },
+      },
+    ]);
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
+    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
+    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
+
+    // The claim used to toast and drop the key. A board that misses its single-use
+    // ten-minute grant was then stranded with nothing an admin could act on.
+    const key = await screen.findByLabelText("Device key");
+    expect(key).toHaveTextContent("c0ffee1234");
+    expect(key.parentElement?.parentElement).toHaveTextContent(/ten minutes from Connect/);
+    expect(key.parentElement?.parentElement).toHaveTextContent(/secrets\.h as DEVICE_KEY/);
+
+    fireEvent.click(screen.getByRole("button", { name: /Copy device key/ }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("c0ffee1234"));
+
+    // Shown once means shown once: nothing a later visitor to this browser can read back.
+    for (let i = 0; i < localStorage.length; i++) {
+      expect(localStorage.getItem(localStorage.key(i)!)).not.toContain("c0ffee1234");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: /I've stored it/ }));
+    expect(screen.queryByLabelText("Device key")).not.toBeInTheDocument();
+  });
+
+  it("says what revoking does, and offers to re-claim a revoked box with its details filled in", async () => {
+    const stub = stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1, 2] })], sequence: [
+        [deviceFixture({ court_numbers: [1, 2] })],
+        [deviceFixture({ court_numbers: [1, 2], revoked_at: new Date().toISOString() })],
+      ] },
+      { method: "POST", path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111/revoke", body: deviceFixture({ revoked_at: new Date().toISOString() }) },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    // "Really revoke?" told nobody what it did. The armed label says: the box is
+    // refused until it is re-claimed.
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refuse this box until re-claimed?" }));
+
+    await waitFor(() => expect(stub.calls.some((c) => c.path.endsWith("/revoke"))).toBe(true));
+    expect(await screen.findByText(/revoked — refused until re-claimed/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
+
+    // A revoked MAC is claimable again on the API; the row hands the claim form the
+    // box's details so the admin only types the code on the LCD. The board is not
+    // announcing yet in this fixture, and the form says so rather than failing later.
+    fireEvent.click(screen.getByRole("button", { name: /Re-claim/ }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Court 1 box");
+    expect(screen.getByLabelText("Device code")).toHaveValue("court-box-1");
+    expect(screen.getByLabelText("Relay A court")).toHaveValue("1");
+    expect(screen.getByLabelText("Relay B court")).toHaveValue("2");
+    expect(screen.getByText(/5ccf7f1a2b3c is not announcing a claim code yet/)).toBeInTheDocument();
+  });
+
+  it("rotates a box's key and shows the new one once", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
+      {
+        method: "POST",
+        path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111/rotate-key",
+        body: { device: deviceFixture({ key_version: 2 }), device_key: "feedface", key_version: 2 },
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Rotate key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refuse it until it has the new key?" }));
+
+    const key = await screen.findByLabelText("Device key");
+    expect(key).toHaveTextContent("feedface");
+    expect(key.parentElement?.parentElement).toHaveTextContent(/version 2/);
+    expect(key.parentElement?.parentElement).toHaveTextContent(/old key stopped working/);
+  });
+
+  it("offers a box its own button map only when the API sends the field", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    await screen.findByText("Court 1 box");
+    // An API that does not send `button_map` gets no editor whose save would bind to nothing.
+    expect(screen.queryByRole("button", { name: /Edit buttons/ })).not.toBeInTheDocument();
+  });
+
+  it("gives a box its own button map, sent as button_map", async () => {
+    const stub = stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ button_map: null })] },
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture({ button_map: SETTINGS_FIXTURE.button_map }) },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Edit buttons/ }));
+    // Null on the payload means the club's map; that is what is selected, and the
+    // editor is not shown until the admin asks for an override.
+    expect(screen.getByLabelText(/Use the club's button map/)).toBeChecked();
+    expect(screen.queryByLabelText("Court 1 box button 1 action")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText(/Own map for this box/));
+    // The override starts from the club's map, labelled by the box so the two editors
+    // on this screen cannot be confused.
+    expect(screen.getByLabelText("Court 1 box button 1 court")).toHaveValue("A");
+    fireEvent.change(screen.getByLabelText("Court 1 box button 1 court"), { target: { value: "B" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save buttons/ }));
+
+    await waitFor(() => {
+      const patch = stub.calls.find((c) => c.method === "PATCH");
+      expect(patch?.path).toBe("/api/v1/admin/devices/11111111-1111-1111-1111-111111111111");
+      expect(patch?.body).toEqual({ button_map: ["court:B", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "minutes:60"] });
+    });
+    expect(await screen.findByText(/has its own button map/)).toBeInTheDocument();
+  });
+
+  it("sends null to put a box back on the club's button map", async () => {
+    const stub = stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ button_map: ["court:A", "off", "none", "none", "none", "none", "none", "none"] })] },
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture({ button_map: null }) },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    expect(await screen.findByText("own button map")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Edit buttons/ }));
+    expect(screen.getByLabelText(/Own map for this box/)).toBeChecked();
+    expect(screen.getByLabelText("Court 1 box button 2 action")).toHaveValue("off");
+
+    fireEvent.click(screen.getByLabelText(/Use the club's button map/));
+    fireEvent.click(screen.getByRole("button", { name: /Save buttons/ }));
+
+    await waitFor(() => {
+      const patch = stub.calls.find((c) => c.method === "PATCH");
+      // Null, not an empty list: the API reads null as "the club's map".
+      expect(patch?.body).toEqual({ button_map: null });
+    });
+  });
+
   it("registers a box by hand and shows its key once", async () => {
     const stub = stubFetch([
       ...baseRoutes(),

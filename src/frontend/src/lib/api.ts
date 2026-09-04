@@ -157,6 +157,23 @@ export type AdminSettings = {
   peak_advance_hours_for_regular: number;
   retention_years: number;
   no_show_lookback_days: number;
+
+  // The six court-box and identification numbers (WI-2). Served by GET /admin/settings
+  // since the programme added them, but until now absent from this type, the save
+  // mapper and the Settings page — so an admin could see none of them and change none
+  // of them. Bounds are the API's (AdminConfigEndpoints.ValidateDeviceNumbers).
+  /** 1–90. The relay bank's hard cap is 90; a setting above it sells minutes the lights cannot deliver. */
+  walk_up_max_minutes: number;
+  /** 10–3600. */
+  heartbeat_seconds: number;
+  /** 1–1440. How far ahead of a booking a scan may activate it. */
+  activation_forward_window_minutes: number;
+  /** 0–1440, and never more than the forward window. */
+  activation_cue_window_minutes: number;
+  /** 15–3600. How long an ident code (walk-up / pay-for-someone) lives. */
+  qr_lifetime_seconds: number;
+  /** 5–1440. How far ahead the box's offline roster reaches. */
+  roster_window_minutes: number;
 };
 
 /**
@@ -196,6 +213,12 @@ export type AdminDevice = {
   /** A build this box installed and could never make a working call on. */
   failed_version: string | null;
   created_at: string;
+  /**
+   * This box's own button map, or null to use the club's. Optional because the field
+   * is landing on the API alongside this screen: the per-box editor renders only when
+   * the payload actually carries it, so an older API simply shows no override.
+   */
+  button_map?: string[] | null;
 };
 
 /** A board announcing itself on the LAN that has not been claimed yet. */
@@ -538,6 +561,12 @@ export const endpoints = {
     ...(req.peak_advance_hours_for_regular !== undefined ? { peakAdvanceHoursForRegular: req.peak_advance_hours_for_regular } : {}),
     ...(req.retention_years !== undefined ? { retentionYears: req.retention_years } : {}),
     ...(req.no_show_lookback_days !== undefined ? { noShowLookbackDays: req.no_show_lookback_days } : {}),
+    ...(req.walk_up_max_minutes !== undefined ? { walkUpMaxMinutes: req.walk_up_max_minutes } : {}),
+    ...(req.heartbeat_seconds !== undefined ? { heartbeatSeconds: req.heartbeat_seconds } : {}),
+    ...(req.activation_forward_window_minutes !== undefined ? { activationForwardWindowMinutes: req.activation_forward_window_minutes } : {}),
+    ...(req.activation_cue_window_minutes !== undefined ? { activationCueWindowMinutes: req.activation_cue_window_minutes } : {}),
+    ...(req.qr_lifetime_seconds !== undefined ? { qrLifetimeSeconds: req.qr_lifetime_seconds } : {}),
+    ...(req.roster_window_minutes !== undefined ? { rosterWindowMinutes: req.roster_window_minutes } : {}),
   }),
 
   // Admin: devices.
@@ -557,14 +586,21 @@ export const endpoints = {
       hardware: DEVICE_HARDWARE_WIRE[req.hardware],
       court_numbers: req.court_numbers,
     }),
-  adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; court_numbers?: number[]; otaChannel?: OtaChannel; pinnedVersion?: string | null }) =>
+  /**
+   * `button_map` is this box's override: a list to set one, `null` to go back to the
+   * club's map, omitted to leave it alone. Sent snake_case like `court_numbers`, on the
+   * assumption the API pins it the same way.
+   */
+  adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; court_numbers?: number[]; otaChannel?: OtaChannel; pinnedVersion?: string | null; button_map?: string[] | null }) =>
     api.patch<AdminDevice>(`/api/v1/admin/devices/${id}`, {
       ...req,
       ...(req.otaChannel !== undefined ? { otaChannel: OTA_CHANNEL_WIRE[req.otaChannel] } : {}),
     }),
-  adminDeviceRevoke: (id: string) => api.post<{ revoked: true }>(`/api/v1/admin/devices/${id}/revoke`, {}),
+  /** Answers with the row as it now is — `revoked_at` set. The box is refused until it is re-claimed. */
+  adminDeviceRevoke: (id: string) => api.post<AdminDevice>(`/api/v1/admin/devices/${id}/revoke`, {}),
+  /** The new key comes back once, exactly as on registration; the old one stops working at once. */
   adminDeviceRotateKey: (id: string) =>
-    api.post<{ device_key: string; key_version: number }>(`/api/v1/admin/devices/${id}/rotate-key`, {}),
+    api.post<{ device: AdminDevice; device_key: string; key_version: number }>(`/api/v1/admin/devices/${id}/rotate-key`, {}),
 
   // Admin: connecting a board
   adminDevicesDiscovered: () => api.get<DiscoveredBoard[]>("/api/v1/admin/devices/discovered"),

@@ -28,6 +28,12 @@ export type StubRoute = {
   path: string;
   status?: number;
   body: unknown;
+  /**
+   * Answers the nth matching call with the nth entry, the last one repeating — for a
+   * screen that fetches the same thing twice and must show that it got two different
+   * answers. When set, `body` is ignored.
+   */
+  sequence?: unknown[];
 };
 
 export type FetchStub = {
@@ -37,6 +43,7 @@ export type FetchStub = {
 
 export function stubFetch(routes: StubRoute[]): FetchStub {
   const calls: { method: string; path: string; body: unknown }[] = [];
+  const served = new Map<StubRoute, number>();
 
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const path = typeof input === "string" ? input : input.toString();
@@ -60,10 +67,14 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
       return Promise.reject(new Error(`No stub for ${method} ${path}`));
     }
 
+    const nth = served.get(route) ?? 0;
+    served.set(route, nth + 1);
+    const answer = route.sequence ? route.sequence[Math.min(nth, route.sequence.length - 1)] : route.body;
+
     return Promise.resolve({
       ok: (route.status ?? 200) < 400,
       status: route.status ?? 200,
-      text: () => Promise.resolve(JSON.stringify(route.body)),
+      text: () => Promise.resolve(JSON.stringify(answer)),
     } as unknown as Response);
   }));
 
@@ -103,6 +114,12 @@ export const SETTINGS_FIXTURE = {
   peak_advance_hours_for_regular: 1,
   retention_years: 2,
   no_show_lookback_days: 7,
+  walk_up_max_minutes: 90,
+  heartbeat_seconds: 60,
+  activation_forward_window_minutes: 120,
+  activation_cue_window_minutes: 10,
+  qr_lifetime_seconds: 60,
+  roster_window_minutes: 120,
 };
 
 export function deviceFixture(overrides: Record<string, unknown> = {}) {

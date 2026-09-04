@@ -295,7 +295,7 @@ export default function AdminMembersPage() {
       {/* Credit adjust modal */}
       {creditFor && (
         <Modal onClose={() => setCreditFor(null)} title={`Adjust credit — ${creditFor.full_name}`}>
-          <Label>Amount (ZAR — positive credits, negative debits)</Label>
+          <Label>Amount (credits — positive adds, negative deducts)</Label>
           <Input value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)} placeholder="e.g. 100" inputMode="decimal" />
           <Label className="mt-3">Reason (audit-logged)</Label>
           <Input value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Voided 2026-05-04 booking, reissuing credit" />

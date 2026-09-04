@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import CourtCodePage from "./CourtCode";
 import { encodeQr, qrPath } from "../lib/qr";
 import { renderPage, stubFetch } from "../test/harness";
@@ -16,7 +16,19 @@ import { renderPage, stubFetch } from "../test/harness";
  * </p>
  */
 describe("CourtCode", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  /**
+   * Fake timers for the clock-and-rollover tests. fireEvent throughout, never
+   * user-event: mixing user-event with fake timers deadlocks under jsdom 28 + vitest 4.
+   * `advanceTimersByTimeAsync` yields between timers, which is what lets the stubbed
+   * fetch's promise chain settle inside the same act.
+   */
+  const fakeClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+  const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
   const BOOKING = {
     code: "7K3M9XQ2RD5A",
@@ -77,6 +89,77 @@ describe("CourtCode", () => {
     await waitFor(() => {
       expect(stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/me/qr/generate")).toHaveLength(2);
     });
+  });
+
+  it("fetches the next code before this one dies and swaps it in without a gap", async () => {
+    fakeClock();
+    const NEXT = { code: "8H2R5V7XM3KP", kind: "ident", expires_in_seconds: 60 };
+    const stub = stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: IDENT, sequence: [IDENT, NEXT] }]);
+    const generates = () => stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/me/qr/generate").length;
+
+    renderPage(<CourtCodePage />);
+    await advance(0);
+    expect(screen.getByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(screen.getByText(/Refreshes in 1m 00s/)).toBeInTheDocument();
+
+    // 49 s in: still the first code, still one call. The rollover used to happen
+    // only AFTER expiry, leaving the member holding a dead QR for the ~10 s the
+    // paced re-fetch took.
+    await advance(49_000);
+    expect(generates()).toBe(1);
+    expect(screen.getByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(screen.getByText(/Refreshes in 11s/)).toBeInTheDocument();
+
+    // Ten seconds out, the next code is fetched and swapped in at once. The old one
+    // never reaches zero on screen — no "Expired", no dimmed QR. (The second advance
+    // is the zero-delay timer the tick's effect schedules; effects flush as the act ends.)
+    await advance(1_000);
+    await advance(0);
+    expect(generates()).toBe(2);
+    expect(screen.getByLabelText("Court code")).toHaveTextContent("8H2R5V7XM3KP");
+    expect(screen.getByRole("img", { name: "QR code 8H2R5V7XM3KP" })).toBeInTheDocument();
+    expect(screen.getByText(/Refreshes in 1m 00s/)).toBeInTheDocument();
+    expect(screen.queryByText(/Expired/)).not.toBeInTheDocument();
+
+    // And the new code is not itself pre-fetched until IT is ten seconds out: one
+    // call per code, not a storm.
+    await advance(40_000);
+    expect(generates()).toBe(2);
+  });
+
+  it("reads the countdown off the clock, so a phone that slept shows the true time left on wake", async () => {
+    fakeClock();
+    stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: IDENT }]);
+
+    renderPage(<CourtCodePage />);
+    await advance(0);
+    expect(screen.getByText(/Refreshes in 1m 00s/)).toBeInTheDocument();
+
+    // The clock moves 35 s with no timer firing — a locked phone. A tick-based
+    // countdown would still say 1m 00s over a code with 25 s left.
+    vi.setSystemTime(Date.now() + 35_000);
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(screen.getByText(/Refreshes in 25s/)).toBeInTheDocument();
+  });
+
+  it("paces the automatic re-fetch so a code that arrives already dead cannot become a request storm", async () => {
+    fakeClock();
+    const DEAD = { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 0 };
+    const stub = stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: DEAD }]);
+    const generates = () => stub.calls.filter((c) => c.method === "POST").length;
+
+    renderPage(<CourtCodePage />);
+    await advance(0);
+    expect(screen.getByText(/Expired — refreshing/)).toBeInTheDocument();
+
+    // Nothing for nine seconds; one more call on the tenth. The auth bucket this
+    // endpoint sits in is shared with login.
+    await advance(9_000);
+    expect(generates()).toBe(1);
+    await advance(1_000);
+    expect(generates()).toBe(2);
+    await advance(10_000);
+    expect(generates()).toBe(3);
   });
 
   it("says so when a code cannot be fetched, and offers to try again", async () => {

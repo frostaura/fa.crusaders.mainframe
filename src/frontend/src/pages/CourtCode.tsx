@@ -20,10 +20,27 @@ import { cn } from "../lib/utils";
  * The code is printed under the QR as well, because it is short enough to type: the
  * alphabet drops I, L, O and U so a code read off a phone at the desk cannot be misread.
  * </p>
+ *
+ * <p>
+ * Two things about time. The countdown is derived from the server's
+ * <code>expires_in_seconds</code> and the clock, never from counting ticks — a phone
+ * locked in a pocket fires no ticks, and used to wake showing a live countdown over a
+ * dead code. And the next code is fetched shortly <em>before</em> the current one runs
+ * out and swapped in one state update, so a member at the box is never holding up a
+ * code that has just died while the page fetches another.
+ * </p>
  */
 
-/** The API's auth rate limit is ten calls a minute per member; a refresh loop must stay well under it. */
+/**
+ * The generate endpoint sits behind the API's auth rate-limit bucket, which is shared
+ * with login — and, until forwarded headers are honoured, shared by everyone behind the
+ * club's gateway. This gap bounds what one open page can cost it: at most one call
+ * every ten seconds, whatever the server says a code's lifetime is.
+ */
 const MIN_REFRESH_GAP_MS = 10_000;
+
+/** How long before expiry the next code is fetched. Ten seconds covers a slow fetch with room to spare. */
+const PREFETCH_LEAD_S = 10;
 
 const QUIET_ZONE = 4;
 
@@ -70,51 +87,114 @@ function describeKind(qr: MyQrCode): { headline: string; detail: string } {
   };
 }
 
+// --- when a code dies -----------------------------------------------------------
+
+/**
+ * A code's expiry, on two clocks.
+ *
+ * <p>
+ * <code>performance.now()</code> is monotonic — it cannot be dragged backwards by a
+ * clock correction — but on some phones it stops while the device sleeps, which is
+ * exactly when a member is not looking at this page. <code>Date.now()</code> runs
+ * through sleep but can jump. Reading the expiry off both and trusting whichever says
+ * less time is left means a dead code is never shown as live, whichever clock lied.
+ * </p>
+ */
+type Deadline = { wall: number; perf: number };
+
+function deadlineFor(seconds: number): Deadline {
+  return { wall: Date.now() + seconds * 1000, perf: performance.now() + seconds * 1000 };
+}
+
+function secondsUntil(deadline: Deadline): number {
+  const ms = Math.min(deadline.wall - Date.now(), deadline.perf - performance.now());
+  return Math.max(0, Math.ceil(ms / 1000));
+}
+
+// --- the page -------------------------------------------------------------------
+
 export default function CourtCodePage() {
   const [qr, setQr] = useState<MyQrCode | null>(null);
+  const [deadline, setDeadline] = useState<Deadline | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const lastFetchAt = useRef(0);
+  const inflight = useRef(false);
+  /** The code a pre-fetch was last made for, so the same code is not pre-fetched over and over as it runs out. */
+  const prefetchedFor = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  /**
+   * Gets a code. "replace" is what the member sees happening — first load, the Refresh
+   * button, or a code that died with nothing ready; "prefetch" is silent, and a failure
+   * is left for the expiry path to surface, by which time it may well have cleared.
+   */
+  const fetchCode = useCallback(async (mode: "replace" | "prefetch") => {
+    if (inflight.current) return;
+    inflight.current = true;
+    lastFetchAt.current = Date.now();
+    if (mode === "replace") {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const next = await endpoints.meQrGenerate();
-      lastFetchAt.current = Date.now();
+      // One batch: code, deadline and countdown move together, so no render ever shows
+      // the new code with the old clock or the old code with the new one.
       setQr(next);
+      setDeadline(deadlineFor(next.expires_in_seconds));
       setSecondsLeft(next.expires_in_seconds);
+      setError(null);
     } catch (e) {
-      setError(
-        e instanceof ApiError && e.status === 429
-          ? "Too many refreshes. Give it a moment and try again."
-          : "Couldn't get a code. Check your connection and try again.",
-      );
+      if (mode === "replace") {
+        setError(
+          e instanceof ApiError && e.status === 429
+            ? "Too many refreshes. Give it a moment and try again."
+            : "Couldn't get a code. Check your connection and try again.",
+        );
+      }
     } finally {
-      setLoading(false);
+      inflight.current = false;
+      if (mode === "replace") setLoading(false);
     }
   }, []);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader, the house idiom
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void fetchCode("replace"); }, [fetchCode]);
 
-  // One tick a second. The server's expires_in_seconds is the truth; this only counts it down.
+  // The countdown is read off the clock, once a second while the page is visible and
+  // again the moment it becomes visible. A tick that never fired — the phone was
+  // locked — therefore costs nothing: the next read is right.
   useEffect(() => {
-    if (!qr) return;
-    const timer = setInterval(() => setSecondsLeft((s) => Math.max(0, s - 1)), 1000);
-    return () => clearInterval(timer);
-  }, [qr]);
+    if (!deadline) return;
+    const read = () => setSecondsLeft(secondsUntil(deadline));
+    const timer = setInterval(read, 1000);
+    document.addEventListener("visibilitychange", read);
+    window.addEventListener("focus", read);
+    window.addEventListener("pageshow", read);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", read);
+      window.removeEventListener("focus", read);
+      window.removeEventListener("pageshow", read);
+    };
+  }, [deadline]);
 
-  // A code that has run out is replaced without anyone tapping anything — a member at
-  // the box should never be holding up a dead code. Paced so a code the server hands
-  // back already expired cannot turn this into a request storm.
+  // The next code is fetched PREFETCH_LEAD_S before this one dies and swapped in at
+  // once, so the member is never holding up a dead code. A code that has already died
+  // — the pre-fetch failed, or the server handed one back already expired — is replaced
+  // visibly. Both are paced so neither can turn into a request storm.
   useEffect(() => {
-    if (!qr || loading || secondsLeft > 0) return;
+    if (!qr || loading || secondsLeft > PREFETCH_LEAD_S) return;
+    const expired = secondsLeft === 0;
+    if (!expired && prefetchedFor.current === qr.code) return;
     const wait = Math.max(0, MIN_REFRESH_GAP_MS - (Date.now() - lastFetchAt.current));
-    const timer = setTimeout(() => void load(), wait);
+    const timer = setTimeout(() => {
+      if (!expired) prefetchedFor.current = qr.code;
+      void fetchCode(expired ? "replace" : "prefetch");
+    }, wait);
     return () => clearTimeout(timer);
-  }, [qr, loading, secondsLeft, load]);
+  }, [qr, loading, secondsLeft, fetchCode]);
 
   const meaning = qr ? describeKind(qr) : null;
 
@@ -131,7 +211,7 @@ export default function CourtCodePage() {
         {error && !qr ? (
           <div className="space-y-3">
             <p className="text-sm text-danger-strong">{error}</p>
-            <Button onClick={() => void load()} disabled={loading}>Try again</Button>
+            <Button onClick={() => void fetchCode("replace")} disabled={loading}>Try again</Button>
           </div>
         ) : !qr ? (
           <p className="text-sm text-text-secondary">Getting your code…</p>
@@ -152,7 +232,7 @@ export default function CourtCodePage() {
                 <QrIcon size={14} />
                 {secondsLeft > 0 ? `Refreshes in ${formatCountdown(secondsLeft)}` : loading ? "Refreshing…" : "Expired — refreshing"}
               </p>
-              <Button variant="outline" className="h-9 px-3 text-xs" onClick={() => void load()} disabled={loading}>
+              <Button variant="outline" className="h-9 px-3 text-xs" onClick={() => void fetchCode("replace")} disabled={loading}>
                 <RefreshCw size={14} className={cn("mr-1", loading && "animate-spin")} /> Refresh
               </Button>
             </div>

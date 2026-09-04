@@ -67,6 +67,66 @@ describe("AdminSettings", () => {
     });
   });
 
+  it("shows the six court-box numbers and sends them back on save", async () => {
+    const stub = stubFetch([
+      ...routes(),
+      { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
+    ]);
+
+    renderPage(<AdminSettingsPage />);
+
+    // Served by GET /admin/settings since the programme added them, and until now
+    // absent from this page — an admin could see none of them and change none of them.
+    expect(await screen.findByLabelText(/Walk-up maximum/)).toHaveValue(90);
+    expect(screen.getByLabelText(/Heartbeat interval/)).toHaveValue(60);
+    expect(screen.getByLabelText(/Activation window before a booking/)).toHaveValue(120);
+    expect(screen.getByLabelText(/Lights cue before a booking/)).toHaveValue(10);
+    expect(screen.getByLabelText(/Court code lifetime/)).toHaveValue(60);
+    expect(screen.getByLabelText(/Offline roster reach/)).toHaveValue(120);
+
+    // The API's bounds, on the inputs, so the form cannot offer a value the save refuses.
+    expect(screen.getByLabelText(/Walk-up maximum/)).toHaveAttribute("max", "90");
+    expect(screen.getByLabelText(/Heartbeat interval/)).toHaveAttribute("min", "10");
+    expect(screen.getByLabelText(/Court code lifetime/)).toHaveAttribute("min", "15");
+    // The cue must fit inside the forward window; the cap follows the window's value.
+    expect(screen.getByLabelText(/Lights cue before a booking/)).toHaveAttribute("max", "120");
+
+    fireEvent.change(screen.getByLabelText(/Court code lifetime/), { target: { value: "45" } });
+    fireEvent.change(screen.getByLabelText(/Walk-up maximum/), { target: { value: "60" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+
+    await waitFor(() => {
+      const save = stub.calls.find((c) => c.method === "PUT");
+      expect(save).toBeTruthy();
+      const body = save!.body as Record<string, unknown>;
+      // The edited two, changed; the other four, round-tripped as read. The save
+      // mapper used to strip all six, so a save from here reset none — and changed none.
+      expect(body).toMatchObject({
+        qrLifetimeSeconds: 45,
+        walkUpMaxMinutes: 60,
+        heartbeatSeconds: 60,
+        activationForwardWindowMinutes: 120,
+        activationCueWindowMinutes: 10,
+        rosterWindowMinutes: 120,
+      });
+    });
+  });
+
+  it("prices courts in credits, not rand", async () => {
+    stubFetch([
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      { path: "/api/v1/admin/courts/", body: [{ id: "c1", court_number: 1, name: "Court 1", court_type: "Squash", slice_price_credits: 8, is_active: true }] },
+    ]);
+
+    renderPage(<AdminSettingsPage />);
+
+    // A court's slice price is what a member is CHARGED, in credits — the unit of
+    // account. The field was labelled "(R)", so the admin priced courts in the wrong unit.
+    expect(await screen.findByLabelText(/Price per slice \(credits\)/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Court 1 price per slice (credits)")).toHaveValue(8);
+    expect(screen.queryByLabelText(/Price per slice \(R\)/)).not.toBeInTheDocument();
+  });
+
   it("shows the API's reason when a value is refused", async () => {
     stubFetch([
       ...routes(),
