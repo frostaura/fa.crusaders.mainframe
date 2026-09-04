@@ -217,12 +217,14 @@ public static class ReportingEndpoints
         return (f, t);
     }
 
-    private static object BuildWalletReport(List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to)
+    internal static object BuildWalletReport(List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to)
     {
         var topUps = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountCredits);
         var spent = -entries.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountCredits);
         var refunds = entries.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountCredits);
-        var penalties = entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Count();
+        // A penalty is a debit. A reversed no-show posts a positive row of the same type
+        // to give the money back, and that row is not a second penalty.
+        var penalties = entries.Count(e => LedgerEntryTypes.Penalty.Contains(e.Type) && e.AmountCredits < 0);
         return new { from, to, top_ups_credits = topUps, spent_credits = spent, refunds_credits = refunds, penalty_count = penalties, count = entries.Count };
     }
 
