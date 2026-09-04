@@ -207,10 +207,15 @@ public static class DeviceEventEndpoints
 
         // The court is the one this box is fitted at, never one named in the request. A box
         // that could sell time on any court is a box that opens any court in the club.
-        var courtNumber = device.CourtNumber;
-        if (courtNumber is null) return Results.BadRequest(new { error = "device_has_no_court" });
+        //
+        // WI-8 rewrites this: a box now drives a LIST of courts (Device.CourtNumbers, in
+        // relay order) and the walk-up request must carry which one the member selected
+        // (review C5). Until then this path is only defined for a single-court box, and a
+        // multi-court box is refused here rather than guessed at.
+        if (device.CourtNumbers.Count != 1) return Results.BadRequest(new { error = "device_has_no_court" });
+        var courtNumber = device.CourtNumbers[0];
 
-        var court = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == courtNumber.Value && c.IsActive, ct);
+        var court = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == courtNumber && c.IsActive, ct);
         if (court is null) return Results.NotFound(new { error = "court_not_found" });
 
         var userId = await identities.ResolveAsync(req.Method, req.Token, ct);

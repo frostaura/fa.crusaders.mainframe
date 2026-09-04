@@ -26,7 +26,7 @@ public class DeviceMacIdentityTests
     private const string Mac = "5ccf7f1a2b3c";
 
     private static RegisterDeviceCommand Command(string code, string? mac) =>
-        new(code, "Court 1 box", DeviceKind.CourtBox, DeviceHardware.Esp8266, 1, null) { MacAddress = mac };
+        new(code, "Court 1 box", DeviceKind.CourtBox, DeviceHardware.Esp8266, [1], null) { MacAddress = mac };
 
     [Fact]
     public async Task A_discovered_device_records_the_board_it_belongs_to()
@@ -151,7 +151,7 @@ public sealed class DeviceMacIndexTests
                 TenantId = tenantId,
                 DeviceCode = code,
                 Name = "Court 1 box",
-                CourtNumber = 1,
+                CourtNumbers = [1],
                 MacAddress = mac,
             });
             await db.SaveChangesAsync();
@@ -188,7 +188,7 @@ public sealed class DeviceMacIndexTests
                 TenantId = tenantId,
                 DeviceCode = $"hand-registered-{i}",
                 Name = $"Court {i} box",
-                CourtNumber = i,
+                CourtNumbers = [i],
                 MacAddress = null,
             });
         }

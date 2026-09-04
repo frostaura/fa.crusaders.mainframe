@@ -58,10 +58,21 @@ public static class AdminConfigEndpoints
                 peak_advance_hours_for_regular = GetInt(doc, "peak_advance_hours_for_regular", defaults.PeakAdvanceHoursForRegular),
                 retention_years = GetInt(doc, "retention_years", defaults.RetentionYears),
                 no_show_lookback_days = GetInt(doc, "no_show_lookback_days", defaults.NoShowLookbackDays),
+
+                // The court-box and identification numbers (WI-2). Same rule as the
+                // economics keys: defaults come from TenantSettingsAccessor, never
+                // from literals here.
+                walk_up_max_minutes = GetInt(doc, "walk_up_max_minutes", defaults.WalkUpMaxMinutes),
+                heartbeat_seconds = GetInt(doc, "heartbeat_seconds", defaults.HeartbeatSeconds),
+                activation_forward_window_minutes = GetInt(doc, "activation_forward_window_minutes", defaults.ActivationForwardWindowMinutes),
+                activation_cue_window_minutes = GetInt(doc, "activation_cue_window_minutes", defaults.ActivationCueWindowMinutes),
+                qr_lifetime_seconds = GetInt(doc, "qr_lifetime_seconds", defaults.QrLifetimeSeconds),
+                roster_window_minutes = GetInt(doc, "roster_window_minutes", defaults.RosterWindowMinutes),
             });
         });
 
-        settings.MapPut("/", async (UpdateSettingsRequest req, MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
+        settings.MapPut("/", async (
+            UpdateSettingsRequest req, MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
         {
             if (req.AdvanceBookingDays < 0 || req.AdvanceBookingDays > 365)
                 return Results.BadRequest(new { error = "advance_booking_days_out_of_range" });
@@ -85,6 +96,9 @@ public static class AdminConfigEndpoints
             var economicsError = ValidateEconomics(req);
             if (economicsError is not null) return Results.BadRequest(new { error = economicsError });
 
+            var deviceError = ValidateDeviceNumbers(req);
+            if (deviceError is not null) return Results.BadRequest(new { error = deviceError });
+
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
             {
@@ -92,6 +106,46 @@ public static class AdminConfigEndpoints
                 db.TenantSettings.Add(row);
             }
             var doc = ParseObject(row.SettingsJson);
+
+            // The cue window must fit inside the forward window, and either may arrive
+            // alone — so each is compared against the value that will actually be in
+            // effect: the request's, else the stored one, else the canonical default.
+            // Derived from the document already in hand rather than a second read of it.
+            var effectiveCue = req.ActivationCueWindowMinutes
+                ?? GetInt(doc, "activation_cue_window_minutes", TenantSettingsView.DefaultActivationCueWindowMinutes);
+            var effectiveForward = req.ActivationForwardWindowMinutes
+                ?? GetInt(doc, "activation_forward_window_minutes", TenantSettingsView.DefaultActivationForwardWindowMinutes);
+            if (effectiveCue > effectiveForward)
+            {
+                return Results.BadRequest(new { error = "activation_cue_window_exceeds_forward_window" });
+            }
+
+            // A map is checked against every court box in the club before it is saved:
+            // the box's court list and the map are edited on different screens, and a
+            // court button reaching past a box's list is a button that selects nothing.
+            // Refused with the box named so the admin knows which one to fix — or which
+            // one to give more courts. Revoked boxes are decommissioned and do not count.
+            if (buttons is not null)
+            {
+                var boxes = await db.Devices
+                    .Where(d => d.Kind == DeviceKind.CourtBox && d.RevokedAt == null)
+                    .OrderBy(d => d.DeviceCode)
+                    .ToListAsync(ct);
+                foreach (var box in boxes)
+                {
+                    if (buttons.FirstSelectionBeyond(box.CourtNumbers.Count) is { } index)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            error = ButtonMap.SelectsCourtBeyondDeviceCourts,
+                            device_code = box.DeviceCode,
+                            court_index = index,
+                            device_court_count = box.CourtNumbers.Count,
+                        });
+                    }
+                }
+            }
+
             doc["slice_minutes"] = ToElement(req.SliceMinutes);
             doc["slice_price_credits"] = ToElement(req.SlicePriceCredits);
             doc["advance_booking_days"] = ToElement(req.AdvanceBookingDays);
@@ -104,6 +158,7 @@ public static class AdminConfigEndpoints
             // yet edit the button map must not wipe one an admin set through another.
             if (buttons is not null) doc["button_map"] = ToElement(buttons.ToWire());
             WriteOptionalEconomics(doc, req);
+            WriteOptionalDeviceNumbers(doc, req);
             row.SettingsJson = JsonSerializer.Serialize(doc);
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { saved = true });
@@ -212,6 +267,24 @@ public static class AdminConfigEndpoints
         return null;
     }
 
+    /// <summary>
+    /// Bounds on the six court-box and identification keys (WI-2). The walk-up cap
+    /// tops out at 90 because that is the relay bank's hard actuation cap — a tenant
+    /// setting above it would sell minutes the lights cannot deliver. The cue ≤
+    /// forward pair rule is checked in the handler against effective values, because
+    /// either key may arrive alone.
+    /// </summary>
+    private static string? ValidateDeviceNumbers(UpdateSettingsRequest req)
+    {
+        if (req.WalkUpMaxMinutes is < 1 or > 90) return "walk_up_max_minutes_out_of_range";
+        if (req.HeartbeatSeconds is < 10 or > 3600) return "heartbeat_seconds_out_of_range";
+        if (req.ActivationForwardWindowMinutes is < 1 or > 1440) return "activation_forward_window_minutes_out_of_range";
+        if (req.ActivationCueWindowMinutes is < 0 or > 1440) return "activation_cue_window_minutes_out_of_range";
+        if (req.QrLifetimeSeconds is < 15 or > 3600) return "qr_lifetime_seconds_out_of_range";
+        if (req.RosterWindowMinutes is < 5 or > 1440) return "roster_window_minutes_out_of_range";
+        return null;
+    }
+
     private static bool TryParsePeakHours(string range)
     {
         var parts = range.Split('-');
@@ -242,6 +315,17 @@ public static class AdminConfigEndpoints
         if (req.PeakAdvanceHoursForRegular is not null) doc["peak_advance_hours_for_regular"] = ToElement(req.PeakAdvanceHoursForRegular);
         if (req.RetentionYears is not null) doc["retention_years"] = ToElement(req.RetentionYears);
         if (req.NoShowLookbackDays is not null) doc["no_show_lookback_days"] = ToElement(req.NoShowLookbackDays);
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the six device numbers.</summary>
+    private static void WriteOptionalDeviceNumbers(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.WalkUpMaxMinutes is not null) doc["walk_up_max_minutes"] = ToElement(req.WalkUpMaxMinutes);
+        if (req.HeartbeatSeconds is not null) doc["heartbeat_seconds"] = ToElement(req.HeartbeatSeconds);
+        if (req.ActivationForwardWindowMinutes is not null) doc["activation_forward_window_minutes"] = ToElement(req.ActivationForwardWindowMinutes);
+        if (req.ActivationCueWindowMinutes is not null) doc["activation_cue_window_minutes"] = ToElement(req.ActivationCueWindowMinutes);
+        if (req.QrLifetimeSeconds is not null) doc["qr_lifetime_seconds"] = ToElement(req.QrLifetimeSeconds);
+        if (req.RosterWindowMinutes is not null) doc["roster_window_minutes"] = ToElement(req.RosterWindowMinutes);
     }
 
     private static Dictionary<string, JsonElement> ParseObject(string json)
@@ -283,7 +367,16 @@ public sealed record UpdateSettingsRequest(
     string? PeakHours = null,
     int? PeakAdvanceHoursForRegular = null,
     int? RetentionYears = null,
-    int? NoShowLookbackDays = null);
+    int? NoShowLookbackDays = null,
+
+    // The six court-box / identification keys (WI-2). Optional on the same
+    // omitted-means-unchanged terms as the economics keys.
+    int? WalkUpMaxMinutes = null,
+    int? HeartbeatSeconds = null,
+    int? ActivationForwardWindowMinutes = null,
+    int? ActivationCueWindowMinutes = null,
+    int? QrLifetimeSeconds = null,
+    int? RosterWindowMinutes = null);
 
 /// <summary>
 /// A new court. <c>SlicePriceCredits</c> is optional: left out, the court is priced at the

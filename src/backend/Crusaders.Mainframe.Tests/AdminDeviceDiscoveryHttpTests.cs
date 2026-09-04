@@ -220,7 +220,7 @@ public sealed class AdminDeviceDiscoveryHttpTests
             claim_code = Code,
             device_code = $"court-box-{Guid.NewGuid():N}"[..20],
             name = "Court 1 box",
-            court_number = 1,
+            court_numbers = new[] { 1, 2, 3, 4 },
         });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -253,7 +253,7 @@ public sealed class AdminDeviceDiscoveryHttpTests
             claim_code = Code,
             device_code = "court-box-nomatch",
             name = "Court 1 box",
-            court_number = 1,
+            court_numbers = new[] { 1, 2, 3, 4 },
         });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -279,7 +279,7 @@ public sealed class AdminDeviceDiscoveryHttpTests
             claim_code = Code,
             device_code = "court-box-ambiguous",
             name = "Court 1 box",
-            court_number = 1,
+            court_numbers = new[] { 1, 2, 3, 4 },
         });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -301,7 +301,7 @@ public sealed class AdminDeviceDiscoveryHttpTests
             claim_code = "lowercase",
             device_code = "court-box-bad",
             name = "Court 1 box",
-            court_number = 1,
+            court_numbers = new[] { 1, 2, 3, 4 },
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);

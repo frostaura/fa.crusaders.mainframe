@@ -20,6 +20,9 @@ namespace Crusaders.Mainframe.Api.Workers;
 public sealed class RetentionWorker : BackgroundService
 {
     private static readonly Guid AnonymisedUserSentinel = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
+    /// <summary>How long an expired access code is kept before it is purged.</summary>
+    public const int AccessCodeGraveHours = 24;
     private readonly IServiceProvider _services;
     private readonly ILogger<RetentionWorker> _logger;
 
@@ -87,6 +90,22 @@ public sealed class RetentionWorker : BackgroundService
             {
                 a.SubjectUserId = AnonymisedUserSentinel;
                 totalAnonymised++;
+            }
+
+            // Access codes — the handles a member's phone shows a court box. Dead a day
+            // after they expire: long enough for a dispute about "my code did not work"
+            // to be looked into, and no longer, because a table of every code ever shown
+            // is a table of every member's movements. Deleted outright, not anonymised —
+            // there is no aggregate anybody wants from them.
+            var codeCutoff = DateTimeOffset.UtcNow.AddHours(-AccessCodeGraveHours);
+            var staleCodes = await db.AccessCodes
+                .Where(c => c.ExpiresAt < codeCutoff)
+                .ToListAsync(ct);
+            if (staleCodes.Count > 0)
+            {
+                db.AccessCodes.RemoveRange(staleCodes);
+                await db.SaveChangesAsync(ct);
+                _logger.LogInformation("Retention purged {Count} expired access codes for tenant {Slug}", staleCodes.Count, tenant.Slug);
             }
 
             if (totalAnonymised > 0)

@@ -169,7 +169,7 @@ public class TenantIsolationTests
                 Name = "Court 1 box",
                 Kind = DeviceKind.CourtBox,
                 Hardware = DeviceHardware.Esp8266,
-                CourtNumber = 1,
+                CourtNumbers = [1],
             };
             db.Devices.Add(device);
             await db.SaveChangesAsync();
@@ -212,7 +212,7 @@ public class TenantIsolationTests
                 TenantId = host.Tenant.Id,
                 DeviceCode = "court-box-1",
                 Name = "Court 1 box",
-                CourtNumber = 1,
+                CourtNumbers = [1],
             };
             db.Devices.Add(d);
             await db.SaveChangesAsync();

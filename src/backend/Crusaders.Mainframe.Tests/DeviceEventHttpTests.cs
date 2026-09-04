@@ -78,7 +78,7 @@ public sealed class DeviceEventHttpTests
             Name = "Court 1 box",
             Kind = DeviceKind.CourtBox,
             Hardware = DeviceHardware.Esp8266,
-            CourtNumber = 1,
+            CourtNumbers = [1],
         };
         db.Devices.Add(device);
 
@@ -119,38 +119,12 @@ public sealed class DeviceEventHttpTests
     }
 
     /// <summary>
-    /// The 60-second QR the member's app renders, minted the way the API mints it.
-    ///
-    /// <para>
-    /// <paramref name="expiredSecondsAgo"/> mints one that has already lapsed. It is a
-    /// separate parameter rather than a negative lifetime because `JwtSecurityToken` refuses
-    /// a token whose expiry precedes its not-before — which is a sensible thing for it to
-    /// refuse and a confusing way for a test to fail.
-    /// </para>
+    /// The QR the member's app renders: a sixty-second member-ident access code, minted the
+    /// way the API mints it. Twelve characters, because the box's scanner pipeline carries
+    /// twenty-four bytes and a JWT never fitted (review H2).
     /// </summary>
-    private static string QrToken(Box box, Guid? userId = null, string purpose = "qr_ident", int expiredSecondsAgo = 0)
-    {
-        var now = DateTime.UtcNow;
-        var expires = expiredSecondsAgo > 0 ? now.AddSeconds(-expiredSecondsAgo) : now.AddSeconds(60);
-        var notBefore = expires.AddSeconds(-60);
-
-        var token = new JwtSecurityToken(
-            issuer: "crusaders.mainframe",
-            audience: "crusaders.mainframe.app",
-            claims:
-            [
-                new Claim(JwtRegisteredClaimNames.Sub, (userId ?? box.MemberId).ToString()),
-                new Claim("tenant_id", box.TenantId.ToString()),
-                new Claim("tenant_slug", box.Slug),
-                new Claim("purpose", purpose),
-            ],
-            notBefore: notBefore,
-            expires: expires,
-            signingCredentials: new SigningCredentials(
-                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Secret)), SecurityAlgorithms.HmacSha256));
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
-    }
+    private static Task<string> QrCodeAsync(TestWebAppFactory factory, Box box)
+        => TestAccessCodes.MintIdentAsync(factory.Services, box.TenantId, box.Slug, box.MemberId);
 
     private static object Batch(params object[] events) => new { uptime_ms = 600_000, events };
 
@@ -286,7 +260,7 @@ public sealed class DeviceEventHttpTests
         {
             minutes = 30,
             method = "qr",
-            token = QrToken(box),
+            token = await QrCodeAsync(factory, box),
         }));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -339,7 +313,7 @@ public sealed class DeviceEventHttpTests
         {
             minutes = 60,
             method = "qr",
-            token = QrToken(box),
+            token = await QrCodeAsync(factory, box),
         }));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -365,6 +339,7 @@ public sealed class DeviceEventHttpTests
     [Theory]
     [InlineData("qr", true)]
     [InlineData("QR", true)]
+    [InlineData("code", true)]      // the same code, typed rather than scanned
     [InlineData("pin", false)]
     [InlineData("biometric", false)]
     [InlineData("", false)]
@@ -406,10 +381,17 @@ public sealed class DeviceEventHttpTests
         Assert.Equal("not_recognised", body.GetProperty("error").GetString());
     }
 
+    /// <summary>
+    /// What a walk-up will not take: a code whose lifetime is over, a code another club
+    /// minted, and the old JWT — which the box could never scan anyway, but which must not
+    /// identify anybody if it somehow arrives. All three land in the same refusal, because
+    /// a box that could tell them apart is an oracle for which codes are real.
+    /// </summary>
     [SkippableTheory]
-    [InlineData("access")]
-    [InlineData("qr_ident")]
-    public async Task A_walk_up_token_must_be_a_live_qr_token_and_nothing_else(string purpose)
+    [InlineData("expired")]
+    [InlineData("foreign")]
+    [InlineData("jwt")]
+    public async Task A_walk_up_token_must_be_a_live_code_of_this_club_and_nothing_else(string kind)
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -417,16 +399,29 @@ public sealed class DeviceEventHttpTests
         var box = await SeedAsync(factory);
         var client = factory.CreateClient();
 
-        // A login JWT is signed with the same key by the same issuer and lives far longer.
-        // The purpose claim is the only thing stopping one being held up to a camera — and
-        // an expired qr_ident token must fail for the same reason a live one works.
-        var expired = purpose == "qr_ident";
-        var token = expired
-            ? QrToken(box, expiredSecondsAgo: 120)
-            : QrToken(box, purpose: purpose);
+        var token = kind switch
+        {
+            "expired" => await TestAccessCodes.InsertExpiredAsync(factory.Services, box.TenantId, box.MemberId),
+            "foreign" => await ForeignCodeAsync(factory),
+            _ => new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
+                issuer: "crusaders.mainframe", audience: "crusaders.mainframe.app",
+                claims: [new Claim(JwtRegisteredClaimNames.Sub, box.MemberId.ToString()), new Claim("purpose", "qr_ident")],
+                expires: DateTime.UtcNow.AddMinutes(1),
+                signingCredentials: new SigningCredentials(
+                    new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Secret)), SecurityAlgorithms.HmacSha256))),
+        };
 
         var response = await client.SendAsync(Signed(box, WalkUpPath, new { minutes = 30, method = "qr", token }));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("not_recognised", body.GetProperty("error").GetString());
+    }
+
+    /// <summary>A live code minted by a different club, for one of its own members.</summary>
+    private static async Task<string> ForeignCodeAsync(TestWebAppFactory factory)
+    {
+        var other = await SeedAsync(factory, topUpCredits: 0m);
+        return await TestAccessCodes.MintIdentAsync(factory.Services, other.TenantId, other.Slug, other.MemberId);
     }
 
     [SkippableFact]
@@ -442,7 +437,7 @@ public sealed class DeviceEventHttpTests
         {
             minutes = 30,
             method = "qr",
-            token = QrToken(box),
+            token = await QrCodeAsync(factory, box),
         }));
 
         Assert.Equal(HttpStatusCode.PaymentRequired, response.StatusCode);
@@ -485,7 +480,7 @@ public sealed class DeviceEventHttpTests
         {
             minutes = 30,
             method = "qr",
-            token = QrToken(box),
+            token = await QrCodeAsync(factory, box),
         }));
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -514,7 +509,7 @@ public sealed class DeviceEventHttpTests
         var client = factory.CreateClient();
         // The request carries no court and cannot: a box that could name one is a box that
         // opens any court in the club.
-        await client.SendAsync(Signed(box, WalkUpPath, new { minutes = 30, method = "qr", token = QrToken(box) }));
+        await client.SendAsync(Signed(box, WalkUpPath, new { minutes = 30, method = "qr", token = await QrCodeAsync(factory, box) }));
 
         using var check = factory.Services.CreateScope();
         var db2 = check.ServiceProvider.GetRequiredService<MainframeDbContext>();

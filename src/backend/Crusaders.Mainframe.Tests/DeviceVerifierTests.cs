@@ -35,7 +35,7 @@ public class DeviceVerifierTests
             TenantId = host.Tenant.Id,
             DeviceCode = $"court-box-{Guid.NewGuid():N}"[..20],
             Name = "Court 1 box",
-            CourtNumber = 1,
+            CourtNumbers = [1],
         };
         db.Devices.Add(device);
         await db.SaveChangesAsync();
@@ -278,7 +278,7 @@ public class DeviceVerifierTests
 public class DeviceRegistryServiceTests
 {
     private static RegisterDeviceCommand CourtBox(string code = "court-box-1") =>
-        new(code, "Court 1 box", DeviceKind.CourtBox, DeviceHardware.Esp8266, 1, null);
+        new(code, "Court 1 box", DeviceKind.CourtBox, DeviceHardware.Esp8266, [1], null);
 
     [Fact]
     public async Task Registration_returns_a_key_and_stores_no_secret()

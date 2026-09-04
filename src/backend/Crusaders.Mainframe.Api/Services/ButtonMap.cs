@@ -68,6 +68,17 @@ public sealed class ButtonMap
     /// reads 6000 would leave a court's lights on for four days.</summary>
     public const int MaxGrantMinutes = 240;
 
+    /// <summary>Relays on a court box: A–D. A box drives at most this many courts.</summary>
+    public const int MaxCourtsPerBox = 4;
+
+    /// <summary>
+    /// The error an admin is shown when the button map and a box's court list disagree,
+    /// from whichever screen they were editing. One constant, because the same
+    /// contradiction is refused from two places and a UI matching on the string must
+    /// not have to know which one raised it.
+    /// </summary>
+    public const string SelectsCourtBeyondDeviceCourts = "button_map_selects_court_beyond_device_courts";
+
     public IReadOnlyList<ButtonAction> Actions { get; }
 
     private ButtonMap(IReadOnlyList<ButtonAction> actions) => Actions = actions;
@@ -212,4 +223,27 @@ public sealed class ButtonMap
     }
 
     public IReadOnlyList<string> ToWire() => Actions.Select(a => a.ToWire()).ToList();
+
+    /// <summary>
+    /// The first court index a <see cref="ButtonAction.SelectCourt"/> button names that a
+    /// box driving <paramref name="courtCount"/> courts has no relay for — or null when
+    /// every court button lands on a wired court.
+    ///
+    /// <para>
+    /// The map and a device's court list are edited on different admin screens, and a
+    /// <c>court:C</c> button on a box whose list has two entries is a button that selects
+    /// nothing. Refused at write time from <i>both</i> screens — saving the map is
+    /// checked against every box, and assigning a box its courts is checked against the
+    /// current map — because that is the moment a human is present to be told. The
+    /// heartbeat, which used to log a warning for this, now sends a pair it can trust.
+    /// </para>
+    /// </summary>
+    public int? FirstSelectionBeyond(int courtCount)
+    {
+        foreach (var action in Actions)
+        {
+            if (action is ButtonAction.SelectCourt c && c.CourtIndex >= courtCount) return c.CourtIndex;
+        }
+        return null;
+    }
 }

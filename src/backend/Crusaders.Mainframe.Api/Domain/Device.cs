@@ -63,8 +63,26 @@ public sealed class Device : ITenantScoped
     public DeviceKind Kind { get; set; } = DeviceKind.CourtBox;
     public DeviceHardware Hardware { get; set; } = DeviceHardware.Esp8266;
 
-    /// <summary>Which court this box drives, for a <see cref="DeviceKind.CourtBox"/>. Null for gates.</summary>
-    public int? CourtNumber { get; set; }
+    /// <summary>
+    /// The courts this box drives, for a <see cref="DeviceKind.CourtBox"/>. Empty for gates.
+    ///
+    /// <para>
+    /// <b>The list order is the relay mapping.</b> Index 0 is relay A, index 1 relay B,
+    /// index 2 relay C, index 3 relay D. The wiring is fixed — relays A–D are screwed
+    /// to pins 2–5 in a cupboard — and it is the list that adapts to it: a box wired to
+    /// courts 3 and 4 on relays A and B carries <c>[3, 4]</c>, and a
+    /// <c>ButtonAction.SelectCourt(1)</c> on the tenant's button map means "the second
+    /// entry here", whatever court number that happens to be.
+    /// </para>
+    ///
+    /// <para>
+    /// A list rather than the single <c>CourtNumber</c> this replaced because one
+    /// physical box has one scanner and four relays (review C4): the per-court model
+    /// could structurally light at most one court at the club's only scanner, and
+    /// members booked on the other three were refused as WrongCourt.
+    /// </para>
+    /// </summary>
+    public List<int> CourtNumbers { get; set; } = [];
 
     /// <summary>Which gate this controller opens, for a <see cref="DeviceKind.Gate"/>. Null for court boxes.</summary>
     public string? GateKey { get; set; }

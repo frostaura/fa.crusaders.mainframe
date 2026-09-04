@@ -346,18 +346,20 @@ public sealed class SecurityRegressionTests
     }
 
     /// <summary>
-    /// A QR token minted by one club does not identify anybody at another club's court.
+    /// A QR code minted by one club does not identify anybody at another club's court.
     ///
     /// <para>
-    /// The token has always carried <c>tenant_id</c>; nothing read it back. What kept a
-    /// cross-tenant booking row from being written was incidental — the balance sum is
+    /// When the QR was a JWT it carried <c>tenant_id</c> and nothing read it back. What kept
+    /// a cross-tenant booking row from being written was incidental — the balance sum is
     /// tenant-filtered, so a foreign member reads as zero credits and the walk-up ends in
     /// 402. That is an arithmetic accident, not isolation, and the 400-vs-402 split it left
     /// behind was a working oracle for "is this a live member token of some other club?".
+    /// The code is now a row, and the row is tenant-filtered like every other read, so the
+    /// isolation is the query filter rather than a comparison somebody has to remember.
     /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task A_qr_token_from_another_tenant_identifies_nobody()
+    public async Task A_qr_code_from_another_tenant_identifies_nobody()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -365,8 +367,8 @@ public sealed class SecurityRegressionTests
         var home = await SeedAsync(factory);
         var away = await SeedAsync(factory);
 
-        // A genuine, unexpired qr_ident token — for the away club's member.
-        var foreignQr = Token(away.TenantId, away.Slug, away.VictimId, role: null, purpose: "qr_ident");
+        // A genuine, unexpired code — for the away club's member.
+        var foreignQr = await TestAccessCodes.MintIdentAsync(factory.Services, away.TenantId, away.Slug, away.VictimId);
 
         using var kiosk = ClientFor(factory, home, home.AdminId, role: "admin");
         var response = await kiosk.PostAsJsonAsync("/api/v1/court/1/qr/match", new { token = foreignQr });

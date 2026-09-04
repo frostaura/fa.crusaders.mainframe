@@ -277,7 +277,7 @@ public sealed class DeviceAuthHttpTests
         db.TenantSettings.Add(new TenantSettings
         {
             TenantId = tenant.Id,
-            SettingsJson = """{"slice_minutes":15,"grace_window_minutes":5,"timezone":"UTC"}""",
+            SettingsJson = """{"slice_minutes":15,"grace_window_minutes":5,"timezone":"UTC","heartbeat_seconds":45}""",
         });
 
         var device = new Device
@@ -287,7 +287,7 @@ public sealed class DeviceAuthHttpTests
             Name = "Court 1 box",
             Kind = DeviceKind.CourtBox,
             Hardware = DeviceHardware.Esp8266,
-            CourtNumber = 1,
+            CourtNumbers = [1],
             Enabled = enabled,
             RevokedAt = revokedAt,
         };
@@ -348,8 +348,14 @@ public sealed class DeviceAuthHttpTests
         // "localhost", which resolves to no tenant at all.
         Assert.Equal(p.Slug, json.GetProperty("tenant_slug").GetString());
         Assert.Equal("court-box-1", json.GetProperty("device_code").GetString());
-        Assert.Equal(1, json.GetProperty("court_number").GetInt32());
         Assert.Equal(15, json.GetProperty("config").GetProperty("slice_minutes").GetInt32());
+
+        // The interval is the tenant's setting, not a hardcoded 60 — WI-2.
+        Assert.Equal(45, json.GetProperty("heartbeat_seconds").GetInt32());
+
+        // WI-3: a court box owns a SET of courts; the wire field is the array.
+        var courts = json.GetProperty("court_numbers").EnumerateArray().Select(e => e.GetInt32()).ToList();
+        Assert.Equal(new[] { 1 }, courts);
     }
 
     /// <summary>

@@ -36,6 +36,7 @@ public class MainframeDbContext : DbContext
     public DbSet<BiometricMatchEvent> BiometricMatchEvents => Set<BiometricMatchEvent>();
     public DbSet<PendingTopup> PendingTopups => Set<PendingTopup>();
     public DbSet<WebAuthnCredential> WebAuthnCredentials => Set<WebAuthnCredential>();
+    public DbSet<AccessCode> AccessCodes => Set<AccessCode>();
 
     /// <summary>
     /// Builds the model, including the global query filter on every tenant-scoped entity.
@@ -119,6 +120,7 @@ public class MainframeDbContext : DbContext
         });
 
         ConfigureDevices(modelBuilder);
+        ConfigureAccessCodes(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -305,6 +307,38 @@ public class MainframeDbContext : DbContext
             // arriving together — both find nothing and both write. This makes the duplicate
             // impossible rather than unlikely.
             e.HasIndex(r => new { r.TenantId, r.DeviceId, r.Seq }).IsUnique();
+        });
+    }
+
+    /// <summary>
+    /// The codes a member's phone shows a court box. Lifted out of <c>OnModelCreating</c>
+    /// for the same length reason as the devices.
+    /// </summary>
+    private void ConfigureAccessCodes(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AccessCode>(e =>
+        {
+            e.ToTable("access_codes");
+            e.HasKey(c => c.Id);
+            e.Property(c => c.Code).HasMaxLength(20).IsRequired();
+            e.Property(c => c.Purpose).HasConversion<int>();
+            e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
+
+            // The code is the lookup key a box presents, and it must name exactly one
+            // member: two rows with one code would make a scan a coin flip on whose
+            // court opens. Per tenant, because the resolver is tenant-filtered and a
+            // collision across clubs is unreachable through it anyway.
+            e.HasIndex(c => new { c.TenantId, c.Code }).IsUnique();
+
+            // One code per booking, enforced — not merely read. Two phones asking for the
+            // same booking's code at once both find nothing and both insert; the index
+            // refuses the second, and AccessCodeService's retry then finds the first.
+            // Filtered so member-ident codes, which have no booking, are unconstrained.
+            // A booking never needs a second code: its code lives until the booking ends
+            // plus the grace window, and nothing mints for a booking that has ended.
+            e.HasIndex(c => new { c.TenantId, c.BookingId })
+                .IsUnique()
+                .HasFilter("\"BookingId\" IS NOT NULL");
         });
     }
 

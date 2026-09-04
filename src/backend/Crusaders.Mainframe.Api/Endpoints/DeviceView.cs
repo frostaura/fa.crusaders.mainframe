@@ -21,7 +21,8 @@ public static class DeviceView
         name = d.Name,
         kind = d.Kind.ToString(),
         hardware = d.Hardware.ToString(),
-        court_number = d.CourtNumber,
+        // In relay order: index 0 is relay A. See Device.CourtNumbers.
+        court_numbers = d.CourtNumbers,
         gate_key = d.GateKey,
         mac_address = d.MacAddress,
         key_version = d.KeyVersion,

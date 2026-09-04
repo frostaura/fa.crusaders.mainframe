@@ -394,4 +394,187 @@ public sealed class AdminSettingsHttpTests
         var row = await db.TenantSettings.IgnoreQueryFilters().FirstAsync(s => s.TenantId == seeded.TenantId);
         Assert.Equal("{}", row.SettingsJson);
     }
+
+    // ---- The six court-box and identification numbers (WI-2) ----------------
+
+    /// <summary>The booking-settings body every PUT needs, with the device numbers layered on top.</summary>
+    private static Dictionary<string, object> Baseline() => new()
+    {
+        ["sliceMinutes"] = 15,
+        ["slicePriceCredits"] = 8m,
+        ["advanceBookingDays"] = 14,
+        ["dayStartMinute"] = 360,
+        ["dayEndMinute"] = 1320,
+        ["penaltyPct"] = 30m,
+        ["graceWindowMinutes"] = 5,
+        ["penaltyWindowMinutes"] = 15,
+    };
+
+    private static async Task<TenantSettingsView> EngineAsync(TestWebAppFactory factory, Seeded seeded)
+    {
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Api.Multitenancy.ITenantContext>().Set(seeded.TenantId, seeded.Slug);
+        return await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+    }
+
+    /// <summary>
+    /// The GET shows the engine's defaults for all six, the PUT writes what it is sent and
+    /// leaves the rest alone, and the engine reads back what was written.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_device_numbers_are_readable_and_writable_and_omitted_means_unchanged()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var shown = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+        Assert.Equal(TenantSettingsView.DefaultWalkUpMaxMinutes, shown.GetProperty("walk_up_max_minutes").GetInt32());
+        Assert.Equal(TenantSettingsView.DefaultHeartbeatSeconds, shown.GetProperty("heartbeat_seconds").GetInt32());
+        Assert.Equal(TenantSettingsView.DefaultActivationForwardWindowMinutes, shown.GetProperty("activation_forward_window_minutes").GetInt32());
+        Assert.Equal(TenantSettingsView.DefaultActivationCueWindowMinutes, shown.GetProperty("activation_cue_window_minutes").GetInt32());
+        Assert.Equal(TenantSettingsView.DefaultQrLifetimeSeconds, shown.GetProperty("qr_lifetime_seconds").GetInt32());
+        Assert.Equal(TenantSettingsView.DefaultRosterWindowMinutes, shown.GetProperty("roster_window_minutes").GetInt32());
+
+        var body = Baseline();
+        body["heartbeatSeconds"] = 45;
+        body["qrLifetimeSeconds"] = 90;
+        body["rosterWindowMinutes"] = 240;
+        body["walkUpMaxMinutes"] = 60;
+        var save = await client.PutAsJsonAsync(SettingsPath, body);
+        Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+
+        var after = await EngineAsync(factory, seeded);
+        Assert.Equal(45, after.HeartbeatSeconds);
+        Assert.Equal(90, after.QrLifetimeSeconds);
+        Assert.Equal(240, after.RosterWindowMinutes);
+        Assert.Equal(60, after.WalkUpMaxMinutes);
+
+        // Omitted means unchanged, never reset.
+        Assert.Equal(TenantSettingsView.DefaultActivationForwardWindowMinutes, after.ActivationForwardWindowMinutes);
+        Assert.Equal(TenantSettingsView.DefaultActivationCueWindowMinutes, after.ActivationCueWindowMinutes);
+
+        var again = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+        Assert.Equal(45, again.GetProperty("heartbeat_seconds").GetInt32());
+        Assert.Equal(240, again.GetProperty("roster_window_minutes").GetInt32());
+    }
+
+    [SkippableTheory]
+    [InlineData("walkUpMaxMinutes", 0, "walk_up_max_minutes_out_of_range")]
+    [InlineData("walkUpMaxMinutes", 91, "walk_up_max_minutes_out_of_range")]      // the relay bank's hard cap
+    [InlineData("heartbeatSeconds", 5, "heartbeat_seconds_out_of_range")]
+    [InlineData("activationForwardWindowMinutes", 0, "activation_forward_window_minutes_out_of_range")]
+    [InlineData("activationCueWindowMinutes", -1, "activation_cue_window_minutes_out_of_range")]
+    [InlineData("qrLifetimeSeconds", 10, "qr_lifetime_seconds_out_of_range")]
+    [InlineData("rosterWindowMinutes", 2000, "roster_window_minutes_out_of_range")]
+    public async Task A_device_number_outside_its_bounds_is_refused(string field, int value, string expected)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var body = Baseline();
+        body[field] = value;
+        var save = await client.PutAsJsonAsync(SettingsPath, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        var json = await save.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(expected, json.GetProperty("error").GetString());
+    }
+
+    /// <summary>
+    /// The cue window must fit inside the forward window — and the check is against the
+    /// values that will be in effect, so sending either one alone is judged against the
+    /// stored (or default) other, not against nothing.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_cue_window_wider_than_the_forward_window_is_refused_however_it_arrives()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        async Task<HttpStatusCode> PutAsync(int? cue, int? forward)
+        {
+            var body = Baseline();
+            if (cue is not null) body["activationCueWindowMinutes"] = cue;
+            if (forward is not null) body["activationForwardWindowMinutes"] = forward;
+            var save = await client.PutAsJsonAsync(SettingsPath, body);
+            if (save.StatusCode == HttpStatusCode.BadRequest)
+            {
+                var json = await save.Content.ReadFromJsonAsync<JsonElement>();
+                Assert.Equal("activation_cue_window_exceeds_forward_window", json.GetProperty("error").GetString());
+            }
+            return save.StatusCode;
+        }
+
+        // Both together, inverted.
+        Assert.Equal(HttpStatusCode.BadRequest, await PutAsync(cue: 30, forward: 20));
+
+        // Cue alone, wider than the default forward (120).
+        Assert.Equal(HttpStatusCode.BadRequest, await PutAsync(cue: 121, forward: null));
+
+        // Forward stored at 60; then cue alone at 61 must be judged against the STORED 60,
+        // not the default 120 — that is what "effective value" means.
+        Assert.Equal(HttpStatusCode.OK, await PutAsync(cue: null, forward: 60));
+        Assert.Equal(HttpStatusCode.BadRequest, await PutAsync(cue: 61, forward: null));
+        Assert.Equal(HttpStatusCode.OK, await PutAsync(cue: 60, forward: null));
+
+        // And forward alone, below the stored cue of 60.
+        Assert.Equal(HttpStatusCode.BadRequest, await PutAsync(cue: null, forward: 59));
+
+        var engine = await EngineAsync(factory, seeded);
+        Assert.Equal(60, engine.ActivationCueWindowMinutes);
+        Assert.Equal(60, engine.ActivationForwardWindowMinutes);
+    }
+
+    /// <summary>
+    /// The button map is checked against every court box before it is saved. A box that
+    /// drives two courts cannot honour <c>court:C</c>, and the refusal names the box so the
+    /// admin knows which one — or which screen — to change.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_button_map_that_selects_a_court_a_box_does_not_drive_is_refused_naming_the_box()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.Devices.AddRange(
+                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-1", Name = "Four courts", CourtNumbers = [1, 2, 3, 4] },
+                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-2", Name = "Two courts", CourtNumbers = [5, 6] },
+                // Revoked: decommissioned, and must not veto a map it will never receive.
+                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-old", Name = "Gone", CourtNumbers = [7], RevokedAt = DateTimeOffset.UtcNow, Enabled = false });
+            await db.SaveChangesAsync();
+        }
+
+        var body = Baseline();
+        body["buttonMap"] = new[] { "court:A", "court:B", "court:C", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60" };
+        var save = await client.PutAsJsonAsync(SettingsPath, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        var json = await save.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(ButtonMap.SelectsCourtBeyondDeviceCourts, json.GetProperty("error").GetString());
+        Assert.Equal("court-box-2", json.GetProperty("device_code").GetString());
+        Assert.Equal(2, json.GetProperty("court_index").GetInt32());
+        Assert.Equal(2, json.GetProperty("device_court_count").GetInt32());
+
+        // A map both live boxes can honour is saved; the revoked one-court box is not consulted.
+        body["buttonMap"] = new[] { "court:A", "court:B", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60" };
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, body)).StatusCode);
+
+        var engine = await EngineAsync(factory, seeded);
+        Assert.Equal(["court:A", "court:B", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"], engine.Buttons.ToWire());
+    }
 }

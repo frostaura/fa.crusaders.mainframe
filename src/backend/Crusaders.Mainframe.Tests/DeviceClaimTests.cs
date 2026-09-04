@@ -46,8 +46,15 @@ public class DeviceClaimTests
             LastSeenAt = DateTimeOffset.UtcNow,
         };
 
+    /// <summary>
+    /// The real hardware: one box, four relays, four courts (review C4). Four rather
+    /// than one because the fixture's button map is the default — courts A–D — and a
+    /// claim for a box that cannot honour every court button is refused at the claim.
+    /// </summary>
+    private static readonly int[] FourCourts = [1, 2, 3, 4];
+
     private static ClaimBoardCommand Command(string code = Code, string deviceCode = "court-box-1")
-        => new(code, deviceCode, "Court 1 box", 1);
+        => new(code, deviceCode, "Court 1 box", FourCourts);
 
     private sealed record Fixture(TestHost Host, IServiceScope Scope, DiscoveryStore Store, DeviceDiscoveryService Service, MainframeDbContext Db);
 
@@ -84,7 +91,8 @@ public class DeviceClaimTests
         var device = result.Registration!.Device;
         Assert.Equal("court-box-1", device.DeviceCode);
         Assert.Equal("Court 1 box", device.Name);
-        Assert.Equal(1, device.CourtNumber);
+        // In relay order, exactly as claimed: index 0 is relay A.
+        Assert.Equal(FourCourts, device.CourtNumbers);
         Assert.Equal(DeviceKind.CourtBox, device.Kind);
         Assert.Equal(DeviceHardware.Esp8266, device.Hardware);
         Assert.Equal(f.Host.Tenant.Id, device.TenantId);
@@ -244,7 +252,7 @@ public class DeviceClaimTests
 
         var registry = f.Scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
         await registry.RegisterAsync(
-            new RegisterDeviceCommand("court-box-1", "Existing", DeviceKind.CourtBox, DeviceHardware.Esp8266, 1, null),
+            new RegisterDeviceCommand("court-box-1", "Existing", DeviceKind.CourtBox, DeviceHardware.Esp8266, [1], null),
             f.Host.AdminUser.Id, default);
 
         var result = await f.Service.ClaimAsync(Command(), f.Host.AdminUser.Id, default);
@@ -270,18 +278,46 @@ public class DeviceClaimTests
         Assert.Empty(await f.Db.Devices.IgnoreQueryFilters().ToListAsync());
     }
 
-    /// <summary>A court box that drives no court cannot have a heartbeat routed to anything.</summary>
-    [Fact]
-    public async Task A_claim_without_a_court_number_is_refused()
+    /// <summary>
+    /// A court box that drives no court cannot have a heartbeat routed to anything; one
+    /// claiming five is asking for a relay that is not there; one listing a court twice
+    /// has two relays on one court. All three are the same refusal.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(new int[0])]
+    [InlineData(new[] { 1, 2, 3, 4, 5 })]
+    [InlineData(new[] { 1, 2, 2, 3 })]
+    public async Task A_claim_with_an_unusable_court_list_is_refused(int[]? courts)
     {
         var f = await CreateAsync();
         f.Store.Upsert(Board());
 
         var result = await f.Service.ClaimAsync(
-            new ClaimBoardCommand(Code, "court-box-1", "Court box", null), f.Host.AdminUser.Id, default);
+            new ClaimBoardCommand(Code, "court-box-1", "Court box", courts), f.Host.AdminUser.Id, default);
 
         Assert.Equal(ClaimFailure.InvalidRegistration, result.Failure);
         Assert.Empty(await f.Db.Devices.IgnoreQueryFilters().ToListAsync());
+    }
+
+    /// <summary>
+    /// The button map and a box's court list are edited on different screens and must
+    /// agree. The fixture's map is the default — courts A–D — so a box that would drive
+    /// only two courts leaves two court buttons selecting nothing, and the claim says so
+    /// rather than handing a key to a box with dead buttons.
+    /// </summary>
+    [Fact]
+    public async Task A_claim_for_fewer_courts_than_the_button_map_selects_is_refused()
+    {
+        var f = await CreateAsync();
+        f.Store.Upsert(Board());
+
+        var result = await f.Service.ClaimAsync(
+            new ClaimBoardCommand(Code, "court-box-1", "Court box", [1, 2]), f.Host.AdminUser.Id, default);
+
+        Assert.Equal(ClaimFailure.ButtonMapMismatch, result.Failure);
+        Assert.Empty(await f.Db.Devices.IgnoreQueryFilters().ToListAsync());
+        await AssertRefusalLoggedAsync(f, ClaimFailure.ButtonMapMismatch);
     }
 
     // ---- Tenant isolation --------------------------------------------------
@@ -423,7 +459,7 @@ public class DeviceClaimTests
         f.Store.Upsert(Board(mac: "aabbccddeeff", nonce: otherNonce, code: "PQRS4567"));
 
         var second = await f.Service.ClaimAsync(
-            new ClaimBoardCommand("PQRS4567", "court-box-2", "Court 2 box", 2), f.Host.AdminUser.Id, default);
+            new ClaimBoardCommand("PQRS4567", "court-box-2", "Court 2 box", FourCourts), f.Host.AdminUser.Id, default);
 
         Assert.True(second.Succeeded);
         Assert.Equal("aabbccddeeff", second.Registration!.Device.MacAddress);

@@ -1,66 +1,46 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Services;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
-
-
 /// <summary>
-/// Phase 8.6 — QR identification (third leg of blueprint B.1's triple-stack alongside biometric + PIN).
+/// QR identification — the third leg of blueprint B.1's triple-stack alongside biometric
+/// and PIN.
 ///
-/// Flow:
-///   1. Player's PWA calls <c>POST /api/v1/me/qr/generate</c> → returns a JWT with purpose=qr_ident,
-///      sub=user_id, tenant_id, exp=60s. The PWA renders this JWT as a QR code on screen.
-///   2. Courtside camera scans the QR → frontend posts <c>POST /api/v1/court/{n}/qr/match</c> with
-///      the token. Backend verifies signature + purpose + expiry + that the user has an active
-///      booking on this court within the grace window.
+/// <para>
+/// The member's PWA calls <c>POST /api/v1/me/qr/generate</c> and renders what comes back
+/// as a QR. What comes back is an <see cref="AccessCode"/>, not a token: twelve
+/// characters the court box's scanner can actually carry (see that type for the 24-byte
+/// pipeline limit that ruled a JWT out). Which code depends on what the member is about
+/// to do —
+/// </para>
 ///
-/// JWT signing reuses the existing <c>Jwt:Secret</c> — the qr_ident purpose claim prevents cross-use
-/// with login JWTs (and the 60s expiry keeps replay risk tiny).
+/// <list type="bullet">
+///   <item><b>booking</b>: they have a booking whose activation window is in reach, so the
+///   code is that booking's own, minted with it and living until its end plus the grace
+///   window. The box finds the roster entry by the code, with no search.</item>
+///   <item><b>ident</b>: no booking is in reach, so the code is a short-lived member-ident
+///   one — for a walk-up, or for volunteering to pay at somebody else's court.</item>
+/// </list>
+///
+/// <para>
+/// The courtside camera path (<c>POST /api/v1/court/{n}/qr/match</c>) resolves the code
+/// through <see cref="IdentificationResolver"/> like every other global identification,
+/// then activates through the one activation path.
+/// </para>
 /// </summary>
 public static class QrEndpoints
 {
     public static IEndpointRouteBuilder MapQrEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/v1/me/qr/generate", (HttpContext ctx, IConfiguration config, Crusaders.Mainframe.Api.Multitenancy.ITenantContext tenant) =>
-        {
-            var userId = ctx.User.Id() ?? Guid.Empty;
-            if (userId == Guid.Empty) return Results.Unauthorized();
-
-            var secret = config["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret missing");
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var claims = new List<Claim>
-            {
-                new(JwtRegisteredClaimNames.Sub, userId.ToString()),
-                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-                new("tenant_id", tenant.TenantId.ToString()),
-                new("tenant_slug", tenant.TenantSlug),
-                new("purpose", "qr_ident"),
-            };
-
-            var token = new JwtSecurityToken(
-                issuer: config["Jwt:Issuer"],
-                audience: config["Jwt:Audience"],
-                claims: claims,
-                notBefore: DateTime.UtcNow,
-                expires: DateTime.UtcNow.AddSeconds(60),
-                signingCredentials: creds);
-            var jwt = new JwtSecurityTokenHandler().WriteToken(token);
-
-            return Results.Ok(new { token = jwt, expires_in_seconds = 60 });
-        }).RequireAuthorization()
-          .RequireRateLimiting(RateLimitPolicies.Auth);
+        app.MapPost("/api/v1/me/qr/generate", GenerateAsync)
+           .RequireAuthorization()
+           .RequireRateLimiting(RateLimitPolicies.Auth);
 
         app.MapPost("/api/v1/court/{courtNumber:int}/qr/match", async (
             int courtNumber, QrMatchRequest req,
@@ -71,11 +51,11 @@ public static class QrEndpoints
         {
             if (string.IsNullOrEmpty(req.Token)) return Results.BadRequest(new { error = "token_required" });
 
-            // Verified through the shared resolver rather than inline here. There were two
+            // Resolved through the shared resolver rather than inline here. There were two
             // copies of this — one for the courtside camera and one that would have been
             // written for the court box's walk-up path — and two implementations of "is this
-            // token real" is one implementation more than a security check should ever have.
-            var resolved = identities.VerifyQrToken(req.Token);
+            // code real" is one implementation more than a security check should ever have.
+            var resolved = await identities.ResolveAsync("qr", req.Token, ct);
             if (resolved is null) return Results.Ok(new { matched = false, reason = "invalid_or_expired" });
             var userId = resolved.Value;
 
@@ -102,6 +82,70 @@ public static class QrEndpoints
 
         return app;
     }
+
+    /// <summary>
+    /// The code the member's screen should show right now.
+    ///
+    /// <para>
+    /// A booking is "in reach" when its activation window — from <c>cue</c> minutes before
+    /// it starts until it ends — overlaps the next <c>roster_window_minutes</c>, the same
+    /// horizon the box's cached roster looks ahead. Lazily minted: a booking made before
+    /// codes existed, or whose code has been purged, gets one here.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> GenerateAsync(
+        HttpContext ctx,
+        MainframeDbContext db,
+        ITenantContext tenant,
+        TenantSettingsAccessor settingsAccessor,
+        AccessCodeService codes,
+        CancellationToken ct)
+    {
+        var userId = ctx.User.Id() ?? Guid.Empty;
+        if (userId == Guid.Empty) return Results.Unauthorized();
+
+        var settings = await settingsAccessor.GetAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+
+        // [StartsAt − cue, EndsAt] intersects [now, now + roster]  ⇔
+        // StartsAt ≤ now + roster + cue  ∧  EndsAt ≥ now. Rearranged so the predicate is
+        // a comparison against two constants the provider can translate.
+        var latestStart = now.AddMinutes(settings.RosterWindowMinutes + settings.ActivationCueWindowMinutes);
+        var booking = await db.Bookings
+            .Where(b => b.UserId == userId
+                        && b.Status == BookingStatus.Booked
+                        && b.StartsAt <= latestStart
+                        && b.EndsAt >= now)
+            .OrderBy(b => b.StartsAt)
+            .FirstOrDefaultAsync(ct);
+
+        if (booking is not null)
+        {
+            var code = await codes.MintForBookingAsync(booking, TimeSpan.FromMinutes(settings.GraceWindowMinutes), ct);
+            var court = await db.Courts.AsNoTracking().FirstOrDefaultAsync(c => c.Id == booking.CourtId, ct);
+
+            return Results.Ok(new
+            {
+                code = code.Code,
+                kind = "booking",
+                expires_in_seconds = ExpiresIn(code, now),
+                booking_id = booking.Id,
+                court_number = court?.CourtNumber,
+                starts_at = booking.StartsAt,
+            });
+        }
+
+        var ident = await codes.MintIdentAsync(userId, TimeSpan.FromSeconds(settings.QrLifetimeSeconds), ct);
+        return Results.Ok(new
+        {
+            code = ident.Code,
+            kind = "ident",
+            expires_in_seconds = ExpiresIn(ident, now),
+        });
+    }
+
+    private static int ExpiresIn(AccessCode code, DateTimeOffset now)
+        => (int)Math.Max(0, Math.Floor((code.ExpiresAt - now).TotalSeconds));
 }
 
 public sealed record QrMatchRequest(string? Token);

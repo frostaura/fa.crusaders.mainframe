@@ -18,12 +18,18 @@ namespace Crusaders.Mainframe.Tests;
 ///
 /// <para>
 /// Every token this application mints is signed with one key, for one issuer and one
-/// audience. That includes the <c>qr_ident</c> token a member's phone puts on screen
-/// at the court so a camera can read it — and the printed member-card QR that is
-/// planned to sit in a wallet permanently. Before the <c>purpose</c> check, either one
-/// was a working <c>Authorization: Bearer</c> header for the entire API as that member:
-/// read their wallet, book on their credits, change their profile. Photographing a
-/// screen in a public sports hall was the whole attack.
+/// audience. That used to include the <c>qr_ident</c> token a member's phone put on
+/// screen at the court so a camera could read it. Before the <c>purpose</c> check, that
+/// token was a working <c>Authorization: Bearer</c> header for the entire API as that
+/// member: read their wallet, book on their credits, change their profile.
+/// Photographing a screen in a public sports hall was the whole attack.
+/// </para>
+///
+/// <para>
+/// The QR is no longer a JWT at all — it is a twelve-character access code that names a
+/// row (review H2) — so nothing this application mints is both scannable and a bearer
+/// token. The purpose rule stays, because the next short-lived token somebody mints for
+/// a courtside purpose must be refused as a bearer by default, not after the fact.
 /// </para>
 ///
 /// <para>
@@ -175,7 +181,7 @@ public sealed class TokenPurposeTests
     /// unexpired — only the purpose differs, and only the purpose stops it.
     /// </summary>
     [SkippableTheory]
-    [InlineData("qr_ident")]        // the QR on a member's phone screen
+    [InlineData("qr_ident")]        // the purpose the QR carried when it was a JWT; no longer minted, still refused
     [InlineData("pin_ident")]       // a plausible future courtside purpose
     [InlineData("magic_link")]
     [InlineData("password_reset")]
@@ -243,12 +249,16 @@ public sealed class TokenPurposeTests
     }
 
     /// <summary>
-    /// The QR match endpoint validates its token itself, out of band, and must keep
-    /// accepting qr_ident — the fix is a bearer-header rule, not a ban on the token.
-    /// If this ever fails, the check has been pushed somewhere too broad.
+    /// No JWT identifies anybody at a court any more — not even one with the old
+    /// <c>qr_ident</c> purpose. The QR is an access code now (review H2: a JWT could never
+    /// cross the box's 24-byte scanner pipeline), so a qr_ident JWT presented as the QR
+    /// body is simply an unknown code. The refusal is the ordinary business one — 200
+    /// with <c>matched:false</c> — not a 401: the admin's bearer still authenticates, and
+    /// the endpoint answers every unusable code identically so it cannot sort real ones
+    /// from junk.
     /// </summary>
     [SkippableFact]
-    public async Task The_qr_match_endpoint_still_understands_a_qr_token()
+    public async Task A_qr_ident_jwt_presented_as_the_qr_body_identifies_nobody()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -266,15 +276,10 @@ public sealed class TokenPurposeTests
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", admin);
         var response = await client.SendAsync(req);
 
-        // The court has no bookings here, so a refusal is expected — but it must be a
-        // business refusal (200 with matched:false, or 404 for a missing court), never
-        // the 401 that would mean the endpoint stopped being able to read the token.
-        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
-        if (response.StatusCode == HttpStatusCode.OK)
-        {
-            var body = await response.Content.ReadAsStringAsync();
-            Assert.DoesNotContain("wrong_purpose", body);
-        }
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.False(body.GetProperty("matched").GetBoolean());
+        Assert.Equal("invalid_or_expired", body.GetProperty("reason").GetString());
     }
 }
 

@@ -34,10 +34,13 @@ public sealed class BookingService
     private readonly TenantSettingsAccessor _settings;
     private readonly IEmailService _email;
     private readonly IEventBus _bus;
+    private readonly AccessCodeService _codes;
     private readonly ILogger<BookingService> _logger;
 
-    public BookingService(MainframeDbContext db, ITenantContext tenant, LedgerService ledger, TenantSettingsAccessor settings, IEmailService email, IEventBus bus, ILogger<BookingService> logger)
-    { _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus; _logger = logger; }
+    public BookingService(
+        MainframeDbContext db, ITenantContext tenant, LedgerService ledger, TenantSettingsAccessor settings,
+        IEmailService email, IEventBus bus, AccessCodeService codes, ILogger<BookingService> logger)
+    { _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus; _codes = codes; _logger = logger; }
 
     public async Task<BookingResult> CreateAsync(Guid courtId, Guid userId, Guid actorId, DateTimeOffset startsAt, int sliceCount, CancellationToken ct)
     {
@@ -261,6 +264,16 @@ public sealed class BookingService
             // insert a booking nobody paid for.
             _db.Entry(booking).State = EntityState.Detached;
             return new BookingResult.InsufficientBalance(openingBalance, spec.TotalCost);
+        }
+
+        // The code the member's phone will show at the box, staged on the context now so
+        // it flushes in the same SaveChanges as the booking and the debit below. A booking
+        // that exists without its code is a member who paid and cannot get in; a code
+        // without its booking is a handle to nothing. One flush, both or neither. A
+        // walk-up gets none — the member is already standing at the court, identified.
+        if (!spec.IsWalkUp)
+        {
+            await _codes.StageForBookingAsync(booking, TimeSpan.FromMinutes(settings.GraceWindowMinutes), ct);
         }
 
         // The debit, at booking time.

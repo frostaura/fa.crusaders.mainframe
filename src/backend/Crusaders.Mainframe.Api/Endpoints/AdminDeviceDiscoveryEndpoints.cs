@@ -93,7 +93,7 @@ public static class AdminDeviceDiscoveryEndpoints
         ClaimBoardRequest req, DeviceDiscoveryService discovery, HttpContext ctx, CancellationToken ct)
     {
         var result = await discovery.ClaimAsync(
-            new ClaimBoardCommand(req.ClaimCode ?? string.Empty, req.DeviceCode ?? string.Empty, req.Name ?? string.Empty, req.CourtNumber),
+            new ClaimBoardCommand(req.ClaimCode ?? string.Empty, req.DeviceCode ?? string.Empty, req.Name ?? string.Empty, req.CourtNumbers),
             ctx.User.Id() ?? Guid.Empty, ct);
 
         if (!result.Succeeded) return Refused(result);
@@ -132,7 +132,12 @@ public static class AdminDeviceDiscoveryEndpoints
             ClaimFailure.InvalidRegistration => Results.BadRequest(new
             {
                 error = "registration_invalid",
-                message = "A device code, a name and a court number are all required.",
+                message = "A device code, a name and one to four distinct court numbers (in relay order A–D) are all required.",
+            }),
+            ClaimFailure.ButtonMapMismatch => Results.BadRequest(new
+            {
+                error = ButtonMap.SelectsCourtBeyondDeviceCourts,
+                message = "The club's button map selects a court this board would not drive. Give the board that many courts, or change the button map first.",
             }),
             ClaimFailure.NoMatch => Results.NotFound(new
             {
@@ -168,7 +173,8 @@ public sealed record ClaimBoardRequest(
     [property: JsonPropertyName("claim_code")] string? ClaimCode,
     [property: JsonPropertyName("device_code")] string? DeviceCode,
     [property: JsonPropertyName("name")] string? Name,
-    [property: JsonPropertyName("court_number")] int? CourtNumber);
+    /// <summary>In relay order: the first entry is the court on relay A. See <c>Device.CourtNumbers</c>.</summary>
+    [property: JsonPropertyName("court_numbers")] IReadOnlyList<int>? CourtNumbers);
 
 /// <summary>
 /// The wire shape of a discovered board.

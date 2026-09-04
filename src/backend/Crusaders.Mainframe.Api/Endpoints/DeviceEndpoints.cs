@@ -53,7 +53,12 @@ public static class DeviceEndpoints
             var device = await db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId.Value, ct);
             if (device is null) return Results.NotFound();
 
-            device.LastSeenAt = DateTimeOffset.UtcNow;
+            // Read once. server_time and server_unix are the same instant expressed two
+            // ways, and the box re-seeds its clock from them — two reads of the clock
+            // could straddle a second boundary and hand it a pair that disagree.
+            var now = DateTimeOffset.UtcNow;
+
+            device.LastSeenAt = now;
             device.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
             if (!string.IsNullOrWhiteSpace(req.RunningVersion)) device.RunningVersion = req.RunningVersion.Trim();
             if (!string.IsNullOrWhiteSpace(req.MegaVersion)) device.MegaVersion = req.MegaVersion.Trim();
@@ -85,12 +90,18 @@ public static class DeviceEndpoints
 
             return Results.Ok(new
             {
-                server_time = DateTimeOffset.UtcNow,
-                server_unix = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                server_time = now,
+                server_unix = now.ToUnixTimeSeconds(),
                 tenant_slug = tenant.TenantSlug,
                 device_code = device.DeviceCode,
-                court_number = device.CourtNumber,
-                heartbeat_seconds = 60,
+                // The courts this box drives, in relay order: index 0 = relay A … index
+                // 3 = relay D. Replaces the old single court_number — one physical box
+                // serves up to four courts (review C4). The button map below is
+                // guaranteed to fit this list: both are checked against each other at
+                // the moment an admin saves either one (ButtonMap.FirstSelectionBeyond),
+                // so nothing here has to warn about a button that selects nothing.
+                court_numbers = device.CourtNumbers,
+                heartbeat_seconds = s.HeartbeatSeconds,
                 ota = offerUpdate
                     ? new
                     {
@@ -163,14 +174,17 @@ public static class DeviceEndpoints
             });
         }
 
+        // One read, two encodings — see the heartbeat for why.
+        var now = DateTimeOffset.UtcNow;
+
         return Results.Ok(new
         {
             // The first clock seed a fresh board ever sees. The box has no RTC and
             // cannot sign a request until it knows the time — a provision response
             // without the clock hands out a key the board can never use, and it
             // deadlocks on 401s until someone reprovisions it.
-            server_time = DateTimeOffset.UtcNow,
-            server_unix = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            server_time = now,
+            server_unix = now.ToUnixTimeSeconds(),
             device_id = grant.DeviceId,
             tenant_slug = grant.TenantSlug,
             key_version = grant.KeyVersion,

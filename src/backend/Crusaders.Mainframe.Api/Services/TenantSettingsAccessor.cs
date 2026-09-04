@@ -60,7 +60,19 @@ public sealed class TenantSettingsAccessor
             retentionYears,
             dayStartMinute, dayEndMinute,
             noShowLookbackDays,
-            buttonMap);
+            buttonMap)
+        {
+            // Court-box and identification numbers previously hardcoded around the
+            // codebase, pulled into settings per the every-configurable-number
+            // invariant. Init-only rather than positional so existing construction
+            // sites (and their tests) are untouched.
+            WalkUpMaxMinutes = TryInt(root, "walk_up_max_minutes", TenantSettingsView.DefaultWalkUpMaxMinutes),
+            HeartbeatSeconds = TryInt(root, "heartbeat_seconds", TenantSettingsView.DefaultHeartbeatSeconds),
+            ActivationForwardWindowMinutes = TryInt(root, "activation_forward_window_minutes", TenantSettingsView.DefaultActivationForwardWindowMinutes),
+            ActivationCueWindowMinutes = TryInt(root, "activation_cue_window_minutes", TenantSettingsView.DefaultActivationCueWindowMinutes),
+            QrLifetimeSeconds = TryInt(root, "qr_lifetime_seconds", TenantSettingsView.DefaultQrLifetimeSeconds),
+            RosterWindowMinutes = TryInt(root, "roster_window_minutes", TenantSettingsView.DefaultRosterWindowMinutes),
+        };
     }
 
     private static int TryInt(JsonElement root, string name, int fallback)
@@ -92,6 +104,40 @@ public sealed record TenantSettingsView(
     int NoShowLookbackDays,
     ButtonMap Buttons)
 {
+    // ---- Init-only additions (WI-2) ----
+    //
+    // Added as init-only properties WITH defaults, not positional parameters, so no
+    // existing constructor call site anywhere changes. The defaults match what the
+    // code hardcoded before each number became a setting, and each is written ONCE,
+    // as a constant: the accessor's TryInt fallback and the property initialiser both
+    // read it, so the two cannot drift apart the way the settings endpoint's own
+    // defaults once did.
+
+    public const int DefaultWalkUpMaxMinutes = 90;
+    public const int DefaultHeartbeatSeconds = 60;
+    public const int DefaultActivationForwardWindowMinutes = 120;
+    public const int DefaultActivationCueWindowMinutes = 10;
+    public const int DefaultQrLifetimeSeconds = 60;
+    public const int DefaultRosterWindowMinutes = 120;
+
+    /// <summary>The longest walk-up a box may sell, minutes. The relay hard cap is 90; selling more than the relay can actuate is paying for darkness.</summary>
+    public int WalkUpMaxMinutes { get; init; } = DefaultWalkUpMaxMinutes;
+
+    /// <summary>How often a court box should call home, seconds. Was hardcoded 60 in the heartbeat response.</summary>
+    public int HeartbeatSeconds { get; init; } = DefaultHeartbeatSeconds;
+
+    /// <summary>How far ahead of a slot an identification can find the booking at all (back-to-back disambiguation window), minutes.</summary>
+    public int ActivationForwardWindowMinutes { get; init; } = DefaultActivationForwardWindowMinutes;
+
+    /// <summary>How far ahead of a slot an identification may actually stamp attendance and cue lights, minutes. Must not exceed the forward window.</summary>
+    public int ActivationCueWindowMinutes { get; init; } = DefaultActivationCueWindowMinutes;
+
+    /// <summary>Lifetime of a member-ident QR access code, seconds.</summary>
+    public int QrLifetimeSeconds { get; init; } = DefaultQrLifetimeSeconds;
+
+    /// <summary>How far ahead the heartbeat roster (and the QR screen's booking lookup) reaches, minutes.</summary>
+    public int RosterWindowMinutes { get; init; } = DefaultRosterWindowMinutes;
+
     /// <summary>Returns credits-per-rand for a given member class. Defaults to <see cref="CreditsPerZarRegular"/> if unknown.</summary>
     public decimal ConversionRateFor(Crusaders.Mainframe.Api.Domain.MemberClass cls)
         => cls == Crusaders.Mainframe.Api.Domain.MemberClass.LeagueOrSenior ? CreditsPerZarLeague : CreditsPerZarRegular;

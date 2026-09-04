@@ -19,10 +19,19 @@ public enum ClaimFailure
 
     /// <summary>This physical board already has a row in this tenant, matched by MAC.</summary>
     BoardAlreadyRegistered,
+
+    /// <summary>
+    /// The tenant's button map has a court button this board's court list cannot honour.
+    /// See <see cref="ButtonMap.FirstSelectionBeyond"/>.
+    /// </summary>
+    ButtonMapMismatch,
 }
 
-/// <summary>The claim code read off the board's LCD, plus the registration details for the row it will create.</summary>
-public sealed record ClaimBoardCommand(string ClaimCode, string DeviceCode, string Name, int? CourtNumber);
+/// <summary>
+/// The claim code read off the board's LCD, plus the registration details for the row it
+/// will create. <paramref name="CourtNumbers"/> is in relay order — see <see cref="Device.CourtNumbers"/>.
+/// </summary>
+public sealed record ClaimBoardCommand(string ClaimCode, string DeviceCode, string Name, IReadOnlyList<int>? CourtNumbers);
 
 public sealed record ClaimResult(
     ClaimFailure Failure,
@@ -99,6 +108,14 @@ public sealed class DeviceDiscoveryService
         var invalid = Validate(cmd);
         if (invalid is not null) return await RefuseAsync(invalid.Value, null, cmd, actorUserId, ct);
 
+        // The same check manual registration makes: a board the tenant's button map
+        // cannot address is refused before any board is matched, so the admin is told
+        // about the map rather than left with a claimed box whose buttons select nothing.
+        if (await _devices.CourtAssignmentErrorAsync(cmd.CourtNumbers!, ct) is not null)
+        {
+            return await RefuseAsync(ClaimFailure.ButtonMapMismatch, null, cmd, actorUserId, ct);
+        }
+
         var announcers = _store.Snapshot();
         var (failure, board) = Match(announcers, cmd.ClaimCode.Trim());
         if (failure != ClaimFailure.None) return await RefuseAsync(failure, board, cmd, actorUserId, ct);
@@ -123,7 +140,7 @@ public sealed class DeviceDiscoveryService
 
         var registration = await _devices.RegisterAsync(
             new RegisterDeviceCommand(
-                cmd.DeviceCode, cmd.Name, DeviceKind.CourtBox, HardwareOf(board.Hardware), cmd.CourtNumber, null)
+                cmd.DeviceCode, cmd.Name, DeviceKind.CourtBox, HardwareOf(board.Hardware), cmd.CourtNumbers, null)
             { MacAddress = board.Mac },
             actorUserId, ct);
 
@@ -200,10 +217,12 @@ public sealed class DeviceDiscoveryService
         if (!DiscoveryBeacon.IsWellFormedClaimCode(cmd.ClaimCode?.Trim())) return ClaimFailure.InvalidClaimCode;
 
         if (string.IsNullOrWhiteSpace(cmd.DeviceCode) || cmd.DeviceCode.Length > 64
-            || string.IsNullOrWhiteSpace(cmd.Name) || cmd.CourtNumber is null)
+            || string.IsNullOrWhiteSpace(cmd.Name)
+            || DeviceRegistryService.ValidateCourtNumbers(cmd.CourtNumbers) is not null)
         {
             // A court box that drives no court cannot have a heartbeat routed to anything,
-            // so the court number is required here exactly as it is on manual registration.
+            // so the court list is required here exactly as it is on manual registration —
+            // and held to the same shape (1–4 entries, no repeats) by the same rule.
             return ClaimFailure.InvalidRegistration;
         }
 

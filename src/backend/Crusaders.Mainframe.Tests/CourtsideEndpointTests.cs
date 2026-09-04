@@ -206,9 +206,13 @@ public sealed class CourtsideEndpointTests
 
     // ---- QR ----------------------------------------------------------------
 
-    /// <summary>The same defect on the QR path — identified, and charged nothing.</summary>
+    /// <summary>
+    /// The same defect on the QR path — identified, and charged nothing. The QR is an
+    /// access code now, not a JWT (review H2); a member-ident code identifies the player
+    /// and the booking is found from there, exactly as a scanned one would be.
+    /// </summary>
     [SkippableFact]
-    public async Task A_valid_qr_token_charges_the_player_and_records_attendance()
+    public async Task A_valid_qr_code_charges_the_player_and_records_attendance()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -216,7 +220,7 @@ public sealed class CourtsideEndpointTests
         var s = await SeedAsync(factory);
         var client = AdminClient(factory, s);
 
-        var qr = Token(s, s.PlayerUserId, "qr_ident", role: null);
+        var qr = await TestAccessCodes.MintIdentAsync(factory.Services, s.TenantId, s.Slug, s.PlayerUserId);
 
         var response = await client.PostAsJsonAsync($"/api/v1/court/{s.CourtNumber}/qr/match", new { Token = qr });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
