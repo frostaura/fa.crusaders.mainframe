@@ -608,6 +608,199 @@ public sealed class BookingService
         return new CancellationResult.Ok(refundAmount, penaltyAmount);
     }
 
+    /// <summary>The ledger reference under which one booking's no-show reversal is posted — one per leg, once per booking.</summary>
+    public static string NoShowReversalReference(Guid bookingId, string leg) => $"noshow-reversal:{bookingId:N}:{leg}";
+
+    /// <summary>
+    /// Reverses a settled no-show when evidence of attendance arrives after the sweep
+    /// (review C6, the residual form).
+    ///
+    /// <para>
+    /// A court box that has been offline for longer than the grace window lights a court
+    /// from its cached roster and queues the activation. By the time the link returns the
+    /// sweep has already run: the row is <c>NoShow</c>, the refund less the penalty has been
+    /// paid, and the uploaded activation resolved to "not chargeable" — so the member who
+    /// played kept the refund, paid the penalty, and the club's ledger said they never came.
+    /// The activation event is attendance, and attendance is what the sweep was betting
+    /// against; when it arrives late the bet is settled the other way.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Two new rows, never an edit.</b> The ledger is append-only and the sweep's rows are
+    /// what happened; this posts a debit reversing the refund and a credit reversing the
+    /// penalty, each tied to the booking and to its own reference, and each read back off
+    /// the ledger rather than recomputed from settings that may since have changed. The
+    /// same two types with the opposite sign, so every report bucket sums back to the
+    /// truth — refunds for this booking net to nothing, penalties net to nothing, and the
+    /// original charge stands as the one thing the member paid.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The reversal is a correction, not a purchase</b>, so it is posted whatever the
+    /// balance: a member who spent the refund before the evidence arrived goes negative,
+    /// which is the honest state — they owe the court they played on — and is what the
+    /// balance guard on the next booking exists to collect.
+    /// </para>
+    ///
+    /// <para>
+    /// <b><c>EndsAt</c> stays truncated.</b> The sweep released the tail of the slot and it
+    /// may since have been resold; the lights already ran from the box's own timer. What
+    /// this repairs is attendance and money, not the calendar.
+    /// </para>
+    ///
+    /// <para>
+    /// Under the payer's lock, with the status change, the audit row and both movements in
+    /// one save, so the concurrency token decides the whole reversal at once: a second
+    /// upload of the same evidence finds the row <c>Booked</c> and checked in, and a
+    /// concurrent one loses on the token or on the reference's unique index and reports
+    /// <see cref="NoShowReversalResult.Lost"/> — nothing written, the winner's work intact.
+    /// </para>
+    /// </summary>
+    public async Task<NoShowReversalResult> ReverseNoShowAsync(
+        Booking booking, DateTimeOffset attendedAt, Guid actorUserId, CancellationToken ct)
+    {
+        if (booking.Status != BookingStatus.NoShow || booking.UserId is null) return new NoShowReversalResult.NotNoShow();
+
+        var payerUserId = booking.PaidByUserId ?? booking.UserId.Value;
+
+        // What the sweep actually posted. The sweep is the only producer that posts these
+        // two types as the system actor, and a reversal already on the ledger nets to zero
+        // here — so this is "what is still outstanding", read off the record.
+        var settled = await _db.LedgerEntries.AsNoTracking()
+            .Where(l => l.RelatedBookingId == booking.Id
+                        && l.ActorUserId == Guid.Empty
+                        && (l.Type == LedgerEntryType.CancellationRefund || l.Type == LedgerEntryType.NoShowPenalty))
+            .ToListAsync(ct);
+        var refunded = settled.Where(l => l.Type == LedgerEntryType.CancellationRefund).Sum(l => l.AmountCredits);
+        var penalised = -settled.Where(l => l.Type == LedgerEntryType.NoShowPenalty).Sum(l => l.AmountCredits);
+
+        var postings = new List<LedgerPosting>(2);
+        if (refunded > 0)
+        {
+            postings.Add(new LedgerPosting(
+                UserId: payerUserId,
+                Type: LedgerEntryType.CancellationRefund,
+                AmountCredits: -refunded,
+                ActorUserId: actorUserId,
+                RelatedBookingId: booking.Id,
+                Reason: "No-show refund reversed — attendance recorded after the sweep",
+                ExternalReference: NoShowReversalReference(booking.Id, "refund")));
+        }
+        if (penalised > 0)
+        {
+            postings.Add(new LedgerPosting(
+                UserId: payerUserId,
+                Type: LedgerEntryType.NoShowPenalty,
+                AmountCredits: penalised,
+                ActorUserId: actorUserId,
+                RelatedBookingId: booking.Id,
+                Reason: "No-show penalty reversed — attendance recorded after the sweep",
+                ExternalReference: NoShowReversalReference(booking.Id, "penalty")));
+        }
+
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, ct);
+
+        booking.Status = BookingStatus.Booked;
+        booking.CheckedInAt = attendedAt;
+        booking.LightsOnCuedAt ??= attendedAt;
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = actorUserId,
+            SubjectUserId = booking.UserId.Value,
+            Action = "booking.no_show_reversed",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = booking.Id,
+                attended_at = attendedAt,
+                refund_reversed_credits = refunded,
+                penalty_reversed_credits = penalised,
+                payer_user_id = payerUserId,
+            }),
+        });
+
+        try
+        {
+            await _ledger.PostManyAsync(postings, ct);
+        }
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || (ex is DbUpdateException due && IsDuplicateReference(due)))
+        {
+            // The other upload of the same evidence got there first, or something else
+            // decided the row. Nothing was written — the transaction is aborted, so no
+            // query here; forget the staged rows and the stale row so the caller's
+            // context is clean, and let it re-read.
+            _logger.LogInformation("No-show reversal of {BookingId} lost a concurrent write", booking.Id);
+            DiscardPendingAdds();
+            _db.Entry(booking).State = EntityState.Detached;
+            return new NoShowReversalResult.Lost();
+        }
+
+        await payerLock.CommitAsync(ct);
+
+        await NotifyNoShowReversedAsync(booking, refunded, penalised, attendedAt, ct);
+        return new NoShowReversalResult.Ok(refunded, penalised);
+    }
+
+    /// <summary>
+    /// Tells the member and the event stream. Mirrors the sweep's own notification: the
+    /// money is committed by now and the email is the courtesy, so a member with no
+    /// <c>users</c> row is logged and skipped, and a failed send is logged and swallowed.
+    /// </summary>
+    private async Task NotifyNoShowReversedAsync(
+        Booking booking, decimal refunded, decimal penalised, DateTimeOffset attendedAt, CancellationToken ct)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == booking.UserId, ct);
+        var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == booking.CourtId, ct);
+        var courtName = court?.Name ?? "a court";
+
+        if (user is null)
+        {
+            _logger.LogInformation("No-show reversal of {BookingId} has no subject to notify — anonymised or removed", booking.Id);
+        }
+        else
+        {
+            try
+            {
+                await _email.SendAsync(NoShowReversedEmail(user.Email, courtName, refunded, penalised), ct);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "No-show reversal email failed for {BookingId}", booking.Id); }
+        }
+
+        await _bus.EmitAsync(new DomainEvent(
+            Id: $"evt_{Guid.NewGuid():N}",
+            Type: "booking.no_show_reversed",
+            TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
+            OccurredAt: DateTimeOffset.UtcNow, ActorUserId: null, ActorIsAdmin: false, SubjectUserId: booking.UserId,
+            Data: new()
+            {
+                ["booking_id"] = booking.Id,
+                ["court_id"] = booking.CourtId,
+                ["court_number"] = court?.CourtNumber,
+                ["user_id"] = booking.UserId,
+                ["penalty_credits"] = penalised,
+                ["refund_credits"] = refunded,
+                ["attended_at"] = attendedAt,
+            }), ct);
+    }
+
+    // Block body, not an expression body — lizard mis-scopes an expression-bodied member
+    // containing braces; see memory/gotchas.md.
+    private static Email.EmailMessage NoShowReversedEmail(string to, string courtName, decimal refunded, decimal penalised)
+    {
+        return new Email.EmailMessage(
+            To: to,
+            Subject: $"No-show reversed — {courtName}",
+            HtmlBody:
+                $"""
+                <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+                  <h2 style="margin:0 0 12px">You were there after all</h2>
+                  <p>Your booking on {courtName} was marked as a no-show, but the court's check-in reached us afterwards.</p>
+                  <p>The no-show refund of <strong>{refunded:0.00} credits</strong> has been reversed and the penalty of <strong>{penalised:0.00} credits</strong> returned. The booking now stands as attended.</p>
+                </div>
+                """);
+    }
+
     /// <summary>
     /// Settles who pays, at the moment somebody identifies at the court.
     ///
@@ -930,6 +1123,19 @@ public abstract record CancellationResult
     public sealed record Ok(decimal RefundedCredits, decimal PenaltyCredits) : CancellationResult;
     public sealed record NotFound : CancellationResult;
     public sealed record AlreadyStarted : CancellationResult;
+}
+
+/// <summary>What became of a late-attendance reversal. See <c>BookingService.ReverseNoShowAsync</c>.</summary>
+public abstract record NoShowReversalResult
+{
+    /// <summary>Reversed: the refund debited back and the penalty credited back, the row <c>Booked</c> and checked in.</summary>
+    public sealed record Ok(decimal RefundReversedCredits, decimal PenaltyReversedCredits) : NoShowReversalResult;
+
+    /// <summary>The row is not a settled no-show — nothing to reverse. The caller takes the ordinary activation path.</summary>
+    public sealed record NotNoShow : NoShowReversalResult;
+
+    /// <summary>A concurrent write decided the row first. Nothing was written; re-read and go again.</summary>
+    public sealed record Lost : NoShowReversalResult;
 }
 
 public abstract record ChargeResult

@@ -240,6 +240,81 @@ public class NoShowWorkerTests
     }
 
     /// <summary>
+    /// Late evidence of attendance undoes the settlement, and the sweep leaves it undone
+    /// (review C6, the residual form).
+    ///
+    /// <para>
+    /// A box offline past the grace window uploads its scan after the sweep has refunded
+    /// and penalised the booking. The reversal posts two new rows — never an edit of the
+    /// sweep's — puts the row back to <c>Booked</c> and stamps <c>CheckedInAt</c> at the
+    /// scan; the next tick must then find nothing to do, because attendance is the one
+    /// thing the sweep's predicate excludes. The status is what makes that true: a
+    /// reversal that moved the money and left the row <c>NoShow</c> would be a member
+    /// charged for a court the club's record still says they missed.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_reversed_no_show_is_not_swept_again()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var bus = host.Services.GetRequiredService<IEventBus>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddBookingAsync(host, db, charged: true, amount: 8m);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id,
+            RelatedBookingId: booking.Id), default);
+
+        var worker = CreateWorker(host);
+        await worker.TickAsync(default);
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.NoShow, booking.Status);
+        Assert.Equal(100m - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+
+        // Fifty minutes ago: inside the slot the sweep settled.
+        var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-50).ToUnixTimeSeconds());
+        var result = await bookings.ReverseNoShowAsync(booking, attendedAt, Guid.Empty, default);
+        var ok = Assert.IsType<NoShowReversalResult.Ok>(result);
+        Assert.Equal(8m, ok.RefundReversedCredits);
+        Assert.Equal(2.40m, ok.PenaltyReversedCredits);
+
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.Booked, booking.Status);
+        Assert.Equal(attendedAt, booking.CheckedInAt);
+        // Charged once, and that is all: the refund is back out and the penalty back in.
+        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+
+        await worker.TickAsync(default);
+
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.Booked, booking.Status);
+        Assert.Equal(attendedAt, booking.CheckedInAt);
+        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+
+        // The charge, the sweep's two rows, and the two reversing them — four settlement
+        // rows, each type netting to nothing, none of them netted into one.
+        var rows = db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id).ToList();
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(0m, rows.Where(l => l.Type == LedgerEntryType.CancellationRefund).Sum(l => l.AmountCredits));
+        Assert.Equal(0m, rows.Where(l => l.Type == LedgerEntryType.NoShowPenalty).Sum(l => l.AmountCredits));
+        Assert.Equal(2, rows.Count(l => l.Type == LedgerEntryType.CancellationRefund));
+        Assert.Equal(2, rows.Count(l => l.Type == LedgerEntryType.NoShowPenalty));
+
+        // The member is told, and the event stream learns — the mirror of booking.no_show.
+        Assert.Contains(host.EmailService.Sent, m => m.Subject.StartsWith("No-show reversed", StringComparison.Ordinal));
+        var emitted = new List<DomainEvent>();
+        while (bus.Reader.TryRead(out var evt)) emitted.Add(evt);
+        Assert.Single(emitted, e => e.Type == "booking.no_show");
+        var reversed = Assert.Single(emitted, e => e.Type == "booking.no_show_reversed");
+        Assert.Equal(8m, Assert.IsType<decimal>(reversed.Data["refund_credits"]));
+        Assert.Equal(2.40m, Assert.IsType<decimal>(reversed.Data["penalty_credits"]));
+        Assert.Equal(booking.Id, reversed.Data["booking_id"]);
+    }
+
+    /// <summary>
     /// Without a lower bound on StartsAt, enabling terminal check-in over a backlog
     /// of historical un-checked-in Booked rows would sweep all of them on the first
     /// 30-second tick.

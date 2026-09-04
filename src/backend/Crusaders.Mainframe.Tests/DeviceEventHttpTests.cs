@@ -11,6 +11,7 @@ using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Crusaders.Mainframe.Api.Services;
 using Crusaders.Mainframe.Api.Webhooks;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -135,7 +136,10 @@ public sealed class DeviceEventHttpTests
     private static Task<string> QrCodeAsync(TestWebAppFactory factory, Box box)
         => TestAccessCodes.MintIdentAsync(factory.Services, box.TenantId, box.Slug, box.MemberId);
 
-    private static object Batch(params object[] events) => new { uptime_ms = 600_000, events };
+    private static object Batch(params object[] events) => BatchAt(600_000, events);
+
+    /// <summary>A batch sent at the given box uptime, so an event's own uptime says how long ago it happened.</summary>
+    private static object BatchAt(long uptimeMs, params object[] events) => new { uptime_ms = uptimeMs, events };
 
     /// <summary>
     /// The five-field walk-up body: the court NUMBER the member selected and the box's
@@ -150,11 +154,15 @@ public sealed class DeviceEventHttpTests
         nonce = nonce ?? Guid.NewGuid().ToString("N")[..16],
     };
 
-    /// <summary><c>court</c> is the RELAY INDEX the box lit (0–3), as <c>eventq::Event::court</c> carries it.</summary>
-    private static object Activation(long seq, string subject = "tok-alice", int court = 0) => new
+    /// <summary>
+    /// <c>court</c> is the RELAY INDEX the box lit (0–3), as <c>eventq::Event::court</c>
+    /// carries it. Against <see cref="Batch"/>'s uptime the default puts the scan five
+    /// minutes before the upload.
+    /// </summary>
+    private static object Activation(long seq, string subject = "tok-alice", int court = 0, long uptimeMs = 300_000) => new
     {
         seq,
-        uptime_ms = 300_000,
+        uptime_ms = uptimeMs,
         kind = "activation",
         court,
         method = "qr",
@@ -856,16 +864,260 @@ public sealed class DeviceEventHttpTests
         Assert.Single(await AuditAsync(factory, box.TenantId, "court.activated"));
     }
 
-    /// <summary>One tick of the real no-show sweep, with email stubbed so it does not dial SMTP for every tenant in the shared database.</summary>
-    private static async Task SweepAsync(TestWebAppFactory factory)
-    {
-        await using var quiet = factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
+    /// <summary>
+    /// The app with email stubbed into <paramref name="mail"/>. The sweep and the reversal
+    /// both send, and neither may dial SMTP for every tenant in the shared database.
+    /// </summary>
+    private static WebApplicationFactory<Program> Quiet(TestWebAppFactory factory, StubEmailService mail)
+        => factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
         {
             s.RemoveAll<Crusaders.Mainframe.Api.Email.IEmailService>();
-            s.AddSingleton<Crusaders.Mainframe.Api.Email.IEmailService>(new StubEmailService());
+            s.AddSingleton<Crusaders.Mainframe.Api.Email.IEmailService>(mail);
         }));
+
+    /// <summary>One tick of the real no-show sweep, quietly.</summary>
+    private static async Task SweepAsync(TestWebAppFactory factory)
+    {
+        await using var quiet = Quiet(factory, new StubEmailService());
         var worker = new NoShowWorker(quiet.Services, quiet.Services.GetRequiredService<IEventBus>(), NullLogger<NoShowWorker>.Instance);
         await worker.TickAsync(default);
+    }
+
+    private static async Task<decimal> BalanceAsync(TestWebAppFactory factory, Guid userId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.LedgerEntries.IgnoreQueryFilters().Where(l => l.UserId == userId).SumAsync(l => l.AmountCredits);
+    }
+
+    /// <summary>Whole seconds, so a value that round-trips through timestamptz compares equal to itself.</summary>
+    private static DateTimeOffset WholeSeconds(DateTimeOffset t) => DateTimeOffset.FromUnixTimeSeconds(t.ToUnixTimeSeconds());
+
+    /// <summary>
+    /// A booking that started ten minutes ago against a five-minute grace, swept as a
+    /// no-show: refunded in full, penalised, released. The state a box that lost WiFi at
+    /// the wrong moment finds when it reconnects.
+    /// </summary>
+    private static async Task<(Booked Booked, Booking Swept)> SweptNoShowAsync(TestWebAppFactory factory, Box box)
+    {
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -10);
+        await SweepAsync(factory);
+
+        var swept = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.NoShow, swept.Status);
+        Assert.Null(swept.CheckedInAt);
+
+        var settled = await LedgerAsync(factory, booked.BookingId);
+        Assert.Equal(24m, Assert.Single(settled, l => l.Type == LedgerEntryType.CancellationRefund).AmountCredits);
+        Assert.True(Assert.Single(settled, l => l.Type == LedgerEntryType.NoShowPenalty).AmountCredits < 0);
+        return (booked, swept);
+    }
+
+    /// <summary>
+    /// The four settlement rows a reversed no-show leaves behind the charge, and the shape
+    /// each must have: refund and penalty as the sweep posted them, a debit reversing the
+    /// refund and a credit reversing the penalty — the same two types with the opposite
+    /// sign, each carrying a reason and its own reference, never netted into one.
+    /// </summary>
+    private static async Task AssertReversedLedgerAsync(TestWebAppFactory factory, Guid bookingId)
+    {
+        var ledger = await LedgerAsync(factory, bookingId);
+        Assert.Equal(5, ledger.Count);   // the seed charge, and the four settlement rows
+
+        var refunds = ledger.Where(l => l.Type == LedgerEntryType.CancellationRefund).ToList();
+        var penalties = ledger.Where(l => l.Type == LedgerEntryType.NoShowPenalty).ToList();
+        Assert.Equal(2, refunds.Count);
+        Assert.Equal(2, penalties.Count);
+        Assert.Equal(0m, refunds.Sum(l => l.AmountCredits));
+        Assert.Equal(0m, penalties.Sum(l => l.AmountCredits));
+
+        var refundReversal = Assert.Single(refunds, l => l.AmountCredits < 0);
+        var penaltyReversal = Assert.Single(penalties, l => l.AmountCredits > 0);
+        Assert.Equal(BookingService.NoShowReversalReference(bookingId, "refund"), refundReversal.ExternalReference);
+        Assert.Equal(BookingService.NoShowReversalReference(bookingId, "penalty"), penaltyReversal.ExternalReference);
+        Assert.All(ledger, l => Assert.False(string.IsNullOrWhiteSpace(l.Reason)));
+        Assert.All(ledger, l => Assert.Equal(bookingId, l.RelatedBookingId));
+    }
+
+    /// <summary>
+    /// The C6 hazard in its remaining form. A box offline for longer than the grace window
+    /// lit the court from its roster and queued the scan; by the time WiFi returned the
+    /// sweep had settled the booking as a no-show. The uploaded scan used to resolve to
+    /// "not chargeable" — the member who played kept the refund, paid the penalty, and the
+    /// ledger said they never came. Late evidence now reverses the settlement: two new
+    /// rows, the row <c>Booked</c> and checked in at the scan, the balance back where the
+    /// charge left it. <c>EndsAt</c> stays where the sweep truncated it — the released tail
+    /// may have been resold, and the lights already ran from the box's own timer.
+    /// </summary>
+    [SkippableFact]
+    public async Task Late_activation_after_the_sweep_reverses_the_no_show()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (booked, swept) = await SweptNoShowAsync(factory, box);
+
+        var mail = new StubEmailService();
+        await using var quiet = Quiet(factory, mail);
+
+        // The scan happened five minutes ago, inside the slot, and is only reaching the
+        // server now.
+        var before = DateTimeOffset.UtcNow;
+        var response = await quiet.CreateClient().SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
+        var after = DateTimeOffset.UtcNow;
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
+
+        var reversed = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.Booked, reversed.Status);
+        Assert.NotNull(reversed.CheckedInAt);
+        Assert.InRange(reversed.CheckedInAt!.Value, before.AddMinutes(-5), after.AddMinutes(-5));
+        Assert.Equal(swept.EndsAt, reversed.EndsAt);
+
+        await AssertReversedLedgerAsync(factory, booked.BookingId);
+        Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+
+        Assert.Single(await AuditAsync(factory, box.TenantId, "booking.no_show_reversed"));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_reversed_no_show"));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "device.activation_not_chargeable"));
+        Assert.Contains(mail.Sent, m => m.Subject.StartsWith("No-show reversed", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The box lost the acknowledgement, or a second scan of the same session arrives
+    /// later. The row is live and checked in, so the ordinary idempotent path answers —
+    /// no second reversal, no fifth and sixth settlement rows.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_second_late_activation_does_not_reverse_twice()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (booked, _) = await SweptNoShowAsync(factory, box);
+
+        await using var quiet = Quiet(factory, new StubEmailService());
+        var client = quiet.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+        var stampedAt = (await BookingAsync(factory, booked.BookingId)).CheckedInAt;
+        Assert.NotNull(stampedAt);
+
+        var again = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(2, subject: booked.Code, court: 0))));
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        var body = await again.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(2, body.GetProperty("accepted_through").GetInt64());
+        Assert.Equal(1, body.GetProperty("recorded").GetInt32());
+
+        var booking = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.Booked, booking.Status);
+        Assert.Equal(stampedAt, booking.CheckedInAt);
+
+        await AssertReversedLedgerAsync(factory, booked.BookingId);
+        Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "booking.no_show_reversed"));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_reversed_no_show"));
+        Assert.Equal(2, (await AuditAsync(factory, box.TenantId, "device.activation")).Count);
+    }
+
+    /// <summary>
+    /// The mirror of the too-early case. The member scanned five minutes into their slot;
+    /// the box only reconnected after the slot had ended and the roster code had expired.
+    /// The scan is judged when it happened — the code was live, the cue window was open —
+    /// and attendance is stamped at the scan, not at the upload.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activation_event_scanned_inside_the_cue_window_but_uploaded_late_is_stamped_at_scan_time()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        // Started an hour ago and ran forty-five minutes: over, and its code expired with it.
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -60);
+
+        const long batchUptime = 4_000_000;
+        const long scannedMinutesAgo = 55;
+        var before = DateTimeOffset.UtcNow;
+        var response = await factory.CreateClient().SendAsync(Signed(box, EventsPath,
+            BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: batchUptime - scannedMinutesAgo * 60_000))));
+        var after = DateTimeOffset.UtcNow;
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var booking = await BookingAsync(factory, booked.BookingId);
+        Assert.NotNull(booking.CheckedInAt);
+        Assert.InRange(booking.CheckedInAt!.Value, before.AddMinutes(-scannedMinutesAgo), after.AddMinutes(-scannedMinutesAgo));
+        Assert.Equal(booking.CheckedInAt, booking.LightsOnCuedAt);
+        Assert.Single(await AuditAsync(factory, box.TenantId, "court.activated"));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "device.activation_unresolved"));
+    }
+
+    /// <summary>
+    /// The other direction of the same rule. The box admitted the member half an hour
+    /// before the cue window opened and uploaded the event once it had; judged at the
+    /// upload the scan would pass, judged when it happened it is what it was — too early.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activation_event_scanned_ahead_of_the_cue_window_but_uploaded_inside_it_is_not_stamped()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        // Starts in five minutes: the ten-minute cue opened five minutes ago.
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 5);
+
+        const long batchUptime = 4_000_000;
+        var response = await factory.CreateClient().SendAsync(Signed(box, EventsPath,
+            BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: batchUptime - 30 * 60_000))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var booking = await BookingAsync(factory, booked.BookingId);
+        Assert.Null(booking.CheckedInAt);
+        Assert.Null(booking.LightsOnCuedAt);
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_too_early"));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "court.activated"));
+    }
+
+    /// <summary>
+    /// A box's clock is the server's clock minus how long ago its uptime says the event
+    /// was — and <c>millis()</c> resets on every power blink while the queue does not. An
+    /// event claiming to be ahead of the upload, or older than any roster the box could
+    /// have trusted, is judged at the upload instead, and the claim is kept on an audit row
+    /// so the desk can see the counter is broken.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(600_000L, 900_000L)]       // ahead of the upload: the queue outlived a reboot
+    [InlineData(30_000_000L, 0L)]          // eight hours behind it: older than the roster's six-hour trust
+    public async Task Activation_event_with_a_wild_occurred_at_is_clamped_and_audited(long batchUptime, long eventUptime)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);
+
+        var before = DateTimeOffset.UtcNow;
+        var response = await factory.CreateClient().SendAsync(Signed(box, EventsPath,
+            BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: eventUptime))));
+        var after = DateTimeOffset.UtcNow;
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var booking = await BookingAsync(factory, booked.BookingId);
+        Assert.NotNull(booking.CheckedInAt);
+        Assert.InRange(booking.CheckedInAt!.Value, before, after);
+
+        var clamped = Assert.Single(await AuditAsync(factory, box.TenantId, "device.event_time_clamped"));
+        Assert.Contains("occurred_at_clamped_from", clamped.DetailsJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var receipt = await db.DeviceEventReceipts.IgnoreQueryFilters().SingleAsync(r => r.DeviceId == box.DeviceId);
+        Assert.InRange(receipt.OccurredAt, before, after);
     }
 
     /// <summary>

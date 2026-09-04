@@ -119,14 +119,14 @@ public static class DeviceEventEndpoints
             // is what lets the box release it and move on.
             if (!alreadyRecorded.Contains(e.Seq))
             {
-                var occurredAt = now.AddMilliseconds(-Math.Max(0, batch.UptimeMs - e.UptimeMs));
+                var time = TimeOf(batch, e, now);
 
                 // Attendance BEFORE the receipt. See the summary for why this order.
                 var outcome = e.Kind == ActivationKind
-                    ? await ActivationOutcomeAsync(device, e, services, ct)
+                    ? await ActivationOutcomeAsync(device, e, time.OccurredAt, services, ct)
                     : null;
 
-                if (await RecordAsync(services, device, e, occurredAt, outcome, ct)) recorded++;
+                if (await RecordAsync(services, device, e, time, outcome, ct)) recorded++;
             }
 
             acceptedThrough = e.Seq;
@@ -141,6 +141,43 @@ public static class DeviceEventEndpoints
             accepted_through = acceptedThrough,
             recorded,
         });
+    }
+
+    /// <summary>
+    /// The oldest an uploaded event may claim to be, and the horizon past which its time is
+    /// not believed. The box's roster is not trusted past six hours
+    /// (<c>lib/roster</c>'s maximum age), so an activation the box decided from it is at
+    /// most that old when it happens; the upload can come much later, and an event that
+    /// arrives claiming to be older than this is judged at the upload instead.
+    /// </summary>
+    public static readonly TimeSpan MaxEventAge = TimeSpan.FromHours(6);
+
+    /// <summary>
+    /// When an event happened, and — if the box's arithmetic could not be believed — the
+    /// value it claimed. <see cref="ClampedFrom"/> is null for an ordinary event.
+    /// </summary>
+    private sealed record EventTime(DateTimeOffset OccurredAt, DateTimeOffset? ClampedFrom);
+
+    /// <summary>
+    /// The event's time from uptime arithmetic, clamped to now when the arithmetic is wild.
+    ///
+    /// <para>
+    /// The box has no RTC; <c>millis()</c> resets on every power blink, and the queue is
+    /// persisted across one. So an event that survived a reboot carries an uptime from a
+    /// previous boot, and the difference against the batch's uptime is meaningless in either
+    /// direction: ahead of the upload, or hours behind it. Both are clamped to the upload
+    /// instant — which is always past the cue window for a booking that has started, so the
+    /// clamp errs toward stamping the member present rather than judging a real scan by a
+    /// time that never happened — and the claimed value is kept on the audit row so the
+    /// desk can see the box's counter is broken.
+    /// </para>
+    /// </summary>
+    private static EventTime TimeOf(DeviceEventBatch batch, DeviceEventDto e, DateTimeOffset now)
+    {
+        var claimed = now.AddMilliseconds(-(double)(batch.UptimeMs - e.UptimeMs));
+        return claimed > now || now - claimed > MaxEventAge
+            ? new EventTime(now, claimed)
+            : new EventTime(claimed, null);
     }
 
     /// <summary>
@@ -168,6 +205,12 @@ public static class DeviceEventEndpoints
     private sealed record ActivationOutcome(string Code, Guid? BookingId)
     {
         public const string Ok = "ok";
+
+        /// <summary>
+        /// Stamped, and a settled no-show undone to do it. Success as far as the box is
+        /// concerned, and its own audit row because money moved back.
+        /// </summary>
+        public const string ReversedNoShow = "reversed_no_show";
     }
 
     /// <summary>
@@ -191,13 +234,22 @@ public static class DeviceEventEndpoints
     /// row, or a booking cancelled after the roster was pushed, is likewise recorded and not
     /// stamped.
     /// </para>
+    ///
+    /// <para>
+    /// Judged at <paramref name="occurredAt"/> — the scan — not at the upload. A box
+    /// offline for longer than the grace window uploads scans the sweep has already ruled
+    /// on; see <see cref="SettleAsync"/> for what a settled no-show becomes.
+    /// </para>
     /// </summary>
     private static async Task<ActivationOutcome> ActivationOutcomeAsync(
-        Device device, DeviceEventDto e, DeviceEventServices services, CancellationToken ct)
+        Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, codes, activation) = services;
+        var (db, _, codes, _, _) = services;
 
-        var resolved = await codes.ResolveAsync(e.Subject, ct);
+        // Live at the scan, not at the upload: the roster token expires at the slot's end
+        // plus grace, and a box offline past that is precisely the box whose evidence
+        // matters most.
+        var resolved = await codes.ResolveAsync(e.Subject, occurredAt, ct);
         if (resolved is null || resolved.Purpose != AccessCodePurpose.BookingActivation || resolved.BookingId is null)
         {
             return new ActivationOutcome("unresolved", null);
@@ -219,16 +271,54 @@ public static class DeviceEventEndpoints
             return new ActivationOutcome("wrong_court", booking.Id);
         }
 
-        var result = await ActivateOnceAsync(db, activation,
-            new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline"), ct);
+        var target = new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline", occurredAt);
+        return new ActivationOutcome(await SettleAsync(services, target, ct), booking.Id);
+    }
 
-        return new ActivationOutcome(result switch
+    /// <summary>
+    /// Turns the activation into attendance — undoing the sweep first if it got there
+    /// before the evidence did.
+    ///
+    /// <para>
+    /// A box offline for longer than the grace window lights the court from its roster and
+    /// queues the scan; by the time the link returns the sweep has settled the booking as a
+    /// no-show, refunded it less the penalty and released the court. The uploaded scan then
+    /// resolved to "not chargeable" and the member who played kept the refund and paid the
+    /// penalty. A settled no-show is now reversed by <see cref="BookingService"/> — two new
+    /// ledger rows, the row <c>Booked</c> and checked in at the scan — and the outcome is
+    /// receipted as its own audit row, because money moved back.
+    /// </para>
+    ///
+    /// <para>
+    /// A reversal that loses to a concurrent upload of the same evidence re-reads the row
+    /// and takes the ordinary path, which finds it live and is the idempotent no-op it is
+    /// meant to be. <c>not_chargeable</c> is kept for what it always meant: cancelled,
+    /// blocked, or otherwise past charging.
+    /// </para>
+    /// </summary>
+    private static async Task<string> SettleAsync(DeviceEventServices services, ActivationTarget t, CancellationToken ct)
+    {
+        var (db, _, _, activation, bookings) = services;
+
+        if (t.Booking.Status == BookingStatus.NoShow)
+        {
+            // The system actor, as the sweep's own rows are: the evidence came from a box,
+            // and Guid.Empty is how every device-originated row already names it.
+            var reversal = await bookings.ReverseNoShowAsync(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, Guid.Empty, ct);
+            if (reversal is NoShowReversalResult.Ok) return ActivationOutcome.ReversedNoShow;
+            if (reversal is NoShowReversalResult.Lost)
+            {
+                t = t with { Booking = await db.Bookings.FirstAsync(b => b.Id == t.Booking.Id, ct) };
+            }
+        }
+
+        return await ActivateOnceAsync(db, activation, t, ct) switch
         {
             ActivationResult.Activated => ActivationOutcome.Ok,
             ActivationResult.TooEarly => "too_early",
             ActivationResult.InsufficientBalance => "unpaid",
             _ => "not_chargeable",
-        }, booking.Id);
+        };
     }
 
     /// <summary>
@@ -240,10 +330,10 @@ public static class DeviceEventEndpoints
     /// request got there first.
     /// </summary>
     private static async Task<bool> RecordAsync(
-        DeviceEventServices services, Device device, DeviceEventDto e, DateTimeOffset occurredAt,
+        DeviceEventServices services, Device device, DeviceEventDto e, EventTime time,
         ActivationOutcome? outcome, CancellationToken ct)
     {
-        var (db, tenant, _, _) = services;
+        var (db, tenant, _, _, _) = services;
 
         var receipt = new DeviceEventReceipt
         {
@@ -251,7 +341,7 @@ public static class DeviceEventEndpoints
             DeviceId = device.Id,
             Seq = e.Seq,
             Kind = e.Kind.Length > 32 ? e.Kind[..32] : e.Kind,
-            OccurredAt = occurredAt,
+            OccurredAt = time.OccurredAt,
         };
         db.DeviceEventReceipts.Add(receipt);
 
@@ -265,19 +355,26 @@ public static class DeviceEventEndpoints
             method = e.Method,
             subject = e.Subject,
             duration_ms = e.DurationMs,
-            occurred_at = occurredAt,
+            occurred_at = time.OccurredAt,
+            occurred_at_clamped_from = time.ClampedFrom,
             outcome = outcome?.Code,
             booking_id = outcome?.BookingId,
         };
         var detailsJson = System.Text.Json.JsonSerializer.Serialize(details);
 
-        var rows = new List<AuditLog>(2)
+        var rows = new List<AuditLog>(3)
         {
             new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = $"device.{e.Kind}", DetailsJson = detailsJson },
         };
         if (outcome is not null && outcome.Code != ActivationOutcome.Ok)
         {
             rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = $"device.activation_{outcome.Code}", DetailsJson = detailsJson });
+        }
+        if (time.ClampedFrom is not null)
+        {
+            // The box's uptime counter cannot be believed; the desk needs to know before
+            // the next event from it, not after.
+            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = "device.event_time_clamped", DetailsJson = detailsJson });
         }
         db.AuditLogs.AddRange(rows);
 
@@ -403,7 +500,7 @@ public static class DeviceEventEndpoints
         // Straight into the one activation path, so attendance, the audit row and
         // booking.lights_on all come from the place that is allowed to produce them.
         var activated = await ActivateOnceAsync(db, activation,
-            new ActivationTarget(court, ok.Booking, userId.Value, req.Method ?? "qr"), ct);
+            new ActivationTarget(court, ok.Booking, userId.Value, req.Method ?? "qr", OccurredAt: null), ct);
         if (activated is not ActivationResult.Activated live)
         {
             return Results.Conflict(new { error = "activation_refused" });
@@ -412,8 +509,12 @@ public static class DeviceEventEndpoints
         return Results.Ok(Grant(ok.Booking, live.AmountCredits, ok.BalanceAfterCredits, replayed: false));
     }
 
-    /// <summary>Who is activating what, and how — the arguments <see cref="ActivateOnceAsync"/> retries with.</summary>
-    private sealed record ActivationTarget(Court Court, Booking Booking, Guid UserId, string Method);
+    /// <summary>
+    /// Who is activating what, how and when — the arguments <see cref="ActivateOnceAsync"/>
+    /// retries with. <c>OccurredAt</c> is null for a walk-up happening now and the scan's
+    /// own time for an uploaded event.
+    /// </summary>
+    private sealed record ActivationTarget(Court Court, Booking Booking, Guid UserId, string Method, DateTimeOffset? OccurredAt);
 
     /// <summary>
     /// Activation that survives its twin. Two retries of one purchase — or two uploads of
@@ -425,9 +526,10 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationResult> ActivateOnceAsync(
         MainframeDbContext db, CourtActivationService activation, ActivationTarget t, CancellationToken ct)
     {
+        var request = new ActivationRequest(t.Court, t.Booking, t.UserId, null, t.Method, t.OccurredAt);
         try
         {
-            return await activation.ActivateAsync(t.Court, t.Booking, t.UserId, null, t.Method, ct);
+            return await activation.ActivateAsync(request, ct);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -438,7 +540,7 @@ public static class DeviceEventEndpoints
                 entry.State = EntityState.Detached;
             }
             await db.Entry(t.Booking).ReloadAsync(ct);
-            return await activation.ActivateAsync(t.Court, t.Booking, t.UserId, null, t.Method, ct);
+            return await activation.ActivateAsync(request, ct);
         }
     }
 
@@ -494,7 +596,7 @@ public static class DeviceEventEndpoints
 
         var court = await db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
         var activated = await ActivateOnceAsync(db, activation,
-            new ActivationTarget(court, booking, entry.UserId, req.Method ?? "qr"), ct);
+            new ActivationTarget(court, booking, entry.UserId, req.Method ?? "qr", OccurredAt: null), ct);
         if (activated is not ActivationResult.Activated)
         {
             return Results.Conflict(new { error = "activation_refused" });
@@ -565,13 +667,15 @@ public sealed record WalkUpServices(
 
 /// <summary>
 /// The services the event upload needs, bundled — see <see cref="WalkUpServices"/>. The code
-/// resolver and the activation path are what turn an activation event into attendance.
+/// resolver and the activation path are what turn an activation event into attendance; the
+/// booking service is what undoes a no-show the sweep settled before the evidence arrived.
 /// </summary>
 public sealed record DeviceEventServices(
     MainframeDbContext Db,
     ITenantContext Tenant,
     AccessCodeService Codes,
-    CourtActivationService Activation);
+    CourtActivationService Activation,
+    BookingService Bookings);
 
 /// <summary>
 /// One event as the box queued it. Names mirror <c>lib/eventq</c>'s wire form. <c>court</c> is

@@ -287,6 +287,39 @@ public class CourtActivationTests
         Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
     }
 
+    // ---- Offline scans are judged when they happened ----------------------
+
+    /// <summary>
+    /// A court box decides scans offline and uploads them later, so the scan and the
+    /// server hearing of it can be far apart. The cue gate and the attendance stamp use the
+    /// scan's own time: a scan made ahead of the cue window is too early however open the
+    /// window is by the time it arrives, and a scan made inside it is stamped when the
+    /// member actually identified, not when the WiFi came back.
+    /// </summary>
+    [Fact]
+    public async Task An_uploaded_scan_is_judged_and_stamped_at_the_time_it_happened()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        // Starts in a minute: the ten-minute cue opened nine minutes ago.
+        var booking = await BookNowAsync(f);
+
+        var early = await f.Activation.ActivateAsync(
+            new ActivationRequest(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "qr", DateTimeOffset.UtcNow.AddMinutes(-30)), default);
+        Assert.IsType<ActivationResult.TooEarly>(early);
+        Assert.Null(booking.CheckedInAt);
+
+        var scannedAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var live = await f.Activation.ActivateAsync(
+            new ActivationRequest(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "qr", scannedAt), default);
+        Assert.False(Assert.IsType<ActivationResult.Activated>(live).AlreadyActive);
+        Assert.Equal(scannedAt, booking.CheckedInAt);
+        Assert.Equal(scannedAt, booking.LightsOnCuedAt);
+        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+    }
+
     // ---- Defect 3: one grace window ---------------------------------------
 
     /// <summary>

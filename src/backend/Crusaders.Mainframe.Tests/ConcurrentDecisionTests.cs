@@ -326,6 +326,77 @@ public sealed class ConcurrentDecisionTests
     }
 
     /// <summary>
+    /// Two uploads of the same late evidence reverse a swept no-show once.
+    ///
+    /// <para>
+    /// A box that lost the acknowledgement re-offers its queue, and a flapping link can
+    /// have two uploads in flight together. Each loads the <c>NoShow</c> row, each decides
+    /// to reverse it; the payer lock serialises them and the concurrency token refuses the
+    /// second's write, so the loser reports <see cref="NoShowReversalResult.Lost"/> with
+    /// nothing written — and the reference on each reversal row is the backstop if the
+    /// token ever did not. Genuinely concurrent, from a shared start signal, because in
+    /// sequence the second would simply find the row already <c>Booked</c>.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task Concurrent_late_activations_reverse_a_swept_no_show_once()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        var bookingId = await SeedDueNoShowAsync(factory, club);
+
+        await Worker(factory).TickAsync(default);
+        var penalty = Math.Round(BookingCost * 0.30m, 2, MidpointRounding.AwayFromZero);
+        Assert.Equal(200m - penalty, await BalanceAsync(factory, club, club.MemberId));
+
+        // Twenty minutes ago: inside the slot the sweep settled.
+        var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-20).ToUnixTimeSeconds());
+
+        // Both uploads hold the NoShow row as they read it BEFORE either acts — loaded
+        // here, not inside the attempt, or the second's read can land after the first's
+        // commit and find the row already Booked, which is the sequential case and not
+        // the race.
+        using var a = RequestScope(factory, club);
+        using var b = RequestScope(factory, club);
+        var rowA = await a.ServiceProvider.GetRequiredService<MainframeDbContext>().Bookings.FirstAsync(x => x.Id == bookingId);
+        var rowB = await b.ServiceProvider.GetRequiredService<MainframeDbContext>().Bookings.FirstAsync(x => x.Id == bookingId);
+        Assert.Equal(BookingStatus.NoShow, rowA.Status);
+        Assert.Equal(BookingStatus.NoShow, rowB.Status);
+
+        using var gate = new SemaphoreSlim(0);
+
+        async Task<NoShowReversalResult> Attempt(IServiceScope scope, Booking row)
+        {
+            var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+            await gate.WaitAsync();
+            return await bookings.ReverseNoShowAsync(row, attendedAt, Guid.Empty, default);
+        }
+
+        var first = Attempt(a, rowA);
+        var second = Attempt(b, rowB);
+        gate.Release(2);
+        var results = await Task.WhenAll(first, second);
+
+        var shape = string.Join(", ", results.Select(r => r.GetType().Name));
+        Assert.True(results.Count(r => r is NoShowReversalResult.Ok) == 1, $"results were: {shape}");
+        Assert.True(results.Count(r => r is NoShowReversalResult.Lost) == 1, $"results were: {shape}");
+
+        // Charged once, refunded once, penalised once, and each of those undone once.
+        Assert.Equal(200m - BookingCost, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(2, await CountAsync(factory, club, bookingId, LedgerEntryType.CancellationRefund));
+        Assert.Equal(2, await CountAsync(factory, club, bookingId, LedgerEntryType.NoShowPenalty));
+
+        using var check = RequestScope(factory, club);
+        var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var after = await db.Bookings.AsNoTracking().FirstAsync(x => x.Id == bookingId);
+        Assert.Equal(BookingStatus.Booked, after.Status);
+        Assert.Equal(attendedAt, after.CheckedInAt);
+        Assert.Single(await db.AuditLogs.Where(a => a.Action == "booking.no_show_reversed").ToListAsync());
+    }
+
+    /// <summary>
     /// Two volunteers pressing "I'll pay" at once do not refund the booker twice.
     ///
     /// <para>

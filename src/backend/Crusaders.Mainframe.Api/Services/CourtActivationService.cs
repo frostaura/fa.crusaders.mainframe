@@ -145,14 +145,15 @@ public sealed class CourtActivationService
     }
 
     /// <summary>
-    /// Charges, checks in and cues the lights — in that order.
+    /// Charges, checks in and cues the lights — in that order. The identification happened
+    /// now; see the overload for one that happened earlier.
     ///
     /// <para>
     /// <paramref name="method"/> is recorded on the audit trail so a dispute can be
     /// answered with how the player identified, not merely that they did.
     /// </para>
     /// </summary>
-    public async Task<ActivationResult> ActivateAsync(
+    public Task<ActivationResult> ActivateAsync(
         Court court,
         Booking booking,
         Guid identifiedUserId,
@@ -160,7 +161,30 @@ public sealed class CourtActivationService
         string method,
         CancellationToken ct)
     {
+        return ActivateAsync(
+            new ActivationRequest(court, booking, identifiedUserId, payerOverrideUserId, method, OccurredAt: null), ct);
+    }
+
+    /// <summary>
+    /// The same decision for an identification that happened at
+    /// <see cref="ActivationRequest.OccurredAt"/> rather than now.
+    ///
+    /// <para>
+    /// A court box decides scans offline and uploads them when the link returns, so the
+    /// moment a member identified and the moment the server hears of it can be hours
+    /// apart. Judging the scan by the upload clock is wrong in both directions: a scan
+    /// made ahead of the cue window was admitted once the window had opened by the time it
+    /// arrived, and a scan made inside the window was stamped with an arrival time that
+    /// belonged to the WiFi, not the member. The cue gate and <c>CheckedInAt</c> now use
+    /// the scan's own time; the lights-on event still measures its remaining duration from
+    /// the server clock, because the relay timer the box runs is the box's own.
+    /// </para>
+    /// </summary>
+    public async Task<ActivationResult> ActivateAsync(ActivationRequest request, CancellationToken ct)
+    {
+        var (court, booking, identifiedUserId, payerOverrideUserId, method, when) = request;
         var now = DateTimeOffset.UtcNow;
+        var occurredAt = when ?? now;
         var alreadyActive = booking.CheckedInAt is not null;
 
         // Too early to light, before anything is charged or stamped.
@@ -172,11 +196,15 @@ public sealed class CourtActivationService
         // cued the lights, and — because CheckedInAt was set — lost their refund if they
         // then cancelled. A live session is never too early: a repeat scan of one falls
         // through to the idempotent branch below whatever the clock says.
+        //
+        // Compared against the scan's own time, not the upload's: a box that admitted a
+        // member ahead of the cue window and uploaded the event once the window had
+        // opened was reporting a scan that broke the rule, not one that kept it.
         var settings = await _settings.GetAsync(ct);
         var cueOpensAt = booking.StartsAt.AddMinutes(-settings.ActivationCueWindowMinutes);
-        if (!alreadyActive && now < cueOpensAt)
+        if (!alreadyActive && occurredAt < cueOpensAt)
         {
-            return new ActivationResult.TooEarly(booking, (int)Math.Ceiling((booking.StartsAt - now).TotalSeconds));
+            return new ActivationResult.TooEarly(booking, (int)Math.Ceiling((booking.StartsAt - occurredAt).TotalSeconds));
         }
 
         // Charge first. Everything below this line is a consequence of it having worked.
@@ -221,8 +249,10 @@ public sealed class CourtActivationService
             return new ActivationResult.Activated(booking, payerUserId, amount, AlreadyActive: true);
         }
 
-        booking.CheckedInAt = now;
-        booking.LightsOnCuedAt ??= now;
+        // Attendance is when the member identified, which for an uploaded event is the
+        // scan and not the upload.
+        booking.CheckedInAt = occurredAt;
+        booking.LightsOnCuedAt ??= occurredAt;
 
         _db.AuditLogs.Add(new AuditLog
         {
@@ -237,6 +267,7 @@ public sealed class CourtActivationService
                 method,
                 payer_user_id = payerUserId,
                 amount_credits = amount,
+                occurred_at = occurredAt,
             }),
         });
 
@@ -293,3 +324,17 @@ public sealed class CourtActivationService
             });
     }
 }
+
+/// <summary>
+/// Who identified, where, how — and when. <see cref="OccurredAt"/> is null for a scan the
+/// server is answering live, and the moment of the scan for one a box decided offline and
+/// uploaded later; the cue gate and <c>CheckedInAt</c> are judged against it. Bundled so
+/// the six positional arguments the courtside touchpoints pass stay as they are.
+/// </summary>
+public sealed record ActivationRequest(
+    Court Court,
+    Booking Booking,
+    Guid IdentifiedUserId,
+    Guid? PayerOverrideUserId,
+    string Method,
+    DateTimeOffset? OccurredAt);

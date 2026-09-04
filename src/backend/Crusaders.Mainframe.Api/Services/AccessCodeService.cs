@@ -142,13 +142,22 @@ public sealed class AccessCodeService
     /// expired, another club's — on purpose: telling them apart at a court box turns it
     /// into an oracle for which codes are real.
     /// </summary>
-    public async Task<ResolvedAccessCode?> ResolveAsync(string? code, CancellationToken ct)
+    public Task<ResolvedAccessCode?> ResolveAsync(string? code, CancellationToken ct)
+        => ResolveAsync(code, DateTimeOffset.UtcNow, ct);
+
+    /// <summary>
+    /// The same question asked of a moment other than now. A court box decides scans
+    /// offline and uploads them later; a code that was live when the member presented it
+    /// and has since expired identified them then, and judging it by the upload clock
+    /// turns a member who played into a stranger the moment the link took too long.
+    /// </summary>
+    public async Task<ResolvedAccessCode?> ResolveAsync(string? code, DateTimeOffset at, CancellationToken ct)
     {
         var normalised = Normalise(code);
         if (normalised is null) return null;
 
         var row = await _db.AccessCodes.AsNoTracking().FirstOrDefaultAsync(c => c.Code == normalised, ct);
-        if (row is null || !row.IsLiveAt(DateTimeOffset.UtcNow)) return null;
+        if (row is null || !row.IsLiveAt(at)) return null;
 
         return new ResolvedAccessCode(row.Purpose, row.UserId, row.BookingId);
     }
