@@ -259,7 +259,26 @@ export type ClaimResult = {
   device_key: string;
   key_version: number;
   board: DiscoveredBoard;
+  /**
+   * True when this board already had a row here — revoked, reflashed, or key lost —
+   * and the claim re-keyed that row (same id, bumped key version, un-revoked) rather
+   * than registering the same hardware twice. Optional because the field arrived on
+   * the API after this screen; an older API reads as a first claim.
+   */
+  reclaimed?: boolean;
   note: string;
+};
+
+/**
+ * What a key rotation hands back. The key is shown once; the `note` says how it reaches
+ * the board — it cannot be pushed, so the box 401s, drops to CLAIM CODE and is connected
+ * again from the discovered list, which re-keys the same row.
+ */
+export type KeyRotation = {
+  device: AdminDevice;
+  device_key: string;
+  key_version: number;
+  note?: string;
 };
 
 /** What manual registration hands back: the row, and the key that is never shown again. */
@@ -469,8 +488,18 @@ export const endpoints = {
   adminMembers: (status?: string) => api.get<AdminMember[]>(`/api/v1/admin/members/${status ? `?status=${status}` : ""}`),
   adminApprove: (memberId: string) => api.post<{ approved: boolean }>(`/api/v1/admin/members/${memberId}/approve`),
   adminReject: (memberId: string, reason: string) => api.post<{ rejected: boolean }>(`/api/v1/admin/members/${memberId}/reject`, { reason }),
-  adminAdjust: (userId: string, amountCredits: number, reason: string) =>
-    api.post<{ entry_id: string; amount_credits: number; balance_after_credits: number }>(`/api/v1/admin/credit/${userId}/adjust`, { amountCredits, reason }),
+  /**
+   * A manual credit movement. `relatedBookingId` is optional and OMITTED when not given:
+   * an adjustment that names a booking is what lets a late box upload recognise that the
+   * desk already compensated the member for a wrongly-swept no-show, and audit instead of
+   * refunding twice (`BookingService.ReverseNoShowAsync`). One without it is plain money.
+   */
+  adminAdjust: (userId: string, amountCredits: number, reason: string, relatedBookingId?: string) =>
+    api.post<{ entry_id: string; amount_credits: number; balance_after_credits: number }>(`/api/v1/admin/credit/${userId}/adjust`, {
+      amountCredits,
+      reason,
+      ...(relatedBookingId ? { relatedBookingId } : {}),
+    }),
   adminResetMemberPassword: (memberId: string) =>
     api.post<{ temp_password: string; email_sent_to: string; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
 
@@ -587,9 +616,11 @@ export const endpoints = {
       court_numbers: req.court_numbers,
     }),
   /**
-   * `button_map` is this box's override: a list to set one, `null` to go back to the
-   * club's map, omitted to leave it alone. Sent snake_case like `court_numbers`, on the
-   * assumption the API pins it the same way.
+   * `button_map` is this box's override and the API binds it three-valued
+   * (`UpdateDeviceRequest` takes it as a bare JsonElement, pinned snake_case like
+   * `court_numbers`): a list sets one, `null` goes back to the club's map, and an ABSENT
+   * key leaves it alone. The spread below keeps that contract — a caller that does not
+   * mention `button_map` sends no such key, and JSON.stringify drops an `undefined` one.
    */
   adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; court_numbers?: number[]; otaChannel?: OtaChannel; pinnedVersion?: string | null; button_map?: string[] | null }) =>
     api.patch<AdminDevice>(`/api/v1/admin/devices/${id}`, {
@@ -599,8 +630,7 @@ export const endpoints = {
   /** Answers with the row as it now is — `revoked_at` set. The box is refused until it is re-claimed. */
   adminDeviceRevoke: (id: string) => api.post<AdminDevice>(`/api/v1/admin/devices/${id}/revoke`, {}),
   /** The new key comes back once, exactly as on registration; the old one stops working at once. */
-  adminDeviceRotateKey: (id: string) =>
-    api.post<{ device: AdminDevice; device_key: string; key_version: number }>(`/api/v1/admin/devices/${id}/rotate-key`, {}),
+  adminDeviceRotateKey: (id: string) => api.post<KeyRotation>(`/api/v1/admin/devices/${id}/rotate-key`, {}),
 
   // Admin: connecting a board
   adminDevicesDiscovered: () => api.get<DiscoveredBoard[]>("/api/v1/admin/devices/discovered"),

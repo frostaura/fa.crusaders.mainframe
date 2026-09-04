@@ -26,16 +26,36 @@ export type IssuedKey = {
   keyVersion: number;
   /**
    * How the key got issued, because the follow-up differs: a claimed board fetches its
-   * own key inside the grant window and the admin only needs this as a fallback; a box
-   * registered by hand, or whose key was rotated, has nothing else.
+   * own key inside the grant window and the admin only needs this as a fallback; a
+   * re-claimed one does the same but on a row the club already had; a box registered
+   * by hand, or whose key was rotated, has nothing else.
    */
-  via: "claim" | "register" | "rotate";
+  via: "claim" | "reclaim" | "register" | "rotate";
+  /**
+   * What the API said alongside the key, when it said anything. On rotation this is
+   * the sentence that explains delivery — the key cannot be pushed to the board, so it
+   * is collected by re-claiming — and it is shown verbatim rather than paraphrased.
+   */
+  note?: string;
+};
+
+/** The headline's account of where the key came from. */
+const ISSUED_AS: Record<IssuedKey["via"], string> = {
+  claim: "first claim",
+  reclaim: "re-keyed",
+  register: "registered by hand",
+  rotate: "rotated",
 };
 
 const FOLLOW_UP: Record<IssuedKey["via"], string> = {
   claim:
     "The board collects this key by itself — it has ten minutes from Connect to do so. If it is still showing "
     + "CLAIM CODE after that, the grant has lapsed: power-cycle the box and press Connect again, and a fresh key is issued. "
+    + "Keep this one only if you are flashing the board by hand: it goes in secrets.h as DEVICE_KEY.",
+  reclaim:
+    "This board already had a row here — revoked, reflashed, or its key lost — so that row was re-keyed and re-enabled "
+    + "rather than registered a second time: same box, same history, key version bumped. The board collects this key by "
+    + "itself within ten minutes of Connect; if it still shows CLAIM CODE after that, power-cycle it and press Connect again. "
     + "Keep this one only if you are flashing the board by hand: it goes in secrets.h as DEVICE_KEY.",
   register:
     "Flash it into the board's secrets.h as DEVICE_KEY before leaving this page — a box registered by hand has no other "
@@ -62,13 +82,16 @@ export function IssuedKeyPanel({ issued, onDismiss }: { issued: IssuedKey; onDis
 
   return (
     <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900" role="status">
-      <div className="font-medium">{issued.name} — device key, version {issued.keyVersion}. Shown once.</div>
+      <div className="font-medium">
+        {issued.name} — device key, version {issued.keyVersion} ({ISSUED_AS[issued.via]}). Shown once.
+      </div>
       <div className="mt-1 flex items-start gap-2">
         <code className="block min-w-0 flex-1 break-all font-mono text-xs" aria-label="Device key">{issued.key}</code>
         <Button variant="outline" className="h-8 shrink-0 px-2 text-xs" onClick={() => void copy()} aria-label="Copy device key">
           <Copy className="mr-1 h-3.5 w-3.5" /> {copied ? "Copied" : "Copy"}
         </Button>
       </div>
+      {issued.note && <p className="mt-2 text-xs font-medium" aria-label="Note from the server">{issued.note}</p>}
       <p className="mt-2 text-xs">{FOLLOW_UP[issued.via]}</p>
       <Button variant="ghost" className="mt-2 h-8 px-2 text-xs" onClick={onDismiss}>I've stored it</Button>
     </div>

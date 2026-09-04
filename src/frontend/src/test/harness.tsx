@@ -36,20 +36,33 @@ export type StubRoute = {
   sequence?: unknown[];
 };
 
+export type StubCall = {
+  method: string;
+  path: string;
+  body: unknown;
+  /**
+   * The body exactly as it went over the wire, for the assertions where parsing would
+   * hide the point — a key that must be ABSENT (not present-as-null, not
+   * present-as-undefined) is only provably absent in the serialised text.
+   */
+  raw: string | undefined;
+};
+
 export type FetchStub = {
   /** Every call the component made, in order — for asserting what a save actually sent. */
-  calls: { method: string; path: string; body: unknown }[];
+  calls: StubCall[];
 };
 
 export function stubFetch(routes: StubRoute[]): FetchStub {
-  const calls: { method: string; path: string; body: unknown }[] = [];
+  const calls: StubCall[] = [];
   const served = new Map<StubRoute, number>();
 
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const path = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method, path, body });
+    const raw = init?.body ? String(init.body) : undefined;
+    const body = raw ? JSON.parse(raw) : undefined;
+    calls.push({ method, path, body, raw });
 
     // Longest prefix wins, not first-declared.
     //
@@ -177,6 +190,44 @@ export function boardFixture(overrides: Record<string, unknown> = {}) {
     tenant_slug: null,
     first_seen_at: new Date().toISOString(),
     last_seen_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+/** One row of the admin members list, as AdminMemberEndpoints shapes it. */
+export function memberFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    membership_id: "33333333-3333-3333-3333-333333333333",
+    user_id: "44444444-4444-4444-4444-444444444444",
+    email: "ada@example.com",
+    full_name: "Ada Lovelace",
+    membership_number: "CR-0001",
+    photo_url: null,
+    status: "Active",
+    member_class: "Regular",
+    created_at: new Date().toISOString(),
+    rejection_reason: null,
+    balance_credits: 120,
+    ...overrides,
+  };
+}
+
+/** One admin-ledger row (LedgerRowDto, camelCase). `relatedBookingId` is null unless given. */
+export function ledgerRowFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "55555555-5555-5555-5555-555555555555",
+    at: "2026-09-01T10:00:00Z",
+    from: "Ada Lovelace",
+    to: "Club treasury",
+    amountCredits: 24,
+    signedAmountCredits: -24,
+    type: "BookingCharge",
+    comment: "Booking charge",
+    subjectUserId: "44444444-4444-4444-4444-444444444444",
+    subjectName: "Ada Lovelace",
+    actorUserId: "44444444-4444-4444-4444-444444444444",
+    actorName: "Ada Lovelace",
+    relatedBookingId: null,
     ...overrides,
   };
 }

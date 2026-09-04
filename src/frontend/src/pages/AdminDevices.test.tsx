@@ -543,4 +543,147 @@ describe("AdminDevices", () => {
     // so it stays on screen until the admin says they have it.
     expect(await screen.findByLabelText("Device key")).toHaveTextContent("deadbeef");
   });
+
+  /** Picks the announcing board, types a code and a court, and presses Connect. */
+  async function connectTheBoard() {
+    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
+    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
+    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
+  }
+
+  it("says when a claim re-keyed a board the club already had, rather than adding it twice", async () => {
+    const note = "This board was already registered here; its row has been re-keyed and re-enabled. The board collects the new key on its next announce.";
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
+      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
+      {
+        method: "POST",
+        path: "/api/v1/admin/devices/claim",
+        // What AdminDeviceDiscoveryEndpoints returns for a MAC with an existing row:
+        // the same id, key version bumped, reclaimed true.
+        body: { device: deviceFixture({ name: "Court 2 box", key_version: 3 }), device_key: "c0ffee", key_version: 3, board: boardFixture({ claimed: true }), reclaimed: true, note },
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+    await connectTheBoard();
+
+    // "Connected" on a box the admin revoked last week reads as a duplicate row. The
+    // outcome is named: re-keyed, same row, new key version.
+    expect(await screen.findByText(/Re-keyed Court 2 box/)).toHaveTextContent(/re-enabled with a new key \(version 3\) rather than added twice/);
+    const panel = screen.getByLabelText("Device key").parentElement?.parentElement;
+    expect(panel).toHaveTextContent(/version 3 \(re-keyed\)/);
+    expect(panel).toHaveTextContent(/already had a row here/);
+    // The API's own sentence, verbatim, next to the key it is about.
+    expect(screen.getByLabelText("Note from the server")).toHaveTextContent(note);
+  });
+
+  it("calls a first claim a first claim", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
+      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
+      {
+        method: "POST",
+        path: "/api/v1/admin/devices/claim",
+        body: { device: deviceFixture({ name: "Court 2 box" }), device_key: "c0ffee", key_version: 1, board: boardFixture({ claimed: true }), reclaimed: false, note: "" },
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+    await connectTheBoard();
+
+    expect(await screen.findByText(/Connected Court 2 box/)).toBeInTheDocument();
+    const panel = screen.getByLabelText("Device key").parentElement?.parentElement;
+    expect(panel).toHaveTextContent(/version 1 \(first claim\)/);
+    expect(panel).not.toHaveTextContent(/already had a row here/);
+    // An empty note is no note — not an empty paragraph.
+    expect(screen.queryByLabelText("Note from the server")).not.toBeInTheDocument();
+  });
+
+  it("shows the rotation note from the API next to the new key", async () => {
+    const note = "The board's old key stops working now. It will show a new claim code on its LCD; connect it again from the discovered boards list to deliver the new key.";
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
+      {
+        method: "POST",
+        path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111/rotate-key",
+        body: { device: deviceFixture({ key_version: 2 }), device_key: "feedface", key_version: 2, note },
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Rotate key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refuse it until it has the new key?" }));
+
+    // The key cannot be pushed to the board; delivery is by re-claim. The API says so
+    // in one sentence and that sentence is shown as sent, not paraphrased into a toast
+    // that is gone in four seconds.
+    expect(await screen.findByLabelText("Device key")).toHaveTextContent("feedface");
+    expect(screen.getByLabelText("Note from the server")).toHaveTextContent(note);
+    expect(screen.getByLabelText("Device key").parentElement?.parentElement).toHaveTextContent(/version 2 \(rotated\)/);
+  });
+
+  it("turns court_number_not_found into a sentence", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1] })] },
+      // The courts table is checked on register, update and claim. The picker only offers
+      // real courts, so this is a court deleted while the form was open.
+      { method: "PATCH", path: "/api/v1/admin/devices/", status: 400, body: { error: "court_number_not_found" } },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Edit courts/ }));
+    fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save courts/ }));
+
+    // Not "court number not found" with the underscores swapped for spaces.
+    expect(await screen.findByText(/not a court at this club/)).toHaveTextContent(/add it under Admin settings/);
+    // And the editor stays open, since the save did not go through.
+    expect(screen.getByRole("button", { name: /Save courts/ })).toBeInTheDocument();
+  });
+
+  it("leaves button_map out of a PATCH that does not touch it, and sends null only to clear it", async () => {
+    const ownMap = ["court:A", "off", "none", "none", "none", "none", "none", "none"];
+    const stub = stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      // A box WITH an override, so echoing it back would be the tempting mistake.
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1], button_map: ownMap })] },
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture({ court_numbers: [1, 2], button_map: ownMap }) },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    // A courts change.
+    fireEvent.click(await screen.findByRole("button", { name: /Edit courts/ }));
+    fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save courts/ }));
+    await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+
+    // A channel change.
+    fireEvent.change(screen.getByLabelText("Court 1 box update channel"), { target: { value: "Canary" } });
+    await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
+
+    // The API binds button_map three-valued — absent leaves the override alone, null
+    // clears it, a list sets it — so a PATCH about something else must not carry the key
+    // at all: not as null (that would clear the box's map), not as its current value
+    // (a stale echo racing another admin's edit). Asserted on the wire text, because a
+    // parsed object cannot tell "absent" from "present as undefined".
+    const patches = stub.calls.filter((c) => c.method === "PATCH");
+    expect(Object.keys(patches[0].body as object)).toEqual(["court_numbers"]);
+    expect(Object.keys(patches[1].body as object)).toEqual(["otaChannel"]);
+    for (const patch of patches) expect(patch.raw).not.toContain("button_map");
+
+    // And "club default" is a PATCH whose body is exactly `{"button_map":null}` — the
+    // one value the API reads as "clear the override".
+    fireEvent.click(screen.getByRole("button", { name: /Edit buttons/ }));
+    fireEvent.click(screen.getByLabelText(/Use the club's button map/));
+    fireEvent.click(screen.getByRole("button", { name: /Save buttons/ }));
+    await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(3));
+    expect(stub.calls.filter((c) => c.method === "PATCH")[2].raw).toBe('{"button_map":null}');
+  });
 });

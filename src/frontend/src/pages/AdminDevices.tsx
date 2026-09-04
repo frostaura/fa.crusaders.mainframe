@@ -80,6 +80,10 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
   court_numbers_required_for_court_box: "A court box needs at least one court. Pick the court on relay A.",
   too_many_courts_for_relay_bank: `A box drives at most ${RELAYS.length} courts — one per relay, A to D.`,
   duplicate_court_numbers: "Each court can be on only one relay. Two relays point at the same court.",
+  // The API checks every court number against the courts table on register, update and
+  // claim (DeviceRegistryService.CourtNumberNotFound). The pickers here only offer real
+  // courts, so this mostly means a court was deleted while the form was open.
+  court_number_not_found: "One of those court numbers is not a court at this club. Refresh the page and pick the court again — if it is missing, add it under Admin settings.",
   device_code_taken: "That device code is already in use. Pick another.",
 };
 
@@ -238,8 +242,26 @@ function ConnectBoard({ courts, onClaimed, prefill }: { courts: AdminCourt[]; on
       });
       // The key used to be dropped here in favour of a toast. It is the one thing an
       // admin can act on if the board misses its ten-minute grant.
-      setIssued({ name: result.device.name, key: result.device_key, keyVersion: result.key_version, via: "claim" });
-      toast.push({ tone: "success", text: `Connected ${result.device.name}. The board will collect its key on its next announce.` });
+      //
+      // `reclaimed` says whether this was a first claim or a MAC the club already had a
+      // row for — re-keyed, un-revoked, same id — and the admin is told which, because
+      // "connected" on a box they thought was gone reads as a duplicate until they know
+      // it is the same row.
+      const reclaimed = result.reclaimed === true;
+      setIssued({
+        name: result.device.name,
+        key: result.device_key,
+        keyVersion: result.key_version,
+        via: reclaimed ? "reclaim" : "claim",
+        note: result.note || undefined,
+      });
+      toast.push({
+        tone: "success",
+        text: reclaimed
+          ? `Re-keyed ${result.device.name} — it was already registered here, so its row was re-enabled with a new key (version ${result.key_version}) rather than added twice. The board collects it on its next announce.`
+          : `Connected ${result.device.name}. The board will collect its key on its next announce.`,
+        durationMs: reclaimed ? 8000 : undefined,
+      });
       setSelected(null);
       setCode("");
       setDeviceCode("");
@@ -722,7 +744,10 @@ function useDeviceActions(reload: () => Promise<void>, onKeyIssued: (key: Issued
     rotate: async () => {
       try {
         const result = await endpoints.adminDeviceRotateKey(device.id);
-        onKeyIssued({ name: device.name, key: result.device_key, keyVersion: result.key_version, via: "rotate" });
+        // The API's note is the delivery story — the key cannot be pushed to the board,
+        // so it 401s, shows CLAIM CODE, and is connected again from the discovered list.
+        // Shown verbatim in the panel, next to the key it is about.
+        onKeyIssued({ name: device.name, key: result.device_key, keyVersion: result.key_version, via: "rotate", note: result.note || undefined });
         await reload();
       } catch (e) {
         toast.push({ tone: "danger", text: describeDeviceError(e, "Could not rotate that box's key.") });

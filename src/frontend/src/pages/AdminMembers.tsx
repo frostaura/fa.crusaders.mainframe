@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Fingerprint, KeyRound, Plus, Search, Users, Wallet, X } from "lucide-react";
-import { endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow } from "../lib/api";
+import { endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type LedgerEntryType, type LedgerRow } from "../lib/api";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -39,6 +39,7 @@ export default function AdminMembersPage() {
   const [creditFor, setCreditFor] = useState<AdminMember | null>(null);
   const [creditAmount, setCreditAmount] = useState("");
   const [creditReason, setCreditReason] = useState("");
+  const [creditBooking, setCreditBooking] = useState("");
   const [resetFor, setResetFor] = useState<AdminMember | null>(null);
   const [resetResult, setResetResult] = useState<{ tempPassword: string; emailSentTo: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -104,19 +105,25 @@ export default function AdminMembersPage() {
     finally { setBusyId(null); }
   };
 
+  const closeCredit = () => { setCreditFor(null); setCreditAmount(""); setCreditReason(""); setCreditBooking(""); };
+
   const adjust = async () => {
     if (!creditFor) return;
     const amount = parseFloat(creditAmount);
     if (isNaN(amount) || amount === 0) { toast.push({ tone: "warning", text: "Enter a non-zero amount." }); return; }
     if (!creditReason.trim()) { toast.push({ tone: "warning", text: "A reason is required." }); return; }
+    // The API binds relatedBookingId as a Guid?; anything else is a 400 with no message
+    // an admin can act on, so it is checked here where the field is.
+    const bookingId = creditBooking.trim();
+    if (bookingId && !isGuid(bookingId)) { toast.push({ tone: "warning", text: "That booking ID is not one — it should look like 8-4-4-4-12 hex characters. Pick one from the list or leave it blank." }); return; }
     const targetUserId = creditFor.user_id;
     setBusyId(targetUserId);
     try {
-      const r = await endpoints.adminAdjust(targetUserId, amount, creditReason);
+      const r = await endpoints.adminAdjust(targetUserId, amount, creditReason, bookingId || undefined);
       // Reflect the new balance in this row immediately — no list refetch, no reload.
       setMembers((prev) => prev?.map((m) => m.user_id === targetUserId ? { ...m, balance_credits: r.balance_after_credits } : m) ?? prev);
-      toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} ${formatCredits(Math.abs(amount))}.` });
-      setCreditFor(null); setCreditAmount(""); setCreditReason("");
+      toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} ${formatCredits(Math.abs(amount))}${bookingId ? ` for booking ${bookingId.slice(0, 8)}` : ""}.` });
+      closeCredit();
     } catch { toast.push({ tone: "danger", text: "Credit adjustment failed." }); }
     finally { setBusyId(null); }
   };
@@ -294,13 +301,14 @@ export default function AdminMembersPage() {
 
       {/* Credit adjust modal */}
       {creditFor && (
-        <Modal onClose={() => setCreditFor(null)} title={`Adjust credit — ${creditFor.full_name}`}>
-          <Label>Amount (credits — positive adds, negative deducts)</Label>
-          <Input value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)} placeholder="e.g. 100" inputMode="decimal" />
-          <Label className="mt-3">Reason (audit-logged)</Label>
-          <Input value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Voided 2026-05-04 booking, reissuing credit" />
+        <Modal onClose={closeCredit} title={`Adjust credit — ${creditFor.full_name}`}>
+          <Label htmlFor="credit-amount">Amount (credits — positive adds, negative deducts)</Label>
+          <Input id="credit-amount" value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)} placeholder="e.g. 100" inputMode="decimal" />
+          <Label htmlFor="credit-reason" className="mt-3">Reason (audit-logged)</Label>
+          <Input id="credit-reason" value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Voided 2026-05-04 booking, reissuing credit" />
+          <RelatedBookingField userId={creditFor.user_id} value={creditBooking} onChange={setCreditBooking} />
           <div className="flex justify-end gap-2 mt-4">
-            <Button variant="ghost" onClick={() => setCreditFor(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={closeCredit}>Cancel</Button>
             <Button onClick={adjust}>Apply</Button>
           </div>
         </Modal>
@@ -360,6 +368,115 @@ function IconAction({ title, icon, onClick }: { title: string; icon: React.React
     >
       {icon}
     </button>
+  );
+}
+
+// --- "for booking" on a credit adjustment --------------------------------------
+
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isGuid(value: string) { return GUID.test(value); }
+
+/** Sentinel option value: the admin will type a booking ID the ledger has not seen. */
+const OTHER_BOOKING = "other";
+
+type RecentBooking = { id: string; label: string };
+
+/**
+ * What each ledger type is called in the picker — the wording LedgerRowMapper uses for
+ * the same rows, so a booking reads the same here as on the ledger page. A Record over
+ * the union, so a type added on the backend fails to compile here rather than showing
+ * up unlabelled.
+ */
+const LEDGER_TYPE_LABEL: Record<LedgerEntryType, string> = {
+  TopUp: "Wallet top-up",
+  BookingCharge: "Booking charge",
+  CancellationRefund: "Cancellation refund",
+  NoShowPenalty: "No-show penalty",
+  LateCancellationPenalty: "Late-cancellation penalty",
+  AdminAdjustment: "Admin adjustment",
+  PaymentReversal: "Payment reversal",
+  LightsPurchase: "Lights purchase",
+};
+
+/**
+ * The bookings the ledger knows this member by, newest first, one entry per booking.
+ *
+ * There is no admin endpoint that lists a member's bookings, and none is needed for
+ * this: every charge, penalty and refund row carries `relatedBookingId`, so the ledger
+ * filtered to the member is the list of bookings money has moved on — which is the
+ * list an adjustment could be compensating for. A no-show penalty row is the usual
+ * pick, and that is exactly the case the field exists for.
+ */
+function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
+  const seen = new Set<string>();
+  const out: RecentBooking[] = [];
+  for (const row of rows) {
+    const id = row.relatedBookingId;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const when = new Date(row.at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+    out.push({ id, label: `${when} · ${LEDGER_TYPE_LABEL[row.type] ?? row.type} ${formatCredits(row.amountCredits)} · ${id.slice(0, 8)}` });
+  }
+  return out;
+}
+
+/**
+ * The optional booking a credit adjustment is compensation for.
+ *
+ * Naming the booking is what turns a manual credit from plain money into evidence:
+ * when the box's attendance upload later proves the member did show up, the no-show
+ * reversal sees a positive AdminAdjustment naming that booking, audits it as manual
+ * compensation, and does not refund a second time. An adjustment without one is
+ * invisible to that check, so an admin who has already made the member whole and
+ * leaves this blank has set up a double refund.
+ */
+function RelatedBookingField({ userId, value, onChange }: { userId: string; value: string; onChange: (next: string) => void }) {
+  const [recent, setRecent] = useState<RecentBooking[] | null>(null);
+  const [choice, setChoice] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    // Best effort: the field degrades to "type the ID" if the ledger cannot be read.
+    endpoints.adminLedger({ userId, limit: 50 })
+      .then((rows) => { if (!cancelled) setRecent(recentBookingsFrom(rows)); })
+      .catch(() => { if (!cancelled) setRecent([]); });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const pick = (next: string) => {
+    setChoice(next);
+    onChange(next === OTHER_BOOKING ? "" : next);
+  };
+
+  return (
+    <div className="mt-3">
+      <Label htmlFor="credit-booking">For booking (optional)</Label>
+      <select
+        id="credit-booking"
+        value={choice}
+        onChange={(e) => pick(e.target.value)}
+        className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+      >
+        <option value="">Not for a specific booking</option>
+        {recent === null && <option value="loading" disabled>Loading recent bookings…</option>}
+        {(recent ?? []).map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+        <option value={OTHER_BOOKING}>Another booking — enter its ID</option>
+      </select>
+      {choice === OTHER_BOOKING && (
+        <Input
+          aria-label="Booking ID"
+          className="mt-2 font-mono text-xs"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="00000000-0000-0000-0000-000000000000"
+          autoComplete="off"
+        />
+      )}
+      <p className="mt-1 text-xs text-text-muted">
+        Name the booking when this makes up for a wrongly-recorded no-show. If the court box later proves the member
+        did attend, the no-show is reversed without refunding them a second time.
+      </p>
+    </div>
   );
 }
 
