@@ -126,12 +126,18 @@ hard prerequisite of item 5, not a hardening step after it.
       `OTA_PRIVATE_KEY` repository secret (PEM content, item 2) and nowhere else — it is
       gitignored, and must never be committed.
 - [ ] Verify `.github/workflows/ci.yml` carries the `iot-sign` job and the backend serves
-      `/firmware/` (both land with the fix programme's release-chain phase; if either is
-      absent, this item cannot complete). With the secret set, that job produces
+      `/firmware/`. Both exist at HEAD: `iot-sign` is in `ci.yml` (Phase 5a) and
+      `Program.cs` serves `Firmware:PayloadPath` — `/app/firmware` in the image — at
+      `/firmware/` (Phase 5b). With the secret set, that job produces
       `firmware.signed.bin` (`src/iot/tools/pio_sign_post.py`) and bakes it into the API
-      image at `/firmware/` — the URL `Ota:Stable:Url` points at.
-- [ ] Publish `Ota:Stable:Version`, `Ota:Stable:Url` and `Ota:Stable:SizeBytes` in the
-      deployment's configuration.
+      image beside `firmware.manifest.json`, which `OtaCatalogue` offers as Stable by
+      default — at an absolute URL built from `Discovery:AdvertisedBaseUrl` or the address
+      the box heartbeats on (`docs/specs/deployment.md`).
+- [ ] Confirm the deployed image is offering it: a heartbeat from a box on an older build
+      carries an `ota` object, or `GET /firmware/firmware.manifest.json` on the deployed
+      API returns the version CI packaged. Set `Ota:Stable:Version`, `Ota:Stable:Url` and
+      `Ota:Stable:SizeBytes` only to pin the fleet to an image other than the one baked
+      into the container; they are no longer required for OTA to work.
 
 **If skipped:** OTA is impossible for boards flashed with this key — every later update is a
 USB/DIP visit. The private key is what a stolen board must *not* yield — that is the whole

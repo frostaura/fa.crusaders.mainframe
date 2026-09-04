@@ -38,6 +38,7 @@ public sealed class TenantResolutionMiddleware
         "/api/v1/platform/",              // platform-admin endpoints scoped above tenant
         "/api/v1/credit/topup/callback",  // PayFast ITN — resolves tenant from query
         "/uploads/",                      // static-served media
+        "/firmware/",                     // static-served signed firmware — the RSA trailer is the integrity anchor, not a tenant
         "/api/v1/device/",                // device surface — DeviceAuthenticationHandler sets the tenant from the device row
     };
 

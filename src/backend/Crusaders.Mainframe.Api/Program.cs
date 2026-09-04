@@ -250,6 +250,11 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddProblemDetails();
 builder.Services.AddRouting();
 
+// OtaCatalogue is a singleton that must hand a box an ABSOLUTE firmware URL, and the
+// only address known to work from where the box stands is the one its heartbeat just
+// arrived on. The accessor is how a singleton sees that request. See OtaCatalogue.
+builder.Services.AddHttpContextAccessor();
+
 var app = builder.Build();
 
 // ---- Schema + seed ----
@@ -283,6 +288,42 @@ app.UseCors();
         RequestPath = "/uploads",
         ServeUnknownFileTypes = false,
     });
+}
+
+// Serve the court-box firmware baked into this image (Dockerfile: COPY firmware-payload/
+// /app/firmware/) at /firmware/. Anonymous and pull-only on purpose: the box fetches with
+// ESPhttpUpdate — a plain GET carrying x-ESP8266-* headers and no device signature — and
+// the image's RSA-2048 trailer, verified on the board against the compiled-in public key,
+// is the integrity anchor, not transport auth. Only .bin and .json are served, so an
+// unsigned (README-only) payload is a 404 rather than a document; no directory listing;
+// PhysicalFileProvider refuses '..'. The directory is decided in one place,
+// FirmwarePayload.ResolvePath, so OtaCatalogue reads the manifest from the directory
+// this serves. Nothing here touches /uploads.
+{
+    var firmwareRoot = FirmwarePayload.ResolvePath(builder.Configuration, builder.Environment.ContentRootPath);
+    if (Directory.Exists(firmwareRoot))
+    {
+        var firmwareTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider(
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [".bin"] = "application/octet-stream",
+                [".json"] = "application/json",
+            });
+        app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
+        {
+            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(firmwareRoot),
+            RequestPath = FirmwarePayload.RequestPath,
+            ContentTypeProvider = firmwareTypes,
+            ServeUnknownFileTypes = false,
+            // A box fetches an image once per update, so caching buys nothing and a proxy
+            // holding a stale image across a redeploy would cost a release.
+            OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "public, max-age=300",
+        });
+    }
+    else
+    {
+        app.Logger.LogWarning("Firmware payload directory {Path} does not exist; /firmware/ is not served.", firmwareRoot);
+    }
 }
 
 app.UseRateLimiter();
