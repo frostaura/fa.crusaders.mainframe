@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 
 namespace Crusaders.Mainframe.Tests;
 
@@ -20,6 +21,10 @@ namespace Crusaders.Mainframe.Tests;
 [Collection(HttpTestCollection.Name)]
 public sealed class RateLimitTests
 {
+    private readonly PostgresFixture _pg;
+
+    public RateLimitTests(PostgresFixture pg) => _pg = pg;
+
     /// <summary>
     /// Under the auth policy and free of the database, which is what makes these tests
     /// runnable without Postgres. Login would have been the obvious choice and is not:
@@ -84,13 +89,14 @@ public sealed class RateLimitTests
     }
 
     /// <summary>
-    /// The limiter is registered before authentication, so a flood costs no token
-    /// validation and no database read. Asserted by flooding with no credentials at
-    /// all and still getting 429 — if authentication ran first this would be 401
-    /// forever and the limiter would never see the request.
+    /// An unauthenticated flood is refused cheaply: no database read, and no token
+    /// validation for a request that carries no token. Authentication runs ahead of the
+    /// limiter now (so the auth policy can partition by member), but authentication does
+    /// not challenge — authorization does, later — so a flood with no credentials still
+    /// reaches the limiter and is 429, never 401 forever.
     /// </summary>
     [Fact]
-    public async Task Limiting_happens_before_authentication()
+    public async Task Limiting_refuses_an_unauthenticated_flood()
     {
         await using var factory = new TestWebAppFactory
         {
@@ -129,6 +135,141 @@ public sealed class RateLimitTests
         // Liveness must survive. A probe that fails under load gets the container killed
         // mid-incident, which is the opposite of what a limiter is for.
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/healthz")).StatusCode);
+    }
+
+    // ---- behind the gateway (closing re-review #7) ------------------------------------
+
+    /// <summary>
+    /// Every deployment fronts the API with nginx, so Kestrel sees the gateway's address
+    /// as the peer of every browser request. Partitioned on that, the whole club shared
+    /// one ten-a-minute auth bucket — ten Court Code refreshes on league night and login,
+    /// PIN and provisioning were dead club-wide for the rest of the minute. The client
+    /// address is now read from X-Forwarded-For when the request came from a trusted
+    /// proxy: distinct forwarded clients are distinct partitions.
+    /// </summary>
+    [Fact]
+    public async Task Distinct_clients_behind_the_trusted_gateway_get_distinct_partitions()
+    {
+        await using var factory = new TestWebAppFactory
+        {
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 1 },
+            RemoteIpAddress = System.Net.IPAddress.Loopback,   // the gateway, per the default trusted list
+        };
+        var client = factory.CreateClient();
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 6; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+            request.Headers.Add("X-Forwarded-For", $"192.168.68.{100 + i}");
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+
+        // Six members, one call each: nobody is limited.
+        Assert.DoesNotContain(HttpStatusCode.TooManyRequests, statuses);
+
+        // The same member twice: limited on the second, and nobody else with them.
+        using var again = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+        again.Headers.Add("X-Forwarded-For", "192.168.68.100");
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await client.SendAsync(again)).StatusCode);
+
+        using var other = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+        other.Headers.Add("X-Forwarded-For", "192.168.68.200");
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, (await client.SendAsync(other)).StatusCode);
+    }
+
+    /// <summary>
+    /// The header is believed only from a trusted proxy. A stranger forging
+    /// X-Forwarded-For from an untrusted address stays in the one partition their real
+    /// address puts them in — otherwise the header is a free pass out of the limit.
+    /// </summary>
+    [Fact]
+    public async Task A_forwarded_header_from_an_untrusted_address_is_ignored()
+    {
+        await using var factory = new TestWebAppFactory
+        {
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 2 },
+            RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.9"),
+        };
+        var client = factory.CreateClient();
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 6; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+            request.Headers.Add("X-Forwarded-For", $"10.0.0.{i}");
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+
+        Assert.DoesNotContain(HttpStatusCode.TooManyRequests, statuses.Take(2));
+        Assert.Contains(HttpStatusCode.TooManyRequests, statuses.Skip(2));
+    }
+
+    /// <summary>
+    /// "Ten a minute per member" means per member: an authenticated call is partitioned on
+    /// the member, so two members behind one address — a shared clubhouse tablet, or the
+    /// gateway when no forwarded header reaches us — do not spend each other's allowance.
+    /// </summary>
+    [SkippableFact]
+    public async Task Authenticated_calls_are_partitioned_by_member()
+    {
+        // The one test here that needs Postgres: an authenticated request resolves its
+        // tenant from the database before authorization, so a database-free host throws
+        // inside the pipeline and the status says nothing about the limiter.
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = new TestWebAppFactory
+        {
+            ConnectionString = _pg.ConnectionString,
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 1 },
+        };
+        var client = factory.CreateClient();
+
+        // The courtside QR match is under the auth policy and admin-only: an ordinary
+        // member's token is authenticated (so the limiter partitions on them) and then
+        // refused by authorization, after the limiter.
+        const string adminOnlyAuthPath = "/api/v1/court/1/qr/match";
+
+        var statuses = new List<HttpStatusCode>();
+        foreach (var member in Enumerable.Range(0, 4).Select(_ => Guid.NewGuid()))
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, adminOnlyAuthPath) { Content = JsonContent.Create(new { token = "x" }) };
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", MemberToken(member));
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+        Assert.DoesNotContain(HttpStatusCode.TooManyRequests, statuses);
+
+        var same = Guid.NewGuid();
+        HttpStatusCode? second = null;
+        for (var i = 0; i < 2; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, adminOnlyAuthPath) { Content = JsonContent.Create(new { token = "x" }) };
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", MemberToken(same));
+            second = (await client.SendAsync(request)).StatusCode;
+        }
+        Assert.Equal(HttpStatusCode.TooManyRequests, second);
+    }
+
+    /// <summary>An access token for a member, signed with the factory's test secret.</summary>
+    private static string MemberToken(Guid subject)
+    {
+        var token = new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
+            issuer: "crusaders.mainframe",
+            audience: "crusaders.mainframe.app",
+            claims:
+            [
+                new System.Security.Claims.Claim(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub, subject.ToString()),
+                new System.Security.Claims.Claim("tenant_id", Guid.NewGuid().ToString()),
+                new System.Security.Claims.Claim("tenant_slug", "crusaders"),
+                new System.Security.Claims.Claim("purpose", "access"),
+            ],
+            notBefore: DateTime.UtcNow,
+            expires: DateTime.UtcNow.AddMinutes(10),
+            signingCredentials: new Microsoft.IdentityModel.Tokens.SigningCredentials(
+                new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(
+                    System.Text.Encoding.UTF8.GetBytes("test-only-signing-key-not-used-in-any-real-environment")),
+                Microsoft.IdentityModel.Tokens.SecurityAlgorithms.HmacSha256));
+        return new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().WriteToken(token);
     }
 
     /// <summary>The generous default must not fire during ordinary use.</summary>

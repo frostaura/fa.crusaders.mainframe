@@ -439,6 +439,59 @@ public sealed class ConcurrentDecisionTests
     }
 
     /// <summary>
+    /// The sweep-versus-upload race (closing re-review #18). The upload reads a Booked row
+    /// that is due; the 30-second sweep settles it — NoShow, refund, penalty — between that
+    /// read and the upload's stamp; the stamp loses on the concurrency token. Re-running
+    /// the activation against the reloaded row used to answer not_chargeable: the member
+    /// on a lit court, refunded, penalised, recorded a no-show, and the box's evidence
+    /// released. The reload is now looked at, and a row that became NoShow underneath the
+    /// upload is reversed.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_upload_that_loses_its_stamp_to_the_sweep_reverses_the_no_show_instead_of_refusing()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        var bookingId = await SeedDueNoShowAsync(factory, club);
+
+        // The upload's read: Booked, as it stood before the sweep tick began.
+        using var upload = RequestScope(factory, club);
+        var db = upload.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var stale = await db.Bookings.FirstAsync(b => b.Id == bookingId);
+        var court = await db.Courts.FirstAsync(c => c.Id == club.CourtId);
+        Assert.Equal(BookingStatus.Booked, stale.Status);
+
+        // The sweep commits underneath it.
+        await Worker(factory).TickAsync(default);
+        var penalty = Math.Round(BookingCost * 0.30m, 2, MidpointRounding.AwayFromZero);
+        Assert.Equal(200m - penalty, await BalanceAsync(factory, club, club.MemberId));
+
+        var scannedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-20).ToUnixTimeSeconds());
+        var services = new DeviceEventServices(
+            db,
+            upload.ServiceProvider.GetRequiredService<ITenantContext>(),
+            upload.ServiceProvider.GetRequiredService<AccessCodeService>(),
+            upload.ServiceProvider.GetRequiredService<CourtActivationService>(),
+            upload.ServiceProvider.GetRequiredService<BookingService>(),
+            upload.ServiceProvider.GetRequiredService<TenantSettingsAccessor>());
+
+        var outcome = await DeviceEventEndpoints.ActivateOrReverseAsync(
+            services, new LateActivation(court, stale, club.MemberId, "offline", scannedAt, 2_700_000), default);
+
+        Assert.Equal("reversed_no_show", outcome);
+        Assert.Equal(200m - BookingCost, await BalanceAsync(factory, club, club.MemberId));
+        Assert.Equal(2, await CountAsync(factory, club, bookingId, LedgerEntryType.CancellationRefund));
+        Assert.Equal(2, await CountAsync(factory, club, bookingId, LedgerEntryType.NoShowPenalty));
+
+        using var check = RequestScope(factory, club);
+        var after = await check.ServiceProvider.GetRequiredService<MainframeDbContext>().Bookings.AsNoTracking().FirstAsync(x => x.Id == bookingId);
+        Assert.Equal(BookingStatus.Booked, after.Status);
+        Assert.Equal(scannedAt, after.CheckedInAt);
+    }
+
+    /// <summary>
     /// Two volunteers pressing "I'll pay" at once do not refund the booker twice.
     ///
     /// <para>

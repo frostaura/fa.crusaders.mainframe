@@ -78,6 +78,10 @@ public sealed class AdminDeviceDiscoveryHttpTests
             Status = MembershipStatus.Active,
             MemberClass = MemberClass.Regular,
         });
+        for (var n = 1; n <= 4; n++)
+        {
+            db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}", SlicePriceCredits = 8m });
+        }
 
         await db.SaveChangesAsync();
         return new Seeded(tenant.Id, slug, admin.Id);

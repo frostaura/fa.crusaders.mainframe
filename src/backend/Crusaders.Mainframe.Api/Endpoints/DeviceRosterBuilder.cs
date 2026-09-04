@@ -111,12 +111,15 @@ public static class DeviceRosterBuilder
     /// The roster for <paramref name="device"/> right now.
     ///
     /// <para>
-    /// Selects bookings on the box's courts that are still <c>Booked</c>, not yet checked in
-    /// — a live session needs no roster entry, and a repeat scan of one is the online
-    /// <c>/activate</c> path's job — and whose activation window
-    /// <c>[StartsAt − cue, EndsAt]</c> intersects <c>[now, now + roster_window]</c>. That is the
-    /// same horizon the QR screen uses to decide which code to show, so the code on the
-    /// member's phone and the code in the box's cache are minted from one rule.
+    /// Selects bookings on the box's courts that are still <c>Booked</c> — checked in or not
+    /// — and whose activation window <c>[StartsAt − cue, EndsAt]</c> intersects
+    /// <c>[now, now + roster_window]</c>. That is the same horizon the QR screen uses to
+    /// decide which code to show, so the code on the member's phone and the code in the
+    /// box's cache are minted from one rule. A live session used to be left out on the
+    /// grounds that a repeat scan is the online path's job; but the relay hard cap is
+    /// ninety minutes and a slot can be longer, so the second half of a paid two-hour slot
+    /// was dark during any outage — the box had nothing to re-light it from. A checked-in
+    /// booking still inside its window stays on the roster until it ends.
     /// </para>
     ///
     /// <para>
@@ -155,7 +158,6 @@ public static class DeviceRosterBuilder
         var bookings = await db.Bookings
             .Where(b => courtIds.Contains(b.CourtId)
                         && b.Status == BookingStatus.Booked
-                        && b.CheckedInAt == null
                         && b.UserId != null
                         && b.StartsAt <= latestStart
                         && b.EndsAt >= now)

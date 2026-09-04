@@ -232,6 +232,32 @@ public sealed class ButtonMap
 
     public IReadOnlyList<string> ToWire() => Actions.Select(a => a.ToWire()).ToList();
 
+    /// <summary>The wire array as a JSON document, for <c>Device.ButtonMapJson</c>.</summary>
+    public string ToJson() => JsonSerializer.Serialize(ToWire());
+
+    /// <summary>
+    /// A per-device override from its stored JSON, or null when there is none or it no
+    /// longer parses — lenient on read for the same reason <see cref="FromSettings"/> is:
+    /// a box must keep working on the club's map rather than stop on a bad row.
+    /// </summary>
+    public static ButtonMap? FromJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var wire = JsonSerializer.Deserialize<List<string>>(json);
+            return wire is not null && TryParse(wire, out var map, out _) ? map : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The map a box actually runs: its own override when it has one, else the club's.</summary>
+    public static ButtonMap EffectiveFor(string? deviceOverrideJson, ButtonMap tenantMap)
+        => FromJson(deviceOverrideJson) ?? tenantMap;
+
     /// <summary>
     /// The first court index a <see cref="ButtonAction.SelectCourt"/> button names that a
     /// box driving <paramref name="courtCount"/> courts has no relay for — or null when

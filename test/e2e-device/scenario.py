@@ -616,7 +616,11 @@ class ApiProcess:
             "Discovery__Enabled": "true",
             "Discovery__Port": str(self.udp_port),  # not 48653: another API on this host must not eat our beacons
             "Discovery__BindAddress": "127.0.0.1",
-            "Discovery__AdvertisedBaseUrl": self.base,
+            # No AdvertisedBaseUrl, on purpose: the OFFER then carries the local interface
+            # plus AdvertisedPort (which is this run's port), and /provision ECHOES the
+            # request's scheme+host — the branch a club's on-prem deployment takes, and the
+            # one the closing re-review found the old scenario never exercised (#18/#22).
+            "Discovery__AdvertisedPort": str(self.port),
             "Media__StoragePath": str(media),
             "Biometric__TemplateStorePath": str(self.cfg.workdir / "biometric"),
             "RateLimits__AuthPerMinute": "1000",  # the scenario makes more auth calls per minute than a club does
@@ -1053,6 +1057,18 @@ def provision_box(w: World, api: ApiProcess) -> None:
                  isinstance(server_unix, int) and abs(server_unix - before) <= 5, f"server_unix={server_unix}")
     REPORT.check("C1", "provision hands out the same derived key the admin was shown, plus the API base URL",
                  prov["device_key"] == claim["device_key"] and prov["device_id"] == w.box_device_id and prov["api_base_url"] == api.base)
+    REPORT.check("R18", "with no AdvertisedBaseUrl the echoed api_base_url keeps the port the board actually used (not a port-less Host)",
+                 prov["api_base_url"] == api.base and api.base.rsplit(":", 1)[1].isdigit(), f"api_base_url={prov['api_base_url']}")
+
+    # Board C provisions THROUGH the gateway: the request carries the X-Forwarded-* headers
+    # nginx sends, from a trusted proxy address (loopback is in the default list), and the
+    # base URL handed back is the gateway's host AND port — the shape a box behind :8088 needs.
+    mac_c, code_c, _ = announce_and_claim("board C")
+    via_gateway = w.http.post("/api/v1/device/provision", {"mac": mac_c, "claim_code": code_c}, headers={
+        "X-Forwarded-For": "192.0.2.50", "X-Forwarded-Proto": "http", "X-Forwarded-Host": "192.0.2.9:8088",
+    })
+    REPORT.check("R18", "board C: provisioning behind the gateway (X-Forwarded-Host 192.0.2.9:8088 from a trusted proxy) hands out http://192.0.2.9:8088",
+                 via_gateway.status == 200 and via_gateway.get("api_base_url") == "http://192.0.2.9:8088", f"resp={via_gateway.text[:160]}")
     key = b64url_decode(prov["device_key"])
     REPORT.check("C1", "device key decodes from base64url to 32 HKDF bytes", len(key) == 32)
     w.box = DeviceClient(w.http, w.box_device_id, key)
@@ -1147,6 +1163,8 @@ def heartbeat_roster(w: World) -> None:
     mine = next((d for d in devices if d["id"] == w.box_device_id), None)
     REPORT.check("C4", "admin device list shows the box with court_numbers [1,2,3,4], last_seen_at and running_version from the heartbeat",
                  bool(mine) and mine["court_numbers"] == [1, 2, 3, 4] and mine.get("last_seen_at") and mine.get("running_version") == "1.1.0")
+    REPORT.check("R17", "the box carries no button-map override (button_map null) and the heartbeat sent the club's eight-entry map",
+                 bool(mine) and "button_map" in mine and mine["button_map"] is None and len(hb.get("config", {}).get("button_map", [])) == 8)
 
 
 def online_activation(w: World, sim: Optional[Simulator]) -> None:
@@ -1188,7 +1206,9 @@ def online_activation(w: World, sim: Optional[Simulator]) -> None:
     REPORT.check("C3", "a repeat scan of the live session is idempotent: activated again with the remaining seconds, no second charge",
                  again.get("activated") is True and again.get("booking_id") == w.b3["id"] and 0 < again.get("granted_seconds", 0) < granted, f"resp={again.json}")
     hb = expect_status(w.box.heartbeat(), 200, "heartbeat after activation")
-    REPORT.check("C3", "B3 (now checked in) is no longer pushed in the roster — a live session needs no roster entry", 2 not in roster_entries(hb))
+    # A checked-in booking STAYS on the roster while it is live: a slot longer than the
+    # 90-minute relay cap needs its second half re-lit from the roster during an outage.
+    REPORT.check("C3", "B3 (now checked in, still live) is still pushed in the roster — re-lightable offline", 2 in roster_entries(hb))
     ledger = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.m_user_id}&limit=200", token=w.admin_token), 200, "ledger M").json
     b3_rows = [r for r in ledger if r.get("relatedBookingId") == w.b3["id"]]
     REPORT.check("C3", "M's ledger holds exactly one movement for B3: the -24 charge posted at booking, nothing at activation",
@@ -1213,7 +1233,10 @@ def offline_attendance(w: World) -> None:
     REPORT.check("C6", "events upload acknowledges accepted_through=1, recorded=1 and carries server_unix",
                  up.get("accepted_through") == 1 and up.get("recorded") == 1 and isinstance(up.get("server_unix"), int), f"resp={up.json}")
     hb = expect_status(w.box.heartbeat(), 200, "heartbeat after event")
-    REPORT.check("C6", "B1 drops out of the roster after the activation event: CheckedInAt was stamped server-side", 0 not in roster_entries(hb))
+    # Attendance is stamped server-side, but the entry STAYS: a checked-in booking still
+    # inside its window is re-lightable offline (a slot longer than the 90-minute relay
+    # cap needs its second half re-lit from the roster). It leaves when it ends.
+    REPORT.check("C6", "B1 stays on the roster after the activation event (checked-in and still live: re-lightable offline)", 0 in roster_entries(hb))
     live = expect_status(w.box.signed("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "activate B1 after event")
     REPORT.check("C6", "a scan of B1 now answers as a live session (activated, remaining seconds) rather than a fresh cue-window check",
                  live.get("activated") is True and live.get("booking_id") == w.b1["id"] and 0 < live.get("granted_seconds", 0) <= 2775)
@@ -1241,8 +1264,8 @@ def walk_up(w: World) -> None:
                  first.get("granted_minutes") == 60 and dec(first.get("amount_credits", 0)) == 32 and first.get("replayed") is False, f"resp={first.json}")
     REPORT.check("C5", "balance_after_credits == wallet before - 32", dec(first.get("balance_after_credits", -1)) == wallet_before - 32)
     replay = expect_status(w.box.signed("POST", "/api/v1/device/walkup", req), 200, "walkup replay")
-    REPORT.check("H3", "resending the identical nonce answers replayed:true with the SAME booking_id and grant",
-                 replay.get("replayed") is True and replay.get("booking_id") == first.get("booking_id") and replay.get("granted_minutes") == 60, f"resp={replay.json}")
+    REPORT.check("H3", "resending the identical nonce answers replayed:true with the SAME booking_id and the remainder of the grant (60, seconds later)",
+                 replay.get("replayed") is True and replay.get("booking_id") == first.get("booking_id") and 59 <= replay.get("granted_minutes", 0) <= 60, f"resp={replay.json}")
     wallet_after = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
     REPORT.check("H3", "the replay charged nothing: wallet moved by exactly -32 across both calls", wallet_after == wallet_before - 32, f"{wallet_before} -> {wallet_after}")
     ledger = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.m_user_id}&limit=200", token=w.admin_token), 200, "ledger M").json
@@ -1256,6 +1279,13 @@ def walk_up(w: World) -> None:
     REPORT.check("C5", "court 5 (not on this box) -> 400 court_not_on_device", off_box.status == 400 and off_box.get("error") == "court_not_on_device", f"resp={off_box.text[:120]}")
     no_nonce = w.box.signed("POST", "/api/v1/device/walkup", {"minutes": 30, "method": "qr", "token": w.ident_code, "court": 2})
     REPORT.check("H3", "a walk-up without a nonce -> 400 nonce_required", no_nonce.status == 400 and no_nonce.get("error") == "nonce_required")
+    booking_code = w.tokens.get(2)
+    if booking_code:
+        wallet_now = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
+        as_wallet = w.box.signed("POST", "/api/v1/device/walkup", {"minutes": 30, "method": "qr", "token": booking_code, "court": 2, "nonce": secrets.token_hex(8)})
+        wallet_after_attempt = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
+        REPORT.check("R19", "B3's BOOKING code presented as a walk-up buyer -> 400 not_recognised and the wallet is untouched (a roster code is not a wallet)",
+                     as_wallet.status == 400 and as_wallet.get("error") == "not_recognised" and wallet_after_attempt == wallet_now, f"resp={as_wallet.text[:120]}")
     too_long = w.box.signed("POST", "/api/v1/device/walkup", {"minutes": 240, "method": "qr", "token": w.ident_code, "court": 2, "nonce": secrets.token_hex(8)})
     REPORT.check("M1", "240 minutes is refused with the effective cap (min(walk_up_max, relay cap 90))",
                  too_long.status == 400 and too_long.get("error") == "minutes_out_of_range" and too_long.get("max_minutes") == 90)

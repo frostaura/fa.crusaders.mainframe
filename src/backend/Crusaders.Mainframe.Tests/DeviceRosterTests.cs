@@ -192,15 +192,37 @@ public class DeviceRosterTests
     private static async Task<string> CodeOfOrEmptyAsync(Fixture f, Booking booking) =>
         (await f.Db.AccessCodes.AsNoTracking().FirstOrDefaultAsync(c => c.BookingId == booking.Id))?.Code ?? "";
 
-    /// <summary>A live session needs no roster entry: the box already lit it, and a re-light is the online path's job.</summary>
+    /// <summary>
+    /// A live session STAYS on the roster while its window is open. It used to be dropped
+    /// on the grounds that a re-light is the online path's job — but the relay hard cap is
+    /// ninety minutes and a slot can be longer, so the second half of a paid two-hour slot
+    /// was dark during any outage: the box had nothing to re-light it from.
+    /// </summary>
     [Fact]
-    public async Task A_checked_in_booking_is_excluded()
+    public async Task A_checked_in_booking_still_in_its_window_is_included()
     {
         var f = await CreateAsync();
         await using var _ = f.Host;
         using var __ = f.Scope;
 
-        await BookAsync(f, f.Host.Courts[0], startsInMinutes: -5, checkedIn: true);
+        var live = await BookAsync(f, f.Host.Courts[0], startsInMinutes: -5, minutes: 120, checkedIn: true);
+        var pending = await BookAsync(f, f.Host.Courts[1], startsInMinutes: 5);
+
+        var roster = await BuildAsync(f, BoxOn(f, 1, 2, 3, 4));
+        Assert.Equal(2, roster.Count);
+        Assert.Contains(roster, e => TokenOf(e) == CodeOfAsync(f, live).Result && RelayOf(e) == 0 && ClosesInOf(e) > 100 * 60);
+        Assert.Contains(roster, e => TokenOf(e) == CodeOfAsync(f, pending).Result && RelayOf(e) == 1);
+    }
+
+    /// <summary>...and drops off once it has ended, like any other booking.</summary>
+    [Fact]
+    public async Task A_checked_in_booking_that_has_ended_is_excluded()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        await BookAsync(f, f.Host.Courts[0], startsInMinutes: -50, minutes: 45, checkedIn: true);
         var pending = await BookAsync(f, f.Host.Courts[1], startsInMinutes: 5);
 
         var entry = Assert.Single(await BuildAsync(f, BoxOn(f, 1, 2, 3, 4)));

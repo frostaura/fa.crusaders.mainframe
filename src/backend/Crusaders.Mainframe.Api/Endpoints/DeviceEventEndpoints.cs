@@ -144,13 +144,17 @@ public static class DeviceEventEndpoints
     }
 
     /// <summary>
-    /// The oldest an uploaded event may claim to be, and the horizon past which its time is
-    /// not believed. The box's roster is not trusted past six hours
-    /// (<c>lib/roster</c>'s maximum age), so an activation the box decided from it is at
-    /// most that old when it happens; the upload can come much later, and an event that
-    /// arrives claiming to be older than this is judged at the upload instead.
+    /// The sanity bound on how far in the past an uploaded event may claim to have
+    /// happened. NOT the roster's six-hour trust: that bounds roster-fetch-to-scan, and
+    /// this bounds scan-to-upload, which is the length of the outage — the very thing the
+    /// persisted queue exists to survive. A six-hour clamp here re-created the C6 outcome
+    /// for every outage longer than six hours: the scan time was replaced with the upload
+    /// time, the roster code was judged expired at that instant, the event resolved to
+    /// nothing, and the member who played stayed refunded and penalised (closing re-review
+    /// #6/#7). Thirty days is past any outage a club will ride out; the access-code grave
+    /// (<c>RetentionWorker</c>) is sized to keep booking codes resolvable that long.
     /// </summary>
-    public static readonly TimeSpan MaxEventAge = TimeSpan.FromHours(6);
+    public static readonly TimeSpan MaxEventAge = TimeSpan.FromDays(30);
 
     /// <summary>
     /// When an event happened, and — if the box's arithmetic could not be believed — the
@@ -159,18 +163,14 @@ public static class DeviceEventEndpoints
     private sealed record EventTime(DateTimeOffset OccurredAt, DateTimeOffset? ClampedFrom);
 
     /// <summary>
-    /// The event's time from uptime arithmetic, clamped to now when the arithmetic is wild.
-    ///
-    /// <para>
-    /// The box has no RTC; <c>millis()</c> resets on every power blink, and the queue is
-    /// persisted across one. So an event that survived a reboot carries an uptime from a
-    /// previous boot, and the difference against the batch's uptime is meaningless in either
-    /// direction: ahead of the upload, or hours behind it. Both are clamped to the upload
-    /// instant — which is always past the cue window for a booking that has started, so the
-    /// clamp errs toward stamping the member present rather than judging a real scan by a
-    /// time that never happened — and the claimed value is kept on the audit row so the
-    /// desk can see the box's counter is broken.
-    /// </para>
+    /// The event's time from uptime arithmetic: the box's uptime at upload minus its uptime
+    /// at the scan, taken off the server clock. The box's clock is server-derived and its
+    /// uptime accumulator is exact within a boot, so the arithmetic is believed however
+    /// long ago the scan was — a two-day outage is precisely what the queue is for. Two
+    /// things are not believed: a scan in the FUTURE (the queue outlived a reboot and
+    /// carries a previous boot's uptime), and one past <see cref="MaxEventAge"/>. Both are
+    /// clamped to the upload instant and the claimed value is kept on the audit row
+    /// (<c>device.event_time_clamped</c>) so the desk can see the counter is broken.
     /// </summary>
     private static EventTime TimeOf(DeviceEventBatch batch, DeviceEventDto e, DateTimeOffset now)
     {
@@ -211,6 +211,13 @@ public static class DeviceEventEndpoints
         /// concerned, and its own audit row because money moved back.
         /// </summary>
         public const string ReversedNoShow = "reversed_no_show";
+
+        /// <summary>
+        /// The booking had been cancelled and refunded before the box lit it from a stale
+        /// roster; the lit time was charged pro rata (review #21). Its own audit row
+        /// because money moved.
+        /// </summary>
+        public const string AfterCancel = "after_cancel";
     }
 
     /// <summary>
@@ -231,8 +238,8 @@ public static class DeviceEventEndpoints
     /// <c>TooEarly</c> is not stamped. The box let the member in ahead of the cue window —
     /// its clock or its cached window drifted — and the cue rule is the rule; the audit row
     /// is what tells an admin the box is drifting. A charge refusal on a legacy uncharged
-    /// row, or a booking cancelled after the roster was pushed, is likewise recorded and not
-    /// stamped.
+    /// row is likewise recorded and not stamped. A booking cancelled after the roster was
+    /// pushed is not stamped either, but its lit time IS charged — see <see cref="SettleAsync"/>.
     /// </para>
     ///
     /// <para>
@@ -244,7 +251,7 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationOutcome> ActivationOutcomeAsync(
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, codes, _, _) = services;
+        var (db, _, codes, _, _, _) = services;
 
         // Live at the scan, not at the upload: the roster token expires at the slot's end
         // plus grace, and a box offline past that is precisely the box whose evidence
@@ -271,9 +278,18 @@ public static class DeviceEventEndpoints
             return new ActivationOutcome("wrong_court", booking.Id);
         }
 
-        var target = new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline", occurredAt);
+        var target = new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline", occurredAt, e.DurationMs);
         return new ActivationOutcome(await SettleAsync(services, target, ct), booking.Id);
     }
+
+    /// <summary>
+    /// The settlement decision for one activation event, driven directly — the same entry
+    /// the upload handler uses, public so a test can interleave a sweep between the read
+    /// of <paramref name="booking"/> and its stamp without an HTTP client in the way.
+    /// </summary>
+    public static Task<string> ActivateOrReverseAsync(DeviceEventServices services, LateActivation evidence, CancellationToken ct)
+        => SettleAsync(services,
+            new ActivationTarget(evidence.Court, evidence.Booking, evidence.UserId, evidence.Method, evidence.OccurredAt, evidence.DurationMs), ct);
 
     /// <summary>
     /// Turns the activation into attendance — undoing the sweep first if it got there
@@ -286,39 +302,111 @@ public static class DeviceEventEndpoints
     /// resolved to "not chargeable" and the member who played kept the refund and paid the
     /// penalty. A settled no-show is now reversed by <see cref="BookingService"/> — two new
     /// ledger rows, the row <c>Booked</c> and checked in at the scan — and the outcome is
-    /// receipted as its own audit row, because money moved back.
+    /// receipted as its own audit row, because money moved back. The cue gate applies on
+    /// this branch too: a box that admitted a member ahead of the window and lost the link
+    /// is reporting a scan that broke the rule, not one that kept it.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The sweep-versus-upload race lands here as well</b> (review #18). The upload reads
+    /// a <c>Booked</c> row, the 30-second sweep settles it in between, and the stamp loses
+    /// on the concurrency token. Re-running the activation against the reloaded row used to
+    /// answer <c>not_chargeable</c> — the C6 outcome with the box's evidence released. The
+    /// reload is now looked at: a row that became <c>NoShow</c> underneath the upload goes
+    /// through the reversal, and only a row that is still live is activated again.
     /// </para>
     ///
     /// <para>
     /// A reversal that loses to a concurrent upload of the same evidence re-reads the row
     /// and takes the ordinary path, which finds it live and is the idempotent no-op it is
-    /// meant to be. <c>not_chargeable</c> is kept for what it always meant: cancelled,
-    /// blocked, or otherwise past charging.
+    /// meant to be. A row cancelled after its code was pushed has its lit time charged
+    /// (review #21); <c>not_chargeable</c> is kept for what remains: blocked, or otherwise
+    /// past charging.
     /// </para>
     /// </summary>
     private static async Task<string> SettleAsync(DeviceEventServices services, ActivationTarget t, CancellationToken ct)
     {
-        var (db, _, _, activation, bookings) = services;
+        var (db, _, _, activation, bookings, settingsAccessor) = services;
+        var settings = await settingsAccessor.GetAsync(ct);
 
-        if (t.Booking.Status == BookingStatus.NoShow)
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            // The system actor, as the sweep's own rows are: the evidence came from a box,
-            // and Guid.Empty is how every device-originated row already names it.
-            var reversal = await bookings.ReverseNoShowAsync(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, Guid.Empty, ct);
-            if (reversal is NoShowReversalResult.Ok) return ActivationOutcome.ReversedNoShow;
-            if (reversal is NoShowReversalResult.Lost)
+            if (t.Booking.Status == BookingStatus.NoShow)
             {
-                t = t with { Booking = await db.Bookings.FirstAsync(b => b.Id == t.Booking.Id, ct) };
+                var cueOpensAt = t.Booking.StartsAt.AddMinutes(-settings.ActivationCueWindowMinutes);
+                if (t.OccurredAt is { } scannedAt && scannedAt < cueOpensAt) return "too_early";
+
+                // The system actor, as the sweep's own rows are: the evidence came from a box,
+                // and Guid.Empty is how every device-originated row already names it.
+                var reversal = await bookings.ReverseNoShowAsync(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, Guid.Empty, ct);
+                if (reversal is NoShowReversalResult.Ok) return ActivationOutcome.ReversedNoShow;
+                t = t with { Booking = await FreshAsync(db, t.Booking, ct) };
+                continue;
+            }
+
+            if (t.Booking.Status == BookingStatus.Cancelled)
+            {
+                var lit = await bookings.ChargeLitCancelledBookingAsync(
+                    t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, LitMinutes(t), ct);
+                return lit is CancelledLightsResult.NotCharged ? "not_chargeable" : ActivationOutcome.AfterCancel;
+            }
+
+            var request = new ActivationRequest(t.Court, t.Booking, t.UserId, null, t.Method, t.OccurredAt);
+            try
+            {
+                return await activation.ActivateAsync(request, ct) switch
+                {
+                    ActivationResult.Activated => ActivationOutcome.Ok,
+                    ActivationResult.TooEarly => "too_early",
+                    ActivationResult.InsufficientBalance => "unpaid",
+                    _ => "not_chargeable",
+                };
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // The failed save leaves its audit row tracked as Added; forget it, or the
+                // next save on this context would insert it against a stamp this request
+                // never made. Then reload and look again — the row may now be a no-show.
+                DetachAdded(db);
+                t = t with { Booking = await FreshAsync(db, t.Booking, ct) };
             }
         }
 
-        return await ActivateOnceAsync(db, activation, t, ct) switch
+        return "not_chargeable";
+    }
+
+    /// <summary>
+    /// How long the box's relay ran for this scan, in whole minutes, from the event's own
+    /// <c>duration_ms</c> — bounded by the relay hard cap and by what was left of the slot
+    /// at the scan, and never less than a minute once the lights came on at all.
+    /// </summary>
+    private static int LitMinutes(ActivationTarget t)
+    {
+        var fromEvent = (int)Math.Ceiling(t.DurationMs / 60_000.0);
+        var scannedAt = t.OccurredAt ?? DateTimeOffset.UtcNow;
+        var remainder = (int)Math.Ceiling((BookingService.OriginalEndsAt(t.Booking) - scannedAt).TotalMinutes);
+        var minutes = fromEvent > 0 ? Math.Min(fromEvent, Math.Max(remainder, 1)) : remainder;
+        return Math.Clamp(minutes, 1, RelayHardCap.Minutes);
+    }
+
+    /// <summary>The row as the database has it now: reloaded in place if still tracked, else read fresh.</summary>
+    private static async Task<Booking> FreshAsync(MainframeDbContext db, Booking booking, CancellationToken ct)
+    {
+        var entry = db.Entry(booking);
+        if (entry.State != EntityState.Detached)
         {
-            ActivationResult.Activated => ActivationOutcome.Ok,
-            ActivationResult.TooEarly => "too_early",
-            ActivationResult.InsufficientBalance => "unpaid",
-            _ => "not_chargeable",
-        };
+            await entry.ReloadAsync(ct);
+            return booking;
+        }
+        return await db.Bookings.FirstAsync(b => b.Id == booking.Id, ct);
+    }
+
+    private static void DetachAdded(MainframeDbContext db)
+    {
+        foreach (var entry in db.ChangeTracker.Entries().Where(e => e.State == EntityState.Added).ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
     }
 
     /// <summary>
@@ -333,7 +421,7 @@ public static class DeviceEventEndpoints
         DeviceEventServices services, Device device, DeviceEventDto e, EventTime time,
         ActivationOutcome? outcome, CancellationToken ct)
     {
-        var (db, tenant, _, _, _) = services;
+        var (db, tenant, _, _, _, _) = services;
 
         var receipt = new DeviceEventReceipt
         {
@@ -500,7 +588,7 @@ public static class DeviceEventEndpoints
         // Straight into the one activation path, so attendance, the audit row and
         // booking.lights_on all come from the place that is allowed to produce them.
         var activated = await ActivateOnceAsync(db, activation,
-            new ActivationTarget(court, ok.Booking, userId.Value, req.Method ?? "qr", OccurredAt: null), ct);
+            new ActivationTarget(court, ok.Booking, userId.Value, req.Method ?? "qr", OccurredAt: null, DurationMs: 0), ct);
         if (activated is not ActivationResult.Activated live)
         {
             return Results.Conflict(new { error = "activation_refused" });
@@ -512,9 +600,10 @@ public static class DeviceEventEndpoints
     /// <summary>
     /// Who is activating what, how and when — the arguments <see cref="ActivateOnceAsync"/>
     /// retries with. <c>OccurredAt</c> is null for a walk-up happening now and the scan's
-    /// own time for an uploaded event.
+    /// own time for an uploaded event; <c>DurationMs</c> is how long the box's relay ran
+    /// for an uploaded event, zero for a walk-up.
     /// </summary>
-    private sealed record ActivationTarget(Court Court, Booking Booking, Guid UserId, string Method, DateTimeOffset? OccurredAt);
+    private sealed record ActivationTarget(Court Court, Booking Booking, Guid UserId, string Method, DateTimeOffset? OccurredAt, long DurationMs);
 
     /// <summary>
     /// Activation that survives its twin. Two retries of one purchase — or two uploads of
@@ -581,6 +670,17 @@ public static class DeviceEventEndpoints
     /// died between the charge and the check-in left the member charged and unstamped, and
     /// activation is idempotent on a live session, so this costs nothing when the first
     /// attempt got that far and repairs it when it did not.
+    ///
+    /// <para>
+    /// <b>A replay grants the remainder, and nothing once the purchase is over</b> (review
+    /// #20). The box reuses a nonce for as long as the same purchase stays undecided and
+    /// a booking code is a stable token for the whole slot, so the same nonce can come
+    /// back an hour later. Answering it with the ORIGINAL length lit the court for that
+    /// long from now — over whoever held the next slots, unpaid. <c>granted_minutes</c>
+    /// on a replay is what is left of the window; a purchase whose window has ended, or
+    /// that is no longer <c>Booked</c>, is <c>409 purchase_ended</c>, and the box shows the
+    /// member the desk.
+    /// </para>
     /// </summary>
     private static async Task<IResult?> ReplayAsync(
         string reference, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
@@ -594,9 +694,15 @@ public static class DeviceEventEndpoints
         var booking = await db.Bookings.FirstOrDefaultAsync(b => b.Id == entry.RelatedBookingId, ct);
         if (booking is null) return null;
 
+        var now = DateTimeOffset.UtcNow;
+        if (booking.Status != BookingStatus.Booked || booking.EndsAt <= now)
+        {
+            return Results.Conflict(new { error = "purchase_ended", booking_id = booking.Id, ended_at = booking.EndsAt });
+        }
+
         var court = await db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
         var activated = await ActivateOnceAsync(db, activation,
-            new ActivationTarget(court, booking, entry.UserId, req.Method ?? "qr", OccurredAt: null), ct);
+            new ActivationTarget(court, booking, entry.UserId, req.Method ?? "qr", OccurredAt: null, DurationMs: 0), ct);
         if (activated is not ActivationResult.Activated)
         {
             return Results.Conflict(new { error = "activation_refused" });
@@ -605,19 +711,25 @@ public static class DeviceEventEndpoints
         // The balance now rather than as it stood after the first attempt: the box shows
         // the member what they have, and a movement between the two attempts is real.
         var balance = await ledger.GetBalanceAsync(entry.UserId, ct);
-        return Results.Ok(Grant(booking, -entry.AmountCredits, balance, replayed: true));
+        return Results.Ok(Grant(booking, -entry.AmountCredits, balance, replayed: true, now));
     }
 
     // Block bodies, not expression bodies, for the two members below. lizard's C# parser
     // mis-scopes an expression-bodied member containing braces and emits a *global*
     // pseudo-function whose reported length is the whole file — see memory/gotchas.md.
-    private static object Grant(Booking booking, decimal amountCredits, decimal balanceAfterCredits, bool replayed)
+    private static object Grant(Booking booking, decimal amountCredits, decimal balanceAfterCredits, bool replayed, DateTimeOffset? now = null)
     {
+        // A fresh purchase is granted what was sold; a replay what is left of it, rounded
+        // up so a member is not cut off ahead of the window they paid for.
+        var sold = (int)(booking.EndsAt - booking.StartsAt).TotalMinutes;
+        var granted = replayed
+            ? Math.Clamp((int)Math.Ceiling((booking.EndsAt - (now ?? DateTimeOffset.UtcNow)).TotalMinutes), 0, sold)
+            : sold;
         return new
         {
             server_unix = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             booking_id = booking.Id,
-            granted_minutes = (int)(booking.EndsAt - booking.StartsAt).TotalMinutes,
+            granted_minutes = granted,
             amount_credits = amountCredits,
             balance_after_credits = balanceAfterCredits,
             replayed,
@@ -666,6 +778,13 @@ public sealed record WalkUpServices(
     LedgerService Ledger);
 
 /// <summary>
+/// One activation as a box reported it, resolved: the court and booking the token named,
+/// the member, how they identified, when the scan happened and how long the relay ran.
+/// The argument of <see cref="DeviceEventEndpoints.ActivateOrReverseAsync"/>.
+/// </summary>
+public sealed record LateActivation(Court Court, Booking Booking, Guid UserId, string Method, DateTimeOffset OccurredAt, long DurationMs);
+
+/// <summary>
 /// The services the event upload needs, bundled — see <see cref="WalkUpServices"/>. The code
 /// resolver and the activation path are what turn an activation event into attendance; the
 /// booking service is what undoes a no-show the sweep settled before the evidence arrived.
@@ -675,7 +794,8 @@ public sealed record DeviceEventServices(
     ITenantContext Tenant,
     AccessCodeService Codes,
     CourtActivationService Activation,
-    BookingService Bookings);
+    BookingService Bookings,
+    TenantSettingsAccessor Settings);
 
 /// <summary>
 /// One event as the box queued it. Names mirror <c>lib/eventq</c>'s wire form. <c>court</c> is

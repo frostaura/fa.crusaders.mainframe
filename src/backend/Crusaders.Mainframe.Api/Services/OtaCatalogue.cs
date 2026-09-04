@@ -77,6 +77,50 @@ public sealed class OtaCatalogue
         _payload = new FirmwarePayload(FirmwarePayload.ResolvePath(config, env.ContentRootPath), logger);
         _discovery = discovery;
         _http = http;
+        RefusePartialSections();
+    }
+
+    /// <summary>
+    /// A partially configured <c>Ota:Stable</c> or <c>Ota:Canary</c> section is a startup
+    /// error, not a silent fallback.
+    ///
+    /// <para>
+    /// Before Phase 5b an unusable section meant "offer nothing"; once Stable fell back to
+    /// the baked manifest it meant "offer the image's own build" — the opposite of what an
+    /// operator setting the override wants, because the override exists to hold the fleet
+    /// on a previous image while a regression is investigated. The shipped
+    /// <c>.env.example</c> template even showed <c>SizeBytes=0</c>, exactly the value that
+    /// made the section unusable (closing re-review #23). Refusing to boot is the only
+    /// answer that cannot be missed.
+    /// </para>
+    /// </summary>
+    private void RefusePartialSections()
+    {
+        foreach (var section in new[] { "Ota:Stable", "Ota:Canary" })
+        {
+            var version = _config[$"{section}:Version"];
+            var url = _config[$"{section}:Url"];
+            var size = _config[$"{section}:SizeBytes"];
+            var any = !string.IsNullOrWhiteSpace(version) || !string.IsNullOrWhiteSpace(url) || !string.IsNullOrWhiteSpace(size);
+            if (!any) continue;
+
+            var usable = long.TryParse(size, out var bytes) && bytes > 0
+                && !string.IsNullOrWhiteSpace(version) && !string.IsNullOrWhiteSpace(url);
+            if (usable && url!.TrimStart().StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                // Same wall as Discovery:AdvertisedBaseUrl: the box fetches with a plain
+                // WiFiClient and has no TLS context, so an https image URL fails every
+                // update on every box with UPDATE FAILED on the glass.
+                throw new InvalidOperationException(
+                    $"{section}:Url is '{url}', but the court box cannot fetch over TLS. Serve the image over http.");
+            }
+            if (usable) continue;
+
+            throw new InvalidOperationException(
+                $"{section} is partially configured (Version='{version}', Url='{url}', SizeBytes='{size}'). " +
+                "An OTA override must carry all three with a positive SizeBytes, or none of them — a half-configured " +
+                "override used to be discarded silently and the fleet was offered the baked image instead.");
+        }
     }
 
     /// <summary>

@@ -203,6 +203,41 @@ public class LightsCueTests
     }
 
     /// <summary>The sweep is idempotent — a second tick must not re-cue.</summary>
+    /// <summary>
+    /// A reversed no-show was cued off at the sweep (NoShow, truncated end); the reversal
+    /// put it back to Booked and checked in. With the cue-off marker already set it was
+    /// never promoted — parked as Booked for ever, never Completed, never anonymised by
+    /// retention. Attended and over is Completed.
+    /// </summary>
+    [Fact]
+    public async Task A_reversed_no_show_that_is_over_is_promoted_to_completed()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var seed = host.NewScope();
+        var booking = await SeedBookingAsync(host, seed, DateTimeOffset.UtcNow.AddMinutes(-30), BookingStatus.NoShow);
+
+        var worker = WorkerFor(host);
+        await worker.TickAsync(default);   // cues the no-show off
+
+        using (var scope = host.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.Bookings.FirstAsync(b => b.Id == booking.Id);
+            Assert.NotNull(row.LightsOffCuedAt);
+            // What ReverseNoShowAsync leaves behind for a slot already over: Booked, checked
+            // in, the cue-off marker still set.
+            row.Status = BookingStatus.Booked;
+            row.CheckedInAt = DateTimeOffset.UtcNow.AddMinutes(-25);
+            await db.SaveChangesAsync();
+        }
+
+        await worker.TickAsync(default);
+
+        using var check = host.NewScope();
+        var after = await check.ServiceProvider.GetRequiredService<MainframeDbContext>().Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
+        Assert.Equal(BookingStatus.Completed, after.Status);
+    }
+
     [Fact]
     public async Task Cueing_off_happens_once()
     {

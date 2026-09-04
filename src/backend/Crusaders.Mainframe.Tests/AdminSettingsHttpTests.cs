@@ -577,4 +577,46 @@ public sealed class AdminSettingsHttpTests
         var engine = await EngineAsync(factory, seeded);
         Assert.Equal(["court:A", "court:B", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"], engine.Buttons.ToWire());
     }
+
+    /// <summary>
+    /// A box with its own button map is not consulted when the club's map is saved: that
+    /// is what lets a four-court box and a one-court annex coexist (closing re-review
+    /// #17). The invariant is per box — the annex is held to ITS map, the main box to the
+    /// club's — and the club's map is refused only for a box that would actually run it.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_box_with_its_own_button_map_does_not_veto_the_clubs_map()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        Assert.True(ButtonMap.TryParse(["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"], out var annexMap, out _));
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.Devices.AddRange(
+                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-1", Name = "Four courts", CourtNumbers = [1, 2, 3, 4] },
+                new Device { TenantId = seeded.TenantId, DeviceCode = "annex", Name = "One court, own map", CourtNumbers = [5], ButtonMapJson = annexMap!.ToJson() });
+            await db.SaveChangesAsync();
+        }
+
+        // The club keeps all four court buttons: the annex runs its own map and is not consulted.
+        var body = Baseline();
+        body["buttonMap"] = new[] { "court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "minutes:60" };
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, body)).StatusCode);
+
+        // A box running the club's map still vetoes a map it cannot honour.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.Devices.Add(new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-2", Name = "Two courts, club map", CourtNumbers = [6, 7] });
+            await db.SaveChangesAsync();
+        }
+        var refused = await client.PutAsJsonAsync(SettingsPath, body);
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("court-box-2", (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("device_code").GetString());
+    }
 }

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Net;
 using System.Text;
 using Crusaders.Mainframe.Api.Biometric;
 using Crusaders.Mainframe.Api.Email;
@@ -10,6 +12,7 @@ using Crusaders.Mainframe.Api.Services;
 using Crusaders.Mainframe.Api.Webhooks;
 using Fido2NetLib;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.RateLimiting;
 using Crusaders.Mainframe.Api.Security.Outbound;
@@ -103,25 +106,85 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddAuthorization();
 
+// ---- Reverse proxy ----
+//
+// Every deployment fronts the API with the nginx gateway (docker-compose.yml: the backend
+// is `expose`d, never published; docker-compose.onprem.yml: host-networked, still fronted
+// by the gateway on :8088). Kestrel therefore sees the gateway's bridge address as the
+// remote peer of every browser request and the gateway's port-less `Host` header. Until
+// the forwarded headers were honoured, two things followed from that: the rate limiter
+// put the whole club in one bucket (closing re-review #7), and every URL composed from
+// the request — the OTA image, provisioning's api_base_url — pointed at port 80, where
+// nothing listens (#8, #18). The middleware below rewrites RemoteIpAddress, Scheme and
+// Host from X-Forwarded-For / -Proto / -Host, and ONLY when the request arrived from a
+// proxy this deployment trusts — anything else could otherwise forge its own client
+// address and escape the limiter, or forge a Host and be handed a URL that points a
+// court box at an attacker.
+//
+// Gateway:TrustedProxies is a list of addresses or CIDR networks. The default is loopback
+// plus the docker bridge pools (172.16.0.0/12), which is where the gateway container
+// stands in both compose files; a club that fronts the API with something else sets it.
+var trustedProxies = builder.Configuration.GetSection("Gateway:TrustedProxies").Get<string[]>()
+    ?? ["127.0.0.1", "::1", "172.16.0.0/12"];
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+    options.KnownProxies.Clear();
+    options.KnownNetworks.Clear();
+    foreach (var entry in trustedProxies)
+    {
+        var text = entry.Trim();
+        if (text.Length == 0) continue;
+        var slash = text.IndexOf('/');
+        if (slash < 0)
+        {
+            options.KnownProxies.Add(IPAddress.Parse(text));
+        }
+        else
+        {
+            options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(
+                IPAddress.Parse(text[..slash]), int.Parse(text[(slash + 1)..], CultureInfo.InvariantCulture)));
+        }
+    }
+});
+
 // ---- Rate limiting ----
 //
-// The application had none. Three surfaces need it for different reasons, so they get
-// three policies rather than one global number:
-//   auth   — password and PIN guessing, which is an unbounded oracle without a limit
-//   device — a court box calls on a schedule; anything faster is a fault or a flood
-//   api    — a backstop so one client cannot saturate an on-prem box at the club
+// The application had none. Four surfaces need it for different reasons, so they get
+// four policies rather than one global number:
+//   auth     — password and PIN guessing, which is an unbounded oracle without a limit
+//   device   — a court box calls on a schedule; anything faster is a fault or a flood
+//   firmware — an anonymous 400 KB download per box per release, and nothing else
+//   api      — a backstop so one client cannot saturate an on-prem box at the club
 //
-// Partitioned by remote address, falling back to a single shared partition when the
-// address is unknown, so a proxy that strips it cannot be used to escape the limit.
+// Partitioned by the client address as the forwarded-headers middleware above resolved
+// it, falling back to a single shared partition when the address is unknown, so a proxy
+// that strips it cannot be used to escape the limit. The auth policy partitions by the
+// authenticated user when there is one: the Court Code page refreshes its ident code on
+// a timer for every member who has it open, and "ten a minute" has to mean per member,
+// not per club. That is why authentication runs BEFORE the limiter — a request with no
+// token costs the JWT handler nothing, and one with a bad token costs one HMAC, so an
+// unauthenticated flood is still refused cheaply and never reaches the database.
+//
+// The ceilings stay deployment configuration (RateLimits:*), not tenant settings: the
+// limiter runs before tenant resolution, and letting a club raise its own ceiling would
+// move a denial-of-service control inside the blast radius it exists to contain.
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    static string PartitionKey(HttpContext ctx)
+    static string ClientKey(HttpContext ctx)
         => ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
+    static string AuthKey(HttpContext ctx)
+    {
+        // By member when there is one, else by client address.
+        var userId = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.Id() : null;
+        return userId is { } id ? $"user:{id:N}" : $"ip:{ClientKey(ctx)}";
+    }
+
     options.AddPolicy(RateLimitPolicies.Auth, ctx =>
-        RateLimitPartition.GetFixedWindowLimiter(PartitionKey(ctx), _ => new FixedWindowRateLimiterOptions
+        RateLimitPartition.GetFixedWindowLimiter(AuthKey(ctx), _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = builder.Configuration.GetValue("RateLimits:AuthPerMinute", 10),
             Window = TimeSpan.FromMinutes(1),
@@ -129,7 +192,7 @@ builder.Services.AddRateLimiter(options =>
         }));
 
     options.AddPolicy(RateLimitPolicies.Device, ctx =>
-        RateLimitPartition.GetFixedWindowLimiter(PartitionKey(ctx), _ => new FixedWindowRateLimiterOptions
+        RateLimitPartition.GetFixedWindowLimiter(ClientKey(ctx), _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = builder.Configuration.GetValue("RateLimits:DevicePerMinute", 120),
             Window = TimeSpan.FromMinutes(1),
@@ -137,7 +200,7 @@ builder.Services.AddRateLimiter(options =>
         }));
 
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
-        RateLimitPartition.GetFixedWindowLimiter(PartitionKey(ctx), _ => new FixedWindowRateLimiterOptions
+        RateLimitPartition.GetFixedWindowLimiter(ClientKey(ctx), _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = builder.Configuration.GetValue("RateLimits:GlobalPerMinute", 600),
             Window = TimeSpan.FromMinutes(1),
@@ -275,6 +338,27 @@ if (app.Environment.IsDevelopment())
     catch (Exception ex) { logger.LogError(ex, "Seed failed (non-fatal in dev)"); }
 }
 
+app.UseForwardedHeaders();
+
+// A court box cannot speak TLS (plain WiFiClient, no heap for a TLS context), so an
+// https AdvertisedBaseUrl hands every box an OTA and provisioning URL it can never
+// open. DiscoveryOptions refuses it at startup unless the deployment has explicitly
+// opted into the downgrade; either way the operator hears about it here, once, loudly.
+{
+    var discovery = app.Services.GetRequiredService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions>();
+    if (discovery.AdvertisedBaseUrlDowngradedFromHttps)
+    {
+        app.Logger.LogWarning(
+            "Discovery:AdvertisedBaseUrl was configured as https and has been downgraded to {Url}: the court box cannot fetch over TLS. " +
+            "Set Discovery:AdvertisedBaseUrl to the http gateway address to silence this.", discovery.AdvertisedBaseUrl);
+    }
+}
+
+// Fail fast on a half-configured Ota:* override rather than serve the baked image in its
+// place: the override exists to halt a rollout, and silently ignoring it is the one thing
+// it must never do. Construction validates; see OtaCatalogue.
+app.Services.GetRequiredService<OtaCatalogue>();
+
 app.UseCors();
 
 // Serve uploaded media. The /uploads/ path is in the tenant-resolution anonymous prefix list
@@ -290,6 +374,11 @@ app.UseCors();
     });
 }
 
+// Authentication before the limiter, so the auth policy can partition by member — see
+// the rate-limiting section above for why that is cheap. The forwarded-headers rewrite
+// comes first of all: every later decision about "who is calling" reads what it wrote.
+app.UseAuthentication();
+app.UseRateLimiter();
 // Serve the court-box firmware baked into this image (Dockerfile: COPY firmware-payload/
 // /app/firmware/) at /firmware/. Anonymous and pull-only on purpose: the box fetches with
 // ESPhttpUpdate — a plain GET carrying x-ESP8266-* headers and no device signature — and
@@ -299,6 +388,12 @@ app.UseCors();
 // PhysicalFileProvider refuses '..'. The directory is decided in one place,
 // FirmwarePayload.ResolvePath, so OtaCatalogue reads the manifest from the directory
 // this serves. Nothing here touches /uploads.
+//
+// Mounted AFTER the rate limiter, behind its own modest per-address ceiling
+// (RateLimits:FirmwarePerMinute). A box fetches one image per release; an anonymous
+// 400 KB download nothing throttled was the one unmetered surface on a host-networked
+// on-prem box. The static-file middleware is not an endpoint, so the policy is applied
+// as a second limiter on this branch rather than as endpoint metadata.
 {
     var firmwareRoot = FirmwarePayload.ResolvePath(builder.Configuration, builder.Environment.ContentRootPath);
     if (Directory.Exists(firmwareRoot))
@@ -309,16 +404,40 @@ app.UseCors();
                 [".bin"] = "application/octet-stream",
                 [".json"] = "application/json",
             });
-        app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
-        {
-            FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(firmwareRoot),
-            RequestPath = FirmwarePayload.RequestPath,
-            ContentTypeProvider = firmwareTypes,
-            ServeUnknownFileTypes = false,
-            // A box fetches an image once per update, so caching buys nothing and a proxy
-            // holding a stale image across a redeploy would cost a release.
-            OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "public, max-age=300",
-        });
+        var firmwarePerMinute = builder.Configuration.GetValue("RateLimits:FirmwarePerMinute", 10);
+        app.UseWhen(
+            ctx => ctx.Request.Path.StartsWithSegments(FirmwarePayload.RequestPath),
+            branch =>
+            {
+                branch.UseRateLimiter(new RateLimiterOptions
+                {
+                    RejectionStatusCode = StatusCodes.Status429TooManyRequests,
+                    GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+                        RateLimitPartition.GetFixedWindowLimiter(
+                            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                            _ => new FixedWindowRateLimiterOptions
+                            {
+                                PermitLimit = firmwarePerMinute,
+                                Window = TimeSpan.FromMinutes(1),
+                                QueueLimit = 0,
+                            })),
+                    OnRejected = (ctx, _) =>
+                    {
+                        ctx.HttpContext.Response.Headers.RetryAfter = "60";
+                        return ValueTask.CompletedTask;
+                    },
+                });
+                branch.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
+                {
+                    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(firmwareRoot),
+                    RequestPath = FirmwarePayload.RequestPath,
+                    ContentTypeProvider = firmwareTypes,
+                    ServeUnknownFileTypes = false,
+                    // A box fetches an image once per update, so caching buys nothing and a proxy
+                    // holding a stale image across a redeploy would cost a release.
+                    OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "public, max-age=300",
+                });
+            });
     }
     else
     {
@@ -326,8 +445,6 @@ app.UseCors();
     }
 }
 
-app.UseRateLimiter();
-app.UseAuthentication();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthorization();
 

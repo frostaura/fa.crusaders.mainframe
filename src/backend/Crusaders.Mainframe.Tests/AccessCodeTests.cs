@@ -23,6 +23,25 @@ internal static class TestAccessCodes
         return (await codes.MintIdentAsync(userId, lifetime ?? TimeSpan.FromSeconds(60), default)).Code;
     }
 
+    /// <summary>A live booking-activation code for <paramref name="bookingId"/>, as the roster would push it.</summary>
+    public static async Task<string> InsertBookingCodeAsync(IServiceProvider services, Guid tenantId, Guid userId, Guid bookingId)
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var row = new AccessCode
+        {
+            TenantId = tenantId,
+            Code = AccessCodeService.NewCode(),
+            Purpose = AccessCodePurpose.BookingActivation,
+            UserId = userId,
+            BookingId = bookingId,
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(2),
+        };
+        db.AccessCodes.Add(row);
+        await db.SaveChangesAsync();
+        return row.Code;
+    }
+
     /// <summary>A well-formed code whose lifetime is already over.</summary>
     public static async Task<string> InsertExpiredAsync(IServiceProvider services, Guid tenantId, Guid userId)
     {

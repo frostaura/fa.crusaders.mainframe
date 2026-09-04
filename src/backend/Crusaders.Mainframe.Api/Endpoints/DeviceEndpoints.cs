@@ -120,10 +120,11 @@ public static class DeviceEndpoints
             device_code = device.DeviceCode,
             // The courts this box drives, in relay order: index 0 = relay A … index
             // 3 = relay D. Replaces the old single court_number — one physical box
-            // serves up to four courts (review C4). The button map below is
-            // guaranteed to fit this list: both are checked against each other at
-            // the moment an admin saves either one (ButtonMap.FirstSelectionBeyond),
-            // so nothing here has to warn about a button that selects nothing.
+            // serves up to four courts (review C4). The button map below is the
+            // EFFECTIVE one for this box — its own override, else the club's — and
+            // is guaranteed to fit this list: the pair is checked at the moment an
+            // admin saves either one (ButtonMap.FirstSelectionBeyond), so nothing
+            // here has to warn about a button that selects nothing.
             court_numbers = device.CourtNumbers,
             heartbeat_seconds = s.HeartbeatSeconds,
             ota = offerUpdate
@@ -141,8 +142,9 @@ public static class DeviceEndpoints
                 // What each of the eight buttons does, by physical position. Sent on
                 // every heartbeat rather than only when it changes: a box that
                 // rebooted and missed the change would otherwise open the wrong
-                // court until somebody edited the setting again.
-                button_map = s.Buttons.ToWire(),
+                // court until somebody edited the setting again. Same wire shape
+                // whether the map is the box's own or the club's.
+                button_map = ButtonMap.EffectiveFor(device.ButtonMapJson, s.Buttons).ToWire(),
             },
             roster,
         });

@@ -92,24 +92,37 @@ public static class AdminDeviceDiscoveryEndpoints
     private static async Task<IResult> ClaimAsync(
         ClaimBoardRequest req, DeviceDiscoveryService discovery, HttpContext ctx, CancellationToken ct)
     {
+        ButtonMap? buttons = null;
+        if (req.ButtonMap is not null && !ButtonMap.TryParse(req.ButtonMap, out buttons, out var reason))
+        {
+            return Results.BadRequest(new { error = "button_map_invalid", message = reason });
+        }
+
         var result = await discovery.ClaimAsync(
-            new ClaimBoardCommand(req.ClaimCode ?? string.Empty, req.DeviceCode ?? string.Empty, req.Name ?? string.Empty, req.CourtNumbers),
+            new ClaimBoardCommand(req.ClaimCode ?? string.Empty, req.DeviceCode ?? string.Empty, req.Name ?? string.Empty, req.CourtNumbers, buttons),
             ctx.User.Id() ?? Guid.Empty, ct);
 
         if (!result.Succeeded) return Refused(result);
 
         // The key is shown once, exactly as on manual registration — it is derived, not
-        // stored, so there is nothing to read back. Pushing it to the board is a separate,
-        // explicit step: the address came from an unauthenticated UDP packet, and the
-        // outbound guard's private-network allow-list is what stands between this API and
-        // being used to POST at arbitrary LAN addresses.
+        // stored, so there is nothing to read back. The board collects it itself through
+        // the grant the claim issued; the copy here is the admin's record of what was
+        // issued, rendered until dismissed. Pushing it to the board is never done: the
+        // address came from an unauthenticated UDP packet, and the outbound guard's
+        // private-network allow-list is what stands between this API and being used to
+        // POST at arbitrary LAN addresses.
         return Results.Ok(new
         {
             device = DeviceView.Of(result.Registration!.Device),
             device_key = result.Registration.DeviceKey,
             key_version = result.Registration.Device.KeyVersion,
             board = DiscoveredBoardView.Of(result.Board!),
-            note = "Store this key on the board now. It is derived, not stored, and cannot be shown again.",
+            // True when this board already had a row here (revoked, reflashed, or key lost)
+            // and was re-keyed rather than registered twice.
+            reclaimed = result.Reclaimed,
+            note = result.Reclaimed
+                ? "This board was already registered here; its row has been re-keyed and re-enabled. The board collects the new key on its next announce."
+                : "Store this key on the board now. It is derived, not stored, and cannot be shown again.",
         });
     }
 
@@ -117,12 +130,10 @@ public static class AdminDeviceDiscoveryEndpoints
     {
         return result.Failure switch
         {
-            ClaimFailure.BoardAlreadyRegistered => Results.Conflict(new
+            ClaimFailure.CourtNumberNotFound => Results.BadRequest(new
             {
-                error = "board_already_registered",
-                message = $"This board is already registered as '{result.Detail}'. Rotate that device's key rather " +
-                          "than registering it a second time — two rows for one board both derive working keys.",
-                device_code = result.Detail,
+                error = DeviceRegistryService.CourtNumberNotFound,
+                message = "One of the court numbers is not a court at this club. Check the courts page.",
             }),
             ClaimFailure.InvalidClaimCode => Results.BadRequest(new
             {
@@ -137,7 +148,7 @@ public static class AdminDeviceDiscoveryEndpoints
             ClaimFailure.ButtonMapMismatch => Results.BadRequest(new
             {
                 error = ButtonMap.SelectsCourtBeyondDeviceCourts,
-                message = "The club's button map selects a court this board would not drive. Give the board that many courts, or change the button map first.",
+                message = "The button map this board would run selects a court it would not drive. Give the board that many courts, or give it its own button map.",
             }),
             ClaimFailure.NoMatch => Results.NotFound(new
             {
@@ -152,7 +163,7 @@ public static class AdminDeviceDiscoveryEndpoints
             ClaimFailure.BoardAlreadyClaimed => Results.Conflict(new
             {
                 error = "board_already_claimed",
-                message = "That board is already claimed. Revoke its device first, then reboot it to generate a new claim code.",
+                message = "That board is already claimed and still holds a working key. Rotate or revoke its device, then reboot it: it will show a new claim code and can be connected again.",
             }),
             _ => Results.Conflict(new { error = "device_code_taken" }),
         };
@@ -174,7 +185,9 @@ public sealed record ClaimBoardRequest(
     [property: JsonPropertyName("device_code")] string? DeviceCode,
     [property: JsonPropertyName("name")] string? Name,
     /// <summary>In relay order: the first entry is the court on relay A. See <c>Device.CourtNumbers</c>.</summary>
-    [property: JsonPropertyName("court_numbers")] IReadOnlyList<int>? CourtNumbers);
+    [property: JsonPropertyName("court_numbers")] IReadOnlyList<int>? CourtNumbers,
+    /// <summary>This box's own eight-entry button map, or omitted/null to run the club's.</summary>
+    [property: JsonPropertyName("button_map")] IReadOnlyList<string>? ButtonMap = null);
 
 /// <summary>
 /// The wire shape of a discovered board.

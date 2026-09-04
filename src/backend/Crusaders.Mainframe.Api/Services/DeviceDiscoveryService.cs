@@ -17,21 +17,23 @@ public enum ClaimFailure
     BoardAlreadyClaimed,
     DeviceCodeTaken,
 
-    /// <summary>This physical board already has a row in this tenant, matched by MAC.</summary>
-    BoardAlreadyRegistered,
-
     /// <summary>
-    /// The tenant's button map has a court button this board's court list cannot honour.
+    /// The map this board would run has a court button its court list cannot honour.
     /// See <see cref="ButtonMap.FirstSelectionBeyond"/>.
     /// </summary>
     ButtonMapMismatch,
+
+    /// <summary>The court list names a court this club does not have.</summary>
+    CourtNumberNotFound,
 }
 
 /// <summary>
 /// The claim code read off the board's LCD, plus the registration details for the row it
-/// will create. <paramref name="CourtNumbers"/> is in relay order — see <see cref="Device.CourtNumbers"/>.
+/// will create. <paramref name="CourtNumbers"/> is in relay order — see <see cref="Device.CourtNumbers"/>;
+/// <paramref name="ButtonMap"/> is this box's own map, or null to run the club's.
 /// </summary>
-public sealed record ClaimBoardCommand(string ClaimCode, string DeviceCode, string Name, IReadOnlyList<int>? CourtNumbers);
+public sealed record ClaimBoardCommand(
+    string ClaimCode, string DeviceCode, string Name, IReadOnlyList<int>? CourtNumbers, ButtonMap? ButtonMap = null);
 
 public sealed record ClaimResult(
     ClaimFailure Failure,
@@ -40,6 +42,9 @@ public sealed record ClaimResult(
     DeviceRegistration? Registration)
 {
     public bool Succeeded => Failure == ClaimFailure.None;
+
+    /// <summary>True when the claim re-keyed a row this club already held for the board's MAC.</summary>
+    public bool Reclaimed { get; init; }
 }
 
 /// <summary>
@@ -108,41 +113,42 @@ public sealed class DeviceDiscoveryService
         var invalid = Validate(cmd);
         if (invalid is not null) return await RefuseAsync(invalid.Value, null, cmd, actorUserId, ct);
 
-        // The same check manual registration makes: a board the tenant's button map
-        // cannot address is refused before any board is matched, so the admin is told
-        // about the map rather than left with a claimed box whose buttons select nothing.
-        if (await _devices.CourtAssignmentErrorAsync(cmd.CourtNumbers!, ct) is not null)
-        {
-            return await RefuseAsync(ClaimFailure.ButtonMapMismatch, null, cmd, actorUserId, ct);
-        }
-
         var announcers = _store.Snapshot();
         var (failure, board) = Match(announcers, cmd.ClaimCode.Trim());
         if (failure != ClaimFailure.None) return await RefuseAsync(failure, board, cmd, actorUserId, ct);
 
-        if (await _devices.DeviceCodeTakenAsync(cmd.DeviceCode.Trim(), ct))
-        {
-            return await RefuseAsync(ClaimFailure.DeviceCodeTaken, board, cmd, actorUserId, ct);
-        }
-
-        // A board that was reflashed, or whose key was lost, announces st=unclaimed with no
-        // device id — indistinguishable from a new board except by its MAC. Registering it
-        // again would leave two rows for one piece of hardware, both deriving working keys,
-        // both looking legitimate. The answer is to rotate the existing row's key, not to
-        // create a second one, so this refuses and says which row already owns the board.
+        // A board that was reflashed, revoked, or whose key was lost announces st=unclaimed
+        // with no device id — indistinguishable from a new board except by its MAC.
+        // Registering it again would leave two rows for one piece of hardware, both
+        // deriving working keys. Refusing used to be the answer, and it made a revoked box
+        // permanently unregistrable (review #9/#10). So a MAC this club already owns is
+        // RE-KEYED: same row, bumped key version, un-revoked, this claim's name and courts.
         var existing = await _devices.FindByMacAddressAsync(board!.Mac, ct);
-        if (existing is not null)
+
+        var codeTaken = existing is null
+            ? await _devices.DeviceCodeTakenAsync(cmd.DeviceCode.Trim(), ct)
+            : await _devices.DeviceCodeTakenAsync(cmd.DeviceCode.Trim(), existing.Id, ct);
+        if (codeTaken) return await RefuseAsync(ClaimFailure.DeviceCodeTaken, board, cmd, actorUserId, ct);
+
+        // The same check manual registration makes, against the map this box would run:
+        // a box whose court buttons reach past its list is refused with the map named,
+        // rather than handed a key and left with buttons that select nothing.
+        var assignment = await _devices.CourtAssignmentErrorAsync(cmd.CourtNumbers!, cmd.ButtonMap, existing?.ButtonMapJson, ct);
+        if (assignment is not null)
         {
-            return await RefuseAsync(
-                ClaimFailure.BoardAlreadyRegistered, board, cmd, actorUserId, ct,
-                detail: existing.DeviceCode);
+            var reason = assignment == DeviceRegistryService.CourtNumberNotFound
+                ? ClaimFailure.CourtNumberNotFound
+                : ClaimFailure.ButtonMapMismatch;
+            return await RefuseAsync(reason, board, cmd, actorUserId, ct);
         }
 
-        var registration = await _devices.RegisterAsync(
-            new RegisterDeviceCommand(
-                cmd.DeviceCode, cmd.Name, DeviceKind.CourtBox, HardwareOf(board.Hardware), cmd.CourtNumbers, null)
-            { MacAddress = board.Mac },
-            actorUserId, ct);
+        var command = new RegisterDeviceCommand(
+            cmd.DeviceCode, cmd.Name, DeviceKind.CourtBox, HardwareOf(board.Hardware), cmd.CourtNumbers, null)
+        { MacAddress = board.Mac, ButtonMap = cmd.ButtonMap };
+
+        var registration = existing is null
+            ? await _devices.RegisterAsync(command, actorUserId, ct)
+            : await _devices.ReclaimAsync(existing, command, actorUserId, ct);
 
         _store.MarkClaimed(board.Mac, registration.Device.Id, registration.Device.TenantId);
 
@@ -170,10 +176,12 @@ public sealed class DeviceDiscoveryService
             address = board.Address,
             hardware = board.Hardware,
             firmware = board.Firmware,
+            reclaimed = existing is not null,
+            key_version = registration.Device.KeyVersion,
         });
         await _db.SaveChangesAsync(ct);
 
-        return new ClaimResult(ClaimFailure.None, null, board, registration);
+        return new ClaimResult(ClaimFailure.None, null, board, registration) { Reclaimed = existing is not null };
     }
 
     /// <summary>

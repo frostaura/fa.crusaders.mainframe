@@ -946,8 +946,9 @@ public sealed class DeviceEventHttpTests
     /// "not chargeable" — the member who played kept the refund, paid the penalty, and the
     /// ledger said they never came. Late evidence now reverses the settlement: two new
     /// rows, the row <c>Booked</c> and checked in at the scan, the balance back where the
-    /// charge left it. <c>EndsAt</c> stays where the sweep truncated it — the released tail
-    /// may have been resold, and the lights already ran from the box's own timer.
+    /// charge left it. <c>EndsAt</c> is restored to the end the member paid for — the
+    /// lights ran that long from the box's own timer, and a truncated end left the tail
+    /// sellable at the box while the court was lit (decision 2026-09-04, review #16).
     /// </summary>
     [SkippableFact]
     public async Task Late_activation_after_the_sweep_reverses_the_no_show()
@@ -974,7 +975,9 @@ public sealed class DeviceEventHttpTests
         Assert.Equal(BookingStatus.Booked, reversed.Status);
         Assert.NotNull(reversed.CheckedInAt);
         Assert.InRange(reversed.CheckedInAt!.Value, before.AddMinutes(-5), after.AddMinutes(-5));
-        Assert.Equal(swept.EndsAt, reversed.EndsAt);
+        Assert.True(reversed.EndsAt > swept.EndsAt, "the truncated end is restored");
+        Assert.Equal(BookingService.OriginalEndsAt(reversed), reversed.EndsAt);
+        Assert.Null(reversed.LightsOffCuedAt);   // the real lights-off is still ahead; the cue worker fires it once
 
         await AssertReversedLedgerAsync(factory, booked.BookingId);
         Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
@@ -1085,14 +1088,15 @@ public sealed class DeviceEventHttpTests
 
     /// <summary>
     /// A box's clock is the server's clock minus how long ago its uptime says the event
-    /// was — and <c>millis()</c> resets on every power blink while the queue does not. An
-    /// event claiming to be ahead of the upload, or older than any roster the box could
-    /// have trusted, is judged at the upload instead, and the claim is kept on an audit row
-    /// so the desk can see the counter is broken.
+    /// was. Two claims are not believed: a scan in the FUTURE (the queue outlived a reboot
+    /// and carries a previous boot's uptime), and one past the thirty-day sanity bound.
+    /// Both are judged at the upload instead and the claim is kept on an audit row so the
+    /// desk can see the counter is broken. Anything in between — hours, a day — is the
+    /// outage the queue exists for and is believed; see the twenty-hour test below.
     /// </summary>
     [SkippableTheory]
-    [InlineData(600_000L, 900_000L)]       // ahead of the upload: the queue outlived a reboot
-    [InlineData(30_000_000L, 0L)]          // eight hours behind it: older than the roster's six-hour trust
+    [InlineData(600_000L, 900_000L)]                 // ahead of the upload: the queue outlived a reboot
+    [InlineData(3_000_000_000L, 0L)]                 // thirty-five days behind it: past the sanity bound
     public async Task Activation_event_with_a_wild_occurred_at_is_clamped_and_audited(long batchUptime, long eventUptime)
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
@@ -1118,6 +1122,478 @@ public sealed class DeviceEventHttpTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var receipt = await db.DeviceEventReceipts.IgnoreQueryFilters().SingleAsync(r => r.DeviceId == box.DeviceId);
         Assert.InRange(receipt.OccurredAt, before, after);
+    }
+
+    /// <summary>
+    /// The long outage — the case the six-hour clamp destroyed (closing re-review #6/#7).
+    /// Router dies at 17:30, the box admits the evening from its roster, the router is
+    /// fixed the next afternoon. The member's slot ended nineteen hours before the upload
+    /// and was swept as a no-show; the roster code expired at slot end plus grace. Judged
+    /// at the upload the code is dead and the event resolves to nothing — refunded,
+    /// penalised, a no-show for a court they played on. Judged at the scan, which is
+    /// what the arithmetic says and what the box's server-derived clock makes exact, the
+    /// code is live and the no-show is reversed.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activation_uploaded_twenty_hours_late_for_a_booking_swept_nineteen_hours_ago_is_reversed()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        // Started 20h05m ago, ran 45 minutes: over since 19h20m ago, code dead since 19h15m ago.
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -(20 * 60 + 5));
+        await SweepAsync(factory);
+        var swept = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.NoShow, swept.Status);
+
+        var mail = new StubEmailService();
+        await using var quiet = Quiet(factory, mail);
+
+        // The box has been up 22 hours; the scan was 20 hours ago, five minutes into the slot.
+        const long batchUptime = 22L * 3600 * 1000;
+        const long scannedAgoMs = 20L * 3600 * 1000;
+        var before = DateTimeOffset.UtcNow;
+        var response = await quiet.CreateClient().SendAsync(Signed(box, EventsPath,
+            BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: batchUptime - scannedAgoMs))));
+        var after = DateTimeOffset.UtcNow;
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var reversed = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.Booked, reversed.Status);
+        Assert.NotNull(reversed.CheckedInAt);
+        Assert.InRange(reversed.CheckedInAt!.Value, before.AddMilliseconds(-scannedAgoMs), after.AddMilliseconds(-scannedAgoMs));
+
+        await AssertReversedLedgerAsync(factory, booked.BookingId);
+        Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_reversed_no_show"));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "device.activation_unresolved"));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "device.event_time_clamped"));
+        Assert.Contains(mail.Sent, m => m.Subject.StartsWith("No-show reversed", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The cue gate applies on the reversal branch too: a box that admitted a member half
+    /// an hour before the window opened and then lost the link for a day is reporting a
+    /// scan that broke the rule, not one that kept it.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_late_activation_scanned_ahead_of_the_cue_window_does_not_reverse_the_sweep()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -60);
+        await SweepAsync(factory);
+
+        // Scanned 100 minutes ago: forty minutes before a slot that started sixty ago.
+        const long batchUptime = 4_000_000;
+        var response = await factory.CreateClient().SendAsync(Signed(box, EventsPath,
+            BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: batchUptime - 100 * 60_000))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var booking = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.NoShow, booking.Status);
+        Assert.Null(booking.CheckedInAt);
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_too_early"));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.no_show_reversed"));
+    }
+
+    // ---- the resold tail (closing re-review #16) ------------------------------------
+
+    /// <summary>
+    /// A second booking on a court the first member was still playing on, so the box
+    /// cannot lie about it. Written directly, at a start inside the tail the sweep released.
+    /// </summary>
+    private static async Task<Booked> BookOnTailAsync(
+        TestWebAppFactory factory, Box box, Guid userId, double startsInMinutes, int minutes, BookingStatus status = BookingStatus.Booked)
+    {
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(box.TenantId, box.Slug);
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var startsAt = DateTimeOffset.UtcNow.AddMinutes(startsInMinutes);
+        var booking = new Booking
+        {
+            TenantId = box.TenantId,
+            CourtId = box.CourtIds[1],
+            UserId = userId,
+            BookedByUserId = userId,
+            PaidByUserId = userId,
+            ActorUserId = userId,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(minutes),
+            SliceMinutes = 15,
+            SliceCount = Math.Max(1, minutes / 15),
+            AmountChargedCredits = 8m * Math.Max(1, minutes / 15),
+            Status = status,
+            ChargedAt = DateTimeOffset.UtcNow,
+        };
+        db.Bookings.Add(booking);
+        db.LedgerEntries.Add(new LedgerEntry
+        {
+            TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.BookingCharge,
+            AmountCredits = -booking.AmountChargedCredits, ActorUserId = userId, RelatedBookingId = booking.Id, Reason = "seed charge",
+        });
+        if (status == BookingStatus.NoShow)
+        {
+            // As the sweep would have left it: refunded in full, penalised 30%.
+            db.LedgerEntries.Add(new LedgerEntry
+            {
+                TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.CancellationRefund,
+                AmountCredits = booking.AmountChargedCredits, ActorUserId = Guid.Empty, RelatedBookingId = booking.Id, Reason = "No-show — booking refunded",
+            });
+            db.LedgerEntries.Add(new LedgerEntry
+            {
+                TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.NoShowPenalty,
+                AmountCredits = -Math.Round(booking.AmountChargedCredits * 0.3m, 2), ActorUserId = Guid.Empty, RelatedBookingId = booking.Id, Reason = "No-show penalty",
+            });
+        }
+        await db.SaveChangesAsync();
+        return new Booked(booking.Id, "");
+    }
+
+    /// <summary>A second funded member of the box's club.</summary>
+    private static async Task<Guid> AnotherMemberAsync(TestWebAppFactory factory, Box box, decimal credits = 200m)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var other = new User { TenantId = box.TenantId, Email = $"other-{Guid.NewGuid():N}@test.local", PasswordHash = "x", EmailVerified = true };
+        db.Users.Add(other);
+        db.Memberships.Add(new Membership
+        {
+            TenantId = box.TenantId, UserId = other.Id, FullName = "Second Buyer",
+            MembershipNumber = $"o-{Guid.NewGuid():N}"[..20], Status = MembershipStatus.Active, MemberClass = MemberClass.Regular,
+        });
+        db.LedgerEntries.Add(new LedgerEntry
+        {
+            TenantId = box.TenantId, UserId = other.Id, Type = LedgerEntryType.TopUp, AmountCredits = credits, ActorUserId = other.Id, Reason = "seed",
+        });
+        await db.SaveChangesAsync();
+        return other.Id;
+    }
+
+    /// <summary>
+    /// The sweep released A's tail and B bought part of it; A's late event then reverses
+    /// A's no-show. B arrived to a lit court with A on it. B is displaced: cancelled with
+    /// the whole charge back as its own row (reason ResoldTailRefunded), no penalty, an
+    /// audit row, an email, a booking.displaced event — and A's end is restored, so the
+    /// tail is not sold a second time at the box while A is still lit. A row the sweep had
+    /// already settled (C) gets its penalty back instead of a second refund.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_late_activation_displaces_bookings_sold_on_the_released_tail()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (booked, swept) = await SweptNoShowAsync(factory, box);   // A: started -10, 45 min, tail [now, +35) released
+        var buyer = await AnotherMemberAsync(factory, box);
+        var b = await BookOnTailAsync(factory, box, buyer, startsInMinutes: 20, minutes: 15);                       // Booked, charged 8
+        var c = await BookOnTailAsync(factory, box, buyer, startsInMinutes: 1, minutes: 15, status: BookingStatus.NoShow); // swept: refunded 8, penalised 2.40
+        var buyerBefore = await BalanceAsync(factory, buyer);
+
+        var mail = new StubEmailService();
+        await using var quiet = Quiet(factory, mail);
+        var response = await quiet.CreateClient().SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var a = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.Booked, a.Status);
+        Assert.Equal(BookingService.OriginalEndsAt(a), a.EndsAt);
+        Assert.True(a.EndsAt > swept.EndsAt);
+
+        var displacedB = await BookingAsync(factory, b.BookingId);
+        Assert.Equal(BookingStatus.Cancelled, displacedB.Status);
+        Assert.True(displacedB.CancellationPenaltyWaived);
+        Assert.Equal(BookingService.ResoldTailRefunded, displacedB.CancellationReason);
+        var refundB = Assert.Single(await LedgerAsync(factory, b.BookingId), l => l.Type == LedgerEntryType.CancellationRefund);
+        Assert.Equal(8m, refundB.AmountCredits);
+        Assert.Contains(BookingService.ResoldTailRefunded, refundB.Reason);
+        Assert.Equal(BookingService.DisplacedReference(a.Id, b.BookingId), refundB.ExternalReference);
+
+        var displacedC = await BookingAsync(factory, c.BookingId);
+        Assert.Equal(BookingStatus.Cancelled, displacedC.Status);
+        var penaltiesC = (await LedgerAsync(factory, c.BookingId)).Where(l => l.Type == LedgerEntryType.NoShowPenalty).ToList();
+        Assert.Equal(2, penaltiesC.Count);
+        Assert.Equal(0m, penaltiesC.Sum(l => l.AmountCredits));
+        Assert.Single(await LedgerAsync(factory, c.BookingId), l => l.Type == LedgerEntryType.CancellationRefund);   // the sweep's; not a second one
+
+        // B's charge back, C's penalty back: the buyer is where they started.
+        Assert.Equal(buyerBefore + 8m + 2.40m, await BalanceAsync(factory, buyer));
+
+        Assert.Equal(2, (await AuditAsync(factory, box.TenantId, "booking.displaced")).Count);
+        var reversal = Assert.Single(await AuditAsync(factory, box.TenantId, "booking.no_show_reversed"));
+        Assert.Contains(b.BookingId.ToString(), reversal.DetailsJson);
+        Assert.Contains(c.BookingId.ToString(), reversal.DetailsJson);
+        Assert.Equal(2, mail.Sent.Count(m => m.Subject.StartsWith("Booking refunded", StringComparison.Ordinal)));
+
+        // A's own reversal is untouched by the displacement rows.
+        await AssertReversedLedgerAsync(factory, booked.BookingId);
+    }
+
+    /// <summary>
+    /// A booking on the tail that somebody DID check in on is not displaced — two people
+    /// cannot both have played and the ledger is not the place to guess — and A's end is
+    /// restored only up to it.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_checked_in_booking_on_the_tail_survives_and_bounds_the_restored_end()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (booked, _) = await SweptNoShowAsync(factory, box);
+        var buyer = await AnotherMemberAsync(factory, box);
+        var d = await BookOnTailAsync(factory, box, buyer, startsInMinutes: 20, minutes: 15);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.Bookings.IgnoreQueryFilters().SingleAsync(x => x.Id == d.BookingId);
+            row.CheckedInAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+
+        await using var quiet = Quiet(factory, new StubEmailService());
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+
+        var a = await BookingAsync(factory, booked.BookingId);
+        var survivor = await BookingAsync(factory, d.BookingId);
+        Assert.Equal(BookingStatus.Booked, survivor.Status);
+        Assert.Equal(BookingStatus.Booked, a.Status);
+        Assert.Equal(survivor.StartsAt, a.EndsAt);
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.displaced"));
+        Assert.Contains(d.BookingId.ToString(), Assert.Single(await AuditAsync(factory, box.TenantId, "booking.no_show_reversed")).DetailsJson);
+    }
+
+    // ---- a cancelled booking lit from a stale roster (closing re-review #21) ---------
+
+    private static async Task CancelAsync(TestWebAppFactory factory, Box box, Guid bookingId)
+    {
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(box.TenantId, box.Slug);
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var result = await bookings.CancelAsync(bookingId, Guid.NewGuid(), actorIsAdmin: true, waivePenalty: true, default);
+        Assert.IsType<CancellationResult.Ok>(result);
+    }
+
+    /// <summary>
+    /// Book, cancel (full refund), walk in during a WiFi drop: the box's roster still
+    /// carries the code and lights the court for the slot. "Nothing back once the lights
+    /// have been on" — the lit time is charged pro rata as a LightsPurchase, separate from
+    /// the refund, audited as activation_after_cancel, once per booking, and the member
+    /// is told. The refund itself is never edited.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activation_for_a_booking_cancelled_after_its_code_was_pushed_charges_the_lit_time()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);   // 45 min, 24 credits
+        await CancelAsync(factory, box, booked.BookingId);
+        Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));   // charged 24, refunded 24
+
+        var mail = new StubEmailService();
+        await using var quiet = Quiet(factory, mail);
+        var client = quiet.CreateClient();
+
+        // The box ran the relay for the 45-minute grant its roster carried.
+        var response = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
+
+        var booking = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.Cancelled, booking.Status);
+        Assert.Null(booking.CheckedInAt);
+
+        var ledger = await LedgerAsync(factory, booked.BookingId);
+        var lit = Assert.Single(ledger, l => l.Type == LedgerEntryType.LightsPurchase);
+        Assert.Equal(-24m, lit.AmountCredits);                                     // 45 min at 8 credits / 15 min
+        Assert.Equal(BookingService.CancelledLightsReference(booked.BookingId), lit.ExternalReference);
+        Assert.Single(ledger, l => l.Type == LedgerEntryType.CancellationRefund);   // the refund stands, un-netted
+        Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_after_cancel"));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_charged"));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "device.activation_not_chargeable"));
+        Assert.Contains(mail.Sent, m => m.Subject.StartsWith("Lights charged", StringComparison.Ordinal));
+
+        // A rescan is another event, not another charge.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath, Batch(Activation(2, subject: booked.Code, court: 0))))).StatusCode);
+        Assert.Single(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
+        Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
+    }
+
+    /// <summary>The correction is posted whatever the balance: a member who spent the refund goes negative.</summary>
+    [SkippableFact]
+    public async Task The_cancelled_lights_charge_is_posted_even_when_the_balance_cannot_cover_it()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, topUpCredits: 24m);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);
+        await CancelAsync(factory, box, booked.BookingId);
+        using (var scope = factory.Services.CreateScope())
+        {
+            // The refund is spent elsewhere before the box reconnects.
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.LedgerEntries.Add(new LedgerEntry { TenantId = box.TenantId, UserId = box.MemberId, Type = LedgerEntryType.BookingCharge, AmountCredits = -20m, ActorUserId = box.MemberId, Reason = "elsewhere" });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(4m, await BalanceAsync(factory, box.MemberId));
+
+        await using var quiet = Quiet(factory, new StubEmailService());
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+
+        Assert.Equal(4m - 24m, await BalanceAsync(factory, box.MemberId));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_after_cancel"));
+    }
+
+    // ---- a booking code is not a wallet (closing re-review #19) ----------------------
+
+    /// <summary>
+    /// A booking-activation code names its member, and for a while that made it a
+    /// spendable identity: anyone who read a roster code — pushed in clear to every box
+    /// driving that court — could buy court time on that member's credits. A booking code
+    /// opens its own booking on the activation paths and nothing else; a walk-up needs the
+    /// member's ident code.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_booking_code_is_refused_as_a_walk_up_buyer()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 60);   // a live roster code for court 1
+        var before = await BalanceAsync(factory, box.MemberId);
+
+        var response = await factory.CreateClient().SendAsync(Signed(box, WalkUpPath, WalkUp(booked.Code, minutes: 60, court: 2)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("not_recognised", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        Assert.Equal(before, await BalanceAsync(factory, box.MemberId));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.walk_up_created"));
+
+        // ...while the same code still opens its own booking on the activation path.
+        var activate = await factory.CreateClient().SendAsync(Signed(box, ActivatePath, new { method = "qr", token = booked.Code }));
+        Assert.Equal(HttpStatusCode.OK, activate.StatusCode);
+        Assert.Equal("too_early", (await activate.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("reason").GetString());
+    }
+
+    /// <summary>Club B's booking code at club A's box: unknown there, whatever kind it is.</summary>
+    [SkippableFact]
+    public async Task Another_clubs_booking_code_is_refused_as_a_walk_up_buyer_here()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var boxA = await SeedAsync(factory);
+        var boxB = await SeedAsync(factory);
+        var bookedB = await BookAsync(factory, boxB, courtNumber: 1, startsInMinutes: 60);
+        var before = await BalanceAsync(factory, boxB.MemberId);
+
+        var response = await factory.CreateClient().SendAsync(Signed(boxA, WalkUpPath, WalkUp(bookedB.Code)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("not_recognised", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        Assert.Equal(before, await BalanceAsync(factory, boxB.MemberId));
+    }
+
+    // ---- a replay grants the remainder, and nothing once over (closing re-review #20) --
+
+    private static async Task ShiftWalkUpAsync(TestWebAppFactory factory, Guid bookingId, double startsInMinutes, double endsInMinutes, BookingStatus? status = null)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var row = await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.Id == bookingId);
+        row.StartsAt = DateTimeOffset.UtcNow.AddMinutes(startsInMinutes);
+        row.EndsAt = DateTimeOffset.UtcNow.AddMinutes(endsInMinutes);
+        if (status is { } st) row.Status = st;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// The 17:00 purchase whose response was lost, rescanned at 17:40 with the same nonce:
+    /// the box used to be told the ORIGINAL sixty minutes and drove the relay for an hour
+    /// from 17:40, over whoever held the next slots. A replay grants what is left of the
+    /// window; a window that has ended, or a purchase no longer Booked, is refused.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_replayed_walk_up_grants_the_remainder_and_is_refused_once_the_window_has_ended()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var client = factory.CreateClient();
+        var nonce = Guid.NewGuid().ToString("N")[..16];
+        var request = WalkUp(await QrCodeAsync(factory, box), minutes: 60, court: 1, nonce: nonce);
+
+        var first = await client.SendAsync(Signed(box, WalkUpPath, request));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(60, firstBody.GetProperty("granted_minutes").GetInt32());
+        var bookingId = firstBody.GetProperty("booking_id").GetGuid();
+
+        // Forty minutes later.
+        await ShiftWalkUpAsync(factory, bookingId, startsInMinutes: -40, endsInMinutes: 20);
+        var mid = await client.SendAsync(Signed(box, WalkUpPath, request));
+        Assert.Equal(HttpStatusCode.OK, mid.StatusCode);
+        var midBody = await mid.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(midBody.GetProperty("replayed").GetBoolean());
+        Assert.InRange(midBody.GetProperty("granted_minutes").GetInt32(), 19, 20);
+
+        // After the window.
+        await ShiftWalkUpAsync(factory, bookingId, startsInMinutes: -70, endsInMinutes: -10);
+        var over = await client.SendAsync(Signed(box, WalkUpPath, request));
+        Assert.Equal(HttpStatusCode.Conflict, over.StatusCode);
+        Assert.Equal("purchase_ended", (await over.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        // Promoted to Completed with time nominally left: still over as a purchase.
+        await ShiftWalkUpAsync(factory, bookingId, startsInMinutes: -40, endsInMinutes: 20, status: BookingStatus.Completed);
+        var completed = await client.SendAsync(Signed(box, WalkUpPath, request));
+        Assert.Equal(HttpStatusCode.Conflict, completed.StatusCode);
+        Assert.Equal("purchase_ended", (await completed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        // Charged exactly once throughout.
+        Assert.Single(await LedgerAsync(factory, bookingId));
+        Assert.Equal(200m - 32m, await BalanceAsync(factory, box.MemberId));
+    }
+
+    // ---- the per-box button map on the wire (closing re-review #17) -------------------
+
+    /// <summary>The heartbeat carries the map THIS box runs: its own override when it has one, else the club's.</summary>
+    [SkippableFact]
+    public async Task Heartbeat_carries_the_boxs_own_button_map_when_it_has_one()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+
+        var clubMap = (await HeartbeatAsync(factory, box)).GetProperty("config").GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Equal(["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "minutes:60"], clubMap);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == box.DeviceId);
+            Assert.True(ButtonMap.TryParse(["court:A", "off", "none", "none", "minutes:15", "minutes:30", "none", "none"], out var own, out _));
+            row.ButtonMapJson = own!.ToJson();
+            await db.SaveChangesAsync();
+        }
+
+        var ownMap = (await HeartbeatAsync(factory, box)).GetProperty("config").GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Equal(["court:A", "off", "none", "none", "minutes:15", "minutes:30", "none", "none"], ownMap);
     }
 
     /// <summary>

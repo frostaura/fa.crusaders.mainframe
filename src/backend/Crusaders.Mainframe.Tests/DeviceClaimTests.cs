@@ -414,36 +414,169 @@ public class DeviceClaimTests
     /// A board that was reflashed, or whose key was lost, announces st=unclaimed with no
     /// device id — indistinguishable from a new board except by its MAC. Registering it
     /// again would leave two rows for one piece of hardware, both deriving working keys.
-    /// Revoking the row an admin can see would then not stop the board.
+    /// Refusing was the old answer and it made a revoked box unregistrable for ever
+    /// (closing re-review #9/#10); the row is re-keyed instead: same id, bumped key
+    /// version, this claim's name and courts, one row for the MAC, and a fresh grant.
     /// </summary>
     [Fact]
-    public async Task A_board_that_is_already_registered_is_refused_rather_than_duplicated()
+    public async Task A_board_that_is_already_registered_is_rekeyed_rather_than_duplicated()
     {
         var f = await CreateAsync();
         f.Store.Upsert(Board());
 
         var first = await f.Service.ClaimAsync(Command(), f.Host.AdminUser.Id, default);
         Assert.True(first.Succeeded);
+        Assert.False(first.Reclaimed);
+        var firstKey = first.Registration!.DeviceKey;
 
         // The same physical board comes back unclaimed — reflashed, or restored from a
-        // backup that predates the claim — and an admin tries to connect it again.
+        // backup that predates the claim — and an admin connects it again.
         f.Store.Upsert(Board());
 
         var second = await f.Service.ClaimAsync(
             Command(deviceCode: "court-box-2"), f.Host.AdminUser.Id, default);
 
-        Assert.False(second.Succeeded);
-        Assert.Equal(ClaimFailure.BoardAlreadyRegistered, second.Failure);
-
-        // The refusal names the row that already owns it, so the admin knows to rotate
-        // rather than to guess.
-        Assert.Equal("court-box-1", second.Detail);
+        Assert.True(second.Succeeded, $"re-claim failed with {second.Failure}");
+        Assert.True(second.Reclaimed);
+        Assert.Equal(first.Registration.Device.Id, second.Registration!.Device.Id);
+        Assert.Equal(2, second.Registration.Device.KeyVersion);
+        Assert.Equal("court-box-2", second.Registration.Device.DeviceCode);
+        Assert.NotEqual(firstKey, second.Registration.DeviceKey);
 
         Assert.Single(await f.Db.Devices.IgnoreQueryFilters().Where(d => d.MacAddress == "5ccf7f1a2b3c").ToListAsync());
-        Assert.NotEmpty(await AuditAsync(f.Db, "device.claim_failed"));
+        Assert.Single(await AuditAsync(f.Db, "device.reclaimed"));
+        Assert.Empty(await AuditAsync(f.Db, "device.claim_failed"));
+
+        // The board can collect the NEW key with the code it is showing.
+        var grants = f.Host.Services.GetRequiredService<ProvisioningGrants>();
+        var grant = grants.Redeem("5ccf7f1a2b3c", Code);
+        Assert.NotNull(grant);
+        Assert.Equal(2, grant!.KeyVersion);
 
         f.Scope.Dispose();
         await f.Host.DisposeAsync();
+    }
+
+    /// <summary>
+    /// The Revoke control is on every Devices row, and the API's own guidance told admins
+    /// to press it before reconnecting a board. Revoking left <c>RevokedAt</c> set for ever,
+    /// nothing cleared it, and every reconnect was refused — a box an admin had revoked was
+    /// permanently unregistrable from any product surface. Now: revoke, the board falls to
+    /// CLAIM CODE and announces unclaimed, the claim un-revokes and re-keys the same row.
+    /// </summary>
+    [Fact]
+    public async Task A_revoked_board_can_be_claimed_again_and_comes_back_enabled_with_a_new_key()
+    {
+        var f = await CreateAsync();
+        f.Store.Upsert(Board());
+
+        var first = await f.Service.ClaimAsync(Command(), f.Host.AdminUser.Id, default);
+        Assert.True(first.Succeeded);
+        var device = first.Registration!.Device;
+
+        var registry = f.Scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
+        await registry.RevokeAsync(device, f.Host.AdminUser.Id, default);
+        Assert.False(device.IsActive);
+
+        // 401 strikes → Reprovision → the board announces unclaimed with a fresh code.
+        const string freshCode = "PQRS4567";
+        const string freshNonce = "ffeeddccbbaa9988";
+        f.Store.Upsert(Board(nonce: freshNonce, code: freshCode));
+
+        var again = await f.Service.ClaimAsync(
+            new ClaimBoardCommand(freshCode, "court-box-1", "Court 1 box (back)", FourCourts), f.Host.AdminUser.Id, default);
+
+        Assert.True(again.Succeeded, $"re-claim after revoke failed with {again.Failure}");
+        Assert.True(again.Reclaimed);
+        var row = await f.Db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == "5ccf7f1a2b3c");
+        Assert.Equal(device.Id, row.Id);
+        Assert.Null(row.RevokedAt);
+        Assert.True(row.Enabled);
+        Assert.True(row.IsActive);
+        Assert.Equal(2, row.KeyVersion);
+        Assert.Equal("Court 1 box (back)", row.Name);
+
+        // The grant is for the code the board is showing NOW, not the one it showed first.
+        var grants = f.Host.Services.GetRequiredService<ProvisioningGrants>();
+        Assert.Null(grants.Redeem("5ccf7f1a2b3c", Code));      // the old code, burned or never issued: refused either way
+        // (a wrong guess burns the grant — issue a fresh one to prove the right code works)
+        f.Store.Upsert(Board(nonce: freshNonce, code: freshCode));
+        var third = await f.Service.ClaimAsync(
+            new ClaimBoardCommand(freshCode, "court-box-1", "Court 1 box (back)", FourCourts), f.Host.AdminUser.Id, default);
+        Assert.True(third.Succeeded);
+        var grant = grants.Redeem("5ccf7f1a2b3c", freshCode);
+        Assert.NotNull(grant);
+        Assert.Equal(3, grant!.KeyVersion);
+
+        f.Scope.Dispose();
+        await f.Host.DisposeAsync();
+    }
+
+    /// <summary>
+    /// A re-claim may not steal a device code that belongs to a DIFFERENT row; the row's
+    /// own current code is fine.
+    /// </summary>
+    [Fact]
+    public async Task A_reclaim_keeps_its_own_device_code_but_may_not_take_anothers()
+    {
+        var f = await CreateAsync();
+        f.Store.Upsert(Board());
+        Assert.True((await f.Service.ClaimAsync(Command(), f.Host.AdminUser.Id, default)).Succeeded);
+
+        var registry = f.Scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
+        await registry.RegisterAsync(
+            new RegisterDeviceCommand("court-box-other", "Other", DeviceKind.CourtBox, DeviceHardware.Esp8266, [1, 2, 3, 4], null),
+            f.Host.AdminUser.Id, default);
+
+        f.Store.Upsert(Board());
+        var stolen = await f.Service.ClaimAsync(Command(deviceCode: "court-box-other"), f.Host.AdminUser.Id, default);
+        Assert.Equal(ClaimFailure.DeviceCodeTaken, stolen.Failure);
+
+        f.Store.Upsert(Board());
+        var own = await f.Service.ClaimAsync(Command(deviceCode: "court-box-1"), f.Host.AdminUser.Id, default);
+        Assert.True(own.Succeeded);
+        Assert.True(own.Reclaimed);
+
+        f.Scope.Dispose();
+        await f.Host.DisposeAsync();
+    }
+
+    /// <summary>A court list naming a court the club does not have is refused — nothing ever checked this, so a typo registered a relay that could never light.</summary>
+    [Fact]
+    public async Task A_claim_naming_a_court_the_club_does_not_have_is_refused()
+    {
+        var f = await CreateAsync();
+        f.Store.Upsert(Board());
+
+        var result = await f.Service.ClaimAsync(
+            new ClaimBoardCommand(Code, "court-box-1", "Court box", [1, 2, 3, 9]), f.Host.AdminUser.Id, default);
+
+        Assert.Equal(ClaimFailure.CourtNumberNotFound, result.Failure);
+        Assert.Empty(await f.Db.Devices.IgnoreQueryFilters().ToListAsync());
+        await AssertRefusalLoggedAsync(f, ClaimFailure.CourtNumberNotFound);
+    }
+
+    /// <summary>
+    /// A one-court annex box under the club's four-court map: refused without an override,
+    /// registered with one. The invariant is per box, not per club (review #17).
+    /// </summary>
+    [Fact]
+    public async Task A_claim_with_its_own_button_map_is_checked_against_that_map_not_the_clubs()
+    {
+        var f = await CreateAsync();
+        f.Store.Upsert(Board());
+
+        var refused = await f.Service.ClaimAsync(
+            new ClaimBoardCommand(Code, "annex", "Annex box", [1]), f.Host.AdminUser.Id, default);
+        Assert.Equal(ClaimFailure.ButtonMapMismatch, refused.Failure);
+
+        Assert.True(ButtonMap.TryParse(["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"], out var annexMap, out _));
+        f.Store.Upsert(Board());
+        var accepted = await f.Service.ClaimAsync(
+            new ClaimBoardCommand(Code, "annex", "Annex box", [1], annexMap), f.Host.AdminUser.Id, default);
+
+        Assert.True(accepted.Succeeded, $"claim with override failed with {accepted.Failure}");
+        Assert.Equal(annexMap!.ToJson(), accepted.Registration!.Device.ButtonMapJson);
     }
 
     /// <summary>A different board is still claimable while the first one is registered.</summary>

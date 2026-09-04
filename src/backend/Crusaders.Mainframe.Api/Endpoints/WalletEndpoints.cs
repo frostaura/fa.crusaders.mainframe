@@ -102,6 +102,10 @@ public static class WalletEndpoints
                 Type: LedgerEntryType.AdminAdjustment,
                 AmountCredits: req.AmountCredits,
                 ActorUserId: ctx.User.Id() ?? Guid.Empty,
+                // Naming the booking is what lets a late box upload recognise that the
+                // desk already compensated the member for a wrongly-swept no-show, and
+                // audit instead of correcting twice. See BookingService.ReverseNoShowAsync.
+                RelatedBookingId: req.RelatedBookingId,
                 Reason: req.Reason), ct);
             var balanceAfter = await ledger.GetBalanceAsync(userId, ct);
             return Results.Ok(new { entry_id = entry.Id, amount_credits = entry.AmountCredits, balance_after_credits = balanceAfter });
@@ -118,4 +122,5 @@ public static class WalletEndpoints
     }
 }
 
-public sealed record AdjustRequest(decimal AmountCredits, string Reason);
+/// <summary><paramref name="RelatedBookingId"/> is optional: set it when the adjustment compensates for a specific booking.</summary>
+public sealed record AdjustRequest(decimal AmountCredits, string Reason, Guid? RelatedBookingId = null);

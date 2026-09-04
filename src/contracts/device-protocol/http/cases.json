@@ -413,6 +413,30 @@
           "K4TQ8N2ZV7BM|0|-2400|900"
         ]
       }
+    },
+    {
+      "id": "walkup-response-replayed-remainder",
+      "kind": "walkup",
+      "note": "a replay grants the REMAINDER of the purchase from now, never the original length: the same nonce forty minutes after a lost 60-minute grant answers granted_minutes:25 (rounded up), and a purchase whose window has ended is 409 purchase_ended rather than a grant at all (closing re-review #20)",
+      "body_hex": "7b227365727665725f756e6978223a313730303030303738392c22626f6f6b696e675f6964223a2233666138356636342d353731372d343536322d623366632d326339363366363661666136222c226772616e7465645f6d696e75746573223a32352c22616d6f756e745f63726564697473223a33322e302c2262616c616e63655f61667465725f63726564697473223a3136382e302c227265706c61796564223a747275657d",
+      "expect": {
+        "server_unix": 1700000789,
+        "granted_minutes": 25,
+        "replayed": true
+      }
+    },
+    {
+      "id": "activate-response-ended",
+      "kind": "activate",
+      "note": "a scan inside the grace window after the slot ended is stamped as attendance but there is nothing left to light: activated:false with reason ended and granted_seconds 0, never activated:true with zero seconds, which the box turned into a one-second relay pulse and a spent scan",
+      "body_hex": "7b22616374697661746564223a66616c73652c22726561736f6e223a22656e646564222c22636f7572745f6e756d626572223a332c22626f6f6b696e675f6964223a2233666138356636342d353731372d343536322d623366632d326339363366363661666136222c226772616e7465645f7365636f6e6473223a302c227365727665725f756e6978223a313730303030303738397d",
+      "expect": {
+        "server_unix": 1700000789,
+        "activated": false,
+        "reason": "ended",
+        "granted_seconds": 0,
+        "court_number": 3
+      }
     }
   ]
 }

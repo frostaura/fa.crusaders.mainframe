@@ -88,6 +88,23 @@ public sealed class Device : ITenantScoped
     public string? GateKey { get; set; }
 
     /// <summary>
+    /// This box's own button map, as the eight-entry wire array (<c>ButtonMap.ToWire()</c>)
+    /// serialised to JSON — or null to use the club's map from <c>tenant_settings</c>.
+    ///
+    /// <para>
+    /// The map used to be tenant-wide only, and validated against every box's court count
+    /// at both save points, so a club with a four-court box and a one-court annex box had
+    /// no valid configuration at all: a map the annex could honour left three buttons on
+    /// the main box inert, and the default map refused to register the annex (closing
+    /// re-review #17). The invariant "a court button selects a wired court" is a property
+    /// of one box, so it is held per box: the EFFECTIVE map — this override, else the
+    /// tenant's — is what a device save is checked against, what the tenant-map save
+    /// checks only for boxes with no override, and what the heartbeat sends.
+    /// </para>
+    /// </summary>
+    public string? ButtonMapJson { get; set; }
+
+    /// <summary>
     /// The board's MAC address, lowercase hex without separators, as it announces itself.
     /// Null for a device registered by hand rather than discovered.
     ///

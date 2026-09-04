@@ -192,6 +192,67 @@ public sealed class FirmwareRouteTests
         Assert.Equal($"http://10.1.2.3:8088/firmware/{BinName}", body.GetProperty("ota").GetProperty("ota_url").GetString());
     }
 
+    /// <summary>
+    /// Behind the documented gateway (closing re-review #8). nginx forwards a port-less
+    /// Host, so the URL composed from it pointed at port 80 where nothing listens; the
+    /// gateway now sends X-Forwarded-Host with the port the box used, and the API believes
+    /// it from a trusted proxy. A box that reached the API at http://ip:8088 is offered
+    /// an image at http://ip:8088/…; a direct call on :5000 is offered :5000.
+    /// </summary>
+    [SkippableFact]
+    public async Task Behind_the_gateway_the_image_url_carries_the_forwarded_host_and_port()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        using var payload = Payload.Signed("1.4.0");
+        await using var factory = new TestWebAppFactory
+        {
+            ConnectionString = _pg.ConnectionString,
+            RemoteIpAddress = System.Net.IPAddress.Loopback,
+        };
+        var box = await SeedAsync(factory);
+
+        var forwarded = Signed(box, HeartbeatPath, new { running_version = "1.0.0" });
+        forwarded.Headers.Add("X-Forwarded-For", "192.168.68.150");
+        forwarded.Headers.Add("X-Forwarded-Proto", "http");
+        forwarded.Headers.Add("X-Forwarded-Host", "192.168.68.20:8088");
+        var response = await factory.CreateClient().SendAsync(forwarded);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal($"http://192.168.68.20:8088/firmware/{BinName}", body.GetProperty("ota").GetProperty("ota_url").GetString());
+
+        var direct = factory.CreateClient();
+        direct.BaseAddress = new Uri("http://localhost:5000");
+        var plain = await direct.SendAsync(Signed(box, HeartbeatPath, new { running_version = "1.0.0" }));
+        Assert.Equal(HttpStatusCode.OK, plain.StatusCode);
+        var plainBody = await plain.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal($"http://localhost:5000/firmware/{BinName}", plainBody.GetProperty("ota").GetProperty("ota_url").GetString());
+    }
+
+    /// <summary>
+    /// The download is anonymous and 400 KB; it was the one unmetered surface on a
+    /// host-networked on-prem box. A modest per-address ceiling, after the limiter.
+    /// </summary>
+    [Fact]
+    public async Task The_firmware_download_is_rate_limited_per_address()
+    {
+        using var payload = Payload.Signed("1.4.0");
+        await using var factory = new TestWebAppFactory
+        {
+            RateLimits = new Dictionary<string, int> { ["FirmwarePerMinute"] = 2 },
+            RemoteIpAddress = System.Net.IPAddress.Parse("192.168.68.150"),
+        };
+        var client = factory.CreateClient();
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 5; i++) statuses.Add((await client.GetAsync($"/firmware/{BinName}")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, statuses[0]);
+        Assert.Equal(HttpStatusCode.OK, statuses[1]);
+        Assert.Contains(HttpStatusCode.TooManyRequests, statuses.Skip(2));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/healthz")).StatusCode);   // only the download is throttled
+    }
+
     [SkippableFact]
     public async Task A_box_already_on_the_baked_version_is_offered_nothing()
     {

@@ -6,6 +6,6 @@
     "hmac_sha256": 6,
     "requests": 16,
     "hkdf": 3,
-    "responses": 9
+    "responses": 11
   }
 }

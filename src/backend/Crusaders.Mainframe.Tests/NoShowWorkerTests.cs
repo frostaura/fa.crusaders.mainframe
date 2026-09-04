@@ -340,6 +340,54 @@ public class NoShowWorkerTests
     }
 
     /// <summary>
+    /// The desk got there first: an admin adjustment referencing the booking already put
+    /// the member right before the box's evidence arrived. The automatic reversal restores
+    /// attendance and audits the compensation instead of correcting the same no-show twice.
+    /// </summary>
+    [Fact]
+    public async Task A_member_the_desk_already_compensated_is_not_corrected_twice()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddBookingAsync(host, db, charged: true, amount: 8m);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id,
+            RelatedBookingId: booking.Id), default);
+
+        await CreateWorker(host).TickAsync(default);
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.NoShow, booking.Status);
+        Assert.Equal(100m - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+
+        // The desk compensates by hand, naming the booking — the penalty back, say.
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, 2.40m, host.AdminUser.Id,
+            RelatedBookingId: booking.Id, Reason: "Sorry — the box was offline"), default);
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+
+        var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-50).ToUnixTimeSeconds());
+        var result = await bookings.ReverseNoShowAsync(booking, attendedAt, Guid.Empty, default);
+        var ok = Assert.IsType<NoShowReversalResult.Ok>(result);
+        Assert.True(ok.ManuallyCompensated);
+        Assert.Equal(0m, ok.RefundReversedCredits);
+        Assert.Equal(0m, ok.PenaltyReversedCredits);
+
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.Booked, booking.Status);
+        Assert.Equal(attendedAt, booking.CheckedInAt);
+        // No money moved: the admin's adjustment stands as the correction.
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Single(db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.CancellationRefund));
+        Assert.Single(db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.NoShowPenalty));
+
+        var audit = Assert.Single(db.AuditLogs.Where(a => a.Action == "booking.no_show_reversed"));
+        Assert.Contains("manual_compensation", audit.DetailsJson);
+    }
+
+    /// <summary>
     /// Without a lower bound on StartsAt, enabling terminal check-in over a backlog
     /// of historical un-checked-in Booked rows would sweep all of them on the first
     /// 30-second tick.

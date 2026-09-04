@@ -109,5 +109,12 @@ services:
     # nginx proxies to http://backend:5000. With the backend on the host that
     # name no longer resolves through docker DNS, so it is pointed at the host
     # gateway address instead and nginx.conf stays as it is.
+    #
+    # The gateway reaches the host-networked backend FROM the compose bridge, so
+    # the backend sees it as a 172.16.0.0/12 peer — inside the API's default
+    # Gateway:TrustedProxies — and believes its X-Forwarded-* headers: that is
+    # what gives every box a provisioning/OTA URL on :8088 rather than :80, and
+    # every member their own rate-limit bucket. A club that fronts the API with
+    # anything else sets Gateway__TrustedProxies__0 (see .env.example).
     extra_hosts:
       - "backend:host-gateway"

@@ -71,6 +71,15 @@ public sealed class DiscoveryOptions
     /// </summary>
     public string? AdvertisedBaseUrl { get; init; }
 
+    /// <summary>
+    /// True when <see cref="AdvertisedBaseUrl"/> was configured with an <c>https</c> scheme
+    /// and rewritten to <c>http</c> because <c>Discovery:DowngradeHttpsAdvertisedBaseUrl</c>
+    /// was set. The court box speaks plain HTTP only — a WiFiClient with no TLS context —
+    /// so an https URL is one it can never open, for provisioning or for OTA. Without the
+    /// flag, <see cref="FromConfiguration"/> refuses to start.
+    /// </summary>
+    public bool AdvertisedBaseUrlDowngradedFromHttps { get; init; }
+
     /// <summary>Port a board should call back on. The gateway's, not the backend container's.</summary>
     public int AdvertisedPort { get; init; } = 8088;
 
@@ -86,6 +95,7 @@ public sealed class DiscoveryOptions
     {
         var section = config.GetSection("Discovery");
         var defaults = new DiscoveryOptions();
+        var (advertised, downgraded) = AdvertisedBaseUrlFor(section);
 
         return new DiscoveryOptions
         {
@@ -98,10 +108,37 @@ public sealed class DiscoveryOptions
                 section.GetValue("MaxPacketsPerSourcePerMinute", defaults.MaxPacketsPerSourcePerMinute),
             MaxRateLimitedSources = section.GetValue("MaxRateLimitedSources", defaults.MaxRateLimitedSources),
             MaxPacketBytes = section.GetValue("MaxPacketBytes", defaults.MaxPacketBytes),
-            AdvertisedBaseUrl = section["AdvertisedBaseUrl"],
+            AdvertisedBaseUrl = advertised,
+            AdvertisedBaseUrlDowngradedFromHttps = downgraded,
             AdvertisedPort = section.GetValue("AdvertisedPort", defaults.AdvertisedPort),
             FallbackBaseUrl = config["App:PublicBaseUrl"],
         };
+    }
+
+    /// <summary>
+    /// The advertised base URL as the box will be handed it. An <c>https</c> value is a
+    /// startup error — the box cannot do TLS, and the closing re-review found the backend
+    /// suite pinning such a URL as correct — unless
+    /// <c>Discovery:DowngradeHttpsAdvertisedBaseUrl</c> is true, in which case the scheme
+    /// is rewritten to <c>http</c> and the fact is reported for Program.cs to log.
+    /// </summary>
+    private static (string? Url, bool Downgraded) AdvertisedBaseUrlFor(IConfigurationSection section)
+    {
+        var configured = section["AdvertisedBaseUrl"];
+        if (string.IsNullOrWhiteSpace(configured)) return (configured, false);
+
+        var trimmed = configured.Trim();
+        if (!trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return (trimmed, false);
+
+        if (!section.GetValue("DowngradeHttpsAdvertisedBaseUrl", false))
+        {
+            throw new InvalidOperationException(
+                $"Discovery:AdvertisedBaseUrl is '{trimmed}', but the court box cannot fetch over TLS: every provisioning " +
+                "and OTA URL derived from it would be unreachable. Use the http gateway address, or set " +
+                "Discovery:DowngradeHttpsAdvertisedBaseUrl=true to have the scheme rewritten to http (logged at startup).");
+        }
+
+        return ("http://" + trimmed["https://".Length..], true);
     }
 
     public TimeSpan AnnouncerTtl => TimeSpan.FromSeconds(Math.Max(1, AnnouncerTtlSeconds));

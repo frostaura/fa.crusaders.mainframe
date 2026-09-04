@@ -150,6 +150,19 @@ public static class DeviceActivateEndpoint
     {
         return result switch
         {
+            // Identified, stamped — and nothing left to light. A scan inside the grace
+            // window after the slot's end is still attendance (it stops the sweep), but
+            // granted_seconds:0 with activated:true became a one-second relay pulse and a
+            // spent scan on the box; the box needs to be told the slot is over.
+            ActivationResult.Activated ended when ended.Booking.EndsAt <= now => new DeviceActivateResponse(
+                Activated: false,
+                Reason: "ended",
+                CourtNumber: court.CourtNumber,
+                BookingId: ended.Booking.Id,
+                GrantedSeconds: 0,
+                StartsInSeconds: null,
+                ServerUnix: now.ToUnixTimeSeconds()),
+
             // The remainder of the slot, clamped to what the relay bank will actually hold.
             // A repeat scan of a live session lands here too, with whatever is left — which
             // is how a slot longer than the cap is re-lit past its first ninety minutes.
@@ -158,7 +171,7 @@ public static class DeviceActivateEndpoint
                 Reason: "ok",
                 CourtNumber: court.CourtNumber,
                 BookingId: a.Booking.Id,
-                GrantedSeconds: Math.Clamp((int)Math.Floor((a.Booking.EndsAt - now).TotalSeconds), 0, RelayHardCap.Seconds),
+                GrantedSeconds: Math.Clamp((int)Math.Floor((a.Booking.EndsAt - now).TotalSeconds), 1, RelayHardCap.Seconds),
                 StartsInSeconds: null,
                 ServerUnix: now.ToUnixTimeSeconds()),
 
@@ -207,8 +220,10 @@ public sealed record DeviceActivateRequest(
 
 /// <summary>
 /// The activation answer. <c>granted_seconds</c> is what goes on the relay timer; zero on
-/// every refusal. Pinned by <c>activate-response-ok</c> and <c>activate-response-too-early</c>
-/// in the shared corpus.
+/// every refusal, and a refusal — <c>reason:"ended"</c> — is what a slot with nothing left
+/// answers, never <c>activated:true</c> with zero seconds. Pinned by
+/// <c>activate-response-ok</c>, <c>activate-response-too-early</c> and
+/// <c>activate-response-ended</c> in the shared corpus.
 /// </summary>
 public sealed record DeviceActivateResponse(
     [property: JsonPropertyName("activated")] bool Activated,

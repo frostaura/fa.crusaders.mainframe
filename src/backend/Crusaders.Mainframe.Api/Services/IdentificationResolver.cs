@@ -43,13 +43,22 @@ public sealed class IdentificationResolver
 
     /// <summary>
     /// The user this code identifies, or null. Null covers every failure — expired,
-    /// unknown, another club's, unsupported method — on purpose: telling them apart at a
-    /// court box turns it into an oracle for which codes are real.
+    /// unknown, another club's, unsupported method, wrong kind of code — on purpose:
+    /// telling them apart at a court box turns it into an oracle for which codes are real.
     ///
     /// <para>
-    /// Either purpose identifies: a booking-activation code names its member as surely as
-    /// a member-ident one does, and a member with a booking on court 2 buying a walk-up on
-    /// court 3 should not have to fetch a second code.
+    /// <b>Only a member-ident code identifies here.</b> A booking-activation code names
+    /// its member too, and for a while that was taken as a convenience — a member with a
+    /// booking on court 2 buying a walk-up on court 3 without fetching a second code. It
+    /// was also the hole in the threat model (closing re-review #19): booking codes are
+    /// pushed in clear to every box driving that court and sit in box RAM for hours, on
+    /// the stated understanding that "nothing a box holds is a member's identity". Making
+    /// them a spendable identity meant anyone who read a roster code — a lifted box, a
+    /// LAN sniff, a glance at a phone — could buy court time on that member's credits at
+    /// any box, or charge them for a stranger's court as the payer. So a booking code
+    /// opens its own booking on the activation paths (<c>/activate</c>, <c>/events</c>,
+    /// which resolve codes themselves) and nothing else; the wallet needs the short-lived
+    /// ident code the member's phone shows for exactly this.
     /// </para>
     /// </summary>
     public async Task<Guid?> ResolveAsync(string? method, string? token, CancellationToken ct)
@@ -60,6 +69,23 @@ public sealed class IdentificationResolver
         }
 
         var resolved = await _codes.ResolveAsync(token, ct);
-        return resolved?.UserId;
+        return resolved?.Purpose == Domain.AccessCodePurpose.MemberIdent ? resolved.UserId : null;
+    }
+
+    /// <summary>
+    /// The identification an ACTIVATION path may act on: either kind of code, with the
+    /// booking a booking code names carried along so the caller can hold the activation to
+    /// that booking. This is the courtside camera's question — "may this person start on
+    /// court N?" — and a booking code answers it for its own booking exactly as the box's
+    /// <c>/activate</c> does. It is not a wallet identity; see <see cref="ResolveAsync"/>.
+    /// </summary>
+    public async Task<ResolvedAccessCode?> ResolveForActivationAsync(string? method, string? token, CancellationToken ct)
+    {
+        if (!CanIdentifyGlobally(method) || string.IsNullOrWhiteSpace(token))
+        {
+            return null;
+        }
+
+        return await _codes.ResolveAsync(token, ct);
     }
 }

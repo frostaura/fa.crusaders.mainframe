@@ -442,4 +442,30 @@ public sealed class SecurityRegressionTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("payer_not_recognised", await response.Content.ReadAsStringAsync());
     }
+
+    /// <summary>
+    /// A booking-activation code is not a wallet (closing re-review #19): pushed in clear to
+    /// every box driving the court and held in box RAM for hours, it must open only its own
+    /// booking. Presented as the volunteer's token it is refused, and the victim is charged
+    /// for nobody's court.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_booking_code_is_refused_as_the_payer_override()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        var before = await BalanceAsync(factory, club.TenantId, club.VictimId);
+        var victimsBookingCode = await TestAccessCodes.InsertBookingCodeAsync(factory.Services, club.TenantId, club.VictimId, club.BookingId);
+
+        using var kiosk = ClientFor(factory, club, club.AdminId, role: "admin");
+        var response = await kiosk.PostAsJsonAsync(
+            $"/api/v1/court/1/biometric/match",
+            new { payerMethod = "qr", payerToken = victimsBookingCode });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("payer_not_recognised", await response.Content.ReadAsStringAsync());
+        Assert.Equal(before, await BalanceAsync(factory, club.TenantId, club.VictimId));
+    }
 }

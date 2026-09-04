@@ -53,19 +53,48 @@ public sealed class DeviceRegistryService
         return null;
     }
 
+    /// <summary>Error code when a court list names a court the tenant does not have.</summary>
+    public const string CourtNumberNotFound = "court_number_not_found";
+
     /// <summary>
-    /// Whether the tenant's current button map has a court button this list cannot
-    /// honour — <see cref="ButtonMap.SelectsCourtBeyondDeviceCourts"/> if so, else null.
-    /// The other half of the check lives in the settings PUT, which runs the same test
-    /// against every box when the map changes.
+    /// Whether the map this box would run has a court button the list cannot honour —
+    /// <see cref="ButtonMap.SelectsCourtBeyondDeviceCourts"/> if so — or whether the list
+    /// names a court the club does not have (<see cref="CourtNumberNotFound"/>); null when
+    /// the assignment is sound.
+    ///
+    /// <para>
+    /// The map checked is the EFFECTIVE one: <paramref name="buttonMap"/> when the caller is
+    /// setting an override for this box, else the box's stored override, else the club's.
+    /// The other half of the rule lives in the settings PUT, which checks a new tenant map
+    /// only against boxes that have no override of their own.
+    /// </para>
+    ///
+    /// <para>
+    /// Court numbers are checked against the courts table because nothing else ever did:
+    /// a typo registered a relay that could never light and nothing reported it. Inactive
+    /// courts are still legal — a box is wired where it is wired, and deactivating a court
+    /// must not orphan the box that drives it.
+    /// </para>
     /// </summary>
-    public async Task<string?> CourtAssignmentErrorAsync(IReadOnlyList<int> courtNumbers, CancellationToken ct)
+    public async Task<string?> CourtAssignmentErrorAsync(
+        IReadOnlyList<int> courtNumbers, ButtonMap? buttonMap, string? storedOverrideJson, CancellationToken ct)
     {
+        var known = await _db.Courts.AsNoTracking()
+            .Where(c => courtNumbers.Contains(c.CourtNumber))
+            .Select(c => c.CourtNumber)
+            .ToListAsync(ct);
+        if (courtNumbers.Any(n => !known.Contains(n))) return CourtNumberNotFound;
+
         var settings = await _settings.GetAsync(ct);
-        return settings.Buttons.FirstSelectionBeyond(courtNumbers.Count) is null
+        var effective = buttonMap ?? ButtonMap.EffectiveFor(storedOverrideJson, settings.Buttons);
+        return effective.FirstSelectionBeyond(courtNumbers.Count) is null
             ? null
             : ButtonMap.SelectsCourtBeyondDeviceCourts;
     }
+
+    /// <summary>The check for a box with no override of its own: the club's map against this list.</summary>
+    public Task<string?> CourtAssignmentErrorAsync(IReadOnlyList<int> courtNumbers, CancellationToken ct)
+        => CourtAssignmentErrorAsync(courtNumbers, null, null, ct);
 
     public Task<List<Device>> ListAsync(CancellationToken ct) =>
         _db.Devices.OrderBy(d => d.Kind).ThenBy(d => d.DeviceCode).ToListAsync(ct);
@@ -89,6 +118,7 @@ public sealed class DeviceRegistryService
             CourtNumbers = cmd.CourtNumbers?.ToList() ?? [],
             GateKey = cmd.GateKey?.Trim(),
             MacAddress = cmd.MacAddress?.Trim().ToLowerInvariant(),
+            ButtonMapJson = cmd.ButtonMap?.ToJson(),
         };
 
         _db.Devices.Add(device);
@@ -107,11 +137,66 @@ public sealed class DeviceRegistryService
     /// Bumps the key version. The previous key stops verifying immediately, so the
     /// device is offline until re-provisioned — deliberately, since a rotation that
     /// left the old key working would not be a rotation.
+    ///
+    /// <para>
+    /// How the board gets the new key: it cannot be pushed (the API never dials a board)
+    /// and it cannot be granted here (a provisioning grant is redeemed with the claim code
+    /// the board shows, and a provisioned board shows none). So the board's own recovery
+    /// path is the delivery: its next signed call is a 401, it drops to CLAIM CODE, and the
+    /// admin connects it again — <see cref="ReclaimAsync"/> re-keys this same row and
+    /// issues the grant. The key is still returned here for the record and the panel.
+    /// </para>
     /// </summary>
     public async Task<DeviceRegistration> RotateKeyAsync(Device device, Guid actorUserId, CancellationToken ct)
     {
         device.KeyVersion++;
         Audit(actorUserId, "device.key_rotated", new { device_id = device.Id, key_version = device.KeyVersion });
+        await _db.SaveChangesAsync(ct);
+
+        return new DeviceRegistration(device, KeyFor(device));
+    }
+
+    /// <summary>
+    /// The same physical board, claimed again: the row is re-keyed and un-revoked rather
+    /// than duplicated or refused.
+    ///
+    /// <para>
+    /// A board that was reflashed, revoked, or that lost its key announces
+    /// <c>st=unclaimed</c> with a fresh claim code, indistinguishable from a new board
+    /// except by its MAC. The old answer to a MAC match was a refusal ("rotate that
+    /// device's key") — and revoking left <c>RevokedAt</c> set for ever, nothing could
+    /// clear it, and rotation issued no grant, so a box an admin had revoked was
+    /// permanently unregistrable from any product surface (closing re-review #9/#10).
+    /// The honest design is that the board's claim code, read off its own LCD, is proof
+    /// of physical presence: whoever can present it could reflash the board anyway. So
+    /// a claim against a MAC this club already owns re-keys that row — a bumped
+    /// <see cref="Device.KeyVersion"/>, <see cref="Device.RevokedAt"/> cleared, enabled —
+    /// takes the claim's name, courts and override, keeps its id and history, and is
+    /// audited as <c>device.reclaimed</c>. One board, one row, always.
+    /// </para>
+    /// </summary>
+    public async Task<DeviceRegistration> ReclaimAsync(Device device, RegisterDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
+    {
+        var previousVersion = device.KeyVersion;
+        var wasRevoked = device.RevokedAt is not null;
+
+        device.KeyVersion++;
+        device.RevokedAt = null;
+        device.Enabled = true;
+        device.DeviceCode = cmd.DeviceCode.Trim();
+        device.Name = cmd.Name.Trim();
+        device.Hardware = cmd.Hardware;
+        device.CourtNumbers = cmd.CourtNumbers?.ToList() ?? [];
+        if (cmd.ButtonMap is not null) device.ButtonMapJson = cmd.ButtonMap.ToJson();
+
+        Audit(actorUserId, "device.reclaimed", new
+        {
+            device_id = device.Id,
+            device_code = device.DeviceCode,
+            was_revoked = wasRevoked,
+            previous_key_version = previousVersion,
+            key_version = device.KeyVersion,
+        });
         await _db.SaveChangesAsync(ct);
 
         return new DeviceRegistration(device, KeyFor(device));
@@ -124,6 +209,7 @@ public sealed class DeviceRegistryService
         if (cmd.CourtNumbers is not null) device.CourtNumbers = cmd.CourtNumbers.ToList();
         if (cmd.OtaChannel is not null) device.OtaChannel = cmd.OtaChannel.Value;
         if (cmd.PinnedVersion is not null) device.PinnedVersion = cmd.PinnedVersion;
+        if (cmd.ButtonMap is { } buttons) device.ButtonMapJson = buttons.Value?.ToJson();
 
         Audit(actorUserId, "device.updated", new { device_id = device.Id });
         await _db.SaveChangesAsync(ct);
@@ -145,6 +231,10 @@ public sealed class DeviceRegistryService
     public Task<bool> DeviceCodeTakenAsync(string deviceCode, CancellationToken ct) =>
         _db.Devices.AnyAsync(d => d.DeviceCode == deviceCode, ct);
 
+    /// <summary>Whether another row than <paramref name="exceptDeviceId"/> already uses this code.</summary>
+    public Task<bool> DeviceCodeTakenAsync(string deviceCode, Guid exceptDeviceId, CancellationToken ct) =>
+        _db.Devices.AnyAsync(d => d.DeviceCode == deviceCode && d.Id != exceptDeviceId, ct);
+
     /// <summary>
     /// The row that already owns this physical board, if any. Tenant-filtered like every
     /// other read here: a board registered by another club is not this club's to recognise.
@@ -158,7 +248,11 @@ public sealed class DeviceRegistryService
     private string KeyFor(Device device) =>
         _keys.DeriveEncoded(device.TenantId, device.Id, device.KeyVersion);
 
-    private void Audit(Guid actorUserId, string action, object details) =>
+    // Block body, not an expression body: lizard's C# parser mis-scopes an
+    // expression-bodied member containing braces into a *global* pseudo-function the
+    // length of the file — see memory/gotchas.md.
+    private void Audit(Guid actorUserId, string action, object details)
+    {
         _db.AuditLogs.Add(new AuditLog
         {
             TenantId = _tenant.TenantId,
@@ -167,6 +261,7 @@ public sealed class DeviceRegistryService
             Action = action,
             DetailsJson = JsonSerializer.Serialize(details),
         });
+    }
 }
 
 /// <summary>A device and its key. The key is derived on demand and never persisted.</summary>
@@ -183,12 +278,23 @@ public sealed record RegisterDeviceCommand(
 {
     /// <summary>Set when the device was discovered rather than typed in by hand.</summary>
     public string? MacAddress { get; init; }
+
+    /// <summary>This box's own button map, or null to run the club's. See <see cref="Device.ButtonMapJson"/>.</summary>
+    public ButtonMap? ButtonMap { get; init; }
 }
 
-/// <summary>A null <paramref name="CourtNumbers"/> leaves the list alone; a list replaces it whole.</summary>
+/// <summary>
+/// A null <paramref name="CourtNumbers"/> leaves the list alone; a list replaces it whole.
+/// <paramref name="ButtonMap"/> is three-valued: null leaves the override alone, a value
+/// holding null clears it (back to the club's map), a value holding a map sets it.
+/// </summary>
 public sealed record UpdateDeviceCommand(
     string? Name,
     bool? Enabled,
     IReadOnlyList<int>? CourtNumbers,
     OtaChannel? OtaChannel,
-    string? PinnedVersion);
+    string? PinnedVersion,
+    Optional<ButtonMap?>? ButtonMap = null);
+
+/// <summary>A value that is explicitly present, so "absent" and "present but null" can be told apart on a PATCH.</summary>
+public readonly record struct Optional<T>(T Value);

@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,7 +37,7 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
 
     /// <summary>
     /// Per-minute rate-limit ceilings, keyed by the <c>RateLimits:*</c> suffix
-    /// ("AuthPerMinute", "DevicePerMinute", "GlobalPerMinute").
+    /// ("AuthPerMinute", "DevicePerMinute", "GlobalPerMinute", "FirmwarePerMinute").
     ///
     /// <para>
     /// Defaults are raised far above production so an ordinary test suite never trips a
@@ -45,11 +47,21 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
     /// </summary>
     public IReadOnlyDictionary<string, int>? RateLimits { get; init; }
 
+    /// <summary>
+    /// The address the in-memory TestServer should report as the connection's remote
+    /// peer. Null (the default) leaves it unset, as TestServer does. The forwarded-headers
+    /// middleware believes X-Forwarded-* only from a trusted proxy, and trust is decided
+    /// by this address — so a test that models the gateway sets it to loopback, and a test
+    /// that models a stranger forging the headers sets it to something else.
+    /// </summary>
+    public System.Net.IPAddress? RemoteIpAddress { get; init; }
+
     private static readonly Dictionary<string, int> DefaultRateLimits = new()
     {
         ["AuthPerMinute"] = 100_000,
         ["DevicePerMinute"] = 100_000,
         ["GlobalPerMinute"] = 100_000,
+        ["FirmwarePerMinute"] = 100_000,
     };
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -108,6 +120,26 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
             // spend the whole run retrying a connection that is never coming, which
             // makes real failures harder to read.
             services.RemoveAll<IHostedService>();
+
+            // A startup filter runs ahead of everything Program.cs adds, so the remote
+            // address is in place before UseForwardedHeaders looks at it.
+            if (RemoteIpAddress is { } remote)
+            {
+                services.AddTransient<IStartupFilter>(_ => new RemoteAddressFilter(remote));
+            }
         });
+    }
+
+    private sealed class RemoteAddressFilter(System.Net.IPAddress remote) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use((ctx, nextMiddleware) =>
+            {
+                ctx.Connection.RemoteIpAddress = remote;
+                return nextMiddleware(ctx);
+            });
+            next(app);
+        };
     }
 }

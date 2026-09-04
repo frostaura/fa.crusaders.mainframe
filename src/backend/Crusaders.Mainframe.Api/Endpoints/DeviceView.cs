@@ -1,4 +1,5 @@
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Services;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
@@ -23,6 +24,8 @@ public static class DeviceView
         hardware = d.Hardware.ToString(),
         // In relay order: index 0 is relay A. See Device.CourtNumbers.
         court_numbers = d.CourtNumbers,
+        // This box's own button map, or null when it runs the club's. See Device.ButtonMapJson.
+        button_map = ButtonMap.FromJson(d.ButtonMapJson)?.ToWire(),
         gate_key = d.GateKey,
         mac_address = d.MacAddress,
         key_version = d.KeyVersion,

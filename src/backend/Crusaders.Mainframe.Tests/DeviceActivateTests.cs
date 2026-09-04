@@ -139,6 +139,34 @@ public class DeviceActivateTests
     }
 
     /// <summary>
+    /// A scan inside the grace window after the slot has ended is still attendance — it
+    /// stops the sweep — but there is nothing left to light. <c>activated:true</c> with
+    /// <c>granted_seconds:0</c> became a one-second relay pulse and a spent scan on the
+    /// box; the box is told the slot is over instead.
+    /// </summary>
+    [Fact]
+    public async Task A_scan_after_the_slot_has_ended_is_stamped_but_answers_ended_with_no_grant()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+        var booking = await BookAsync(f, courtIndex: 0, startsInMinutes: -47, minutes: 45);   // over two minutes ago, inside grace
+
+        var response = await ActivateAsync(f, box, await BookingCodeAsync(f, booking));
+
+        Assert.False(response.Activated);
+        Assert.Equal("ended", response.Reason);
+        Assert.Equal(0, response.GrantedSeconds);
+        Assert.Equal(booking.Id, response.BookingId);
+        Assert.Equal(1, response.CourtNumber);
+
+        var fresh = await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
+        Assert.NotNull(fresh.CheckedInAt);
+    }
+
+    /// <summary>
     /// A slot longer than the relay can hold is granted the cap, not the slot. The relay
     /// bank cuts the lights at ninety minutes whatever it is told; a grant of two hours
     /// would be thirty minutes of darkness the box could not explain.

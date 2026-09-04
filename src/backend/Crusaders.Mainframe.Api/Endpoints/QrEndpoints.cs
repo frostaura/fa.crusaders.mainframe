@@ -29,9 +29,11 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </list>
 ///
 /// <para>
-/// The courtside camera path (<c>POST /api/v1/court/{n}/qr/match</c>) resolves the code
-/// through <see cref="IdentificationResolver"/> like every other global identification,
-/// then activates through the one activation path.
+/// The courtside camera path (<c>POST /api/v1/court/{n}/qr/match</c>) is an ACTIVATION
+/// path, like the box's <c>/activate</c>: it resolves either kind of code through
+/// <see cref="IdentificationResolver.ResolveForActivationAsync"/>, and a booking code opens
+/// only its own booking — never the member's wallet, which is what the walk-up and
+/// payer-override paths ask <see cref="IdentificationResolver.ResolveAsync"/> for.
 /// </para>
 /// </summary>
 public static class QrEndpoints
@@ -55,9 +57,9 @@ public static class QrEndpoints
             // copies of this — one for the courtside camera and one that would have been
             // written for the court box's walk-up path — and two implementations of "is this
             // code real" is one implementation more than a security check should ever have.
-            var resolved = await identities.ResolveAsync("qr", req.Token, ct);
+            var resolved = await identities.ResolveForActivationAsync("qr", req.Token, ct);
             if (resolved is null) return Results.Ok(new { matched = false, reason = "invalid_or_expired" });
-            var userId = resolved.Value;
+            var userId = resolved.UserId;
 
             // Identify AND activate. This used to confirm a booking existed and return a
             // user_id — no ledger post, no CheckedInAt, no event, no audit row. So a
@@ -71,7 +73,12 @@ public static class QrEndpoints
             // Shared window: was hardcoded at -30 minutes here while the no-show sweep used
             // the tenant's grace setting, so the two disagreed about the same booking.
             var booking = await activation.FindForUserAsync(court.Id, userId, now, ct);
-            if (booking is null) return Results.Ok(new { matched = false, reason = "no_active_booking" });
+            // A booking code names its booking and opens that one only: presented at a
+            // court the booking is not on, it is no booking at all here.
+            if (booking is null || (resolved.BookingId is { } named && booking.Id != named))
+            {
+                return Results.Ok(new { matched = false, reason = "no_active_booking" });
+            }
 
             var result = await activation.ActivateAsync(
                 court, booking, identifiedUserId: userId, payerOverrideUserId: null, method: "qr", ct);

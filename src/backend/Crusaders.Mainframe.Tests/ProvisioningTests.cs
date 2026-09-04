@@ -244,6 +244,42 @@ public sealed class ProvisioningHttpTests
     }
 
     /// <summary>
+    /// api_base_url is echoed from the request so it is by construction an address that
+    /// works from where the board stands — which behind the gateway meant a port-less Host
+    /// and a box calling port 80 for ever (closing re-review #18). With the gateway's
+    /// X-Forwarded-Host believed, the box that provisioned at http://ip:8088 is told
+    /// http://ip:8088; a board on the backend's own :5000 is told :5000.
+    /// </summary>
+    [SkippableFact]
+    public async Task Api_base_url_keeps_the_port_the_board_used_behind_the_gateway_and_directly()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = new TestWebAppFactory
+        {
+            ConnectionString = _pg.ConnectionString,
+            RemoteIpAddress = System.Net.IPAddress.Loopback,   // the gateway
+        };
+        var client = factory.CreateClient();
+
+        Seed(factory, "5ccf7f1a2b3c", "K7RM4XPT");
+        var forwarded = new HttpRequestMessage(HttpMethod.Post, Path) { Content = JsonContent.Create(new { mac = "5ccf7f1a2b3c", claim_code = "K7RM4XPT" }) };
+        forwarded.Headers.Add("X-Forwarded-For", "192.168.68.150");
+        forwarded.Headers.Add("X-Forwarded-Proto", "http");
+        forwarded.Headers.Add("X-Forwarded-Host", "192.168.68.20:8088");
+        var response = await client.SendAsync(forwarded);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("http://192.168.68.20:8088", JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.GetProperty("api_base_url").GetString());
+
+        Seed(factory, "aabbccddeeff", "K7RM4XPT");
+        var direct = factory.CreateClient();
+        direct.BaseAddress = new Uri("http://localhost:5000");
+        var plain = await direct.PostAsJsonAsync(Path, new { mac = "aabbccddeeff", claim_code = "K7RM4XPT" });
+        Assert.Equal(HttpStatusCode.OK, plain.StatusCode);
+        Assert.Equal("http://localhost:5000", JsonDocument.Parse(await plain.Content.ReadAsStringAsync()).RootElement.GetProperty("api_base_url").GetString());
+    }
+
+    /// <summary>
     /// The endpoint is anonymous by necessity — a board collecting its first key has no
     /// credential to present. So it must not become an oracle for which boards are
     /// mid-claim: a wrong code, an unknown MAC and no grant at all look identical.

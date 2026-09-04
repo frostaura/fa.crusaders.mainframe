@@ -120,11 +120,14 @@ public static class AdminConfigEndpoints
                 return Results.BadRequest(new { error = "activation_cue_window_exceeds_forward_window" });
             }
 
-            // A map is checked against every court box in the club before it is saved:
-            // the box's court list and the map are edited on different screens, and a
-            // court button reaching past a box's list is a button that selects nothing.
-            // Refused with the box named so the admin knows which one to fix — or which
-            // one to give more courts. Revoked boxes are decommissioned and do not count.
+            // A map is checked against every court box that would RUN it before it is
+            // saved: the box's court list and the map are edited on different screens, and
+            // a court button reaching past a box's list is a button that selects nothing.
+            // A box with its own override is unaffected by the club's map and is not
+            // consulted — that is what lets a four-court box and a one-court annex box
+            // coexist (review #17). Refused with the box named so the admin knows which
+            // one to fix, give more courts, or give its own map. Revoked boxes are
+            // decommissioned and do not count.
             if (buttons is not null)
             {
                 var boxes = await db.Devices
@@ -133,6 +136,7 @@ public static class AdminConfigEndpoints
                     .ToListAsync(ct);
                 foreach (var box in boxes)
                 {
+                    if (ButtonMap.FromJson(box.ButtonMapJson) is not null) continue;
                     if (buttons.FirstSelectionBeyond(box.CourtNumbers.Count) is { } index)
                     {
                         return Results.BadRequest(new

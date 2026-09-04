@@ -69,7 +69,7 @@ public class OtaCatalogueTests : IDisposable
     private static (string, string)[] Stable(string version = "1.2.0") =>
     [
         ("Ota:Stable:Version", version),
-        ("Ota:Stable:Url", $"https://fw.example/{version}.bin"),
+        ("Ota:Stable:Url", $"http://fw.example/{version}.bin"),
         ("Ota:Stable:SizeBytes", "328192"),
     ];
 
@@ -107,16 +107,40 @@ public class OtaCatalogueTests : IDisposable
         Assert.Equal(328192, release.SizeBytes);
     }
 
+    /// <summary>
+    /// A partially configured override is a startup error, not a silent fallback (closing
+    /// re-review #23). It used to be discarded and Stable fell through to the baked
+    /// manifest — the opposite of what an operator setting the override to HOLD the fleet
+    /// wants, and the shipped .env.example showed SizeBytes=0, exactly the value that made
+    /// the section unusable.
+    /// </summary>
     [Theory]
     [InlineData("Ota:Stable:Version")]
     [InlineData("Ota:Stable:Url")]
     [InlineData("Ota:Stable:SizeBytes")]
-    public void A_half_configured_release_is_treated_as_no_release(string missing)
+    public void A_half_configured_release_refuses_to_start_rather_than_offering_the_baked_image(string missing)
     {
-        // Offered-and-refused by every box in the fleet is worse than not offered:
-        // it looks like the update is stuck rather than like nothing was published.
+        BakeManifest("1.4.0");
         var settings = Stable().Where(s => s.Item1 != missing).ToArray();
-        Assert.Null(Catalogue(settings).For(Box()));
+
+        var ex = Assert.Throws<InvalidOperationException>(() => Catalogue(settings));
+        Assert.Contains("Ota:Stable", ex.Message);
+    }
+
+    [Fact]
+    public void A_size_of_zero_is_a_half_configured_release()
+    {
+        var settings = Stable().Where(s => s.Item1 != "Ota:Stable:SizeBytes").Append(("Ota:Stable:SizeBytes", "0")).ToArray();
+        Assert.Throws<InvalidOperationException>(() => Catalogue(settings));
+    }
+
+    /// <summary>The box fetches with a plain WiFiClient: an https image URL fails every update, so it is refused at startup.</summary>
+    [Fact]
+    public void An_https_image_url_refuses_to_start()
+    {
+        var settings = Stable().Where(s => s.Item1 != "Ota:Stable:Url").Append(("Ota:Stable:Url", "https://fw.example/1.2.0.bin")).ToArray();
+        var ex = Assert.Throws<InvalidOperationException>(() => Catalogue(settings));
+        Assert.Contains("TLS", ex.Message);
     }
 
     [Fact]
@@ -134,7 +158,7 @@ public class OtaCatalogueTests : IDisposable
         var settings = Stable().Concat(new[]
         {
             ("Ota:Canary:Version", "1.3.0-canary"),
-            ("Ota:Canary:Url", "https://fw.example/canary.bin"),
+            ("Ota:Canary:Url", "http://fw.example/canary.bin"),
             ("Ota:Canary:SizeBytes", "330000"),
         }).ToArray();
 
@@ -153,7 +177,7 @@ public class OtaCatalogueTests : IDisposable
         var settings = Stable("2.0.0").Concat(new[]
         {
             ("Ota:Versions:1.1.0:Version", "1.1.0"),
-            ("Ota:Versions:1.1.0:Url", "https://fw.example/1.1.0.bin"),
+            ("Ota:Versions:1.1.0:Url", "http://fw.example/1.1.0.bin"),
             ("Ota:Versions:1.1.0:SizeBytes", "320000"),
         }).ToArray();
 
@@ -260,9 +284,56 @@ public class OtaCatalogueTests : IDisposable
         // boards must use gets that name, whatever address the heartbeat came in on.
         BakeManifest();
 
-        var release = Catalogue(RequestOn("192.168.1.20:8088"), ("Discovery:AdvertisedBaseUrl", "https://courts.club.example/"))
+        var release = Catalogue(RequestOn("192.168.1.20:8088"), ("Discovery:AdvertisedBaseUrl", "http://courts.club.example:8088/"))
             .For(Box());
-        Assert.Equal("https://courts.club.example/firmware/court_bridge.signed.bin", release?.Url);
+        Assert.Equal("http://courts.club.example:8088/firmware/court_bridge.signed.bin", release?.Url);
+    }
+
+    /// <summary>
+    /// The box cannot do TLS, and the backend suite used to pin an https advertised URL as
+    /// correct — a URL every box would fail to open. Refused at startup, or downgraded
+    /// with a flag the operator has to set on purpose (and a warning Program.cs logs).
+    /// </summary>
+    [Fact]
+    public void An_https_advertised_base_url_refuses_to_start_unless_explicitly_downgraded()
+    {
+        var refused = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Discovery:AdvertisedBaseUrl"] = "https://courts.club.example/",
+        }).Build();
+        var ex = Assert.Throws<InvalidOperationException>(() => DiscoveryOptions.FromConfiguration(refused));
+        Assert.Contains("TLS", ex.Message);
+
+        var downgraded = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Discovery:AdvertisedBaseUrl"] = "https://courts.club.example:8088/",
+            ["Discovery:DowngradeHttpsAdvertisedBaseUrl"] = "true",
+        }).Build();
+        var options = DiscoveryOptions.FromConfiguration(downgraded);
+        Assert.Equal("http://courts.club.example:8088/", options.AdvertisedBaseUrl);
+        Assert.True(options.AdvertisedBaseUrlDowngradedFromHttps);
+
+        BakeManifest();
+        var release = Catalogue(RequestOn("192.168.1.20:8088"),
+            ("Discovery:AdvertisedBaseUrl", "https://courts.club.example:8088/"),
+            ("Discovery:DowngradeHttpsAdvertisedBaseUrl", "true")).For(Box());
+        Assert.Equal("http://courts.club.example:8088/firmware/court_bridge.signed.bin", release?.Url);
+    }
+
+    /// <summary>
+    /// What the box is handed behind the gateway: the forwarded-headers middleware has
+    /// rewritten Scheme and Host from X-Forwarded-Proto / X-Forwarded-Host by the time the
+    /// heartbeat reaches the catalogue, so a box that reached the API at http://ip:8088
+    /// gets an image URL on :8088 — not on the gateway's port-less Host (review #8).
+    /// The middleware itself is pinned over HTTP in FirmwareRouteTests and ProvisioningTests.
+    /// </summary>
+    [Fact]
+    public void The_url_is_composed_from_the_request_host_including_its_port()
+    {
+        BakeManifest();
+
+        Assert.Equal("http://192.168.68.20:8088/firmware/court_bridge.signed.bin", Catalogue(RequestOn("192.168.68.20:8088")).For(Box())?.Url);
+        Assert.Equal("http://192.168.68.20/firmware/court_bridge.signed.bin", Catalogue(RequestOn("192.168.68.20")).For(Box())?.Url);
     }
 
     [Fact]
@@ -294,7 +365,7 @@ public class OtaCatalogueTests : IDisposable
     public void An_absolute_url_is_passed_through_untouched()
     {
         var release = Catalogue(RequestOn("10.0.0.5:8088"), Stable()).For(Box());
-        Assert.Equal("https://fw.example/1.2.0.bin", release?.Url);
+        Assert.Equal("http://fw.example/1.2.0.bin", release?.Url);
     }
 
     // ---- scaffolding ------------------------------------------------------------

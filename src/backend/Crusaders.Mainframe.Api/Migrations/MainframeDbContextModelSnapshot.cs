@@ -308,6 +308,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ButtonMapJson")
+                        .HasColumnType("text");
+
                     b.PrimitiveCollection<List<int>>("CourtNumbers")
                         .IsRequired()
                         .HasColumnType("integer[]");

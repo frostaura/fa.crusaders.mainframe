@@ -86,7 +86,22 @@ public sealed class LightsCueWorker : BackgroundService
             }
         }
 
-        if (dueOff.Count > 0) await db.SaveChangesAsync(ct);
+        // A reversed no-show was cued off at the sweep, when it was NoShow with a truncated
+        // end; the reversal put it back to Booked and checked in, and unless its restored
+        // end was still ahead (in which case the marker was cleared and the sweep above
+        // handles it) nothing would ever promote it: LightsOffCuedAt is set, so the
+        // predicate above never sees it again, and it sat as Booked for ever — never
+        // Completed, never anonymised by retention. Attended and over is Completed,
+        // whether or not the lights-off was already cued.
+        var attendedAndOver = await db.Bookings.IgnoreQueryFilters()
+            .Where(b => b.Status == BookingStatus.Booked
+                && b.CheckedInAt != null
+                && b.LightsOffCuedAt != null
+                && b.EndsAt <= now)
+            .ToListAsync(ct);
+        foreach (var b in attendedAndOver) b.Status = BookingStatus.Completed;
+
+        if (dueOff.Count > 0 || attendedAndOver.Count > 0) await db.SaveChangesAsync(ct);
     }
 
     private async Task FireLightsAsync(MainframeDbContext db, ITenantContext tenant, Booking b, bool on, CancellationToken ct)
