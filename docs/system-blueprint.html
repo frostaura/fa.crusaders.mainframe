@@ -1,5 +1,5 @@
 <title>Crusaders Mainframe Blueprint</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<!-- Self-contained by rule: no external stylesheets, scripts or fonts. Archivo / IBM Plex Mono are used when installed locally; the system stacks below are the designed fallback. -->
 <style>
 :root{
   --paper:#F4F7F9; --card:#FFFFFF; --card2:#EDF1F4; --ink:#17222D; --muted:#5C6E7E;
@@ -171,7 +171,7 @@ ul.tight li{margin:5px 0}
 
 <div class="shell">
 <nav class="rail" aria-label="Sections">
-  <div class="brand">Crusaders Mainframe<span class="mono">SYSTEM BLUEPRINT · REV 2026-08-24</span></div>
+  <div class="brand">Crusaders Mainframe<span class="mono">SYSTEM BLUEPRINT · REV 2026-09-04</span></div>
   <div class="grp">System</div>
   <a href="#overview">Topology</a>
   <div class="grp">Hardware</div>
@@ -182,6 +182,7 @@ ul.tight li{margin:5px 0}
   <div class="grp">Protocols</div>
   <a href="#serial">Serial protocol</a>
   <a href="#discovery">Discovery &amp; claim</a>
+  <a href="#deviceapi">Device API</a>
   <div class="grp">Server side</div>
   <a href="#webhooks">Webhooks &amp; guards</a>
   <a href="#backend">Backend</a>
@@ -191,6 +192,7 @@ ul.tight li{margin:5px 0}
   <a href="#frontend">Frontend</a>
   <a href="#deploy">Deployment</a>
   <a href="#risks">Watch list</a>
+  <a href="#fixes">Fix programme</a>
 </nav>
 <main>
 
@@ -198,14 +200,14 @@ ul.tight li{margin:5px 0}
   <div style="height:42px"></div>
   <div class="stamp"><b>●</b> ON-PREM SAAS · CLUB LAN · 4 COURTS</div>
   <h1>Crusaders Mainframe Blueprint</h1>
-  <p class="sub">The full system on one page — a multi-tenant booking SaaS whose last hop is a relay coil: React PWA → .NET 10 API → PostgreSQL ledger → outbound webhooks → an ESP8266 bridge → an ATmega2560 that physically switches the court lights.</p>
+  <p class="sub">The full system on one page — a multi-tenant booking SaaS whose last hop is a relay coil: React PWA → .NET 10 API → PostgreSQL ledger → outbound webhooks → an ESP8266 bridge that asks the API first and falls back to its cached roster → an ATmega2560 that physically switches the court lights. Revised 2026-09-04 to the state of the <a href="#fixes">E2E fix programme</a> branch.</p>
   <div class="tiles">
-    <div class="tile hw"><div class="v">4</div><div class="k">Court relays A–D</div></div>
+    <div class="tile hw"><div class="v">4</div><div class="k">Courts per box, relays A–D</div></div>
     <div class="tile hw"><div class="v">9600</div><div class="k">Baud, both serial links</div></div>
-    <div class="tile hw"><div class="v">90 min</div><div class="k">Relay hard cap</div></div>
-    <div class="tile sw"><div class="v">15 min</div><div class="k">Booking slice</div></div>
-    <div class="tile sw"><div class="v">16</div><div class="k">Webhook event types</div></div>
-    <div class="tile ok"><div class="v">799</div><div class="k">Tests green (519 + 240 + 40)</div></div>
+    <div class="tile hw"><div class="v">90 min</div><div class="k">Relay hard cap — one shared constant</div></div>
+    <div class="tile sw"><div class="v">12</div><div class="k">Chars in an access code</div></div>
+    <div class="tile sw"><div class="v">18</div><div class="k">Webhook event types</div></div>
+    <div class="tile ok"><div class="v">1033</div><div class="k">Tests green (686 + 303 + 44)</div></div>
   </div>
   <div class="legend">
     <span><i style="background:var(--amber-fill)"></i>Hardware / court box</span>
@@ -220,7 +222,7 @@ ul.tight li{margin:5px 0}
 <section id="overview">
   <div class="eyebrow">System · End to end</div>
   <h2>Topology — from tap to relay coil</h2>
-  <p class="lede">Everything runs on one on-prem machine at the club behind a Cloudflare tunnel; the court box is the only other computer. The API never dials the box for actuation decisions that matter — the box decides locally from a cached roster, and the mains-side safety timer lives one hop further down, on the Mega itself.</p>
+  <p class="lede">Everything runs on one on-prem machine at the club behind a Cloudflare tunnel; the court box is the only other computer. The API never dials the box — every call is box → API, signed. A scan asks <span class="mono">POST /api/v1/device/activate</span> first and is decided from the heartbeat-pushed roster only when the API could not be asked; the mains-side safety timer lives one hop further down, on the Mega itself.</p>
   <div class="card pad scroll">
   <figure style="margin:0">
   <svg viewBox="0 0 1240 620" role="img" aria-label="System topology: member PWA through Cloudflare tunnel to the on-prem Docker stack (gateway, frontend, backend API, PostgreSQL), and across the club LAN to the court box, where an ESP8266 bridge talks over Serial3 to an ATmega2560 driving four relays, LCD, buttons and QR scanner" style="min-width:1000px;max-width:100%;height:auto">
@@ -274,7 +276,7 @@ ul.tight li{margin:5px 0}
         <rect x="650" y="200" width="168" height="24" rx="4" fill="none" stroke="var(--blue)" stroke-opacity=".55"/>
         <text x="734" y="216" text-anchor="middle">webhook delivery workers</text>
         <rect x="650" y="230" width="168" height="24" rx="4" fill="none" stroke="var(--blue)" stroke-opacity=".55"/>
-        <text x="734" y="246" text-anchor="middle">device API + provisioning</text>
+        <text x="734" y="246" text-anchor="middle">device API · roster · /firmware/</text>
         <rect x="650" y="260" width="168" height="24" rx="4" fill="none" stroke="var(--blue)" stroke-opacity=".55"/>
         <text x="734" y="276" text-anchor="middle">no-show sweep · retry sweep</text>
       </g>
@@ -356,8 +358,8 @@ ul.tight li{margin:5px 0}
       <path d="M834 212 Q880 200 900 152 Q908 132 902 118" marker-end="url(#arwA)"/>
       <path d="M902 96 Q860 60 834 160" marker-end="url(#arwA)" stroke-dasharray="6 4"/>
     </g>
-    <text x="845" y="120" class="m" font-size="10" fill="var(--amber)" text-anchor="end">lights on/off — direct signed HTTP (LAN)</text>
-    <text x="845" y="70" class="m" font-size="10" fill="var(--amber)" text-anchor="end">heartbeat · queued events · OTA poll</text>
+    <text x="845" y="120" class="m" font-size="10" fill="var(--amber)" text-anchor="end">heartbeat ← court_numbers · roster · ota</text>
+    <text x="845" y="70" class="m" font-size="10" fill="var(--amber)" text-anchor="end">activate · walk-up · events (box → API, signed)</text>
 
     <!-- discovery dashed -->
     <path d="M576 386 Q740 420 900 112" stroke="var(--amber-fill)" stroke-width="1.4" fill="none" stroke-dasharray="3 4" marker-end="url(#arwA)"/>
@@ -380,14 +382,14 @@ ul.tight li{margin:5px 0}
     <text x="1064" y="371" class="m" font-size="9.5" fill="var(--red)" text-anchor="middle">230 VAC</text>
     <text x="1064" y="418" font-size="9.5" fill="var(--red)" text-anchor="middle">via contactor? — open</text>
   </svg>
-  <figcaption>One machine runs the whole SaaS; the court box is the only peripheral computer. Amber paths are club-LAN hardware traffic: direct signed HTTP for actuation, UDP broadcast for discovery, and the box phoning home with heartbeats and its offline event queue. The red hop is mains voltage — its contactor question is the top item on the <a href="#risks">watch list</a>.</figcaption>
+  <figcaption>One machine runs the whole SaaS; the court box is the only peripheral computer. Amber paths are club-LAN hardware traffic, and every HTTP call on them is <em>outbound from the box</em>: activation and walk-up questions, the drained event queue, and the heartbeat that brings back the box's court list, its roster and any firmware offer. UDP broadcast is discovery. The red hop is mains voltage — its contactor question is the top item on the <a href="#risks">watch list</a>.</figcaption>
   </figure>
   </div>
 
   <div class="grid3" style="margin-top:18px">
     <div class="callout good" style="margin:0">
-      <div class="t">The court works when the network does not</div>
-      <p>A scan is decided <em>on the box</em>, from a cached roster, in microseconds. The API hears about it when it can, via a sequence-numbered event queue.</p>
+      <div class="t">Online first; the court still works when the network does not</div>
+      <p>A scan asks the API — only it knows about a booking made thirty seconds ago or a balance too low to admit — and its answer is final. When the API <em>cannot be asked</em> (no link, no clock, a 5xx, a malformed 200) the box decides from the roster the last heartbeat pushed, and the API hears about it later via the sequence-numbered event queue.</p>
     </div>
     <div class="callout" style="margin:0">
       <div class="t">Charge at booking — decided 2026-08-22</div>
@@ -414,7 +416,7 @@ ul.tight li{margin:5px 0}
         <thead><tr><th></th><th>ATmega2560</th><th>ESP8266</th></tr></thead>
         <tbody>
           <tr><td><b>Role</b></td><td>thin I/O, near-static</td><td>all the brains</td></tr>
-          <tr><td><b>Owns</b></td><td>buttons, scanner framing, relay drive, LCD, <b>independent auto-off timer</b></td><td>protocol, state machine, device auth, heartbeat, roster cache, event queue, OTA</td></tr>
+          <tr><td><b>Owns</b></td><td>buttons, scanner framing, relay drive, LCD — including the <span class="mono">CHECKING...</span> it paints itself on every scan, so a dead ESP is visible on the glass — and the <b>independent auto-off timer</b></td><td>protocol, device auth, heartbeat, the <b>scan decision</b> (<span class="mono">lib/bridgelogic</span>: online-first, roster fallback), <span class="mono">!AUTH</span> arming, <span class="mono">!STATE</span> reconciliation, roster cache, event queue, OTA</td></tr>
           <tr><td><b>Updated by</b></td><td>USB, rarely</td><td><b>over the air</b></td></tr>
         </tbody>
       </table>
@@ -431,7 +433,7 @@ ul.tight li{margin:5px 0}
       </div>
       <div class="callout good">
         <div class="t">Hard limits burned into the Mega</div>
-        <p><span class="mono">RELAY_HARD_CAP_MS</span> = 90 min — no frame can express indefinite-on. <span class="mono">AUTH_TTL_MS</span> = 30 s — button authorisation expires. Both hold regardless of what the ESP, network or backend believe.</p>
+        <p><span class="mono">RELAY_HARD_CAP_MS</span> = 90 min — no frame can express indefinite-on, and the same 5400 s is now <em>one</em> constant on both sides: <span class="mono">proto::kRelayHardCapSeconds</span> (static-asserted in the ESP build too) and the backend's <span class="mono">RelayHardCap</span>, pinned by the buttonmap corpus, so the button map, a walk-up and an activation can no longer sell minutes the relay will not deliver. <span class="mono">AUTH_TTL_MS</span> = 30 s — button authorisation expires. Both hold regardless of what the ESP, network or backend believe.</p>
       </div>
     </div>
   </div>
@@ -637,7 +639,7 @@ ul.tight li{margin:5px 0}
 <section id="firmware">
   <div class="eyebrow">Hardware · Firmware</div>
   <h2>Firmware — one logic layer, three targets</h2>
-  <p class="lede">Everything under <code>lib/</code> except the two HALs is free of Arduino headers, so the same code compiles for AVR, Xtensa <em>and</em> the host test runner — 240 Unity tests prove the logic with no board attached, and CI enforces purity with a grep gate. <code>main.cpp</code> is a composition root only; behaviour is not allowed to live where no test can drive it.</p>
+  <p class="lede">Everything under <code>lib/</code> except the two HALs is free of Arduino headers, so the same code compiles for AVR, Xtensa <em>and</em> the host test runner — 303 Unity tests, run native and again under ASAN + UBSAN, prove the logic with no board attached, and CI enforces purity with a grep gate. <code>main.cpp</code> is a composition root only; behaviour is not allowed to live where no test can drive it. The 2026-08-24 review found the ESP sketch hiding exactly such behaviour (a roster nothing filled, a scan path that never asked the API, an <span class="mono">!AUTH</span> nobody sent); it now lives in <code>lib/bridgelogic</code>, host-tested and corpus-bound. Bridge firmware is <span class="mono">1.1.0</span>.</p>
 
   <div class="grid2">
     <div class="card pad">
@@ -653,8 +655,10 @@ ul.tight li{margin:5px 0}
           <tr><td class="mono">roster/</td><td>who may open which court — cached, age-limited</td></tr>
           <tr><td class="mono">eventq/</td><td>what the box DID, queued until the API can hear</td></tr>
           <tr><td class="mono">court/</td><td>what a scan means; button map; walk-up pad</td></tr>
-          <tr><td class="mono">devapi/</td><td>signed requests, response policy, heapless JSON scanner</td></tr>
+          <tr><td class="mono" style="color:var(--amber)">bridgelogic/</td><td><b>the ESP's decisions</b> — <span class="mono">RosterSync</span> (heartbeat → cache), <span class="mono">ScanFlow</span> (online-then-roster), <span class="mono">WalkUp</span> (court + nonce body), <span class="mono">StateReconcile</span> (<span class="mono">!STATE</span> → held state); everything <span class="mono">court_bridge/main.cpp</span> does NOT do</td></tr>
+          <tr><td class="mono">devapi/</td><td>signed requests, response policy, clock seed + skew escalation, heapless JSON scanner</td></tr>
           <tr><td class="mono">otacore/</td><td>whether to take an update; surviving one that doesn't work</td></tr>
+          <tr><td class="mono">fwversion/</td><td>the <span class="mono">FW_VERSION_*</span> string, alone so either half can carry it</td></tr>
           <tr><td class="mono">hal/ + hal_fakes/</td><td>port interfaces, nulls, recording test doubles</td></tr>
           <tr><td class="mono">arduino_hal/ · posix_hal/</td><td>the only places Arduino / POSIX headers live</td></tr>
         </tbody>
@@ -664,19 +668,25 @@ ul.tight li{margin:5px 0}
 
     <div>
       <div class="card pad" style="margin-bottom:16px">
-        <h3 style="margin-top:0">Offline behaviour — three deliberate directions</h3>
+        <h3 style="margin-top:0">The decision model — who decides what, and in which direction it fails</h3>
         <table>
-          <thead><tr><th>Subsystem</th><th>On failure</th><th>Why</th></tr></thead>
+          <thead><tr><th>Subsystem</th><th>Rule</th><th>Why</th></tr></thead>
           <tbody>
+            <tr><td>Scan</td><td><span class="pill sw">online first</span></td><td><span class="mono">ScanFlow</span>: a provisioned box with WiFi and a clock POSTs <span class="mono">/activate</span>; a <em>refusal</em> is final and the roster gets no second opinion. Only a transport failure — no route, 5xx, 429, a 401 the client is already correcting its clock over, a 200 with no grant — hands the scan to the roster</td></tr>
+            <tr><td>Roster cache</td><td><span class="pill risk">fails closed</span></td><td>filled by <span class="mono">RosterSync</span> from every heartbeat (wholesale replace; an absent key leaves the cache alone; a malformed entry is refused, never truncated). Past <span class="mono">ROSTER_MAX_AGE_MS</span> (6 h) the box admits nobody — a cancelled booking lingering in cache lights a court nobody is charged for. Lights the court the <em>matched entry</em> names, for its <em>remaining</em> time</td></tr>
             <tr><td>Relay timer</td><td><span class="pill ok">fails open</span></td><td>lights off even if ESP, WiFi and backend are all gone — the most expensive failure is a court burning all night</td></tr>
-            <tr><td>Roster cache</td><td><span class="pill risk">fails closed</span></td><td>past <span class="mono">ROSTER_MAX_AGE_MS</span> the box admits nobody — a cancelled booking lingering in cache lights a court nobody is charged for</td></tr>
-            <tr><td>Walk-ups</td><td><span class="pill sw">need network</span></td><td>the box knows neither tariff nor next booking; refusing to sell new time is a member at the desk, refusing paid time is a member in the dark</td></tr>
+            <tr><td>Held state</td><td><span class="pill sw">reconciled</span></td><td><span class="mono">StateReconcile</span> reads <span class="mono">!STATE</span> (every change, every 10 s): a mask bit cleared while the bridge believes the court held <em>is</em> the release, so a dropped <span class="mono">!EVT,AUTOOFF</span> can no longer strand a court as held; 2 s grace against a frame in flight. A failed <span class="mono">!ON</span> no longer marks a court held — the box paints TRY AGAIN instead</td></tr>
+            <tr><td>Walk-ups</td><td><span class="pill sw">need network</span></td><td>the box knows neither tariff nor next booking; refusing to sell new time is a member at the desk, refusing paid time is a member in the dark. Body carries the court number and a per-purchase nonce, reused across retries of the same purchase</td></tr>
           </tbody>
         </table>
       </div>
       <div class="card pad" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Clock — how a box with no RTC gets one on every path</h3>
+        <p style="font-size:13.5px">The box signs every request with its own clock and cannot sign without one; review C1 found no production path ever seeded it. Now: the <b>provision response</b> carries <span class="mono">server_unix</span> (the first seed a fresh board sees), <b>every heartbeat</b> carries it, and every Device-scheme <b>401 writes <span class="mono">{"server_unix":…}</span></b> and nothing else — refusal reasons stay unleaked. A <em>provisioned</em> box also adopts the clock in the HMAC-verified, nonce-bound discovery <b>OFFER</b> (an unclaimed box's offer is unsigned and never trusted), which is how a power-cycled board recovers without touching the API. A clockless provisioned box <b>probes</b>: it signs a heartbeat with timestamp 0 and reseeds from the 401 body. Skew tolerance is asymmetric by contract — client 90 s &lt; server 120 s, pinned as the corpus's <span class="mono">clock</span> object — and a two-strike <span class="mono">ClockCorrected → Reprovision</span> guard in <span class="mono">DeviceClient::react</span> stops a 401 loop.</p>
+      </div>
+      <div class="card pad" style="margin-bottom:16px">
         <h3 style="margin-top:0">Event queue</h3>
-        <p style="font-size:13.5px">A RAM ring of what the box did, drained to the API when reachable. Survives WiFi loss, router reboots, a two-day outage — <b>not a power cut</b> (events outsize the 32-byte <code>hal::IStore</code> slots). The <b>sequence number does persist</b>, in blocks of 64 — that's what API-side deduplication rests on. A queued activation is evidence, not a charge: it stops the no-show sweep reversing a debit that was already posted at booking.</p>
+        <p style="font-size:13.5px">A RAM ring of what the box did, drained to the API when reachable. Survives WiFi loss, router reboots, a two-day outage — <b>not a power cut</b> (events outsize the 32-byte <code>hal::IStore</code> slots). The <b>sequence number does persist</b>, in blocks of 64 — that's what API-side deduplication rests on. Only the <em>roster</em> path queues: an activation the API itself granted is one it already recorded. A queued activation is evidence, not a charge — it is what stops the no-show sweep reversing a debit already posted at booking, and since this branch the API actually reads it as attendance (review C6).</p>
       </div>
       <div class="card pad">
         <h3 style="margin-top:0">The rollover rule</h3>
@@ -689,7 +699,7 @@ ul.tight li{margin:5px 0}
   <div class="grid3">
     <div class="card pad kv">
       <span class="pill hw">Signing</span>
-      <p style="font-size:13.5px;margin:8px 0 0"><b>RSA-2048 / SHA-256</b> via the ESP8266 core's <code>Updater</code>, against a public key compiled into the image. Ed25519 was the plan; BearSSL has no Ed25519 and vendoring a curve into a court-lighting controller is the worse trade. The property that mattered survives: the signing key is asymmetric and lives only where releases are built.</p>
+      <p style="font-size:13.5px;margin:8px 0 0"><b>RSA-2048 / SHA-256</b> via the ESP8266 core's <code>Updater</code>, against a public key compiled into the image. Ed25519 was the plan; BearSSL has no Ed25519 and vendoring a curve into a court-lighting controller is the worse trade. The property that mattered survives: the signing key is asymmetric and lives only where releases are built — now concretely CI's <span class="mono">iot-sign</span> job, fed by the <span class="mono">OTA_PRIVATE_KEY</span> secret (<a href="#deploy">deploy chain</a>). <b>The private key does not exist yet</b>; minting it is a hard prerequisite of the first flash, not a hardening step after it.</p>
     </div>
     <div class="card pad kv">
       <span class="pill risk">No rollback</span>
@@ -790,20 +800,20 @@ ul.tight li{margin:5px 0}
         <tbody>
           <tr><td class="mono">!BTN,&lt;key&gt;</td><td>Debounced press, key ∈ A–D, 1–4</td></tr>
           <tr><td class="mono">!SCAN,&lt;code&gt;</td><td>Complete line from the QR scanner</td></tr>
-          <tr><td class="mono">!STATE,&lt;mask&gt;,&lt;remA..D&gt;</td><td>Relay bitmask + seconds remaining — on change and every 10 s</td></tr>
+          <tr><td class="mono">!STATE,&lt;mask&gt;,&lt;remA..D&gt;</td><td>Relay bitmask + seconds remaining — on change and every 10 s. <b>Read, not just logged</b>: the bridge reconciles its held state from the mask (review A2-6)</td></tr>
           <tr><td class="mono">!PONG,&lt;ver&gt;,&lt;uptime&gt;</td><td>Answer to PING</td></tr>
           <tr><td class="mono">!EVT,&lt;name&gt;,&lt;detail&gt;</td><td>AUTOOFF · AUTHEXPIRED · BADFRAME · OVERRUN</td></tr>
           <tr><td class="mono">!ERR,&lt;code&gt;</td><td>BADCRC · BADVERB · BADARG · NOCOURT</td></tr>
         </tbody>
       </table>
-      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Bounds: <span class="mono">kMaxArgLen 24</span>, <span class="mono">kMaxFrameLen 192</span>. Over-long LCD text is truncated (the panel cuts it anyway); an over-long SCAN is <b>refused</b> — a truncated member code doesn't fail, it identifies a <em>different member</em>.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Bounds: <span class="mono">kMaxArgLen 24</span>, <span class="mono">kMaxFrameLen 192</span>. Over-long LCD text is truncated (the panel cuts it anyway); an over-long SCAN is <b>refused</b> — a truncated member code doesn't fail, it identifies a <em>different member</em>. That 24-byte argument is the pipeline that ruled a JWT out (review H2): the identifier is now a 12-character <a href="#deviceapi">access code</a>, and <span class="mono">roster::kMaxTokenLen 20 ≤ kMaxArgLen</span> is static-asserted where the two meet.</p>
     </div>
   </div>
 
   <div class="grid2" style="margin-top:16px">
     <div class="callout good" style="margin:0">
       <div class="t">The two safety rules live on the Mega</div>
-      <p>1 — <b>Every ON carries a deadline.</b> v2 cannot express indefinite-on; <span class="mono">RELAY_HARD_CAP_MS</span> (90 min) caps even a frame that asks for more. A Mega whose bridge is unplugged still opens its relays. 2 — <b>Authorisation expires.</b> <span class="mono">!AUTH</span> arms buttons for a bounded window (default 30 s); the legacy <span class="mono">authenticated</span> flag had no expiry, so a button pressed hours after someone else's scan fired a relay on their credit.</p>
+      <p>1 — <b>Every ON carries a deadline.</b> v2 cannot express indefinite-on; <span class="mono">RELAY_HARD_CAP_MS</span> (90 min) caps even a frame that asks for more. A Mega whose bridge is unplugged still opens its relays. 2 — <b>Authorisation expires.</b> <span class="mono">!AUTH</span> arms buttons for a bounded window (30 s = <span class="mono">AUTH_TTL_MS</span>); the legacy <span class="mono">authenticated</span> flag had no expiry, so a button pressed hours after someone else's scan fired a relay on their credit. Review H1 found the bridge <em>never sent</em> <span class="mono">!AUTH</span>, so every button press was discarded; it now arms on every remembered scan and sends <span class="mono">!AUTH,0</span> the moment <em>any</em> path — online, roster or walk-up — lights the court (<span class="mono">bridgelogic::spendsScan</span>), so the next walk-up never gets thirty seconds of buttons on a stranger's token.</p>
     </div>
     <div class="card pad scroll" style="margin:0">
       <h3 style="margin-top:0">Legacy compatibility (both directions)</h3>
@@ -847,7 +857,7 @@ ul.tight li{margin:5px 0}
       <pre class="code">CRSDR1 &lt;VERB&gt; key=value key=value ... *CC\n</pre>
       <p style="font-size:13px">Same shape as the serial protocol, one mental model for both links. Limits: ≤12 fields, key ≤8, value ≤64, datagram ≤320 bytes. Empty value = <span class="mono">bad_frame</span> (absent and blank are different statements). Error precedence: <span class="mono">bad_frame → bad_magic → bad_checksum → bad_verb → duplicate_key</span>.</p>
       <h3>ANNOUNCE / OFFER</h3>
-      <p style="font-size:13px"><b>ANNOUNCE</b> (box → broadcast): every 5 s unclaimed, 60 s claimed, and on link-up. Carries <span class="mono">mac hw fw mega st n cch|dev+ten up sig</span>. <b>OFFER</b> (API → unicast): <span class="mono">url t n sig</span> — the nonce echo kills replay across boots, and <b>a claimed box refuses any unsigned or bad-signature OFFER</b>, or anyone on the club WiFi could redirect a board to their own mainframe by answering faster.</p>
+      <p style="font-size:13px"><b>ANNOUNCE</b> (box → broadcast): every 5 s unclaimed, 60 s claimed, and on link-up. Carries <span class="mono">mac hw fw mega st n cch|dev+ten up sig</span>. <b>OFFER</b> (API → unicast): <span class="mono">url t n sig</span> — the nonce echo kills replay across boots, and <b>a claimed box refuses any unsigned or bad-signature OFFER</b>, or anyone on the club WiFi could redirect a board to their own mainframe by answering faster. The <span class="mono">t</span> field is the API clock: a <em>provisioned</em> box adopts it once the HMAC has verified (its clock-recovery path after a power cut); an unclaimed box's offer is unsigned and its time is never adopted. A provisioned box also never repaints <span class="mono">CLAIM CODE</span> over its idle screen on a Mega reset or WiFi reconnect (review A2-7).</p>
     </div>
 
     <div class="card pad scroll">
@@ -895,7 +905,7 @@ ul.tight li{margin:5px 0}
         <path d="M100 478 H458" stroke="var(--amber-fill)" stroke-width="1.8" fill="none" marker-end="url(#parw)"/>
         <text x="278" y="470" text-anchor="middle" class="m" font-size="10" fill="var(--amber)">POST /api/v1/device/provision {mac, claim_code}</text>
         <path d="M458 512 H100" stroke="var(--amber-fill)" stroke-width="1.8" fill="none" marker-end="url(#parw)"/>
-        <text x="278" y="504" text-anchor="middle" class="m" font-size="10" fill="var(--amber)">device key (uniform refusals; wrong guess burns grant)</text>
+        <text x="278" y="504" text-anchor="middle" class="m" font-size="10" fill="var(--amber)">device key + server_unix + api_base_url (uniform refusals)</text>
 
         <g font-size="10.5" fill="currentColor">
           <rect x="20" y="534" width="140" height="48" rx="6" fill="var(--green-soft)" stroke="var(--green)"/>
@@ -904,8 +914,71 @@ ul.tight li{margin:5px 0}
         </g>
         <text x="278" y="604" text-anchor="middle" font-size="10" fill="currentColor" opacity=".7">3 wrong codes → claiming locked until reboot · 32⁸ ≈ 1.1×10¹² codes, new commitment each boot</text>
       </svg>
-      <figcaption><b>The board fetches; the API never pushes.</b> The obvious design — POST the key to the announced address — would dial an address that arrived in an unauthenticated UDP datagram, carving a member-reachable hole through the SSRF guard. Inverting the direction leaves the API's outbound posture untouched; the claim code (generated on the board, displayed on its LCD, never on the wire) is what authenticates the fetch. The key is also shown to the admin once — the serial-cable fallback for a board that can't reach the API yet.</figcaption>
+      <figcaption><b>The board fetches; the API never pushes.</b> The obvious design — POST the key to the announced address — would dial an address that arrived in an unauthenticated UDP datagram, carving a member-reachable hole through the SSRF guard. Inverting the direction leaves the API's outbound posture untouched; the claim code (generated on the board, displayed on its LCD, never on the wire) is what authenticates the fetch. The provision response is also the board's first clock seed — without <span class="mono">server_unix</span> it held a key it could never sign with (review C1). The key is also shown to the admin once — the serial-cable fallback for a board that can't reach the API yet.</figcaption>
       </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DEVICE API ================= -->
+<section id="deviceapi">
+  <div class="eyebrow">Protocols · Wire format №3</div>
+  <h2>Device API — five signed calls, one identifier</h2>
+  <p class="lede">Everything under <code>/api/v1/device</code> authenticates with the <b>Device</b> scheme — an HMAC over a canonical request string, never a JWT — and every call is <em>box → API</em>. Provision is the one anonymous exception, authenticated by the claim code instead. Request and response shapes are pinned in the shared corpus (<code>src/contracts/device-protocol/http/cases.json</code>: 16 signed-request vectors and a <code>responses</code> section) that both the C++ and the .NET suites assert, so neither side can drift without the other going red.</p>
+
+  <div class="card pad scroll">
+    <table>
+      <thead><tr><th>Call</th><th>Box sends</th><th>API answers</th><th>What it settles</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">POST /provision<br><span style="opacity:.6">anonymous · claim code</span></td>
+          <td class="mono">{mac, claim_code}</td>
+          <td class="mono">{server_time, server_unix, device_id, tenant_slug, key_version, device_key, api_base_url}</td>
+          <td>The key, once, and the <b>first clock seed</b>. <span class="mono">api_base_url</span> is echoed from the address the board reached, unless <span class="mono">Discovery:AdvertisedBaseUrl</span> is set. Uniform refusals: wrong code, unknown MAC and expired grant are indistinguishable.</td>
+        </tr>
+        <tr>
+          <td class="mono">POST /heartbeat<br><span style="opacity:.6">every heartbeat_seconds (60)</span></td>
+          <td class="mono">{running_version, mega_version, uptime_seconds, wifi_rssi, failed_version?}</td>
+          <td class="mono">{server_time, server_unix, tenant_slug, device_code, <b>court_numbers</b>[≤4], heartbeat_seconds, ota{ota_version, ota_url, ota_size}|null, config{slice_minutes, grace_window_minutes, button_map[8]}, <b>roster</b>[≤16]}</td>
+          <td><span class="mono">court_numbers</span> is the relay mapping (index 0 = relay A). <span class="mono">roster</span> is <b>always present</b> — the box replaces its cache wholesale and a cancelled booking is expressed by absence. Each entry is <span class="mono">TOKEN|relay|opens_in|closes_in</span> (signed seconds from the response instant; <span class="mono">opens_in</span> = start − cue window, negative = already open) for Booked, not-yet-checked-in bookings on this box's courts inside the tenant's roster window; earliest sixteen by <span class="mono">StartsAt</span>; whole body ≤ 2048 B, the box's response buffer. <span class="mono">ota</span> is omitted when the box already runs (or condemned) that version.</td>
+        </tr>
+        <tr>
+          <td class="mono">POST /activate<br><span style="opacity:.6">the pre-booked member (C3)</span></td>
+          <td class="mono">{method, token, court?}</td>
+          <td class="mono">{activated, reason, court_number?, booking_id?, granted_seconds, starts_in_seconds?, server_unix}</td>
+          <td>A booking code names its booking outright; a member-ident code is searched across the box's courts for the <em>earliest</em> activatable booking. <span class="mono">granted_seconds</span> = remainder of the slot clamped to <span class="mono">RelayHardCap</span> (5400) — a rescan of a live session answers what is left, which is how a slot longer than 90 min is re-lit. <b>Every refusal is a 200</b> with <span class="mono">activated:false</span> and a reason the LCD can show: <span class="mono">too_early</span> (with <span class="mono">starts_in_seconds</span>), <span class="mono">not_recognised</span>, <span class="mono">wrong_court</span>, <span class="mono">no_booking</span>, <span class="mono">insufficient_balance</span>, <span class="mono">not_chargeable</span>.</td>
+        </tr>
+        <tr>
+          <td class="mono">POST /walkup<br><span style="opacity:.6">the one call that moves money now</span></td>
+          <td class="mono">{minutes, method, token, <b>court</b>, <b>nonce</b>}</td>
+          <td class="mono">200 {server_unix, booking_id, granted_minutes, amount_credits, balance_after_credits, replayed}<br>402 insufficient_balance · 409 court_in_use | no_time_available · 400 minutes_out_of_range | court_not_on_device | nonce_required | not_recognised</td>
+          <td>Five fields (C5/H3). <span class="mono">court</span> is the court <em>number</em> the pressed relay maps to and must be one of the box's; <span class="mono">minutes</span> ≤ min(tenant walk-up cap, 90). <span class="mono">nonce</span> (16 hex) is the idempotency key: the ledger reference <span class="mono">walkup:{device}:{nonce}</span> is looked up first and a repeat returns the <b>original grant</b> with <span class="mono">replayed:true</span>, so a box that lost the first 200 can still <span class="mono">!ON</span> and nobody is charged twice — the read-first check is the fast path, the unique index plus re-read is the guarantee. Creates a real booking, born activated.</td>
+        </tr>
+        <tr>
+          <td class="mono">POST /events<br><span style="opacity:.6">the drained queue</span></td>
+          <td class="mono">{uptime_ms, events[≤32]{seq, uptime_ms, kind, court (relay idx 0–3), method, subject, duration_ms}}</td>
+          <td class="mono">{server_unix, accepted_through, recorded}</td>
+          <td>Idempotent on <span class="mono">(device, seq)</span>; the box releases its ring up to <span class="mono">accepted_through</span>. <b>An <span class="mono">activation</span> event is attendance</b> (C6): its token resolves to the booking, the relay is checked against the booking's court, and it runs through the one <span class="mono">CourtActivationService</span> path <em>before</em> its receipt is written — per-event unit of work, so a mid-batch failure loses no attendance. <b>Nothing here 4xxs the box</b>: <span class="mono">ok</span>, <span class="mono">too_early</span>, <span class="mono">unpaid</span>, <span class="mono">not_chargeable</span>, <span class="mono">unresolved</span>, <span class="mono">wrong_court</span> and <span class="mono">reversed_no_show</span> are all acked and written as <span class="mono">device.activation_{outcome}</span> audit rows, so the desk can answer "it let me in — why am I a no-show?" from the record.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="card pad">
+      <h3 style="margin-top:0">Identification — the 12-character access code</h3>
+      <p style="font-size:13.5px">The 60-second JWT QR is <b>retired from identification entirely</b>: the Mega's frame codec caps an argument at 24 bytes and poisons anything longer, so the multi-hundred-byte HS256 token was dropped as TooLong at the panel every time (review H2). What the phone now puts in front of the scanner is an <span class="mono">AccessCode</span>: <b>12 upper-case Crockford base32 characters</b> (no I, L, O, U — readable off a screen, typeable at a desk), 60 bits of CSPRNG entropy, a random handle to a tenant-scoped row that is the proof. Two purposes: a <b>booking-activation</b> code, minted <em>in the booking's own unit of work</em> and live until slot end + grace — it names its booking, so the box finds the roster entry with no search; and a short-lived <b>member-ident</b> code for walk-ups and the payer override. A code minted at one club resolves to nothing at another, structurally, through the tenant query filter. Bookings that predate codes are minted lazily by the roster builder and the QR screen from one rule.</p>
+      <p style="font-size:13px;color:var(--muted)">Member surface: <span class="mono">POST /api/v1/me/qr/generate</span> returns <span class="mono">{code, kind: booking|ident, expires_in_seconds, …}</span>, and the PWA's <span class="mono">/court-code</span> screen renders the <em>bare</em> code as a QR through an in-house encoder (verified against python-qrcode, 40/40 identical matrices) — nothing but the 12 characters ever reaches the 24-byte pipeline.</p>
+    </div>
+    <div>
+      <div class="card pad">
+        <h3 style="margin-top:0">Late evidence reverses a settled no-show (C6 residual, landed 2026-09-04)</h3>
+        <p style="font-size:13.5px">Decision recorded in <span class="mono">memory/decisions.md</span>; mechanism in <span class="mono">DeviceEventEndpoints.SettleAsync</span>. A box offline longer than the grace window lights the court from its roster and queues the scan; by the time WiFi returns the sweep has settled the booking as a no-show, refunded it less the penalty and released the court. The upload used to resolve to <span class="mono">not_chargeable</span> — the member who played kept the refund and paid the penalty. Now <span class="mono">BookingService.ReverseNoShowAsync</span> posts <b>two new rows, never an edit</b> — a debit reversing the refund, a credit reversing the penalty, each the same type as the row it reverses with the opposite sign, referenced <span class="mono">noshow-reversal:{booking}:{refund|penalty}</span> — and the row goes back to <span class="mono">Booked</span>, checked in at the scan. <span class="mono">EndsAt</span> stays truncated (the tail may have been resold); the reversal posts whatever the balance (a correction, not a purchase). Outcome <span class="mono">reversed_no_show</span>, event <span class="mono">booking.no_show_reversed</span>. Offline scans are judged <b>at scan time</b>: the code's liveness and the cue gate use <span class="mono">OccurredAt</span>, derived from uptime arithmetic and clamped to the upload (with a <span class="mono">device.event_time_clamped</span> audit row) when a reboot made the box's counter wild.</p>
+      </div>
+      <div class="callout" style="margin:16px 0 0">
+        <div class="t">Tenant settings the box runs on</div>
+        <p>The six court-box numbers that were hardcoded around the codebase are <span class="mono">tenant_settings</span> keys with one canonical default each, bounds-checked on the admin surface: <span class="mono">walk_up_max_minutes</span> (90, the relay cap), <span class="mono">heartbeat_seconds</span> (60), <span class="mono">activation_forward_window_minutes</span> (120), <span class="mono">activation_cue_window_minutes</span> (10), <span class="mono">qr_lifetime_seconds</span> (60, ident codes), <span class="mono">roster_window_minutes</span> (120).</p>
+      </div>
     </div>
   </div>
 </section>
@@ -914,7 +987,7 @@ ul.tight li{margin:5px 0}
 <section id="webhooks">
   <div class="eyebrow sw">Server side · Eventing</div>
   <h2>Webhooks, web servers &amp; the SSRF guard</h2>
-  <p class="lede">Every system event fans out to user- and admin-registered HTTP endpoints, HMAC-signed and retried per-endpoint. Webhooks are a programmatic <em>mirror</em> of the event stream — every player-affecting event also sends an email, never a substitute. Lights <b>actuation</b> is deliberately <em>not</em> on this bus: the webhook dispatcher is a store-and-forward worker with a 10 s timeout, wrong for a request-path relay flip, so actuation is a direct signed client call.</p>
+  <p class="lede">Every system event fans out to user- and admin-registered HTTP endpoints, HMAC-signed and retried per-endpoint. Webhooks are a programmatic <em>mirror</em> of the event stream — every player-affecting event also sends an email, never a substitute. Lights <b>actuation</b> is deliberately <em>not</em> on this bus: the webhook dispatcher is a store-and-forward worker with a 10 s timeout, wrong for a request-path relay flip — and the court box has no inbound HTTP listener at all, so it can never be a webhook destination. Actuation is the box's own decision, made through the <a href="#deviceapi">device API</a>; <span class="mono">booking.lights_on</span> / <span class="mono">lights_off</span> here are a <em>mirror</em> of what already happened.</p>
 
   <div class="grid2">
     <div>
@@ -972,14 +1045,14 @@ ul.tight li{margin:5px 0}
     </div>
   </div>
 
-  <h3>Event catalogue — 16 types</h3>
+  <h3>Event catalogue — 18 types</h3>
   <div class="card pad scroll">
     <table>
       <thead><tr><th>Member</th><th>Booking</th><th>Credit</th><th>System</th></tr></thead>
       <tbody>
         <tr>
           <td class="mono">member.registered<br>member.approved<br>member.rejected<br>member.suspended</td>
-          <td class="mono">booking.created<br>booking.cancelled<br>booking.late_cancellation<br>booking.no_show<br>booking.lights_on<br>booking.completed</td>
+          <td class="mono">booking.created<br>booking.cancelled<br>booking.late_cancellation<br>booking.no_show<br>booking.lights_on<br>booking.lights_off<br>booking.completed<br>booking.no_show_reversed</td>
           <td class="mono">credit.topped_up<br>credit.refunded<br>credit.penalty_applied<br>credit.adjusted</td>
           <td class="mono">peripheral.unhealthy<br>webhook.test</td>
         </tr>
@@ -993,22 +1066,24 @@ ul.tight li{margin:5px 0}
 <section id="backend">
   <div class="eyebrow sw">Server side · API</div>
   <h2>Backend — .NET 10, one flat project</h2>
-  <p class="lede"><span class="mono">Crusaders.Mainframe.Api</span>: Minimal APIs + EF Core on PostgreSQL 16, folder-layered inside a single assembly. Auth is JWT HS256 plus WebAuthn passkeys (Fido2). 519 xUnit tests run in-process against a TestHost; cross-tenant injection tests are non-negotiable for every tenant-scoped table.</p>
+  <p class="lede"><span class="mono">Crusaders.Mainframe.Api</span>: Minimal APIs + EF Core on PostgreSQL 16, folder-layered inside a single assembly. Auth is JWT HS256 plus WebAuthn passkeys (Fido2) for people, the HMAC Device scheme for boxes. 686 xUnit tests at the last committed gate, zero skips — the in-process TestHost tier plus the Postgres-backed HTTP tier, which CI now runs <em>unfiltered</em> against a real <span class="mono">postgres:16</span> (the old class-name filter had silently excluded that whole collection from CI forever). Cross-tenant injection tests are non-negotiable for every tenant-scoped table.</p>
 
   <div class="grid2">
     <div class="card pad">
       <h3 style="margin-top:0">Folder layers</h3>
       <pre class="code">Crusaders.Mainframe.Api/
-├── Endpoints/      # Minimal API route groups
-├── Domain/         # entities + invariants
-├── Services/       # booking, ledger, no-show sweep
+├── Endpoints/      # route groups · device: provision, heartbeat,
+│                   #   activate, walkup, events · DeviceRosterBuilder
+├── Domain/         # entities + invariants · Device.CourtNumbers · AccessCode
+├── Services/       # booking, ledger, activation, AccessCodeService,
+│                   #   RelayHardCap, OtaCatalogue + FirmwarePayload
 ├── Persistence/    # EF Core, migrations (mandatory)
-├── Security/       # JWT · WebAuthn · OutboundAddressGuard
-├── Webhooks/       # catalogue, delivery + retry workers
+├── Security/       # JWT · WebAuthn · Device HMAC · OutboundAddressGuard
+├── Webhooks/       # delivery + retry · no-show sweep · lights cue
 ├── Biometric/      # IBiometricDevice · Null · simulator
 ├── Multitenancy/   # tenant resolution, tenant_settings
 ├── Payments/       # PayFast provider, ITN pipeline
-└── Workers/        # background sweeps</pre>
+└── /app/firmware/  # baked by CI; served at /firmware/</pre>
       <p style="font-size:13px;color:var(--muted)">Hardware abstractions ship before drivers: <span class="mono">IBiometricDevice</span> + <span class="mono">NullBiometricDevice</span> + a mock simulator are first-class, and CI passes without touching real hardware. Known, tracked deviations from the FrostAura mandate: no shadcn/Radix, no Redux Toolkit, folder layering rather than iDesign separation.</p>
     </div>
     <div class="card pad">
@@ -1017,7 +1092,12 @@ ul.tight li{margin:5px 0}
         <li><b>Money is ledger-only.</b> Balance = sum of immutable entries, never a stored field. Every movement carries actor, subject, reason, external reference; disputes replay the ledger.</li>
         <li><b>Credits are the unit of account.</b> ZAR exists only on <span class="mono">PendingTopup</span> for reconciliation. A field mixing units is a money-correctness bug.</li>
         <li><b>Charge at booking; refund on cancel; nothing back once checked in.</b> Booking row + <span class="mono">BookingCharge</span> debit flush in one unit of work — a lost slot race can't leave a member paying for a court they didn't get. Penalty and refund post as separate rows, never netted.</li>
-        <li><b>Attendance means <span class="mono">CheckedInAt</span></b> — never the clock, never <span class="mono">ChargedAt</span>. A no-show is the <em>absence</em> of an identification match in the grace window.</li>
+        <li><b>Attendance means <span class="mono">CheckedInAt</span></b> — never the clock, never <span class="mono">ChargedAt</span>. A no-show is the <em>absence</em> of an identification match in the grace window. A box's queued activation <em>is</em> an identification match, judged at scan time.</li>
+        <li><b>The cue window gates the stamp.</b> The 2-hour forward window only disambiguates back-to-back slices; <span class="mono">CheckedInAt</span> and the lights cue happen only from <span class="mono">activation_cue_window_minutes</span> (10) before start — a curious scan at 17:00 for an 18:45 slot answers <span class="mono">too_early</span> and forfeits nothing (review A2-11).</li>
+        <li><b>Every debit takes the payer advisory lock.</b> <span class="mono">PayerLock.BeginAsync</span> serialises the read-then-post on the booking path and on <em>both</em> <span class="mono">ChargeOnActivation</span> branches — the payer reassignment and the never-charged row — so two courtside "I'll pay" taps cannot both see 200 credits and both post (review A2-10).</li>
+        <li><b>A settled no-show frees the slot.</b> The sweep truncates <span class="mono">EndsAt</span> to its own clock in the same save as the refund and penalty, so the tail is resellable through the real GiST exclusion constraint, which exempts only Cancelled (review H5). No un-no-show admin endpoint; ledger adjustment is the recovery path — and a box's own late evidence is the one automatic exception (<a href="#deviceapi">C6 residual</a>).</li>
+        <li><b>One ordered candidate list, three touchpoints.</b> QR, PIN and biometric all read <span class="mono">CandidatesAsync</span> ordered by <span class="mono">StartsAt</span> — the biometric path had its own unordered query and the documented two-bookings wrong-row bug was still live there (review H4) — and the biometric kiosk now sees the <span class="mono">ActivationResult</span> (insufficient balance et al.) instead of a plain "matched" (A2-9).</li>
+        <li><b>One box, up to four courts, and the list order is the wiring.</b> <span class="mono">Device.CourtNumbers</span> is an ordered <span class="mono">int[]</span> whose position is the relay index; the button map is validated against its length at admin save time on every surface (<span class="mono">ButtonMap.FirstSelectionBeyond</span>), never logged per heartbeat.</li>
         <li><b>Tenant isolation is structural.</b> <span class="mono">tenant_id</span> on every entity; leakage is a P0 incident.</li>
         <li><b>Admins act on behalf of users</b> — every action representable as <span class="mono">{actor, subject}</span> in the audit trail.</li>
         <li><b>Every configurable number is <span class="mono">tenant_settings.&lt;key&gt;</span>.</b></li>
@@ -1067,8 +1147,8 @@ ul.tight li{margin:5px 0}
       <text x="272" y="210" fill="currentColor" opacity=".75">starts_at · ends_at · slices ×15 min</text>
       <text x="272" y="226" fill="currentColor" opacity=".75">booked_by_user_id</text>
       <text x="272" y="242" fill="currentColor" opacity=".75">paid_by_user_id (at-court “I'll pay”)</text>
-      <text x="272" y="258" fill="currentColor" opacity=".75">charged_at (set at booking)</text>
-      <text x="272" y="274" fill="currentColor" opacity=".75">checked_in_at ← attendance truth</text>
+      <text x="272" y="258" fill="currentColor" opacity=".75">charged_at (set at booking) · ends_at truncated on no-show</text>
+      <text x="272" y="274" fill="currentColor" opacity=".75">checked_in_at ← attendance truth (cue-gated)</text>
       <!-- ledger -->
       <rect x="550" y="170" width="250" height="120" rx="8" fill="var(--violet-soft)" stroke="var(--violet)" stroke-width="2.2"/>
       <text x="675" y="190" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">ledger_entries — append-only</text>
@@ -1087,10 +1167,17 @@ ul.tight li{margin:5px 0}
       <!-- devices -->
       <rect x="20" y="330" width="220" height="100" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
       <text x="130" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">devices (court boxes)</text>
-      <text x="32" y="370" fill="currentColor" opacity=".75">mac · hw · fw · mega_fw</text>
-      <text x="32" y="386" fill="currentColor" opacity=".75">device key (HKDF-derived)</text>
-      <text x="32" y="402" fill="currentColor" opacity=".75">last_ip — observability only,</text>
-      <text x="32" y="418" fill="currentColor" opacity=".75">never an authorisation input</text>
+      <text x="32" y="370" fill="currentColor" opacity=".75">court_numbers[≤4] = relays A–D</text>
+      <text x="32" y="386" fill="currentColor" opacity=".75">mac · fw · mega_fw · failed_version</text>
+      <text x="32" y="402" fill="currentColor" opacity=".75">key HKDF-derived, never stored ·</text>
+      <text x="32" y="418" fill="currentColor" opacity=".75">last_ip observability only</text>
+      <!-- access codes -->
+      <rect x="860" y="330" width="230" height="100" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+      <text x="975" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">access_codes</text>
+      <text x="872" y="370" fill="currentColor" opacity=".75">code · 12 × Crockford b32 · unique</text>
+      <text x="872" y="386" fill="currentColor" opacity=".75">purpose: booking | member_ident</text>
+      <text x="872" y="402" fill="currentColor" opacity=".75">user_id · booking_id? · expires_at</text>
+      <text x="872" y="418" fill="currentColor" opacity=".75">→ bookings · what the scanner reads</text>
       <!-- webhooks -->
       <rect x="300" y="330" width="220" height="100" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.8"/>
       <text x="410" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">webhook_endpoints</text>
@@ -1126,7 +1213,7 @@ ul.tight li{margin:5px 0}
       <text x="822" y="212">confirms</text>
     </g>
   </svg>
-  <figcaption>Core entities. The one violet-filled table is the point of the schema: <span class="mono">ledger_entries</span> is append-only, credit-denominated, and its filtered unique index on <span class="mono">external_reference</span> is what makes a retried PayFast ITN safe rather than a double credit.</figcaption>
+  <figcaption>Core entities. The one violet-filled table is the point of the schema: <span class="mono">ledger_entries</span> is append-only, credit-denominated, and its filtered unique index on <span class="mono">external_reference</span> is what makes a retried PayFast ITN safe rather than a double credit — and, under <span class="mono">walkup:{device}:{nonce}</span>, what makes a retried walk-up a replay rather than a second charge. <span class="mono">access_codes</span> (amber) is the new bridge between a booking and the box: minted in the booking's own unit of work, it is the only thing a scanner ever reads.</figcaption>
   </figure>
   </div>
 
@@ -1148,7 +1235,8 @@ ul.tight li{margin:5px 0}
       <ul class="tight">
         <li>Default slice <b>15 minutes</b>; 1-hour-per-day cap per member, relaxed same-day if courts are otherwise empty.</li>
         <li><b>Charge at booking</b> (2026-08-22 decision) — cancel refunds in full, less the late-cancel penalty inside the window; no refund after check-in.</li>
-        <li>Walk-ups create <b>real bookings</b>, truncated at the next booking and charged pro rata — which is why they need the network.</li>
+        <li>Walk-ups create <b>real bookings</b>, truncated at the next booking and charged pro rata — which is why they need the network. Capped at min(<span class="mono">walk_up_max_minutes</span>, the 90-minute relay constant); idempotent on the box's purchase nonce.</li>
+        <li>A no-show settles as refund-less-penalty <em>and</em> releases the court (<span class="mono">EndsAt</span> truncated at the sweep); a box's late attendance evidence reverses the settlement with two opposite-signed rows, and the wallet report counts debits only so the reversal never reads as a second penalty.</li>
         <li>Top-ups in R100 blocks, capped at R1000 for non-admins.</li>
         <li>Reports: monthly presets + per-member spend drill-down; 2-year retention with anonymisation.</li>
       </ul>
@@ -1205,8 +1293,12 @@ ul.tight li{margin:5px 0}
       <p style="font-size:13.5px;margin:8px 0 0"><b>Credits are primary everywhere</b>; ZAR appears only on top-up screens. The booking grid shows <b>photo + name only</b> — no email, phone or membership number visible to other players, which is why photo upload is mandatory at registration.</p>
     </div>
     <div class="card pad kv">
+      <span class="pill ok">Court code screen</span>
+      <p style="font-size:13.5px;margin:8px 0 0">The member-facing QR surface did not exist before this branch (<span class="mono">meQrGenerate</span> had no call site). <span class="mono">/court-code</span> now renders the bare 12-character access code as a QR via an in-house encoder — verified against python-qrcode, 40/40 identical matrices — with booking-or-ident copy and an expiry countdown. Admin Devices gained a relay-ordered A–D court editor on claim, edit and a register-by-hand form, readable messages for the four court/map validation errors, and a claim request that sends the real snake_case shape (it was rebinding only <span class="mono">name</span>).</p>
+    </div>
+    <div class="card pad kv">
       <span class="pill ok">Verified by</span>
-      <p style="font-size:13.5px;margin:8px 0 0">28 unit tests + 12 Playwright e2e, bundle-size gate in CI. Auth: JWT sessions with WebAuthn passkeys for step-up.</p>
+      <p style="font-size:13.5px;margin:8px 0 0">44 vitest unit tests (was 28), Playwright e2e, tsc clean, the lizard complexity gate (CCN ≤ 15 — the device-error formatter was at 24 and is now a lookup table at 7) and a bundle-size gate in CI. Auth: JWT sessions with WebAuthn passkeys for step-up.</p>
     </div>
   </div>
 </section>
@@ -1227,12 +1319,12 @@ ul.tight li{margin:5px 0}
       <text x="79" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">main</text>
       <rect x="186" y="22" width="240" height="82" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
       <text x="306" y="44" text-anchor="middle" font-weight="700">GitHub Actions — ci.yml</text>
-      <text x="306" y="62" text-anchor="middle" font-size="10" opacity=".75">backend lint·unit·integration·coverage</text>
-      <text x="306" y="77" text-anchor="middle" font-size="10" opacity=".75">frontend lint·unit·e2e·bundle gate</text>
-      <text x="306" y="92" text-anchor="middle" font-size="10" opacity=".75">firmware purity+rollover gates · audits</text>
+      <text x="306" y="62" text-anchor="middle" font-size="10" opacity=".75">backend unit · whole suite vs Postgres</text>
+      <text x="306" y="77" text-anchor="middle" font-size="10" opacity=".75">frontend lint·unit·e2e·bundle · security</text>
+      <text x="306" y="92" text-anchor="middle" font-size="10" opacity=".75">iot purity·rollover·corpus-check → build → sign</text>
       <rect x="468" y="34" width="170" height="54" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
       <text x="553" y="57" text-anchor="middle" font-weight="700">multi-arch build</text>
-      <text x="553" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">amd64 + arm64 manifest</text>
+      <text x="553" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">amd64 + arm64 · + firmware payload</text>
       <rect x="680" y="34" width="140" height="54" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
       <text x="750" y="57" text-anchor="middle" font-weight="700">Docker Hub</text>
       <text x="750" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">frostaura/…:latest</text>
@@ -1245,10 +1337,26 @@ ul.tight li{margin:5px 0}
     <g stroke="var(--blue)" stroke-width="1.6" fill="none" marker-end="url(#darw)">
       <path d="M144 61 H184"/><path d="M426 61 H466"/><path d="M638 61 H678"/><path d="M820 61 H860"/>
     </g>
-    <text x="560" y="130" text-anchor="middle" font-size="10.5" fill="var(--red)" font-weight="700">⚠ the 6 Portainer/Docker Hub Actions secrets are still unset — the release chain is unproven end-to-end</text>
+    <text x="560" y="130" text-anchor="middle" font-size="10.5" fill="var(--red)" font-weight="700">⚠ the seven Actions secrets are still unset (CI consumes six; OTA_PRIVATE_KEY feeds iot-sign) — the release chain is unproven end-to-end</text>
   </svg>
-  <figcaption>Push-to-live chain. The stack: nginx gateway :8088 → frontend (static) + backend :5000 → postgres:16-alpine, with MailHog in dev. Biometric USB devices reach the container via <span class="mono">--device</span> passthrough. Backups: nightly encrypted <span class="mono">pg_dump</span> offsite; the <span class="mono">MASTER_SECRETS_ENCRYPTION_KEY</span> that wraps tenant secrets lives in a password manager <em>off</em> the host, so losing the machine doesn't lose the keys.</figcaption>
+  <figcaption>Push-to-live chain. The stack: nginx gateway :8088 → frontend (static) + backend :5000 → postgres:16-alpine, with MailHog in dev. Biometric USB devices reach the container via <span class="mono">--device</span> passthrough. Backups: nightly encrypted <span class="mono">pg_dump</span> offsite; the <span class="mono">MASTER_SECRETS_ENCRYPTION_KEY</span> that wraps tenant secrets lives in a password manager <em>off</em> the host, so losing the machine doesn't lose the keys. The secrets are <span class="mono">DOCKERHUB_USERNAME · DOCKERHUB_TOKEN · PORTAINER_URL · PORTAINER_TOKEN · PORTAINER_ENDPOINT_ID · PORTAINER_STACK_ID · OTA_PRIVATE_KEY</span>; <span class="mono">workflow_dispatch</span> cannot trigger a deploy, so only a real push to <span class="mono">main</span> proves it.</figcaption>
   </figure>
+  </div>
+
+  <h3>The firmware release half — from <span class="mono">iot-sign</span> to a heartbeat's <span class="mono">ota</span> object</h3>
+  <div class="grid3">
+    <div class="card pad kv">
+      <span class="pill sw">iot-sign (CI)</span>
+      <p style="font-size:13.5px;margin:8px 0 0">After <span class="mono">iot-build</span> proves every target compiles, <span class="mono">iot-sign</span> materialises <span class="mono">OTA_PRIVATE_KEY</span> (PEM content → 0600 file under <span class="mono">$RUNNER_TEMP</span>, rejected loudly if openssl cannot parse it), rebuilds <span class="mono">court_bridge</span> so the post-build hook appends the RSA trailer, derives the version from <span class="mono">platformio.ini</span>'s <span class="mono">FW_VERSION</span> flags, and packages <span class="mono">court_bridge.signed.bin</span> + <span class="mono">firmware.manifest.json</span> (<span class="mono">{version, url, sizeBytes}</span>) as a 90-day artifact. With no key: a README plus a workflow warning — <b>never a silent skip</b>. One corpus-check gate (<span class="mono">make corpus-check</span>) runs in the <span class="mono">iot</span> job, so an edited <span class="mono">cases.json</span> with a forgotten regeneration goes red instead of leaving the C++ suite green against old vectors.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill sw">Baked into the API image</span>
+      <p style="font-size:13.5px;margin:8px 0 0">Both backend image builds download the artifact into <span class="mono">firmware-payload/</span> and the Dockerfile copies it to <span class="mono">/app/firmware/</span> (a tracked placeholder README keeps local compose builds working). <span class="mono">Program.cs</span> serves that directory at <span class="mono">/firmware/</span> — anonymous, <span class="mono">.bin</span>/<span class="mono">.json</span> only, no listing, no traversal, a tenantless prefix so a miss is a 404: the box cannot sign a GET, and the RSA trailer is the integrity anchor.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill ok">OtaCatalogue offers it by default</span>
+      <p style="font-size:13.5px;margin:8px 0 0">Stable falls back to the image's own <span class="mono">firmware.manifest.json</span> when <span class="mono">Ota:Stable:*</span> is unset, so a deployed image offers its own firmware with zero config; explicit config still wins (how a fleet is pinned to another image). The ESP8266 HTTP client refuses a relative URL before a packet leaves the board — CI's manifest and <span class="mono">.env.example</span> both carried that latent dead-on-arrival — so the catalogue composes an <b>absolute</b> URL: <span class="mono">Discovery:AdvertisedBaseUrl</span> → the scheme and host of the heartbeat that is asking → <span class="mono">PublicBaseUrl</span>. The heartbeat then carries <span class="mono">ota{ota_version, ota_url, ota_size}</span>, omitted when the box already runs or has condemned that version.</p>
+    </div>
   </div>
 </section>
 
@@ -1256,18 +1364,22 @@ ul.tight li{margin:5px 0}
 <section id="risks">
   <div class="eyebrow safe">Status · Ordered by risk</div>
   <h2>Watch list &amp; open questions</h2>
-  <p class="lede">Phases A–J are code-complete and green — 519 backend + 240 firmware + 40 frontend tests. Then three adversarial audits pointed at the money, tenancy and firmware paths found <b>sixteen more defects in code that was already green</b> (an IDOR, registration outside every tenant, the panel lighting the wrong court, four money-moving races) — all fixed and mutation-proven. Green is not evidence; audits are. What remains needs physical access or a live credential.</p>
+  <p class="lede">The 2026-08-24 adversarial E2E review found the headline flow — book online, scan at the box, lights on — did not exist end to end: 30 confirmed defects, seven critical, every one in firmware, backend, CI or documentation and none in the wiring. The <a href="#fixes">fix programme</a> on this branch closes the software classes. Green was never evidence; the review was. What remains needs physical access, a live credential, or a person's decision — each expanded, with the cost of skipping it, in <span class="mono">docs/go-live-checklist.md</span>.</p>
   <div class="card pad scroll">
     <table>
       <thead><tr><th>#</th><th>Item</th><th>Class</th><th>Why it matters</th></tr></thead>
       <tbody>
-        <tr><td class="num">1</td><td><b>Relay → contactor, or relay → load?</b></td><td><span class="pill risk">Safety</span></td><td>Gates go-live. If the 10 A relays switch the lighting load directly, a qualified electrician is required. No software decision touches this.</td></tr>
-        <tr><td class="num">2</td><td>6 GitHub Actions secrets unset</td><td><span class="pill sw">Release</span></td><td>Docker Hub + Portainer creds — until set, the push-to-live chain has never run end-to-end.</td></tr>
-        <tr><td class="num">3</td><td>Committee sign-off: charge-at-booking</td><td><span class="pill sw">Decision</span></td><td>Founder decision contradicts blueprint A.9 (charge-on-lights-on); recorded in the deltas doc, needs client sign-off before go-live.</td></tr>
-        <tr><td class="num">4</td><td>First-ESP-flash DIP position</td><td><span class="pill hw">Hardware</span></td><td>Documented on the wiring sheet: 5, 6, 7 ON, others OFF — DIP 7 is the flash-mode line. No adapter or physical intervention needed; verify the physical DIP against the sheet once.</td></tr>
-        <tr><td class="num">5</td><td>Firmware signing key</td><td><span class="pill hw">Hardware</span></td><td>Does not exist yet; OTA chain is designed but unkeyed.</td></tr>
-        <tr><td class="num">6</td><td>Unwaivered frontend deviation</td><td><span class="pill sw">Governance</span></td><td>Hand-rolled primitives + context state vs the shadcn/Redux mandate — adopt or record a rationale.</td></tr>
-        <tr><td class="num">7</td><td>PIN length · gate vocabulary · revoked-card window · biometric vendor SDK · go-live date</td><td><span class="pill sw">Open</span></td><td>Smaller open questions, tracked in project memory.</td></tr>
+        <tr><td class="num">1</td><td><b>Relay → contactor, or relay → load?</b></td><td><span class="pill risk">Safety</span></td><td>Gates go-live and is the only item that could hurt somebody. If the 10 A / 250 VAC relays switch the lighting load directly, a qualified electrician is required. A welded contact is a court whose lights <b>cannot be switched off by anything</b> — the box has no readback. No software decision touches this.</td></tr>
+        <tr><td class="num">2</td><td>Seven GitHub Actions secrets unset</td><td><span class="pill sw">Release</span></td><td>CI consumes six today (Docker Hub + Portainer, incl. <span class="mono">PORTAINER_TOKEN</span>); the seventh, <span class="mono">OTA_PRIVATE_KEY</span>, feeds <span class="mono">iot-sign</span>. The deploy job is skipped silently on every push; the chain stays unproven until they are set and one real push to <span class="mono">main</span> has completed. Founder-only.</td></tr>
+        <tr><td class="num">3</td><td>Committee sign-off: charge-at-booking (D-1)</td><td><span class="pill sw">Decision</span></td><td>The build debits at booking; client blueprint A.9 says lights-on. Recorded as deviation D-1 in <span class="mono">client-blueprint-deltas.md</span>. The blueprint is the customer's own word and outranks internal specs on economics — not the repo's decision to close.</td></tr>
+        <tr><td class="num">4</td><td>OTA signing key — mint it before the first flash</td><td><span class="pill hw">Hardware</span></td><td>Only the public half is committed; the private half is unlocatable anywhere. Every board flashed with the current header rejects every image nobody can sign. <span class="mono">iot-sign</span> and <span class="mono">/firmware/</span> now exist and are unkeyed; <span class="mono">generate_ota_keys.sh</span> → commit the header → put the PEM in the secret. Hard prerequisite of item 5, not a hardening step after it.</td></tr>
+        <tr><td class="num">5</td><td>First flash and one real-hardware run</td><td><span class="pill hw">Hardware</span></td><td>Everything below the API is proven on the host; nothing has run on the board. First ESP flash is DIP 5, 6, 7 ON (documented; no adapter). Then: a board claimed and heartbeating, one member scanned with lights confirmed on and ledger checked, the Mega's auto-off confirmed with the ESP <em>unplugged</em>, one no-show left to expire — plus the review's <b>seven §4 physical checks</b>: power topology under WiFi bursts, the physical DIP for all four modes, screens legible on the 20×4 glass, a real code fed to the scanner and its TX captured, scanner UART at 9600, the relay board's JD-VCC jumper and active-LOW on all four channels, and button-to-pin order.</td></tr>
+        <tr><td class="num">6</td><td>Offline identification verified once, both paths</td><td><span class="pill hw">Hardware</span></td><td>One activation through <span class="mono">/activate</span>; one from the roster with the WAN deliberately down; the roster seen to age out at <span class="mono">ROSTER_MAX_AGE_MS</span> and refuse rather than guess.</td></tr>
+        <tr><td class="num">7</td><td>Live PayFast credentials and the first real transaction</td><td><span class="pill sw">Credential</span></td><td>Merchant ID, key and passphrase as tenant settings (never committed); ITN URL registered; one real R100 top-up and one deliberate ITN replay confirmed refused. Founder-only.</td></tr>
+        <tr><td class="num">8</td><td>Power: brownout under WiFi transmit bursts</td><td><span class="pill hw">Hardware</span></td><td>Measure the 5 V rail (relays + LCD + scanner) and the Mega's VIN/9 V path (which feeds the ESP) separately. Three spurious resets read to <span class="mono">BootGuard</span> as a failed firmware and condemn a good build — the symptom will look like a bad release and will not be one.</td></tr>
+        <tr><td class="num">9</td><td>Queued events do not survive a power cut</td><td><span class="pill sw">Accepted</span></td><td>RAM ring; a court lit during an outage that ended at the breaker is never reported and sweeps as a no-show. Visible in the ledger, reversible by an admin. Accepted knowingly; item 8 makes it rarer.</td></tr>
+        <tr><td class="num">10</td><td>Unwaivered frontend deviation</td><td><span class="pill sw">Governance</span></td><td>Hand-rolled primitives + context state vs the shadcn/Redux mandate — adopt or record a rationale. The primitives now have tests, which is a mitigation and not a waiver.</td></tr>
+        <tr><td class="num">11</td><td>LAN webhook allow-list · no backend architecture doc</td><td><span class="pill sw">Ops</span></td><td>The court box is pull-only and never a webhook destination; any <em>other</em> LAN consumer needs a DHCP reservation and a CIDR entry in <span class="mono">Webhooks:PrivateNetworkAllowList</span>. And <span class="mono">src/iot/README.md</span> covers the hardware split thoroughly; nothing yet covers the API.</td></tr>
       </tbody>
     </table>
   </div>
@@ -1275,9 +1387,48 @@ ul.tight li{margin:5px 0}
     <div class="t">Launch bar (working set)</div>
     <p>100% of bookings in-system within 60 days · ≥95% lights-on match rate · ≥70% of members holding positive credit · second club onboarded in &lt;2 h · ≥99.5% uptime during club hours.</p>
   </div>
+</section>
+
+<!-- ================= FIX PROGRAMME ================= -->
+<section id="fixes">
+  <div class="eyebrow safe">Status · 2026-09-04</div>
+  <h2>The fix programme — branch <span class="mono" style="font-size:20px">claude/e2e-fix-programme</span></h2>
+  <p class="lede">Two rounds, 55 agents, 38 raw findings → <b>30 confirmed</b> (7 critical · 7 high · 12 medium · 4 low), one refuted, seven physical-verification items. Full file-and-line evidence: <a href="reviews/e2e-adversarial-review-2026-08-24.md"><span class="mono">docs/reviews/e2e-adversarial-review-2026-08-24.md</span></a>. The constraint honoured throughout: <b>the wiring is fixed and was never touched</b> — the pin map matched the schematic and the old sketches exactly, and every fix is firmware, backend, CI or documentation.</p>
+  <div class="grid2">
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">What this branch closed, by phase</h3>
+      <table>
+        <thead><tr><th>Phase</th><th>Findings</th><th>What landed</th></tr></thead>
+        <tbody>
+          <tr><td class="num">0</td><td class="mono">A2-1 ·2 ·3 ·4 ·8 ·12 ·15 · N1 · N2</td><td>Documentation truth pass: ESP-flash DIP row restored, OTA key story made honest, SSRF carve-out rewritten for a pull-only box, two-rail power truth, 2004A LCD, seven secrets</td></tr>
+          <tr><td class="num">1</td><td class="mono">CI</td><td>Postgres-HTTP tier runs unfiltered in <span class="mono">backend-integration</span>; one <span class="mono">corpus-check</span> gate; dead hooks target removed</td></tr>
+          <tr><td class="num">2</td><td class="mono">C1</td><td>Clock seed on every path: <span class="mono">server_unix</span> in provision and the 401 body; verified-OFFER time adopted; zero-timestamp probe; skew 90 s &lt; 120 s pinned in the corpus; two-strike loop breaker</td></tr>
+          <tr><td class="num">3</td><td class="mono">C3 · C4 · C5 · H2 · H3 · H4 · H5 · M1 · A2-9 ·10 ·11 · WI-2</td><td><span class="mono">/activate</span>; <span class="mono">Device.CourtNumbers</span> in relay order; 12-char access codes, JWT QR retired; five-field nonce-idempotent walk-up; ordered biometric candidates that surface refusals; no-show frees the slot; cue window; payer lock on both charge branches; one <span class="mono">RelayHardCap</span>; six box numbers → tenant settings</td></tr>
+          <tr><td class="num">4</td><td class="mono">C2 · C6 · H1 · M2 · A2-6 ·7 ·13 ·14</td><td><span class="mono">lib/bridgelogic</span> (RosterSync, ScanFlow, StateReconcile, WalkUp), host-tested; heartbeat roster push (≤16, ≤2048 B, four corpus vectors); activation events become attendance before the receipt; <span class="mono">!AUTH</span> sent, symmetric disarm; <span class="mono">!STATE</span> reconciled; no CLAIM CODE repaint; Mega paints CHECKING...; monitor at 9600; bridge 1.1.0</td></tr>
+          <tr><td class="num">5</td><td class="mono">A2-2 · A2-3 (release half)</td><td><span class="mono">iot-sign</span> job; signed bin + manifest baked at <span class="mono">/app/firmware</span>, served at <span class="mono">/firmware/</span>; <span class="mono">OtaCatalogue</span> offers the baked manifest by default at an absolute URL</td></tr>
+          <tr><td class="num">FE</td><td class="mono">—</td><td><span class="mono">/court-code</span> QR screen; relay-ordered court editor; working claim form; error formatter under the complexity gate</td></tr>
+          <tr><td class="num">6</td><td class="mono">C6 residual</td><td>Late activation evidence reverses a settled no-show (two opposite-signed rows, status back to Booked, <span class="mono">CheckedInAt</span> at the scan, idempotent under the payer lock); offline scans judged at <span class="mono">occurredAt</span> — cue gate, stamp and code liveness alike — with wild times clamped to the upload and audited; the wallet report counts debits only so the reversal is not a second penalty</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <div class="card pad">
+        <h3 style="margin-top:0">Gates, at the last committed step</h3>
+        <ul class="tight">
+          <li><b>Backend</b> 686 / 686, <b>zero skips</b>, against real Postgres — the whole suite, in-memory and HTTP tiers alike. Mutants killed per phase and named in each commit (tenant filter, court-set filter, activation ignored, cap 17, replay guarantee, both payer locks, cue gate, relay cap, provision field, 401 body, skew boundary, probe timestamp, truncation removed, candidate order reversed, penalty credit dropped, reversal disabled, code resolved at upload).</li>
+          <li><b>Firmware</b> 303 / 303 native <em>and</em> under ASAN + UBSAN; all three targets build (<span class="mono">court_mega</span>, <span class="mono">court_bridge</span>, <span class="mono">simulator</span>); corpus-check green; every committed HTTP response vector and both request vectors drive <span class="mono">bridgelogic</span> directly, so rendered bodies are byte-identical to what the corpus signatures cover. RAM +17 B / +1.2 KB.</li>
+          <li><b>Frontend</b> 44 / 44 vitest, tsc clean, build OK, lint at the pre-existing 14-warning baseline.</li>
+        </ul>
+      </div>
+      <div class="callout danger" style="margin:16px 0 0">
+        <div class="t">Still open after this branch</div>
+        <p>The relay/contactor safety question · the seven §4 physical checks · D-1 committee sign-off · founder-only items: the seven secrets, the OTA key, the first real push to <span class="mono">main</span>, live PayFast · one real-hardware run. None is code; all are on the <a href="#risks">watch list</a>. The code-complete claim returns only when the closing re-review passes.</p>
+      </div>
+    </div>
+  </div>
   <div class="footer">
-    <span>Crusaders Mainframe · FrostAura Technologies · sources: <span class="mono">docs/specs/*</span>, <span class="mono">src/iot/README.md</span>, project memory</span>
-    <span class="mono">REV 2026-08-24</span>
+    <span>Crusaders Mainframe · FrostAura Technologies · sources: <span class="mono">docs/reviews/*</span>, <span class="mono">docs/go-live-checklist.md</span>, <span class="mono">src/iot/README.md</span>, endpoint and header doc comments, <span class="mono">http/cases.json</span>, <span class="mono">ci.yml</span>, project memory</span>
+    <span class="mono">REV 2026-09-04</span>
   </div>
 </section>
 
@@ -1345,7 +1496,7 @@ ul.tight li{margin:5px 0}
       ON:'The Mega closes the relay and arms its <b>own</b> deadline — auto-off happens even if the ESP, the WiFi and the backend are all gone. Duration is mandatory: v2 has nowhere to put an indefinite-on.',
       OFF:'Opens the relay now. Also fired early on cancellation.',
       EXT:'Extends the deadline to now + seconds — how back-to-back bookings flow through without flicker. Refused if the relay is open.',
-      AUTH:'Arms the button panel for a bounded window (default 30 s). Zero disarms — the one verb where 0 is legal.',
+      AUTH:'Arms the button panel for a bounded window (30 s = AUTH_TTL_MS). The bridge sends it on every remembered scan and sends 0 the moment any path lights the court. Zero disarms — the one verb where 0 is legal.',
       LCD:'Two display lines, truncated to 16 columns. Commas ride as %2C, percent as %25 — the only frames that ever need escaping.',
       RST:'Relays open, buttons disarmed, default screen.',
       PING:'Answered with <span class="mono">!PONG,&lt;version&gt;,&lt;uptime&gt;</span>.'
