@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Microsoft.Extensions.Configuration;
 
@@ -226,8 +227,10 @@ public class DeviceProtocolCorpusTests
         var executed = 0;
         foreach (var c in Corpus.GetProperty("responses").EnumerateArray())
         {
-            using var body = JsonDocument.Parse(Hex(c, "body_hex"));
+            var bytes = Hex(c, "body_hex");
+            using var body = JsonDocument.Parse(bytes);
             var expect = c.GetProperty("expect");
+            var id = c.GetProperty("id").GetString();
 
             // server_unix is mandatory on every response the box reads: it is the one
             // field a clockless board cannot do without.
@@ -237,18 +240,86 @@ public class DeviceProtocolCorpusTests
 
             foreach (var field in expect.EnumerateObject())
             {
+                // Not a field of the body but a bound on it: the box reads the whole
+                // response into a fixed buffer, and a roster that fills to its cap has to
+                // fit alongside everything else the heartbeat carries.
+                if (field.Name == MaxBytesKey)
+                {
+                    Assert.True(bytes.Length <= field.Value.GetInt32(),
+                        $"response '{id}' is {bytes.Length} bytes, over its {field.Value.GetInt32()}-byte budget");
+                    continue;
+                }
+
                 Assert.True(
                     body.RootElement.TryGetProperty(field.Name, out var actual),
-                    $"response '{c.GetProperty("id").GetString()}' lacks expected field '{field.Name}'");
+                    $"response '{id}' lacks expected field '{field.Name}'");
                 Assert.True(
                     JsonElement.DeepEquals(field.Value, actual),
-                    $"response '{c.GetProperty("id").GetString()}' field '{field.Name}': expected {field.Value.GetRawText()}, got {actual.GetRawText()}");
+                    $"response '{id}' field '{field.Name}': expected {field.Value.GetRawText()}, got {actual.GetRawText()}");
             }
 
             executed++;
         }
 
         Assert.Equal(Declared("responses"), executed);
+    }
+
+    /// <summary>The one <c>expect</c> key that is a bound on the body rather than a field of it.</summary>
+    private const string MaxBytesKey = "max_bytes";
+
+    // ---- The roster push -----------------------------------------------------
+
+    /// <summary>
+    /// The element grammar the firmware's <c>bridgelogic::parseRosterElement</c> reads:
+    /// a Crockford token of at most twenty characters, one relay digit 0–3, a SIGNED
+    /// opens_in, an unsigned closes_in. The server-side builder is held to the same
+    /// expression in <c>DeviceRosterTests</c>, so the two cannot drift apart silently.
+    /// </summary>
+    public const string RosterEntryPattern = @"^[0-9A-HJKMNP-TV-Z]{1,20}\|[0-3]\|-?\d+\|\d+$";
+
+    /// <summary>
+    /// Every heartbeat vector's roster parses under the contract grammar, is ordered by
+    /// opens_in, and is no longer than <see cref="DeviceRosterBuilder.RosterMaxEntries"/>
+    /// — and the one vector that fills the roster really does fill it, because a cap
+    /// pinned by a vector with three entries is not pinned.
+    /// </summary>
+    [Fact]
+    public void Heartbeat_roster_vectors_match_the_firmware_grammar_and_the_cap()
+    {
+        var sawFull = false;
+        foreach (var c in Corpus.GetProperty("responses").EnumerateArray())
+        {
+            if (c.GetProperty("kind").GetString() != "heartbeat") continue;
+
+            using var body = JsonDocument.Parse(Hex(c, "body_hex"));
+            var roster = body.RootElement.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!).ToList();
+
+            Assert.True(roster.Count <= DeviceRosterBuilder.RosterMaxEntries);
+            Assert.All(roster, entry => Assert.Matches(RosterEntryPattern, entry));
+
+            var opensIn = roster.Select(e => long.Parse(e.Split('|')[2])).ToList();
+            Assert.Equal(opensIn.OrderBy(x => x), opensIn);
+
+            var courts = body.RootElement.GetProperty("court_numbers").GetArrayLength();
+            Assert.All(roster, entry => Assert.InRange(int.Parse(entry.Split('|')[1]), 0, courts - 1));
+
+            sawFull |= roster.Count == DeviceRosterBuilder.RosterMaxEntries;
+        }
+
+        Assert.True(sawFull, "no heartbeat vector fills the roster to RosterMaxEntries; the cap is not pinned");
+    }
+
+    /// <summary>
+    /// The server's limits are the contract's. The cap and the token bound are constants on
+    /// the builder because the firmware buffer is sized to them, and a tenant setting cannot
+    /// resize a buffer in a cupboard.
+    /// </summary>
+    [Fact]
+    public void Roster_constants_match_the_firmware_buffer()
+    {
+        Assert.Equal(16, DeviceRosterBuilder.RosterMaxEntries);          // bridgelogic::kMaxRosterEntries
+        Assert.Equal(20, DeviceRosterBuilder.MaxTokenLength);            // roster::kMaxTokenLen
+        Assert.True(Crusaders.Mainframe.Api.Domain.AccessCode.Length <= DeviceRosterBuilder.MaxTokenLength);
     }
 
     // ---- Clock skew --------------------------------------------------------

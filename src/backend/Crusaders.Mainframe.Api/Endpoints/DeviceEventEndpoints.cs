@@ -55,6 +55,9 @@ public static class DeviceEventEndpoints
         return app;
     }
 
+    /// <summary>The event kind a box queues when it lit a court from its cached roster.</summary>
+    public const string ActivationKind = "activation";
+
     /// <summary>
     /// Records a batch of events and reports the highest sequence number accepted.
     ///
@@ -63,18 +66,39 @@ public static class DeviceEventEndpoints
     /// success loses nothing: whatever came after simply stays queued and is offered again.
     /// That is why the response carries a sequence number rather than a bare 200.
     /// </para>
+    ///
+    /// <para>
+    /// <b>An activation event is attendance</b> (review C6). The firmware's whole offline
+    /// money model rests on the queued activation stopping the no-show refund; this handler
+    /// used to write a receipt and an audit row and nothing else, so a member the box had
+    /// admitted from its roster was swept as a no-show, refunded and penalised — and the
+    /// acknowledgement made the box release the only evidence. Every not-yet-receipted
+    /// activation now goes through <see cref="CourtActivationService"/>, the one path that
+    /// stamps <c>CheckedInAt</c>, <i>before</i> its receipt is written.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Each event is its own unit of work.</b> <c>ActivateAsync</c> saves internally, so
+    /// a batch-level save was a fiction the moment an activation was in it: whatever was
+    /// staged before the activation flushed with it, and a failure after it left a batch
+    /// half-committed with no record of which half. Saving per event makes the boundary
+    /// honest — receipts exist through the last event that completed, <c>accepted_through</c>
+    /// says exactly that, and a retry after a mid-batch failure skips what was taken and
+    /// re-runs the rest. Re-running an activation is harmless because it is idempotent on
+    /// <c>CheckedInAt</c>; the other order — receipt first — would have acknowledged the
+    /// event and lost the attendance permanently on that same failure.
+    /// </para>
     /// </summary>
     private static async Task<IResult> UploadAsync(
         DeviceEventBatch batch,
-        MainframeDbContext db,
-        ITenantContext tenant,
+        [AsParameters] DeviceEventServices services,
         HttpContext ctx,
         CancellationToken ct)
     {
         var deviceId = ctx.User.DeviceId();
         if (deviceId is null) return Results.Unauthorized();
 
-        var device = await db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId.Value, ct);
+        var device = await services.Db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId.Value, ct);
         if (device is null) return Results.NotFound();
 
         var events = (batch.Events ?? []).Take(MaxBatch).ToList();
@@ -87,80 +111,29 @@ public static class DeviceEventEndpoints
         long acceptedThrough = 0;
         var recorded = 0;
 
-        // One read for the whole batch rather than one per event: a box back from a week
-        // offline arrives with a full ring, and 32 round trips to answer "seen this?" is 32
-        // round trips.
-        var offered = events.Select(e => e.Seq).ToList();
-        var seen = await db.DeviceEventReceipts
-            .Where(r => r.DeviceId == device.Id && offered.Contains(r.Seq))
-            .Select(r => r.Seq)
-            .ToListAsync(ct);
-        var alreadyRecorded = seen.ToHashSet();
+        var alreadyRecorded = await SeenAsync(services.Db, device, events, ct);
 
         foreach (var e in events.OrderBy(e => e.Seq))
         {
-            if (alreadyRecorded.Contains(e.Seq))
+            // A retry of something already taken is acknowledged, not re-recorded — which
+            // is what lets the box release it and move on.
+            if (!alreadyRecorded.Contains(e.Seq))
             {
-                // A retry of something already taken. Acknowledged, not re-recorded — which
-                // is what lets the box release it and move on.
-                acceptedThrough = e.Seq;
-                continue;
+                var occurredAt = now.AddMilliseconds(-Math.Max(0, batch.UptimeMs - e.UptimeMs));
+
+                // Attendance BEFORE the receipt. See the summary for why this order.
+                var outcome = e.Kind == ActivationKind
+                    ? await ActivationOutcomeAsync(device, e, services, ct)
+                    : null;
+
+                if (await RecordAsync(services, device, e, occurredAt, outcome, ct)) recorded++;
             }
 
-            var occurredAt = now.AddMilliseconds(-Math.Max(0, batch.UptimeMs - e.UptimeMs));
-
-            db.DeviceEventReceipts.Add(new DeviceEventReceipt
-            {
-                TenantId = tenant.TenantId,
-                DeviceId = device.Id,
-                Seq = e.Seq,
-                Kind = e.Kind.Length > 32 ? e.Kind[..32] : e.Kind,
-                OccurredAt = occurredAt,
-            });
-
-            db.AuditLogs.Add(new AuditLog
-            {
-                TenantId = tenant.TenantId,
-                ActorUserId = Guid.Empty,
-                SubjectUserId = null,
-                Action = $"device.{e.Kind}",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    device_id = device.Id,
-                    device_code = device.DeviceCode,
-                    seq = e.Seq,
-                    kind = e.Kind,
-                    court = e.Court,
-                    method = e.Method,
-                    subject = e.Subject,
-                    duration_ms = e.DurationMs,
-                    occurred_at = occurredAt,
-                }),
-            });
-
             acceptedThrough = e.Seq;
-            recorded++;
         }
 
         device.LastSeenAt = now;
-
-        try
-        {
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex) when (IsDuplicateReceipt(ex))
-        {
-            // Two uploads of the same batch, in flight together. The index refused the
-            // second, which is the outcome that was wanted — and the box is told the events
-            // are accepted, because they are: the other request recorded them.
-            return Results.Ok(new
-            {
-                server_unix = now.ToUnixTimeSeconds(),
-                accepted_through = acceptedThrough,
-                recorded = 0,
-                note = "already recorded by a concurrent upload",
-            });
-        }
+        await services.Db.SaveChangesAsync(ct);
 
         return Results.Ok(new
         {
@@ -168,6 +141,159 @@ public static class DeviceEventEndpoints
             accepted_through = acceptedThrough,
             recorded,
         });
+    }
+
+    /// <summary>
+    /// Which of the offered sequence numbers this box has already had receipted. One read
+    /// for the whole batch rather than one per event: a box back from a week offline arrives
+    /// with a full ring, and 32 round trips to answer "seen this?" is 32 round trips.
+    /// </summary>
+    private static async Task<HashSet<long>> SeenAsync(
+        MainframeDbContext db, Device device, List<DeviceEventDto> events, CancellationToken ct)
+    {
+        var offered = events.Select(e => e.Seq).ToList();
+        var seen = await db.DeviceEventReceipts
+            .Where(r => r.DeviceId == device.Id && offered.Contains(r.Seq))
+            .Select(r => r.Seq)
+            .ToListAsync(ct);
+        return seen.ToHashSet();
+    }
+
+    /// <summary>
+    /// What became of one activation event, for the audit trail. <c>ok</c> covers a fresh
+    /// stamp and a repeat of a live session alike; everything else names why nothing was
+    /// stamped, and is written as its own <c>device.activation_{code}</c> audit row so the
+    /// desk can answer "I scanned and it let me in — why am I a no-show?" from the record.
+    /// </summary>
+    private sealed record ActivationOutcome(string Code, Guid? BookingId)
+    {
+        public const string Ok = "ok";
+    }
+
+    /// <summary>
+    /// Turns an activation event into attendance, or says why it could not.
+    ///
+    /// <para>
+    /// The token the box reports is the roster token — the booking's own activation code
+    /// — so it names the booking outright; the only questions are whether it is this
+    /// club's (the code resolver is tenant-filtered, so another club's code is simply
+    /// unknown here), whether the relay the box lit is wired to the booking's court, and
+    /// what the one activation path makes of it. <b>Nothing here refuses the batch.</b> A
+    /// 4xx on an event the box cannot change is a box retrying forever; every outcome is
+    /// receipted and acknowledged, and the refusals are preserved server-side as audit rows
+    /// — the evidence the box is about to release.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>TooEarly</c> is not stamped. The box let the member in ahead of the cue window —
+    /// its clock or its cached window drifted — and the cue rule is the rule; the audit row
+    /// is what tells an admin the box is drifting. A charge refusal on a legacy uncharged
+    /// row, or a booking cancelled after the roster was pushed, is likewise recorded and not
+    /// stamped.
+    /// </para>
+    /// </summary>
+    private static async Task<ActivationOutcome> ActivationOutcomeAsync(
+        Device device, DeviceEventDto e, DeviceEventServices services, CancellationToken ct)
+    {
+        var (db, _, codes, activation) = services;
+
+        var resolved = await codes.ResolveAsync(e.Subject, ct);
+        if (resolved is null || resolved.Purpose != AccessCodePurpose.BookingActivation || resolved.BookingId is null)
+        {
+            return new ActivationOutcome("unresolved", null);
+        }
+
+        var booking = await db.Bookings.FirstOrDefaultAsync(b => b.Id == resolved.BookingId, ct);
+        if (booking is null) return new ActivationOutcome("unresolved", null);
+
+        var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == booking.CourtId, ct);
+        if (court is null) return new ActivationOutcome("unresolved", booking.Id);
+
+        // The event's court is the RELAY INDEX the box lit (eventq::Event::court, 0-3),
+        // and the device's court list is the relay mapping — so the relay must be wired
+        // to the booking's court. A box that lit relay C for a court-1 booking has a
+        // stale or wrong court list, and the member is standing on the wrong court.
+        if (e.Court is not { } relay || relay < 0 || relay >= device.CourtNumbers.Count
+            || device.CourtNumbers[relay] != court.CourtNumber)
+        {
+            return new ActivationOutcome("wrong_court", booking.Id);
+        }
+
+        var result = await ActivateOnceAsync(db, activation,
+            new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline"), ct);
+
+        return new ActivationOutcome(result switch
+        {
+            ActivationResult.Activated => ActivationOutcome.Ok,
+            ActivationResult.TooEarly => "too_early",
+            ActivationResult.InsufficientBalance => "unpaid",
+            _ => "not_chargeable",
+        }, booking.Id);
+    }
+
+    /// <summary>
+    /// Writes one event's receipt and audit rows and saves them — its own unit of work, see
+    /// <see cref="UploadAsync"/>. False when the unique index on (tenant, device, seq)
+    /// refused the receipt: two uploads of the same batch were in flight together, the other
+    /// one recorded this event, and the box is told it is accepted because it is. Any
+    /// activation this event carried has already been applied, idempotently, by whichever
+    /// request got there first.
+    /// </summary>
+    private static async Task<bool> RecordAsync(
+        DeviceEventServices services, Device device, DeviceEventDto e, DateTimeOffset occurredAt,
+        ActivationOutcome? outcome, CancellationToken ct)
+    {
+        var (db, tenant, _, _) = services;
+
+        var receipt = new DeviceEventReceipt
+        {
+            TenantId = tenant.TenantId,
+            DeviceId = device.Id,
+            Seq = e.Seq,
+            Kind = e.Kind.Length > 32 ? e.Kind[..32] : e.Kind,
+            OccurredAt = occurredAt,
+        };
+        db.DeviceEventReceipts.Add(receipt);
+
+        var details = new
+        {
+            device_id = device.Id,
+            device_code = device.DeviceCode,
+            seq = e.Seq,
+            kind = e.Kind,
+            court = e.Court,
+            method = e.Method,
+            subject = e.Subject,
+            duration_ms = e.DurationMs,
+            occurred_at = occurredAt,
+            outcome = outcome?.Code,
+            booking_id = outcome?.BookingId,
+        };
+        var detailsJson = System.Text.Json.JsonSerializer.Serialize(details);
+
+        var rows = new List<AuditLog>(2)
+        {
+            new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = $"device.{e.Kind}", DetailsJson = detailsJson },
+        };
+        if (outcome is not null && outcome.Code != ActivationOutcome.Ok)
+        {
+            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = $"device.activation_{outcome.Code}", DetailsJson = detailsJson });
+        }
+        db.AuditLogs.AddRange(rows);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException ex) when (IsDuplicateReceipt(ex))
+        {
+            // Forget the refused rows, or the next save on this context would offer them
+            // again against the same index.
+            db.Entry(receipt).State = EntityState.Detached;
+            foreach (var row in rows) db.Entry(row).State = EntityState.Detached;
+            return false;
+        }
     }
 
     /// <summary>
@@ -276,7 +402,8 @@ public static class DeviceEventEndpoints
 
         // Straight into the one activation path, so attendance, the audit row and
         // booking.lights_on all come from the place that is allowed to produce them.
-        var activated = await ActivateOnceAsync(services, court, ok.Booking, userId.Value, req.Method, ct);
+        var activated = await ActivateOnceAsync(db, activation,
+            new ActivationTarget(court, ok.Booking, userId.Value, req.Method ?? "qr"), ct);
         if (activated is not ActivationResult.Activated live)
         {
             return Results.Conflict(new { error = "activation_refused" });
@@ -285,21 +412,22 @@ public static class DeviceEventEndpoints
         return Results.Ok(Grant(ok.Booking, live.AmountCredits, ok.BalanceAfterCredits, replayed: false));
     }
 
+    /// <summary>Who is activating what, and how — the arguments <see cref="ActivateOnceAsync"/> retries with.</summary>
+    private sealed record ActivationTarget(Court Court, Booking Booking, Guid UserId, string Method);
+
     /// <summary>
-    /// Activation that survives its twin. Two retries of one purchase can reach this from
-    /// both sides — the winner after its commit, the loser after re-reading the winner's
-    /// booking — and whichever stamps <c>CheckedInAt</c> second finds the concurrency token
-    /// moved under it. That is not a failure of the purchase: the row was stamped, by the
-    /// other attempt. Re-read it and go again, and the second pass sees a live session and
-    /// is the idempotent no-op it is meant to be.
+    /// Activation that survives its twin. Two retries of one purchase — or two uploads of
+    /// one event batch — can reach this from both sides, and whichever stamps
+    /// <c>CheckedInAt</c> second finds the concurrency token moved under it. That is not a
+    /// failure: the row was stamped, by the other attempt. Re-read it and go again, and the
+    /// second pass sees a live session and is the idempotent no-op it is meant to be.
     /// </summary>
     private static async Task<ActivationResult> ActivateOnceAsync(
-        WalkUpServices services, Court court, Booking booking, Guid userId, string? method, CancellationToken ct)
+        MainframeDbContext db, CourtActivationService activation, ActivationTarget t, CancellationToken ct)
     {
-        var (db, _, activation, _, _, _) = services;
         try
         {
-            return await activation.ActivateAsync(court, booking, userId, null, method ?? "qr", ct);
+            return await activation.ActivateAsync(t.Court, t.Booking, t.UserId, null, t.Method, ct);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -309,8 +437,8 @@ public static class DeviceEventEndpoints
             {
                 entry.State = EntityState.Detached;
             }
-            await db.Entry(booking).ReloadAsync(ct);
-            return await activation.ActivateAsync(court, booking, userId, null, method ?? "qr", ct);
+            await db.Entry(t.Booking).ReloadAsync(ct);
+            return await activation.ActivateAsync(t.Court, t.Booking, t.UserId, null, t.Method, ct);
         }
     }
 
@@ -355,7 +483,7 @@ public static class DeviceEventEndpoints
     private static async Task<IResult?> ReplayAsync(
         string reference, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, _, _, _, _, ledger) = services;
+        var (db, _, activation, _, _, ledger) = services;
 
         var entry = await db.LedgerEntries.AsNoTracking()
             .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
@@ -365,7 +493,8 @@ public static class DeviceEventEndpoints
         if (booking is null) return null;
 
         var court = await db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
-        var activated = await ActivateOnceAsync(services, court, booking, entry.UserId, req.Method, ct);
+        var activated = await ActivateOnceAsync(db, activation,
+            new ActivationTarget(court, booking, entry.UserId, req.Method ?? "qr"), ct);
         if (activated is not ActivationResult.Activated)
         {
             return Results.Conflict(new { error = "activation_refused" });
@@ -434,7 +563,21 @@ public sealed record WalkUpServices(
     TenantSettingsAccessor Settings,
     LedgerService Ledger);
 
-/// <summary>One event as the box queued it. Names mirror <c>lib/eventq</c>'s wire form.</summary>
+/// <summary>
+/// The services the event upload needs, bundled — see <see cref="WalkUpServices"/>. The code
+/// resolver and the activation path are what turn an activation event into attendance.
+/// </summary>
+public sealed record DeviceEventServices(
+    MainframeDbContext Db,
+    ITenantContext Tenant,
+    AccessCodeService Codes,
+    CourtActivationService Activation);
+
+/// <summary>
+/// One event as the box queued it. Names mirror <c>lib/eventq</c>'s wire form. <c>court</c> is
+/// the RELAY INDEX the box acted on (0–3, <c>eventq::Event::court</c>), not a court number:
+/// the device's court list maps it.
+/// </summary>
 public sealed record DeviceEventDto(
     [property: JsonPropertyName("seq")] long Seq,
     [property: JsonPropertyName("uptime_ms")] long UptimeMs,

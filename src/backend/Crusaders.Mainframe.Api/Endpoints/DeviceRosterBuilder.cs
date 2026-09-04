@@ -1,0 +1,203 @@
+using System.Globalization;
+using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services;
+using Microsoft.EntityFrameworkCore;
+
+namespace Crusaders.Mainframe.Api.Endpoints;
+
+/// <summary>
+/// The roster a court box caches so it can admit a booked member with no network.
+///
+/// <para>
+/// This is the half of review C2 that lives on the server. <c>Roster.h</c> said "the API
+/// pushes the roster on the heartbeat" and nothing ever did, so every scan at a healthy
+/// box was refused as Stale — forever, on every court. The heartbeat now carries
+/// <c>roster</c>: one string per near-future booking on the box's courts, in the four-field
+/// shape the firmware's <c>bridgelogic/RosterSync</c> parses.
+/// </para>
+///
+/// <para>
+/// <b>The wire shape is <c>TOKEN|relay|opens_in|closes_in</c></b>. The token is the
+/// booking's activation code — the bytes the member's phone will put in front of the
+/// scanner, and nothing a stolen board could turn into a member. The relay is the index of
+/// the booking's court in <see cref="Device.CourtNumbers"/>, because that list <i>is</i> the
+/// relay mapping. The two counts are SIGNED seconds relative to the response instant —
+/// until the booking's cue window opens (negative means already open) and until its slot
+/// ends — because the box has no RTC and an absolute time is meaningless across the reboot
+/// that clears <c>millis()</c>.
+/// </para>
+///
+/// <para>
+/// The assembly is split in two so the arithmetic is testable against a fixed clock without
+/// a database: <see cref="Format"/> is pure, and <see cref="BuildAsync"/> is the query plus
+/// the lazy mint that feeds it.
+/// </para>
+/// </summary>
+public static class DeviceRosterBuilder
+{
+    /// <summary>
+    /// Most entries one heartbeat carries. A <b>contract constant</b>, not a tenant setting:
+    /// it bounds the firmware's roster buffer (<c>bridgelogic::kMaxRosterEntries</c>) and,
+    /// through it, the size of the heartbeat response the box has to hold in RAM. Pinned by
+    /// <c>heartbeat-response-roster-full</c> in the shared corpus. A tenant with more than
+    /// sixteen bookings inside its window on one box gets the sixteen that start first; the
+    /// rest arrive on a later heartbeat as the earlier ones check in or end.
+    /// </summary>
+    public const int RosterMaxEntries = 16;
+
+    /// <summary>
+    /// Longest token the firmware will match (<c>roster::kMaxTokenLen</c>). Access codes are
+    /// twelve characters; this is the wall, and an entry whose token would breach it is left
+    /// out rather than sent to be refused — a token cut short matches a different member.
+    /// </summary>
+    public const int MaxTokenLength = 20;
+
+    /// <summary>One booking as the roster sees it: its court number and the code that opens it.</summary>
+    public sealed record Candidate(Booking Booking, int CourtNumber, string Token);
+
+    /// <summary>
+    /// The roster strings for <paramref name="candidates"/>, relative to <paramref name="now"/>.
+    ///
+    /// <para>
+    /// Pure. Orders by <c>StartsAt</c>, maps each court number to its relay index in
+    /// <paramref name="courtNumbers"/>, drops anything that cannot be expressed — a court
+    /// this box does not drive, a token too long for the firmware — and caps at
+    /// <see cref="RosterMaxEntries"/>. The cap is applied AFTER ordering, so it is always the
+    /// earliest sixteen that go, which is what the member standing at the box needs.
+    /// </para>
+    /// </summary>
+    public static List<string> Format(
+        IEnumerable<Candidate> candidates, IReadOnlyList<int> courtNumbers, DateTimeOffset now, TimeSpan cue)
+    {
+        var roster = new List<string>(RosterMaxEntries);
+
+        foreach (var c in candidates.OrderBy(c => c.Booking.StartsAt).ThenBy(c => c.Booking.Id))
+        {
+            if (roster.Count == RosterMaxEntries) break;
+
+            var relay = RelayOf(courtNumbers, c.CourtNumber);
+            if (relay < 0 || relay > 3) continue;
+            if (c.Token.Length is 0 or > MaxTokenLength) continue;
+
+            roster.Add(Entry(c.Token, relay, c.Booking.StartsAt - cue, c.Booking.EndsAt, now));
+        }
+
+        return roster;
+    }
+
+    /// <summary>The relay a court number is wired to: its position in the list, or -1.</summary>
+    public static int RelayOf(IReadOnlyList<int> courtNumbers, int courtNumber)
+    {
+        for (var i = 0; i < courtNumbers.Count; i++)
+        {
+            if (courtNumbers[i] == courtNumber) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// One <c>TOKEN|relay|opens_in|closes_in</c> string. Floored, not rounded: a booking
+    /// half a second from opening is not open, and a slot with half a second left is over.
+    /// </summary>
+    public static string Entry(string token, int relay, DateTimeOffset opensAt, DateTimeOffset closesAt, DateTimeOffset now)
+    {
+        var opensIn = (long)Math.Floor((opensAt - now).TotalSeconds);
+        var closesIn = (long)Math.Floor((closesAt - now).TotalSeconds);
+        return string.Create(CultureInfo.InvariantCulture, $"{token}|{relay}|{opensIn}|{closesIn}");
+    }
+
+    /// <summary>
+    /// The roster for <paramref name="device"/> right now.
+    ///
+    /// <para>
+    /// Selects bookings on the box's courts that are still <c>Booked</c>, not yet checked in
+    /// — a live session needs no roster entry, and a repeat scan of one is the online
+    /// <c>/activate</c> path's job — and whose activation window
+    /// <c>[StartsAt − cue, EndsAt]</c> intersects <c>[now, now + roster_window]</c>. That is the
+    /// same horizon the QR screen uses to decide which code to show, so the code on the
+    /// member's phone and the code in the box's cache are minted from one rule.
+    /// </para>
+    ///
+    /// <para>
+    /// Every query here goes through the context's tenant filter. The device row was found
+    /// under this tenant, its courts are this tenant's courts, and the bookings are read
+    /// through the same filter — another club's booking on a court that happens to share a
+    /// number cannot reach this list, structurally.
+    /// </para>
+    ///
+    /// <para>
+    /// Codes are minted lazily for bookings that predate them. <see cref="AccessCodeService.MintForBookingAsync"/>
+    /// saves per new code, which is a write on a read path; it happens once per legacy
+    /// booking and never again, and the alternative — a member with a paid booking and no
+    /// code — is exactly the dark court this exists to prevent.
+    /// </para>
+    /// </summary>
+    public static async Task<List<string>> BuildAsync(
+        MainframeDbContext db, AccessCodeService codes, Device device, TenantSettingsView settings,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        if (device.CourtNumbers.Count == 0) return [];
+
+        var cue = TimeSpan.FromMinutes(settings.ActivationCueWindowMinutes);
+        var courtNumbers = device.CourtNumbers;
+        var courts = await db.Courts.AsNoTracking()
+            .Where(c => courtNumbers.Contains(c.CourtNumber) && c.IsActive)
+            .Select(c => new { c.Id, c.CourtNumber })
+            .ToListAsync(ct);
+        var courtIds = courts.Select(c => c.Id).ToList();
+        var numberOf = courts.ToDictionary(c => c.Id, c => c.CourtNumber);
+
+        // [StartsAt − cue, EndsAt] ∩ [now, now + roster] ≠ ∅  ⇔
+        // StartsAt ≤ now + roster + cue  ∧  EndsAt ≥ now — two constants the provider can
+        // translate, the same rearrangement QrEndpoints uses.
+        var latestStart = now.AddMinutes(settings.RosterWindowMinutes).Add(cue);
+        var bookings = await db.Bookings
+            .Where(b => courtIds.Contains(b.CourtId)
+                        && b.Status == BookingStatus.Booked
+                        && b.CheckedInAt == null
+                        && b.UserId != null
+                        && b.StartsAt <= latestStart
+                        && b.EndsAt >= now)
+            .OrderBy(b => b.StartsAt)
+            .Take(RosterMaxEntries)
+            .ToListAsync(ct);
+        if (bookings.Count == 0) return [];
+
+        var tokens = await TokensForAsync(db, codes, bookings, settings, now, ct);
+
+        return Format(
+            bookings.Select(b => new Candidate(b, numberOf[b.CourtId], tokens[b.Id])),
+            courtNumbers, now, cue);
+    }
+
+    /// <summary>
+    /// The live activation code per booking — one read for the batch, then a mint for each
+    /// booking that has none. Sixteen bookings must not be sixteen round trips four times a
+    /// minute per box.
+    /// </summary>
+    private static async Task<Dictionary<Guid, string>> TokensForAsync(
+        MainframeDbContext db, AccessCodeService codes, List<Booking> bookings, TenantSettingsView settings,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var ids = bookings.Select(b => b.Id).ToList();
+        var live = await db.AccessCodes.AsNoTracking()
+            .Where(c => c.BookingId != null && ids.Contains(c.BookingId.Value)
+                        && c.Purpose == AccessCodePurpose.BookingActivation
+                        && c.ExpiresAt > now)
+            .OrderBy(c => c.ExpiresAt)
+            .ToListAsync(ct);
+
+        var tokens = new Dictionary<Guid, string>(bookings.Count);
+        foreach (var code in live) tokens[code.BookingId!.Value] = code.Code;
+
+        var grace = TimeSpan.FromMinutes(settings.GraceWindowMinutes);
+        foreach (var booking in bookings)
+        {
+            if (tokens.ContainsKey(booking.Id)) continue;
+            tokens[booking.Id] = (await codes.MintForBookingAsync(booking, grace, ct)).Code;
+        }
+
+        return tokens;
+    }
+}

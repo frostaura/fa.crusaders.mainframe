@@ -9,8 +9,12 @@ using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Crusaders.Mainframe.Api.Services;
+using Crusaders.Mainframe.Api.Webhooks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Crusaders.Mainframe.Tests;
@@ -146,12 +150,13 @@ public sealed class DeviceEventHttpTests
         nonce = nonce ?? Guid.NewGuid().ToString("N")[..16],
     };
 
-    private static object Activation(long seq, string subject = "tok-alice") => new
+    /// <summary><c>court</c> is the RELAY INDEX the box lit (0–3), as <c>eventq::Event::court</c> carries it.</summary>
+    private static object Activation(long seq, string subject = "tok-alice", int court = 0) => new
     {
         seq,
         uptime_ms = 300_000,
         kind = "activation",
-        court = 0,
+        court,
         method = "qr",
         subject,
         duration_ms = 2_700_000,
@@ -661,5 +666,377 @@ public sealed class DeviceEventHttpTests
 
         var response = await client.PostAsJsonAsync(ActivatePath, new { method = "qr", token = "7Q3F9KM2XZ8B" });
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    // ---- the roster the box decides against (review C2) ----------------------
+
+    private const string HeartbeatPath = "/api/v1/device/heartbeat";
+
+    private sealed record Booked(Guid BookingId, string Code);
+
+    /// <summary>
+    /// A charged booking for the box's member on <paramref name="courtNumber"/>, with the
+    /// BookingCharge on the ledger so a no-show sweep would have something to refund — the
+    /// shape the C6 finding is about.
+    /// </summary>
+    private static async Task<Booked> BookAsync(
+        TestWebAppFactory factory, Box box, int courtNumber, double startsInMinutes, int minutes = 45, bool mintCode = true)
+    {
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(box.TenantId, box.Slug);
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var startsAt = DateTimeOffset.UtcNow.AddMinutes(startsInMinutes);
+        var booking = new Booking
+        {
+            TenantId = box.TenantId,
+            CourtId = box.CourtIds[courtNumber],
+            UserId = box.MemberId,
+            BookedByUserId = box.MemberId,
+            PaidByUserId = box.MemberId,
+            ActorUserId = box.MemberId,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(minutes),
+            SliceMinutes = 15,
+            SliceCount = Math.Max(1, minutes / 15),
+            AmountChargedCredits = 8m * Math.Max(1, minutes / 15),
+            Status = BookingStatus.Booked,
+            ChargedAt = DateTimeOffset.UtcNow,
+        };
+        db.Bookings.Add(booking);
+        db.LedgerEntries.Add(new LedgerEntry
+        {
+            TenantId = box.TenantId,
+            UserId = box.MemberId,
+            Type = LedgerEntryType.BookingCharge,
+            AmountCredits = -booking.AmountChargedCredits,
+            ActorUserId = box.MemberId,
+            RelatedBookingId = booking.Id,
+            Reason = "seed charge",
+        });
+        await db.SaveChangesAsync();
+
+        var code = mintCode
+            ? (await scope.ServiceProvider.GetRequiredService<AccessCodeService>().MintForBookingAsync(booking, TimeSpan.FromMinutes(5), default)).Code
+            : "";
+        return new Booked(booking.Id, code);
+    }
+
+    private static async Task<Booking> BookingAsync(TestWebAppFactory factory, Guid bookingId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.Bookings.IgnoreQueryFilters().AsNoTracking().SingleAsync(b => b.Id == bookingId);
+    }
+
+    private static async Task<List<AuditLog>> AuditAsync(TestWebAppFactory factory, Guid tenantId, string action)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.AuditLogs.IgnoreQueryFilters().Where(a => a.TenantId == tenantId && a.Action == action).ToListAsync();
+    }
+
+    private static async Task<List<LedgerEntry>> LedgerAsync(TestWebAppFactory factory, Guid bookingId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.LedgerEntries.IgnoreQueryFilters().Where(l => l.RelatedBookingId == bookingId).ToListAsync();
+    }
+
+    private static async Task<JsonElement> HeartbeatAsync(TestWebAppFactory factory, Box box)
+    {
+        var response = await factory.CreateClient().SendAsync(Signed(box, HeartbeatPath, new { running_version = "1.0.0" }));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    /// <summary>
+    /// The heartbeat carries the roster over the real wire, in the four-field shape the
+    /// firmware parses, with the relay from the box's own court list and the seconds
+    /// relative to the response. The booking was written with no code; the heartbeat mints
+    /// it, and the token on the wire is the code the member's phone will show.
+    /// </summary>
+    [SkippableFact]
+    public async Task Heartbeat_carries_the_roster_over_signed_http()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: 5, minutes: 45, mintCode: false);
+
+        var body = await HeartbeatAsync(factory, box);
+
+        var roster = body.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!).ToList();
+        var entry = Assert.Single(roster);
+        Assert.Matches(DeviceProtocolCorpusTests.RosterEntryPattern, entry);
+
+        var fields = entry.Split('|');
+        Assert.Equal(1, int.Parse(fields[1]));                                   // court 2 is relay B on this box
+        Assert.InRange(long.Parse(fields[2]), (5 - 10) * 60 - 5, (5 - 10) * 60);  // cue of 10 opened five minutes ago
+        Assert.InRange(long.Parse(fields[3]), 50 * 60 - 5, 50 * 60);             // ends in fifty
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var code = await db.AccessCodes.IgnoreQueryFilters().SingleAsync(c => c.BookingId == booked.BookingId);
+        Assert.Equal(code.Code, fields[0]);
+        Assert.Equal(AccessCodePurpose.BookingActivation, code.Purpose);
+    }
+
+    /// <summary>
+    /// Seventeen bookings in the window: sixteen go, and the whole response still fits the
+    /// box's buffer. The cap is what bounds the response, so this is where the byte budget
+    /// is held against the live serializer rather than a hand-written vector.
+    /// </summary>
+    [SkippableFact]
+    public async Task Heartbeat_roster_is_capped_at_sixteen_and_the_response_fits_the_boxs_buffer()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        // The literal, not the constant: this is the contract number the firmware buffer is
+        // sized to (bridgelogic::kMaxRosterEntries), and a test that reads the cap off the
+        // builder would follow the builder if somebody raised it.
+        const int contractCap = 16;
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2, 3, 4]);
+        for (var i = 0; i < contractCap + 2; i++)
+        {
+            await BookAsync(factory, box, courtNumber: 1 + (i % 4), startsInMinutes: 1 + i * 5, minutes: 5);
+        }
+
+        var response = await factory.CreateClient().SendAsync(Signed(box, HeartbeatPath, new { running_version = "1.0.0" }));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var bytes = await response.Content.ReadAsByteArrayAsync();
+        Assert.True(bytes.Length <= 2048, $"heartbeat response is {bytes.Length} bytes; the box holds 2048");
+
+        var roster = JsonDocument.Parse(bytes).RootElement.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!).ToList();
+        Assert.Equal(contractCap, roster.Count);
+        Assert.All(roster, e => Assert.Matches(DeviceProtocolCorpusTests.RosterEntryPattern, e));
+        Assert.DoesNotContain(roster, e => e.Contains('\\'));   // the serializer must not escape the separator
+    }
+
+    // ---- activation events become attendance (review C6) -----------------------
+
+    /// <summary>
+    /// The C6 headline. The box admitted a member from its roster, queued the activation,
+    /// and uploaded it; the no-show sweep then runs past the grace window. Before this the
+    /// upload wrote a receipt and nothing else, so the member was swept, refunded and
+    /// penalised for a court they played on. Now the event is attendance: no refund, no
+    /// penalty, no NoShow.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activation_event_stamps_checked_in_and_survives_no_show_sweep()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        // Started ten minutes ago against a five-minute grace: due for the sweep unless
+        // somebody checked in.
+        var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: -10);
+
+        var response = await factory.CreateClient().SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 1))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, body.GetProperty("accepted_through").GetInt64());
+
+        var stamped = await BookingAsync(factory, booked.BookingId);
+        Assert.NotNull(stamped.CheckedInAt);
+
+        await SweepAsync(factory);
+
+        var after = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.Booked, after.Status);
+        Assert.NotNull(after.CheckedInAt);
+
+        var ledger = await LedgerAsync(factory, booked.BookingId);
+        Assert.DoesNotContain(ledger, l => l.Type == LedgerEntryType.CancellationRefund);
+        Assert.DoesNotContain(ledger, l => l.Type == LedgerEntryType.NoShowPenalty);
+        Assert.Single(await AuditAsync(factory, box.TenantId, "court.activated"));
+    }
+
+    /// <summary>One tick of the real no-show sweep, with email stubbed so it does not dial SMTP for every tenant in the shared database.</summary>
+    private static async Task SweepAsync(TestWebAppFactory factory)
+    {
+        await using var quiet = factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
+        {
+            s.RemoveAll<Crusaders.Mainframe.Api.Email.IEmailService>();
+            s.AddSingleton<Crusaders.Mainframe.Api.Email.IEmailService>(new StubEmailService());
+        }));
+        var worker = new NoShowWorker(quiet.Services, quiet.Services.GetRequiredService<IEventBus>(), NullLogger<NoShowWorker>.Instance);
+        await worker.TickAsync(default);
+    }
+
+    /// <summary>
+    /// The box lost the acknowledgement and sent the same batch again. One stamp, one
+    /// <c>court.activated</c> row, and the second answer accepts the same sequence number
+    /// having recorded nothing new.
+    /// </summary>
+    [SkippableFact]
+    public async Task Replayed_activation_batch_is_idempotent()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);
+        var client = factory.CreateClient();
+
+        var first = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(7, subject: booked.Code, court: 0))));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var stampedAt = (await BookingAsync(factory, booked.BookingId)).CheckedInAt;
+        Assert.NotNull(stampedAt);
+
+        var again = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(7, subject: booked.Code, court: 0))));
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        var body = await again.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(7, body.GetProperty("accepted_through").GetInt64());
+        Assert.Equal(0, body.GetProperty("recorded").GetInt32());
+
+        Assert.Equal(stampedAt, (await BookingAsync(factory, booked.BookingId)).CheckedInAt);
+        Assert.Single(await AuditAsync(factory, box.TenantId, "court.activated"));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation"));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(1, await db.DeviceEventReceipts.IgnoreQueryFilters().CountAsync(r => r.DeviceId == box.DeviceId));
+    }
+
+    /// <summary>
+    /// A token the server does not know — expired, never minted, or another club's — is
+    /// still acknowledged, so the box can release its queue, and the refusal is preserved
+    /// as an audit row: the evidence the box is about to discard.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activation_event_with_unknown_token_is_acked_and_audited()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);
+
+        var response = await factory.CreateClient().SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: "ZZZZZZZZZZZZ", court: 0))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, body.GetProperty("accepted_through").GetInt64());
+        Assert.Equal(1, body.GetProperty("recorded").GetInt32());
+
+        Assert.Null((await BookingAsync(factory, booked.BookingId)).CheckedInAt);
+        var audit = Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_unresolved"));
+        Assert.Contains("ZZZZZZZZZZZZ", audit.DetailsJson);
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "court.activated"));
+    }
+
+    /// <summary>
+    /// The box let somebody in ahead of the cue window — its clock or its cached window
+    /// drifted. The cue rule is the rule: receipted and acknowledged, audited as too early,
+    /// nothing stamped.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activation_event_ahead_of_cue_window_is_not_stamped()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        // Inside the forward window (120) but well ahead of the cue (10).
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 60);
+
+        var response = await factory.CreateClient().SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
+
+        var booking = await BookingAsync(factory, booked.BookingId);
+        Assert.Null(booking.CheckedInAt);
+        Assert.Null(booking.LightsOnCuedAt);
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_too_early"));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "court.activated"));
+    }
+
+    /// <summary>
+    /// The relay the box lit is not wired to the booking's court: a stale or wrong court list
+    /// on the box. Acknowledged, audited, not stamped — the member is standing on a court
+    /// they did not book.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activation_event_on_a_relay_not_wired_to_the_bookings_court_is_not_stamped()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: -2);
+
+        var response = await factory.CreateClient().SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));   // relay A is court 1
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        Assert.Null((await BookingAsync(factory, booked.BookingId)).CheckedInAt);
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_wrong_court"));
+    }
+
+    /// <summary>
+    /// Eight uploads of one batch in flight together — the retry storm a flapping link
+    /// produces. Postgres refuses seven receipts on the unique index and seven stamps on the
+    /// concurrency token; every request is answered 200 with the sequence accepted, and
+    /// there is one receipt, one stamp and one <c>court.activated</c> row at the end.
+    /// </summary>
+    [SkippableFact]
+    public async Task Concurrent_duplicate_activation_uploads()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);
+        var client = factory.CreateClient();
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ =>
+            client.SendAsync(Signed(box, EventsPath, Batch(Activation(3, subject: booked.Code, court: 0))))));
+
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+        foreach (var r in responses)
+        {
+            Assert.Equal(3, (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
+        }
+
+        Assert.NotNull((await BookingAsync(factory, booked.BookingId)).CheckedInAt);
+        Assert.Single(await AuditAsync(factory, box.TenantId, "court.activated"));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation"));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(1, await db.DeviceEventReceipts.IgnoreQueryFilters().CountAsync(r => r.DeviceId == box.DeviceId));
+        Assert.Single(await LedgerAsync(factory, booked.BookingId));   // the seed charge, and nothing else
+    }
+
+    /// <summary>
+    /// Club B's roster token, reported by club A's box. The code resolver is filtered by
+    /// tenant, so at club A it is simply unknown: acknowledged, audited as unresolved, and
+    /// club B's booking is untouched.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activation_event_citing_another_clubs_code_stamps_nothing()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var boxA = await SeedAsync(factory);
+        var boxB = await SeedAsync(factory);
+        var bookedB = await BookAsync(factory, boxB, courtNumber: 1, startsInMinutes: -2);
+
+        var response = await factory.CreateClient().SendAsync(
+            Signed(boxA, EventsPath, Batch(Activation(1, subject: bookedB.Code, court: 0))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
+
+        Assert.Null((await BookingAsync(factory, bookedB.BookingId)).CheckedInAt);
+        Assert.Single(await AuditAsync(factory, boxA.TenantId, "device.activation_unresolved"));
+        Assert.Empty(await AuditAsync(factory, boxB.TenantId, "court.activated"));
+        Assert.Empty(await AuditAsync(factory, boxA.TenantId, "court.activated"));
     }
 }
