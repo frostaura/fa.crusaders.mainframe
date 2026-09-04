@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 
@@ -94,7 +95,7 @@ public sealed class DeviceAuthenticationHandler : AuthenticationHandler<DeviceAu
         Response.Headers.WWWAuthenticate = SchemeName;
         Response.ContentType = "application/json";
         await Response.WriteAsync(
-            $"{{\"server_unix\":{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}",
+            JsonSerializer.Serialize(new { server_unix = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }),
             Context.RequestAborted);
     }
 

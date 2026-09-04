@@ -123,10 +123,14 @@ public static class BiometricEndpoints
     /// </summary>
     private static IResult MatchResponse(BiometricMatchResult match, ActivationResult? activation)
     {
-        if (match.Matched && match.MatchedUserId is Guid matchedUserId && activation is not null)
+        if (match.Matched && match.MatchedUserId is Guid matchedUserId)
         {
+            // The service fabricates ActivationResult.NoBooking for a match with nothing
+            // to activate, precisely so that a match always carries an outcome — so the
+            // match alone decides the branch, and a null here is a service bug, not a
+            // shape to answer.
             return CourtActivationResponse.For(
-                activation, matchedUserId, match.Confidence, match.LivenessScore, match.LatencyMs);
+                activation!, matchedUserId, match.Confidence, match.LivenessScore, match.LatencyMs);
         }
 
         return Results.Ok(new

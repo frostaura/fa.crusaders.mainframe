@@ -9,18 +9,6 @@ namespace devapi {
 
 namespace {
 
-/// Correction size below which a 401-with-time is judged "not a clock problem".
-///
-/// This MUST be strictly below the server's own skew window (120 s,
-/// DeviceVerifier ClockSkew) — the asymmetry is the whole point. The server
-/// starts refusing at 120 s of drift; a local threshold at or above that (this
-/// used to be 300) opens a dead band: a board drifted 2–5 minutes gets the
-/// 401, adopts the server time, measures a correction smaller than the local
-/// threshold, concludes "not skew", and re-provisions over a perfectly healthy
-/// credential. At 90 s, every drift the server can refuse for skew corrects by
-/// more than this and is read as the clock problem it is.
-constexpr int64_t kSkewToleranceSeconds = 90;
-
 bool isDigit(char c) {
   return c >= '0' && c <= '9';
 }
@@ -48,11 +36,8 @@ bool DeviceClient::sign(const Call& call, uint32_t uptimeMs, RequestBuffers& buf
   return render(call, seconds, buffers, out);
 }
 
-bool DeviceClient::probe(const Call& call, uint32_t uptimeMs, RequestBuffers& buffers,
-                         SignedRequest& out) const {
-  // Present only so probe() and sign() are call-compatible; there is no clock
-  // for the uptime to be added to, and the timestamp is 0 by contract.
-  static_cast<void>(uptimeMs);
+bool DeviceClient::probe(const Call& call, RequestBuffers& buffers, SignedRequest& out) const {
+  // The timestamp is 0 by contract: there is no clock to add an uptime to.
   return render(call, 0U, buffers, out);
 }
 
@@ -122,6 +107,7 @@ Reaction DeviceClient::react(const Response& response, uint32_t uptimeMs) {
   adoptServerTime(response.serverUnix, uptimeMs);
 
   if (response.status >= 200U && response.status < 300U) {
+    clockCorrectedStreak_ = 0U;
     return Reaction::Accepted;
   }
 
@@ -135,9 +121,21 @@ Reaction DeviceClient::react(const Response& response, uint32_t uptimeMs) {
       const bool wasSkewed = !hadClock || (previousOffset - offset_ > kSkewToleranceSeconds) ||
                              (offset_ - previousOffset > kSkewToleranceSeconds);
       if (wasSkewed) {
+        // Once is a clock problem. Twice in a row — the retry that carried the
+        // adopted time was refused with yet another time — is a server that
+        // keeps rejecting-with-time, and believing it indefinitely is a 1 s
+        // hammer for the rest of the board's life. Second strike reads as the
+        // credential problem it is.
+        if (clockCorrectedStreak_ >= 1U) {
+          clockCorrectedStreak_ = 0U;
+          return Reaction::Reprovision;
+        }
+        ++clockCorrectedStreak_;
         return Reaction::ClockCorrected;
       }
     }
+    // Cleared so a future credential does not inherit half a strike.
+    clockCorrectedStreak_ = 0U;
     return Reaction::Reprovision;
   }
 

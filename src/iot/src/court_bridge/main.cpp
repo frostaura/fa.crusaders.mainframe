@@ -295,14 +295,6 @@ char gDeviceId[devapi::kMaxDeviceIdLen + 1U] = {};
 uint8_t gDeviceKey[kDeviceKeyBytes] = {};
 bool gProvisioned = false;
 
-/// Consecutive heartbeat ClockCorrected reactions. A ClockCorrected is supposed
-/// to be self-curing — the very next attempt carries the adopted time and is
-/// accepted — so two in a row means the server keeps 401ing WITH a time
-/// attached, and a box that trusts that forever retries at 1 s for the rest of
-/// its life. Two strikes and the 401 is treated as the credential problem it
-/// evidently is. Reset by any Accepted heartbeat.
-uint8_t gClockCorrectedStreak = 0U;
-
 /// The tenant slug, present once provisioned. Empty falls the announce back to
 /// the unclaimed form — a claimed board that somehow lost its slug is better
 /// listed as connectable than not listed at all.
@@ -738,9 +730,8 @@ uint16_t callApi(const char* method, const char* path, const char* body, char* o
 
   devapi::RequestBuffers buffers;
   devapi::SignedRequest signed_;
-  const uint32_t uptimeMs = static_cast<uint32_t>(gUptime.value());
-  const bool rendered =
-      asProbe ? gApi.probe(call, uptimeMs, buffers, signed_) : gApi.sign(call, uptimeMs, buffers, signed_);
+  const bool rendered = asProbe ? gApi.probe(call, buffers, signed_)
+                                : gApi.sign(call, static_cast<uint32_t>(gUptime.value()), buffers, signed_);
   if (!rendered) {
     // No credential, or no clock yet. Both are local refusals on purpose — a
     // request signed with a timestamp of zero comes back 401 and reads exactly
@@ -1158,7 +1149,6 @@ void pumpHeartbeat(uint32_t nowMs) {
 
   switch (gApi.react(result, static_cast<uint32_t>(gUptime.value()))) {
   case devapi::Reaction::Accepted:
-    gClockCorrectedStreak = 0U;
     // The evidence that clears a pending update. Not "it booted" — a firmware that
     // comes up and cannot authenticate looks alive and does nothing, which is worse
     // than one that does not come up at all.
@@ -1167,28 +1157,16 @@ void pumpHeartbeat(uint32_t nowMs) {
     considerUpdate(response, strlen(response));
     return;
   case devapi::Reaction::ClockCorrected:
-    // ClockCorrected is self-curing by design: the retry below carries the
-    // adopted time and should be accepted. A SECOND one in a row means the
-    // server keeps rejecting-with-time — a box that believes it indefinitely
-    // hammers at 1 s forever — so two strikes read as the credential problem
-    // Reprovision handles.
-    ++gClockCorrectedStreak;
-    if (gClockCorrectedStreak >= 2U) {
-      gClockCorrectedStreak = 0U;
-      gProvisioned = false;
-      showClaimPrompt();
-      return;
-    }
     // The offset is fixed and the next attempt is expected to work, so do not
-    // wait a full interval to find out.
+    // wait a full interval to find out. react() itself refuses to answer this
+    // twice in a row — a second consecutive correction comes back as
+    // Reprovision — so this cannot become a 1 s hammer.
     gHeartbeat.arm(nowMs, 1000UL);
     return;
   case devapi::Reaction::Reprovision:
     // The server does not accept this credential. Hammering it with a revoked key
     // is how a board gets rate limited out of ever recovering, so the box goes
-    // back to announcing itself and waits to be claimed again. The streak is
-    // cleared so a future credential does not inherit half a strike.
-    gClockCorrectedStreak = 0U;
+    // back to announcing itself and waits to be claimed again.
     gProvisioned = false;
     showClaimPrompt();
     return;

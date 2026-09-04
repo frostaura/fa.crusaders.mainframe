@@ -187,6 +187,13 @@ private:
 /// failure, since a corpus case missing a field is a corpus that changed shape.
 inline const char* member(const char* object, const char* name);
 
+/// Decodes the hex-string member `name` of `object` into `out`, writing the
+/// byte count to `outLen`. False when the member is absent, not a string, has
+/// an odd length or a non-hex digit, or does not fit — never a partial decode.
+/// Shared by every suite that reads `*_hex` fields, so the decoding rule cannot
+/// drift between them.
+inline bool hexField(const char* object, const char* name, uint8_t* out, size_t outCap, size_t* outLen);
+
 // --- loading ----------------------------------------------------------------
 
 /// Reads one file from a src/contracts/device-protocol family, searching upward
@@ -408,6 +415,33 @@ inline const char* member(const char* object, const char* name) {
     }
   }
   return nullptr;
+}
+
+inline bool hexField(const char* object, const char* name, uint8_t* out, size_t outCap, size_t* outLen) {
+  // Static, not stack: the longest corpus string is 4 KB and this runs inside
+  // a Unity test frame.
+  static char text[kMaxStringLen];
+
+  const char* value = member(object, name);
+  size_t textLen = 0;
+  if (value == nullptr || out == nullptr || outLen == nullptr ||
+      !stringValue(value, text, sizeof(text), &textLen)) {
+    return false;
+  }
+  if ((textLen % 2U) != 0U || textLen / 2U > outCap) {
+    return false;
+  }
+
+  for (size_t i = 0; i < textLen; i += 2U) {
+    const int hi = hexNibble(text[i]);
+    const int lo = hexNibble(text[i + 1U]);
+    if (hi < 0 || lo < 0) {
+      return false;
+    }
+    out[i / 2U] = static_cast<uint8_t>((hi << 4) | lo);
+  }
+  *outLen = textLen / 2U;
+  return true;
 }
 
 inline bool File::load(const char* family, const char* fileName) {

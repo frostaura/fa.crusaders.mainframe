@@ -757,18 +757,6 @@ private:
   size_t at_ = 0U;
 };
 
-/// Decodes a hex-valued corpus field into `out`, returning its length in bytes.
-size_t corpusHexField(const char* object, const char* name, uint8_t* out, size_t outCap) {
-  static char text[2048];
-  const char* value = corpus::member(object, name);
-  TEST_ASSERT_NOT_NULL_MESSAGE(value, name);
-  size_t textLen = 0U;
-  TEST_ASSERT_TRUE_MESSAGE(corpus::stringValue(value, text, sizeof(text), &textLen), name);
-  size_t byteLen = 0U;
-  TEST_ASSERT_TRUE_MESSAGE(dc::hex::decode(text, textLen, out, outCap, &byteLen), name);
-  return byteLen;
-}
-
 /// The clock-bootstrap probe, byte for byte against the shared corpus.
 ///
 /// The fixture is the `requests` vector whose nonce is the pinned
@@ -819,7 +807,9 @@ void test_client_probe_renders_unix_seconds_zero_with_a_real_hmac() {
   TEST_ASSERT_EQUAL_STRING("/api/v1/device/heartbeat", path);
 
   uint8_t bodyBytes[128] = {};
-  const size_t bodyLen = corpusHexField(vector, "body_hex", bodyBytes, sizeof(bodyBytes) - 1U);
+  size_t bodyLen = 0U;
+  TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(vector, "body_hex", bodyBytes, sizeof(bodyBytes) - 1U, &bodyLen),
+                           "body_hex");
   char body[128] = {};
   memcpy(body, bodyBytes, bodyLen);
   TEST_ASSERT_EQUAL_STRING("{\"running_version\":\"1.0.0\"}", body);
@@ -855,7 +845,7 @@ void test_client_probe_renders_unix_seconds_zero_with_a_real_hmac() {
 
   devapi::RequestBuffers buffers;
   devapi::SignedRequest request;
-  TEST_ASSERT_TRUE(client.probe(call, 5000U, buffers, request));
+  TEST_ASSERT_TRUE(client.probe(call, buffers, request));
 
   TEST_ASSERT_EQUAL_STRING("0", request.timestamp);
   TEST_ASSERT_EQUAL_STRING(kProbeNonce, request.nonce);
@@ -912,48 +902,81 @@ void test_client_drift_inside_the_local_window_still_means_the_key_is_gone() {
   }
 }
 
-void test_find_server_unix_agrees_with_the_shared_response_corpus() {
+void test_client_skew_tolerance_is_pinned_by_the_corpus_below_the_servers_window() {
+  // The 90 s / 120 s asymmetry above is a two-sided invariant: the server's
+  // window is DeviceVerifier.ClockSkew, the local threshold is
+  // kSkewToleranceSeconds, and neither side can see the other's source. The
+  // corpus carries both numbers; the .NET suite asserts the server half, this
+  // asserts the firmware half, and the strict inequality is what closes the
+  // dead band described on the constant.
   TEST_ASSERT_TRUE_MESSAGE(g_httpCases.load("http", "cases.json"),
                            "http corpus not found — a skipped corpus proves nothing");
 
-  const char* responses = corpus::member(g_httpCases.root(), "responses");
-  TEST_ASSERT_NOT_NULL_MESSAGE(responses, "corpus has no responses section");
+  const char* clock = corpus::member(g_httpCases.root(), "clock");
+  TEST_ASSERT_NOT_NULL_MESSAGE(clock, "corpus lost its clock section");
 
-  corpus::ArrayIter it(responses);
-  const char* element = nullptr;
-  int executed = 0;
-  bool sawProvision = false;
-  bool sawChallenge = false;
+  const char* tolerance = corpus::member(clock, "client_skew_tolerance_seconds");
+  const char* serverSkew = corpus::member(clock, "server_skew_seconds");
+  TEST_ASSERT_NOT_NULL(tolerance);
+  TEST_ASSERT_NOT_NULL(serverSkew);
 
-  while (it.next(&element)) {
-    static uint8_t bodyBytes[1024];
-    const size_t bodyLen = corpusHexField(element, "body_hex", bodyBytes, sizeof(bodyBytes));
+  TEST_ASSERT_EQUAL_UINT64(corpus::unsignedValue(tolerance),
+                           static_cast<uint64_t>(devapi::kSkewToleranceSeconds));
+  TEST_ASSERT_TRUE(static_cast<uint64_t>(devapi::kSkewToleranceSeconds) < corpus::unsignedValue(serverSkew));
+}
 
-    const char* expect = corpus::member(element, "expect");
-    TEST_ASSERT_NOT_NULL(expect);
-    const uint64_t expected = corpus::unsignedValue(corpus::member(expect, "server_unix"));
+void test_client_a_second_consecutive_clock_correction_is_a_dead_key() {
+  // ClockCorrected is self-curing: the retry carries the adopted time and is
+  // accepted. If that retry is refused WITH yet another time, the server is
+  // rejecting-with-time indefinitely, and a box that keeps believing it
+  // retries at 1 s for the rest of its life. Two strikes is Reprovision.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    ScriptedEntropy entropy;
+    devapi::DeviceClient client(credentials(), entropy);
+    client.adoptServerTime(1750000000ULL, kBases[i]);
 
-    char kind[32] = {};
-    TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(element, "kind"), kind, sizeof(kind), nullptr));
-    if (strcmp(kind, "provision") == 0) {
-      // The first clock seed a fresh board ever sees.
-      TEST_ASSERT_EQUAL_UINT64(1700000123ULL, expected);
-      sawProvision = true;
-    } else if (strcmp(kind, "challenge") == 0) {
-      // The 401 body that lets a skewed or clockless box recover.
-      TEST_ASSERT_EQUAL_UINT64(1700000456ULL, expected);
-      sawChallenge = true;
-    }
+    devapi::Response rejected;
+    rejected.status = 401U;
+    rejected.serverUnix = 1750000121ULL; // 121 s out: skew, corrected
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
 
-    TEST_ASSERT_EQUAL_UINT64(expected,
-                             devapi::findServerUnix(reinterpret_cast<const char*>(bodyBytes), bodyLen));
-    ++executed;
+    // A transient failure in between neither clears nor counts.
+    devapi::Response blip;
+    blip.status = 503U;
+    TEST_ASSERT_TRUE(client.react(blip, kBases[i]) == devapi::Reaction::Retry);
+
+    rejected.serverUnix = 1750000242ULL; // another 121 s out of the CORRECTED clock
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::Reprovision);
+
+    // The strike is spent with the Reprovision: a fresh credential does not
+    // inherit half of one, so the next skew is again a correction.
+    rejected.serverUnix = 1750000363ULL;
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
   }
+}
 
-  // A corpus that loaded but yielded nothing passes every assertion above.
-  TEST_ASSERT_EQUAL(2, executed);
-  TEST_ASSERT_TRUE(sawProvision);
-  TEST_ASSERT_TRUE(sawChallenge);
+void test_client_an_accepted_call_clears_the_clock_correction_strike() {
+  // Correction, then the cured retry is accepted, then — much later — the
+  // clock has drifted again. That is two corrections in a lifetime, not two
+  // in a row, and must still be read as a clock problem.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    ScriptedEntropy entropy;
+    devapi::DeviceClient client(credentials(), entropy);
+    client.adoptServerTime(1750000000ULL, kBases[i]);
+
+    devapi::Response rejected;
+    rejected.status = 401U;
+    rejected.serverUnix = 1750000121ULL;
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
+
+    devapi::Response accepted;
+    accepted.status = 200U;
+    accepted.serverUnix = 1750000121ULL;
+    TEST_ASSERT_TRUE(client.react(accepted, kBases[i]) == devapi::Reaction::Accepted);
+
+    rejected.serverUnix = 1750000242ULL;
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1660,7 +1683,9 @@ int main(int, char**) {
   RUN_TEST(test_client_a_probe_401_with_time_seeds_the_clock);
   RUN_TEST(test_client_drift_the_server_refuses_is_read_as_skew_not_a_dead_key);
   RUN_TEST(test_client_drift_inside_the_local_window_still_means_the_key_is_gone);
-  RUN_TEST(test_find_server_unix_agrees_with_the_shared_response_corpus);
+  RUN_TEST(test_client_skew_tolerance_is_pinned_by_the_corpus_below_the_servers_window);
+  RUN_TEST(test_client_a_second_consecutive_clock_correction_is_a_dead_key);
+  RUN_TEST(test_client_an_accepted_call_clears_the_clock_correction_strike);
 
   return UNITY_END();
 }

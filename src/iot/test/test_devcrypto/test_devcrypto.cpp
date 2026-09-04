@@ -101,16 +101,12 @@ size_t declaredCount(const char* name) {
   return static_cast<size_t>(corpus::unsignedValue(value));
 }
 
-/// Reads a hex-valued field into `out`, returning its length in bytes.
+/// Reads a hex-valued field into `out`, returning its length in bytes. The
+/// decoding lives in corpus::hexField, shared with the bridge suite; this only
+/// turns its failure into an assertion naming the field.
 size_t hexField(const char* object, const char* name, uint8_t* out, size_t outCap) {
-  const char* value = corpus::member(object, name);
-  TEST_ASSERT_NOT_NULL_MESSAGE(value, name);
-
-  size_t textLen = 0;
-  TEST_ASSERT_TRUE(corpus::stringValue(value, g_text, sizeof(g_text), &textLen));
-
   size_t byteLen = 0;
-  TEST_ASSERT_TRUE_MESSAGE(dc::hex::decode(g_text, textLen, out, outCap, &byteLen), name);
+  TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(object, name, out, outCap, &byteLen), name);
   return byteLen;
 }
 

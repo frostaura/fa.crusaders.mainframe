@@ -63,6 +63,22 @@ inline constexpr size_t kMaxDeviceIdLen = 36U;
 inline constexpr size_t kNonceBytes = 16U;
 inline constexpr size_t kNonceHexLen = kNonceBytes * 2U;
 
+/// Correction size below which a 401-with-time is judged "not a clock problem".
+///
+/// This MUST be strictly below the server's own skew window (120 s,
+/// DeviceVerifier ClockSkew) — the asymmetry is the whole point. The server
+/// starts refusing at 120 s of drift; a local threshold at or above that (this
+/// used to be 300) opens a dead band: a board drifted 2–5 minutes gets the
+/// 401, adopts the server time, measures a correction smaller than the local
+/// threshold, concludes "not skew", and re-provisions over a perfectly healthy
+/// credential. At 90 s, every drift the server can refuse for skew corrects by
+/// more than this and is read as the clock problem it is.
+///
+/// Both numbers are pinned in the shared corpus (`clock` in http/cases.json)
+/// and asserted from both sides, so neither can move without the other
+/// noticing.
+inline constexpr int64_t kSkewToleranceSeconds = 90;
+
 /// What the box needs before it can sign anything.
 struct Credentials {
   /// The device id, as the API issued it.
@@ -144,7 +160,8 @@ enum class Reaction : uint8_t {
   Retry = 2U,
   /// The clock was out of the server's skew window. The offset has been
   /// corrected from the response; retry immediately rather than backing off,
-  /// because the next attempt is expected to work.
+  /// because the next attempt is expected to work. Never answered twice in a
+  /// row — see react().
   ClockCorrected = 3U,
   /// The credential is not accepted. The box must re-provision; hammering the
   /// endpoint with a key the server has revoked is how a board gets rate
@@ -180,10 +197,9 @@ public:
   /// refusal protects every NORMAL call from reading its own 401 as a revoked
   /// key; a probe is the one call whose 401 is the point.
   ///
-  /// Same shape as sign() so a call site can use either interchangeably.
-  /// `uptimeMs` is unused (there is no clock to add it to) and accepted only
-  /// for that symmetry.
-  bool probe(const Call& call, uint32_t uptimeMs, RequestBuffers& buffers, SignedRequest& out) const;
+  /// Takes no uptime: there is no clock for it to be added to, and a parameter
+  /// that is accepted and ignored reads as if it mattered.
+  bool probe(const Call& call, RequestBuffers& buffers, SignedRequest& out) const;
 
   /// The box's best guess at Unix time. Zero until a response has been seen —
   /// and a zero timestamp is deliberately NOT signable, so an unsynchronised
@@ -202,6 +218,16 @@ public:
 
   /// Interprets a response. Also adopts the server time, so a caller cannot
   /// forget to.
+  ///
+  /// ClockCorrected is supposed to be self-curing — the very next attempt
+  /// carries the adopted time and is accepted — so a SECOND consecutive one
+  /// means the server keeps 401ing WITH a time attached, and a box that
+  /// trusts that forever retries at 1 s for the rest of its life. Two strikes
+  /// and the 401 is answered as the Reprovision it evidently is. An Accepted
+  /// clears the strike; a Retry or Rejected in between neither clears nor
+  /// counts, because a network blip says nothing about the credential. The
+  /// policy lives here rather than at the call site so every caller of
+  /// react() — heartbeat and event drain alike — shares one count.
   Reaction react(const Response& response, uint32_t uptimeMs);
 
   void setCredentials(const Credentials& credentials) { credentials_ = credentials; }
@@ -219,6 +245,9 @@ private:
 
   int64_t offset_ = 0;
   bool clockKnown_ = false;
+
+  /// Consecutive ClockCorrected reactions not yet cleared by an Accepted.
+  uint8_t clockCorrectedStreak_ = 0U;
 };
 
 /// Reads `"server_unix": <digits>` out of a JSON body without a parser.

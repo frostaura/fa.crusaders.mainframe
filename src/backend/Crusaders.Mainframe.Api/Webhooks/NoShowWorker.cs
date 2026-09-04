@@ -140,12 +140,15 @@ public sealed class NoShowWorker : BackgroundService
         // Settling a no-show releases the court (decision 2026-08-24, review H5). The
         // row keeps only its elapsed portion — EndsAt truncated to the sweep's own
         // clock — so the GiST exclusion constraint and every overlap predicate free the
-        // remainder of the slot with no NoShow exemption needed in either. The due
-        // predicate guarantees StartsAt is in the past, so the truncated range stays a
-        // valid non-empty [) interval; the AddSeconds branch is belt-and-braces for a
-        // clock that says otherwise. Rides the same save as the status change and the
-        // money, so a concurrent check-in rolls all of it back together.
-        b.EndsAt = now > b.StartsAt ? now : b.StartsAt.AddSeconds(1);
+        // remainder of the slot with no NoShow exemption needed in either. Rides the
+        // same save as the status change and the money, so a concurrent check-in rolls
+        // all of it back together.
+        //
+        // No lower bound is needed: the due predicate is StartsAt <= now - grace with
+        // grace >= 0, so StartsAt <= now always holds, and the equal-bound row that a
+        // zero grace can produce is an empty [x,x) range the GiST constraint treats as
+        // overlapping nothing.
+        b.EndsAt = now;
 
         try
         {

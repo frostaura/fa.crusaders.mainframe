@@ -1,5 +1,9 @@
 {
   "signing_key_hex": "00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f",
+  "clock": {
+    "server_skew_seconds": 120,
+    "client_skew_tolerance_seconds": 90
+  },
   "sha256": [
     {
       "input_hex": "",

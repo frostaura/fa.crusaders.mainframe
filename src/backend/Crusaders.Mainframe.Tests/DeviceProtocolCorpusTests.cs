@@ -234,6 +234,29 @@ public class DeviceProtocolCorpusTests
         Assert.Equal(Declared("responses"), executed);
     }
 
+    // ---- Clock skew --------------------------------------------------------
+
+    /// <summary>
+    /// The two-sided skew invariant. The server refuses a signature drifted past
+    /// <see cref="DeviceVerifier.ClockSkew"/>; the firmware judges a 401-with-time to
+    /// be a clock problem only when the correction it measures exceeds its own local
+    /// threshold, which must sit strictly BELOW the server's window — at or above it,
+    /// a board drifted between the two reads a healthy credential as revoked and
+    /// reprovisions. The corpus pins both numbers; this asserts the server half, the
+    /// firmware's bridge suite asserts its half, and both check the inequality.
+    /// </summary>
+    [Fact]
+    public void Server_clock_skew_matches_the_corpus_and_the_firmware_tolerance_sits_inside_it()
+    {
+        var clock = Corpus.GetProperty("clock");
+        var serverSkew = clock.GetProperty("server_skew_seconds").GetInt64();
+        var clientTolerance = clock.GetProperty("client_skew_tolerance_seconds").GetInt64();
+
+        Assert.Equal(serverSkew, (long)DeviceVerifier.ClockSkew.TotalSeconds);
+        Assert.True(clientTolerance < serverSkew,
+            $"Firmware skew tolerance ({clientTolerance}s) must be strictly below the server window ({serverSkew}s).");
+    }
+
     /// <summary>
     /// The anti-drift assertion itself. A section present in the corpus but absent
     /// from the manifest — or vice versa — means someone added cases without
