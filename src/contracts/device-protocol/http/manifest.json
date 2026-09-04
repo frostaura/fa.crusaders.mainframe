@@ -4,8 +4,8 @@
   "case_count": {
     "sha256": 9,
     "hmac_sha256": 6,
-    "requests": 14,
+    "requests": 16,
     "hkdf": 3,
-    "responses": 2
+    "responses": 5
   }
 }

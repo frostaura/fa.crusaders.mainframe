@@ -211,12 +211,14 @@ public class DeviceProtocolCorpusTests
 
     /// <summary>
     /// The other direction of the wire. The <c>requests</c> section is what the
-    /// firmware signs; these are the two responses it reads its clock from — the
-    /// provision body (the first seed a fresh board ever sees) and the Device-scheme
-    /// 401 body (how a skewed box recovers without reprovisioning). Each body must
-    /// parse as JSON and carry the declared <c>server_unix</c>; the live serializers
-    /// are held to the same key by the HTTP tests in <c>ProvisioningHttpTests</c> and
-    /// <c>DeviceAuthHttpTests</c>.
+    /// firmware signs; these are the responses it reads — the provision body (the
+    /// first clock seed a fresh board ever sees), the Device-scheme 401 body (how a
+    /// skewed box recovers without reprovisioning), the activation answers it puts on
+    /// its relay timer, and the replayed walk-up grant. Every body must parse as JSON,
+    /// carry <c>server_unix</c>, and carry every field its <c>expect</c> declares with
+    /// the declared value; the live serializers are held to the same keys by the HTTP
+    /// tests in <c>ProvisioningHttpTests</c>, <c>DeviceAuthHttpTests</c> and
+    /// <c>DeviceEventHttpTests</c>.
     /// </summary>
     [Fact]
     public void Response_bodies_carry_the_declared_server_unix()
@@ -225,9 +227,24 @@ public class DeviceProtocolCorpusTests
         foreach (var c in Corpus.GetProperty("responses").EnumerateArray())
         {
             using var body = JsonDocument.Parse(Hex(c, "body_hex"));
+            var expect = c.GetProperty("expect");
+
+            // server_unix is mandatory on every response the box reads: it is the one
+            // field a clockless board cannot do without.
             Assert.Equal(
-                c.GetProperty("expect").GetProperty("server_unix").GetInt64(),
+                expect.GetProperty("server_unix").GetInt64(),
                 body.RootElement.GetProperty("server_unix").GetInt64());
+
+            foreach (var field in expect.EnumerateObject())
+            {
+                Assert.True(
+                    body.RootElement.TryGetProperty(field.Name, out var actual),
+                    $"response '{c.GetProperty("id").GetString()}' lacks expected field '{field.Name}'");
+                Assert.True(
+                    JsonElement.DeepEquals(field.Value, actual),
+                    $"response '{c.GetProperty("id").GetString()}' field '{field.Name}': expected {field.Value.GetRawText()}, got {actual.GetRawText()}");
+            }
+
             executed++;
         }
 

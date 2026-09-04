@@ -215,6 +215,28 @@
       "body_sha256": "956c604019655a428f81dac7a4586048e8bdad022d2b0c8a43d5551a193df368",
       "signature": "31de5400ea693a4635f3c970ef052f0c20d7ad44ee6ac16a783014b85797ebd5",
       "note": "clock-bootstrap probe: a provisioned box with no clock signs unix_seconds=0; the server rejects it for skew and the 401 body's server_unix seeds the clock"
+    },
+    {
+      "method": "POST",
+      "path_and_query": "/api/v1/device/activate",
+      "unix_seconds": 1700000789,
+      "nonce": "c0ffee00c0ffee00c0ffee00c0ffee00",
+      "body_hex": "7b226d6574686f64223a227172222c22746f6b656e223a2237513346394b4d32585a3842227d",
+      "canonical_hex": "504f53540a2f6170692f76312f6465766963652f61637469766174650a313730303030303738390a63306666656530306330666665653030633066666565303063306666656530300a37306637653366656631343636303739336265636336383463313766343137643435363163323033626664326333333839663036623336343738373134313735",
+      "body_sha256": "70f7e3fef14660793becc684c17f417d4561c203bfd2c3389f06b36478714175",
+      "signature": "8c373a38de053766a7cace2b18ad15bb4fbdb849d9a5c1ed6afd80a2dbe516e8",
+      "note": "device-authenticated activation (review C3): a pre-booked member's code, resolved to their booking on one of this box's courts"
+    },
+    {
+      "method": "POST",
+      "path_and_query": "/api/v1/device/walkup",
+      "unix_seconds": 1700000789,
+      "nonce": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "body_hex": "7b226d696e75746573223a36302c226d6574686f64223a227172222c22746f6b656e223a2237513346394b4d32585a3842222c22636f757274223a332c226e6f6e6365223a2239663261346336653862306431663361227d",
+      "canonical_hex": "504f53540a2f6170692f76312f6465766963652f77616c6b75700a313730303030303738390a30613162326333643465356636303731383239336134623563366437653866390a31323835376334616661383633613535643233313364616466353238353736373034323037663262346662663136643239356166343232663933623663636666",
+      "body_sha256": "12857c4afa863a55d2313dadf528576704207f2b4fbf16d295af422f93b6ccff",
+      "signature": "5ebdd0fc8245469d17b9b6956916e8c3bd36e4b1e1450814cfaf0d8719074cb9",
+      "note": "five-field walk-up (review C5/H3): court is the court NUMBER the member selected, nonce is the box's 16-hex purchase nonce that makes a retry replay-safe"
     }
   ],
   "hkdf": [
@@ -266,6 +288,43 @@
       "body_hex": "7b227365727665725f756e6978223a313730303030303435367d",
       "expect": {
         "server_unix": 1700000456
+      }
+    },
+    {
+      "id": "activate-response-ok",
+      "kind": "activate",
+      "note": "granted_seconds is what the box puts on the relay timer: EndsAt-now clamped to the relay hard cap, so a 45-minute remainder is 2700",
+      "body_hex": "7b22616374697661746564223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a332c22626f6f6b696e675f6964223a2233666138356636342d353731372d343536322d623366632d326339363366363661666136222c226772616e7465645f7365636f6e6473223a323730302c227365727665725f756e6978223a313730303030303738397d",
+      "expect": {
+        "server_unix": 1700000789,
+        "activated": true,
+        "reason": "ok",
+        "court_number": 3,
+        "granted_seconds": 2700
+      }
+    },
+    {
+      "id": "activate-response-too-early",
+      "kind": "activate",
+      "note": "inside the forward window but outside the cue window: identified, not stamped, nothing on the relay; the box shows starts_in_seconds",
+      "body_hex": "7b22616374697661746564223a66616c73652c22726561736f6e223a22746f6f5f6561726c79222c22636f7572745f6e756d626572223a332c22626f6f6b696e675f6964223a2233666138356636342d353731372d343536322d623366632d326339363366363661666136222c226772616e7465645f7365636f6e6473223a302c227374617274735f696e5f7365636f6e6473223a3534302c227365727665725f756e6978223a313730303030303738397d",
+      "expect": {
+        "server_unix": 1700000789,
+        "activated": false,
+        "reason": "too_early",
+        "granted_seconds": 0,
+        "starts_in_seconds": 540
+      }
+    },
+    {
+      "id": "walkup-response-replayed",
+      "kind": "walkup",
+      "note": "the same (device, nonce) seen again: the original grant comes back with replayed:true so a box that lost the first 200 can still !ON, and nobody is charged twice",
+      "body_hex": "7b227365727665725f756e6978223a313730303030303738392c22626f6f6b696e675f6964223a2233666138356636342d353731372d343536322d623366632d326339363366363661666136222c226772616e7465645f6d696e75746573223a36302c22616d6f756e745f63726564697473223a33322e302c2262616c616e63655f61667465725f63726564697473223a3136382e302c227265706c61796564223a747275657d",
+      "expect": {
+        "server_unix": 1700000789,
+        "granted_minutes": 60,
+        "replayed": true
       }
     }
   ]

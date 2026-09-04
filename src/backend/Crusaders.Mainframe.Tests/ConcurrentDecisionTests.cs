@@ -1,8 +1,11 @@
+using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
 using Crusaders.Mainframe.Api.Webhooks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -46,7 +49,7 @@ public sealed class ConcurrentDecisionTests
     private const decimal SlicePriceCredits = 8m;
     private const decimal BookingCost = SlicePriceCredits * 4m;
 
-    private sealed record Club(Guid TenantId, string Slug, Guid CourtId, Guid MemberId, Guid VolunteerId);
+    private sealed record Club(Guid TenantId, string Slug, Guid CourtId, Guid MemberId, Guid VolunteerId, Guid DeviceId);
 
     private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
 
@@ -83,12 +86,23 @@ public sealed class ConcurrentDecisionTests
         var court2 = new Court { TenantId = tenant.Id, CourtNumber = 2, Name = "Court 2", SlicePriceCredits = SlicePriceCredits };
         db.Courts.AddRange(court, court2);
 
+        // One box driving both courts, for the walk-up race.
+        var device = new Device
+        {
+            TenantId = tenant.Id,
+            DeviceCode = "court-box-1",
+            Name = "Race box",
+            Kind = DeviceKind.CourtBox,
+            CourtNumbers = [1, 2],
+        };
+        db.Devices.Add(device);
+
         db.LedgerEntries.AddRange(
             new LedgerEntry { TenantId = tenant.Id, UserId = member.Id, Type = LedgerEntryType.TopUp, AmountCredits = 200m, ActorUserId = member.Id, Reason = "seed" },
             new LedgerEntry { TenantId = tenant.Id, UserId = volunteer.Id, Type = LedgerEntryType.TopUp, AmountCredits = 200m, ActorUserId = volunteer.Id, Reason = "seed" });
 
         await db.SaveChangesAsync();
-        return new Club(tenant.Id, slug, court.Id, member.Id, volunteer.Id);
+        return new Club(tenant.Id, slug, court.Id, member.Id, volunteer.Id, device.Id);
     }
 
     /// <summary>A scope with the tenant resolved — one HTTP request's worth of services.</summary>
@@ -525,5 +539,226 @@ public sealed class ConcurrentDecisionTests
         using var check = RequestScope(factory, club);
         var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
         Assert.Equal(1, await db.Bookings.CountAsync(b => b.UserId == club.MemberId && b.StartsAt == startsAt));
+    }
+
+    // ---- Walk-up retries and payer locks ----------------------------------
+
+    private static WalkUpServices WalkUpServicesOf(IServiceScope scope) => new(
+        scope.ServiceProvider.GetRequiredService<MainframeDbContext>(),
+        scope.ServiceProvider.GetRequiredService<BookingService>(),
+        scope.ServiceProvider.GetRequiredService<CourtActivationService>(),
+        scope.ServiceProvider.GetRequiredService<IdentificationResolver>(),
+        scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>(),
+        scope.ServiceProvider.GetRequiredService<LedgerService>());
+
+    private static (int Status, JsonElement Body) Unwrap(IResult result) => (
+        (result as IStatusCodeHttpResult)?.StatusCode ?? StatusCodes.Status200OK,
+        JsonSerializer.SerializeToElement((result as IValueHttpResult)?.Value));
+
+    /// <summary>
+    /// An uncharged booking for the member on the given court, starting a minute ago — the
+    /// shape that reaches the never-charged branch of <c>ChargeOnActivationAsync</c>.
+    /// </summary>
+    private static async Task<Guid> SeedUnchargedLiveBookingAsync(TestWebAppFactory factory, Club club, int courtNumber, Guid? chargedBy = null)
+    {
+        using var scope = RequestScope(factory, club);
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var courtId = await db.Courts.Where(c => c.CourtNumber == courtNumber).Select(c => c.Id).FirstAsync();
+        var startsAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var booking = new Booking
+        {
+            TenantId = club.TenantId,
+            CourtId = courtId,
+            UserId = club.MemberId,
+            BookedByUserId = club.MemberId,
+            PaidByUserId = club.MemberId,
+            ActorUserId = club.MemberId,
+            StartsAt = startsAt,
+            EndsAt = startsAt.AddMinutes(60),
+            SliceMinutes = 15,
+            SliceCount = 4,
+            AmountChargedCredits = BookingCost,
+            Status = BookingStatus.Booked,
+            ChargedAt = chargedBy is null ? null : DateTimeOffset.UtcNow,
+        };
+        db.Bookings.Add(booking);
+        if (chargedBy is { } payer)
+        {
+            db.LedgerEntries.Add(new LedgerEntry
+            {
+                TenantId = club.TenantId, UserId = payer, Type = LedgerEntryType.BookingCharge,
+                AmountCredits = -BookingCost, ActorUserId = payer, RelatedBookingId = booking.Id, Reason = "seed charge",
+            });
+        }
+        await db.SaveChangesAsync();
+        return booking.Id;
+    }
+
+    private static async Task SpendDownToOneBookingAsync(TestWebAppFactory factory, Club club, Guid userId)
+    {
+        using var scope = RequestScope(factory, club);
+        await scope.ServiceProvider.GetRequiredService<LedgerService>().PostAsync(
+            new LedgerPosting(userId, LedgerEntryType.AdminAdjustment, -(200m - BookingCost), userId,
+                Reason: "spend down to one booking"), default);
+        Assert.Equal(BookingCost, await BalanceAsync(factory, club, userId));
+    }
+
+    /// <summary>
+    /// Two identical walk-ups in flight together — the box retried before its first attempt
+    /// answered — debit once and answer the same grant twice (review H3).
+    ///
+    /// <para>
+    /// The read-first replay check cannot catch this: neither attempt has committed when
+    /// the other looks. What catches it is the filtered unique index on the ledger's
+    /// external reference, or the slot the first attempt has just taken — and either way the
+    /// loser re-reads the reference and answers with the winner's grant, so a box holding
+    /// either response can <c>!ON</c>. Genuinely concurrent, from a shared start signal,
+    /// because in sequence the replay check alone would pass it.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task Walkup_same_nonce_race_charges_once()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        var code = await TestAccessCodes.MintIdentAsync(factory.Services, club.TenantId, club.Slug, club.MemberId);
+        const string nonce = "9f2a4c6e8b0d1f3a";
+
+        using var gate = new SemaphoreSlim(0);
+
+        async Task<(int Status, JsonElement Body)> Attempt()
+        {
+            using var scope = RequestScope(factory, club);
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var device = await db.Devices.FirstAsync(d => d.Id == club.DeviceId);
+            var services = WalkUpServicesOf(scope);
+            await gate.WaitAsync();
+            return Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+                device, new WalkUpRequest(60, "qr", code, 2, nonce), services, default));
+        }
+
+        var first = Attempt();
+        var second = Attempt();
+        gate.Release(2);
+        var results = await Task.WhenAll(first, second);
+
+        var shape = string.Join(", ", results.Select(r => $"{r.Status} {r.Body.GetRawText()}"));
+        Assert.All(results, r => Assert.True(r.Status == 200, $"results were: {shape}"));
+
+        // The same grant, twice — and exactly one of them was the purchase.
+        var bookingIds = results.Select(r => r.Body.GetProperty("booking_id").GetGuid()).Distinct().ToList();
+        Assert.Single(bookingIds);
+        Assert.Equal(1, results.Count(r => !r.Body.GetProperty("replayed").GetBoolean()));
+        Assert.Equal(1, results.Count(r => r.Body.GetProperty("replayed").GetBoolean()));
+        Assert.All(results, r => Assert.Equal(60, r.Body.GetProperty("granted_minutes").GetInt32()));
+
+        // One booking, one debit, one attendance stamp.
+        Assert.Equal(200m - BookingCost, await BalanceAsync(factory, club, club.MemberId));
+        using var check = RequestScope(factory, club);
+        var checkDb = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var booking = Assert.Single(await checkDb.Bookings.Where(b => b.UserId == club.MemberId).ToListAsync());
+        Assert.Equal(bookingIds[0], booking.Id);
+        Assert.NotNull(booking.CheckedInAt);
+        Assert.Single(await checkDb.LedgerEntries
+            .Where(l => l.ExternalReference == DeviceEventEndpoints.WalkUpReference(club.DeviceId, nonce)).ToListAsync());
+        Assert.Single(await checkDb.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
+    }
+
+    /// <summary>
+    /// Two uncharged bookings, one payer, credits for one: two concurrent activations debit
+    /// once. This is the never-charged branch of <c>ChargeOnActivationAsync</c>, which read
+    /// an unlocked <c>SUM</c> and debited — the same race <c>CommitAsync</c> closes for a
+    /// booking, left open at the court. <b>Postgres only</b>: the payer lock is a no-op on
+    /// the in-memory provider, so nothing but this proves it.
+    /// </summary>
+    [SkippableFact]
+    public async Task Concurrent_activation_debits_same_payer_from_two_bookings_cannot_overspend()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        await SpendDownToOneBookingAsync(factory, club, club.MemberId);
+
+        var onCourt1 = await SeedUnchargedLiveBookingAsync(factory, club, courtNumber: 1);
+        var onCourt2 = await SeedUnchargedLiveBookingAsync(factory, club, courtNumber: 2);
+
+        using var gate = new SemaphoreSlim(0);
+
+        async Task<ChargeResult> Attempt(Guid bookingId)
+        {
+            using var scope = RequestScope(factory, club);
+            var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+            await gate.WaitAsync();
+            return await bookings.ChargeOnActivationAsync(bookingId, null, club.MemberId, default);
+        }
+
+        var first = Attempt(onCourt1);
+        var second = Attempt(onCourt2);
+        gate.Release(2);
+        var results = await Task.WhenAll(first, second);
+
+        var shape = string.Join(", ", results.Select(r => r.GetType().Name));
+        Assert.True(results.Count(r => r is ChargeResult.Ok) == 1, $"results were: {shape}");
+        Assert.True(results.Count(r => r is ChargeResult.InsufficientBalance) == 1, $"results were: {shape}");
+
+        var balance = await BalanceAsync(factory, club, club.MemberId);
+        Assert.True(balance >= 0m, $"balance went negative: {balance}");
+        Assert.Equal(0m, balance);
+
+        using var check = RequestScope(factory, club);
+        var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(1, await db.Bookings.CountAsync(b => b.UserId == club.MemberId && b.ChargedAt != null));
+    }
+
+    /// <summary>
+    /// The other branch: two charged bookings, one volunteer pressing "I'll pay" at both
+    /// courts at once with credits for one. The booker is refunded once and the volunteer
+    /// pays once; the second reassignment is refused for balance rather than half-applied.
+    /// </summary>
+    [SkippableFact]
+    public async Task Concurrent_payer_reassignment_from_two_bookings_cannot_overspend()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        await SpendDownToOneBookingAsync(factory, club, club.VolunteerId);
+
+        var onCourt1 = await SeedUnchargedLiveBookingAsync(factory, club, courtNumber: 1, chargedBy: club.MemberId);
+        var onCourt2 = await SeedUnchargedLiveBookingAsync(factory, club, courtNumber: 2, chargedBy: club.MemberId);
+        var bookerBefore = await BalanceAsync(factory, club, club.MemberId);
+
+        using var gate = new SemaphoreSlim(0);
+
+        async Task<ChargeResult> Attempt(Guid bookingId)
+        {
+            using var scope = RequestScope(factory, club);
+            var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+            await gate.WaitAsync();
+            return await bookings.ChargeOnActivationAsync(bookingId, club.VolunteerId, club.VolunteerId, default);
+        }
+
+        var first = Attempt(onCourt1);
+        var second = Attempt(onCourt2);
+        gate.Release(2);
+        var results = await Task.WhenAll(first, second);
+
+        var shape = string.Join(", ", results.Select(r => r.GetType().Name));
+        Assert.True(results.Count(r => r is ChargeResult.Ok) == 1, $"results were: {shape}");
+        Assert.True(results.Count(r => r is ChargeResult.InsufficientBalance) == 1, $"results were: {shape}");
+
+        var volunteer = await BalanceAsync(factory, club, club.VolunteerId);
+        Assert.True(volunteer >= 0m, $"volunteer balance went negative: {volunteer}");
+        Assert.Equal(0m, volunteer);
+
+        // The booker is made whole for exactly one court.
+        Assert.Equal(bookerBefore + BookingCost, await BalanceAsync(factory, club, club.MemberId));
+
+        using var check = RequestScope(factory, club);
+        var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(1, await db.Bookings.CountAsync(b => b.PaidByUserId == club.VolunteerId));
     }
 }

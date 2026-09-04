@@ -1,6 +1,9 @@
+using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -89,7 +92,8 @@ public class WalkUpBookingTests
 
     private static Task<BookingResult> WalkUpAsync(Fixture f, int minutes) =>
         f.Bookings.CreateWalkUpAsync(
-            f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.PlayerUser.Id, minutes, default);
+            f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.PlayerUser.Id, minutes,
+            DeviceEventEndpoints.WalkUpReference(Guid.NewGuid(), Guid.NewGuid().ToString("N")[..16]), default);
 
     // ---- Pricing ----------------------------------------------------------
 
@@ -393,6 +397,261 @@ public class WalkUpBookingTests
             TestHost.BookableSlot(3), sliceCount: 97, default));
 
         Assert.Equal(96, refused.MaxSlices);
+        Assert.Empty(await f.Db.Bookings.ToListAsync());
+    }
+
+    // ---- The box's view: which court, how long, and again -----------------
+    //
+    // Driven through the endpoint's decision method rather than over HTTP, because the
+    // questions here are about money and courts and not about signatures. The signed wire
+    // is covered in DeviceEventHttpTests.
+
+    private static async Task<Device> BoxOnAsync(Fixture f, params int[] courtNumbers)
+    {
+        var device = new Device
+        {
+            TenantId = f.Host.Tenant.Id,
+            DeviceCode = "court-box-1",
+            Name = "The box",
+            Kind = DeviceKind.CourtBox,
+            CourtNumbers = [.. courtNumbers],
+        };
+        f.Db.Devices.Add(device);
+        await f.Db.SaveChangesAsync();
+        return device;
+    }
+
+    private static WalkUpServices ServicesOf(Fixture f) => new(
+        f.Db,
+        f.Bookings,
+        f.Scope.ServiceProvider.GetRequiredService<CourtActivationService>(),
+        f.Scope.ServiceProvider.GetRequiredService<IdentificationResolver>(),
+        f.Scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>(),
+        f.Ledger);
+
+    private static async Task<string> CodeAsync(Fixture f) =>
+        (await f.Scope.ServiceProvider.GetRequiredService<AccessCodeService>()
+            .MintIdentAsync(f.Host.PlayerUser.Id, TimeSpan.FromSeconds(60), default)).Code;
+
+    private static WalkUpRequest Request(string code, int court, int minutes = 30, string? nonce = null) =>
+        new(minutes, "qr", code, court, nonce ?? Guid.NewGuid().ToString("N")[..16]);
+
+    private static (int Status, JsonElement Body) Unwrap(IResult result) => (
+        (result as IStatusCodeHttpResult)?.StatusCode ?? StatusCodes.Status200OK,
+        JsonSerializer.SerializeToElement((result as IValueHttpResult)?.Value));
+
+    /// <summary>
+    /// The C5 headline. One box, four relays; the member pressed COURT B. Court A is busy
+    /// and court B is free, and the ONLY court the answer may touch is B — booked, charged
+    /// and activated — while A is left alone. The old contract carried no court, so the
+    /// backend charged the box's configured court while the firmware lit the one pressed.
+    /// </summary>
+    [Fact]
+    public async Task A_walk_up_books_charges_and_lights_the_court_the_member_selected_while_another_is_busy()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1, 2);
+        await AddBookingAsync(f, startsInMinutes: -5, minutes: 30, plusSeconds: 0);   // court 1 is in use
+        var courtB = f.Host.Courts[1];
+
+        var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(await CodeAsync(f), court: 2, minutes: 30), ServicesOf(f), default));
+
+        Assert.Equal(200, status);
+        Assert.Equal(30, body.GetProperty("granted_minutes").GetInt32());
+        Assert.False(body.GetProperty("replayed").GetBoolean());
+
+        var booking = await f.Db.Bookings.AsNoTracking().SingleAsync(b => b.UserId == f.Host.PlayerUser.Id);
+        Assert.Equal(courtB.Id, booking.CourtId);
+        Assert.NotEqual(f.Host.Courts[0].Id, booking.CourtId);
+        Assert.NotNull(booking.CheckedInAt);
+        Assert.Equal(booking.Id, body.GetProperty("booking_id").GetGuid());
+
+        // Charged for court B, and the audit row says so.
+        Assert.Equal(200m - 16m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        var activated = Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
+        Assert.Contains($"\"court_number\":{courtB.CourtNumber}", activated.DetailsJson);
+    }
+
+    /// <summary>The same press on the busy court is refused as busy — the court named, not the box's first.</summary>
+    [Fact]
+    public async Task A_walk_up_on_the_selected_court_is_refused_when_that_court_is_busy()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1, 2);
+        await AddBookingAsync(f, startsInMinutes: -5, minutes: 30, plusSeconds: 0);   // court 1 is in use
+
+        var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(await CodeAsync(f), court: 1), ServicesOf(f), default));
+
+        Assert.Equal(409, status);
+        Assert.Equal("court_in_use", body.GetProperty("error").GetString());
+        Assert.Empty(await f.Db.Bookings.Where(b => b.UserId == f.Host.PlayerUser.Id).ToListAsync());
+    }
+
+    /// <summary>
+    /// A court the box does not drive is refused before anything is looked up. A box that
+    /// could name any court is a box that opens any court in the club.
+    /// </summary>
+    [Theory]
+    [InlineData(3)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task A_walk_up_on_a_court_the_box_does_not_drive_is_refused(int court)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1, 2);
+
+        var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(await CodeAsync(f), court), ServicesOf(f), default));
+
+        Assert.Equal(400, status);
+        Assert.Equal("court_not_on_device", body.GetProperty("error").GetString());
+        Assert.Empty(await f.Db.Bookings.ToListAsync());
+        Assert.Equal(200m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+    }
+
+    /// <summary>
+    /// Minutes past the relay hard cap are refused, whatever the tenant setting says. The
+    /// bound was a hardcoded 240 while the relay bank cuts the lights at ninety — the member
+    /// paid for the difference in darkness (review M1). A hand-edited setting of 240 must not
+    /// reopen it, which is why the bound is the smaller of the two.
+    /// </summary>
+    [Theory]
+    [InlineData(null, 91)]
+    [InlineData(null, 240)]
+    [InlineData(240, 120)]
+    [InlineData(60, 61)]
+    public async Task A_walk_up_longer_than_the_cap_is_refused(int? walkUpMaxSetting, int minutes)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        if (walkUpMaxSetting is { } configured)
+        {
+            var row = await f.Db.TenantSettings.FirstAsync();
+            row.SettingsJson = row.SettingsJson.TrimEnd('}') + $",\"walk_up_max_minutes\":{configured}}}";
+            await f.Db.SaveChangesAsync();
+        }
+
+        var box = await BoxOnAsync(f, 1);
+
+        var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(await CodeAsync(f), court: 1, minutes), ServicesOf(f), default));
+
+        Assert.Equal(400, status);
+        Assert.Equal("minutes_out_of_range", body.GetProperty("error").GetString());
+        Assert.Equal(Math.Min(walkUpMaxSetting ?? RelayHardCap.Minutes, RelayHardCap.Minutes),
+            body.GetProperty("max_minutes").GetInt32());
+        Assert.Empty(await f.Db.Bookings.ToListAsync());
+    }
+
+    /// <summary>The cap itself is on sale: ninety minutes at the hard cap is a valid purchase.</summary>
+    [Fact]
+    public async Task A_walk_up_of_exactly_the_cap_is_sold()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+
+        var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(await CodeAsync(f), court: 1, RelayHardCap.Minutes), ServicesOf(f), default));
+
+        Assert.Equal(200, status);
+        Assert.Equal(RelayHardCap.Minutes, body.GetProperty("granted_minutes").GetInt32());
+    }
+
+    /// <summary>
+    /// The H3 headline. The box bought, lost the 200, and asked again with the same nonce.
+    /// The answer is the original grant with <c>replayed: true</c> — same booking, same
+    /// minutes — and the ledger shows one purchase, not two. Without this the retry hit the
+    /// member's own fresh booking and was told "court in use": charged, dark, and stuck.
+    /// </summary>
+    [Fact]
+    public async Task A_retried_walk_up_with_the_same_nonce_returns_the_original_grant_and_charges_once()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1, 2);
+        var code = await CodeAsync(f);
+        const string nonce = "9f2a4c6e8b0d1f3a";
+
+        var (firstStatus, first) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(code, court: 2, minutes: 30, nonce), ServicesOf(f), default));
+        Assert.Equal(200, firstStatus);
+        Assert.False(first.GetProperty("replayed").GetBoolean());
+
+        // The retry: same box, same nonce, same body.
+        var (secondStatus, second) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(code, court: 2, minutes: 30, nonce), ServicesOf(f), default));
+
+        Assert.Equal(200, secondStatus);
+        Assert.True(second.GetProperty("replayed").GetBoolean());
+        Assert.Equal(first.GetProperty("booking_id").GetGuid(), second.GetProperty("booking_id").GetGuid());
+        Assert.Equal(first.GetProperty("granted_minutes").GetInt32(), second.GetProperty("granted_minutes").GetInt32());
+        Assert.Equal(first.GetProperty("amount_credits").GetDecimal(), second.GetProperty("amount_credits").GetDecimal());
+
+        // One booking, one debit, and the reference on it.
+        var booking = Assert.Single(await f.Db.Bookings.Where(b => b.UserId == f.Host.PlayerUser.Id).ToListAsync());
+        var charge = Assert.Single(await f.Db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id).ToListAsync());
+        Assert.Equal(DeviceEventEndpoints.WalkUpReference(box.Id, nonce), charge.ExternalReference);
+        Assert.Equal(200m - 16m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+        Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
+    }
+
+    /// <summary>A different nonce is a different purchase — and is refused, because the member's own walk-up now holds the court.</summary>
+    [Fact]
+    public async Task A_second_walk_up_with_a_new_nonce_is_a_new_purchase()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+        var code = await CodeAsync(f);
+
+        var (firstStatus, _) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(code, court: 1, minutes: 30), ServicesOf(f), default));
+        Assert.Equal(200, firstStatus);
+
+        var (secondStatus, second) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(code, court: 1, minutes: 30), ServicesOf(f), default));
+        Assert.Equal(409, secondStatus);
+        Assert.Equal("court_in_use", second.GetProperty("error").GetString());
+    }
+
+    [Theory]
+    [InlineData(null, "nonce_required")]
+    [InlineData("", "nonce_required")]
+    [InlineData("   ", "nonce_required")]
+    [InlineData("0123456789abcdef0123456789abcdef0", "nonce_too_long")]
+    public async Task A_walk_up_without_a_usable_nonce_is_refused(string? nonce, string error)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+
+        var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, new WalkUpRequest(30, "qr", await CodeAsync(f), 1, nonce), ServicesOf(f), default));
+
+        Assert.Equal(400, status);
+        Assert.Equal(error, body.GetProperty("error").GetString());
         Assert.Empty(await f.Db.Bookings.ToListAsync());
     }
 }

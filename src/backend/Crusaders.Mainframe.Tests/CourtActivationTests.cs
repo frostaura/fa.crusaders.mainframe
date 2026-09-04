@@ -308,7 +308,8 @@ public class CourtActivationTests
         var (start, end) = await f.Activation.WindowAsync(now, default);
 
         Assert.Equal(now.AddMinutes(-settings.GraceWindowMinutes), start, TimeSpan.FromSeconds(1));
-        Assert.True(end > now);
+        // The forward edge was a hardcoded two hours; it is the tenant's setting now.
+        Assert.Equal(now.AddMinutes(settings.ActivationForwardWindowMinutes), end, TimeSpan.FromSeconds(1));
     }
 
     /// <summary>
@@ -339,6 +340,80 @@ public class CourtActivationTests
 
         Assert.Null(await f.Activation.FindForUserAsync(
             f.Host.Courts[0].Id, f.Host.PlayerUser.Id, DateTimeOffset.UtcNow, default));
+    }
+
+    // ---- The cue window ---------------------------------------------------
+
+    /// <summary>
+    /// A scan inside the forward window but outside the cue window finds the booking and
+    /// does nothing to it. The forward window has to be two hours wide to tell back-to-back
+    /// slices apart; the cue window is the narrower one that says when a scan may light the
+    /// court. They used to be the same two hours, so a member scanning on their way in was
+    /// stamped present, cued the lights, and — because attendance means <c>CheckedInAt</c> —
+    /// lost their refund if they then cancelled. Here the cancellation still refunds in full.
+    /// </summary>
+    [Fact]
+    public async Task Scan_outside_cue_window_stamps_nothing()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var settings = await f.Scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        var startsIn = settings.ActivationCueWindowMinutes + 30;
+        Assert.True(startsIn < settings.ActivationForwardWindowMinutes, "the case must sit inside the forward window");
+        Assert.True(startsIn > settings.PenaltyWindowMinutes, "the cancellation must sit outside the penalty window");
+
+        // Booked by the admin on the player's behalf, so no booking rule stands in the way
+        // of a slot that starts at whatever hour the suite happens to run.
+        var created = await f.Bookings.CreateAsync(
+            f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.AdminUser.Id,
+            DateTimeOffset.UtcNow.AddMinutes(startsIn), 1, default);
+        var booking = Assert.IsType<BookingResult.Ok>(created).Booking;
+        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+
+        // The booking IS in the forward window — the selectors find it.
+        Assert.NotNull(await f.Activation.FindForUserAsync(CourtOf(f).Id, f.Host.PlayerUser.Id, DateTimeOffset.UtcNow, default));
+
+        var result = await f.Activation.ActivateAsync(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "qr", default);
+
+        var early = Assert.IsType<ActivationResult.TooEarly>(result);
+        Assert.Equal(booking.Id, early.Booking.Id);
+        Assert.InRange(early.StartsInSeconds, startsIn * 60 - 5, startsIn * 60);
+
+        var fresh = await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
+        Assert.Null(fresh.CheckedInAt);
+        Assert.Null(fresh.LightsOnCuedAt);
+        Assert.Empty(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
+
+        // Not stamped, so the member can still change their mind and be made whole.
+        var cancelled = await f.Bookings.CancelAsync(booking.Id, f.Host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
+        var ok = Assert.IsType<CancellationResult.Ok>(cancelled);
+        Assert.Equal(8m, ok.RefundedCredits);
+        Assert.Equal(0m, ok.PenaltyCredits);
+        Assert.Equal(100m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+    }
+
+    /// <summary>The cue window's edge is inclusive: a scan exactly at cue-minutes-before lights the court.</summary>
+    [Fact]
+    public async Task A_scan_inside_the_cue_window_activates()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var settings = await f.Scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        var startsIn = Math.Max(settings.ActivationCueWindowMinutes - 1, 0);
+
+        var created = await f.Bookings.CreateAsync(
+            f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.AdminUser.Id,
+            DateTimeOffset.UtcNow.AddMinutes(startsIn).AddSeconds(30), 1, default);
+        var booking = Assert.IsType<BookingResult.Ok>(created).Booking;
+
+        var result = await f.Activation.ActivateAsync(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "qr", default);
+
+        Assert.IsType<ActivationResult.Activated>(result);
+        Assert.NotNull((await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id)).CheckedInAt);
     }
 
     // ---- Payer override ---------------------------------------------------

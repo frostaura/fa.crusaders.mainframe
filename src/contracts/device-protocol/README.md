@@ -20,6 +20,7 @@ months. A shared corpus is the cheapest thing that would have caught it.
 |---|---|---|
 | `serial/` | the line protocol between the ATmega2560 and the ESP8266 over Serial3 @ 9600 | C++ only — both ends of that link are firmware |
 | `http/` | the canonical signing string and HMAC of a device API request | **C++ and C#** — the firmware signs, the server verifies |
+| `buttonmap/` | the button-map token grammar and the relay hard cap it is pinned to (`relay_hard_cap_minutes`) | **C++ and C#** — the server validates what an admin saves, the firmware parses what the heartbeat hands it |
 
 `http/` is the one that matters most. A canonical string the firmware builds
 one byte differently from the server produces a 401 with no diagnostic, on a

@@ -20,6 +20,17 @@ public abstract record ActivationResult
 
     /// <summary>The booking is cancelled, expired or otherwise past charging.</summary>
     public sealed record NotChargeable : ActivationResult;
+
+    /// <summary>
+    /// Identified and holding the booking, but its start is further off than the cue
+    /// window allows. <b>Nothing was charged, stamped or cued.</b> The forward window
+    /// finds the booking — it has to be wide enough to disambiguate back-to-back slices —
+    /// and the cue window is the narrower one that says when a scan may actually light the
+    /// court. Before this the two were the same two hours, so a member scanning on their
+    /// way in was stamped present, cued the lights, and locked out their refund, up to two
+    /// hours before their slot.
+    /// </summary>
+    public sealed record TooEarly(Booking Booking, int StartsInSeconds) : ActivationResult;
 }
 
 /// <summary>
@@ -68,28 +79,8 @@ public sealed class CourtActivationService
         _logger = logger;
     }
 
-    /// <summary>How far ahead of a slot someone may identify and have it count.</summary>
-    ///
-    /// <remarks>
-    /// Two hours is wide enough to hold <b>two</b> of a member's bookings at once, and
-    /// back-to-back slices are the ordinary shape under a per-day cap measured in minutes.
-    /// Both selectors below therefore order by <c>StartsAt</c> and take the earliest, which
-    /// is the one the player is standing on: a live booking always starts before a future
-    /// one.
-    ///
-    /// <para>
-    /// Neither used to order at all, and the row the database happened to return first won.
-    /// Pick the 17:15 slice when a member scans at 16:58 holding 17:00 and 17:15, and the
-    /// lights come on seventeen minutes early on the wrong row — while the 17:00 booking is
-    /// never checked in, is swept as a no-show at 17:05, and costs the member a penalty for
-    /// a court they are playing on. A rescan cannot repair it either: the status is no
-    /// longer <c>Booked</c>, so the row is not a candidate any more.
-    /// </para>
-    /// </remarks>
-    private static readonly TimeSpan ForwardWindow = TimeSpan.FromHours(2);
-
     /// <summary>
-    /// The window in which an identification counts, from tenant settings.
+    /// The window in which an identification <i>finds</i> a booking, from tenant settings.
     ///
     /// <para>
     /// There were three of these and they disagreed: biometric read
@@ -100,11 +91,30 @@ public sealed class CourtActivationService
     /// as a no-show by the worker, which is not a grace period so much as a disagreement.
     /// One setting now governs all of them, per the every-configurable-number invariant.
     /// </para>
+    ///
+    /// <para>
+    /// The forward edge is <c>activation_forward_window_minutes</c> — it was a hardcoded two
+    /// hours, and it is deliberately wide: wide enough to hold <b>two</b> of a member's
+    /// bookings at once, because back-to-back slices are the ordinary shape under a per-day
+    /// cap measured in minutes. Both selectors below therefore order by <c>StartsAt</c> and
+    /// take the earliest, which is the one the player is standing on: a live booking always
+    /// starts before a future one. Neither used to order at all, and the row the database
+    /// happened to return first won — the 17:15 slice at 16:58 holding 17:00 and 17:15, the
+    /// lights on seventeen minutes early on the wrong row, and the 17:00 booking swept as a
+    /// no-show at 17:05 with a penalty for a court the member was playing on.
+    /// </para>
+    ///
+    /// <para>
+    /// Finding a booking is not the same as lighting it. That is the cue window, checked in
+    /// <see cref="ActivateAsync"/>.
+    /// </para>
     /// </summary>
     public async Task<(DateTimeOffset Start, DateTimeOffset End)> WindowAsync(DateTimeOffset now, CancellationToken ct)
     {
         var settings = await _settings.GetAsync(ct);
-        return (now.AddMinutes(-settings.GraceWindowMinutes), now.Add(ForwardWindow));
+        return (
+            now.AddMinutes(-settings.GraceWindowMinutes),
+            now.AddMinutes(settings.ActivationForwardWindowMinutes));
     }
 
     /// <summary>The bookings on this court that an identification could activate right now.</summary>
@@ -152,6 +162,22 @@ public sealed class CourtActivationService
     {
         var now = DateTimeOffset.UtcNow;
         var alreadyActive = booking.CheckedInAt is not null;
+
+        // Too early to light, before anything is charged or stamped.
+        //
+        // The forward window that FOUND this booking is two hours wide so that back-to-back
+        // slices can be told apart; the cue window is the narrower one that says when a
+        // scan may actually light the court. The two used to be the same two hours, so a
+        // member scanning on their way in at 15:10 for a 17:00 slot was stamped present,
+        // cued the lights, and — because CheckedInAt was set — lost their refund if they
+        // then cancelled. A live session is never too early: a repeat scan of one falls
+        // through to the idempotent branch below whatever the clock says.
+        var settings = await _settings.GetAsync(ct);
+        var cueOpensAt = booking.StartsAt.AddMinutes(-settings.ActivationCueWindowMinutes);
+        if (!alreadyActive && now < cueOpensAt)
+        {
+            return new ActivationResult.TooEarly(booking, (int)Math.Ceiling((booking.StartsAt - now).TotalSeconds));
+        }
 
         // Charge first. Everything below this line is a consequence of it having worked.
         var charge = await _bookings.ChargeOnActivationAsync(

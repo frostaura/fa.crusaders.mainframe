@@ -69,6 +69,20 @@ public static class CourtActivationResponse
             ["reason"] = "no_active_booking",
         },
 
+        // Identified, holding the booking, but its start is outside the cue window.
+        // Nothing was stamped or cued, so the kiosk says when to come back rather than
+        // pretending the member is not booked at all.
+        ActivationResult.TooEarly early => new()
+        {
+            ["matched"] = true,
+            ["activated"] = false,
+            ["user_id"] = userId,
+            ["booking_id"] = early.Booking.Id,
+            ["reason"] = "too_early",
+            ["starts_in_seconds"] = early.StartsInSeconds,
+            ["starts_at"] = early.Booking.StartsAt,
+        },
+
         _ => new()
         {
             ["matched"] = true,

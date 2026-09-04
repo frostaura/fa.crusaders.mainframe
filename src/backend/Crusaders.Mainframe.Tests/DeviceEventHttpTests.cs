@@ -34,15 +34,17 @@ public sealed class DeviceEventHttpTests
 
     private const string EventsPath = "/api/v1/device/events";
     private const string WalkUpPath = "/api/v1/device/walkup";
+    private const string ActivatePath = "/api/v1/device/activate";
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
 
-    private sealed record Box(Guid DeviceId, byte[] Key, Guid TenantId, string Slug, Guid CourtId, Guid MemberId);
+    private sealed record Box(Guid DeviceId, byte[] Key, Guid TenantId, string Slug, Guid CourtId, Guid MemberId, IReadOnlyDictionary<int, Guid> CourtIds);
 
     private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
 
-    /// <summary>A tenant, a court, a funded member and a claimed box on that court.</summary>
-    private static async Task<Box> SeedAsync(TestWebAppFactory factory, decimal topUpCredits = 200m)
+    /// <summary>A tenant, a funded member, and a claimed box driving <paramref name="courtNumbers"/> (court 1 alone by default).</summary>
+    private static async Task<Box> SeedAsync(TestWebAppFactory factory, decimal topUpCredits = 200m, int[]? courtNumbers = null)
     {
+        courtNumbers ??= [1];
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await db.Database.MigrateAsync();
@@ -56,8 +58,10 @@ public sealed class DeviceEventHttpTests
             SettingsJson = """{"slice_minutes":15,"slice_price_credits":8,"grace_window_minutes":5,"timezone":"UTC","peak_hours":"16:00-19:00"}""",
         });
 
-        var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m };
-        db.Courts.Add(court);
+        var courts = courtNumbers
+            .Select(n => new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}", SlicePriceCredits = 8m })
+            .ToList();
+        db.Courts.AddRange(courts);
 
         var member = new User { TenantId = tenant.Id, Email = $"{slug}@test.local", PasswordHash = "x", EmailVerified = true };
         db.Users.Add(member);
@@ -78,7 +82,7 @@ public sealed class DeviceEventHttpTests
             Name = "Court 1 box",
             Kind = DeviceKind.CourtBox,
             Hardware = DeviceHardware.Esp8266,
-            CourtNumbers = [1],
+            CourtNumbers = [.. courtNumbers],
         };
         db.Devices.Add(device);
 
@@ -98,7 +102,8 @@ public sealed class DeviceEventHttpTests
         await db.SaveChangesAsync();
 
         var keys = scope.ServiceProvider.GetRequiredService<IDeviceKeyDeriver>();
-        return new Box(device.Id, keys.Derive(tenant.Id, device.Id, device.KeyVersion), tenant.Id, slug, court.Id, member.Id);
+        return new Box(device.Id, keys.Derive(tenant.Id, device.Id, device.KeyVersion), tenant.Id, slug, courts[0].Id, member.Id,
+            courts.ToDictionary(c => c.CourtNumber, c => c.Id));
     }
 
     private static HttpRequestMessage Signed(Box box, string path, object payload)
@@ -127,6 +132,19 @@ public sealed class DeviceEventHttpTests
         => TestAccessCodes.MintIdentAsync(factory.Services, box.TenantId, box.Slug, box.MemberId);
 
     private static object Batch(params object[] events) => new { uptime_ms = 600_000, events };
+
+    /// <summary>
+    /// The five-field walk-up body: the court NUMBER the member selected and the box's
+    /// per-purchase nonce, the same on every retry of the same purchase.
+    /// </summary>
+    private static object WalkUp(string? token, int minutes = 30, int court = 1, string? method = "qr", string? nonce = null) => new
+    {
+        minutes,
+        method,
+        token,
+        court,
+        nonce = nonce ?? Guid.NewGuid().ToString("N")[..16],
+    };
 
     private static object Activation(long seq, string subject = "tok-alice") => new
     {
@@ -256,17 +274,13 @@ public sealed class DeviceEventHttpTests
         var box = await SeedAsync(factory);
         var client = factory.CreateClient();
 
-        var response = await client.SendAsync(Signed(box, WalkUpPath, new
-        {
-            minutes = 30,
-            method = "qr",
-            token = await QrCodeAsync(factory, box),
-        }));
+        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 30)));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(30, body.GetProperty("granted_minutes").GetInt32());
         Assert.Equal(16m, body.GetProperty("amount_credits").GetDecimal());
+        Assert.False(body.GetProperty("replayed").GetBoolean());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -309,12 +323,7 @@ public sealed class DeviceEventHttpTests
         }
 
         var client = factory.CreateClient();
-        var response = await client.SendAsync(Signed(box, WalkUpPath, new
-        {
-            minutes = 60,
-            method = "qr",
-            token = await QrCodeAsync(factory, box),
-        }));
+        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 60)));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -369,12 +378,7 @@ public sealed class DeviceEventHttpTests
         // which is what makes four digits usable. A walk-up has no booking, so the same
         // check against the whole roll would be a 10,000-space oracle over a club with far
         // fewer than 10,000 members — a random four digits would frequently match somebody.
-        var response = await client.SendAsync(Signed(box, WalkUpPath, new
-        {
-            minutes = 30,
-            method,
-            token = "1234",
-        }));
+        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp("1234", method: method)));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -411,7 +415,7 @@ public sealed class DeviceEventHttpTests
                     new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Secret)), SecurityAlgorithms.HmacSha256))),
         };
 
-        var response = await client.SendAsync(Signed(box, WalkUpPath, new { minutes = 30, method = "qr", token }));
+        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(token)));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("not_recognised", body.GetProperty("error").GetString());
@@ -433,12 +437,7 @@ public sealed class DeviceEventHttpTests
         var box = await SeedAsync(factory, topUpCredits: 5m);
         var client = factory.CreateClient();
 
-        var response = await client.SendAsync(Signed(box, WalkUpPath, new
-        {
-            minutes = 30,
-            method = "qr",
-            token = await QrCodeAsync(factory, box),
-        }));
+        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box))));
 
         Assert.Equal(HttpStatusCode.PaymentRequired, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -476,45 +475,191 @@ public sealed class DeviceEventHttpTests
         }
 
         var client = factory.CreateClient();
-        var response = await client.SendAsync(Signed(box, WalkUpPath, new
-        {
-            minutes = 30,
-            method = "qr",
-            token = await QrCodeAsync(factory, box),
-        }));
+        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box))));
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("court_in_use", body.GetProperty("error").GetString());
     }
 
+    /// <summary>
+    /// A box sells time on the courts it drives and no other. The request names the court
+    /// now — it has to, one box drives four relays (review C5) — and a court outside the
+    /// box's list is refused before anything is booked. A box that could name any court is
+    /// a box that opens any court in the club.
+    /// </summary>
     [SkippableFact]
-    public async Task A_box_sells_time_on_its_own_court_and_no_other()
+    public async Task A_box_sells_time_on_its_own_courts_and_no_other()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
         await using var factory = CreateFactory();
         var box = await SeedAsync(factory);
 
-        Guid otherCourtId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            var other = new Court { TenantId = box.TenantId, CourtNumber = 2, Name = "Court 2", SlicePriceCredits = 8m };
-            db.Courts.Add(other);
+            db.Courts.Add(new Court { TenantId = box.TenantId, CourtNumber = 2, Name = "Court 2", SlicePriceCredits = 8m });
             await db.SaveChangesAsync();
-            otherCourtId = other.Id;
         }
 
         var client = factory.CreateClient();
-        // The request carries no court and cannot: a box that could name one is a box that
-        // opens any court in the club.
-        await client.SendAsync(Signed(box, WalkUpPath, new { minutes = 30, method = "qr", token = await QrCodeAsync(factory, box) }));
+        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), court: 2)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("court_not_on_device", body.GetProperty("error").GetString());
 
         using var check = factory.Services.CreateScope();
         var db2 = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var booking = await db2.Bookings.IgnoreQueryFilters().SingleAsync(b => b.UserId == box.MemberId);
-        Assert.Equal(box.CourtId, booking.CourtId);
-        Assert.NotEqual(otherCourtId, booking.CourtId);
+        Assert.Empty(await db2.Bookings.IgnoreQueryFilters().Where(b => b.UserId == box.MemberId).ToListAsync());
+    }
+
+    /// <summary>The court the member selected is the court booked, charged and lit — over the real wire.</summary>
+    [SkippableFact]
+    public async Task A_walk_up_over_signed_http_books_the_selected_court()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), court: 2)));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var check = factory.Services.CreateScope();
+        var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var booking = await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.UserId == box.MemberId);
+        Assert.Equal(box.CourtIds[2], booking.CourtId);
+        Assert.NotEqual(box.CourtIds[1], booking.CourtId);
+        Assert.NotNull(booking.CheckedInAt);
+    }
+
+    /// <summary>
+    /// The retry the firmware actually makes: the same signed body with the same nonce,
+    /// after a lost response. The original grant comes back with <c>replayed: true</c> and
+    /// the member is charged once (review H3).
+    /// </summary>
+    [SkippableFact]
+    public async Task A_walk_up_retried_with_the_same_nonce_over_signed_http_is_replayed_not_resold()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var client = factory.CreateClient();
+        var code = await QrCodeAsync(factory, box);
+        const string nonce = "0a1b2c3d4e5f6071";
+
+        var first = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(code, nonce: nonce)));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+
+        var again = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(code, nonce: nonce)));
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        var againBody = await again.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.True(againBody.GetProperty("replayed").GetBoolean());
+        Assert.Equal(firstBody.GetProperty("booking_id").GetGuid(), againBody.GetProperty("booking_id").GetGuid());
+        Assert.Equal(30, againBody.GetProperty("granted_minutes").GetInt32());
+
+        using var check = factory.Services.CreateScope();
+        var db = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Single(await db.Bookings.IgnoreQueryFilters().Where(b => b.UserId == box.MemberId).ToListAsync());
+        Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.UserId == box.MemberId && l.Type == LedgerEntryType.LightsPurchase).ToListAsync());
+    }
+
+    [SkippableFact]
+    public async Task A_walk_up_without_a_nonce_is_refused_over_signed_http()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var client = factory.CreateClient();
+
+        // The old three-field body, exactly as pre-C5 firmware would send it.
+        var response = await client.SendAsync(Signed(box, WalkUpPath, new { minutes = 30, method = "qr", token = await QrCodeAsync(factory, box) }));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("nonce_required", body.GetProperty("error").GetString());
+    }
+
+    // ---- lighting a booked court from the box -------------------------------
+
+    /// <summary>
+    /// The pre-booked member's path (review C3), over the real wire: a booking-activation
+    /// code on the signed device group answers the seconds the box puts on its relay timer.
+    /// </summary>
+    [SkippableFact]
+    public async Task Activate_over_signed_http()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+
+        Guid bookingId;
+        string code;
+        using (var scope = factory.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(box.TenantId, box.Slug);
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var startsAt = DateTimeOffset.UtcNow.AddMinutes(1);
+            var booking = new Booking
+            {
+                TenantId = box.TenantId,
+                CourtId = box.CourtIds[2],
+                UserId = box.MemberId,
+                BookedByUserId = box.MemberId,
+                PaidByUserId = box.MemberId,
+                ActorUserId = box.MemberId,
+                StartsAt = startsAt,
+                EndsAt = startsAt.AddMinutes(45),
+                SliceMinutes = 15,
+                SliceCount = 3,
+                AmountChargedCredits = 24m,
+                Status = BookingStatus.Booked,
+                ChargedAt = DateTimeOffset.UtcNow,
+            };
+            db.Bookings.Add(booking);
+            await db.SaveChangesAsync();
+            bookingId = booking.Id;
+            code = (await scope.ServiceProvider.GetRequiredService<AccessCodeService>()
+                .MintForBookingAsync(booking, TimeSpan.FromMinutes(5), default)).Code;
+        }
+
+        var client = factory.CreateClient();
+        var response = await client.SendAsync(Signed(box, ActivatePath, new { method = "qr", token = code }));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(body.GetProperty("activated").GetBoolean());
+        Assert.Equal("ok", body.GetProperty("reason").GetString());
+        Assert.Equal(2, body.GetProperty("court_number").GetInt32());
+        Assert.Equal(bookingId, body.GetProperty("booking_id").GetGuid());
+        Assert.InRange(body.GetProperty("granted_seconds").GetInt32(), 45 * 60, 46 * 60 + 1);
+        Assert.False(body.TryGetProperty("starts_in_seconds", out _));
+        Assert.True(body.GetProperty("server_unix").GetInt64() > 0);
+
+        using var check = factory.Services.CreateScope();
+        var db2 = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.NotNull((await db2.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == bookingId)).CheckedInAt);
+    }
+
+    [SkippableFact]
+    public async Task An_unsigned_activation_is_refused()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        await SeedAsync(factory);
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(ActivatePath, new { method = "qr", token = "7Q3F9KM2XZ8B" });
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

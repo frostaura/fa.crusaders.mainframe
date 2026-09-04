@@ -63,10 +63,18 @@ public sealed class ButtonMap
     /// <summary>Physical buttons on a court box. Fixed by the wiring.</summary>
     public const int ButtonCount = 8;
 
-    /// <summary>The longest court time a single button may grant, as a guard rail.
-    /// Not a policy — a club that wants three hours can set 180 — but a typo that
-    /// reads 6000 would leave a court's lights on for four days.</summary>
-    public const int MaxGrantMinutes = 240;
+    /// <summary>
+    /// The longest court time a single button may grant: the relay bank's hard cap.
+    ///
+    /// <para>
+    /// This used to be 240 with a note that a club wanting three hours could set 180.
+    /// It could not — the relay timer cuts the lights at <see cref="RelayHardCap.Minutes"/>
+    /// regardless, so a 180-minute button sold ninety minutes of darkness (review M1).
+    /// The bound is the hardware's, shared through <see cref="RelayHardCap"/> with the
+    /// walk-up and activation paths and pinned in the corpus the firmware reads.
+    /// </para>
+    /// </summary>
+    public const int MaxGrantMinutes = RelayHardCap.Minutes;
 
     /// <summary>Relays on a court box: A–D. A box drives at most this many courts.</summary>
     public const int MaxCourtsPerBox = 4;

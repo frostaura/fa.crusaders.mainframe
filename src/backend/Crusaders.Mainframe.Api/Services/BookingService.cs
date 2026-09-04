@@ -149,8 +149,18 @@ public sealed class BookingService
     /// attendance, the audit row and <c>booking.lights_on</c> all come from the one place
     /// that is allowed to produce them.
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="externalReference"/> is the purchase's identity across retries —
+    /// <c>walkup:{device}:{nonce}</c> — and it lands on the ledger row, where the filtered
+    /// unique index makes a second attempt with the same reference fail to post rather
+    /// than debit twice (review H3). The caller looks the reference up <i>before</i>
+    /// calling this and answers a replay with the original grant; this is the backstop
+    /// for two attempts in flight at once, which no read-first check can catch.
+    /// </para>
     /// </summary>
-    public async Task<BookingResult> CreateWalkUpAsync(Guid courtId, Guid userId, Guid actorId, int requestedMinutes, CancellationToken ct)
+    public async Task<BookingResult> CreateWalkUpAsync(
+        Guid courtId, Guid userId, Guid actorId, int requestedMinutes, string externalReference, CancellationToken ct)
     {
         var settings = await _settings.GetAsync(ct);
         var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == courtId && c.IsActive, ct);
@@ -219,7 +229,8 @@ public sealed class BookingService
             Settings: settings,
             TotalCost: totalCost,
             DurationLabel: $"{grantedMinutes} min",
-            IsWalkUp: true), ct);
+            IsWalkUp: true,
+            ExternalReference: externalReference), ct);
     }
 
     /// <summary>
@@ -234,7 +245,8 @@ public sealed class BookingService
     /// </summary>
     private sealed record NewBooking(
         Booking Row, Court Court, TenantSettingsView Settings,
-        decimal TotalCost, string DurationLabel, bool IsWalkUp);
+        decimal TotalCost, string DurationLabel, bool IsWalkUp,
+        string? ExternalReference = null);
 
     private async Task<BookingResult> CommitAsync(NewBooking spec, CancellationToken ct)
     {
@@ -302,10 +314,26 @@ public sealed class BookingService
                 AmountCredits: -spec.TotalCost,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
-                Reason: $"Booking {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}"), ct);
+                Reason: $"Booking {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}",
+                ExternalReference: spec.ExternalReference), ct);
+        }
+        catch (DbUpdateException ex) when (IsDuplicateReference(ex))
+        {
+            // The same purchase, twice, in flight together — a box that retried before its
+            // first attempt had answered. The filtered unique index on ExternalReference
+            // refused the second debit, and the booking row went down with it in the same
+            // SaveChanges. Told apart from the slot race below because the answer is
+            // different: not "court in use" but "you already bought this" — the caller
+            // re-reads the reference and returns the original grant, so the box can !ON.
+            _logger.LogInformation(
+                "Booking with reference {Reference} was already posted by a concurrent request",
+                spec.ExternalReference);
+            DiscardPendingAdds();
+            return new BookingResult.DuplicateRequest();
         }
         catch (DbUpdateException ex) when (IsOverlapViolation(ex))
         {
+            DiscardPendingAdds();
             // Lost the race. The overlap check upstream passed because the other request had
             // not committed yet — under READ COMMITTED it could not have seen it. The
             // database is the only place that collision is decidable, and this is the answer
@@ -384,6 +412,25 @@ public sealed class BookingService
             }), ct);
 
         return new BookingResult.Ok(booking, balance);
+    }
+
+    /// <summary>
+    /// Forgets every row staged on this context that the database just refused.
+    ///
+    /// <para>
+    /// A save that fails leaves its rows tracked as <c>Added</c>, and the next
+    /// <c>SaveChanges</c> on the same context — the walk-up endpoint activating the
+    /// <i>original</i> booking after a duplicate — would try to insert them again and fail
+    /// the same way. The refusal was the outcome that was wanted; the tracker must not
+    /// keep arguing with it.
+    /// </para>
+    /// </summary>
+    private void DiscardPendingAdds()
+    {
+        foreach (var entry in _db.ChangeTracker.Entries().Where(e => e.State == EntityState.Added).ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
     }
 
     private static string AuditActionFor(NewBooking spec, Guid actorId, Guid userId)
@@ -601,6 +648,16 @@ public sealed class BookingService
                 return new ChargeResult.AlreadyCharged(booking.AmountChargedCredits);
             }
 
+            // The volunteer is about to be debited, so the volunteer is who is locked —
+            // the balance read below is an unlocked SUM otherwise, and two scans at two
+            // courts naming the same volunteer both saw enough and both charged (the same
+            // race CommitAsync closes for a booker). The booker's refund needs no lock:
+            // credit never overspends. The advisory lock is per transaction and reentrant
+            // within it, so a caller already holding a lock on this payer — the walk-up
+            // path commits and releases the booker's before activating, but a future
+            // caller that does not would simply nest — cannot deadlock against itself.
+            await using var volunteerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, reassignTo.Value, ct);
+
             var volunteerBalance = await _ledger.GetBalanceAsync(reassignTo.Value, ct);
             if (volunteerBalance < booking.AmountChargedCredits)
             {
@@ -668,15 +725,24 @@ public sealed class BookingService
             }
             catch (DbUpdateConcurrencyException)
             {
+                // Not committed: disposing the lock rolls the transaction back.
                 _logger.LogInformation("Payer reassignment on {BookingId} lost a concurrent write", booking.Id);
                 return new ChargeResult.NotChargeable();
             }
 
+            await volunteerLock.CommitAsync(ct);
             return new ChargeResult.Ok(booking, reassignTo.Value, booking.AmountChargedCredits);
         }
 
         // Never charged: a walk-up, or a booking predating charge-at-booking.
         var payerUserId = payerOverrideUserId ?? currentPayer;
+
+        // Locked for the same reason CommitAsync locks the booker: the balance read is an
+        // unlocked SUM, and a member with one booking's worth of credits holding two
+        // uncharged bookings could otherwise have both activated at once and finish
+        // negative. Same reentrancy note as the volunteer lock above. A refusal below
+        // returns without committing, which rolls back — nothing to unwind.
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, ct);
 
         var balance = await _ledger.GetBalanceAsync(payerUserId, ct);
         if (balance < booking.AmountChargedCredits)
@@ -703,6 +769,7 @@ public sealed class BookingService
         });
 
         await _db.SaveChangesAsync(ct);
+        await payerLock.CommitAsync(ct);
         return new ChargeResult.Ok(booking, payerUserId, booking.AmountChargedCredits);
     }
 
@@ -733,6 +800,18 @@ public sealed class BookingService
         ex.InnerException is Npgsql.PostgresException pg
         && pg.SqlState == "23P01"
         && (string.IsNullOrEmpty(pg.ConstraintName) || pg.ConstraintName == OverlapConstraintName);
+
+    /// <summary>
+    /// The filtered unique index on <c>ledger_entries.ExternalReference</c>, as named by the
+    /// migration. Matched on the name so a unique violation on some other table in the same
+    /// flush — an access code, say — is not read as a duplicate purchase.
+    /// </summary>
+    private const string ExternalReferenceIndexName = "IX_ledger_entries_ExternalReference";
+
+    private static bool IsDuplicateReference(DbUpdateException ex) =>
+        ex.InnerException is Npgsql.PostgresException pg
+        && pg.SqlState == "23505"
+        && pg.ConstraintName == ExternalReferenceIndexName;
 
     private static BookingResult? CheckPeakHoursRule(DateTimeOffset startsAt, DateTimeOffset endsAt, MemberClass memberClass, TenantSettingsView settings)
     {
@@ -837,6 +916,13 @@ public abstract record BookingResult
     /// the outer wall.
     /// </summary>
     public sealed record InvalidDuration(int RequestedSlices, int MaxSlices) : BookingResult;
+
+    /// <summary>
+    /// A purchase carrying an external reference that another request has already posted
+    /// — the concurrent half of a walk-up retry. Nothing was written; the caller re-reads
+    /// the reference and answers with the original grant.
+    /// </summary>
+    public sealed record DuplicateRequest : BookingResult;
 }
 
 public abstract record CancellationResult

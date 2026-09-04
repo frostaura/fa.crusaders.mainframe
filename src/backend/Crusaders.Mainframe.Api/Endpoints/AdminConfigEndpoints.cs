@@ -276,7 +276,7 @@ public static class AdminConfigEndpoints
     /// </summary>
     private static string? ValidateDeviceNumbers(UpdateSettingsRequest req)
     {
-        if (req.WalkUpMaxMinutes is < 1 or > 90) return "walk_up_max_minutes_out_of_range";
+        if (req.WalkUpMaxMinutes is < 1 or > RelayHardCap.Minutes) return "walk_up_max_minutes_out_of_range";
         if (req.HeartbeatSeconds is < 10 or > 3600) return "heartbeat_seconds_out_of_range";
         if (req.ActivationForwardWindowMinutes is < 1 or > 1440) return "activation_forward_window_minutes_out_of_range";
         if (req.ActivationCueWindowMinutes is < 0 or > 1440) return "activation_cue_window_minutes_out_of_range";

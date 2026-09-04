@@ -84,10 +84,11 @@ public class ButtonMapTests
 
     [Theory]
     [InlineData("court:E", "court must be A, B, C or D")]
-    [InlineData("minutes:0", "minutes must be between 1 and 240")]
-    [InlineData("minutes:241", "minutes must be between 1 and 240")]
-    [InlineData("minutes:-5", "minutes must be between 1 and 240")]
-    [InlineData("minutes:abc", "minutes must be between 1 and 240")]
+    [InlineData("minutes:0", "minutes must be between 1 and 90")]
+    [InlineData("minutes:91", "minutes must be between 1 and 90")]
+    [InlineData("minutes:240", "minutes must be between 1 and 90")]
+    [InlineData("minutes:-5", "minutes must be between 1 and 90")]
+    [InlineData("minutes:abc", "minutes must be between 1 and 90")]
     [InlineData("explode", "expected court:<A-D>, minutes:<n>, off or none")]
     public void The_write_path_names_the_button_and_the_problem(string bad, string expectedReason)
     {
@@ -140,7 +141,11 @@ public class ButtonMapTests
     private sealed record ActionCase(string Wire, bool Valid, string? Kind, int? Court, int? Minutes);
     private sealed record MapCase(string Name, string[] Wire, bool Valid);
 
-    private static JsonElement Corpus()
+    private static JsonElement Corpus() => CorpusFile("cases.json");
+
+    private static JsonElement Manifest() => CorpusFile("manifest.json");
+
+    private static JsonElement CorpusFile(string name)
     {
         // Walk upward: the corpus lives outside both src/backend and src/iot so that
         // neither side reaches into the other's tree, and the test runner's working
@@ -148,14 +153,14 @@ public class ButtonMapTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            var candidate = Path.Combine(dir.FullName, "src", "contracts", "device-protocol", "buttonmap", "cases.json");
+            var candidate = Path.Combine(dir.FullName, "src", "contracts", "device-protocol", "buttonmap", name);
             if (File.Exists(candidate)) return JsonDocument.Parse(File.ReadAllText(candidate)).RootElement.Clone();
             dir = dir.Parent;
         }
 
         // Loud, never skipped. A corpus test that quietly does not run is exactly the
         // failure mode the corpus exists to prevent.
-        throw new FileNotFoundException("button-map corpus not found above " + AppContext.BaseDirectory);
+        throw new FileNotFoundException($"button-map corpus {name} not found above " + AppContext.BaseDirectory);
     }
 
     public static TheoryData<string> ActionWires()
@@ -233,10 +238,66 @@ public class ButtonMapTests
     public void The_corpus_pins_the_limits_this_build_enforces()
     {
         var corpus = Corpus();
-        // If the corpus and the code disagree about the cap, every "minutes:241" case
+        // If the corpus and the code disagree about the cap, every "minutes:91" case
         // is testing the wrong boundary on one side or the other.
         Assert.Equal(ButtonMap.MaxGrantMinutes, corpus.GetProperty("max_grant_minutes").GetInt32());
         Assert.Equal(ButtonMap.ButtonCount, corpus.GetProperty("button_count").GetInt32());
+    }
+
+    /// <summary>
+    /// The relay hard cap is one number in three places — the shared constant, the button
+    /// map's limit, and the corpus the firmware reads — and this is what keeps them one
+    /// number (review M1). The cap is the hardware's: the relay timer cuts the lights at
+    /// ninety minutes whatever it was told, so a grant past it is paid-for darkness.
+    /// </summary>
+    [Fact]
+    public void RelayCap_matches_contract()
+    {
+        var corpus = Corpus();
+        Assert.Equal(RelayHardCap.Minutes, corpus.GetProperty("relay_hard_cap_minutes").GetInt32());
+        Assert.Equal(ButtonMap.MaxGrantMinutes, corpus.GetProperty("max_grant_minutes").GetInt32());
+        Assert.Equal(RelayHardCap.Minutes, ButtonMap.MaxGrantMinutes);
+        Assert.Equal(RelayHardCap.Minutes * 60, RelayHardCap.Seconds);
+    }
+
+    /// <summary>
+    /// A button may not grant more than the relay will hold. Ninety is the cap and is
+    /// legal; ninety-one is refused, and so is the old 240 that the previous comment
+    /// invited a club to set.
+    /// </summary>
+    [Theory]
+    [InlineData("minutes:90", true)]
+    [InlineData("minutes:91", false)]
+    [InlineData("minutes:180", false)]
+    [InlineData("minutes:240", false)]
+    public void A_button_past_the_relay_hard_cap_is_refused(string wire, bool accepted)
+    {
+        var map = new[] { "court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", wire };
+        Assert.Equal(accepted, ButtonMap.TryParse(map, out _, out _));
+    }
+
+    /// <summary>
+    /// The anti-drift gate this family lacked: the manifest declares how many cases each
+    /// section holds, and the counts here are what the theories above actually executed.
+    /// A section added to the corpus but not to the manifest — or the reverse — fails here
+    /// rather than being silently skipped by whichever side did not recognise it.
+    /// </summary>
+    [Fact]
+    public void Every_corpus_section_is_declared_and_executed()
+    {
+        var corpus = Corpus();
+        var declared = Manifest().GetProperty("case_count");
+
+        var sections = corpus.EnumerateObject()
+            .Where(p => p.Value.ValueKind == JsonValueKind.Array && p.Name != "_comment")
+            .Select(p => p.Name)
+            .Order()
+            .ToList();
+        Assert.Equal(sections, declared.EnumerateObject().Select(p => p.Name).Order().ToList());
+
+        Assert.Equal(declared.GetProperty("actions").GetInt32(), ActionWires().Count);
+        Assert.Equal(declared.GetProperty("maps").GetInt32(), MapNames().Count);
+        Assert.All(sections, s => Assert.True(corpus.GetProperty(s).GetArrayLength() > 0, $"Corpus section '{s}' is empty."));
     }
 
     [Fact]

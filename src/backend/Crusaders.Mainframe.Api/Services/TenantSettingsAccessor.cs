@@ -113,14 +113,14 @@ public sealed record TenantSettingsView(
     // read it, so the two cannot drift apart the way the settings endpoint's own
     // defaults once did.
 
-    public const int DefaultWalkUpMaxMinutes = 90;
+    public const int DefaultWalkUpMaxMinutes = RelayHardCap.Minutes;
     public const int DefaultHeartbeatSeconds = 60;
     public const int DefaultActivationForwardWindowMinutes = 120;
     public const int DefaultActivationCueWindowMinutes = 10;
     public const int DefaultQrLifetimeSeconds = 60;
     public const int DefaultRosterWindowMinutes = 120;
 
-    /// <summary>The longest walk-up a box may sell, minutes. The relay hard cap is 90; selling more than the relay can actuate is paying for darkness.</summary>
+    /// <summary>The longest walk-up a box may sell, minutes. Bounded above by <see cref="RelayHardCap.Minutes"/>; selling more than the relay can actuate is paying for darkness.</summary>
     public int WalkUpMaxMinutes { get; init; } = DefaultWalkUpMaxMinutes;
 
     /// <summary>How often a court box should call home, seconds. Was hardcoded 60 in the heartbeat response.</summary>
