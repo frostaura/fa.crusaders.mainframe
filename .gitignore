@@ -111,3 +111,7 @@ src/iot/**/*.hex
 # Firmware secrets — a filled-in secrets.h was previously committable
 **/secrets.h
 **/ota_privkey.pem
+
+# CI drops the signed firmware payload here before the API image build; only the placeholder is tracked.
+firmware-payload/*
+!firmware-payload/README.txt

@@ -350,6 +350,163 @@ jobs:
           echo "$out" | grep -q '^\[sim\] listening on 127\.0\.0\.1:[0-9]\+$'
 
   # ============================================================================
+  # IoT firmware — sign the ESP8266 image and package it for the API to serve.
+  #
+  # This is the release half of OTA. `iot-build` proves every target compiles;
+  # this job rebuilds only court_bridge with $OTA_PRIVATE_KEY set, so the
+  # post-build hook (src/iot/tools/pio_sign_post.py) appends the RSA-2048/SHA-256
+  # trailer the board's verifier trusts, and then packages the result as the
+  # `firmware` artifact that build-backend-* bakes into the API image at
+  # /app/firmware/ — the path the API serves at /firmware/ and that
+  # Ota:Stable:Url points at.
+  #
+  # The secret is optional so that PRs and forks still get a green run, but an
+  # unsigned build is never a SILENT one: the missing key produces a workflow
+  # warning here AND a README in the artifact (so the image says why it carries
+  # no firmware), because a release that forgot the secret should be discovered
+  # in the run log, not when every court box refuses the update. Go-live
+  # checklist item 6 is what mints the key.
+  #
+  # The signer's own roundtrip (sign_firmware.py --selftest) already gates in
+  # the `iot` job; it is not repeated here.
+  # ============================================================================
+  iot-sign:
+    name: IoT Firmware (sign + package)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [iot-build]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: src/iot/requirements.txt
+
+      # Same key as iot-build on purpose: that job has just populated the entry
+      # with the Xtensa toolchain and the espressif8266 framework this build needs,
+      # so restoring it here is what keeps a second `pio run` from re-downloading
+      # hundreds of megabytes.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-boards-${{ runner.os }}-${{ hashFiles('src/iot/platformio.ini') }}
+          restore-keys: pio-boards-${{ runner.os }}-
+
+      - name: Install pinned toolchain
+        run: pip install -r src/iot/requirements.txt
+
+      # pio_sign_post.py reads $OTA_PRIVATE_KEY as a PATH to a PEM file, and the
+      # secret holds the PEM CONTENT, so it has to land on disk first. umask 077
+      # keeps it owner-only; $RUNNER_TEMP is wiped when the job ends. The secret is
+      # read through an env var, never interpolated into the script text.
+      - name: Materialize signing key
+        id: key
+        env:
+          OTA_PRIVATE_KEY_PEM: ${{ secrets.OTA_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${OTA_PRIVATE_KEY_PEM:-}" ]; then
+            umask 077
+            path="$RUNNER_TEMP/ota_private_key.pem"
+            printf '%s\n' "$OTA_PRIVATE_KEY_PEM" > "$path"
+            # A secret that is set but not a parseable key is an operator error
+            # worth failing on now, with a clear message, rather than as an
+            # openssl stderr buried inside the SCons post-action.
+            if ! openssl pkey -in "$path" -noout 2>/dev/null; then
+              echo "::error title=OTA key invalid::OTA_PRIVATE_KEY is set but is not a PEM private key openssl can parse"
+              exit 1
+            fi
+            echo "path=$path" >> "$GITHUB_OUTPUT"
+            echo "Signing key materialized; this build will be signed."
+          else
+            echo "::warning title=OTA unsigned::OTA_PRIVATE_KEY unset — this build cannot be installed over the air (go-live checklist item 6)"
+            echo "path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # An empty OTA_PRIVATE_KEY is the hook's documented "not set" case: it
+      # prints NOT SIGNED and leaves only firmware.bin. A set path that does not
+      # exist makes the hook raise, which is the behaviour we want if the step
+      # above somehow produced a dangling path.
+      - name: Build + sign court_bridge
+        env:
+          OTA_PRIVATE_KEY: ${{ steps.key.outputs.path }}
+        run: pio run -d src/iot -e court_bridge
+
+      # The version comes from the three FW_VERSION_* flags in platformio.ini —
+      # the same values the firmware compiles in and reports on heartbeat — read
+      # by regex so a bump there is the only edit a release needs. Any flag
+      # missing is a hard failure: a manifest with a guessed version would be
+      # offered to the fleet as if it were real.
+      - name: Package firmware + manifest
+        env:
+          OTA_PRIVATE_KEY_PATH: ${{ steps.key.outputs.path }}
+        run: |
+          set -euo pipefail
+          ini=src/iot/platformio.ini
+          build=src/iot/.pio/build/court_bridge
+          out=out/firmware
+          mkdir -p "$out"
+
+          # Matches `-DFW_VERSION_MAJOR=1` as its own line of build_flags. Anchored
+          # so a same-named flag inside a comment or another env cannot satisfy it.
+          # Prints nothing (and does not fail under pipefail) when absent, so the
+          # check below is what reports it — an exit inside $(...) would only
+          # swallow its own message.
+          ver() {
+            grep -oE "^[[:space:]]*-DFW_VERSION_$1=[0-9]+" "$ini" | head -1 | sed 's/.*=//' || true
+          }
+          major=$(ver MAJOR); minor=$(ver MINOR); patch=$(ver PATCH)
+          if [ -z "$major" ] || [ -z "$minor" ] || [ -z "$patch" ]; then
+            echo "::error title=Firmware version unknown::$ini must define -DFW_VERSION_MAJOR, _MINOR and _PATCH as their own lines in [common] build_flags (found major='$major' minor='$minor' patch='$patch')"
+            exit 1
+          fi
+          version="$major.$minor.$patch"
+          echo "Firmware version: $version"
+
+          if [ -f "$build/firmware.signed.bin" ]; then
+            cp "$build/firmware.signed.bin" "$out/court_bridge.signed.bin"
+            size=$(wc -c < "$out/court_bridge.signed.bin" | tr -d '[:space:]')
+            printf '{"version":"%s","url":"/firmware/court_bridge.signed.bin","sizeBytes":%s}\n' \
+              "$version" "$size" > "$out/firmware.manifest.json"
+            echo "Packaged signed firmware ($size bytes):"
+            cat "$out/firmware.manifest.json"
+          else
+            if [ -n "${OTA_PRIVATE_KEY_PATH:-}" ]; then
+              # The key was materialized and the build ran, yet nothing was signed.
+              # That is a broken hook, not a missing secret, and must not degrade
+              # into an "unsigned" artifact that reads as an operator omission.
+              echo "::error title=OTA signing failed::key was present but $build/firmware.signed.bin was not produced"
+              exit 1
+            fi
+            {
+              echo "UNSIGNED BUILD — no firmware baked into this image."
+              echo
+              echo "Firmware version $version was compiled but the OTA_PRIVATE_KEY repository"
+              echo "secret was unset, so no signed image exists and nothing can be installed"
+              echo "over the air from this deployment. Boards flashed over USB are unaffected."
+              echo
+              echo "See docs/go-live-checklist.md item 6 (mint the signing key, set the secret)"
+              echo "and docs/specs/deployment.md (iot-sign job). Workflow run: ${GITHUB_SERVER_URL:-}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}"
+            } > "$out/README.txt"
+            echo "No signed image — wrote $out/README.txt:"
+            cat "$out/README.txt"
+          fi
+          ls -la "$out"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: out/firmware/
+          retention-days: 90
+          if-no-files-found: error
+
+  # ============================================================================
   # Security — npm audit + dotnet vulnerable package scan
   # ============================================================================
   security:
@@ -423,11 +580,24 @@ jobs:
     name: Build Backend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, backend-integration, iot, iot-build, iot-sign, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      # The checkout carries a placeholder README in firmware-payload/ so a local
+      # build has something to COPY. Clear it before the artifact lands, so the
+      # image's /app/firmware/ is exactly what iot-sign produced — and the
+      # placeholder's "no firmware baked" text never sits beside a signed image.
+      - name: Fetch firmware payload from iot-sign
+        run: rm -rf firmware-payload && mkdir -p firmware-payload
+
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: firmware-payload/
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -451,11 +621,21 @@ jobs:
     name: Build Backend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, backend-integration, iot, iot-build, iot-sign, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      # Same as the amd64 job: clear the placeholder, then take iot-sign's output.
+      - name: Fetch firmware payload from iot-sign
+        run: rm -rf firmware-payload && mkdir -p firmware-payload
+
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: firmware-payload/
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

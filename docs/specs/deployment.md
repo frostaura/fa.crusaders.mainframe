@@ -27,7 +27,8 @@ Local Machine (on-premises at the club, or Dean's office for dev)
    - Backend: lint, build, unit + integration tests, Postgres-backed boundary tests, coverage gate.
    - Frontend: lint, build, unit, Playwright e2e, bundle-size gate.
    - Security: `npm audit` + `dotnet list package --vulnerable`.
-3. On `main` push (after gates green), build amd64 + arm64 images for both backend and frontend, push to Docker Hub, merge multi-arch manifest.
+   - IoT: host unit tests + lint (`iot`), every board target compiles (`iot-build`), then the court-box image is signed and packaged (`iot-sign`, below).
+3. On `main` push (after gates green), build amd64 + arm64 images for both backend and frontend, push to Docker Hub, merge multi-arch manifest. The backend image build waits on `iot-sign` and bakes its artifact in (below).
 4. Deploy job calls Portainer's REST API: `PUT /api/stacks/{stack_id}?endpointId={endpoint_id}` with `pullImage: true`.
 5. Portainer re-pulls the manifests, recreates containers, the new build is live.
 
@@ -40,6 +41,21 @@ Local Machine (on-premises at the club, or Dean's office for dev)
 | `PORTAINER_TOKEN` | Portainer API key |
 | `PORTAINER_ENDPOINT_ID` | Numeric endpoint ID in Portainer |
 | `PORTAINER_STACK_ID` | Numeric stack ID for crusaders.mainframe |
+| `OTA_PRIVATE_KEY` | The **PEM content** (not a path) of the RSA-2048 firmware signing key minted by `src/iot/tools/generate_ota_keys.sh` (go-live checklist item 6). Optional for CI to go green; required for any build a court box will accept over the air. |
+
+The first six are consumed by the build/deploy jobs. The seventh is consumed only by `iot-sign`; that job writes the content to a file under `$RUNNER_TEMP` (mode 0600, wiped with the job) because the signing hook takes a path. The private key exists in exactly two places — the secret and the operator's secure store — and is never committed (`*.pem` is gitignored).
+
+## Firmware signing and packaging (`iot-sign`)
+OTA for the court box is asymmetric: the ESP8266 image carries a trailer signed with the private key and the board verifies it against the public key compiled into the firmware (`src/iot/tools/sign_firmware.py` documents the trailer). The CI job that produces the installable image:
+
+1. `iot-sign` (`needs: iot-build`) restores the same PlatformIO boards cache, materializes `OTA_PRIVATE_KEY` to a temp file, and runs `pio run -d src/iot -e court_bridge` with `$OTA_PRIVATE_KEY` pointing at it. The post-build hook (`src/iot/tools/pio_sign_post.py`) then writes `firmware.signed.bin` beside `firmware.bin`.
+2. The version is read from the three `-DFW_VERSION_{MAJOR,MINOR,PATCH}` flags in `src/iot/platformio.ini` `[common]` — the same values the firmware reports on heartbeat. A missing flag fails the job.
+3. The job uploads a `firmware` artifact (90-day retention) containing **one of**:
+   - `court_bridge.signed.bin` + `firmware.manifest.json` = `{"version":"<major.minor.patch>","url":"/firmware/court_bridge.signed.bin","sizeBytes":<n>}`, or
+   - `README.txt` stating the build is **UNSIGNED**, when the secret is unset. This is deliberate: an unsigned build is allowed (PRs, forks, pre-go-live) but never silent — the job also emits a workflow warning titled *OTA unsigned*.
+4. `build-backend-amd64` / `build-backend-arm64` download that artifact into `firmware-payload/` and the backend `Dockerfile` copies it to **`/app/firmware/`** in the runtime image. The directory is always present in the repository with a placeholder `README.txt` so a local `docker compose build` works with no artifact; CI clears the placeholder before the download so the image holds exactly what `iot-sign` produced.
+
+Design: the API serves `/app/firmware/` at **`/firmware/`** (anonymous, pull-only — the court box fetches, nothing is pushed to it), which is the URL the manifest's `url` is relative to, and `OtaCatalogue` falls back to `/app/firmware/firmware.manifest.json` for `Ota:Stable` when no `Ota:Stable:*` configuration is set. Both the static route and the manifest fallback are the backend half of this work and land separately; until they do, `OtaCatalogue` reads only configuration (`Ota:Stable:{Version,Url,SizeBytes}`, `Ota:Canary:*`, `Ota:Versions:<v>:*`) and the baked payload is inert. Explicit `Ota__Stable__*` environment variables always win over the baked manifest, which is how a deployment pins the fleet to an image other than the one in its own container (see `.env.example`).
 
 ## Image names
 - `frostaura/crusaders-mainframe-backend:latest`
