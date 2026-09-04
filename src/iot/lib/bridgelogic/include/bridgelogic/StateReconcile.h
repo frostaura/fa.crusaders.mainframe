@@ -92,6 +92,22 @@ bool parseStateMask(const char* arg, uint8_t& mask);
 /// Compares `mask` against `held` and says what to do about each court.
 Reconciliation reconcile(uint8_t mask, const HeldState held[kStateCourts], uint32_t nowMs);
 
+/// The belief about a court after an `!ON` was ATTEMPTED: held from `nowMs`
+/// only when the frame actually left the bridge, `previous` otherwise.
+///
+/// The bridge used to mark the court held whether or not the `!ON` was sent. A
+/// full TX ring or a dead cable then left a court "held" in this half's books
+/// that the Mega never lit, and the next `!STATE` — correctly showing it dark —
+/// synthesised a Release for a session that never happened. A frame that did
+/// not go leaves the books alone; the member is told to try again.
+HeldState afterOnAttempt(const HeldState& previous, bool sent, uint32_t nowMs);
+
+/// What the member reads when the `!ON` could not be sent. The screen already
+/// said "COURT C 45 MIN" — painted first, on purpose — so this replaces a
+/// promise the lights did not keep.
+inline constexpr char kOnNotSentLine1[] = "TRY AGAIN";
+inline constexpr char kOnNotSentLine2[] = "SCAN TO START";
+
 } // namespace bridgelogic
 
 #endif // CRUSADERS_BRIDGELOGIC_STATERECONCILE_H

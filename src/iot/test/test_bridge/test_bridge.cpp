@@ -1175,6 +1175,66 @@ void test_session_a_full_queue_still_opens_the_court() {
 // ---------------------------------------------------------------------------
 
 corpus::File g_buttonCases;
+corpus::File g_buttonManifest;
+
+// --- executed-case ledger ---------------------------------------------------
+//
+// The same shape as the devcrypto suite's: each corpus test records how many
+// cases it ran under the section it read, and the last test cross-checks the
+// ledger against cases.json and manifest.json in both directions. Until this
+// existed the button-map test asserted `executed >= 20` against a corpus that
+// declared 27, and a `maps` section nothing on this side read — exactly the
+// silent skip the corpus README's executed-count rule exists to forbid.
+
+constexpr size_t kMaxButtonSections = 4;
+
+struct ButtonLedger {
+  char names[kMaxButtonSections][corpus::kMaxNameLen];
+  size_t executed[kMaxButtonSections];
+  size_t count = 0;
+
+  void record(const char* name, size_t ran) {
+    TEST_ASSERT_TRUE_MESSAGE(count < kMaxButtonSections, "ledger full");
+    strncpy(names[count], name, corpus::kMaxNameLen - 1);
+    names[count][corpus::kMaxNameLen - 1] = '\0';
+    executed[count] = ran;
+    ++count;
+  }
+
+  bool find(const char* name, size_t* ran) const {
+    for (size_t i = 0; i < count; ++i) {
+      if (strcmp(names[i], name) == 0) {
+        *ran = executed[i];
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
+ButtonLedger g_buttonLedger;
+
+void loadButtonCorpus() {
+  TEST_ASSERT_TRUE_MESSAGE(g_buttonCases.load("buttonmap", "cases.json"),
+                           "button-map corpus not found — a skipped corpus proves nothing");
+  TEST_ASSERT_TRUE_MESSAGE(g_buttonManifest.load("buttonmap", "manifest.json"),
+                           "src/contracts/device-protocol/buttonmap/manifest.json not found above cwd");
+}
+
+const char* buttonSection(const char* name) {
+  const char* value = corpus::member(g_buttonCases.root(), name);
+  TEST_ASSERT_NOT_NULL_MESSAGE(value, name);
+  TEST_ASSERT_TRUE_MESSAGE(corpus::isArray(value), name);
+  return value;
+}
+
+size_t buttonDeclaredCount(const char* name) {
+  const char* counts = corpus::member(g_buttonManifest.root(), "case_count");
+  TEST_ASSERT_NOT_NULL_MESSAGE(counts, "manifest has no case_count");
+  const char* value = corpus::member(counts, name);
+  TEST_ASSERT_NOT_NULL_MESSAGE(value, name);
+  return static_cast<size_t>(corpus::unsignedValue(value));
+}
 
 /// Every token in the corpus, parsed by the firmware, checked against what the
 /// corpus says the API accepts.
@@ -1185,15 +1245,11 @@ corpus::File g_buttonCases;
 /// ignores leaves a button that quietly still does what it did before an admin
 /// changed it. Both sides read this file, so drift turns a test red.
 void test_buttonmap_agrees_with_the_shared_corpus() {
-  TEST_ASSERT_TRUE_MESSAGE(g_buttonCases.load("buttonmap", "cases.json"),
-                           "button-map corpus not found — a skipped corpus proves nothing");
+  loadButtonCorpus();
 
-  const char* actions = corpus::member(g_buttonCases.root(), "actions");
-  TEST_ASSERT_NOT_NULL(actions);
-
-  corpus::ArrayIter it(actions);
+  corpus::ArrayIter it(buttonSection("actions"));
   const char* element = nullptr;
-  int executed = 0;
+  size_t executed = 0;
 
   while (it.next(&element)) {
     char wire[128] = {};
@@ -1238,9 +1294,101 @@ void test_buttonmap_agrees_with_the_shared_corpus() {
   }
 
   // A corpus that loaded but yielded nothing passes every assertion above. The
-  // count is what makes an empty or reshaped file a failure rather than a
-  // silent success.
-  TEST_ASSERT_TRUE_MESSAGE(executed >= 20, "corpus yielded too few action cases");
+  // declared count is what makes an empty, reshaped or quietly extended file a
+  // failure rather than a silent success.
+  TEST_ASSERT_EQUAL_size_t(buttonDeclaredCount("actions"), executed);
+  g_buttonLedger.record("actions", executed);
+}
+
+/// Every whole map in the corpus, applied entry by entry exactly as the
+/// heartbeat handler applies one, and read back as the panel it produces.
+///
+/// The server decides whether a map is VALID — it refuses one that cannot start
+/// or finish a walk-up, or that leaves buttons undefined — and the firmware
+/// never sees a refused one. What the firmware must agree on is narrower and
+/// is asserted here: every token in every map parses (the grammar is shared,
+/// whatever the map's structural verdict), a valid map fills all eight buttons
+/// so none falls back to the old wiring, and the panel a valid map produces can
+/// select a court and grant minutes. A map the server calls invalid must fail
+/// at least one of those on this side too, or the two sides disagree about
+/// what a usable panel is.
+void test_buttonmap_applies_every_corpus_map() {
+  loadButtonCorpus();
+  TEST_ASSERT_EQUAL_UINT8(court::kButtonCount, static_cast<uint8_t>(corpus::unsignedValue(
+                                                   corpus::member(g_buttonCases.root(), "button_count"))));
+
+  corpus::ArrayIter it(buttonSection("maps"));
+  const char* element = nullptr;
+  size_t executed = 0;
+
+  while (it.next(&element)) {
+    char name[64] = {};
+    TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(element, "name"), name, sizeof(name), nullptr));
+    const char* validValue = corpus::skipWs(corpus::member(element, "valid"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(validValue, name);
+    const bool expectedValid = validValue[0] == 't';
+
+    court::ButtonMap map;
+    map.reset();
+    corpus::ArrayIter tokens(corpus::member(element, "wire"));
+    const char* tokenValue = nullptr;
+    uint8_t entries = 0U;
+    while (tokens.next(&tokenValue)) {
+      char wire[32] = {};
+      TEST_ASSERT_TRUE_MESSAGE(corpus::stringValue(tokenValue, wire, sizeof(wire), nullptr), name);
+      TEST_ASSERT_TRUE_MESSAGE(entries < court::kButtonCount, name);
+      TEST_ASSERT_TRUE_MESSAGE(map.setFromWire(entries, wire), wire);
+      ++entries;
+    }
+
+    bool canSelectCourt = false;
+    bool canGrantMinutes = false;
+    for (uint8_t i = 0U; i < entries; ++i) {
+      canSelectCourt = canSelectCourt || map[i].kind == court::ButtonKind::SelectCourt;
+      canGrantMinutes = canGrantMinutes || map[i].kind == court::ButtonKind::GrantMinutes;
+    }
+    const bool usable = entries == court::kButtonCount && canSelectCourt && canGrantMinutes;
+    TEST_ASSERT_EQUAL_MESSAGE(expectedValid, usable, name);
+    ++executed;
+  }
+
+  TEST_ASSERT_EQUAL_size_t(buttonDeclaredCount("maps"), executed);
+  g_buttonLedger.record("maps", executed);
+}
+
+/// Every case section in buttonmap/cases.json is declared in its manifest and
+/// was executed by a test above, and every declared section exists. Sections
+/// whose name starts with `_` are prose, not cases.
+void test_every_buttonmap_section_is_declared_and_executed() {
+  loadButtonCorpus();
+  char name[corpus::kMaxNameLen];
+  const char* value = nullptr;
+  size_t sectionsSeen = 0;
+
+  corpus::ObjectIter cases(g_buttonCases.root());
+  while (cases.next(name, sizeof(name), &value)) {
+    if (name[0] == '_' || !corpus::isArray(value)) {
+      continue;
+    }
+    size_t ran = 0;
+    TEST_ASSERT_TRUE_MESSAGE(g_buttonLedger.find(name, &ran),
+                             "corpus section was not executed by any test in this suite");
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(buttonDeclaredCount(name), ran, name);
+    ++sectionsSeen;
+  }
+
+  const char* counts = corpus::member(g_buttonManifest.root(), "case_count");
+  TEST_ASSERT_NOT_NULL(counts);
+  corpus::ObjectIter declared(counts);
+  size_t sectionsDeclared = 0;
+  while (declared.next(name, sizeof(name), &value)) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(corpus::member(g_buttonCases.root(), name),
+                                 "manifest declares a section cases.json does not contain");
+    ++sectionsDeclared;
+  }
+
+  TEST_ASSERT_EQUAL_size_t(sectionsSeen, sectionsDeclared);
+  TEST_ASSERT_EQUAL_size_t(sectionsSeen, g_buttonLedger.count);
 }
 
 void test_buttonmap_defaults_to_the_original_wiring() {
@@ -1630,6 +1778,8 @@ int main(int, char**) {
   RUN_TEST(test_roster_token_copy_refuses_rather_than_truncates);
 
   RUN_TEST(test_buttonmap_agrees_with_the_shared_corpus);
+  RUN_TEST(test_buttonmap_applies_every_corpus_map);
+  RUN_TEST(test_every_buttonmap_section_is_declared_and_executed);
   RUN_TEST(test_buttonmap_defaults_to_the_original_wiring);
   RUN_TEST(test_buttonmap_an_unknown_token_leaves_the_previous_entry_alone);
   RUN_TEST(test_buttonmap_reset_clears_a_short_map_rather_than_leaving_stale_entries);

@@ -9,8 +9,13 @@
 // "for diagnostics only" (A2-6). None of them had a test because none of the
 // logic was in lib/. It is now, and this is the suite that keeps it there.
 //
-// The bodies below are INLINE fixtures shaped by the wire contract. Binding
-// them to the shared corpus is a follow-up; the shapes here are the contract's.
+// Most bodies below are INLINE fixtures shaped by the wire contract, so each
+// branch can be driven without a corpus entry for it. The bytes the two sides
+// must AGREE on — the activate and walk-up request bodies the signature
+// covers, and the response bodies the server actually produces — are bound to
+// the shared corpus at the end of the file, by vector id, never by index.
+// devcrypto owns the executed-count gate on those sections; this suite reads
+// named vectors and fails loudly when one is missing.
 //
 // The clock bases are the same matrix the other suites use: millis() wraps at
 // 49.7 days and a court box in a cupboard runs for months, so every age and
@@ -30,6 +35,7 @@
 #include "eventq/EventQueue.h"
 #include "fakes/FakeStore.h"
 #include "roster/Roster.h"
+#include "support/CorpusJson.h"
 
 namespace {
 
@@ -598,6 +604,58 @@ void test_display_minutes_never_promise_more_than_the_relay_gives() {
   TEST_ASSERT_EQUAL_UINT32(0U, bridgelogic::displayMinutes(0U));
 }
 
+void test_any_grant_spends_the_scan_whichever_path_lit_the_court() {
+  // THE H1 PIN. The online grant closed the button window and the roster grant
+  // did not, so a box with no link lit the court and left thirty seconds of
+  // buttons armed on the member's token for whoever walked up next. One rule,
+  // both paths: a lit court spends the scan; a refusal leaves it live.
+  Cache cache(kSixHoursMs);
+  fakes::FakeStore store;
+  Queue queue(&store);
+  queue.begin();
+  Play play(cache, queue);
+  const roster::Entry entries[] = {booking("TOKALICE", 2U, 0U, kHourMs),
+                                   booking("TOKBOB", 1U, 600000UL, kHourMs)};
+  loadRoster(cache, kBaseMid, entries, 2U);
+
+  // Roster grant: spent.
+  const court::Outcome offlineGrant =
+      play.onScan("TOKALICE", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid + 1U);
+  TEST_ASSERT_TRUE(offlineGrant.action == court::Action::TurnOn);
+  TEST_ASSERT_TRUE(bridgelogic::spendsScan(offlineGrant));
+
+  // Roster refusals — too early, unknown — leave the scan live so the member
+  // can still buy time with the buttons.
+  const court::Outcome tooEarly =
+      play.onScan("TOKBOB", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid + 1U);
+  TEST_ASSERT_TRUE(tooEarly.action == court::Action::Refuse);
+  TEST_ASSERT_FALSE(bridgelogic::spendsScan(tooEarly));
+  const court::Outcome unknown =
+      play.onScan("NOBODY", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid + 1U);
+  TEST_ASSERT_FALSE(bridgelogic::spendsScan(unknown));
+
+  // Online grant and refusal: the bit the composition root reads is the SAME
+  // rule, not a second one that can drift from it.
+  const bridgelogic::ScanFlow flow;
+  const char granted[] = "{\"activated\":true,\"reason\":\"ok\",\"court_number\":9,\"granted_seconds\":2700}";
+  const bridgelogic::ActivationResult online =
+      flow.onActivateResponse(200U, granted, len(granted), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(online.disarmAuth);
+  TEST_ASSERT_EQUAL(bridgelogic::spendsScan(online.outcome), online.disarmAuth);
+
+  const char refused[] = "{\"activated\":false,\"reason\":\"no_booking\"}";
+  const bridgelogic::ActivationResult onlineRefusal =
+      flow.onActivateResponse(200U, refused, len(refused), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(onlineRefusal.disarmAuth);
+  TEST_ASSERT_EQUAL(bridgelogic::spendsScan(onlineRefusal.outcome), onlineRefusal.disarmAuth);
+
+  // A walk-up grant spends it too; a walk-up refusal does not.
+  const char sold[] = "{\"granted_minutes\":30}";
+  TEST_ASSERT_TRUE(
+      bridgelogic::spendsScan(bridgelogic::onWalkUpResponse(200U, sold, len(sold), 0U, 30U).outcome));
+  TEST_ASSERT_FALSE(bridgelogic::spendsScan(bridgelogic::onWalkUpResponse(402U, "", 0U, 0U, 30U).outcome));
+}
+
 // ---------------------------------------------------------------------------
 // WalkUp — the request on the wire, the nonce, and the answer
 // ---------------------------------------------------------------------------
@@ -841,6 +899,224 @@ void test_reconcile_waits_out_a_frame_that_was_already_in_flight() {
   }
 }
 
+void test_after_on_attempt_marks_held_only_when_the_frame_left() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    const bridgelogic::HeldState dark = darkSince(base);
+
+    // The `!ON` went: held from now.
+    const bridgelogic::HeldState lit = bridgelogic::afterOnAttempt(dark, true, base + 5000U);
+    TEST_ASSERT_TRUE(lit.held);
+    TEST_ASSERT_EQUAL_UINT32(base + 5000U, lit.sinceMs);
+
+    // The `!ON` did not go — full TX ring, dead cable. The books are untouched,
+    // so the next periodic `!STATE` showing the court dark agrees with them and
+    // no Release is synthesised for a session that never started.
+    const bridgelogic::HeldState stillDark = bridgelogic::afterOnAttempt(dark, false, base + 5000U);
+    TEST_ASSERT_FALSE(stillDark.held);
+    TEST_ASSERT_EQUAL_UINT32(base, stillDark.sinceMs);
+    const bridgelogic::HeldState held[4] = {stillDark, dark, dark, dark};
+    TEST_ASSERT_TRUE(bridgelogic::reconcile(0x0U, held, base + 15000U).action[0] ==
+                     bridgelogic::CourtAction::None);
+
+    // And a court that was already held keeps its original instant when a
+    // re-light fails: the session it is in did not restart.
+    const bridgelogic::HeldState wasHeld = heldSince(base);
+    const bridgelogic::HeldState unchanged = bridgelogic::afterOnAttempt(wasHeld, false, base + 5000U);
+    TEST_ASSERT_TRUE(unchanged.held);
+    TEST_ASSERT_EQUAL_UINT32(base, unchanged.sinceMs);
+  }
+
+  // What replaces the promise on the screen fits the display.
+  TEST_ASSERT_EQUAL_STRING("TRY AGAIN", bridgelogic::kOnNotSentLine1);
+  TEST_ASSERT_TRUE(strlen(bridgelogic::kOnNotSentLine1) <= court::kLineLen);
+  TEST_ASSERT_TRUE(strlen(bridgelogic::kOnNotSentLine2) <= court::kLineLen);
+}
+
+// ---------------------------------------------------------------------------
+// The shared corpus — the bytes the server and this box must agree on
+// ---------------------------------------------------------------------------
+//
+// Located BY ID (responses) or by path and pinned nonce (requests), never by
+// index: a reordered or extended corpus must not silently detach a test from
+// its vector. A vector that has gone missing is a failure, not a skip — this
+// suite binds to ids that are committed, and losing one is a contract change.
+// The executed-count gate on these sections is devcrypto's; none is repeated
+// here.
+
+/// Static, not stack: 64 KB of corpus in a Unity test frame is a stack
+/// overflow on some hosts.
+corpus::File g_httpCases;
+
+/// This box drives club courts 1-4 on relays A-D — the court set the corpus's
+/// activate vectors assume, where `court_number` 3 is relay C.
+const int16_t kCorpusCourts[bridgelogic::kMaxCourts] = {1, 2, 3, 4};
+
+void loadHttpCorpus() {
+  TEST_ASSERT_TRUE_MESSAGE(g_httpCases.load("http", "cases.json"),
+                           "http corpus not found — a skipped corpus proves nothing");
+}
+
+/// The `responses` vector whose `id` is `id`. Fails the test when absent.
+const char* responseVector(const char* id) {
+  const char* responses = corpus::member(g_httpCases.root(), "responses");
+  TEST_ASSERT_NOT_NULL_MESSAGE(responses, "http corpus has no responses section");
+
+  corpus::ArrayIter it(responses);
+  const char* element = nullptr;
+  char found[64] = {};
+  while (it.next(&element)) {
+    const char* idValue = corpus::member(element, "id");
+    if (idValue != nullptr && corpus::stringValue(idValue, found, sizeof(found), nullptr) &&
+        strcmp(found, id) == 0) {
+      return element;
+    }
+  }
+  TEST_FAIL_MESSAGE(id);
+  return nullptr;
+}
+
+/// The `requests` vector for `path` carrying `nonce`. Two keys, because a
+/// path may gain a second vector with a different body; the nonce is what
+/// pins THIS one, exactly as the probe test pins its own.
+const char* requestVector(const char* path, const char* nonce) {
+  const char* requests = corpus::member(g_httpCases.root(), "requests");
+  TEST_ASSERT_NOT_NULL_MESSAGE(requests, "http corpus has no requests section");
+
+  corpus::ArrayIter it(requests);
+  const char* element = nullptr;
+  char foundPath[128] = {};
+  char foundNonce[64] = {};
+  while (it.next(&element)) {
+    const char* pathValue = corpus::member(element, "path_and_query");
+    const char* nonceValue = corpus::member(element, "nonce");
+    if (pathValue != nullptr && nonceValue != nullptr &&
+        corpus::stringValue(pathValue, foundPath, sizeof(foundPath), nullptr) &&
+        corpus::stringValue(nonceValue, foundNonce, sizeof(foundNonce), nullptr) &&
+        strcmp(foundPath, path) == 0 && strcmp(foundNonce, nonce) == 0) {
+      return element;
+    }
+  }
+  TEST_FAIL_MESSAGE(path);
+  return nullptr;
+}
+
+/// Decodes a vector's `body_hex` into `out` as a NUL-terminated string,
+/// returning its byte length.
+size_t bodyOf(const char* vector, char* out, size_t cap) {
+  uint8_t bytes[512] = {};
+  size_t n = 0U;
+  TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(vector, "body_hex", bytes, sizeof(bytes), &n), "body_hex");
+  TEST_ASSERT_TRUE(n < cap);
+  memcpy(out, bytes, n);
+  out[n] = '\0';
+  return n;
+}
+
+void test_corpus_activate_ok_lights_the_relay_court_3_maps_to() {
+  loadHttpCorpus();
+  char body[512] = {};
+  const size_t n = bodyOf(responseVector("activate-response-ok"), body, sizeof(body));
+
+  const bridgelogic::ScanFlow flow;
+  const bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, body, n, kCorpusCourts, bridgelogic::kMaxCourts);
+
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+  TEST_ASSERT_TRUE(r.disarmAuth);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(2U, r.outcome.court); // court_number 3 of [1,2,3,4]
+  TEST_ASSERT_EQUAL_UINT32(2700U * 1000U, r.outcome.durationMs);
+  TEST_ASSERT_EQUAL_STRING("COURT C", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("45 MIN", r.outcome.line2);
+}
+
+void test_corpus_activate_too_early_refuses_with_the_wait_line_and_no_fallback() {
+  loadHttpCorpus();
+  char body[512] = {};
+  const size_t n = bodyOf(responseVector("activate-response-too-early"), body, sizeof(body));
+
+  const bridgelogic::ScanFlow flow;
+  const bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, body, n, kCorpusCourts, bridgelogic::kMaxCourts);
+
+  // A decision: the roster does not get a second opinion, and the scan stays
+  // live. starts_in_seconds is 540 in the vector — nine minutes.
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+  TEST_ASSERT_FALSE(r.disarmAuth);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+  TEST_ASSERT_EQUAL_STRING("TOO EARLY", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("WAIT 9 MIN", r.outcome.line2);
+}
+
+void test_corpus_walkup_replayed_is_a_sixty_minute_grant() {
+  loadHttpCorpus();
+  char body[512] = {};
+  const size_t n = bodyOf(responseVector("walkup-response-replayed"), body, sizeof(body));
+
+  // Relay C, sixty minutes asked; the replayed answer is the first purchase
+  // seen again and lights the court exactly as a fresh grant would.
+  const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(200U, body, n, 2U, 60U);
+  TEST_ASSERT_TRUE(r.decided);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(2U, r.outcome.court);
+  TEST_ASSERT_EQUAL_UINT32(60U * 60000U, r.outcome.durationMs);
+  TEST_ASSERT_EQUAL_STRING("COURT C", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("60 MIN", r.outcome.line2);
+}
+
+void test_corpus_every_bound_response_carries_the_clock_the_reader_finds() {
+  loadHttpCorpus();
+  // Every response body the box reads is also a clock source. The expectation
+  // is the vector's own, so this hardcodes nothing the two sides must agree on.
+  const char* const ids[] = {"provision-response-server-unix", "device-401-body", "activate-response-ok",
+                             "activate-response-too-early", "walkup-response-replayed"};
+  for (const char* id : ids) {
+    const char* vector = responseVector(id);
+    char body[512] = {};
+    const size_t n = bodyOf(vector, body, sizeof(body));
+
+    const char* expect = corpus::member(vector, "expect");
+    TEST_ASSERT_NOT_NULL_MESSAGE(expect, id);
+    const uint64_t expected = corpus::unsignedValue(corpus::member(expect, "server_unix"));
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(0U, expected, id);
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(expected, devapi::findServerUnix(body, n), id);
+  }
+}
+
+void test_corpus_activate_body_is_byte_identical_to_the_signed_request() {
+  loadHttpCorpus();
+  // The signature covers these exact bytes. A field reordered or a space
+  // added on this side is a 401 with no diagnostic on the other.
+  char expected[512] = {};
+  const size_t n = bodyOf(requestVector("/api/v1/device/activate", "c0ffee00c0ffee00c0ffee00c0ffee00"),
+                          expected, sizeof(expected));
+
+  char rendered[96] = {};
+  const size_t renderedLen = bridgelogic::renderActivateBody(rendered, sizeof(rendered), "7Q3F9KM2XZ8B");
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
+}
+
+void test_corpus_walkup_body_is_byte_identical_to_the_signed_request() {
+  loadHttpCorpus();
+  char expected[512] = {};
+  const size_t n = bodyOf(requestVector("/api/v1/device/walkup", "0a1b2c3d4e5f60718293a4b5c6d7e8f9"),
+                          expected, sizeof(expected));
+
+  // Sixty minutes on relay C, which this box maps to club court 3.
+  court::WalkUpIntent intent;
+  intent.court = 2U;
+  intent.minutes = 60U;
+  char rendered[320] = {};
+  const size_t renderedLen = bridgelogic::renderWalkUpBody(
+      rendered, sizeof(rendered), intent, kCorpusCourts[intent.court], "7Q3F9KM2XZ8B", "9f2a4c6e8b0d1f3a");
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
+}
+
 } // namespace
 
 void setUp() {
@@ -884,6 +1160,7 @@ int main(int, char**) {
   RUN_TEST(test_scan_flow_no_answer_is_the_rosters_scan);
   RUN_TEST(test_scan_flow_renders_the_activate_body);
   RUN_TEST(test_display_minutes_never_promise_more_than_the_relay_gives);
+  RUN_TEST(test_any_grant_spends_the_scan_whichever_path_lit_the_court);
 
   RUN_TEST(test_walkup_body_names_the_court_and_carries_the_nonce);
   RUN_TEST(test_walkup_nonce_is_reused_only_for_the_same_undecided_purchase);
@@ -896,6 +1173,14 @@ int main(int, char**) {
   RUN_TEST(test_reconcile_a_set_bit_on_a_dark_court_is_adopted);
   RUN_TEST(test_reconcile_handles_all_four_courts_in_one_frame);
   RUN_TEST(test_reconcile_waits_out_a_frame_that_was_already_in_flight);
+  RUN_TEST(test_after_on_attempt_marks_held_only_when_the_frame_left);
+
+  RUN_TEST(test_corpus_activate_ok_lights_the_relay_court_3_maps_to);
+  RUN_TEST(test_corpus_activate_too_early_refuses_with_the_wait_line_and_no_fallback);
+  RUN_TEST(test_corpus_walkup_replayed_is_a_sixty_minute_grant);
+  RUN_TEST(test_corpus_every_bound_response_carries_the_clock_the_reader_finds);
+  RUN_TEST(test_corpus_activate_body_is_byte_identical_to_the_signed_request);
+  RUN_TEST(test_corpus_walkup_body_is_byte_identical_to_the_signed_request);
 
   return UNITY_END();
 }

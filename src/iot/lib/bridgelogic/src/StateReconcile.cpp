@@ -47,4 +47,14 @@ Reconciliation reconcile(uint8_t mask, const HeldState held[kStateCourts], uint3
   return result;
 }
 
+HeldState afterOnAttempt(const HeldState& previous, bool sent, uint32_t nowMs) {
+  if (!sent) {
+    return previous;
+  }
+  HeldState held;
+  held.sinceMs = nowMs;
+  held.held = true;
+  return held;
+}
+
 } // namespace bridgelogic

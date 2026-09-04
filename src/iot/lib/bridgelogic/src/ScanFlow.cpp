@@ -72,7 +72,6 @@ ActivationResult fallback() {
 
 ActivationResult granted(uint32_t grantedSeconds, uint8_t relay) {
   ActivationResult result;
-  result.disarmAuth = true;
 
   // Clamp the SECONDS before the multiply, for the reason RelayGuard does: a
   // value that wraps on conversion turns the longest grant into the shortest.
@@ -87,10 +86,18 @@ ActivationResult granted(uint32_t grantedSeconds, uint8_t relay) {
   line1[6] = static_cast<char>('A' + relay);
   court::detail::setLine(result.outcome.line1, line1);
   court::detail::setLineWithMinutes(result.outcome.line2, "", result.outcome.durationMs, " MIN");
+
+  // Derived from the outcome, not set beside it, so the online path cannot
+  // disagree with the roster path about when a scan is spent.
+  result.disarmAuth = spendsScan(result.outcome);
   return result;
 }
 
 } // namespace
+
+bool spendsScan(const court::Outcome& outcome) {
+  return outcome.action == court::Action::TurnOn;
+}
 
 uint32_t displayMinutes(uint32_t grantedMinutes) {
   return grantedMinutes > kMaxDisplayMinutes ? kMaxDisplayMinutes : grantedMinutes;

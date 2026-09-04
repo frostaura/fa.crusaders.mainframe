@@ -368,8 +368,9 @@ void showIdentityScreen() {
 /// scan is remembered and would otherwise let it run out on its own — but a
 /// window that outlives the scan is thirty seconds of buttons on the previous
 /// member's identity for whoever walks up next. So every armed→cleared edge of
-/// gLastScan sends `!AUTH,0`: the lapse, a walk-up that spent it, an online
-/// activation that lit the court.
+/// gLastScan sends `!AUTH,0`: the lapse, a walk-up that spent it, and any
+/// activation that lit the court — online or from the roster alike, which is
+/// bridgelogic::spendsScan's rule.
 void forgetScan() {
   gLastScan[0] = '\0';
   gScanAt.disarm();
@@ -571,15 +572,22 @@ void noteMegaPong(const proto::Frame& frame) {
 /// The LCD is written FIRST. If the `!ON` fails — a full TX ring, a dead cable
 /// — the member is looking at "COURT C 45 MIN" and no lights, which is a
 /// complaint with a clear cause. The other order gives them lights and a blank
-/// screen, which reads as the box being broken.
+/// screen, which reads as the box being broken. A failed `!ON` then repaints
+/// "TRY AGAIN" and leaves the court dark in this half's books, so the next
+/// `!STATE` does not synthesise a Release for a session that never started —
+/// bridgelogic::afterOnAttempt is the rule.
 void applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
   static_cast<void>(sendToMega(proto::Frame::lcd(outcome.line1, outcome.line2)));
   if (outcome.action != court::Action::TurnOn || outcome.court >= bridgelogic::kStateCourts) {
     return;
   }
   const proto::Court court = static_cast<proto::Court>(outcome.court);
-  static_cast<void>(sendToMega(proto::Frame::on(court, outcome.durationMs / 1000U)));
-  gHeld[outcome.court] = bridgelogic::HeldState{nowMs, true};
+  const bool sent = sendToMega(proto::Frame::on(court, outcome.durationMs / 1000U));
+  gHeld[outcome.court] = bridgelogic::afterOnAttempt(gHeld[outcome.court], sent, nowMs);
+  if (!sent) {
+    static_cast<void>(
+        sendToMega(proto::Frame::lcd(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2)));
+  }
 }
 
 /// Forward declarations: the API calls sit together further down, with the
@@ -621,8 +629,15 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // roster entry carries it — never something in the scanned bytes. A barcode
   // that could name its own court would be a barcode that opens any court in
   // the club. The scanner serves the first gCourtCount relays.
-  applyOutcome(gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, nowMs),
-               nowMs);
+  const court::Outcome outcome =
+      gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, nowMs);
+  applyOutcome(outcome, nowMs);
+  if (bridgelogic::spendsScan(outcome)) {
+    // The same rule as the online grant (review H1): a lit court spends the
+    // scan, and the window closes with it. Before this the offline grant left
+    // both armed, and the next walk-up bought time on this member's token.
+    forgetScan();
+  }
 }
 
 /// Queues the Release for a court and forgets it. The one place a held court
@@ -964,7 +979,7 @@ void requestWalkUp(const court::WalkUpIntent& intent, uint32_t nowMs) {
     gWalkUpNonce.decided();
   }
   applyOutcome(answer.outcome, nowMs);
-  if (answer.outcome.action == court::Action::TurnOn) {
+  if (bridgelogic::spendsScan(answer.outcome)) {
     // The identity is spent on the purchase: the next member's presses must not
     // buy on this one's token, so the window closes with the scan.
     forgetScan();

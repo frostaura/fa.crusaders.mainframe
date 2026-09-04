@@ -31,6 +31,12 @@
 // next person to walk up must not get thirty seconds of buttons on the previous
 // member's identity. The decision lives here so a host test can pin it.
 //
+// The rule is the same whichever path lit the court. The online grant carried
+// the bit and the roster grant did not (review H1): a box with no link lit the
+// court and left the window armed, and the next walk-up was thirty seconds of
+// buttons on a stranger's token. `spendsScan` is the one rule for both, and the
+// online path's bit is pinned to agree with it.
+//
 // No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
 
 #ifndef CRUSADERS_BRIDGELOGIC_SCANFLOW_H
@@ -84,9 +90,16 @@ uint32_t displayMinutes(uint32_t grantedMinutes);
 bool relayForCourtNumber(int16_t courtNumber, const int16_t courtNumbers[kMaxCourts], uint8_t courtCount,
                          uint8_t& relay);
 
+/// True when `outcome` lit a court, on ANY path — online, roster or walk-up —
+/// and the scan behind it is therefore spent: forget it and close the Mega's
+/// button window. A refusal leaves the scan live so the member can still buy
+/// time with the buttons.
+bool spendsScan(const court::Outcome& outcome);
+
 /// Renders the activate request body. Returns the length, or 0 when it would
 /// not fit — never a truncated body, which would be a request for a different
-/// token.
+/// token. The field order is the corpus's (`http/cases.json`, the
+/// `/api/v1/device/activate` request): the signature covers these exact bytes.
 size_t renderActivateBody(char* out, size_t cap, const char* token);
 
 /// The decision core. Stateless; every input is an argument so the host suite
