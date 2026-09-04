@@ -46,10 +46,18 @@
 
 namespace roster {
 
-/// Longest identification token the box will match. QR payloads and PIN
-/// derivations both fit; anything longer is refused rather than truncated,
-/// because a truncated token matches the wrong member.
-inline constexpr size_t kMaxTokenLen = 40U;
+/// Longest identification token the box will match. Anything longer is refused
+/// rather than truncated, because a truncated token matches the wrong member.
+///
+/// 20, not 40. The token has to transit the scanner line and the `!SCAN` frame,
+/// whose argument is capped at proto::kMaxArgLen (24), so a 40-character roster
+/// token was one the box could hold and never match — the scanner would have
+/// refused it before the roster ever saw it. The heartbeat contract pins the
+/// token as Crockford base32, typically 12 characters, and bounds it at 20; this
+/// constant is that bound. bridgelogic/RosterSync.h asserts it against the
+/// protocol's argument cap, where the two constants meet, because this library
+/// must not depend on the protocol to state its own limit.
+inline constexpr size_t kMaxTokenLen = 20U;
 
 /// One booking, as far as the box needs to know about it.
 ///
@@ -94,9 +102,27 @@ enum class Verdict : uint8_t {
 
 struct Decision {
   Verdict verdict = Verdict::Unknown;
-  /// The matched entry, meaningful only for Allow. For TooEarly and WrongCourt
-  /// it is also populated, so the display can say WHEN and WHERE.
+  /// The matched entry, populated for every verdict that matched one — Allow,
+  /// TooEarly, TooLate and WrongCourt — so the display can say WHEN and WHERE,
+  /// and so the caller can light the court the ENTRY names rather than the one
+  /// it guessed. Untouched for Unknown and Stale.
   Entry entry;
+  /// What to grant now, for Allow: the time REMAINING on the booking, not its
+  /// nominal length. A member who arrives twenty minutes into a 45-minute slot
+  /// gets 25, which is what they booked and what the next member's start time
+  /// depends on. Zero for every other verdict.
+  uint32_t grantMs = 0U;
+};
+
+/// How many relays a box drives, for the shared-scanner decide() overload.
+///
+/// A distinct type rather than a second uint8_t, because a court INDEX and a
+/// court COUNT are the same width and the wrong one compiles silently: passing
+/// a count of 2 where an index was expected refuses every member on court C.
+struct CourtCount {
+  explicit constexpr CourtCount(uint8_t n) : value(n) {}
+
+  uint8_t value;
 };
 
 /// A bounded, age-limited set of bookings for this box's courts.
@@ -121,8 +147,14 @@ public:
   /// empty one.
   void commitReplace();
 
-  /// How the box should answer a scan at `court` presenting `token`.
+  /// How the box should answer a scan at `court` presenting `token`. For a box
+  /// with one scanner per court.
   Decision decide(const char* token, uint8_t court, uint32_t nowMs) const;
+
+  /// How the box should answer `token` presented at its ONE scanner, when that
+  /// scanner serves the first `courts.value` relays. The matched entry names the
+  /// court; an entry on a relay this box does not drive is WrongCourt.
+  Decision decide(const char* token, CourtCount courts, uint32_t nowMs) const;
 
   /// True when the roster has aged out and can no longer be trusted.
   bool stale(uint32_t nowMs) const;
@@ -142,6 +174,11 @@ public:
 
 private:
   static bool tokenEquals(const char* a, const char* b);
+
+  /// The one matching loop both overloads share. An entry is "at this scanner"
+  /// when `firstCourt <= entry.court < endCourt`: a single court is the range
+  /// [court, court + 1) and a shared scanner is [0, count).
+  Decision decideWithin(const char* token, uint8_t firstCourt, uint8_t endCourt, uint32_t nowMs) const;
 
   uint32_t maxAgeMs_;
 
@@ -230,6 +267,17 @@ template <uint8_t Capacity> bool Roster<Capacity>::tokenEquals(const char* a, co
 
 template <uint8_t Capacity>
 Decision Roster<Capacity>::decide(const char* token, uint8_t court, uint32_t nowMs) const {
+  return decideWithin(token, court, static_cast<uint8_t>(court + 1U), nowMs);
+}
+
+template <uint8_t Capacity>
+Decision Roster<Capacity>::decide(const char* token, CourtCount courts, uint32_t nowMs) const {
+  return decideWithin(token, 0U, courts.value, nowMs);
+}
+
+template <uint8_t Capacity>
+Decision Roster<Capacity>::decideWithin(const char* token, uint8_t firstCourt, uint8_t endCourt,
+                                        uint32_t nowMs) const {
   Decision decision;
 
   if (token == nullptr || token[0] == '\0') {
@@ -253,7 +301,7 @@ Decision Roster<Capacity>::decide(const char* token, uint8_t court, uint32_t now
     }
     sawToken = true;
 
-    if (e.court != court) {
+    if (e.court < firstCourt || e.court >= endCourt) {
       // Keep looking: the same member may hold bookings on two courts, and the
       // one they are standing at should win over the one they are not.
       decision.verdict = Verdict::WrongCourt;
@@ -273,6 +321,10 @@ Decision Roster<Capacity>::decide(const char* token, uint8_t court, uint32_t now
 
     decision.verdict = Verdict::Allow;
     decision.entry = e;
+    // Remaining, not nominal. The TooLate check above established that the age
+    // is still inside the window, so this cannot underflow, and a late arrival
+    // gets what is left of the slot.
+    decision.grantMs = e.closesAtMs - age;
     return decision;
   }
 

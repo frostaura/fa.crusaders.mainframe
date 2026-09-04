@@ -997,7 +997,9 @@ void test_session_a_booked_member_gets_the_lights_and_an_activation_event() {
 
   TEST_ASSERT_TRUE(out.action == court::Action::TurnOn);
   TEST_ASSERT_EQUAL_UINT8(2U, out.court);
-  TEST_ASSERT_EQUAL_UINT32(2700000UL, out.durationMs);
+  // One second after the slot opened, so one second less than the slot: the
+  // grant is what REMAINS, not what was booked. Rounded up on the display.
+  TEST_ASSERT_EQUAL_UINT32(2699000UL, out.durationMs);
   TEST_ASSERT_EQUAL_STRING("COURT C", out.line1);
   TEST_ASSERT_EQUAL_STRING("45 MIN", out.line2);
 

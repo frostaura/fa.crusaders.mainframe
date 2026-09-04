@@ -93,6 +93,10 @@ lib/           shared modules — PURE, no Arduino headers, host-compilable
   roster/      who may open which court, cached and age-limited
   eventq/      what the box DID, queued until the API can hear about it
   court/       what a scan means; the button map; the walk-up pad
+  bridgelogic/ the ESP's decisions: roster sync from the heartbeat, the
+               online-then-roster scan flow, walk-up request + nonce,
+               `!STATE` reconciliation — everything court_bridge/main.cpp
+               does NOT do
   devapi/      signed requests, response policy, and a heapless JSON scanner
   otacore/     whether to take an update, and surviving one that does not work
   fwversion/   the FW_VERSION_* string, alone so either half can carry it
@@ -157,13 +161,19 @@ never released). `make lint-iot` greps for raw comparisons against any
 
 ## The court works when the network does not
 
-A scan is decided **on the box**, from the roster cache, in microseconds. Putting
-an HTTPS round trip on that path would make every activation depend on a consumer
-router and an ISP, and turn a DNS stall into a member standing in a dark corridor
-pressing the button again.
+A scan on a box that can reach the API **asks the API first**
+(`POST /api/v1/device/activate`), because only the API knows about a booking made
+thirty seconds ago, a walk-up member with no booking, or a balance too low to admit.
+Its answer — a grant or a refusal — is final; the roster is never asked for a
+second opinion. When the API cannot be asked (no link, no clock, a transport
+failure, a 5xx, a malformed 200) the scan is decided **on the box**, from the
+roster cache the heartbeat fills, in microseconds — so a router reboot is a slower
+scan, not a dark court. The flow is `lib/bridgelogic/ScanFlow`.
 
-So the box decides locally and records what it did; the API hears about it when it
-can. Three consequences worth knowing before changing any of it:
+On the roster path the box records what it did and the API hears about it when it
+can; an activation the API itself granted is not queued, because the queue is the
+record of what the API did **not** hear. Three consequences worth knowing before
+changing any of it:
 
 - **A queued activation is not a charge.** Under charge-at-booking the member has
   already been debited. The event is the evidence that stops the no-show sweep

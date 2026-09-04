@@ -774,8 +774,84 @@ void test_box_a_duration_past_a_uint16_clamps_rather_than_wrapping(void) {
   TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!STATE,1,5400,0,0,0"));
 }
 
+// --- scan feedback (review A2-14) -------------------------------------------
+//
+// The sketch this replaces painted "VERIFYING..." on every scan before any
+// answer existed. v2 moved every scan-path LCD write onto the ESP, so with the
+// bridge dead a scan produced no visible change at all and members re-scanned
+// until they reported the scanner as broken. The Mega now acknowledges locally
+// and lets the bridge's answer overwrite it.
+
+void test_box_a_scan_is_acknowledged_on_the_glass_before_any_answer(void) {
+  Box b(kBaseMid);
+
+  TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
+  b.step(kBaseMid + 1U);
+
+  TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING("                ", b.display.row(1U));
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!SCAN,MEM-0042"));
+}
+
+void test_box_a_dead_bridge_still_gets_the_scan_acknowledged(void) {
+  Box b(kBaseMid);
+
+  // The ESP is gone: the frame cannot be sent. That is exactly when the member
+  // most needs to see that the scanner heard them.
+  b.bridge.setConnected(false);
+  TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
+  b.step(kBaseMid + 1U);
+
+  TEST_ASSERT_TRUE(b.box.droppedTxFrames() > 0U);
+  TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+}
+
+void test_box_the_bridges_answer_replaces_the_acknowledgement_and_stays(void) {
+  Box b(kBaseMid);
+
+  TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
+  b.step(kBaseMid + 1U);
+
+  feedFrame(b.bridge, proto::Frame::lcd("COURT A", "45 MIN"));
+  b.step(kBaseMid + 800U);
+  TEST_ASSERT_EQUAL_STRING("COURT A         ", b.display.row(0U));
+
+  // Ten seconds on, the answer must NOT be painted over with the idle screen:
+  // the bridge answered, so the feedback timer was disarmed.
+  b.step(kBaseMid + 1U + courtlogic::kScanFeedbackMs);
+  b.step(kBaseMid + 1U + courtlogic::kScanFeedbackMs + 5000U);
+  TEST_ASSERT_EQUAL_STRING("COURT A         ", b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING("45 MIN          ", b.display.row(1U));
+}
+
+void test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds(void) {
+  for (size_t i = 0; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    Box b(base);
+
+    TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
+    b.step(base);
+    TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+
+    // Still waiting one millisecond before the deadline — across the wrap for
+    // the two wrap bases, where a naive comparison would repaint immediately
+    // or never.
+    b.step(base + courtlogic::kScanFeedbackMs - 1U);
+    TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+
+    b.step(base + courtlogic::kScanFeedbackMs);
+    TEST_ASSERT_EQUAL_STRING(courtlogic::kIdleLine1, b.display.row(0U));
+    TEST_ASSERT_EQUAL_STRING("SCAN TO START   ", b.display.row(1U));
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
+
+  RUN_TEST(test_box_a_scan_is_acknowledged_on_the_glass_before_any_answer);
+  RUN_TEST(test_box_a_dead_bridge_still_gets_the_scan_acknowledged);
+  RUN_TEST(test_box_the_bridges_answer_replaces_the_acknowledgement_and_stays);
+  RUN_TEST(test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds);
 
   RUN_TEST(test_relay_guard_drives_the_active_low_level);
   RUN_TEST(test_relay_guard_releases_at_the_deadline_at_every_base);

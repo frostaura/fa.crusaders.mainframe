@@ -37,16 +37,25 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "protocol/Protocol.h"
+
 namespace court {
 
 /// Physical buttons on a court box. Fixed by the wiring.
 inline constexpr uint8_t kButtonCount = 8U;
 
-/// The longest grant a single button may carry. Mirrors ButtonMap.MaxGrantMinutes
-/// on the server; a value past it is refused here too rather than trusted, because
-/// "the server validated it" stops being true the moment somebody edits the
-/// database by hand.
-inline constexpr uint16_t kMaxGrantMinutes = 240U;
+/// The longest grant a single button may carry: the relay hard cap, in minutes.
+///
+/// Mirrors ButtonMap.MaxGrantMinutes on the server, which is pinned to the same
+/// cap — and both are pinned by the shared corpus (`max_grant_minutes` in
+/// buttonmap/cases.json). It was 240, and the Mega's timer cut the lights at
+/// minute 90 whatever the button promised (review M1): the member paid for 240,
+/// the LCD said 240, and the court went dark with no refund path. A value past
+/// the cap is refused here too rather than trusted, because "the server validated
+/// it" stops being true the moment somebody edits the database by hand.
+inline constexpr uint16_t kMaxGrantMinutes = proto::kRelayHardCapSeconds / 60U;
+
+static_assert(kMaxGrantMinutes == 90U, "the button grant cap must be the relay hard cap in minutes");
 
 enum class ButtonKind : uint8_t {
   /// A button the club has decided not to use.

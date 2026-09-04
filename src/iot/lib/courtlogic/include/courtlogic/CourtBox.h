@@ -77,6 +77,21 @@ inline constexpr uint16_t kBytesPerPass = 64U;
 inline constexpr char kIdleLine1[] = "CRUSADERS COURTS";
 inline constexpr char kIdleLine2[] = "SCAN TO START";
 
+/// Painted the instant a scan completes, before any answer exists.
+///
+/// The sketch this replaces painted "VERIFYING..." unconditionally on every
+/// scan; v2 moved every scan-path LCD write to the ESP, so with the bridge
+/// crashed, rebooting or mid-failed-OTA a scan produced NO visible change and
+/// members re-scanned until they reported the scanner as broken (review A2-14).
+/// This is local feedback only — no decision moves onto the Mega — and the
+/// bridge's own `!LCD` overwrites it within a second when the bridge is alive.
+inline constexpr char kScanFeedbackLine1[] = "CHECKING...";
+
+/// How long the feedback stands before the idle screen comes back on its own.
+/// A bridge that has not answered in ten seconds is not going to; leaving
+/// "CHECKING..." up indefinitely would be the same silence with different words.
+inline constexpr uint32_t kScanFeedbackMs = 10000UL;
+
 /// Every port the Mega has, gathered into one argument.
 ///
 /// A struct rather than six constructor parameters, for two reasons. Six is the
@@ -141,10 +156,11 @@ public:
 private:
   // --- one pass ------------------------------------------------------------
   void drainBridge(uint32_t nowMs);
-  void drainScanner();
+  void drainScanner(uint32_t nowMs);
   void pollButtons(uint32_t nowMs);
   void releaseExpired(uint32_t nowMs);
   void noteAuthLapse(uint32_t nowMs);
+  void expireScanFeedback(uint32_t nowMs);
   void flushOverrun();
   void publishState(uint32_t nowMs);
 
@@ -188,6 +204,11 @@ private:
   proto::Decoder rx_;
   tb::Uptime64 uptime_;
   tb::Deadline stateDue_;
+
+  /// Armed when "CHECKING..." goes up; disarmed by the bridge's next `!LCD`;
+  /// expiring it repaints the idle screen. A tb::Deadline, so the wrap cannot
+  /// leave the feedback up for 49 days.
+  tb::Deadline scanFeedback_;
 
   /// The mask `!STATE` last reported, so a change can be detected without
   /// re-deriving it from four deadlines.

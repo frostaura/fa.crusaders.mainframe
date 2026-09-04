@@ -71,10 +71,14 @@ void linesFor(roster::Verdict verdict, const roster::Entry& entry, uint8_t court
   switch (verdict) {
   case roster::Verdict::Allow: {
     // "COURT C" then "45 MIN" — the two facts a member checks before walking on.
+    // Line 2 is the caller's: it carries the GRANT, which is the remaining time
+    // clamped to the relay cap, and only Session knows that number. The entry's
+    // nominal duration is deliberately not painted — a member arriving late
+    // would read a promise the relay is not going to keep.
     size_t at = appendText(line1, 0U, kLineLen + 1U, "COURT ");
     line1[at] = courtLetter(court);
     line1[at + 1U] = '\0';
-    setLineWithMinutes(line2, "", entry.durationMs, " MIN");
+    static_cast<void>(entry);
     return;
   }
 

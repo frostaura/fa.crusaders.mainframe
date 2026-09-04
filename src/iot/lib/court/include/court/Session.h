@@ -39,6 +39,7 @@
 
 #include "eventq/Event.h"
 #include "eventq/EventQueue.h"
+#include "protocol/Protocol.h"
 #include "roster/Roster.h"
 
 namespace court {
@@ -46,6 +47,17 @@ namespace court {
 /// Exactly 16 characters plus a terminator: the display's width, and the width
 /// hal::IDisplayPort will pad or clip to.
 inline constexpr size_t kLineLen = 16U;
+
+/// The longest grant this layer will hand out, in milliseconds: the relay hard
+/// cap. The Mega clamps the wire duration to the same number, so a grant past
+/// it would light the court for 90 minutes while the display promised more —
+/// clamping HERE is what makes the screen, the event and the relay agree.
+inline constexpr uint32_t kMaxGrantMs = static_cast<uint32_t>(proto::kRelayHardCapSeconds) * 1000UL;
+
+/// `ms`, or the cap, whichever is smaller.
+constexpr uint32_t clampGrantMs(uint32_t ms) {
+  return ms > kMaxGrantMs ? kMaxGrantMs : ms;
+}
 
 /// What the box should do next.
 enum class Action : uint8_t {
@@ -86,8 +98,14 @@ template <typename RosterT, typename QueueT> class Session {
 public:
   Session(RosterT& roster, QueueT& queue) : roster_(roster), queue_(queue) {}
 
-  /// A member presented `token` at `court`.
+  /// A member presented `token` at `court` — a box with a scanner per court.
   Outcome onScan(const char* token, uint8_t court, eventq::Method method, uint32_t nowMs);
+
+  /// A member presented `token` at the box's ONE scanner, which serves the
+  /// first `courts.value` relays. The court comes from the matched roster
+  /// entry, never from the scan: a barcode that could name its own court would
+  /// be a barcode that opens any court in the club.
+  Outcome onScan(const char* token, roster::CourtCount courts, eventq::Method method, uint32_t nowMs);
 
   /// A court's lights went out — the Mega's timer expired, or somebody pressed
   /// off. Recorded so the club can see how long the court was actually used,
@@ -101,11 +119,25 @@ public:
 private:
   Outcome record(Outcome outcome, eventq::Event& event);
 
+  /// Turns a roster decision into an outcome and an event. `fallbackCourt` is
+  /// what the outcome and the event carry when NO entry matched — the scanned-at
+  /// court for the per-court overload, eventq::Event::kNoCourt for the shared
+  /// scanner, which has no court to attribute an unknown token to.
+  Outcome applyDecision(const roster::Decision& decision, const char* token, uint8_t fallbackCourt,
+                        eventq::Method method, uint32_t nowMs);
+
   RosterT& roster_;
   QueueT& queue_;
 };
 
 namespace detail {
+
+/// True for the verdicts that carry a matched entry — the ones whose court is
+/// the ENTRY's court, not the caller's.
+constexpr bool matchedAnEntry(roster::Verdict verdict) {
+  return verdict == roster::Verdict::Allow || verdict == roster::Verdict::TooEarly ||
+         verdict == roster::Verdict::TooLate || verdict == roster::Verdict::WrongCourt;
+}
 
 /// Copies at most kLineLen characters and terminates. Silently clips, because
 /// a display line is the one place where truncation is the correct answer.
@@ -149,7 +181,28 @@ Outcome Session<RosterT, QueueT>::record(Outcome outcome, eventq::Event& event) 
 template <typename RosterT, typename QueueT>
 Outcome Session<RosterT, QueueT>::onScan(const char* token, uint8_t court, eventq::Method method,
                                          uint32_t nowMs) {
-  const roster::Decision decision = roster_.decide(token, court, nowMs);
+  return applyDecision(roster_.decide(token, court, nowMs), token, court, method, nowMs);
+}
+
+template <typename RosterT, typename QueueT>
+Outcome Session<RosterT, QueueT>::onScan(const char* token, roster::CourtCount courts, eventq::Method method,
+                                         uint32_t nowMs) {
+  return applyDecision(roster_.decide(token, courts, nowMs), token, eventq::Event::kNoCourt, method, nowMs);
+}
+
+template <typename RosterT, typename QueueT>
+Outcome Session<RosterT, QueueT>::applyDecision(const roster::Decision& decision, const char* token,
+                                                uint8_t fallbackCourt, eventq::Method method,
+                                                uint32_t nowMs) {
+  // THE COURT IS THE ENTRY'S, WHENEVER THERE IS ONE.
+  //
+  // This used to be the caller's court unconditionally — set before the lines
+  // were rendered and set AGAIN after record() — so on a box whose single
+  // scanner serves four relays, `!ON` always went to the relay the caller
+  // guessed, whatever booking had actually matched (review C4). The entry
+  // carries the court the API booked; that is the relay to drive.
+  const bool matched = detail::matchedAnEntry(decision.verdict);
+  const uint8_t court = matched ? decision.entry.court : fallbackCourt;
 
   Outcome outcome;
   outcome.court = court;
@@ -162,11 +215,15 @@ Outcome Session<RosterT, QueueT>::onScan(const char* token, uint8_t court, event
   event.method = method;
 
   if (decision.verdict == roster::Verdict::Allow) {
+    // What is LEFT of the booking, capped at what the relay will honour. The
+    // display, the event and the wire duration all take this one number.
+    const uint32_t grantMs = clampGrantMs(decision.grantMs);
     outcome.action = Action::TurnOn;
-    outcome.durationMs = decision.entry.durationMs;
+    outcome.durationMs = grantMs;
+    detail::setLineWithMinutes(outcome.line2, "", grantMs, " MIN");
 
     event.kind = eventq::Kind::Activation;
-    event.durationMs = decision.entry.durationMs;
+    event.durationMs = grantMs;
     // The roster's token, not the scanned bytes. They are equal by construction
     // here, and taking the stored one means a scanner that appends a stray
     // character cannot put it in the ledger reference.

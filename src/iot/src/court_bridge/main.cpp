@@ -32,25 +32,29 @@
 //
 // THE COURT WORKS WHEN THE NETWORK DOES NOT
 // -----------------------------------------
-// A scan is decided HERE, from the roster cache, in microseconds. Putting an
-// HTTPS round trip on that path would make every activation depend on a
-// consumer router and an ISP, and turn a DNS stall into a member standing in a
-// dark corridor pressing the button again. So the box decides locally and
-// queues what it did; the API hears about it when it can.
+// A scan on a box that can reach the API asks the API, because only the API
+// knows about a booking made thirty seconds ago, a walk-up member with no
+// booking, or a balance too low to admit. Its answer is final. When the API
+// cannot be asked — no link, no clock, a transport failure, a 5xx — the scan
+// is decided HERE, from the roster cache the heartbeat fills, in microseconds,
+// and the box queues what it did; the API hears about it when it can. A router
+// reboot is a slower scan, not a dark court. The flow itself is in
+// lib/bridgelogic/ScanFlow, where the host suite drives every branch.
 //
 // The event queue is therefore not a nicety. Under charge-at-booking the member
 // has ALREADY been debited, and the activation event is what stops the no-show
 // sweep reversing it — a court lit and never reported looks exactly like a
 // member who stayed home. See lib/eventq, which also states plainly what the
-// queue does not survive.
+// queue does not survive. An activation the API itself granted is NOT queued:
+// the queue is the record of what the API did not hear.
 //
-// WHAT THIS FIRMWARE DELIBERATELY DEFERS
-// --------------------------------------
-//   * OTA. The whole reason this half is separate; it needs a signed-image
-//     policy decided before any code, not after.
-//   * Remappable buttons. `!BTN` frames are decoded and counted but do not yet
-//     choose a court or a duration — that map is a tenant setting and arrives
-//     on the heartbeat config payload.
+// WHAT THIS FILE DOES NOT DECIDE
+// ------------------------------
+// Anything a host test could want to drive. What a heartbeat's roster means,
+// what an activate response means, when a `!STATE` mask contradicts a held
+// court, what a walk-up request looks like on the wire — all of it is in
+// lib/bridgelogic. This file owns the sockets, the store and the Mega link,
+// and wires the answers to them.
 
 #include <Arduino.h>
 #include <ESP8266HTTPClient.h>
@@ -65,6 +69,10 @@
 #include "arduino_hal/ArduinoClock.h"
 #include "arduino_hal/LittleFsStore.h"
 #include "arduino_hal/SerialTransport.h"
+#include "bridgelogic/RosterSync.h"
+#include "bridgelogic/ScanFlow.h"
+#include "bridgelogic/StateReconcile.h"
+#include "bridgelogic/WalkUp.h"
 #include "court/ButtonMap.h"
 #include "court/Session.h"
 #include "court/WalkUpPad.h"
@@ -213,8 +221,9 @@ bool gWifiUp = false;
 /// Sizes come from build flags so they are visible in platformio.ini next to
 /// the board they have to fit in, and so the linker can prove they do. 64 slots
 /// of ~48 bytes is about 3 KB — affordable on the ESP8266, and a whole busy
-/// evening's worth of events.
-constexpr uint8_t kRosterSlots = 32U;
+/// evening's worth of events. The roster holds exactly what the heartbeat
+/// contract can send: sixteen entries, two copies (live and staging).
+constexpr uint8_t kRosterSlots = bridgelogic::kMaxRosterEntries;
 
 eventq::EventQueue<EVENTQ_SLOTS> gQueue(&gStore);
 roster::Roster<kRosterSlots> gRoster(ROSTER_MAX_AGE_MS);
@@ -231,32 +240,34 @@ public:
 RequestEntropy gRequestEntropy;
 devapi::DeviceClient gApi(devapi::Credentials{}, gRequestEntropy);
 
-/// Which court this box is fitted at, from the heartbeat. 0-3 for A-D.
+/// The courts this box drives, from the heartbeat's `court_numbers`: array
+/// position is the relay index, value is the club's court number. Empty until
+/// the first accepted heartbeat, and a box that drives no courts it knows of
+/// refuses every walk-up locally rather than selling court zero.
 ///
-/// The API assigns it; the box does not guess. A default of 0 means an
-/// unprovisioned box would answer scans as court A — which is why the roster
-/// starts stale, and a stale roster refuses everything regardless of court.
-uint8_t gCourtNumber = 0U;
+/// The API assigns them; the box does not guess. One box serves up to four
+/// courts through one scanner, so a scan's court comes from the matched roster
+/// entry or the API's answer, never from a single configured number (review C4).
+int16_t gCourtNumbers[bridgelogic::kMaxCourts] = {};
+uint8_t gCourtCount = 0U;
 
 /// When each court's lights went on, so a release can report how long it was
 /// actually held. This is the number a dispute about a 45-minute booking turns
 /// on, and the Mega's own timer is what ends it — so the ESP has to watch for
-/// the end rather than schedule it.
+/// the end rather than schedule it: the `!EVT` release, or failing that the
+/// `!STATE` mask, which bridgelogic::reconcile compares against this.
 ///
 /// `held` is a separate flag rather than "zero means not held", which is the
 /// rule TimeBase.h states outright: every possible uint32_t is a legal millis()
-/// reading, so no value is free to carry a second meaning. tb::Deadline carries
-/// its own `armed` flag for exactly this. A court lit in the one millisecond the
-/// clock reads zero — once per 49.7 days — reported a session of zero length,
-/// which is the same defect class the file exists to prevent, in the one file no
-/// gate covers. (The CI lint described in TimeBase.h matches identifiers ending
-/// Deadline|Expires|AtMs; `gHeldSinceMs` ends in SinceMs and slipped through.)
-struct HeldSince {
-  uint32_t sinceMs = 0U;
-  bool held = false;
-};
+/// reading, so no value is free to carry a second meaning. `sinceMs` is when the
+/// belief last changed, in either direction — see StateReconcile.h for why the
+/// release instant matters too.
+bridgelogic::HeldState gHeld[bridgelogic::kStateCourts];
 
-HeldSince gHeld[4];
+/// The scan flow's decision core and the walk-up nonce policy. Both stateless
+/// or nearly so; both live in lib/bridgelogic so the host suite owns them.
+bridgelogic::ScanFlow gScanFlow;
+bridgelogic::WalkUpNonce gWalkUpNonce;
 
 /// What the eight buttons do, and the two presses that use them.
 ///
@@ -267,17 +278,30 @@ HeldSince gHeld[4];
 court::ButtonMap gButtons;
 court::WalkUpPad gPad;
 
-/// How long a scan is remembered for a following walk-up.
+/// How long a scan is remembered for a following walk-up — and, on the Mega,
+/// how long the button window it opens stays armed. ONE number: the two are
+/// the same fact seen from either end of the cable, and when they were two
+/// literals the ESP forgot the scan while the Mega was still forwarding the
+/// presses, or the reverse.
 ///
 /// The same reasoning as the pad's own selection lapse, and it has to be at least as long or
 /// the two disagree: somebody who scans, wanders off and comes back to a different member's
 /// button presses must not have bought them court time. The QR itself expires in 60 seconds
 /// at the API, which is the real backstop.
-constexpr uint32_t kScanMemoryMs = 30000UL;
+constexpr uint32_t kScanMemoryMs = AUTH_TTL_MS;
+
+/// What `!AUTH` is sent with after a scan.
+constexpr uint16_t kAuthSeconds = static_cast<uint16_t>(kScanMemoryMs / 1000UL);
 
 /// The last thing the scanner read, verbatim. Cleared when it lapses or is spent.
 char gLastScan[proto::kMaxArgLen + 1] = {'\0'};
 tb::Deadline gScanAt;
+
+/// The heartbeat response. File scope, not stack: the contract allows 2048
+/// bytes — sixteen roster entries plus the button map plus an OTA offer — and
+/// loop() runs on the ESP8266's 4 KB continuation stack, where a 2.5 KB local
+/// under an HTTP call is a crash that looks like a random reset.
+char gHeartbeatBody[2560] = {};
 
 /// The guard that stops a broken build being taken twice.
 ///
@@ -318,11 +342,38 @@ bool sendToMega(const proto::Frame& frame) {
   return gMega.write(reinterpret_cast<const uint8_t*>(buf), len) == len;
 }
 
-void showClaimPrompt() {
+/// Paints what this board IS: the idle screen on a claimed board, the claim
+/// code on one still waiting to be claimed.
+///
+/// One function for both because every caller has the same question — "the
+/// screen may be stale, what should it say?" — after a Mega reset, a WiFi
+/// link-up, a lost credential. When it was showClaimPrompt() unconditionally,
+/// a brown-out or a WiFi blip on a live court painted "CLAIM CODE <hex>" over a
+/// working box, and staff read it as unclaimed or broken (review A2-7). The
+/// code shown was meaningless anyway: it is regenerated every boot.
+void showIdentityScreen() {
+  if (gProvisioned) {
+    static_cast<void>(sendToMega(proto::Frame::lcd("CONNECTED", "SCAN TO START")));
+    return;
+  }
   // The claim code goes out on the ONE channel nothing on the network can read:
   // the Mega's LCD. That is the whole point of the commitment scheme — the code
   // is never on the wire, only SHA256(code ":" nonce) truncated to 16 hex.
   static_cast<void>(sendToMega(proto::Frame::lcd("CLAIM CODE", gClaimCode.lcdText())));
+}
+
+/// Forgets the remembered scan AND closes the Mega's button window.
+///
+/// The two are one transition. The Mega arms its window on `!AUTH,<ttl>` when a
+/// scan is remembered and would otherwise let it run out on its own — but a
+/// window that outlives the scan is thirty seconds of buttons on the previous
+/// member's identity for whoever walks up next. So every armed→cleared edge of
+/// gLastScan sends `!AUTH,0`: the lapse, a walk-up that spent it, an online
+/// activation that lit the court.
+void forgetScan() {
+  gLastScan[0] = '\0';
+  gScanAt.disarm();
+  static_cast<void>(sendToMega(proto::Frame::auth(0U)));
 }
 
 void setupIdentity() {
@@ -509,8 +560,8 @@ void noteMegaPong(const proto::Frame& frame) {
   }
   if (seconds < gMegaUptime) {
     // The Mega restarted: its screen is back to the idle text and it has no
-    // idea a claim is in progress.
-    showClaimPrompt();
+    // idea whether a claim is in progress.
+    showIdentityScreen();
   }
   gMegaUptime = seconds;
 }
@@ -521,17 +572,21 @@ void noteMegaPong(const proto::Frame& frame) {
 /// — the member is looking at "COURT C 45 MIN" and no lights, which is a
 /// complaint with a clear cause. The other order gives them lights and a blank
 /// screen, which reads as the box being broken.
-void applyOutcome(const court::Outcome& outcome) {
+void applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
   static_cast<void>(sendToMega(proto::Frame::lcd(outcome.line1, outcome.line2)));
-  if (outcome.action != court::Action::TurnOn) {
+  if (outcome.action != court::Action::TurnOn || outcome.court >= bridgelogic::kStateCourts) {
     return;
   }
   const proto::Court court = static_cast<proto::Court>(outcome.court);
   static_cast<void>(sendToMega(proto::Frame::on(court, outcome.durationMs / 1000U)));
-  if (outcome.court < 4U) {
-    gHeld[outcome.court] = HeldSince{gClock.nowMs(), true};
-  }
+  gHeld[outcome.court] = bridgelogic::HeldState{nowMs, true};
 }
+
+/// Forward declarations: the API calls sit together further down, with the
+/// helpers they share. Moving them up to satisfy the compiler would put them
+/// away from the code they belong with.
+bool activateOnline(const char* token, uint32_t nowMs);
+void requestWalkUp(const court::WalkUpIntent& intent, uint32_t nowMs);
 
 void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // Remembered so a following walk-up knows WHO is buying. The scanned bytes, not the
@@ -540,12 +595,41 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   snprintf(gLastScan, sizeof(gLastScan), "%s", frame.arg(0));
   gScanAt.arm(nowMs, kScanMemoryMs);
 
-  // The court a scan belongs to is the court the box is fitted at, which is the
-  // court_number the API assigned it — not something in the scanned bytes. A
-  // barcode that could name its own court would be a barcode that opens any
-  // court in the club.
-  const court::Outcome outcome = gSession.onScan(frame.arg(0), gCourtNumber, eventq::Method::Qr, nowMs);
-  applyOutcome(outcome);
+  // Open the Mega's button window for the same span the scan is remembered. The
+  // Mega drops every press outside its window, and until this was sent nothing
+  // in the bridge ever opened one — walk-up and early release were dead at the
+  // panel (review H1). forgetScan() closes it.
+  static_cast<void>(sendToMega(proto::Frame::auth(kAuthSeconds)));
+
+  bridgelogic::LinkState link;
+  link.provisioned = gProvisioned;
+  link.wifiUp = gWifiUp;
+  link.clockKnown = gApi.clockKnown();
+
+  switch (gScanFlow.onScan(link)) {
+  case bridgelogic::Attempt::Online:
+    if (activateOnline(frame.arg(0), nowMs)) {
+      return;
+    }
+    // No decision from the API. The roster's scan, as below.
+    break;
+  case bridgelogic::Attempt::RosterOnly:
+    break;
+  }
+
+  // The court a scan belongs to is the one the matched booking names — the
+  // roster entry carries it — never something in the scanned bytes. A barcode
+  // that could name its own court would be a barcode that opens any court in
+  // the club. The scanner serves the first gCourtCount relays.
+  applyOutcome(gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, nowMs),
+               nowMs);
+}
+
+/// Queues the Release for a court and forgets it. The one place a held court
+/// becomes a released one, whichever messenger — `!EVT` or `!STATE` — said so.
+void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
+  applyOutcome(gSession.onRelease(court, heldMs, nowMs), nowMs);
+  gHeld[court] = bridgelogic::HeldState{nowMs, false};
 }
 
 void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
@@ -562,15 +646,39 @@ void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
   const uint8_t court = static_cast<uint8_t>(courtText[0] - 'A');
-  applyOutcome(
-      gSession.onRelease(court, gHeld[court].held ? tb::since(nowMs, gHeld[court].sinceMs) : 0U, nowMs));
-  gHeld[court] = HeldSince{};
+  if (!gHeld[court].held) {
+    // Already dark in this half's books: a `!STATE` got here first and the
+    // release is queued. Exactly one Release per lighting, whichever messenger
+    // survived the Mega's TX ring.
+    return;
+  }
+  releaseCourt(court, tb::since(nowMs, gHeld[court].sinceMs), nowMs);
 }
 
-/// Forward declaration: the button handler sits with the rest of the uplink handling, and
-/// the walk-up request sits with the other API calls it shares helpers with. Moving either
-/// to satisfy the compiler would put it away from the code it belongs with.
-void requestWalkUp(const court::WalkUpIntent& intent);
+/// `!STATE,<mask>,...` — the Mega's own account of which relays are closed,
+/// on every change and every ten seconds. Reconciled against gHeld so that a
+/// release whose `!EVT` was dropped from the Mega's 64-byte TX ring still
+/// reaches the API (review A2-6). The rule is in bridgelogic::reconcile; this
+/// only applies what it says.
+void handleState(const proto::Frame& frame, uint32_t nowMs) {
+  uint8_t mask = 0U;
+  if (!bridgelogic::parseStateMask(frame.arg(0), mask)) {
+    return;
+  }
+  const bridgelogic::Reconciliation plan = bridgelogic::reconcile(mask, gHeld, nowMs);
+  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
+    switch (plan.action[i]) {
+    case bridgelogic::CourtAction::SynthesizeRelease:
+      releaseCourt(i, plan.heldMs[i], nowMs);
+      break;
+    case bridgelogic::CourtAction::AdoptHeld:
+      gHeld[i] = bridgelogic::HeldState{nowMs, true};
+      break;
+    case bridgelogic::CourtAction::None:
+      break;
+    }
+  }
+}
 
 /// A debounced press, interpreted through the map the API pushed.
 ///
@@ -596,7 +704,7 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
   case court::PadResult::Requested:
-    requestWalkUp(gPad.intent());
+    requestWalkUp(gPad.intent(), nowMs);
     return;
   case court::PadResult::ReleaseRequested:
     static_cast<void>(sendToMega(proto::Frame::off(static_cast<proto::Court>(gPad.intent().court))));
@@ -626,11 +734,15 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
   case proto::Verb::Btn:
     handleButton(result.frame, nowMs);
     return;
+  case proto::Verb::State:
+    // The Mega's timer is still the authority on when a court goes dark. This
+    // half does not second-guess it — it CATCHES UP with it, when the event
+    // that should have said so was dropped.
+    handleState(result.frame, nowMs);
+    return;
   default:
-    // `!STATE` is the Mega telling us which relays it believes are closed. Read for
-    // diagnostics only: the Mega's own timer is the authority on when a court goes
-    // dark, and second-guessing it from here is how the two halves start
-    // disagreeing about a live court.
+    // `!ERR`, and downlink verbs echoed by a crossed cable. Counted by the
+    // decoder; nothing to act on.
     return;
   }
 }
@@ -766,57 +878,97 @@ uint16_t callApi(const char* method, const char* path, const char* body, char* o
   return status > 0 ? static_cast<uint16_t>(status) : 0U;
 }
 
+/// Asks the API to activate the remembered scan. True when the API DECIDED —
+/// granted or refused — and the outcome has been applied; false when it could
+/// not be asked or gave no decision, in which case the caller falls back to
+/// the roster. The interpretation is bridgelogic::ScanFlow's; this owns the
+/// socket and the two side effects it cannot see: the clock, and the Mega.
+bool activateOnline(const char* token, uint32_t nowMs) {
+  static_cast<void>(sendToMega(proto::Frame::lcd("ONE MOMENT", "")));
+
+  char body[96];
+  if (bridgelogic::renderActivateBody(body, sizeof(body), token) == 0U) {
+    return false;
+  }
+
+  // Static, not stack: this runs under the HTTP call on the 4 KB continuation
+  // stack, beside callApi's own url and signing buffers.
+  static char response[256];
+  response[0] = '\0';
+
+  devapi::Response result;
+  result.status = callApi("POST", "/api/v1/device/activate", body, response, sizeof(response));
+  result.serverUnix = devapi::findServerUnix(response, strlen(response));
+  // The clock first: a 401 with a time attached corrects the offset and counts
+  // towards the reprovision strike, exactly as it does on the heartbeat. The
+  // reaction itself is not acted on here — THIS scan got no decision from a 401
+  // and falls back to the roster below; the heartbeat carries the credential
+  // consequence.
+  static_cast<void>(gApi.react(result, static_cast<uint32_t>(gUptime.value())));
+
+  const bridgelogic::ActivationResult decision =
+      gScanFlow.onActivateResponse(result.status, response, strlen(response), gCourtNumbers, gCourtCount);
+  if (decision.fallbackToRoster) {
+    return false;
+  }
+  applyOutcome(decision.outcome, nowMs);
+  if (decision.disarmAuth) {
+    forgetScan();
+  }
+  return true;
+}
+
 /// Buys court time, which is the one court-box operation that needs the network.
 ///
 /// The price is not decided here and cannot be: a walk-up is truncated at the next booking
 /// and charged pro rata, and the box knows neither the tariff nor the next booking. Guessing
 /// at either sells a member something the club did not agree to. So it asks, and shows what
-/// the API answered.
-void requestWalkUp(const court::WalkUpIntent& intent) {
+/// the API answered. The request names the COURT the pressed relay maps to and carries a
+/// per-purchase nonce; both are bridgelogic::WalkUp's, which says why.
+void requestWalkUp(const court::WalkUpIntent& intent, uint32_t nowMs) {
   if (gLastScan[0] == '\0') {
     // Nobody has identified. The buttons alone cannot say WHO is buying, and a walk-up
     // charged to the last person who happened to scan is worse than one refused.
     static_cast<void>(sendToMega(proto::Frame::lcd("SCAN FIRST", "THEN PICK A TIME")));
     return;
   }
-
-  static_cast<void>(sendToMega(proto::Frame::lcd("ONE MOMENT", "")));
-
-  char body[320];
-  snprintf(body, sizeof(body), "{\"minutes\":%u,\"method\":\"qr\",\"token\":\"%s\"}",
-           static_cast<unsigned>(intent.minutes), gLastScan);
-
-  char response[256] = {};
-  const uint16_t status = callApi("POST", "/api/v1/device/walkup", body, response, sizeof(response));
-
-  if (status != 200U) {
-    // Every refusal reads differently to somebody standing in a corridor. 402 is the one
-    // they can act on themselves.
-    const char* line = status == 402U   ? "NOT ENOUGH CREDIT"
-                       : status == 409U ? "COURT NOT FREE"
-                       : status == 0U   ? "NO CONNECTION"
-                                        : "SEE THE DESK";
-    static_cast<void>(sendToMega(proto::Frame::lcd(line, "SCAN TO START")));
+  if (intent.court >= gCourtCount) {
+    // A relay the heartbeat never mapped to a court. Refused here rather than
+    // sold as court zero — the API cannot book a court this box did not name.
+    static_cast<void>(sendToMega(proto::Frame::lcd("SEE THE DESK", "SCAN TO START")));
     return;
   }
 
-  // What was ACTUALLY sold, from the response — not what was asked for. Twenty minutes may
-  // be all there was, and telling the member sixty would be a complaint waiting to happen.
-  const size_t len = strlen(response);
-  uint32_t granted = intent.minutes;
-  static_cast<void>(devapi::json::unsignedField(response, len, "granted_minutes", granted));
+  static_cast<void>(sendToMega(proto::Frame::lcd("ONE MOMENT", "")));
 
-  char line2[court::kLineLen + 1U];
-  snprintf(line2, sizeof(line2), "%lu MIN", static_cast<unsigned long>(granted));
-
-  char line1[court::kLineLen + 1U] = "COURT ?";
-  line1[6] = static_cast<char>('A' + intent.court);
-  static_cast<void>(sendToMega(proto::Frame::lcd(line1, line2)));
-  static_cast<void>(sendToMega(proto::Frame::on(static_cast<proto::Court>(intent.court), granted * 60U)));
-  if (intent.court < 4U) {
-    gHeld[intent.court] = HeldSince{gClock.nowMs(), true};
+  // 320 holds the contract body with ~200 bytes to spare: minutes (3), a
+  // 24-byte token, a court number (5) and a 16-hex nonce come to under 120.
+  char body[320];
+  const char* nonce = gWalkUpNonce.forPurchase(intent, gLastScan, gRequestEntropy);
+  if (bridgelogic::renderWalkUpBody(body, sizeof(body), intent, gCourtNumbers[intent.court], gLastScan,
+                                    nonce) == 0U) {
+    static_cast<void>(sendToMega(proto::Frame::lcd("SEE THE DESK", "SCAN TO START")));
+    return;
   }
-  gLastScan[0] = '\0';
+
+  static char response[256];
+  response[0] = '\0';
+  const uint16_t status = callApi("POST", "/api/v1/device/walkup", body, response, sizeof(response));
+
+  const bridgelogic::WalkUpResult answer =
+      bridgelogic::onWalkUpResponse(status, response, strlen(response), intent.court, intent.minutes);
+  if (answer.decided) {
+    // Granted or refused, the nonce is spent. An UNDECIDED attempt keeps it, so
+    // a repeat of the same purchase is answered with the first one rather than
+    // charged twice.
+    gWalkUpNonce.decided();
+  }
+  applyOutcome(answer.outcome, nowMs);
+  if (answer.outcome.action == court::Action::TurnOn) {
+    // The identity is spent on the purchase: the next member's presses must not
+    // buy on this one's token, so the window closes with the scan.
+    forgetScan();
+  }
 }
 
 /// Persists what provisioning returned.
@@ -925,7 +1077,7 @@ void pumpWifiLink(uint32_t nowMs) {
     // Immediately, not after a full interval: the case that matters is a box
     // that just got its DHCP lease with an admin standing at the cupboard.
     gAnnouncer.linkUp(nowMs);
-    showClaimPrompt();
+    showIdentityScreen();
     return;
   }
   gUdp.stop();
@@ -1135,7 +1287,8 @@ void pumpHeartbeat(uint32_t nowMs) {
            static_cast<unsigned long>(uptimeSeconds()), static_cast<long>(WiFi.RSSI()),
            gBootGuard.badVersion());
 
-  char response[512] = {};
+  char* response = gHeartbeatBody;
+  response[0] = '\0';
   devapi::Response result;
   // A provisioned box with no clock — a power cycle, since the offset lives in
   // RAM — cannot sign, and before probe() existed that was a deadlock: the only
@@ -1144,18 +1297,30 @@ void pumpHeartbeat(uint32_t nowMs) {
   // ClockCorrected, and the 1 s re-arm below retries as a normally signed
   // heartbeat.
   const bool asProbe = !gApi.clockKnown();
-  result.status = callApi("POST", "/api/v1/device/heartbeat", body, response, sizeof(response), asProbe);
-  result.serverUnix = devapi::findServerUnix(response, strlen(response));
+  result.status =
+      callApi("POST", "/api/v1/device/heartbeat", body, response, sizeof(gHeartbeatBody), asProbe);
+  const size_t responseLen = strlen(response);
+  result.serverUnix = devapi::findServerUnix(response, responseLen);
 
   switch (gApi.react(result, static_cast<uint32_t>(gUptime.value()))) {
-  case devapi::Reaction::Accepted:
+  case devapi::Reaction::Accepted: {
     // The evidence that clears a pending update. Not "it booted" — a firmware that
     // comes up and cannot authenticate looks alive and does nothing, which is worse
     // than one that does not come up at all.
     gBootGuard.confirm();
-    applyButtonMap(response, strlen(response));
-    considerUpdate(response, strlen(response));
+    applyButtonMap(response, responseLen);
+    // Absent keys leave the previous set alone, for the same reason the button
+    // map's does: an older API must not blank what a newer one configured.
+    static_cast<void>(bridgelogic::parseCourtNumbers(response, responseLen, gCourtNumbers, gCourtCount));
+    // The roster's times are relative to the instant the server produced them,
+    // and `nowMs` was sampled before an HTTP call that may have taken four
+    // seconds — so the roster is anchored to a fresh read, not the pass's.
+    // Every accepted heartbeat re-anchors it, which is what resets staleness;
+    // ROSTER_MAX_AGE_MS only governs how long the last one survives offline.
+    static_cast<void>(bridgelogic::applyRoster(response, responseLen, gRoster, gClock.nowMs()));
+    considerUpdate(response, responseLen);
     return;
+  }
   case devapi::Reaction::ClockCorrected:
     // The offset is fixed and the next attempt is expected to work, so do not
     // wait a full interval to find out. react() itself refuses to answer this
@@ -1168,7 +1333,7 @@ void pumpHeartbeat(uint32_t nowMs) {
     // is how a board gets rate limited out of ever recovering, so the box goes
     // back to announcing itself and waits to be claimed again.
     gProvisioned = false;
-    showClaimPrompt();
+    showIdentityScreen();
     return;
   case devapi::Reaction::Rejected:
   case devapi::Reaction::Retry:
@@ -1208,6 +1373,13 @@ void setup() {
   gUptime.seed(now);
   gHeartbeat.arm(now, kHeartbeatMs);
 
+  // Every court starts dark AS OF NOW, not as of millis() zero: the reconcile
+  // grace period is measured from this, and a Mega still holding a court across
+  // an ESP reboot is adopted from its first `!STATE` after the grace elapses.
+  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
+    gHeld[i] = bridgelogic::HeldState{now, false};
+  }
+
   gQueue.begin();
   gSession.onBoot(now);
 }
@@ -1224,7 +1396,9 @@ void loop() {
     static_cast<void>(sendToMega(proto::Frame::lcd("CRUSADERS COURTS", "SCAN TO START")));
   }
   if (gLastScan[0] != '\0' && gScanAt.expired(now)) {
-    gLastScan[0] = '\0';
+    // Lapsed unspent. The Mega's own window lapses at the same TTL, but the
+    // explicit `!AUTH,0` is what keeps the two from drifting by a loop pass.
+    forgetScan();
   }
 
   pumpWifiLink(now);
