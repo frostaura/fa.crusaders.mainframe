@@ -210,6 +210,31 @@ public class NoShowWorkerTests
     }
 
     /// <summary>
+    /// A booking swept after its own end — the worker was down, or the lookback reached
+    /// it late — keeps its EndsAt. Extending it to the sweep clock grew the range forward
+    /// into the next booking on the court and tripped the exclusion constraint, which
+    /// threw inside the tick and stalled the sweep for every tenant. Found by the E2E
+    /// scenario, not by a unit test, because the in-memory provider has no constraint.
+    /// </summary>
+    [Fact]
+    public async Task Sweep_never_extends_a_booking_that_already_ended()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var start = DateTimeOffset.UtcNow.AddHours(-3);
+        var end = start.AddMinutes(60);
+        var booking = await AddBookingAsync(host, db, charged: true, startsAt: start, endsAt: end);
+
+        await CreateWorker(host).TickAsync(default);
+
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.NoShow, booking.Status);
+        Assert.Equal(end, booking.EndsAt);
+    }
+
+    /// <summary>
     /// The point of the truncation: the freed tail is genuinely rebookable through
     /// <c>BookingService.CreateAsync</c>'s overlap predicate, which exempts only Cancelled.
     /// Booked as an admin actor so the member-class rules stay out of the way — the overlap

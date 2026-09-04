@@ -1,5 +1,5 @@
 .PHONY: install lint lint-backend lint-frontend lint-iot format-iot build build-iot \
-        test test-iot test-iot-asan test-integration test-e2e complexity corpus-check \
+        test test-iot test-iot-asan test-integration test-e2e test-e2e-device complexity corpus-check \
         virt-up virt-down ci-status up down down-reset clean
 
 # IoT toolchain lives in a venv so `pio` and `lizard` are pinned per-checkout
@@ -86,6 +86,22 @@ corpus-check:
 # Unset, Playwright uses its own and a developer machine needs no setup.
 test-e2e:
 	cd src/frontend && npx playwright test
+
+# Tests — end-to-end proof of the court-light system without hardware.
+#
+# Real API from source against a fresh Postgres database, the firmware's native
+# simulator (the Mega half) over TCP, and the PayFast mountebank imposter — the
+# script plays the ESP8266 bridge, the member's phone, the admin and PayFast. Every
+# review finding it pins is printed as `finding-id -> assertion`; exits non-zero on
+# any failed assertion. What it does and does not prove: test/e2e-device/README.md.
+#
+# Postgres: whatever answers on E2E_PG_HOST:E2E_PG_PORT (default localhost:5439,
+# the throwaway `crusaders-fixprog-pg` container, started via docker if absent). A
+# fresh database is created per run and dropped on success. DOTNET, PIO and PY are
+# overridable like everywhere else in this file.
+test-e2e-device:
+	"$(PIO)" run -d src/iot -e simulator
+	DOTNET="$${DOTNET:-dotnet}" PIO="$(PIO)" "$(PY)" test/e2e-device/scenario.py
 
 # Service virtualization as plain processes.
 #

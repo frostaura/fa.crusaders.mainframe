@@ -148,7 +148,11 @@ public sealed class NoShowWorker : BackgroundService
         // grace >= 0, so StartsAt <= now always holds, and the equal-bound row that a
         // zero grace can produce is an empty [x,x) range the GiST constraint treats as
         // overlapping nothing.
-        b.EndsAt = now;
+        // Truncate, never extend: a booking swept after its natural end (the worker was
+        // down, or the lookback reached it late) must keep its own EndsAt, or the range
+        // grows forward into the next booking on the court and the exclusion constraint
+        // throws — stalling the sweep for every tenant.
+        if (now < b.EndsAt) b.EndsAt = now;
 
         try
         {
