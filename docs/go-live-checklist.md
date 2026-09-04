@@ -36,8 +36,10 @@ the API. The box has no readback and cannot even detect it.
 ## 2. Deploy secrets — seven unset
 
 The release chain builds multi-arch images, pushes to Docker Hub and redeploys through
-Portainer. It has never run, because seven repository secrets are unset and
-`workflow_dispatch` cannot trigger a deploy — only a real push to `main`.
+Portainer. It has never run, because the repository secrets are unset and
+`workflow_dispatch` cannot trigger a deploy — only a real push to `main`. CI consumes the
+first six today; the seventh is read by the `iot-sign` firmware-signing job (item 6 —
+verify that job exists in `.github/workflows/ci.yml` before ticking its box).
 
 - [ ] `DOCKERHUB_USERNAME`
 - [ ] `DOCKERHUB_TOKEN`
@@ -123,9 +125,11 @@ hard prerequisite of item 5, not a hardening step after it.
 - [ ] Commit the regenerated public-key header. The **private** key goes into the
       `OTA_PRIVATE_KEY` repository secret (PEM content, item 2) and nowhere else — it is
       gitignored, and must never be committed.
-- [ ] The `iot-sign` CI job then produces `firmware.signed.bin` (`src/iot/tools/pio_sign_post.py`)
-      and bakes it into the API image, served at `/firmware/` — that URL is what
-      `Ota:Stable:Url` points at.
+- [ ] Verify `.github/workflows/ci.yml` carries the `iot-sign` job and the backend serves
+      `/firmware/` (both land with the fix programme's release-chain phase; if either is
+      absent, this item cannot complete). With the secret set, that job produces
+      `firmware.signed.bin` (`src/iot/tools/pio_sign_post.py`) and bakes it into the API
+      image at `/firmware/` — the URL `Ota:Stable:Url` points at.
 - [ ] Publish `Ota:Stable:Version`, `Ota:Stable:Url` and `Ota:Stable:SizeBytes` in the
       deployment's configuration.
 

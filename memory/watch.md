@@ -27,10 +27,12 @@ consequence of skipping each, in [`docs/go-live-checklist.md`](../docs/go-live-c
    switched off by anything** — the box has no readback and cannot even detect it.
 2. **The seven Actions secrets are still unset** (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`,
    `PORTAINER_URL`, `PORTAINER_TOKEN`, `PORTAINER_ENDPOINT_ID`, `PORTAINER_STACK_ID`,
-   `OTA_PRIVATE_KEY`). The
-   deploy job is skipped silently on every push. **The release chain stays unproven until they
-   are set and one real push to `main` has completed** — `workflow_dispatch` cannot trigger a
-   deploy, so a green CI run on a branch says nothing about it.
+   `OTA_PRIVATE_KEY`). CI consumes the first six today; nothing reads `OTA_PRIVATE_KEY`
+   until the fix programme's `iot-sign` job lands (item 5) — verified against ci.yml
+   2026-08-24. The deploy job is skipped silently on every push. **The release chain stays
+   unproven until the secrets are set and one real push to `main` has completed** —
+   `workflow_dispatch` cannot trigger a deploy, so a green CI run on a branch says nothing
+   about it.
 3. **Charge-at-booking has not been signed off.** The build debits at booking; client
    blueprint A.9 says lights-on. Recorded as deviation **D-1** in
    `docs/specs/client-blueprint-deltas.md`. The blueprint is the customer's own word and

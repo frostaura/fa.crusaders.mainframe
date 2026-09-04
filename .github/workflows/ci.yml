@@ -270,16 +270,9 @@ jobs:
         run: python3 src/iot/tools/sign_firmware.py --selftest
 
       - name: Generated corpus headers are current
-        # The serial/discovery corpora are baked into headers by generators that
-        # nothing else runs — a contributor who edits cases.json and forgets to
-        # regenerate gets a green C++ suite testing the old vectors.
-        run: |
-          python3 src/iot/tools/gen_corpus.py
-          python3 src/iot/tools/gen_discovery_corpus.py
-          git diff --exit-code -- \
-            src/iot/test/test_protocol/corpus_generated.h \
-            src/iot/test/test_discovery/corpus_generated.h \
-            || { echo "::error::generated corpus headers are stale — rerun the generators and commit"; exit 1; }
+        # One copy of the gate: the Makefile target owns the generator and file
+        # lists; CI only overrides PY since the pinned toolchain is on PATH here.
+        run: make corpus-check PY=python3
 
       - name: Unit tests (host)
         run: pio test -d src/iot -e native
