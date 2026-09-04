@@ -72,6 +72,21 @@ struct Outcome {
   uint8_t court = 0U;
   uint32_t durationMs = 0U;
 
+  /// True when the scan IDENTIFIED somebody — the roster matched an entry
+  /// (allowed, too early, too late or wrong court alike) or the API answered
+  /// with a verdict about a known member. False for a token nobody knows and
+  /// for a stale roster, which knows nothing. bridgelogic::AuthPolicy arms the
+  /// Mega's button window on this bit and on nothing else: buttons for a scan
+  /// nobody recognised were thirty seconds of relay control for any barcode.
+  bool recognised = false;
+
+  /// On a grant, what is LEFT of the booking before the relay cap was applied
+  /// — `durationMs` is clamped to ninety minutes because that is all one `!ON`
+  /// can buy, and this is the number that says whether the court will need an
+  /// `!EXT` before the cap runs out. Equal to durationMs when nothing was
+  /// clamped; zero on a refusal.
+  uint32_t bookingRemainingMs = 0U;
+
   /// What to paint. Always both lines, always NUL-terminated, never longer than
   /// kLineLen — a court box that shows nothing after a refused scan is a court
   /// box the member scans again.
@@ -206,6 +221,7 @@ Outcome Session<RosterT, QueueT>::applyDecision(const roster::Decision& decision
 
   Outcome outcome;
   outcome.court = court;
+  outcome.recognised = matched;
   detail::linesFor(decision.verdict, decision.entry, court, roster_.ageMs(nowMs), outcome.line1,
                    outcome.line2);
 
@@ -220,6 +236,7 @@ Outcome Session<RosterT, QueueT>::applyDecision(const roster::Decision& decision
     const uint32_t grantMs = clampGrantMs(decision.grantMs);
     outcome.action = Action::TurnOn;
     outcome.durationMs = grantMs;
+    outcome.bookingRemainingMs = decision.grantMs;
     detail::setLineWithMinutes(outcome.line2, "", grantMs, " MIN");
 
     event.kind = eventq::Kind::Activation;

@@ -65,13 +65,23 @@ struct LinkState {
   bool provisioned = false;
   bool wifiUp = false;
   bool clockKnown = false;
+  /// Relays the heartbeat has mapped to court numbers. Zero for ~30 s after
+  /// every reboot, and an online grant then names a court the box cannot map:
+  /// the API records the attendance and the court stays dark (review #12). A
+  /// box with no court list is not ready to ask.
+  uint8_t courtCount = 0U;
+  /// bridgelogic::ApiBreaker says the API is down. Asking costs a 4 s connect
+  /// timeout per scan and answers nothing; the roster answers in microseconds.
+  bool apiDown = false;
 };
 
 /// What to do with the API's answer.
 struct ActivationResult {
   /// The API produced no decision. Decide from the roster.
   bool fallbackToRoster = false;
-  /// The court was lit: close the button window and forget the scan.
+  /// The court was lit and the scan is spent: forget it. (The button window
+  /// itself is bridgelogic::AuthPolicy's, which keeps it armed for the member
+  /// who just lit the court so their OFF button works.)
   bool disarmAuth = false;
   /// What to paint and, on a grant, which relay to drive for how long.
   court::Outcome outcome;
@@ -107,7 +117,9 @@ size_t renderActivateBody(char* out, size_t cap, const char* token);
 class ScanFlow {
 public:
   /// Online only when every precondition for a SIGNED call that the server
-  /// will accept holds. Anything less is the roster's scan.
+  /// will accept AND act on holds: provisioned, linked, clock known, at least
+  /// one court mapped, and the API not currently judged down. Anything less is
+  /// the roster's scan.
   Attempt onScan(const LinkState& link) const;
 
   /// Interprets the activate response.
@@ -116,8 +128,13 @@ public:
   ///                            for `granted_seconds` display-clamped to the
   ///                            relay cap; disarmAuth. A court this box does
   ///                            not drive is refused — no fallback, the API
-  ///                            has already recorded the activation.
+  ///                            has already recorded the activation. A grant
+  ///                            of ZERO seconds is a refusal ("SLOT ENDED"):
+  ///                            the wire's one-second floor would turn it into
+  ///                            a relay pulse and a spent scan.
   ///   200 + activated:false  → Refuse with a line per `reason`; no fallback.
+  ///                            `recognised` is set for every reason except
+  ///                            not_recognised (and a missing reason).
   ///   200 with no grant      → fallback (malformed).
   ///   anything else          → fallback. A 401 is included: DeviceClient::react
   ///                            has already handled the clock, and THIS scan

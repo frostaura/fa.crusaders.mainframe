@@ -24,10 +24,16 @@ constexpr ReasonLines kReasons[] = {
     {"not_chargeable", "SEE THE DESK", ""},
 };
 
-court::Outcome refusal(const char* line1, const char* line2) {
+/// The one reason that says the API did NOT identify anybody. Every other
+/// reason is a verdict about a known member — no booking, no credit, wrong
+/// court, too early — and a known member may still buy time at the buttons.
+constexpr char kNotRecognised[] = "not_recognised";
+
+court::Outcome refusal(const char* line1, const char* line2, bool recognised) {
   court::Outcome outcome;
   outcome.action = court::Action::Refuse;
   outcome.court = eventq::Event::kNoCourt;
+  outcome.recognised = recognised;
   court::detail::setLine(outcome.line1, line1);
   court::detail::setLine(outcome.line2, line2);
   return outcome;
@@ -39,9 +45,9 @@ court::Outcome refusal(const char* line1, const char* line2) {
 court::Outcome tooEarly(const char* body, size_t len) {
   uint32_t startsIn = 0U;
   if (!devapi::json::unsignedField(body, len, "starts_in_seconds", startsIn)) {
-    return refusal("TOO EARLY", "SEE THE DESK");
+    return refusal("TOO EARLY", "SEE THE DESK", true);
   }
-  court::Outcome outcome = refusal("TOO EARLY", "");
+  court::Outcome outcome = refusal("TOO EARLY", "", true);
   const uint32_t ms = startsIn > UINT32_MAX / 1000U ? UINT32_MAX : startsIn * 1000U;
   court::detail::setLineWithMinutes(outcome.line2, "WAIT ", ms, " MIN");
   return outcome;
@@ -55,13 +61,15 @@ court::Outcome refusedFor(const char* body, size_t len) {
     }
     for (const ReasonLines& row : kReasons) {
       if (strcmp(reason, row.reason) == 0) {
-        return refusal(row.line1, row.line2);
+        return refusal(row.line1, row.line2, strcmp(reason, kNotRecognised) != 0);
       }
     }
+    // A reason this build does not know is still a reason ABOUT somebody: the
+    // API only has verdicts for members it identified.
+    return refusal("SEE THE DESK", "", true);
   }
-  // No reason, or one this build does not know. The API refused; the desk can
-  // say why.
-  return refusal("SEE THE DESK", "");
+  // No reason at all. Nothing says who scanned, so nobody is recognised.
+  return refusal("SEE THE DESK", "", false);
 }
 
 ActivationResult fallback() {
@@ -73,6 +81,15 @@ ActivationResult fallback() {
 ActivationResult granted(uint32_t grantedSeconds, uint8_t relay) {
   ActivationResult result;
 
+  if (grantedSeconds == 0U) {
+    // Activated with nothing left to grant: a rescan inside the post-slot
+    // grace window. The wire clamps every ON up to one second, so passing this
+    // through was a one-second relay pulse, a "1 MIN" screen and a spent scan.
+    // It is a refusal, and the member is told which one.
+    result.outcome = refusal("SLOT ENDED", "SEE THE DESK", true);
+    return result;
+  }
+
   // Clamp the SECONDS before the multiply, for the reason RelayGuard does: a
   // value that wraps on conversion turns the longest grant into the shortest.
   const uint32_t seconds =
@@ -81,6 +98,11 @@ ActivationResult granted(uint32_t grantedSeconds, uint8_t relay) {
   result.outcome.action = court::Action::TurnOn;
   result.outcome.court = relay;
   result.outcome.durationMs = seconds * 1000U;
+  result.outcome.recognised = true;
+  // What the API actually granted, uncapped and saturating: the number an
+  // `!EXT` will have to honour once the ninety-minute relay cap runs out.
+  result.outcome.bookingRemainingMs =
+      grantedSeconds > UINT32_MAX / 1000U ? UINT32_MAX : grantedSeconds * 1000U;
 
   char line1[court::kLineLen + 1U] = "COURT ?";
   line1[6] = static_cast<char>('A' + relay);
@@ -128,7 +150,9 @@ size_t renderActivateBody(char* out, size_t cap, const char* token) {
 }
 
 Attempt ScanFlow::onScan(const LinkState& link) const {
-  return link.provisioned && link.wifiUp && link.clockKnown ? Attempt::Online : Attempt::RosterOnly;
+  const bool canSign = link.provisioned && link.wifiUp && link.clockKnown;
+  const bool canAct = link.courtCount > 0U && !link.apiDown;
+  return canSign && canAct ? Attempt::Online : Attempt::RosterOnly;
 }
 
 ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body, size_t len,
@@ -163,7 +187,7 @@ ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body,
     // already recorded the activation, so the roster must not be asked to light
     // a second one; the desk untangles it.
     ActivationResult result;
-    result.outcome = refusal("SEE THE DESK", "");
+    result.outcome = refusal("SEE THE DESK", "", true);
     return result;
   }
 

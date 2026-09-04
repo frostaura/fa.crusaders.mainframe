@@ -15,6 +15,18 @@
 // right of line 1 reappears in the MIDDLE of line 3. There is no wrapping worth
 // having, so print() stops at the last column exactly as the port promises.
 //
+// WHY THE BUS HAS A TIMEOUT, AND WHAT A TIMEOUT DOES
+// -------------------------------------------------
+// Every character is ~6 synchronous `Wire` transactions and the pinned core
+// ships with its bus timeout disabled, so a PCF8574 transaction corrupted by a
+// relay-coil transient could spin forever inside loop() — with a court lit and
+// the auto-off timer behind the spin. begin() arms the core's per-transaction
+// timeout with reset-on-timeout, so one wedge costs ~25 ms. After a timeout the
+// rest of the write is abandoned and the next writes are skipped for a while
+// (courtlogic::DisplayHoldoff, which is pure and host-tested); the panel is
+// then tried again, because a transient is transient. The relay timer never
+// waits on the glass.
+//
 // Compiled only for the Mega. The ESP8266 has no I2C peripheral on this board
 // and LiquidCrystal_I2C is not one of court_bridge's dependencies, so the guard
 // is what keeps the bridge build from needing a library it has no display for.
@@ -28,9 +40,15 @@
 
 #include <stdint.h>
 
+#include "courtlogic/DisplayHoldoff.h"
 #include "hal/Display.h"
 
 namespace arduino_hal {
+
+/// Per-transaction I2C timeout. Long enough for a healthy PCF8574 at 100 kHz
+/// by two orders of magnitude; short enough that an abandoned write is a blink,
+/// not a stall the watchdog notices.
+inline constexpr uint32_t kWireTimeoutMicros = 25000UL;
 
 class LcdDisplay final : public hal::IDisplayPort {
 public:
@@ -43,8 +61,15 @@ public:
 
   void print(uint8_t row, uint8_t col, const char* text) override;
 
+  /// Bus timeouts since boot, for the diagnostics the Mega has nowhere to send.
+  uint16_t busTimeouts() const { return holdoff_.timeouts(); }
+
 private:
+  /// True when the bus timed out since the flag was last cleared. Clears it.
+  static bool busTimedOut();
+
   LiquidCrystal_I2C lcd_;
+  courtlogic::DisplayHoldoff holdoff_;
 };
 
 } // namespace arduino_hal

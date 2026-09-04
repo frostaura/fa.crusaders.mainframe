@@ -1,0 +1,39 @@
+#include "bridgelogic/ApiBreaker.h"
+
+namespace bridgelogic {
+
+bool isTransportFailure(uint16_t status) {
+  return status == 0U || status >= 500U;
+}
+
+void ApiBreaker::onResult(uint16_t status, uint32_t nowMs) {
+  if (!isTransportFailure(status)) {
+    // The API answered. Whatever it said, it is reachable, and the next
+    // outage starts from the short window again.
+    failures_ = 0U;
+    backoffMs_ = kInitialBackoffMs;
+    until_.disarm();
+    return;
+  }
+
+  if (failures_ < UINT8_MAX) {
+    ++failures_;
+  }
+  if (failures_ < kBreakerTripFailures) {
+    return;
+  }
+
+  // Open — or, for a failure on the probe after a window elapsed, open again
+  // for twice as long. The doubling is what stops a host that is off for the
+  // evening costing a 4 s stall every fifteen seconds all evening.
+  const bool reopening = until_.isArmed() && until_.expired(nowMs);
+  if (reopening) {
+    backoffMs_ = backoffMs_ >= kMaxBackoffMs / 2U ? kMaxBackoffMs : backoffMs_ * 2U;
+  }
+  until_.arm(nowMs, backoffMs_);
+  if (trips_ < UINT16_MAX) {
+    ++trips_;
+  }
+}
+
+} // namespace bridgelogic

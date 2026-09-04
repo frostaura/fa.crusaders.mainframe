@@ -169,6 +169,25 @@ enum class Reaction : uint8_t {
   Reprovision = 4U,
 };
 
+/// What became of a discovery OFFER's clock. See DeviceClient::adoptOfferTime.
+enum class OfferClock : uint8_t {
+  /// The box had no clock; the OFFER seeded it. The bootstrap case the OFFER
+  /// clock exists for.
+  Bootstrapped = 0U,
+  /// The box had a clock and the OFFER moved it forward by less than the skew
+  /// window — ordinary drift, corrected.
+  Adopted = 1U,
+  /// The OFFER's time is BEHIND the box's clock. A replayed datagram: ignored
+  /// and counted. This is the one that used to rewind the clock and, two
+  /// strikes later, strip the credential.
+  IgnoredBehind = 2U,
+  /// The OFFER would move a known clock forward by more than the skew window.
+  /// Not a correction this channel is trusted with; the signed 401 path is.
+  IgnoredTooFar = 3U,
+  /// No `t` on the OFFER. Nothing to learn.
+  Absent = 4U,
+};
+
 class DeviceClient {
 public:
   DeviceClient(const Credentials& credentials, IEntropySource& entropy)
@@ -212,6 +231,20 @@ public:
 
   bool clockKnown() const { return clockKnown_; }
 
+  /// Learns the offset from a verified discovery OFFER — under a stricter rule
+  /// than a signed response body, because an OFFER is a datagram anyone on the
+  /// LAN can capture and replay for the whole boot it was captured in (the
+  /// nonce is per boot, not per packet). Adopted only while the box has NO
+  /// clock, or when it moves a known clock FORWARD by less than
+  /// kSkewToleranceSeconds. A `t` behind the current clock is a replay and is
+  /// ignored and counted. Never touches the ClockCorrected strike counter:
+  /// that counter is evidence about the CREDENTIAL, gathered from signed 401s,
+  /// and a datagram must not be able to add to it.
+  OfferClock adoptOfferTime(uint64_t offerUnix, uint32_t uptimeMs);
+
+  /// OFFERs whose clock was refused as behind or too far. Diagnostics.
+  uint16_t offersIgnored() const { return offersIgnored_; }
+
   /// The signed offset applied to uptime seconds. Meaningless until
   /// clockKnown().
   int64_t clockOffset() const { return offset_; }
@@ -248,6 +281,8 @@ private:
 
   /// Consecutive ClockCorrected reactions not yet cleared by an Accepted.
   uint8_t clockCorrectedStreak_ = 0U;
+
+  uint16_t offersIgnored_ = 0U;
 };
 
 /// Reads `"server_unix": <digits>` out of a JSON body without a parser.

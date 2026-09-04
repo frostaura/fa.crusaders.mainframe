@@ -1,0 +1,86 @@
+// Crusaders Mainframe — keeping a court lit past the ninety-minute relay cap.
+//
+// THE GAP
+// -------
+// One `!ON` buys at most ninety minutes: the Mega clamps every duration to
+// kRelayHardCapSeconds, on purpose, so a bridge that DIES cannot leave a court
+// burning. A two-hour booking therefore went dark at minute ninety with no
+// cue, after an LCD that had promised "90 MIN" for a 120-minute purchase, and
+// the only re-light was "scan again" — which the roster refuses once the
+// booking is checked in.
+//
+// THE RULE
+// --------
+// The bridge knows how long the booking really has: the roster entry's
+// `closes_in`, the activate response's `granted_seconds`, the walk-up's
+// `granted_minutes` — all carried uncapped in court::Outcome::bookingRemainingMs.
+// For a grant longer than the cap this remembers, per court, when the booking
+// ends and when the current relay deadline runs out, and says when to send
+// `!EXT,<court>,<seconds>`: kExtLeadMs before the deadline, for
+// min(cap, what is left of the booking). The Mega's per-command cap is still
+// the safety net — every `!EXT` is clamped there too, and a bridge that dies
+// mid-booking still fails open at the next cap. A release, by whichever
+// messenger, forgets the court.
+//
+// tb::Deadline throughout: a two-hour booking that straddles the 49.7-day
+// millis() wrap is exactly the kind of thing this box is up long enough to see.
+//
+// No Arduino headers, no heap. Compiles for Xtensa and the host.
+
+#ifndef CRUSADERS_BRIDGELOGIC_RELIGHT_H
+#define CRUSADERS_BRIDGELOGIC_RELIGHT_H
+
+#include <stdint.h>
+
+#include "bridgelogic/StateReconcile.h"
+#include "court/Session.h"
+#include "timebase/TimeBase.h"
+
+namespace bridgelogic {
+
+/// How long before the relay deadline the extension is sent. Long enough to
+/// survive a heartbeat's 4 s blocking call and a dropped frame plus the next
+/// periodic `!STATE`; short enough that a booking cancelled at the desk is
+/// not extended by a whole minute more than it had to be.
+inline constexpr uint32_t kExtLeadMs = 60000UL;
+
+/// What to send for one court, if anything.
+struct Extension {
+  bool due = false;
+  uint32_t seconds = 0U;
+};
+
+class Relight {
+public:
+  /// A court was lit (or re-lit) by `outcome` at `nowMs`. Remembers nothing
+  /// for a grant the cap did not shorten.
+  void onGrant(const court::Outcome& outcome, uint32_t nowMs);
+
+  /// The court went dark, by `!EVT` or `!STATE`. Forgotten.
+  void onRelease(uint8_t court);
+
+  /// Whether `court` needs an `!EXT` now, and for how many seconds. Calling
+  /// this does not change anything; the caller reports what it sent with
+  /// extended().
+  Extension check(uint8_t court, uint32_t nowMs) const;
+
+  /// The `!EXT` for `court` was sent for `seconds`: the relay deadline moves.
+  void extended(uint8_t court, uint32_t seconds, uint32_t nowMs);
+
+  /// True while `court` has a booking longer than its current relay deadline.
+  bool tracking(uint8_t court) const;
+
+private:
+  struct Court {
+    /// When the booking ends.
+    tb::Deadline bookingEnd;
+    /// When the relay's current deadline runs out.
+    tb::Deadline relayEnd;
+  };
+
+  Court courts_[kStateCourts];
+};
+
+} // namespace bridgelogic
+
+#endif // CRUSADERS_BRIDGELOGIC_RELIGHT_H

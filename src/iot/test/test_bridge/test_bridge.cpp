@@ -1660,6 +1660,74 @@ void test_json_a_key_that_is_a_prefix_of_another_does_not_match_it() {
 
 } // namespace
 
+void test_client_an_offer_seeds_a_box_with_no_clock_and_never_rewinds_a_known_one() {
+  // THE #5 PIN. A signed OFFER is bound to this boot's nonce, and the nonce is
+  // per boot — so one captured today verifies all week, and replaying it used
+  // to set the clock BACK to the capture instant. Two 401s later the box read
+  // its own rewound clock as a dead credential and threw the key away.
+  //
+  // Uptimes here are the monotonic milliseconds the composition root feeds the
+  // client (tb::Uptime64), not raw millis(): a base that wraps mid-test would
+  // be testing the caller's contract, not this rule.
+  ScriptedEntropy entropy;
+  devapi::DeviceClient client(credentials(), entropy);
+  // No clock: the OFFER is the bootstrap, whatever it says.
+  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000000ULL, 5000U) == devapi::OfferClock::Bootstrapped);
+  TEST_ASSERT_TRUE(client.clockKnown());
+  TEST_ASSERT_EQUAL_UINT64(1750000000ULL, client.unixNow(5000U));
+
+  // Sixty seconds on, a replay of that same OFFER: behind the clock, ignored.
+  const uint32_t later = 65000U;
+  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000000ULL, later) == devapi::OfferClock::IgnoredBehind);
+  TEST_ASSERT_EQUAL_UINT64(1750000060ULL, client.unixNow(later));
+  TEST_ASSERT_EQUAL_UINT16(1U, client.offersIgnored());
+
+  // A fresh OFFER thirty seconds ahead (drift): adopted.
+  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000090ULL, later) == devapi::OfferClock::Adopted);
+  TEST_ASSERT_EQUAL_UINT64(1750000090ULL, client.unixNow(later));
+  // Exactly the window is still a correction; one past it is not this
+  // channel's to make.
+  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000090ULL + 90ULL, later) == devapi::OfferClock::Adopted);
+  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000180ULL + 91ULL, later) == devapi::OfferClock::IgnoredTooFar);
+  TEST_ASSERT_EQUAL_UINT64(1750000180ULL, client.unixNow(later));
+  // The same second again is neither behind nor ahead: adopted, harmlessly.
+  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000180ULL, later) == devapi::OfferClock::Adopted);
+  // No `t` at all teaches nothing.
+  TEST_ASSERT_TRUE(client.adoptOfferTime(0ULL, later) == devapi::OfferClock::Absent);
+  TEST_ASSERT_EQUAL_UINT16(2U, client.offersIgnored());
+}
+
+void test_client_offers_never_feed_the_reprovision_strike() {
+  // The strike counter is evidence about the CREDENTIAL, gathered from signed
+  // 401s. Any number of OFFERs — adopted, ignored, replayed — leaves it where
+  // it was, so a datagram cannot walk a box into Reprovision.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    ScriptedEntropy entropy;
+    devapi::DeviceClient client(credentials(), entropy);
+    client.adoptServerTime(1750000000ULL, kBases[i]);
+
+    devapi::Response rejected;
+    rejected.status = 401U;
+    rejected.serverUnix = 1750000121ULL;
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected); // strike one
+
+    // A storm of replayed OFFERs, all behind the corrected clock.
+    for (uint8_t n = 0U; n < 10U; ++n) {
+      static_cast<void>(client.adoptOfferTime(1750000000ULL, kBases[i] + n));
+    }
+    TEST_ASSERT_EQUAL_UINT64(1750000121ULL, client.unixNow(kBases[i]));
+
+    // The cured retry is accepted: the strike clears. Had the replays moved
+    // the clock back, this call would have been another 401 and strike two.
+    devapi::Response accepted;
+    accepted.status = 200U;
+    accepted.serverUnix = 1750000121ULL;
+    TEST_ASSERT_TRUE(client.react(accepted, kBases[i]) == devapi::Reaction::Accepted);
+    rejected.serverUnix = 1750000242ULL;
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected); // not Reprovision
+  }
+}
+
 void setUp() {
 }
 
@@ -1838,6 +1906,8 @@ int main(int, char**) {
   RUN_TEST(test_client_skew_tolerance_is_pinned_by_the_corpus_below_the_servers_window);
   RUN_TEST(test_client_a_second_consecutive_clock_correction_is_a_dead_key);
   RUN_TEST(test_client_an_accepted_call_clears_the_clock_correction_strike);
+  RUN_TEST(test_client_an_offer_seeds_a_box_with_no_clock_and_never_rewinds_a_known_one);
+  RUN_TEST(test_client_offers_never_feed_the_reprovision_strike);
 
   return UNITY_END();
 }

@@ -306,9 +306,9 @@ size_t encodeLegacy(const Frame& f, char* out, size_t cap) {
 
 // --- decoding --------------------------------------------------------------
 
-Decoder::Decoder(Link link)
-    : link_(link), line_(), len_(0), overrun_(false), lastWasCr_(false), queue_(), head_(0), count_(0),
-      dropped_(0) {
+Decoder::Decoder(Link link, LegacyDialect legacy)
+    : link_(link), legacy_(legacy), line_(), len_(0), overrun_(false), lastWasCr_(false), queue_(), head_(0),
+      count_(0), dropped_(0) {
 }
 
 void Decoder::reset() {
@@ -396,7 +396,17 @@ bool Decoder::endLine() {
 bool Decoder::parseLine(const char* line, size_t n) {
   // '!' is the sentinel precisely because no legacy message in either direction
   // begins with it, so this dispatch is unambiguous.
-  return line[0] == '!' ? parseV2(line, n) : parseLegacy(line, n);
+  if (line[0] == '!') {
+    return parseV2(line, n);
+  }
+  if (legacy_ == LegacyDialect::Refuse) {
+    // Not a frame in the only dialect this decoder speaks. Reported, never
+    // guessed at: on the production Mega this line is ESP boot garbage or coil
+    // noise, and the legacy table would have read a lone `A` as ninety minutes
+    // of lights.
+    return pushError(DecodeError::BadFrame);
+  }
+  return parseLegacy(line, n);
 }
 
 DecodeError Decoder::splitBody(const char* body, size_t n, Arg* fields, uint8_t& count) {

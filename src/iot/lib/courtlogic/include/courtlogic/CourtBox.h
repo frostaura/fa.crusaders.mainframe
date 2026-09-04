@@ -112,7 +112,12 @@ struct CourtPorts {
 
 class CourtBox {
 public:
-  explicit CourtBox(const CourtPorts& ports);
+  /// `legacy` is which dialect the downlink decoder honours. The default is
+  /// REFUSE: a production Mega takes only checksummed `!` frames, because the
+  /// legacy `A` is the one message that closes a relay without a checksum and
+  /// the link it arrives on carries the ESP's boot banner at every reset. The
+  /// simulator and a bench pairing with the original bridge opt in explicitly.
+  explicit CourtBox(const CourtPorts& ports, proto::LegacyDialect legacy = proto::LegacyDialect::Refuse);
 
   /// Relays open, authorisation disarmed, decoder cleared, idle screen. This is
   /// both the power-on state and what `!RST` means, deliberately the same

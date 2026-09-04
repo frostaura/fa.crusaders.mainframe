@@ -48,6 +48,7 @@
 #include "arduino_hal/Pins.h"
 #include "arduino_hal/SerialScanner.h"
 #include "arduino_hal/SerialTransport.h"
+#include "arduino_hal/Watchdog.h"
 #include "courtlogic/CourtBox.h"
 
 namespace {
@@ -63,7 +64,13 @@ arduino_hal::ArduinoButtons gButtons;
 arduino_hal::SerialTransport gBridge(Serial3);
 arduino_hal::ArduinoClock gClock;
 
-courtlogic::CourtBox gBox(courtlogic::CourtPorts{gRelay, gDisplay, gScanner, gButtons, gBridge, gClock});
+// LegacyDialect::Refuse — the production box takes only checksummed `!` frames.
+// The legacy `A` is the one message that closes a relay with no checksum, and
+// this UART receives the ESP's 74880-baud boot banner at every ESP reset. The
+// codec still speaks the dialect for the simulator and the bench; a real box
+// does not opt in. See proto::LegacyDialect.
+courtlogic::CourtBox gBox(courtlogic::CourtPorts{gRelay, gDisplay, gScanner, gButtons, gBridge, gClock},
+                          proto::LegacyDialect::Refuse);
 
 } // namespace
 
@@ -80,11 +87,21 @@ void setup() {
   gBridge.begin();
 
   gBox.begin();
+
+  // Last, once nothing above can spend tens of milliseconds in an init
+  // delay(). From here on a pass of loop() that does not return within two
+  // seconds is a hardware reset — which lands back at gRelay.begin() above,
+  // with every contact open. That is the property this half of the box exists
+  // for, and until now a wedged I2C bus under the LCD could take it away.
+  arduino_hal::watchdogBegin();
 }
 
 void loop() {
   // One pass, no delay(). A blocking delay anywhere in this loop stops the
   // relay auto-off timer for its duration, which is the one thing this half of
-  // the box exists to keep running.
+  // the box exists to keep running. The watchdog is kicked HERE and nowhere
+  // else: a driver that kicked it from inside its own spin would hide exactly
+  // the stall the watchdog is for.
+  arduino_hal::watchdogKick();
   gBox.poll();
 }

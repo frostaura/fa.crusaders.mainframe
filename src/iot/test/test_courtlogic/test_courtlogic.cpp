@@ -17,6 +17,7 @@
 #include "courtlogic/AuthWindow.h"
 #include "courtlogic/ButtonPanel.h"
 #include "courtlogic/CourtBox.h"
+#include "courtlogic/DisplayHoldoff.h"
 #include "courtlogic/RelayGuard.h"
 #include "courtlogic/ScanAssembler.h"
 #include "fakes/FakeButtons.h"
@@ -105,6 +106,87 @@ struct Box {
     bridge.drainTx();
   }
 };
+
+// --- Hardening wave (closing re-review 2026-09-04) --------------------------
+
+void feedRaw(fakes::FakeTransport& tx, const char* text) {
+  for (size_t i = 0U; text[i] != '\0'; ++i) {
+    TEST_ASSERT_TRUE(tx.feedByte(static_cast<uint8_t>(text[i])));
+  }
+}
+
+void test_box_refuses_the_legacy_dialect_so_a_bare_a_lights_nothing(void) {
+  // THE #11 PIN. The production Mega is built with LegacyDialect::Refuse (the
+  // CourtBox default): a lone `A` between two terminators — which the legacy
+  // table read as `!ON,A,5400` — is BADFRAME, and no relay moves. The line it
+  // arrives on carries the ESP's boot banner at every ESP reset.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    Box b(kBases[i]);
+    feedRaw(b.bridge, "A\n");
+    b.step(kBases[i] + 1U);
+    TEST_ASSERT_EQUAL_UINT8(0U, b.box.relays().mask());
+    TEST_ASSERT_FALSE(b.relay.isOn(kCourtA));
+    TEST_ASSERT_EQUAL_UINT8(1U, countLinesStarting(b.bridge, "!EVT,BADFRAME"));
+    TEST_ASSERT_EQUAL_UINT16(1U, b.box.rxErrors());
+    // The legacy two-line prompt armed the buttons as a side effect; refused
+    // too, so garbage cannot open the window either.
+    feedRaw(b.bridge, "HELLO|WORLD\n");
+    b.step(kBases[i] + 2U);
+    TEST_ASSERT_FALSE(b.box.auth().allows(kBases[i] + 3U));
+    TEST_ASSERT_EQUAL_UINT8(2U, countLinesStarting(b.bridge, "!EVT,BADFRAME"));
+    // A v2 frame on the same decoder still works: the dialect, not the
+    // link, is what was refused.
+    feedFrame(b.bridge, proto::Frame::on(proto::Court::A, 60U));
+    b.step(kBases[i] + 3U);
+    TEST_ASSERT_TRUE(b.relay.isOn(kCourtA));
+  }
+}
+
+void test_box_accepts_the_legacy_dialect_only_when_told_to(void) {
+  // The bench and the simulator opt in, and the corpus keeps the dialect
+  // honest there. This is what a real box would have done with the same byte.
+  fakes::FakeRelay relay;
+  fakes::FakeDisplay display;
+  fakes::FakeScanner scanner;
+  fakes::FakeButtons buttons;
+  fakes::FakeTransport bridge;
+  fakes::FakeClock clock(kBaseMid);
+  courtlogic::CourtBox box(courtlogic::CourtPorts{relay, display, scanner, buttons, bridge, clock},
+                           proto::LegacyDialect::Accept);
+  box.begin();
+  feedRaw(bridge, "A\n");
+  clock.setNow(kBaseMid + 1U);
+  box.poll();
+  TEST_ASSERT_TRUE(relay.isOn(kCourtA));
+  TEST_ASSERT_EQUAL_UINT16(0U, box.rxErrors());
+}
+
+void test_display_holdoff_abandons_then_skips_then_tries_again(void) {
+  // THE #3 PIN, the host-testable half. After a bus timeout the driver skips
+  // the next kHoldoffWrites writes and then tries the panel again, so a dead
+  // display costs one bounded stall per holdoff and a recovered one starts
+  // rendering without a power cycle. The AVR-specific half — the timeout
+  // itself and the watchdog — is in arduino_hal and is a bench check.
+  courtlogic::DisplayHoldoff holdoff;
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_FALSE(holdoff.holding());
+  holdoff.noteTimeout();
+  TEST_ASSERT_TRUE(holdoff.holding());
+  TEST_ASSERT_EQUAL_UINT16(1U, holdoff.timeouts());
+  for (uint8_t i = 0U; i < courtlogic::kHoldoffWrites; ++i) {
+    TEST_ASSERT_FALSE(holdoff.allow());
+  }
+  TEST_ASSERT_TRUE(holdoff.allow()); // the retry
+  TEST_ASSERT_FALSE(holdoff.holding());
+  TEST_ASSERT_TRUE(holdoff.allow()); // and it keeps rendering while the bus is fine
+  holdoff.noteTimeout();
+  holdoff.noteTimeout(); // a second timeout inside a holdoff restarts it, never stacks
+  TEST_ASSERT_EQUAL_UINT16(3U, holdoff.timeouts());
+  for (uint8_t i = 0U; i < courtlogic::kHoldoffWrites; ++i) {
+    TEST_ASSERT_FALSE(holdoff.allow());
+  }
+  TEST_ASSERT_TRUE(holdoff.allow());
+}
 
 } // namespace
 
@@ -900,6 +982,9 @@ int main(int, char**) {
   RUN_TEST(test_box_repaints_a_row_padded_to_the_full_width);
   RUN_TEST(test_box_reports_an_overrun_on_the_pass_after_it_recovers);
   RUN_TEST(test_box_samples_the_clock_once_per_pass);
+  RUN_TEST(test_box_refuses_the_legacy_dialect_so_a_bare_a_lights_nothing);
+  RUN_TEST(test_box_accepts_the_legacy_dialect_only_when_told_to);
+  RUN_TEST(test_display_holdoff_abandons_then_skips_then_tries_again);
 
   return UNITY_END();
 }

@@ -91,6 +91,11 @@ WalkUpResult onWalkUpResponse(uint16_t status, const char* body, size_t len, uin
     result.outcome.action = court::Action::TurnOn;
     result.outcome.court = relay;
     result.outcome.durationMs = minutes * 60000U;
+    result.outcome.recognised = true;
+    // Uncapped: what the API SOLD. Past the relay cap it is what an `!EXT` will
+    // have to honour later (bridgelogic::Relight).
+    result.outcome.bookingRemainingMs =
+        granted > UINT32_MAX / 60000U ? UINT32_MAX : granted * 60000U;
 
     char line1[court::kLineLen + 1U] = "COURT ?";
     line1[6] = static_cast<char>('A' + relay);
@@ -101,12 +106,18 @@ WalkUpResult onWalkUpResponse(uint16_t status, const char* body, size_t len, uin
 
   // Every refusal reads differently to somebody standing in a corridor. 402 is
   // the one they can act on themselves.
+  // A refusal the API could price is a refusal of a member it recognised; the
+  // scan stays usable for another attempt. No connection and a server fault say
+  // nothing about who scanned.
   if (status == 402U) {
     result.outcome = lines("TOO FEW CREDITS", "TOP UP & RETRY");
+    result.outcome.recognised = true;
   } else if (status == 409U && errorIs(body, len, "no_time_available")) {
     result.outcome = lines("NO TIME BEFORE", "NEXT BOOKING");
+    result.outcome.recognised = true;
   } else if (status == 409U) {
     result.outcome = lines("COURT NOT FREE", "SCAN TO START");
+    result.outcome.recognised = true;
   } else if (status == 0U) {
     result.outcome = lines("NO CONNECTION", "SCAN TO START");
   } else {

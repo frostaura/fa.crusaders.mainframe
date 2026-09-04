@@ -101,6 +101,34 @@ void DeviceClient::adoptServerTime(uint64_t serverUnix, uint32_t uptimeMs) {
   clockKnown_ = true;
 }
 
+OfferClock DeviceClient::adoptOfferTime(uint64_t offerUnix, uint32_t uptimeMs) {
+  if (offerUnix == 0U) {
+    return OfferClock::Absent;
+  }
+  if (!clockKnown_) {
+    adoptServerTime(offerUnix, uptimeMs);
+    return OfferClock::Bootstrapped;
+  }
+  // Signed arithmetic on the difference, so "behind" and "ahead" are asked as
+  // two questions and neither one wraps.
+  const int64_t current = static_cast<int64_t>(unixNow(uptimeMs));
+  const int64_t delta = static_cast<int64_t>(offerUnix) - current;
+  if (delta < 0) {
+    if (offersIgnored_ < UINT16_MAX) {
+      ++offersIgnored_;
+    }
+    return OfferClock::IgnoredBehind;
+  }
+  if (delta > kSkewToleranceSeconds) {
+    if (offersIgnored_ < UINT16_MAX) {
+      ++offersIgnored_;
+    }
+    return OfferClock::IgnoredTooFar;
+  }
+  adoptServerTime(offerUnix, uptimeMs);
+  return OfferClock::Adopted;
+}
+
 Reaction DeviceClient::react(const Response& response, uint32_t uptimeMs) {
   const bool hadClock = clockKnown_;
   const int64_t previousOffset = offset_;

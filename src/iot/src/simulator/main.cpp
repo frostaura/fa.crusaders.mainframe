@@ -193,7 +193,10 @@ int main(int argc, char** argv) {
   static_cast<void>(signal(SIGINT, onSignal));
   static_cast<void>(signal(SIGTERM, onSignal));
 
-  courtlogic::CourtBox box(courtlogic::CourtPorts{relay, display, scanner, buttons, bridge, clock});
+  // LegacyDialect::Accept, explicitly: the simulator is the bench, and the one
+  // place a legacy-dialect bridge is still met. The production Mega refuses it.
+  courtlogic::CourtBox box(courtlogic::CourtPorts{relay, display, scanner, buttons, bridge, clock},
+                           proto::LegacyDialect::Accept);
   box.begin();
 
   while (gStopRequested == 0) {

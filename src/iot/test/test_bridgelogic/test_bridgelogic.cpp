@@ -26,6 +26,12 @@
 #include <string.h>
 #include <unity.h>
 
+#include "bridgelogic/ApiBreaker.h"
+#include "bridgelogic/AuthPolicy.h"
+#include "bridgelogic/Cadence.h"
+#include "bridgelogic/CredentialStore.h"
+#include "bridgelogic/OnRetry.h"
+#include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterSync.h"
 #include "bridgelogic/ScanFlow.h"
 #include "bridgelogic/StateReconcile.h"
@@ -461,6 +467,8 @@ bridgelogic::LinkState link(bool provisioned, bool wifiUp, bool clockKnown) {
   l.provisioned = provisioned;
   l.wifiUp = wifiUp;
   l.clockKnown = clockKnown;
+  l.courtCount = kCourtCount;
+  l.apiDown = false;
   return l;
 }
 
@@ -1117,6 +1125,624 @@ void test_corpus_walkup_body_is_byte_identical_to_the_signed_request() {
   TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
 }
 
+// ---------------------------------------------------------------------------
+// Hardening wave (closing re-review 2026-09-04)
+// ---------------------------------------------------------------------------
+
+void test_scan_flow_a_box_with_no_court_list_is_not_online() {
+  // THE BOOT-GAP PIN (review #12). For ~30 s after every ESP reboot the clock
+  // is known (a signed OFFER seeds it within seconds) and the court list is
+  // empty until the first heartbeat. Asking the API then records attendance
+  // server-side and refuses the member at the box, because the granted court
+  // number maps to nothing. Not ready is not online.
+  const bridgelogic::ScanFlow flow;
+  bridgelogic::LinkState l = link(true, true, true);
+  TEST_ASSERT_TRUE(flow.onScan(l) == bridgelogic::Attempt::Online);
+  l.courtCount = 0U;
+  TEST_ASSERT_TRUE(flow.onScan(l) == bridgelogic::Attempt::RosterOnly);
+  l.courtCount = 1U;
+  TEST_ASSERT_TRUE(flow.onScan(l) == bridgelogic::Attempt::Online);
+}
+
+void test_scan_flow_an_open_breaker_is_the_rosters_scan() {
+  const bridgelogic::ScanFlow flow;
+  bridgelogic::LinkState l = link(true, true, true);
+  l.apiDown = true;
+  TEST_ASSERT_TRUE(flow.onScan(l) == bridgelogic::Attempt::RosterOnly);
+}
+
+void test_scan_flow_a_zero_second_grant_is_a_refusal_not_a_pulse() {
+  // A rescan inside the post-slot grace window answers activated:true with
+  // granted_seconds:0. The wire's one-second floor turned that into a relay
+  // pulse, a "1 MIN" screen and a spent scan.
+  const bridgelogic::ScanFlow flow;
+  const char body[] = "{\"activated\":true,\"reason\":\"ok\",\"court_number\":7,\"granted_seconds\":0}";
+  const bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, body, len(body), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+  TEST_ASSERT_FALSE(r.disarmAuth);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+  TEST_ASSERT_EQUAL_STRING("SLOT ENDED", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("SEE THE DESK", r.outcome.line2);
+  TEST_ASSERT_TRUE(r.outcome.recognised);
+}
+
+void test_scan_flow_recognised_is_every_verdict_about_a_known_member() {
+  const bridgelogic::ScanFlow flow;
+  struct Case {
+    const char* body;
+    bool recognised;
+  };
+  const Case cases[] = {
+      {"{\"activated\":true,\"reason\":\"ok\",\"court_number\":7,\"granted_seconds\":600}", true},
+      {"{\"activated\":false,\"reason\":\"no_booking\"}", true},
+      {"{\"activated\":false,\"reason\":\"insufficient_balance\"}", true},
+      {"{\"activated\":false,\"reason\":\"wrong_court\"}", true},
+      {"{\"activated\":false,\"reason\":\"too_early\",\"starts_in_seconds\":900}", true},
+      {"{\"activated\":false,\"reason\":\"not_chargeable\"}", true},
+      {"{\"activated\":false,\"reason\":\"something_newer\"}", true},
+      {"{\"activated\":false,\"reason\":\"not_recognised\"}", false},
+      {"{\"activated\":false}", false},
+  };
+  for (const Case& c : cases) {
+    const bridgelogic::ActivationResult r =
+        flow.onActivateResponse(200U, c.body, len(c.body), kCourts, kCourtCount);
+    TEST_ASSERT_EQUAL_MESSAGE(c.recognised, r.outcome.recognised, c.body);
+  }
+}
+
+void test_scan_flow_a_grant_carries_the_uncapped_booking_remainder() {
+  const bridgelogic::ScanFlow flow;
+  const char body[] = "{\"activated\":true,\"reason\":\"ok\",\"court_number\":7,\"granted_seconds\":7200}";
+  const bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, body, len(body), kCourts, kCourtCount);
+  TEST_ASSERT_EQUAL_UINT32(5400000UL, r.outcome.durationMs);
+  TEST_ASSERT_EQUAL_UINT32(7200000UL, r.outcome.bookingRemainingMs);
+}
+
+court::Outcome outcomeOf(court::Action action, uint8_t court, bool recognised) {
+  court::Outcome o;
+  o.action = action;
+  o.court = court;
+  o.recognised = recognised;
+  o.durationMs = action == court::Action::TurnOn ? 2700000UL : 0U;
+  o.bookingRemainingMs = o.durationMs;
+  return o;
+}
+
+void test_auth_policy_a_refused_scan_cannot_release_any_court() {
+  // THE #4/#14 PIN, half one. NOT RECOGNISED, then COURT B, then OFF used to
+  // darken court B mid-match, repeatable every thirty seconds by anyone with
+  // any barcode. An unrecognised scan arms nothing and closes what was open.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::AuthPolicy auth(30000UL);
+    TEST_ASSERT_TRUE(auth.afterScan(outcomeOf(court::Action::Refuse, eventq::Event::kNoCourt, false), base) ==
+                     bridgelogic::AuthCommand::Disarm);
+    TEST_ASSERT_FALSE(auth.armed(base + 1U));
+    for (uint8_t court = 0U; court < 4U; ++court) {
+      TEST_ASSERT_FALSE(auth.allowsRelease(court, base + 1U));
+    }
+    // A stale roster is not a recognition either.
+    TEST_ASSERT_TRUE(auth.afterScan(outcomeOf(court::Action::Refuse, eventq::Event::kNoCourt, false), base) ==
+                     bridgelogic::AuthCommand::Disarm);
+  }
+}
+
+void test_auth_policy_a_recognised_refusal_arms_for_a_walk_up_but_releases_nothing() {
+  // A known member with no booking is exactly who buys a walk-up: the window
+  // opens. But nothing was lit for them, so OFF releases nobody's court.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::AuthPolicy auth(30000UL);
+    TEST_ASSERT_TRUE(auth.afterScan(outcomeOf(court::Action::Refuse, eventq::Event::kNoCourt, true), base) ==
+                     bridgelogic::AuthCommand::Arm);
+    TEST_ASSERT_TRUE(auth.armed(base + 29999UL));
+    TEST_ASSERT_EQUAL_UINT8(bridgelogic::AuthPolicy::kUnbound, auth.boundCourt());
+    for (uint8_t court = 0U; court < 4U; ++court) {
+      TEST_ASSERT_FALSE(auth.allowsRelease(court, base + 1U));
+    }
+  }
+}
+
+void test_auth_policy_the_member_whose_scan_lit_b_can_release_b_and_only_b() {
+  // THE #4/#14 PIN, half two. Every grant used to send `!AUTH,0`, and a
+  // rescan by the owner is another grant, so the paying member could never
+  // press OFF. A grant keeps the window and binds it to the court it lit.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::AuthPolicy auth(30000UL);
+    TEST_ASSERT_TRUE(auth.afterScan(outcomeOf(court::Action::TurnOn, 1U, true), base) ==
+                     bridgelogic::AuthCommand::Arm);
+    TEST_ASSERT_TRUE(auth.allowsRelease(1U, base + 29999UL));
+    TEST_ASSERT_FALSE(auth.allowsRelease(0U, base + 1U));
+    TEST_ASSERT_FALSE(auth.allowsRelease(2U, base + 1U));
+    TEST_ASSERT_FALSE(auth.allowsRelease(3U, base + 1U));
+
+    // The window lapses, once, and then releases nothing.
+    TEST_ASSERT_FALSE(auth.lapsed(base + 29999UL));
+    TEST_ASSERT_TRUE(auth.lapsed(base + 30000UL));
+    TEST_ASSERT_FALSE(auth.lapsed(base + 30001UL));
+    TEST_ASSERT_FALSE(auth.allowsRelease(1U, base + 30001UL));
+
+    // A rescan by the owner (the API answers AlreadyActive as a grant) binds
+    // again — and a walk-up purchase binds to the court it bought.
+    TEST_ASSERT_TRUE(auth.afterScan(outcomeOf(court::Action::TurnOn, 1U, true), base + 40000UL) ==
+                     bridgelogic::AuthCommand::Arm);
+    TEST_ASSERT_TRUE(auth.allowsRelease(1U, base + 40001UL));
+    TEST_ASSERT_TRUE(auth.afterWalkUp(outcomeOf(court::Action::TurnOn, 3U, true), base + 40002UL) ==
+                     bridgelogic::AuthCommand::Arm);
+    TEST_ASSERT_TRUE(auth.allowsRelease(3U, base + 40003UL));
+    TEST_ASSERT_FALSE(auth.allowsRelease(1U, base + 40003UL));
+    // A walk-up refusal changes nothing.
+    TEST_ASSERT_TRUE(auth.afterWalkUp(outcomeOf(court::Action::Refuse, 2U, true), base + 40004UL) ==
+                     bridgelogic::AuthCommand::None);
+    TEST_ASSERT_TRUE(auth.allowsRelease(3U, base + 40005UL));
+    // An explicit disarm — the scan lapsed unspent — closes it.
+    TEST_ASSERT_TRUE(auth.disarm() == bridgelogic::AuthCommand::Disarm);
+    TEST_ASSERT_FALSE(auth.allowsRelease(3U, base + 40006UL));
+  }
+}
+
+void test_session_and_walkup_say_whether_the_scan_was_recognised() {
+  // The bit AuthPolicy reads, produced by the roster path: a match of any
+  // verdict is a recognition; an unknown token and a stale roster are not.
+  Cache cache(kSixHoursMs);
+  fakes::FakeStore store;
+  Queue queue(&store);
+  queue.begin();
+  Play play(cache, queue);
+
+  // Never loaded: stale, nobody recognised.
+  TEST_ASSERT_FALSE(play.onScan("TOKALICE", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid)
+                        .recognised);
+
+  const roster::Entry entries[] = {booking("TOKALICE", 2U, 0U, 7200000UL),
+                                   booking("TOKBOB", 1U, 600000UL, kHourMs)};
+  loadRoster(cache, kBaseMid, entries, 2U);
+  const court::Outcome grant =
+      play.onScan("TOKALICE", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid + 1U);
+  TEST_ASSERT_TRUE(grant.recognised);
+  TEST_ASSERT_EQUAL_UINT32(5400000UL, grant.durationMs);
+  TEST_ASSERT_EQUAL_UINT32(7199999UL, grant.bookingRemainingMs); // uncapped, for the !EXT
+  TEST_ASSERT_TRUE(play.onScan("TOKBOB", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid + 1U)
+                       .recognised); // too early, but known
+  TEST_ASSERT_FALSE(play.onScan("NOBODY", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid + 1U)
+                        .recognised);
+
+  // Walk-up: a grant and a priced refusal are about a known member; no
+  // connection is about nobody.
+  const char sold[] = "{\"granted_minutes\":120}";
+  const bridgelogic::WalkUpResult granted = bridgelogic::onWalkUpResponse(200U, sold, len(sold), 2U, 120U);
+  TEST_ASSERT_TRUE(granted.outcome.recognised);
+  TEST_ASSERT_EQUAL_UINT32(5400000UL, granted.outcome.durationMs);
+  TEST_ASSERT_EQUAL_UINT32(7200000UL, granted.outcome.bookingRemainingMs);
+  TEST_ASSERT_TRUE(bridgelogic::onWalkUpResponse(402U, "", 0U, 2U, 30U).outcome.recognised);
+  TEST_ASSERT_TRUE(bridgelogic::onWalkUpResponse(409U, "", 0U, 2U, 30U).outcome.recognised);
+  TEST_ASSERT_FALSE(bridgelogic::onWalkUpResponse(0U, "", 0U, 2U, 30U).outcome.recognised);
+  TEST_ASSERT_FALSE(bridgelogic::onWalkUpResponse(503U, "", 0U, 2U, 30U).outcome.recognised);
+}
+
+void test_breaker_opens_after_two_transport_failures_and_backs_off_doubling() {
+  // THE #13 PIN. One failure is a blip; two in a row is a host that is not
+  // there, and every scan then costs two connect timeouts unless something
+  // remembers. The window doubles 15 → 30 → 60 → 120 and stops there.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::ApiBreaker breaker;
+    TEST_ASSERT_FALSE(breaker.open(base));
+    breaker.onResult(0U, base);
+    TEST_ASSERT_FALSE(breaker.open(base + 1U));
+    breaker.onResult(503U, base + 1U);
+    TEST_ASSERT_TRUE(breaker.open(base + 2U));
+    TEST_ASSERT_TRUE(breaker.open(base + 1U + 14999UL));
+    TEST_ASSERT_FALSE(breaker.open(base + 1U + 15000UL)); // the probe's turn
+    TEST_ASSERT_EQUAL_UINT16(1U, breaker.trips());
+
+    // The probe fails: open again, for twice as long.
+    breaker.onResult(0U, base + 16000UL);
+    TEST_ASSERT_TRUE(breaker.open(base + 16000UL + 29999UL));
+    TEST_ASSERT_FALSE(breaker.open(base + 16000UL + 30000UL));
+    breaker.onResult(0U, base + 47000UL);
+    TEST_ASSERT_FALSE(breaker.open(base + 47000UL + 60000UL));
+    breaker.onResult(0U, base + 108000UL);
+    TEST_ASSERT_TRUE(breaker.open(base + 108000UL + 119999UL));
+    TEST_ASSERT_FALSE(breaker.open(base + 108000UL + 120000UL));
+    breaker.onResult(0U, base + 230000UL);
+    TEST_ASSERT_EQUAL_UINT32(bridgelogic::kMaxBackoffMs, breaker.backoffMs()); // capped
+    TEST_ASSERT_FALSE(breaker.open(base + 230000UL + 120000UL));
+  }
+}
+
+void test_breaker_any_answer_closes_it_and_resets_the_window() {
+  // A 401, a 4xx and a 429 all say the API is THERE. Only "never completed"
+  // and 5xx are transport failures.
+  TEST_ASSERT_TRUE(bridgelogic::isTransportFailure(0U));
+  TEST_ASSERT_TRUE(bridgelogic::isTransportFailure(500U));
+  TEST_ASSERT_TRUE(bridgelogic::isTransportFailure(503U));
+  TEST_ASSERT_FALSE(bridgelogic::isTransportFailure(200U));
+  TEST_ASSERT_FALSE(bridgelogic::isTransportFailure(401U));
+  TEST_ASSERT_FALSE(bridgelogic::isTransportFailure(404U));
+  TEST_ASSERT_FALSE(bridgelogic::isTransportFailure(429U));
+
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::ApiBreaker breaker;
+    breaker.onResult(0U, base);
+    breaker.onResult(0U, base + 1U);
+    breaker.onResult(0U, base + 16000UL); // reopened at 30 s
+    TEST_ASSERT_TRUE(breaker.open(base + 16001UL));
+    breaker.onResult(401U, base + 16002UL);
+    TEST_ASSERT_FALSE(breaker.open(base + 16003UL));
+    TEST_ASSERT_EQUAL_UINT8(0U, breaker.consecutiveFailures());
+    TEST_ASSERT_EQUAL_UINT32(bridgelogic::kInitialBackoffMs, breaker.backoffMs());
+    // And one failure after a success is a blip again, not a trip.
+    breaker.onResult(0U, base + 16004UL);
+    TEST_ASSERT_FALSE(breaker.open(base + 16005UL));
+  }
+}
+
+void test_heartbeat_interval_is_adopted_and_bounded() {
+  uint32_t ms = 30000UL;
+  const char sixty[] = "{\"court_numbers\":[7],\"heartbeat_seconds\":60}";
+  TEST_ASSERT_TRUE(bridgelogic::parseHeartbeatInterval(sixty, len(sixty), ms));
+  TEST_ASSERT_EQUAL_UINT32(60000UL, ms);
+  const char tooFast[] = "{\"heartbeat_seconds\":1}";
+  TEST_ASSERT_TRUE(bridgelogic::parseHeartbeatInterval(tooFast, len(tooFast), ms));
+  TEST_ASSERT_EQUAL_UINT32(bridgelogic::kMinHeartbeatMs, ms);
+  const char tooSlow[] = "{\"heartbeat_seconds\":86400}";
+  TEST_ASSERT_TRUE(bridgelogic::parseHeartbeatInterval(tooSlow, len(tooSlow), ms));
+  TEST_ASSERT_EQUAL_UINT32(bridgelogic::kMaxHeartbeatMs, ms);
+  const char absent[] = "{\"court_numbers\":[7]}";
+  TEST_ASSERT_FALSE(bridgelogic::parseHeartbeatInterval(absent, len(absent), ms));
+  TEST_ASSERT_EQUAL_UINT32(bridgelogic::kMaxHeartbeatMs, ms); // untouched
+  const char quoted[] = "{\"heartbeat_seconds\":\"60\"}";
+  TEST_ASSERT_FALSE(bridgelogic::parseHeartbeatInterval(quoted, len(quoted), ms));
+}
+
+void test_relight_extends_a_booking_longer_than_the_cap_before_the_cap_runs_out() {
+  // A two-hour booking: one !ON buys ninety minutes. At 89 minutes the bridge
+  // sends !EXT for the thirty that are left; at every base, including the
+  // ones that put the millis() wrap inside the booking.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::Relight relight;
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 1U, true);
+    grant.durationMs = 5400000UL;
+    grant.bookingRemainingMs = 7200000UL;
+    relight.onGrant(grant, base);
+    TEST_ASSERT_TRUE(relight.tracking(1U));
+    TEST_ASSERT_FALSE(relight.tracking(0U));
+
+    TEST_ASSERT_FALSE(relight.check(1U, base + 5400000UL - 60001UL).due);
+    const bridgelogic::Extension ext = relight.check(1U, base + 5400000UL - 60000UL);
+    TEST_ASSERT_TRUE(ext.due);
+    // Booking left: 7200000 - 5340000 = 1860000 ms = 1860 s.
+    TEST_ASSERT_EQUAL_UINT32(1860U, ext.seconds);
+    // Not sent yet: still due on the next pass.
+    TEST_ASSERT_TRUE(relight.check(1U, base + 5400000UL - 59000UL).due);
+    relight.extended(1U, ext.seconds, base + 5400000UL - 60000UL);
+    // Now the relay covers the rest of the booking: nothing more to do, ever.
+    TEST_ASSERT_FALSE(relight.check(1U, base + 5400000UL - 59000UL).due);
+    TEST_ASSERT_FALSE(relight.check(1U, base + 7200000UL - 60000UL).due);
+    TEST_ASSERT_FALSE(relight.check(1U, base + 7200000UL + 60000UL).due);
+  }
+}
+
+void test_relight_a_three_hour_booking_needs_two_extensions_each_capped() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::Relight relight;
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 2U, true);
+    grant.durationMs = 5400000UL;
+    grant.bookingRemainingMs = 10800000UL;
+    relight.onGrant(grant, base);
+
+    uint32_t now = base + 5400000UL - 60000UL;
+    bridgelogic::Extension ext = relight.check(2U, now);
+    TEST_ASSERT_TRUE(ext.due);
+    TEST_ASSERT_EQUAL_UINT32(5400U, ext.seconds); // capped: 91 min left, 90 granted
+    relight.extended(2U, ext.seconds, now);
+    // Second cap expiry at now + 90 min; the booking has one minute past it.
+    now += 5400000UL - 60000UL;
+    ext = relight.check(2U, now);
+    TEST_ASSERT_TRUE(ext.due);
+    TEST_ASSERT_EQUAL_UINT32(120U, ext.seconds);
+    relight.extended(2U, ext.seconds, now);
+    TEST_ASSERT_FALSE(relight.check(2U, now + 119000UL).due);
+  }
+}
+
+void test_relight_forgets_a_court_on_release_and_a_grant_inside_the_cap() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::Relight relight;
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 0U, true);
+    grant.durationMs = 5400000UL;
+    grant.bookingRemainingMs = 7200000UL;
+    relight.onGrant(grant, base);
+    relight.onRelease(0U);
+    TEST_ASSERT_FALSE(relight.tracking(0U));
+    TEST_ASSERT_FALSE(relight.check(0U, base + 5400000UL - 60000UL).due);
+
+    // A fresh 45-minute grant on the same court replaces the record: nothing
+    // from the earlier booking may extend this one.
+    relight.onGrant(grant, base);
+    relight.onGrant(outcomeOf(court::Action::TurnOn, 0U, true), base + 1000UL);
+    TEST_ASSERT_FALSE(relight.tracking(0U));
+    // A refusal is not a grant.
+    relight.onGrant(outcomeOf(court::Action::Refuse, 0U, true), base);
+    TEST_ASSERT_FALSE(relight.tracking(0U));
+    // A court this box does not have is ignored, not written past the array.
+    court::Outcome bad = grant;
+    bad.court = 9U;
+    relight.onGrant(bad, base);
+    TEST_ASSERT_FALSE(relight.tracking(9U));
+  }
+}
+
+void test_on_retry_resends_the_last_on_once_and_only_inside_the_window() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::OnRetry retry;
+    proto::Frame out;
+    // Nothing remembered: nothing to resend.
+    TEST_ASSERT_FALSE(retry.shouldResend(base, out));
+
+    const proto::Frame on = proto::Frame::on(proto::Court::B, 2700U);
+    retry.sent(on, base);
+    TEST_ASSERT_TRUE(retry.pending());
+    TEST_ASSERT_TRUE(retry.shouldResend(base + 20U, out));
+    TEST_ASSERT_TRUE(out == on);
+    // Once. A second error is a cable.
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 40U, out));
+    TEST_ASSERT_EQUAL_UINT16(1U, retry.retries());
+
+    // Outside the window an error cannot be about this frame.
+    retry.sent(on, base + 1000UL);
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 1000UL + bridgelogic::kRetryWindowMs, out));
+    TEST_ASSERT_FALSE(retry.pending());
+
+    // Only an ON is kept; a release forgets it.
+    retry.sent(proto::Frame::lcd("A", "B"), base + 3000UL);
+    TEST_ASSERT_FALSE(retry.pending());
+    retry.sent(on, base + 3000UL);
+    retry.clear();
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 3001UL, out));
+  }
+  // Which uplink reports count.
+  TEST_ASSERT_TRUE(bridgelogic::isReceiveError(proto::Verb::Err, "BADCRC", ""));
+  TEST_ASSERT_TRUE(bridgelogic::isReceiveError(proto::Verb::Evt, "OVERRUN", "RX"));
+  // The Mega dropping a frame on its way OUT says nothing about what it heard.
+  TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::Evt, "OVERRUN", "TX"));
+  TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::Err, "BADARG", ""));
+  TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::Evt, "AUTOOFF", "B"));
+  TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::Evt, "BADFRAME", "RX"));
+  TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::State, "BADCRC", ""));
+}
+
+void test_credential_store_checked_text_survives_the_store_and_a_torn_write_reads_as_absent() {
+  fakes::FakeStore store;
+  char out[64] = {};
+  TEST_ASSERT_TRUE(bridgelogic::putCheckedText(store, "k", "hello"));
+  TEST_ASSERT_TRUE(bridgelogic::getCheckedText(store, "k", out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("hello", out);
+  // An empty text is a record (an open network's passphrase).
+  TEST_ASSERT_TRUE(bridgelogic::putCheckedText(store, "e", ""));
+  TEST_ASSERT_TRUE(bridgelogic::getCheckedText(store, "e", out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("", out);
+  // Absent.
+  TEST_ASSERT_FALSE(bridgelogic::getCheckedText(store, "none", out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("", out);
+  // Torn: the store hands back a mongrel with kOk; the trailer refuses it.
+  store.tearNextWriteAfter(2U);
+  TEST_ASSERT_FALSE(bridgelogic::putCheckedText(store, "k", "world"));
+  TEST_ASSERT_FALSE(bridgelogic::getCheckedText(store, "k", out, sizeof(out)));
+  // Too long for the caller's buffer: refused, not truncated.
+  TEST_ASSERT_TRUE(bridgelogic::putCheckedText(store, "l", "0123456789"));
+  char tiny[8] = {};
+  TEST_ASSERT_FALSE(bridgelogic::getCheckedText(store, "l", tiny, sizeof(tiny)));
+  // Too long for the record: refused, not truncated.
+  char huge[hal::kStoreMaxValueLen + 1U];
+  memset(huge, 'x', sizeof(huge) - 1U);
+  huge[sizeof(huge) - 1U] = '\0';
+  TEST_ASSERT_FALSE(bridgelogic::putCheckedText(store, "h", huge));
+}
+
+void test_wifi_credential_is_persisted_on_first_join_and_read_back_by_a_ci_image() {
+  // THE #1 PIN. Boot one carries secrets.h: it wins, and once it has joined it
+  // is written. Boot two is a CI image with nothing compiled in: it reads the
+  // store and joins with the same credential.
+  fakes::FakeStore store;
+  bridgelogic::WifiCredential compiledIn;
+  TEST_ASSERT_TRUE(compiledIn.set("ClubWiFi", "correct horse battery staple"));
+  bridgelogic::WifiCredential stored;
+  TEST_ASSERT_FALSE(bridgelogic::loadWifiCredential(store, stored));
+  TEST_ASSERT_FALSE(stored.present());
+
+  bridgelogic::WifiCredential joining;
+  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(compiledIn, stored, joining) ==
+                   bridgelogic::WifiSource::CompiledIn);
+  TEST_ASSERT_TRUE(joining.equals(compiledIn));
+  // Joined: differs from the store, so it is written.
+  TEST_ASSERT_TRUE(bridgelogic::shouldPersistWifi(joining, stored));
+  TEST_ASSERT_TRUE(bridgelogic::storeWifiCredential(store, joining));
+  stored = joining;
+  // Joins again tomorrow: nothing to write, no flash wear.
+  TEST_ASSERT_FALSE(bridgelogic::shouldPersistWifi(joining, stored));
+
+  // The CI image.
+  bridgelogic::WifiCredential none;
+  bridgelogic::WifiCredential fromStore;
+  TEST_ASSERT_TRUE(bridgelogic::loadWifiCredential(store, fromStore));
+  bridgelogic::WifiCredential joinsWith;
+  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(none, fromStore, joinsWith) ==
+                   bridgelogic::WifiSource::Stored);
+  TEST_ASSERT_EQUAL_STRING("ClubWiFi", joinsWith.ssid);
+  TEST_ASSERT_EQUAL_STRING("correct horse battery staple", joinsWith.password);
+
+  // Nothing anywhere: the box says so rather than joining an empty SSID.
+  fakes::FakeStore empty;
+  bridgelogic::WifiCredential nothing;
+  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(none, nothing, joinsWith) == bridgelogic::WifiSource::None);
+  TEST_ASSERT_FALSE(joinsWith.present());
+  TEST_ASSERT_FALSE(bridgelogic::shouldPersistWifi(joinsWith, nothing));
+  TEST_ASSERT_FALSE(bridgelogic::storeWifiCredential(empty, joinsWith));
+
+  // A rotated password in a fresh secrets.h wins over the store, and lands.
+  bridgelogic::WifiCredential rotated;
+  TEST_ASSERT_TRUE(rotated.set("ClubWiFi", "new passphrase"));
+  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(rotated, fromStore, joinsWith) ==
+                   bridgelogic::WifiSource::CompiledIn);
+  TEST_ASSERT_TRUE(bridgelogic::shouldPersistWifi(joinsWith, fromStore));
+}
+
+void test_wifi_credential_refuses_what_the_standard_does_not_allow() {
+  bridgelogic::WifiCredential c;
+  char ssid33[34];
+  memset(ssid33, 's', 33U);
+  ssid33[33] = '\0';
+  TEST_ASSERT_FALSE(c.set(ssid33, "pw"));
+  TEST_ASSERT_FALSE(c.present());
+  char pw64[65];
+  memset(pw64, 'p', 64U);
+  pw64[64] = '\0';
+  TEST_ASSERT_FALSE(c.set("ok", pw64));
+  TEST_ASSERT_FALSE(c.set("", "pw"));
+  ssid33[32] = '\0';
+  pw64[63] = '\0';
+  TEST_ASSERT_TRUE(c.set(ssid33, pw64)); // exactly the limits
+  TEST_ASSERT_TRUE(c.set("open", ""));   // an open network
+  TEST_ASSERT_TRUE(c.present());
+
+  // A torn write of the password reads the whole credential as absent — a
+  // credential that is half the previous password is one that cannot join
+  // and cannot say why.
+  fakes::FakeStore store;
+  bridgelogic::WifiCredential good;
+  TEST_ASSERT_TRUE(good.set("ClubWiFi", "one-passphrase"));
+  TEST_ASSERT_TRUE(bridgelogic::storeWifiCredential(store, good));
+  bridgelogic::WifiCredential next;
+  TEST_ASSERT_TRUE(next.set("ClubWiFi", "two-passphrase"));
+  // Power goes five bytes into the password record: "two-p" + "assphrase" +
+  // the OLD trailer, handed back with kOk by the store. The trailer refuses it.
+  store.tearNextWriteAfter(5U);
+  TEST_ASSERT_FALSE(bridgelogic::storeWifiCredential(store, next));
+  bridgelogic::WifiCredential back;
+  TEST_ASSERT_FALSE(bridgelogic::loadWifiCredential(store, back));
+  TEST_ASSERT_FALSE(back.present());
+}
+
+void test_api_url_holds_the_ota_length_and_refuses_longer_loudly() {
+  fakes::FakeStore store;
+  char out[bridgelogic::kMaxApiUrlLen + 1U] = {};
+  // The 32-character cap was silent: this is 53 characters, a DNS-named
+  // advertised base, and it must survive a reboot intact.
+  const char named[] = "http://mainframe.crusaders-squash.example.co.za:8088";
+  TEST_ASSERT_TRUE(bridgelogic::storeApiUrl(store, named));
+  TEST_ASSERT_TRUE(bridgelogic::loadApiUrl(store, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING(named, out);
+
+  char exact[bridgelogic::kMaxApiUrlLen + 1U];
+  memset(exact, 'u', bridgelogic::kMaxApiUrlLen);
+  exact[bridgelogic::kMaxApiUrlLen] = '\0';
+  TEST_ASSERT_TRUE(bridgelogic::storeApiUrl(store, exact));
+  char over[bridgelogic::kMaxApiUrlLen + 2U];
+  memset(over, 'u', bridgelogic::kMaxApiUrlLen + 1U);
+  over[bridgelogic::kMaxApiUrlLen + 1U] = '\0';
+  TEST_ASSERT_FALSE(bridgelogic::storeApiUrl(store, over));
+  TEST_ASSERT_FALSE(bridgelogic::storeApiUrl(store, ""));
+  TEST_ASSERT_TRUE(bridgelogic::loadApiUrl(store, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING(exact, out); // the refused one changed nothing
+
+  // A box provisioned before the checked record: the legacy key still boots
+  // it, and the first new store retires the legacy record.
+  fakes::FakeStore old;
+  const char legacy[] = "http://192.168.68.10:8088";
+  TEST_ASSERT_TRUE(old.put(bridgelogic::kKeyApiUrlLegacy, reinterpret_cast<const uint8_t*>(legacy),
+                           static_cast<uint8_t>(strlen(legacy))) == hal::StoreResult::kOk);
+  TEST_ASSERT_TRUE(bridgelogic::loadApiUrl(old, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING(legacy, out);
+  TEST_ASSERT_TRUE(bridgelogic::storeApiUrl(old, named));
+  TEST_ASSERT_FALSE(old.exists(bridgelogic::kKeyApiUrlLegacy));
+  TEST_ASSERT_TRUE(bridgelogic::loadApiUrl(old, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING(named, out);
+
+  fakes::FakeStore none;
+  TEST_ASSERT_FALSE(bridgelogic::loadApiUrl(none, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("", out);
+}
+
+void test_wifi_line_is_parsed_with_escapes_and_an_optional_checksum() {
+  bridgelogic::WifiCredential c;
+  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine("!WIFI,ClubWiFi,secret pass", 26U, c));
+  TEST_ASSERT_EQUAL_STRING("ClubWiFi", c.ssid);
+  TEST_ASSERT_EQUAL_STRING("secret pass", c.password);
+  // Escaped comma and percent, an open network, and a verified trailer.
+  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine("!WIFI,Club%2C Bar,100%25", 24U, c));
+  TEST_ASSERT_EQUAL_STRING("Club, Bar", c.ssid);
+  TEST_ASSERT_EQUAL_STRING("100%", c.password);
+  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine("!WIFI,Open,", 11U, c));
+  TEST_ASSERT_EQUAL_STRING("", c.password);
+  // XOR of "WIFI,a,b" is 0x57^0x49^0x46^0x49^0x2C^0x61^0x2C^0x62 = 0x2C^... computed once here:
+  uint8_t x = 0U;
+  const char body[] = "WIFI,a,b";
+  for (size_t i = 0U; body[i] != '\0'; ++i) {
+    x = static_cast<uint8_t>(x ^ static_cast<uint8_t>(body[i]));
+  }
+  char signedLine[32];
+  snprintf(signedLine, sizeof(signedLine), "!WIFI,a,b*%02X", x);
+  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine(signedLine, strlen(signedLine), c));
+  TEST_ASSERT_EQUAL_STRING("a", c.ssid);
+  snprintf(signedLine, sizeof(signedLine), "!WIFI,a,b*%02X", static_cast<uint8_t>(x ^ 1U));
+  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine(signedLine, strlen(signedLine), c));
+  // Refusals: no password field, wrong prefix, bad escape, over-long.
+  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine("!WIFI,onlyssid", 14U, c));
+  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine("!WIFX,a,b", 9U, c));
+  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine("!WIFI,a%2,b", 11U, c));
+  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine("!WIFI,a,b%", 10U, c));
+  char longLine[128] = "!WIFI,";
+  memset(longLine + 6U, 's', 33U);
+  strcpy(longLine + 39U, ",pw");
+  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine(longLine, strlen(longLine), c));
+  TEST_ASSERT_FALSE(c.present());
+}
+
+void test_wifi_line_assembler_keeps_only_that_one_line() {
+  bridgelogic::WifiLineAssembler lines;
+  // Ordinary Mega traffic: never kept, never completes.
+  const char frame[] = "!SCAN,4T8Y2K9QW3ZM*3A\r\n!EVT,AUTOOFF,B*11\n";
+  for (size_t i = 0U; frame[i] != '\0'; ++i) {
+    TEST_ASSERT_FALSE(lines.feed(frame[i]));
+  }
+  // The line, CRLF-terminated, after a fragment of garbage.
+  const char typed[] = "xx\n!WIFI,ClubWiFi,pw\r\n";
+  bool ready = false;
+  for (size_t i = 0U; typed[i] != '\0'; ++i) {
+    if (lines.feed(typed[i])) {
+      TEST_ASSERT_FALSE(ready); // exactly once, on the CR
+      ready = true;
+      TEST_ASSERT_EQUAL_STRING("!WIFI,ClubWiFi,pw", lines.line());
+      TEST_ASSERT_EQUAL_size_t(17U, lines.length());
+    }
+  }
+  TEST_ASSERT_TRUE(ready);
+  // The next line starts fresh.
+  TEST_ASSERT_FALSE(lines.feed('!'));
+  TEST_ASSERT_EQUAL_size_t(1U, lines.length());
+  // A bare prefix with nothing after it is not a line; an over-long one is
+  // discarded to the terminator.
+  lines.reset();
+  const char bare[] = "!WIFI,\n";
+  for (size_t i = 0U; bare[i] != '\0'; ++i) {
+    TEST_ASSERT_FALSE(lines.feed(bare[i]));
+  }
+  for (size_t i = 0U; i < bridgelogic::WifiLineAssembler::kMaxLineLen + 10U; ++i) {
+    TEST_ASSERT_FALSE(lines.feed(i < 6U ? "!WIFI,"[i] : 'x'));
+  }
+  TEST_ASSERT_FALSE(lines.feed('\n'));
+}
+
 } // namespace
 
 void setUp() {
@@ -1181,6 +1807,29 @@ int main(int, char**) {
   RUN_TEST(test_corpus_every_bound_response_carries_the_clock_the_reader_finds);
   RUN_TEST(test_corpus_activate_body_is_byte_identical_to_the_signed_request);
   RUN_TEST(test_corpus_walkup_body_is_byte_identical_to_the_signed_request);
+
+  RUN_TEST(test_scan_flow_a_box_with_no_court_list_is_not_online);
+  RUN_TEST(test_scan_flow_an_open_breaker_is_the_rosters_scan);
+  RUN_TEST(test_scan_flow_a_zero_second_grant_is_a_refusal_not_a_pulse);
+  RUN_TEST(test_scan_flow_recognised_is_every_verdict_about_a_known_member);
+  RUN_TEST(test_scan_flow_a_grant_carries_the_uncapped_booking_remainder);
+  RUN_TEST(test_auth_policy_a_refused_scan_cannot_release_any_court);
+  RUN_TEST(test_auth_policy_a_recognised_refusal_arms_for_a_walk_up_but_releases_nothing);
+  RUN_TEST(test_auth_policy_the_member_whose_scan_lit_b_can_release_b_and_only_b);
+  RUN_TEST(test_session_and_walkup_say_whether_the_scan_was_recognised);
+  RUN_TEST(test_breaker_opens_after_two_transport_failures_and_backs_off_doubling);
+  RUN_TEST(test_breaker_any_answer_closes_it_and_resets_the_window);
+  RUN_TEST(test_heartbeat_interval_is_adopted_and_bounded);
+  RUN_TEST(test_relight_extends_a_booking_longer_than_the_cap_before_the_cap_runs_out);
+  RUN_TEST(test_relight_a_three_hour_booking_needs_two_extensions_each_capped);
+  RUN_TEST(test_relight_forgets_a_court_on_release_and_a_grant_inside_the_cap);
+  RUN_TEST(test_on_retry_resends_the_last_on_once_and_only_inside_the_window);
+  RUN_TEST(test_credential_store_checked_text_survives_the_store_and_a_torn_write_reads_as_absent);
+  RUN_TEST(test_wifi_credential_is_persisted_on_first_join_and_read_back_by_a_ci_image);
+  RUN_TEST(test_wifi_credential_refuses_what_the_standard_does_not_allow);
+  RUN_TEST(test_api_url_holds_the_ota_length_and_refuses_longer_loudly);
+  RUN_TEST(test_wifi_line_is_parsed_with_escapes_and_an_optional_checksum);
+  RUN_TEST(test_wifi_line_assembler_keeps_only_that_one_line);
 
   return UNITY_END();
 }

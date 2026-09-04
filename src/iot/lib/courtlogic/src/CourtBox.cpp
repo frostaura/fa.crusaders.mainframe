@@ -49,9 +49,9 @@ uint32_t parseU32(const char* text) {
 
 } // namespace
 
-CourtBox::CourtBox(const CourtPorts& ports)
+CourtBox::CourtBox(const CourtPorts& ports, proto::LegacyDialect legacy)
     : display_(ports.display), scanner_(ports.scanner), bridge_(ports.bridge), clock_(ports.clock),
-      relays_(ports.relay), panel_(ports.buttons), scan_(), auth_(), rx_(proto::Link::Downlink), uptime_(),
+      relays_(ports.relay), panel_(ports.buttons), scan_(), auth_(), rx_(proto::Link::Downlink, legacy), uptime_(),
       stateDue_(), scanFeedback_(), lastMask_(0U), overrunPending_(false), txBuf_(), txDropped_(0U),
       rxErrors_(0U), unauthorised_(0U), oversizeScans_(0U) {
 }

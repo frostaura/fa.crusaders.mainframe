@@ -30,6 +30,26 @@ drops and the backend dies, **the lights still go off**. In the system this
 replaces, the off command was scheduled inside an Excel macro on a Windows PC —
 close the workbook mid-session and a court burned until somebody noticed.
 
+Two things stand behind that timer on the Mega itself:
+
+- **A hardware watchdog (2 s).** Enabled at the end of `setup()`, kicked once per
+  pass of `loop()` and nowhere else. Anything that stops `loop()` returning —
+  which used to include a wedged I²C bus under the LCD — ends in a reset that
+  re-runs `ArduinoRelay::begin()`, which drives every relay pin to the released
+  level *before* configuring it as an output. A watchdog reset therefore lands
+  with all four contacts open, exactly like a power-on. An `.init3` hook clears
+  `MCUSR` and disables the WDT before `main()`, so the firmware side can never
+  contribute to a WDT boot loop; whether the club's Mega2560 **bootloader**
+  survives a WDT reset is a bench check (older stk500v2 bootloaders loop) and is
+  on the go-live checklist.
+- **An I²C bus timeout on the LCD.** The pinned AVR core ships with `Wire`'s
+  timeout *disabled*, so one corrupted PCF8574 transaction spun forever inside a
+  paint. `LcdDisplay::begin()` now arms `Wire.setWireTimeout(25 ms, reset)`;
+  a timeout abandons the rest of that write, skips the next 20 writes
+  (`courtlogic::DisplayHoldoff`, host-tested), then tries the panel again. A dead
+  display costs one bounded stall per holdoff; the relay timer never waits on
+  the glass.
+
 ## Wiring
 
 | Function | Connection |
@@ -115,6 +135,18 @@ Arduino headers, so the same code compiles for AVR, Xtensa **and** the host test
 runner. That is what lets the whole logic layer be proven with no board
 attached. CI enforces the rule with a grep gate.
 
+### The legacy serial dialect is off on a real box
+
+`proto::Decoder` still speaks Carl's original one-character dialect (a bare
+`A` is "relay A on", `<line1>|<line2>` is an LCD prompt that also arms the
+buttons), tested against the shared corpus — but the **production Mega is built
+with `proto::LegacyDialect::Refuse`**, the `CourtBox` default. Any line on the
+downlink that does not start with `!` is answered `!EVT,BADFRAME,RX` and moves
+no relay. The legacy `A` was the one path by which a relay closed without a
+checksum, on a UART that receives the ESP8266's 74880-baud boot banner at every
+ESP reset, beside four relay coils. The simulator opts in with
+`LegacyDialect::Accept` explicitly, because it is the bench.
+
 `main.cpp` is the **only** composition root in each of the three targets: it
 chooses implementations and wires them, and it holds no behaviour. That is not a
 style preference — `pio test -e native` sets `build_src_filter = -<*>`, so
@@ -159,16 +191,87 @@ with `now >= expiresAt` (false for 49.7 days after the wrap, so the relay was
 never released). `make lint-iot` greps for raw comparisons against any
 `*deadline` / `*expires` / `*AtMs` identifier outside `lib/timebase`.
 
+## The button window: who may press what
+
+The Mega only forwards a button press while its authorisation window is armed,
+and only the ESP arms it (`!AUTH,<seconds>`; `!AUTH,0` closes it). The rule for
+*when* is `lib/bridgelogic/AuthPolicy`, and it is deliberately not "on every
+scan":
+
+- **The window opens only for a scan somebody recognised** — the API answered
+  with a verdict about a known member (activated, or refused for any reason except
+  `not_recognised`: a known member with no booking is exactly who buys a
+  walk-up), or the roster matched an entry (allowed, too early, too late, wrong
+  court). An unknown token and a stale roster arm nothing and close whatever was
+  open. Before this, any barcode bought thirty seconds of buttons, and with an
+  admin-mapped OFF button that was a lit court going dark from a stranger's
+  receipt.
+- **A grant does not close the window; it binds it.** The court that just lit is
+  remembered, the window stays armed for the same TTL, and an OFF press is
+  honoured for **that court only** — so the member who lit court B can switch B
+  off, and nobody at the panel can switch off A, C or D. Any other court's OFF
+  paints `NOT YOUR COURT`. A walk-up purchase binds the window to the court it
+  bought. The scan itself is spent by a grant (no walk-up on a lit member's
+  token), so the bound window is release-only.
+- **A lapse closes it**, on both ends, as before.
+
 ## The court works when the network does not
 
 A scan on a box that can reach the API **asks the API first**
 (`POST /api/v1/device/activate`), because only the API knows about a booking made
 thirty seconds ago, a walk-up member with no booking, or a balance too low to admit.
 Its answer — a grant or a refusal — is final; the roster is never asked for a
-second opinion. When the API cannot be asked (no link, no clock, a transport
-failure, a 5xx, a malformed 200) the scan is decided **on the box**, from the
-roster cache the heartbeat fills, in microseconds — so a router reboot is a slower
-scan, not a dark court. The flow is `lib/bridgelogic/ScanFlow`.
+second opinion. When the API cannot be asked (no link, no clock, **no court list
+yet**, the circuit breaker open, a transport failure, a 5xx, a malformed 200) the
+scan is decided **on the box**, from the roster cache the heartbeat fills, in
+microseconds — so a router reboot is a slower scan, not a dark court. The flow is
+`lib/bridgelogic/ScanFlow`.
+
+Three details of that flow that were each a review finding:
+
+- **The first heartbeat goes out the moment the WiFi link comes up** (and again
+  the moment a signed OFFER seeds the clock on a box with no court list), not
+  30 s after boot. Until it has answered, `court_numbers` is empty and the box is
+  *not* online: a scan is refused locally from the roster rather than recorded as
+  attendance server-side and then refused at the box because the granted court
+  maps to nothing.
+- **A circuit breaker** (`lib/bridgelogic/ApiBreaker`) sits in front of every
+  signed call. Two consecutive transport failures — the request never completed,
+  or a 5xx — and the API is judged down for a backoff window of 15 s, doubling to
+  a cap of 120 s while it stays down. While open, scans go straight to the roster
+  and the event drain waits; the heartbeat keeps its cadence and is the probe.
+  Any completed answer, 401 and 429 included, closes it. Without this, a host that
+  was off with the AP up cost every scan two 4 s connect timeouts.
+- **`granted_seconds: 0` is a refusal** (`SLOT ENDED`), not a one-second relay
+  pulse: a rescan inside the post-slot grace window answers `activated:true` with
+  nothing left to grant.
+
+The tenant's **`heartbeat_seconds`** is adopted from every accepted heartbeat,
+bounded to 15–300 s (`lib/bridgelogic/Cadence`); the compiled-in 30 s is only
+where a box starts.
+
+### A booking longer than the relay cap
+
+One `!ON` buys at most ninety minutes — the Mega clamps every duration, on
+purpose, so a bridge that *dies* cannot leave a court burning. A two-hour
+booking used to go dark at minute ninety with no cue. The bridge knows how long
+the booking really has (the roster's `closes_in`, the activate response's
+`granted_seconds`, the walk-up's `granted_minutes`, all carried uncapped), so
+`lib/bridgelogic/Relight` keeps a per-court deadline and sends
+`!EXT,<court>,<seconds>` sixty seconds before each cap expiry, for
+`min(cap, what is left)`, while the booking is still live. The Mega clamps every
+`!EXT` to its own cap too: a bridge that dies mid-booking still fails open at the
+next cap. A release, by `!EVT` or `!STATE`, forgets the court.
+
+### An `!ON` the Mega did not take
+
+A frame whose checksum dies on the wire comes back as `!ERR,BADCRC` (or, for a
+line that overran, `!EVT,OVERRUN,RX`). The bridge keeps the last `!ON` and, on a
+receive error inside 1.5 s of it, sends it **once** more
+(`lib/bridgelogic/OnRetry`). Once, not until acknowledged: a second failure is a
+cable. If the retry cannot be sent either, the court is marked dark in the
+bridge's books and the screen says `TRY AGAIN`, so the next `!STATE` does not
+synthesise a Release for a session that never started.
 
 On the roster path the box records what it did and the API hears about it when it
 can; an activation the API itself granted is not queued, because the queue is the
@@ -212,6 +315,11 @@ Ed25519, and vendoring a curve implementation into a court-lighting controller i
 the worse trade. **The property that mattered is unchanged**: the signing key is
 asymmetric and lives only where releases are built.
 
+**The image carries no WiFi credential, and must not.** CI builds and signs the
+release on a runner where `secrets.h` cannot exist, so an image that needed the
+header would have put an empty SSID on every box in the club at the first
+over-the-air release. See *WiFi credentials* below.
+
 **There is no rollback.** A 4M part carrying a 1 MB sketch and 2 MB of LittleFS has
 no second OTA slot, and the filesystem is not optional because it holds the device
 credential. What `ota::BootGuard` does instead is make sure a bad build is never
@@ -225,6 +333,43 @@ does nothing. Three boots are allowed before a build is condemned, because a
 brownout when four relay coils energise at once is a real thing on this hardware.
 The condemned version is reported on the heartbeat and shown on the Devices screen.
 
+## The discovery OFFER and the clock
+
+A provisioned box adopts the API's clock from a *signed* discovery OFFER — that
+is how a power-cycled board recovers its clock without a call. But the OFFER is
+bound to a per-**boot** nonce, so one captured today verifies all week, and a
+replayed one used to set the clock *back* to the capture instant; two 401s
+later the box read its own rewound clock as a dead credential. The rule is now
+`devapi::DeviceClient::adoptOfferTime`: an OFFER **seeds** a box with no clock,
+**moves a known clock forward** by up to the skew window (90 s), and is
+**ignored and counted** when its time is behind the clock or further ahead than
+that. OFFERs never touch the two-strike reprovision counter; that counter is
+evidence about the credential, gathered from signed 401s only.
+
+## WiFi credentials
+
+The SSID and password live in the box's LittleFS store, beside the device key
+(`lib/bridgelogic/CredentialStore`), under an integrity trailer so a torn write
+reads as *absent* rather than as half a passphrase. Three ways in, one rule:
+
+| Path | What happens |
+|---|---|
+| **Bench / first flash** — `secrets.h` present at build | The compiled-in credential is used to join. The first time it actually joins, it is written to the store (only when it differs from what is stored, so a working box does not wear a flash cell every morning). |
+| **OTA / CI image** — no `secrets.h` | The stored credential is read at boot and used to join. Every box provisioned once at the bench works on every release after. |
+| **USB, no `secrets.h` at all** — DIP 5, 6 ON, monitor at 9600 | Type `!WIFI,<ssid>,<password>` (optionally with the v2 `*CC` XOR trailer; escape `,` `*` `%` as `%2C` `%2A` `%25`). The box stores it, paints `WIFI SAVED / JOINING...` and joins. A box with no credential anywhere shows `NO WIFI SET / !WIFI,SSID,PASS` instead of a claim code. |
+
+The `!WIFI` line rides the same UART as the Mega link; that is safe because the
+Mega only ever emits frames from its fixed verb table, none of which is `WIFI`.
+A compiled-in credential wins over a stored one, which is how a rotated
+password reaches the store: reflash once with the new `secrets.h`, or type the
+line.
+
+The API base URL moved to the same checked-record scheme (`api_base`, up to 120
+characters — the OTA URL bound). The old `api_url` record was silently capped at
+32, which is why a DNS-named advertised base used to fail discovery with nothing
+on the glass. A box that only holds the old record still boots off it; a URL
+that will not fit paints `API URL TOO LONG` instead of being truncated.
+
 ## Flashing
 
 **Mega** — DIP 1,2 OFF; 3,4 ON, then `pio run -e court_mega -t upload`.
@@ -232,5 +377,10 @@ The condemned version is reported on the heartbeat and shown on the Devices scre
 **ESP8266** — normally OTA. For a first flash, set the ESP-upload DIP row above
 (5, 6, 7 ON, others OFF), then restore the run positions.
 
-Copy `src/common/secrets.h.example` to `secrets.h` and fill it before flashing.
-`secrets.h` is gitignored; it was committable until this project closed that gap.
+For the first flash of a box, either copy `src/common/secrets.h.example` to
+`secrets.h` and fill in the WiFi credential before building — it is persisted to
+the store on the first join, and no later image needs it — or flash the plain CI
+image and type the `!WIFI` line over USB. `secrets.h` is gitignored; it was
+committable until this project closed that gap. The `DEVICE_*` and `API_BASE_URL`
+lines in the example are not read by this firmware: the device key and the URL
+come from provisioning and discovery.

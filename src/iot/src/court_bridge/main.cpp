@@ -69,6 +69,12 @@
 #include "arduino_hal/ArduinoClock.h"
 #include "arduino_hal/LittleFsStore.h"
 #include "arduino_hal/SerialTransport.h"
+#include "bridgelogic/ApiBreaker.h"
+#include "bridgelogic/AuthPolicy.h"
+#include "bridgelogic/Cadence.h"
+#include "bridgelogic/CredentialStore.h"
+#include "bridgelogic/OnRetry.h"
+#include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterSync.h"
 #include "bridgelogic/ScanFlow.h"
 #include "bridgelogic/StateReconcile.h"
@@ -95,9 +101,12 @@
 
 // secrets.h is gitignored and is absent on a CI runner, so its presence cannot
 // be a build requirement — a firmware that only compiles on the machine holding
-// the club's WiFi password is a firmware CI never checks. The defaults below
-// produce a board that boots, talks to the Mega and refuses to join a network,
-// which is the honest behaviour for an unconfigured box.
+// the club's WiFi password is a firmware CI never checks. And the CI image is
+// the one every box installs over the air, so the credential CANNOT live in the
+// image at all: it lives in the LittleFS store beside the device key, written
+// the first time a build that carries secrets.h actually joins, and read from
+// there by every boot and every OTA image after (bridgelogic::CredentialStore).
+// The empty defaults below mean "nothing compiled in; use the store".
 #if __has_include("common/secrets.h")
 #include "common/secrets.h"
 #endif
@@ -120,15 +129,16 @@ constexpr size_t kNonceBytes = 8U;
 /// digests, so the corpus settles it and this comment records which one won.
 constexpr size_t kNonceHexLen = dc::hex::encodedSize(kNonceBytes);
 
-/// Store keys. Short ASCII literals, well inside hal::kStoreMaxKeyLen.
-constexpr char kKeyApiUrl[] = "api_url";
+/// Store keys. Short ASCII literals, well inside hal::kStoreMaxKeyLen. The API
+/// URL's and the WiFi credential's are bridgelogic::CredentialStore's.
 constexpr char kKeyDeviceId[] = "dev_id";
 constexpr char kKeyDeviceKey[] = "dev_key";
 
 /// The device key as hex, so it survives a byte-array store with no encoding of
-/// its own. 32 bytes of key is 64 characters, which is over hal::kStoreMaxValueLen
-/// — so the key is stored in two halves under one key each, which the store's
-/// 32-byte value limit forces and which is worth stating rather than discovering.
+/// its own. 32 bytes of key is 64 characters, which was over the store's value
+/// cap when this was written — so the key is stored in two halves under one key
+/// each. The cap has since grown; the two-record layout stays, because every
+/// provisioned box in the field holds it that way.
 constexpr char kKeyDeviceKey2[] = "dev_key2";
 constexpr size_t kDeviceKeyBytes = 32U;
 
@@ -164,12 +174,17 @@ constexpr uint8_t kPacketsPerPass = 4U;
 /// Bytes drained from the Mega link per pass, matching the UART ring.
 constexpr uint16_t kBytesPerPass = 64U;
 
+/// The heartbeat interval until the API says otherwise. The tenant's
+/// `heartbeat_seconds` is adopted from every accepted heartbeat, bounded by
+/// bridgelogic::Cadence; this is only where a box starts.
 constexpr uint32_t kHeartbeatMs = 30000UL;
 
 #ifdef HEARTBEAT_INTERVAL_MS
 static_assert(HEARTBEAT_INTERVAL_MS == kHeartbeatMs,
               "kHeartbeatMs and the HEARTBEAT_INTERVAL_MS build flag have drifted apart");
 #endif
+
+uint32_t gHeartbeatMs = kHeartbeatMs;
 
 /// The ESP8266's hardware RNG register, behind discovery::IEntropySource.
 ///
@@ -269,6 +284,19 @@ bridgelogic::HeldState gHeld[bridgelogic::kStateCourts];
 bridgelogic::ScanFlow gScanFlow;
 bridgelogic::WalkUpNonce gWalkUpNonce;
 
+/// The circuit breaker in front of every signed call. Two consecutive
+/// transport failures and the API is treated as down for a backoff window:
+/// scans go straight to the roster and the event drain waits, instead of every
+/// scan standing in a 4 s connect timeout twice (review #13).
+bridgelogic::ApiBreaker gBreaker;
+
+/// Which courts have a booking longer than the ninety-minute relay cap, and
+/// when each needs its `!EXT`. The Mega's cap is still the safety net.
+bridgelogic::Relight gRelight;
+
+/// The last `!ON`, kept for one retry if the Mega reports it did not decode.
+bridgelogic::OnRetry gOnRetry;
+
 /// What the eight buttons do, and the two presses that use them.
 ///
 /// The map starts as the original wiring — courts A-D then 15/30/45/60 — and is
@@ -290,12 +318,18 @@ court::WalkUpPad gPad;
 /// at the API, which is the real backstop.
 constexpr uint32_t kScanMemoryMs = AUTH_TTL_MS;
 
-/// What `!AUTH` is sent with after a scan.
+/// What `!AUTH` is sent with when the window is armed.
 constexpr uint16_t kAuthSeconds = static_cast<uint16_t>(kScanMemoryMs / 1000UL);
 
 /// The last thing the scanner read, verbatim. Cleared when it lapses or is spent.
 char gLastScan[proto::kMaxArgLen + 1] = {'\0'};
 tb::Deadline gScanAt;
+
+/// When the Mega's button window is armed, and which court an OFF press may
+/// release. Armed only for a scan somebody recognised; bound to the court a
+/// grant lit so its owner can switch it off; refused for every other court.
+/// The rule and its tests are bridgelogic::AuthPolicy's (review #4/#14).
+bridgelogic::AuthPolicy gAuth(kScanMemoryMs);
 
 /// The heartbeat response. File scope, not stack: the contract allows 2048
 /// bytes — sixteen roster entries plus the button map plus an OTA offer — and
@@ -325,7 +359,20 @@ bool gProvisioned = false;
 char gTenantSlug[hal::kStoreMaxValueLen + 1U] = {};
 
 /// Where the API is, learned from the discovery OFFER or from provisioning.
-char gApiUrl[hal::kStoreMaxValueLen + 1U] = {};
+char gApiUrl[bridgelogic::kMaxApiUrlLen + 1U] = {};
+
+/// The WiFi credential: what the store holds, and what the radio is joining
+/// with right now. The two differ only between a boot that carried secrets.h
+/// (or received a `!WIFI` line) and the moment that credential first joins,
+/// which is when it is written.
+bridgelogic::WifiCredential gWifiStored;
+bridgelogic::WifiCredential gWifiActive;
+bridgelogic::WifiSource gWifiSource = bridgelogic::WifiSource::None;
+
+/// Watches the Mega link for a `!WIFI,<ssid>,<password>` line — the USB
+/// provisioning path, DIP 5 and 6 on. See CredentialStore.h for why taking it
+/// from this stream is safe.
+bridgelogic::WifiLineAssembler gWifiLine;
 
 uint32_t uptimeSeconds() {
   return static_cast<uint32_t>(gUptime.value() / 1000ULL);
@@ -356,25 +403,49 @@ void showIdentityScreen() {
     static_cast<void>(sendToMega(proto::Frame::lcd("CONNECTED", "SCAN TO START")));
     return;
   }
+  if (gWifiSource == bridgelogic::WifiSource::None) {
+    // No network to be claimed over. A claim code here would be a prompt for a
+    // step that cannot succeed; the line that helps is the one that says what
+    // to type over USB.
+    static_cast<void>(sendToMega(proto::Frame::lcd("NO WIFI SET", "!WIFI,SSID,PASS")));
+    return;
+  }
   // The claim code goes out on the ONE channel nothing on the network can read:
   // the Mega's LCD. That is the whole point of the commitment scheme — the code
   // is never on the wire, only SHA256(code ":" nonce) truncated to 16 hex.
   static_cast<void>(sendToMega(proto::Frame::lcd("CLAIM CODE", gClaimCode.lcdText())));
 }
 
-/// Forgets the remembered scan AND closes the Mega's button window.
-///
-/// The two are one transition. The Mega arms its window on `!AUTH,<ttl>` when a
-/// scan is remembered and would otherwise let it run out on its own — but a
-/// window that outlives the scan is thirty seconds of buttons on the previous
-/// member's identity for whoever walks up next. So every armed→cleared edge of
-/// gLastScan sends `!AUTH,0`: the lapse, a walk-up that spent it, and any
-/// activation that lit the court — online or from the roster alike, which is
-/// bridgelogic::spendsScan's rule.
-void forgetScan() {
+/// Sends what bridgelogic::AuthPolicy decided to the Mega, whose window is the
+/// one that actually forwards presses.
+void applyAuth(bridgelogic::AuthCommand command) {
+  switch (command) {
+  case bridgelogic::AuthCommand::Arm:
+    static_cast<void>(sendToMega(proto::Frame::auth(kAuthSeconds)));
+    return;
+  case bridgelogic::AuthCommand::Disarm:
+    static_cast<void>(sendToMega(proto::Frame::auth(0U)));
+    return;
+  case bridgelogic::AuthCommand::None:
+    return;
+  }
+}
+
+/// Forgets the remembered scan — the identity a walk-up would be bought on.
+/// Does NOT touch the button window: a grant spends the scan and keeps the
+/// window armed for the member who just lit the court, so their OFF press
+/// works (review #4); a lapse spends it and closes the window (forgetScan).
+void spendScan() {
   gLastScan[0] = '\0';
   gScanAt.disarm();
-  static_cast<void>(sendToMega(proto::Frame::auth(0U)));
+}
+
+/// The scan lapsed unspent, or was thrown away. Identity and window both go:
+/// a window that outlives the scan is thirty seconds of buttons on the
+/// previous member's identity for whoever walks up next.
+void forgetScan() {
+  spendScan();
+  applyAuth(gAuth.disarm());
 }
 
 void setupIdentity() {
@@ -451,23 +522,25 @@ void broadcastAnnounce() {
   static_cast<void>(gUdp.endPacket());
 }
 
-/// Persists the API base URL. False when it will not fit the store.
-///
-/// The caller must honour that false rather than carrying on: gApiUrl is sized to
-/// the store's value cap, while an OFFER may carry up to discovery::kMaxValueLen.
-/// So a longer URL used to be silently truncated into RAM by snprintf while this
-/// function quietly declined to persist it — leaving the box calling a mangled
-/// host until the next reboot, and a different mangled host after it.
-bool rememberApiUrl(const char* url) {
-  const size_t len = strlen(url);
-  if (len == 0U || len > hal::kStoreMaxValueLen) {
+/// Adopts a base URL for this boot AND the next. False, with nothing changed,
+/// when it will not fit — refused rather than truncated, because half a URL is
+/// a request to somewhere else. The store's cap used to be 32 characters and
+/// the refusal was silent; bridgelogic::kMaxApiUrlLen is the bound now, and a
+/// refusal is painted so a DNS-named advertised base that is too long is a
+/// line on the glass rather than a box that never connects.
+bool adoptApiUrl(const char* url) {
+  const size_t urlLen = strlen(url);
+  if (urlLen == 0U || urlLen > bridgelogic::kMaxApiUrlLen) {
+    static_cast<void>(sendToMega(proto::Frame::lcd("API URL TOO LONG", "SEE THE DESK")));
     return false;
   }
-  return gStore.put(kKeyApiUrl, reinterpret_cast<const uint8_t*>(url), static_cast<uint8_t>(len)) ==
-         hal::StoreResult::kOk;
+  memcpy(gApiUrl, url, urlLen);
+  gApiUrl[urlLen] = '\0';
+  static_cast<void>(bridgelogic::storeApiUrl(gStore, url));
+  return true;
 }
 
-void handleOffer(const discovery::Packet& packet) {
+void handleOffer(const discovery::Packet& packet, uint32_t nowMs) {
   // The type carries the rule, which is the whole reason both types exist — and
   // until now this built an UnclaimedBox unconditionally, so ClaimedBox was
   // constructed nowhere in the firmware and its guarantee was a comment.
@@ -498,30 +571,28 @@ void handleOffer(const discovery::Packet& packet) {
   }
 
   if (gProvisioned) {
-    // Verified-offer time ONLY. For a provisioned box the OFFER above was
-    // HMAC-verified and nonce-replay-bound before any of its fields became
-    // readable, so its clock is as trustworthy as a signed response body — and
-    // it is how a power-cycled board recovers its clock without touching the
-    // API. An unclaimed box's offer is unsigned and attacker-suppliable, so
-    // its time is never adopted; an unclaimed box also needs no clock, because
-    // its only call, /provision, is unsigned and the response seeds the clock.
-    gApi.adoptServerTime(offer.unixSeconds(), static_cast<uint32_t>(gUptime.value()));
+    // Verified-offer time, under the OFFER rule. The OFFER above was
+    // HMAC-verified and bound to this boot's nonce — but the nonce is per
+    // BOOT, so a signed OFFER captured today verifies all week, and a replayed
+    // one used to rewind the clock and, two 401s later, strip the credential
+    // (review #5). adoptOfferTime seeds a box that has no clock — the
+    // power-cycle recovery this exists for — and otherwise only moves a known
+    // clock forward, by less than the skew window; anything behind the clock
+    // is a replay and is ignored. It never feeds the credential strike count.
+    // An unclaimed box's offer is unsigned and never teaches the clock at all.
+    const devapi::OfferClock verdict =
+        gApi.adoptOfferTime(offer.unixSeconds(), static_cast<uint32_t>(gUptime.value()));
+    if (verdict == devapi::OfferClock::Bootstrapped && gCourtCount == 0U) {
+      // The clock just became known on a box that has no court list yet. The
+      // heartbeat that fills it is due now, not at boot+30 s (review #12).
+      gHeartbeat.arm(nowMs, 0U);
+    }
   }
 
-  // Refused rather than truncated. A base URL this box cannot hold is one it
-  // cannot call correctly, and half of one is a request to somewhere else.
-  // gApiUrl is sized to the store's value cap while an OFFER may carry up to
-  // discovery::kMaxValueLen, so this is a real gap and not a defensive nicety.
-  const size_t urlLen = strlen(offer.url());
-  if (urlLen == 0U || urlLen >= sizeof(gApiUrl)) {
-    return;
-  }
-  static_cast<void>(rememberApiUrl(offer.url()));
-  memcpy(gApiUrl, offer.url(), urlLen);
-  gApiUrl[urlLen] = '\0';
+  static_cast<void>(adoptApiUrl(offer.url()));
 }
 
-void pumpOffers() {
+void pumpOffers(uint32_t nowMs) {
   for (uint8_t i = 0U; i < kPacketsPerPass; ++i) {
     const int size = gUdp.parsePacket();
     if (size <= 0) {
@@ -540,7 +611,7 @@ void pumpOffers() {
       continue;
     }
     if (packet.verb() == discovery::Verb::Offer) {
-      handleOffer(packet);
+      handleOffer(packet, nowMs);
     }
   }
 }
@@ -582,19 +653,41 @@ void applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
     return;
   }
   const proto::Court court = static_cast<proto::Court>(outcome.court);
-  const bool sent = sendToMega(proto::Frame::on(court, outcome.durationMs / 1000U));
+  const proto::Frame on = proto::Frame::on(court, outcome.durationMs / 1000U);
+  const bool sent = sendToMega(on);
   gHeld[outcome.court] = bridgelogic::afterOnAttempt(gHeld[outcome.court], sent, nowMs);
   if (!sent) {
     static_cast<void>(
         sendToMega(proto::Frame::lcd(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2)));
+    return;
   }
+  // Left the bridge, which is not the same as reached the Mega: a checksum
+  // that dies on the wire comes back as `!ERR,BADCRC`, and this is the frame
+  // that is then sent once more (bridgelogic::OnRetry).
+  gOnRetry.sent(on, nowMs);
+}
+
+/// A scan has been decided, by whichever path: paint it, light it, spend the
+/// scan if it lit, arm or close the button window, and remember a booking
+/// longer than the relay cap for its `!EXT`. ONE function for the online and
+/// roster paths so the two cannot disagree about any of those.
+void settleScan(const court::Outcome& outcome, uint32_t nowMs) {
+  applyOutcome(outcome, nowMs);
+  if (bridgelogic::spendsScan(outcome)) {
+    // A lit court spends the scan (review H1): the next walk-up must not buy
+    // on this member's token. The window is the policy's, below — kept armed
+    // and bound to the court for THIS member's OFF press.
+    spendScan();
+    gRelight.onGrant(outcome, nowMs);
+  }
+  applyAuth(gAuth.afterScan(outcome, nowMs));
 }
 
 /// Forward declarations: the API calls sit together further down, with the
 /// helpers they share. Moving them up to satisfy the compiler would put them
 /// away from the code they belong with.
-bool activateOnline(const char* token, uint32_t nowMs);
-void requestWalkUp(const court::WalkUpIntent& intent, uint32_t nowMs);
+bool activateOnline(const char* token);
+void requestWalkUp(const court::WalkUpIntent& intent);
 
 void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // Remembered so a following walk-up knows WHO is buying. The scanned bytes, not the
@@ -603,20 +696,22 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   snprintf(gLastScan, sizeof(gLastScan), "%s", frame.arg(0));
   gScanAt.arm(nowMs, kScanMemoryMs);
 
-  // Open the Mega's button window for the same span the scan is remembered. The
-  // Mega drops every press outside its window, and until this was sent nothing
-  // in the bridge ever opened one — walk-up and early release were dead at the
-  // panel (review H1). forgetScan() closes it.
-  static_cast<void>(sendToMega(proto::Frame::auth(kAuthSeconds)));
+  // No `!AUTH` yet. The window used to be armed HERE, before anything had
+  // decided what the scan was — so any barcode bought thirty seconds of
+  // buttons, and with a mapped OFF button that was a lit court going dark
+  // from a stranger's receipt. The window is armed by settleScan(), for a
+  // recognised scan only, once there is a decision (review #4/#14).
 
   bridgelogic::LinkState link;
   link.provisioned = gProvisioned;
   link.wifiUp = gWifiUp;
   link.clockKnown = gApi.clockKnown();
+  link.courtCount = gCourtCount;
+  link.apiDown = gBreaker.open(nowMs);
 
   switch (gScanFlow.onScan(link)) {
   case bridgelogic::Attempt::Online:
-    if (activateOnline(frame.arg(0), nowMs)) {
+    if (activateOnline(frame.arg(0))) {
       return;
     }
     // No decision from the API. The roster's scan, as below.
@@ -629,15 +724,12 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // roster entry carries it — never something in the scanned bytes. A barcode
   // that could name its own court would be a barcode that opens any court in
   // the club. The scanner serves the first gCourtCount relays.
-  const court::Outcome outcome =
-      gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, nowMs);
-  applyOutcome(outcome, nowMs);
-  if (bridgelogic::spendsScan(outcome)) {
-    // The same rule as the online grant (review H1): a lit court spends the
-    // scan, and the window closes with it. Before this the offline grant left
-    // both armed, and the next walk-up bought time on this member's token.
-    forgetScan();
-  }
+  //
+  // A fresh clock read, not the pass's: activateOnline may have just spent
+  // four seconds in a connect timeout, and a held-since stamped before that
+  // call is old enough for the next `!STATE` to read as a lost release.
+  const uint32_t now = gClock.nowMs();
+  settleScan(gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, now), now);
 }
 
 /// Queues the Release for a court and forgets it. The one place a held court
@@ -645,6 +737,35 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
 void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
   applyOutcome(gSession.onRelease(court, heldMs, nowMs), nowMs);
   gHeld[court] = bridgelogic::HeldState{nowMs, false};
+  gRelight.onRelease(court);
+  gOnRetry.clear();
+}
+
+/// The Mega said the last line it received did not decode. If that line was
+/// the `!ON` that lights a paid court, it goes once more; otherwise nothing —
+/// a repaint the Mega missed is a repaint, and the next one is a second away.
+void handleReceiveError(const proto::Frame& frame, uint32_t nowMs) {
+  proto::Frame on;
+  if (!bridgelogic::isReceiveError(frame.verb(), frame.arg(0), frame.arg(1)) ||
+      !gOnRetry.shouldResend(nowMs, on)) {
+    return;
+  }
+  const uint8_t court = static_cast<uint8_t>(on.arg(0)[0] - 'A');
+  if (court >= bridgelogic::kStateCourts) {
+    return;
+  }
+  const bool sent = sendToMega(on);
+  if (sent) {
+    // Held from NOW: the first attempt's stamp is the one a `!STATE` in flight
+    // would have contradicted.
+    gHeld[court] = bridgelogic::afterOnAttempt(gHeld[court], true, nowMs);
+    return;
+  }
+  // Twice is a cable. The court is dark in this half's books so the next
+  // `!STATE` does not synthesise a Release for a session that never started,
+  // and the member is told to try again.
+  gHeld[court] = bridgelogic::HeldState{nowMs, false};
+  static_cast<void>(sendToMega(proto::Frame::lcd(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2)));
 }
 
 void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
@@ -719,11 +840,21 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
   case court::PadResult::Requested:
-    requestWalkUp(gPad.intent(), nowMs);
+    requestWalkUp(gPad.intent());
     return;
-  case court::PadResult::ReleaseRequested:
-    static_cast<void>(sendToMega(proto::Frame::off(static_cast<proto::Court>(gPad.intent().court))));
+  case court::PadResult::ReleaseRequested: {
+    // Only the court the current window is bound to — the one this member's
+    // scan or purchase lit. Anything else is somebody else's game, and the
+    // press that used to darken it mid-match now says so (review #4/#14).
+    const uint8_t court = gPad.intent().court;
+    if (!gAuth.allowsRelease(court, nowMs)) {
+      static_cast<void>(
+          sendToMega(proto::Frame::lcd(bridgelogic::kNotYourCourtLine1, bridgelogic::kNotYourCourtLine2)));
+      return;
+    }
+    static_cast<void>(sendToMega(proto::Frame::off(static_cast<proto::Court>(court))));
     return;
+  }
   case court::PadResult::Ignored:
     return;
   }
@@ -744,7 +875,11 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
     handleScan(result.frame, nowMs);
     return;
   case proto::Verb::Evt:
+    handleReceiveError(result.frame, nowMs);
     handleMegaEvent(result.frame, nowMs);
+    return;
+  case proto::Verb::Err:
+    handleReceiveError(result.frame, nowMs);
     return;
   case proto::Verb::Btn:
     handleButton(result.frame, nowMs);
@@ -756,15 +891,22 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
     handleState(result.frame, nowMs);
     return;
   default:
-    // `!ERR`, and downlink verbs echoed by a crossed cable. Counted by the
-    // decoder; nothing to act on.
+    // Downlink verbs echoed by a crossed cable. Counted by the decoder;
+    // nothing to act on.
     return;
   }
 }
 
+void handleWifiLine(const char* line, size_t len);
+
 void pumpMegaLink(uint32_t nowMs) {
   uint8_t byte = 0U;
   for (uint16_t i = 0U; i < kBytesPerPass && gMega.read(byte); ++i) {
+    // The same bytes, watched for the one line the Mega never sends: a
+    // technician's `!WIFI,...` over USB with DIP 5 and 6 on.
+    if (gWifiLine.feed(static_cast<char>(byte))) {
+      handleWifiLine(gWifiLine.line(), gWifiLine.length());
+    }
     if (!gUplink.feed(static_cast<char>(byte))) {
       continue;
     }
@@ -890,7 +1032,13 @@ uint16_t callApi(const char* method, const char* path, const char* body, char* o
     out[n] = '\0';
   }
   http.end();
-  return status > 0 ? static_cast<uint16_t>(status) : 0U;
+  const uint16_t result = status > 0 ? static_cast<uint16_t>(status) : 0U;
+  // Every call that actually went to the socket teaches the breaker. The
+  // local refusals above (no credential, no clock) do not: they say nothing
+  // about whether the host is there. A fresh clock read, because the call
+  // may have just spent kHttpTimeoutMs.
+  gBreaker.onResult(result, gClock.nowMs());
+  return result;
 }
 
 /// Asks the API to activate the remembered scan. True when the API DECIDED —
@@ -898,7 +1046,7 @@ uint16_t callApi(const char* method, const char* path, const char* body, char* o
 /// not be asked or gave no decision, in which case the caller falls back to
 /// the roster. The interpretation is bridgelogic::ScanFlow's; this owns the
 /// socket and the two side effects it cannot see: the clock, and the Mega.
-bool activateOnline(const char* token, uint32_t nowMs) {
+bool activateOnline(const char* token) {
   static_cast<void>(sendToMega(proto::Frame::lcd("ONE MOMENT", "")));
 
   char body[96];
@@ -926,10 +1074,12 @@ bool activateOnline(const char* token, uint32_t nowMs) {
   if (decision.fallbackToRoster) {
     return false;
   }
-  applyOutcome(decision.outcome, nowMs);
-  if (decision.disarmAuth) {
-    forgetScan();
-  }
+  // Sampled AFTER the blocking call, not at the top of the pass: the held-since
+  // stamp on a grant is what the reconcile grace is measured from, and a stamp
+  // four seconds old at birth let a `!STATE` already in flight synthesise a
+  // Release for a court that was coming on. (decision.disarmAuth is what
+  // settleScan's spendsScan reads; the two are pinned to agree.)
+  settleScan(decision.outcome, gClock.nowMs());
   return true;
 }
 
@@ -940,7 +1090,7 @@ bool activateOnline(const char* token, uint32_t nowMs) {
 /// at either sells a member something the club did not agree to. So it asks, and shows what
 /// the API answered. The request names the COURT the pressed relay maps to and carries a
 /// per-purchase nonce; both are bridgelogic::WalkUp's, which says why.
-void requestWalkUp(const court::WalkUpIntent& intent, uint32_t nowMs) {
+void requestWalkUp(const court::WalkUpIntent& intent) {
   if (gLastScan[0] == '\0') {
     // Nobody has identified. The buttons alone cannot say WHO is buying, and a walk-up
     // charged to the last person who happened to scan is worse than one refused.
@@ -978,12 +1128,17 @@ void requestWalkUp(const court::WalkUpIntent& intent, uint32_t nowMs) {
     // charged twice.
     gWalkUpNonce.decided();
   }
+  // After the call, for the same reason as activateOnline.
+  const uint32_t nowMs = gClock.nowMs();
   applyOutcome(answer.outcome, nowMs);
   if (bridgelogic::spendsScan(answer.outcome)) {
     // The identity is spent on the purchase: the next member's presses must not
-    // buy on this one's token, so the window closes with the scan.
-    forgetScan();
+    // buy on this one's token. The window stays, bound to the court just
+    // bought, so the buyer can still switch it off.
+    spendScan();
+    gRelight.onGrant(answer.outcome, nowMs);
   }
+  applyAuth(gAuth.afterWalkUp(answer.outcome, nowMs));
 }
 
 /// Persists what provisioning returned.
@@ -994,7 +1149,7 @@ void requestWalkUp(const court::WalkUpIntent& intent, uint32_t nowMs) {
 bool storeProvisioning(const char* body, size_t len) {
   char deviceId[devapi::kMaxDeviceIdLen + 1U] = {};
   char keyHex[(kDeviceKeyBytes * 2U) + 1U] = {};
-  char baseUrl[hal::kStoreMaxValueLen + 1U] = {};
+  char baseUrl[bridgelogic::kMaxApiUrlLen + 1U] = {};
 
   if (!devapi::json::stringField(body, len, "device_id", deviceId, sizeof(deviceId)) ||
       !devapi::json::stringField(body, len, "device_key", keyHex, sizeof(keyHex))) {
@@ -1027,8 +1182,7 @@ bool storeProvisioning(const char* body, size_t len) {
   // An explicitly advertised base URL wins over the one discovery offered, for a
   // club that fronts the API with a name the boards must use instead.
   if (devapi::json::stringField(body, len, "api_base_url", baseUrl, sizeof(baseUrl))) {
-    rememberApiUrl(baseUrl);
-    snprintf(gApiUrl, sizeof(gApiUrl), "%s", baseUrl);
+    static_cast<void>(adoptApiUrl(baseUrl));
   }
   return ok;
 }
@@ -1039,7 +1193,7 @@ bool storeProvisioning(const char* body, size_t len) {
 /// reason this endpoint is anonymous on the server. It also seeds the clock: the
 /// response carries server_unix, and without it the first signed request would be
 /// refused locally for having no clock at all.
-void tryProvision() {
+void tryProvision(uint32_t nowMs) {
   if (gProvisioned || !gWifiUp || gApiUrl[0] == '\0') {
     return;
   }
@@ -1078,8 +1232,40 @@ void tryProvision() {
   gProvisioned = loadCredentials();
   if (gProvisioned) {
     static_cast<void>(sendToMega(proto::Frame::lcd("CONNECTED", "SCAN TO START")));
+    // The court list and the roster are a heartbeat away. Now, not in 30 s.
+    gHeartbeat.arm(nowMs, 0U);
   }
 }
+
+/// Joins the network with `credential`. What every credential source —
+/// secrets.h, the store, a `!WIFI` line — funnels into.
+void joinWifi(const bridgelogic::WifiCredential& credential) {
+  gWifiActive = credential;
+  // DHCP. No WiFi.config(), no static address — see the header.
+  WiFi.begin(credential.ssid, credential.password);
+}
+
+/// A `!WIFI,<ssid>,<password>` line arrived on the UART. Stored and joined at
+/// once; the store write here rather than on join, because the technician
+/// typing it is standing at the box and needs to see it land whether or not
+/// the router agrees.
+void handleWifiLine(const char* line, size_t len) {
+  bridgelogic::WifiCredential credential;
+  if (!bridgelogic::parseWifiLine(line, len, credential)) {
+    static_cast<void>(sendToMega(proto::Frame::lcd("WIFI LINE BAD", "!WIFI,SSID,PASS")));
+    return;
+  }
+  if (!bridgelogic::storeWifiCredential(gStore, credential)) {
+    static_cast<void>(sendToMega(proto::Frame::lcd("WIFI NOT SAVED", "STORE REFUSED")));
+    return;
+  }
+  gWifiStored = credential;
+  gWifiSource = bridgelogic::WifiSource::Stored;
+  static_cast<void>(sendToMega(proto::Frame::lcd("WIFI SAVED", "JOINING...")));
+  WiFi.disconnect();
+  joinWifi(credential);
+}
+
 
 void pumpWifiLink(uint32_t nowMs) {
   const bool up = WiFi.status() == WL_CONNECTED;
@@ -1088,10 +1274,24 @@ void pumpWifiLink(uint32_t nowMs) {
   }
   gWifiUp = up;
   if (up) {
+    // The credential that JOINED is the one worth keeping. Written on the
+    // link-up edge rather than at boot so a typo in secrets.h cannot overwrite
+    // a stored credential that works; and only when it differs, so a box that
+    // joins every morning is not a box that wears a flash cell every morning.
+    if (bridgelogic::shouldPersistWifi(gWifiActive, gWifiStored) &&
+        bridgelogic::storeWifiCredential(gStore, gWifiActive)) {
+      gWifiStored = gWifiActive;
+    }
     static_cast<void>(gUdp.begin(discovery::kUdpPort));
     // Immediately, not after a full interval: the case that matters is a box
     // that just got its DHCP lease with an admin standing at the cupboard.
     gAnnouncer.linkUp(nowMs);
+    if (gProvisioned) {
+      // And the heartbeat that fills the court list and the roster. Until it
+      // has, a scan is refused locally rather than recorded server-side and
+      // then refused at the box (review #12).
+      gHeartbeat.arm(nowMs, 0U);
+    }
     showIdentityScreen();
     return;
   }
@@ -1239,8 +1439,11 @@ void renderEvent(const eventq::Event& event, char* out, size_t outCap) {
 /// the API has taken it, or a flaky link loses exactly the events it produces. The response
 /// names the highest sequence accepted, so a partial success costs nothing — whatever came
 /// after simply stays queued and is offered again.
-void drainEvents() {
-  if (!gProvisioned || !gWifiUp || gQueue.empty()) {
+void drainEvents(uint32_t nowMs) {
+  if (!gProvisioned || !gWifiUp || gQueue.empty() || gBreaker.open(nowMs)) {
+    // The breaker: with the host unreachable this used to cost a 4 s connect
+    // timeout on EVERY loop pass, in front of every scan, for as long as the
+    // queue was non-empty — which after the first scan is always.
     return;
   }
 
@@ -1283,7 +1486,7 @@ void pumpHeartbeat(uint32_t nowMs) {
   if (!gHeartbeat.expired(nowMs)) {
     return;
   }
-  gHeartbeat.arm(nowMs, kHeartbeatMs);
+  gHeartbeat.arm(nowMs, gHeartbeatMs);
 
   // `!PING` is the only thing that tells this half whether the other half is
   // alive: a UART has no carrier, so silence and a dead peer look identical.
@@ -1333,6 +1536,10 @@ void pumpHeartbeat(uint32_t nowMs) {
     // Every accepted heartbeat re-anchors it, which is what resets staleness;
     // ROSTER_MAX_AGE_MS only governs how long the last one survives offline.
     static_cast<void>(bridgelogic::applyRoster(response, responseLen, gRoster, gClock.nowMs()));
+    // The tenant's cadence, bounded. Takes effect from the NEXT arm; the one
+    // above already used the old value, which is a one-interval delay and not
+    // worth a re-arm that could shorten this interval to nothing.
+    static_cast<void>(bridgelogic::parseHeartbeatInterval(response, responseLen, gHeartbeatMs));
     considerUpdate(response, responseLen);
     return;
   }
@@ -1356,6 +1563,26 @@ void pumpHeartbeat(uint32_t nowMs) {
   }
 }
 
+/// Sends `!EXT` for any lit court whose booking outlasts its relay deadline
+/// and whose deadline is close. The Mega clamps the extension to its own cap,
+/// so a bridge that dies after this still fails open at the next cap.
+void pumpRelight(uint32_t nowMs) {
+  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
+    if (!gHeld[i].held) {
+      continue;
+    }
+    const bridgelogic::Extension ext = gRelight.check(i, nowMs);
+    if (!ext.due) {
+      continue;
+    }
+    if (sendToMega(proto::Frame::ext(static_cast<proto::Court>(i), ext.seconds))) {
+      gRelight.extended(i, ext.seconds, nowMs);
+    }
+    // A frame that did not go is still due next pass; the lead time is what
+    // makes a dropped one survivable.
+  }
+}
+
 } // namespace
 
 void setup() {
@@ -1365,11 +1592,18 @@ void setup() {
   gMega.begin(kMegaRxBufferBytes);
   static_cast<void>(gStore.begin());
 
+  // The credential comes from the store or from secrets.h, never from the
+  // SDK's own flash record — persistent(false) keeps the core from writing a
+  // second, invisible copy that would outlive a rotation.
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  if (WIFI_SSID[0] != '\0') {
-    // DHCP. No WiFi.config(), no static address — see the header.
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  static_cast<void>(bridgelogic::loadWifiCredential(gStore, gWifiStored));
+  bridgelogic::WifiCredential compiledIn;
+  static_cast<void>(compiledIn.set(WIFI_SSID, WIFI_PASSWORD));
+  bridgelogic::WifiCredential joining;
+  gWifiSource = bridgelogic::chooseWifiCredential(compiledIn, gWifiStored, joining);
+  if (gWifiSource != bridgelogic::WifiSource::None) {
+    joinWifi(joining);
   }
 
   setupIdentity();
@@ -1381,12 +1615,13 @@ void setup() {
   // update and may condemn a build that has never worked.
   static_cast<void>(gBootGuard.begin());
 
-  static_cast<void>(loadText(kKeyApiUrl, gApiUrl, sizeof(gApiUrl)));
+  static_cast<void>(bridgelogic::loadApiUrl(gStore, gApiUrl, sizeof(gApiUrl)));
   gProvisioned = loadCredentials();
 
   const uint32_t now = gClock.nowMs();
   gUptime.seed(now);
-  gHeartbeat.arm(now, kHeartbeatMs);
+  // A fallback only: the link-up edge re-arms this to "now" (pumpWifiLink).
+  gHeartbeat.arm(now, gHeartbeatMs);
 
   // Every court starts dark AS OF NOW, not as of millis() zero: the reconcile
   // grace period is measured from this, and a Mega still holding a court across
@@ -1415,6 +1650,10 @@ void loop() {
     // explicit `!AUTH,0` is what keeps the two from drifting by a loop pass.
     forgetScan();
   }
+  if (gAuth.lapsed(now)) {
+    // The release-only window a grant left open for its owner ran out.
+    applyAuth(bridgelogic::AuthCommand::Disarm);
+  }
 
   pumpWifiLink(now);
 
@@ -1425,10 +1664,11 @@ void loop() {
   // that arrived a moment ago from sharing the ring with the frames the call is
   // about to let pile up.
   pumpMegaLink(now);
-  tryProvision();
-  drainEvents();
+  pumpRelight(now);
+  tryProvision(now);
+  drainEvents(now);
   pumpHeartbeat(now);
-  pumpOffers();
+  pumpOffers(now);
 
   if (gAnnouncer.due(now)) {
     broadcastAnnounce();
