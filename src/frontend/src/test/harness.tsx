@@ -112,7 +112,8 @@ export function deviceFixture(overrides: Record<string, unknown> = {}) {
     name: "Court 1 box",
     kind: "CourtBox",
     hardware: "Esp8266",
-    court_number: 1,
+    // Relay order: index 0 is relay A. A box drives up to four courts.
+    court_numbers: [1],
     gate_key: null,
     mac_address: "5ccf7f1a2b3c",
     key_version: 1,
@@ -129,6 +130,21 @@ export function deviceFixture(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+export function courtFixture(courtNumber: number, overrides: Record<string, unknown> = {}) {
+  return {
+    id: `22222222-2222-2222-2222-22222222222${courtNumber}`,
+    court_number: courtNumber,
+    name: `Court ${courtNumber}`,
+    court_type: "Squash",
+    slice_price_credits: 8,
+    is_active: true,
+    ...overrides,
+  };
+}
+
+/** The club's courts — what the device screens offer when assigning relays. */
+export const COURTS_FIXTURE = [courtFixture(1), courtFixture(2), courtFixture(3)];
 
 export function boardFixture(overrides: Record<string, unknown> = {}) {
   return {

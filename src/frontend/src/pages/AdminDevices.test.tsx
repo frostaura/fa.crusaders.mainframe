@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { AdminDevicesPage } from "./AdminDevices";
 import {
+  COURTS_FIXTURE,
   DISCOVERY_LISTENING,
   SETTINGS_FIXTURE,
   boardFixture,
@@ -15,10 +16,17 @@ import {
  *
  * <p>
  * Eight device endpoints were live for weeks with zero frontend references — "connecting
- * a board" meant an admin reading an IP off a sticker. These tests are about the three
- * things this screen has to get right for somebody standing at a cupboard: does a board
- * that is announcing itself appear, does the claim send the code they typed, and does
- * saving the button map avoid trampling everything else in the settings document.
+ * a board" meant an admin reading an IP off a sticker. These tests are about the things
+ * this screen has to get right for somebody standing at a cupboard: does a board that is
+ * announcing itself appear, does the claim send what the API actually binds, do the
+ * courts go over in relay order, and does saving the button map avoid trampling
+ * everything else in the settings document.
+ * </p>
+ *
+ * <p>
+ * A court box drives up to four courts, one per relay, so "which court is this box for"
+ * is a list, `court_numbers`, indexed A–D. It is snake_case on every request because the
+ * API pins that name; the previous claim body sent camelCase fields that bound to nothing.
  * </p>
  */
 describe("AdminDevices", () => {
@@ -35,18 +43,20 @@ describe("AdminDevices", () => {
     { path: "/api/v1/admin/devices/discovery-status", body: DISCOVERY_LISTENING },
     { path: "/api/v1/admin/devices/", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+    { path: "/api/v1/admin/courts/", body: COURTS_FIXTURE },
   ];
 
-  it("lists a connected board with its firmware and court", async () => {
+  it("lists a connected board with its firmware and courts, relay by relay", async () => {
     stubFetch([
       ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1, 3] })] },
     ]);
 
     renderPage(<AdminDevicesPage />);
 
     expect(await screen.findByText("Court 1 box")).toBeInTheDocument();
-    expect(screen.getByText(/court 1/)).toBeInTheDocument();
+    // Relay order is the meaning: relay A drives court 1, relay B drives court 3.
+    expect(screen.getByText(/A: court 1, B: court 3/)).toBeInTheDocument();
     expect(screen.getByText(/firmware 1\.0\.0/)).toBeInTheDocument();
   });
 
@@ -99,7 +109,7 @@ describe("AdminDevices", () => {
     expect(warning.parentElement).toHaveTextContent(/not enabled on this deployment/);
   });
 
-  it("sends the code the admin typed, and the board they picked", async () => {
+  it("sends the claim in the shape the API binds: snake_case, courts as a list", async () => {
     const stub = stubFetch([
       ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
       { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
@@ -115,7 +125,7 @@ describe("AdminDevices", () => {
     fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
     fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "k7rm4xpt" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Court 2 box" } });
-    fireEvent.change(screen.getByLabelText("Court number"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
 
     await waitFor(() => {
@@ -124,11 +134,72 @@ describe("AdminDevices", () => {
       // Upper-cased, because the code on the LCD is upper-case and nobody types it
       // that way on a phone. Getting this wrong is a claim that fails for no visible
       // reason while the admin is looking at a code that matches.
-      expect(claim!.body).toMatchObject({ mac: "5ccf7f1a2b3c", claimCode: "K7RM4XPT", name: "Court 2 box", courtNumber: 2 });
+      //
+      // Every property pinned snake_case, as ClaimBoardRequest declares them. The
+      // device code is derived from the courts when the admin leaves it blank.
+      expect(claim!.body).toEqual({ claim_code: "K7RM4XPT", device_code: "court-box-2", name: "Court 2 box", court_numbers: [2] });
+      // The MAC is how the admin picks a board to read the LCD of; the server matches
+      // on the code's commitment, and a stray property would only suggest otherwise.
+      expect(claim!.body).not.toHaveProperty("mac");
+      expect(claim!.body).not.toHaveProperty("courtNumber");
     });
   });
 
-  it("will not send a claim without a code", async () => {
+  it("sends courts in relay order, A first, and keeps the list contiguous", async () => {
+    const stub = stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
+      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
+      {
+        method: "POST",
+        path: "/api/v1/admin/devices/claim",
+        body: { device: deviceFixture(), device_key: "abc", key_version: 1, board: boardFixture(), note: "" },
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
+    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
+
+    // B is not reachable until A is set: the list is positional and a gap is not a
+    // thing the API can store.
+    expect(screen.getByLabelText("Relay B court")).toBeDisabled();
+
+    // Court 3 on relay A, court 1 on relay B — the ORDER is the assignment, so a
+    // sorted list would be a wiring change.
+    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "3" } });
+    expect(screen.getByLabelText("Relay B court")).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Relay B court"), { target: { value: "1" } });
+    expect(screen.getByLabelText("Relay C court")).toBeEnabled();
+    expect(screen.getByLabelText("Relay D court")).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
+
+    await waitFor(() => {
+      const claim = stub.calls.find((c) => c.path.includes("/claim"));
+      expect(claim?.body).toMatchObject({ court_numbers: [3, 1] });
+    });
+  });
+
+  it("clearing relay A clears the relays after it", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
+      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
+    fireEvent.change(await screen.findByLabelText("Relay A court"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("Relay B court"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "" } });
+
+    expect(screen.getByLabelText("Relay A court")).toHaveValue("");
+    expect(screen.getByLabelText("Relay B court")).toHaveValue("");
+    expect(screen.getByLabelText("Relay B court")).toBeDisabled();
+  });
+
+  it("will not send a claim without a code, or without a court", async () => {
     stubFetch([
       ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
       { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
@@ -140,6 +211,89 @@ describe("AdminDevices", () => {
     // The code is the whole security of claiming — it proves the admin is standing in
     // front of the box. A claim with an empty one must not even be attempted.
     expect(screen.getByRole("button", { name: /Connect this board/ })).toBeDisabled();
+
+    // And a court box with no courts is refused by the API anyway
+    // (court_numbers_required_for_court_box); better not to make the call.
+    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
+    expect(screen.getByRole("button", { name: /Connect this board/ })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "1" } });
+    expect(screen.getByRole("button", { name: /Connect this board/ })).toBeEnabled();
+  });
+
+  it("turns a button-map mismatch on claim into a sentence", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
+      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
+      {
+        method: "POST",
+        path: "/api/v1/admin/devices/claim",
+        status: 400,
+        body: {
+          error: "button_map_selects_court_beyond_device_courts",
+          message: "The club's button map selects a court this board would not drive. Give the board that many courts, or change the button map first.",
+        },
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
+    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
+    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
+
+    // Not "HTTP 400", and not the raw token. The fixture's map has court buttons A–D;
+    // a one-court box cannot honour it, and the admin is told what to change.
+    expect(await screen.findByText(/button map selects a court this box does not drive/i)).toBeInTheDocument();
+  });
+
+  it("changes a box's courts and sends them in relay order", async () => {
+    const stub = stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1] })] },
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture({ court_numbers: [1, 2] }) },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Edit courts/ }));
+    // The row's editor is labelled by the box, so two editors on one screen cannot be
+    // confused for each other.
+    expect(screen.getByLabelText("Court 1 box relay A court")).toHaveValue("1");
+    fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save courts/ }));
+
+    await waitFor(() => {
+      const patch = stub.calls.find((c) => c.method === "PATCH");
+      expect(patch?.path).toBe("/api/v1/admin/devices/11111111-1111-1111-1111-111111111111");
+      expect(patch?.body).toEqual({ court_numbers: [1, 2] });
+    });
+    expect(await screen.findByText(/now drives A: court 1, B: court 2/)).toBeInTheDocument();
+  });
+
+  it("names the box when the button map reaches past its courts", async () => {
+    stubFetch([
+      ...baseRoutes(),
+      {
+        method: "PUT",
+        path: "/api/v1/admin/settings/",
+        status: 400,
+        // What AdminConfigEndpoints returns: the token, plus which box and how far the
+        // map reached. court_index 3 is relay D.
+        body: { error: "button_map_selects_court_beyond_device_courts", device_code: "court-box-1", court_index: 3, device_court_count: 2 },
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.change(await screen.findByLabelText("Button 1 court"), { target: { value: "D" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save button map/ }));
+
+    // The fix is on one of two screens, and the message says which box and which relay
+    // so the admin does not have to work it out from a token.
+    const toast = await screen.findByText(/selects court D, but court-box-1 drives only 2 courts/);
+    expect(toast).toHaveTextContent(/Give the box more courts, or change the button map first/);
   });
 
   it("renders the button map as eight physical buttons", async () => {
@@ -182,11 +336,11 @@ describe("AdminDevices", () => {
     });
   });
 
-  it("changes a box's update channel", async () => {
+  it("changes a box's update channel, as the integer the API binds", async () => {
     const stub = stubFetch([
       ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
       { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
-      { method: "PATCH", path: "/api/v1/admin/devices/", body: { saved: true } },
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture({ ota_channel: "Canary" }) },
     ]);
 
     renderPage(<AdminDevicesPage />);
@@ -195,8 +349,38 @@ describe("AdminDevices", () => {
 
     await waitFor(() => {
       const patch = stub.calls.find((c) => c.method === "PATCH");
-      // One box goes first so the rest of the club is not the experiment.
-      expect(patch?.body).toMatchObject({ otaChannel: "Canary" });
+      // One box goes first so the rest of the club is not the experiment. The API
+      // has no string-enum converter, so Canary goes over as 1 — the name never bound.
+      expect(patch?.body).toEqual({ otaChannel: 1 });
     });
+  });
+
+  it("registers a box by hand and shows its key once", async () => {
+    const stub = stubFetch([
+      ...baseRoutes(),
+      {
+        method: "POST",
+        path: "/api/v1/admin/devices/",
+        body: { device: deviceFixture({ name: "Bench box", court_numbers: [2, 3] }), device_key: "deadbeef", key_version: 1, note: "Store this key on the device now." },
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Register a box by hand/ }));
+    fireEvent.change(screen.getByLabelText("Device code"), { target: { value: "bench-box" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Bench box" } });
+    fireEvent.change(screen.getByLabelText("New box relay A court"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("New box relay B court"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /Register box/ }));
+
+    await waitFor(() => {
+      const post = stub.calls.find((c) => c.method === "POST" && c.path === "/api/v1/admin/devices/");
+      // Enums as integers (CourtBox = 0, Esp8266 = 1); courts snake_case, in relay order.
+      expect(post?.body).toEqual({ deviceCode: "bench-box", name: "Bench box", kind: 0, hardware: 1, court_numbers: [2, 3] });
+    });
+    // The key is derived, not stored: this is the only time it will ever be visible,
+    // so it stays on screen until the admin says they have it.
+    expect(await screen.findByLabelText("Device key")).toHaveTextContent("deadbeef");
   });
 });

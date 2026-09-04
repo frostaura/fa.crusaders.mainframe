@@ -18,6 +18,7 @@ import AdminWebhooksPage from "./pages/AdminWebhooks";
 import AdminSettingsPage from "./pages/AdminSettings";
 import AdminLedgerPage from "./pages/AdminLedger";
 import ProfilePage from "./pages/Profile";
+import CourtCodePage from "./pages/CourtCode";
 import ReportsPage from "./pages/Reports";
 import { AdminDevicesPage } from "./pages/AdminDevices";
 
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="/wallet/topup/:topupId" element={<RequireAuth><TopUpStatusPage /></RequireAuth>} />
             <Route path="/schedule" element={<RequireAuth><SchedulePage /></RequireAuth>} />
             <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
+            <Route path="/court-code" element={<RequireAuth><CourtCodePage /></RequireAuth>} />
             <Route path="/reports" element={<RequireAuth><ReportsPage /></RequireAuth>} />
             <Route path="/admin/members" element={<RequireAuth admin><AdminMembersPage /></RequireAuth>} />
             <Route path="/admin/webhooks" element={<RequireAuth admin><AdminWebhooksPage /></RequireAuth>} />

@@ -44,6 +44,7 @@ export default function Layout() {
           {auth.status === "authenticated" && (
             <nav className="hidden md:flex items-center gap-1 text-sm">
               <NavTab to="/schedule" label="Bookings" />
+              <NavTab to="/court-code" label="Court code" />
               {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
               {auth.isAdmin && <NavTab to="/admin/members" label="Members" />}
               <NavTab to="/reports" label="Reports" />
@@ -141,6 +142,7 @@ export default function Layout() {
           <nav className="md:hidden border-t border-border overflow-x-auto no-scrollbar">
             <div className="flex items-center gap-1 px-2 py-1 text-sm w-max">
               <NavTab to="/schedule" label="Bookings" />
+              <NavTab to="/court-code" label="Court code" />
               {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
               {auth.isAdmin && <NavTab to="/admin/members" label="Members" />}
               <NavTab to="/reports" label="Reports" />

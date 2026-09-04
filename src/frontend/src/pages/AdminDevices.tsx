@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Cpu, Radio, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { Cpu, KeyRound, Radio, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import {
+  ApiError,
   endpoints,
+  type AdminCourt,
   type AdminDevice,
   type AdminSettings,
+  type DeviceHardware,
   type DiscoveredBoard,
   type DiscoveryStatus,
+  type OtaChannel,
 } from "../lib/api";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
@@ -18,12 +22,21 @@ import { cn } from "../lib/utils";
  *
  * Three jobs, in the order an admin does them: connect a board that has just been
  * plugged in, see what the fleet is doing, and decide what the buttons on it mean.
+ *
+ * A court box drives up to four courts, one per relay. The relay letters A–D are the
+ * physical outputs; which court sits on each is decided here, in relay order, and the
+ * tenant's button map addresses courts by that same letter. The two are checked against
+ * each other on every save — from either screen — so a button can never select a relay
+ * the box does not have a court on.
  */
 
 /** A device that has not called in for this long is shown as offline. Mirrors
  *  DeviceEndpoints.OfflineAfterSeconds on the server; a box heartbeats every 30s,
  *  so three missed beats is a real absence rather than one slow request. */
 const OFFLINE_AFTER_MS = 180_000;
+
+/** The relay bank on a court box, in the order `court_numbers` is indexed. */
+const RELAYS = ["A", "B", "C", "D"] as const;
 
 function isOnline(device: AdminDevice) {
   if (!device.last_seen_at) return false;
@@ -37,6 +50,124 @@ function relative(iso: string | null) {
   if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
   return `${Math.round(seconds / 86400)}d ago`;
+}
+
+/** "A: court 1, B: court 2" — the relay bank as an admin reads it off the box. */
+function describeCourts(courtNumbers: number[]) {
+  if (courtNumbers.length === 0) return "no courts";
+  return courtNumbers.map((n, i) => `${RELAYS[i]}: court ${n}`).join(", ");
+}
+
+/** The suggested device code for a box, from the courts it drives: `court-box-1-2`. */
+function suggestDeviceCode(courtNumbers: number[]) {
+  return courtNumbers.length === 0 ? "court-box" : `court-box-${courtNumbers.join("-")}`;
+}
+
+// --- errors -------------------------------------------------------------------
+
+/**
+ * Turns an API refusal into a sentence an admin can act on.
+ *
+ * The server answers with a stable `error` token, and for the button-map mismatch it
+ * also names the box, the relay index the map reaches for and how many courts the box
+ * has — because the fix is on one of two screens and the message has to say which.
+ * Anything unrecognised falls back to the server's own `message`, then the token.
+ */
+function describeDeviceError(e: unknown, fallback: string): string {
+  if (!(e instanceof ApiError)) return e instanceof Error && e.message ? e.message : fallback;
+  const payload = typeof e.payload === "object" && e.payload !== null ? (e.payload as Record<string, unknown>) : {};
+  const code = typeof payload.error === "string" ? payload.error : null;
+
+  switch (code) {
+    case "court_numbers_required_for_court_box":
+      return "A court box needs at least one court. Pick the court on relay A.";
+    case "too_many_courts_for_relay_bank":
+      return `A box drives at most ${RELAYS.length} courts — one per relay, A to D.`;
+    case "duplicate_court_numbers":
+      return "Each court can be on only one relay. Two relays point at the same court.";
+    case "button_map_selects_court_beyond_device_courts": {
+      const index = typeof payload.court_index === "number" ? payload.court_index : null;
+      const count = typeof payload.device_court_count === "number" ? payload.device_court_count : null;
+      const box = typeof payload.device_code === "string" ? payload.device_code : null;
+      const relay = index !== null ? RELAYS[index] ?? `#${index + 1}` : null;
+      if (relay !== null && count !== null && box !== null) {
+        return `The button map selects court ${relay}, but ${box} drives only ${count} court${count === 1 ? "" : "s"}. `
+          + "Give the box more courts, or change the button map first.";
+      }
+      return "The button map selects a court this box does not drive. Give the box more courts, or change the button map first.";
+    }
+    case "device_code_taken":
+      return "That device code is already in use. Pick another.";
+    default:
+      if (typeof payload.message === "string" && payload.message) return payload.message;
+      if (code) return code.replace(/_/g, " ");
+      return fallback;
+  }
+}
+
+// --- relay → court editor -------------------------------------------------------
+
+/**
+ * Assigns a court to each relay, A first.
+ *
+ * The list is contiguous by construction: relay B cannot be set until A is, and
+ * clearing A clears everything after it. A gap would be a relay index the API cannot
+ * represent — `court_numbers` is positional — so the editor makes one impossible rather
+ * than validating it away.
+ */
+function CourtListEditor({
+  value, onChange, courts, disabled, labelPrefix,
+}: {
+  value: number[];
+  onChange: (next: number[]) => void;
+  courts: AdminCourt[];
+  disabled?: boolean;
+  /** Distinguishes editors that share a screen: "" → "Relay A court", "Court 1 box" → "Court 1 box relay A court". */
+  labelPrefix?: string;
+}) {
+  if (courts.length === 0) {
+    return (
+      <p className="text-sm text-amber-800">
+        No courts to assign yet. Add the club's courts under Admin settings first.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {RELAYS.map((relay, index) => {
+        const current = value[index];
+        const reachable = !disabled && index <= value.length;
+        const label = `${labelPrefix ? `${labelPrefix} relay` : "Relay"} ${relay} court`;
+        return (
+          <div key={relay} className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-sm text-slate-500">Relay {relay}</span>
+            <select
+              aria-label={label}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
+              value={current ?? ""}
+              disabled={!reachable}
+              onChange={(e) => {
+                if (e.target.value === "") onChange(value.slice(0, index));
+                else onChange([...value.slice(0, index), Number(e.target.value), ...value.slice(index + 1)]);
+              }}
+            >
+              <option value="">{index === 0 ? "Choose a court" : "— none —"}</option>
+              {courts.map((court) => (
+                <option
+                  key={court.id}
+                  value={court.court_number}
+                  disabled={value.includes(court.court_number) && current !== court.court_number}
+                >
+                  Court {court.court_number} — {court.name}{court.is_active ? "" : " (inactive)"}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // --- button map editor ------------------------------------------------------
@@ -108,7 +239,7 @@ function ButtonMapEditor({
                 disabled={disabled}
                 onChange={(e) => update(index, "court", e.target.value)}
               >
-                {["A", "B", "C", "D"].map((c) => <option key={c} value={c}>Court {c}</option>)}
+                {RELAYS.map((c) => <option key={c} value={c}>Court {c}</option>)}
               </select>
             )}
 
@@ -133,14 +264,15 @@ function ButtonMapEditor({
 
 // --- connect a board --------------------------------------------------------
 
-function ConnectBoard({ onClaimed }: { onClaimed: () => void }) {
+function ConnectBoard({ courts, onClaimed }: { courts: AdminCourt[]; onClaimed: () => void }) {
   const toast = useToast();
   const [boards, setBoards] = useState<DiscoveredBoard[]>([]);
   const [status, setStatus] = useState<DiscoveryStatus | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  const [deviceCode, setDeviceCode] = useState("");
   const [name, setName] = useState("");
-  const [courtNumber, setCourtNumber] = useState("");
+  const [courtNumbers, setCourtNumbers] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -167,21 +299,24 @@ function ConnectBoard({ onClaimed }: { onClaimed: () => void }) {
     if (!selected) return;
     setBusy(true);
     try {
+      // The board is matched on the server by its commitment to the code, not by the
+      // MAC picked here — picking one is how the admin knows which LCD to read.
       const result = await endpoints.adminDeviceClaim({
-        mac: selected,
         claimCode: code.trim().toUpperCase(),
-        name: name.trim() || `Court box ${courtNumber || "?"}`,
-        courtNumber: courtNumber === "" ? null : Number(courtNumber),
+        deviceCode: deviceCode.trim() || suggestDeviceCode(courtNumbers),
+        name: name.trim() || `Court box ${courtNumbers.join("/")}`,
+        court_numbers: courtNumbers,
       });
       toast.push({ tone: "success", text: `Connected ${result.device.name}. The board will collect its key on its next announce.` });
       setSelected(null);
       setCode("");
+      setDeviceCode("");
       setName("");
-      setCourtNumber("");
+      setCourtNumbers([]);
       onClaimed();
       await refresh();
     } catch (e) {
-      toast.push({ tone: "danger", text: e instanceof Error ? e.message : "Could not connect that board." });
+      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not connect that board."), durationMs: 8000 });
     } finally {
       setBusy(false);
     }
@@ -261,25 +396,163 @@ function ConnectBoard({ onClaimed }: { onClaimed: () => void }) {
               <Input id="claim-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Court 1 box" />
             </div>
             <div>
-              <Label htmlFor="claim-court">Court number</Label>
-              <Input id="claim-court" type="number" min={1} value={courtNumber} onChange={(e) => setCourtNumber(e.target.value)} />
+              <Label htmlFor="claim-device-code">Device code</Label>
+              <Input
+                id="claim-device-code"
+                value={deviceCode}
+                onChange={(e) => setDeviceCode(e.target.value)}
+                placeholder={suggestDeviceCode(courtNumbers)}
+                autoComplete="off"
+              />
             </div>
           </div>
-          <Button onClick={() => void claim()} disabled={busy || code.trim().length === 0}>
+          <div>
+            <Label>Courts, by relay</Label>
+            <p className="mb-2 text-xs text-slate-500">
+              Relay A is the first output on the box. Assign the courts in the order they are wired.
+            </p>
+            <CourtListEditor value={courtNumbers} onChange={setCourtNumbers} courts={courts} disabled={busy} />
+          </div>
+          <Button onClick={() => void claim()} disabled={busy || code.trim().length === 0 || courtNumbers.length === 0}>
             {busy ? "Connecting…" : "Connect this board"}
           </Button>
         </div>
       )}
+
+      <RegisterByHand courts={courts} onRegistered={onClaimed} />
     </Card>
+  );
+}
+
+// --- register by hand ---------------------------------------------------------
+
+/**
+ * For a box that is not announcing — flashed on the bench, or on a network the API
+ * cannot hear. The key comes back once and is shown until dismissed, because a toast
+ * that fades after four seconds is not a way to hand somebody a secret.
+ */
+function RegisterByHand({ courts, onRegistered }: { courts: AdminCourt[]; onRegistered: () => void }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [deviceCode, setDeviceCode] = useState("");
+  const [name, setName] = useState("");
+  const [hardware, setHardware] = useState<DeviceHardware>("Esp8266");
+  const [courtNumbers, setCourtNumbers] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [issued, setIssued] = useState<{ name: string; key: string; note: string } | null>(null);
+
+  async function register() {
+    setBusy(true);
+    try {
+      const result = await endpoints.adminDeviceRegister({
+        deviceCode: deviceCode.trim() || suggestDeviceCode(courtNumbers),
+        name: name.trim() || `Court box ${courtNumbers.join("/")}`,
+        hardware,
+        court_numbers: courtNumbers,
+      });
+      setIssued({ name: result.device.name, key: result.device_key, note: result.note });
+      setDeviceCode("");
+      setName("");
+      setCourtNumbers([]);
+      onRegistered();
+    } catch (e) {
+      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not register that box."), durationMs: 8000 });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-4">
+      {!open ? (
+        <Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setOpen(true)}>
+          <KeyRound className="mr-1 h-4 w-4" /> Register a box by hand
+        </Button>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Register a box by hand</h3>
+            <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => setOpen(false)}>Close</Button>
+          </div>
+          <p className="text-xs text-slate-500">
+            For a box that is not announcing. You will get its key once — flash it into the board's secrets before leaving this page.
+          </p>
+
+          {issued && (
+            <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">
+              <div className="font-medium">{issued.name} registered.</div>
+              <code className="mt-1 block break-all font-mono text-xs" aria-label="Device key">{issued.key}</code>
+              <div className="mt-1 text-xs">{issued.note}</div>
+              <Button variant="ghost" className="mt-2 h-8 px-2 text-xs" onClick={() => setIssued(null)}>I've stored it</Button>
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <Label htmlFor="register-device-code">Device code</Label>
+              <Input
+                id="register-device-code"
+                value={deviceCode}
+                onChange={(e) => setDeviceCode(e.target.value)}
+                placeholder={suggestDeviceCode(courtNumbers)}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <Label htmlFor="register-name">Name</Label>
+              <Input id="register-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Court 1 box" />
+            </div>
+            <div>
+              <Label htmlFor="register-hardware">Hardware</Label>
+              <select
+                id="register-hardware"
+                className="h-11 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                value={hardware}
+                onChange={(e) => setHardware(e.target.value as DeviceHardware)}
+              >
+                <option value="Esp8266">ESP8266 — court box</option>
+                <option value="Mega2560">Mega 2560</option>
+                <option value="Esp32">ESP32</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <Label>Courts, by relay</Label>
+            <CourtListEditor value={courtNumbers} onChange={setCourtNumbers} courts={courts} disabled={busy} labelPrefix="New box" />
+          </div>
+          <Button onClick={() => void register()} disabled={busy || courtNumbers.length === 0}>
+            {busy ? "Registering…" : "Register box"}
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
 // --- one board in the list --------------------------------------------------
 
 function DeviceRow({
-  device, onChannel, onRevoke,
-}: { device: AdminDevice; onChannel: (channel: string) => Promise<void>; onRevoke: () => Promise<void> }) {
+  device, courts, onChannel, onCourts, onRevoke,
+}: {
+  device: AdminDevice;
+  courts: AdminCourt[];
+  onChannel: (channel: OtaChannel) => Promise<void>;
+  onCourts: (courtNumbers: number[]) => Promise<boolean>;
+  onRevoke: () => Promise<void>;
+}) {
   const online = isOnline(device);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<number[]>(device.court_numbers);
+  const [saving, setSaving] = useState(false);
+
+  async function saveCourts() {
+    setSaving(true);
+    try {
+      if (await onCourts(draft)) setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="rounded-lg border border-slate-200 p-3">
@@ -302,24 +575,46 @@ function DeviceRow({
 
       <div className="mt-1 text-xs text-slate-500">
         {device.device_code}
-        {device.court_number !== null ? ` · court ${device.court_number}` : ""}
+        {device.kind === "Gate"
+          ? (device.gate_key ? ` · gate ${device.gate_key}` : "")
+          : ` · ${describeCourts(device.court_numbers)}`}
         {device.mac_address ? ` · ${device.mac_address}` : ""}
         {device.last_ip_address ? ` · ${device.last_ip_address}` : ""}
         {device.running_version ? ` · firmware ${device.running_version}` : ""}
         {device.mega_version ? ` · Mega ${device.mega_version}` : ""}
       </div>
 
+      {editing && (
+        <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3">
+          <CourtListEditor value={draft} onChange={setDraft} courts={courts} disabled={saving} labelPrefix={device.name} />
+          <div className="flex gap-2">
+            <Button className="h-8 px-3 text-xs" onClick={() => void saveCourts()} disabled={saving || draft.length === 0}>
+              {saving ? "Saving…" : "Save courts"}
+            </Button>
+            <Button variant="ghost" className="h-8 px-3 text-xs" onClick={() => { setDraft(device.court_numbers); setEditing(false); }} disabled={saving}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <select
           aria-label={`${device.name} update channel`}
           className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm"
           value={device.ota_channel}
-          onChange={(e) => void onChannel(e.target.value)}
+          onChange={(e) => void onChannel(e.target.value as OtaChannel)}
         >
           <option value="Stable">Stable</option>
           <option value="Canary">Canary — takes new firmware first</option>
           <option value="Pinned">Pinned — held at one version</option>
         </select>
+
+        {device.kind !== "Gate" && !device.revoked_at && !editing && (
+          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => { setDraft(device.court_numbers); setEditing(true); }}>
+            Edit courts
+          </Button>
+        )}
 
         <ConfirmButton idleLabel="Revoke" confirmLabel="Really revoke?" onConfirm={onRevoke} />
       </div>
@@ -332,16 +627,22 @@ function DeviceRow({
 export function AdminDevicesPage() {
   const toast = useToast();
   const [devices, setDevices] = useState<AdminDevice[]>([]);
+  const [courts, setCourts] = useState<AdminCourt[]>([]);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [buttonMap, setButtonMap] = useState<string[]>([]);
   const [savingMap, setSavingMap] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [list, config] = await Promise.all([endpoints.adminDevicesList(), endpoints.adminSettingsGet()]);
+    const [list, config, courtList] = await Promise.all([
+      endpoints.adminDevicesList(),
+      endpoints.adminSettingsGet(),
+      endpoints.adminCourtsList(),
+    ]);
     setDevices(list);
     setSettings(config);
     setButtonMap(config.button_map);
+    setCourts(courtList);
     setLoading(false);
   }, []);
 
@@ -358,23 +659,42 @@ export function AdminDevicesPage() {
       await endpoints.adminSettingsSave({ ...settings, button_map: buttonMap });
       toast.push({ tone: "success", text: "Button map saved. Boxes pick it up on their next heartbeat." });
     } catch (e) {
-      toast.push({ tone: "danger", text: e instanceof Error ? e.message : "Could not save the button map." });
+      // The server checks the map against every box's court list and names the one
+      // that cannot honour it. That sentence is the whole point of the refusal.
+      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not save the button map."), durationMs: 8000 });
     } finally {
       setSavingMap(false);
     }
   }
 
-  async function setChannel(device: AdminDevice, channel: string) {
-    await endpoints.adminDeviceUpdate(device.id, { otaChannel: channel });
-    toast.push({ tone: "success", text: `${device.name} is now on the ${channel.toLowerCase()} channel.` });
-    await load();
+  async function setChannel(device: AdminDevice, channel: OtaChannel) {
+    try {
+      await endpoints.adminDeviceUpdate(device.id, { otaChannel: channel });
+      toast.push({ tone: "success", text: `${device.name} is now on the ${channel.toLowerCase()} channel.` });
+      await load();
+    } catch (e) {
+      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not change the update channel.") });
+    }
+  }
+
+  /** Returns whether the save went through, so the row knows whether to leave edit mode. */
+  async function assignCourts(device: AdminDevice, courtNumbers: number[]): Promise<boolean> {
+    try {
+      await endpoints.adminDeviceUpdate(device.id, { court_numbers: courtNumbers });
+      toast.push({ tone: "success", text: `${device.name} now drives ${describeCourts(courtNumbers)}.` });
+      await load();
+      return true;
+    } catch (e) {
+      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not change that box's courts."), durationMs: 8000 });
+      return false;
+    }
   }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4">
       <h1 className="text-2xl font-bold">Devices</h1>
 
-      <ConnectBoard onClaimed={() => void load()} />
+      <ConnectBoard courts={courts} onClaimed={() => void load()} />
 
       <Card className="p-5">
         <div className="mb-3 flex items-center gap-2">
@@ -392,7 +712,9 @@ export function AdminDevicesPage() {
               <DeviceRow
                 key={device.id}
                 device={device}
+                courts={courts}
                 onChannel={(channel) => setChannel(device, channel)}
+                onCourts={(courtNumbers) => assignCourts(device, courtNumbers)}
                 onRevoke={async () => {
                   await endpoints.adminDeviceRevoke(device.id);
                   toast.push({ tone: "success", text: `${device.name} revoked. It can no longer authenticate.` });
@@ -412,7 +734,8 @@ export function AdminDevicesPage() {
         <p className="mb-4 text-sm text-slate-500">
           What each of the eight buttons on a court box does. The wiring never changes — button 1 is always
           the same physical button — so you can swap courts around here without anyone touching the hardware.
-          Boxes pick up a change on their next heartbeat.
+          "Court A" means whatever court is on relay A of the box being pressed. Boxes pick up a change on their
+          next heartbeat.
         </p>
 
         <ButtonMapEditor value={buttonMap} onChange={setButtonMap} disabled={savingMap || loading} />

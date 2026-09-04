@@ -53,7 +53,8 @@ const DEVICE = {
   name: "Court 1 box",
   kind: "CourtBox",
   hardware: "Esp8266",
-  court_number: 1,
+  // Relay order: index 0 is relay A.
+  court_numbers: [1],
   gate_key: null,
   mac_address: "5ccf7f1a2b3c",
   key_version: 1,
@@ -68,6 +69,11 @@ const DEVICE = {
   failed_version: null,
   created_at: new Date().toISOString(),
 };
+
+const COURTS = [
+  { id: "22222222-2222-2222-2222-222222222221", court_number: 1, name: "Court 1", court_type: "Squash", slice_price_credits: 8, is_active: true },
+  { id: "22222222-2222-2222-2222-222222222222", court_number: 2, name: "Court 2", court_type: "Squash", slice_price_credits: 8, is_active: true },
+];
 
 const DISCOVERY = {
   state: "Listening",
@@ -93,6 +99,7 @@ test.describe("Connecting a board", () => {
       { path: "/api/v1/admin/devices/discovery-status", body: DISCOVERY },
       { path: "/api/v1/admin/devices/", body: [] },
       { path: "/api/v1/admin/settings/", body: SETTINGS },
+      { path: "/api/v1/admin/courts/", body: COURTS },
       { method: "POST", path: "/api/v1/admin/devices/claim", body: { device: DEVICE, device_key: "k", key_version: 1, board: BOARD, note: "" } },
     ]);
 
@@ -104,7 +111,8 @@ test.describe("Connecting a board", () => {
     await page.getByLabel("Board 5ccf7f1a2b3c").check();
     await page.getByLabel(/Code on the box/).fill("K7RM4XPT");
     await page.getByLabel("Name").fill("Court 1 box");
-    await page.getByLabel("Court number").fill("1");
+    // Courts are assigned per relay, A first — one box drives up to four of them.
+    await page.getByLabel("Relay A court").selectOption("1");
     await page.getByRole("button", { name: /Connect this board/ }).click();
 
     await expect(page.getByText(/Connected Court 1 box/)).toBeVisible();
@@ -118,6 +126,7 @@ test.describe("Connecting a board", () => {
       { path: "/api/v1/admin/devices/discovery-status", body: DISCOVERY },
       { path: "/api/v1/admin/devices/", body: [DEVICE] },
       { path: "/api/v1/admin/settings/", body: SETTINGS },
+      { path: "/api/v1/admin/courts/", body: COURTS },
       { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
     ]);
 
@@ -142,6 +151,7 @@ test.describe("Connecting a board", () => {
       { path: "/api/v1/admin/devices/discovery-status", body: DISCOVERY },
       { path: "/api/v1/admin/devices/", body: [{ ...DEVICE, failed_version: "1.1.0" }] },
       { path: "/api/v1/admin/settings/", body: SETTINGS },
+      { path: "/api/v1/admin/courts/", body: COURTS },
     ]);
 
     await page.goto("/admin/devices");

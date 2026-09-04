@@ -176,7 +176,12 @@ export type AdminDevice = {
   name: string;
   kind: string;
   hardware: string;
-  court_number: number | null;
+  /**
+   * The courts this box drives, in relay order: index 0 is relay A, index 3 is relay D.
+   * One box, up to four courts — a court box is not "the box for court N" any more.
+   * Empty for a gate.
+   */
+  court_numbers: number[];
   gate_key: string | null;
   mac_address: string | null;
   key_version: number;
@@ -232,6 +237,52 @@ export type ClaimResult = {
   key_version: number;
   board: DiscoveredBoard;
   note: string;
+};
+
+/** What manual registration hands back: the row, and the key that is never shown again. */
+export type DeviceRegistration = {
+  device: AdminDevice;
+  device_key: string;
+  key_version: number;
+  note: string;
+};
+
+/** A court box's brain. Gates are modelled on the API but parked, so they are not offered here. */
+export type DeviceHardware = "Esp8266" | "Mega2560" | "Esp32";
+export type OtaChannel = "Stable" | "Canary" | "Pinned";
+
+/**
+ * Enum values as the API binds them. It configures no string-enum converter, so requests
+ * carry the integer; responses spell the name out (`DeviceView`), which is what the types
+ * above hold. Keep in step with `DeviceKind`, `DeviceHardware` and `OtaChannel` in the
+ * backend domain.
+ */
+export const DEVICE_KIND_WIRE = { CourtBox: 0, Gate: 1 } as const;
+export const DEVICE_HARDWARE_WIRE: Record<DeviceHardware, number> = { Mega2560: 0, Esp8266: 1, Esp32: 2 };
+export const OTA_CHANNEL_WIRE: Record<OtaChannel, number> = { Stable: 0, Canary: 1, Pinned: 2 };
+
+/**
+ * The code a member's phone shows the court box.
+ *
+ * `code` is the entire QR payload — twelve characters of Crockford base32, and nothing
+ * else, because the box's scanner pipeline carries at most 24 bytes and poisons anything
+ * longer. It used to be a JWT, which could never cross that pipeline at all.
+ *
+ * `kind` says what presenting it does: a `booking` code names the member's upcoming
+ * booking (and lives until it ends plus the grace window), an `ident` code only says who
+ * they are — for a walk-up, or for paying at somebody else's court — and lives for the
+ * tenant's `qr_lifetime_seconds`.
+ */
+export type MyQrCode = {
+  code: string;
+  kind: "booking" | "ident";
+  expires_in_seconds: number;
+  /** Booking codes only. */
+  booking_id?: string;
+  /** Booking codes only; null if the court row has since gone. */
+  court_number?: number | null;
+  /** Booking codes only. UTC. */
+  starts_at?: string;
 };
 
 export type AdminCourt = {
@@ -417,8 +468,8 @@ export const endpoints = {
   courtPinMatch: (courtNumber: number, pin: string) =>
     api.post<{ matched: boolean; user_id: string | null }>(`/api/v1/court/${courtNumber}/pin/match`, { pin }),
 
-  // Phase 8.6 — QR identification (third leg of the triple-stack).
-  meQrGenerate: () => api.post<{ token: string; expires_in_seconds: number }>("/api/v1/me/qr/generate"),
+  // Phase 8.6 — QR identification (third leg of the triple-stack). See MyQrCode.
+  meQrGenerate: () => api.post<MyQrCode>("/api/v1/me/qr/generate"),
   courtQrMatch: (courtNumber: number, token: string) =>
     api.post<{ matched: boolean; user_id?: string; reason?: string }>(`/api/v1/court/${courtNumber}/qr/match`, { token }),
 
@@ -489,10 +540,28 @@ export const endpoints = {
     ...(req.no_show_lookback_days !== undefined ? { noShowLookbackDays: req.no_show_lookback_days } : {}),
   }),
 
-  // Admin: devices
+  // Admin: devices.
+  //
+  // `court_numbers` is snake_case on every request that carries it — register, update
+  // and claim — because the API pins that one property name (the rest bind from
+  // camelCase case-insensitively). It is a list in relay order: [court on A, on B, …].
+  //
+  // Enums go over the wire as their integer values: the API configures no string-enum
+  // converter, so a name like "Canary" does not bind. (It used to be sent as a name.)
   adminDevicesList: () => api.get<AdminDevice[]>("/api/v1/admin/devices/"),
-  adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; courtNumber?: number | null; otaChannel?: string; pinnedVersion?: string | null }) =>
-    api.patch<{ saved: true }>(`/api/v1/admin/devices/${id}`, req),
+  adminDeviceRegister: (req: { deviceCode: string; name: string; hardware: DeviceHardware; court_numbers: number[] }) =>
+    api.post<DeviceRegistration>("/api/v1/admin/devices/", {
+      deviceCode: req.deviceCode,
+      name: req.name,
+      kind: DEVICE_KIND_WIRE.CourtBox,
+      hardware: DEVICE_HARDWARE_WIRE[req.hardware],
+      court_numbers: req.court_numbers,
+    }),
+  adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; court_numbers?: number[]; otaChannel?: OtaChannel; pinnedVersion?: string | null }) =>
+    api.patch<AdminDevice>(`/api/v1/admin/devices/${id}`, {
+      ...req,
+      ...(req.otaChannel !== undefined ? { otaChannel: OTA_CHANNEL_WIRE[req.otaChannel] } : {}),
+    }),
   adminDeviceRevoke: (id: string) => api.post<{ revoked: true }>(`/api/v1/admin/devices/${id}/revoke`, {}),
   adminDeviceRotateKey: (id: string) =>
     api.post<{ device_key: string; key_version: number }>(`/api/v1/admin/devices/${id}/rotate-key`, {}),
@@ -500,8 +569,20 @@ export const endpoints = {
   // Admin: connecting a board
   adminDevicesDiscovered: () => api.get<DiscoveredBoard[]>("/api/v1/admin/devices/discovered"),
   adminDiscoveryStatus: () => api.get<DiscoveryStatus>("/api/v1/admin/devices/discovery-status"),
-  adminDeviceClaim: (req: { mac: string; claimCode: string; name: string; courtNumber?: number | null }) =>
-    api.post<ClaimResult>("/api/v1/admin/devices/claim", req),
+  /**
+   * Claims an announcing board. Every property here is pinned snake_case on the API
+   * (`ClaimBoardRequest`), and the board is matched by its commitment to `claim_code`,
+   * not by MAC — so the MAC the admin picked in the list is not sent. This used to send
+   * `{ mac, claimCode, courtNumber }`, none of which bound to anything, so no claim from
+   * this screen could ever have succeeded.
+   */
+  adminDeviceClaim: (req: { claimCode: string; deviceCode: string; name: string; court_numbers: number[] }) =>
+    api.post<ClaimResult>("/api/v1/admin/devices/claim", {
+      claim_code: req.claimCode,
+      device_code: req.deviceCode,
+      name: req.name,
+      court_numbers: req.court_numbers,
+    }),
 
   // Admin: courts
   adminCourtsList: () => api.get<AdminCourt[]>("/api/v1/admin/courts/"),
