@@ -8,22 +8,91 @@ eight-button panel and a QR scanner.
 DIP position below reflects hardware that is already built and working. Firmware
 adapts to the hardware, never the reverse.
 
+## Flashing — the whole procedure
+
+Both halves are flashed over USB. There is no over-the-air path: one club, one
+box, and the person holding the screwdriver is the person who knows the WiFi
+password. A password change is a reflash, and a reflash is the four commands
+below.
+
+**Prerequisites, once per machine**
+
+```bash
+brew install uv          # the toolchain installer make install-iot uses
+make install-iot         # creates src/iot/.venv (Python 3.12) with pio, lizard, gcovr
+```
+
+No USB-serial driver is needed on current macOS — the CH340 on this board is
+handled by the system. Only if **no** `/dev/cu.*` port ever appears:
+`brew install --cask wch-ch34x-usb-serial-driver`, then replug.
+
+**Prerequisites, once per checkout**
+
+```bash
+cp src/iot/src/common/secrets.h.example src/iot/src/common/secrets.h
+```
+
+Fill in `WIFI_SSID` and `WIFI_PASSWORD`. It is gitignored, and the bridge
+**refuses to compile without it** — an image that joins an empty SSID looks
+identical to a working one until it is screwed to a wall.
+
+**Flash**
+
+```bash
+make flash-mega          # the ATmega2560
+make flash-bridge        # the ESP8266, then drops into the serial monitor
+```
+
+Each target prints the DIP positions it needs, waits for the USB port to
+appear, uploads, and reminds you what to set the switches back to. Pass
+`UPLOAD_PORT=/dev/cu.usbserial-XXXX` to name the port yourself.
+
+**The DIP block, in order** — the same rows as the table under *DIP switches*
+below, which is the wiring sheet's and is hardware truth:
+
+| Step | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| `make flash-mega` | OFF | OFF | **ON** | **ON** | OFF | OFF | OFF | OFF |
+| `make flash-bridge` (upload) | OFF | OFF | OFF | OFF | **ON** | **ON** | **ON** | OFF |
+| `make monitor-bridge` (watch it boot) | OFF | OFF | OFF | OFF | **ON** | **ON** | OFF | OFF |
+| **Run** — restore these before the box goes back on the wall | **ON** | **ON** | **ON** | **ON** | OFF | OFF | OFF | OFF |
+
+**What the LCD shows, step by step**
+
+| When | Glass |
+|---|---|
+| After `make flash-mega`, run DIPs | `CRUSADERS COURTS / SCAN TO START` — the Mega's own idle text, and proof the Mega is alive |
+| During `make flash-bridge` and the monitor | **Nothing new.** DIP 1 and 2 are off, so the ESP's UART is on the USB socket and the Mega is not on the other end of it. Watch the monitor, not the glass. |
+| Run DIPs restored, box not yet claimed | `CLAIM CODE <8 hex>` — type it into the admin Devices screen to connect the board |
+| Run DIPs restored, box already claimed | `CONNECTED / SCAN TO START` |
+
+The identity screen is painted at the end of `setup()` and again on the first
+`!PONG` the bridge gets from the Mega, which is the first moment the glass is
+reachable after a DIP change. If it never appears, the two halves are not
+talking: check DIP 1 and 2.
+
+**Rotating the club WiFi password** — change `secrets.h`, `make flash-bridge`,
+restore the run DIPs. That is the whole of it. Nothing is stored on the box, so
+nothing can be left holding a credential nobody can see.
+
 ## Why the logic lives on the ESP8266
 
-The ATmega2560 cannot be flashed over WiFi. Its ESP8266 sits on **Serial3**, not
-the Serial0 bootloader port, and no GPIO reaches the Mega's RESET pin — and
-adding one would be a wiring change.
-
-So the split is deliberate:
+The ESP8266 is the half with a network stack, a clock and enough RAM to hold a
+roster. The Mega is 8 KB of SRAM driving relays. So the split is deliberate:
 
 | | ATmega2560 | ESP8266 |
 |---|---|---|
 | **Role** | thin I/O, near-static | all the brains |
-| **Owns** | buttons, scanner framing, relay drive, LCD, **independent auto-off timer** | protocol, state machine, device auth, heartbeat, roster cache, event queue, OTA |
-| **Updated by** | USB, rarely | **over the air** |
+| **Owns** | buttons, scanner framing, relay drive, LCD, **independent auto-off timer** | protocol, state machine, device auth, heartbeat, roster cache, event queue |
 
-Behaviour changes ship as ESP8266 OTA updates. The Mega's firmware is designed
-to almost never need reflashing, which is what makes USB-only acceptable for it.
+Both are flashed over USB, by DIP switch, and neither can be flashed over the
+network: the ATmega's ESP sits on **Serial3**, not the Serial0 bootloader port,
+and no GPIO reaches the Mega's RESET pin. Adding one would be a wiring change.
+The ESP *could* have taken over-the-air updates and did until firmware 1.2.0;
+that was removed along with image signing and the runtime credential store,
+because a fleet update mechanism for one box is a way for the box to break
+itself and nothing else. The Mega's firmware is designed to almost never need
+reflashing, and the ESP's now needs it about as rarely.
 
 The Mega's auto-off timer is independent on purpose: if the ESP hangs, the WiFi
 drops and the backend dies, **the lights still go off**. In the system this
@@ -108,13 +177,14 @@ From the project wiring sheet:
 | Mega ↔ ESP8266 internal serial (Serial3) | **1 ON, 2 ON** |
 | Upload to Mega over USB | 1 OFF, 2 OFF, **3 ON, 4 ON**, 5–8 OFF |
 | Run (normal operation) | **1 ON, 2 ON, 3 ON, 4 ON**, 5–8 OFF |
-| Upload to ESP8266 over USB (first flash) | 1 OFF, 2 OFF, 3 OFF, 4 OFF, **5 ON, 6 ON, 7 ON**, 8 OFF |
+| Upload to ESP8266 over USB | 1 OFF, 2 OFF, 3 OFF, 4 OFF, **5 ON, 6 ON, 7 ON**, 8 OFF |
 | ESP run/monitor over USB | **5 ON, 6 ON**, 7 OFF, others OFF |
 
 The sheet documents the ESP-upload position directly: it differs from ESP
 run/monitor only in **DIP 7**, which is the flash-mode line. No external serial
-adapter, no soldering and no pad access is ever needed — the first flash is a
-DIP change like every other mode.
+adapter, no soldering and no pad access is ever needed — flashing the ESP is a
+DIP change like every other mode, which is what makes USB-only flashing a
+two-minute job rather than a reason to build an update mechanism.
 
 ## Layout
 
@@ -136,7 +206,6 @@ lib/           shared modules — PURE, no Arduino headers, host-compilable
                `!STATE` reconciliation — everything court_bridge/main.cpp
                does NOT do
   devapi/      signed requests, response policy, and a heapless JSON scanner
-  otacore/     whether to take an update, and surviving one that does not work
   fwversion/   the FW_VERSION_* string, alone so either half can carry it
   arduino_hal/ real drivers (AVR / ESP)   ← the ONLY place Arduino headers live
   posix_hal/   host drivers, for the simulator
@@ -145,7 +214,7 @@ src/
   court_bridge/  ESP8266 firmware — composition root only
   simulator/     native device simulator — the same lib/ over posix_hal
 test/          Unity tests, run on the host
-tools/         strict compile gate, size budgets
+tools/         strict compile gate, corpus generators
 ```
 
 Everything under `lib/` except `arduino_hal/` and `posix_hal/` is free of
@@ -189,13 +258,19 @@ waiting seven weeks. Console commands: `scan <code>`, `btn <A-D|1-4>`, `quit`.
 ## Working on it
 
 ```bash
-make install        # creates src/iot/.venv with pio, lizard, gcovr
-make test-iot       # Unity tests on the host — no board needed
-make test-iot-asan  # the same suite under ASAN + UBSAN
-make lint-iot       # clang-format, strict compile, purity + rollover gates
-make build-iot      # compile for every target board
-make complexity     # cyclomatic complexity, all three languages
+make install-iot     # creates src/iot/.venv (Python 3.12, via uv) with pio, lizard, gcovr
+make test-iot        # Unity tests on the host — no board needed
+make test-iot-asan   # the same suite under ASAN + UBSAN
+make lint-iot        # clang-format, strict compile, purity + rollover gates
+make build-iot       # compile for every target board
+make complexity      # cyclomatic complexity, all three languages
+make flash-mega      # USB-flash the ATmega2560 (prints the DIP positions)
+make flash-bridge    # USB-flash the ESP8266, then open its monitor
+make monitor-bridge  # watch the ESP's UART at 9600 (DIP 5 and 6 ON)
 ```
+
+`make build-iot` compiles `court_bridge`, so it needs `src/common/secrets.h`
+like a flash does — see *Flashing* above.
 
 ### The rollover rule
 
@@ -343,34 +418,6 @@ the member did not earn. Visible in the ledger, reversible by an admin, and in t
 go-live checklist. The **sequence number** does persist, in blocks of 64 — that is
 what the API's deduplication rests on, and reusing one loses a real event.
 
-## Over-the-air updates
-
-Signed with **RSA-2048/SHA-256** through the ESP8266 core's `Updater`, against a
-public key compiled into the image. The plan called for Ed25519 on the correct
-reasoning that an HMAC keyed with the device key would let one compromised box
-forge firmware for the fleet; BearSSL — already linked in for TLS — has no
-Ed25519, and vendoring a curve implementation into a court-lighting controller is
-the worse trade. **The property that mattered is unchanged**: the signing key is
-asymmetric and lives only where releases are built.
-
-**The image carries no WiFi credential, and must not.** CI builds and signs the
-release on a runner where `secrets.h` cannot exist, so an image that needed the
-header would have put an empty SSID on every box in the club at the first
-over-the-air release. See *WiFi credentials* below.
-
-**There is no rollback.** A 4M part carrying a 1 MB sketch and 2 MB of LittleFS has
-no second OTA slot, and the filesystem is not optional because it holds the device
-credential. What `ota::BootGuard` does instead is make sure a bad build is never
-installed **twice** — which is the failure that takes out a club, since every box
-heartbeats against the same manifest and would otherwise reflash in a loop, all at
-once. A box that will not boot at all still needs a USB cable.
-
-The guard clears on **evidence**: an API call the server accepted. "It booted" is
-not "it works" — a firmware that comes up and cannot authenticate looks alive and
-does nothing. Three boots are allowed before a build is condemned, because a
-brownout when four relay coils energise at once is a real thing on this hardware.
-The condemned version is reported on the heartbeat and shown on the Devices screen.
-
 ## The discovery OFFER and the clock
 
 A provisioned box adopts the API's clock from a *signed* discovery OFFER — that
@@ -384,50 +431,26 @@ later the box read its own rewound clock as a dead credential. The rule is now
 that. OFFERs never touch the two-strike reprovision counter; that counter is
 evidence about the credential, gathered from signed 401s only.
 
-## WiFi credentials
+## What the box keeps in flash
 
-The SSID and password live in the box's LittleFS store, beside the device key
-(`lib/bridgelogic/CredentialStore`), under an integrity trailer so a torn write
-reads as *absent* rather than as half a passphrase. Three ways in, one rule:
+Two things, and only because losing either would make the box re-provision
+itself every time the breaker trips:
 
-| Path | What happens |
-|---|---|
-| **Bench / first flash** — `secrets.h` present, store empty | The compiled-in credential is used to join. The first time it actually joins, it is written to the store (only when it differs from what is stored, so a working box does not wear a flash cell every morning). |
-| **OTA / CI image** — no `secrets.h` | The stored credential is read at boot and used to join. Every box provisioned once at the bench works on every release after. |
-| **USB** — DIP 5, 6 ON, monitor at 9600 | Type `!WIFI,<ssid>,<password>` (optionally with the v2 `*CC` XOR trailer; escape `,` `*` `%` as `%2C` `%2A` `%25`). The box stores it and joins, and answers **in the monitor** with `[wifi] saved, joining <ssid>` then `[wifi] joined <ip>`. The `!LCD,WIFI SAVED,JOINING...*CC` frame arrives in the monitor too — the Mega is not attached in this DIP position, so that frame is what the glass *would* have shown, not proof that it did. The glass itself catches up when DIP 1 and 2 are restored: the bridge repaints its identity screen (`CLAIM CODE ...`, `CONNECTED / SCAN TO START`, or `NO WIFI SET / !WIFI,SSID,PASS`) on the first `!PONG` after the link returns, and also once at the end of `setup()`. |
+- **The device credential** — the id and key the claim flow returns, stored as
+  two records because a 32-byte key is 64 hex characters and the store's value
+  cap was 32 when it was written. Both halves and the id must load or the box
+  treats itself as unclaimed; half a key signs every request wrongly and reads
+  back as a revoked credential.
+- **The API base URL** (`api_base`, up to 120 characters), learned from the
+  discovery OFFER or from provisioning. The old `api_url` record was silently
+  capped at 32, which is why a DNS-named advertised base used to fail discovery
+  with nothing on the glass. A box that only holds the old record still boots
+  off it; a URL that will not fit paints `API URL TOO LONG` rather than being
+  truncated, because half a URL is a request to somewhere else.
 
-The `!WIFI` line rides the same UART as the Mega link; that is safe because the
-Mega only ever emits frames from its fixed verb table, none of which is `WIFI`.
-It is also what gates the plain-text acknowledgements above: prose on that UART
-would otherwise reach the Mega's frame decoder, which answers it with
-`!EVT,BADFRAME,RX`.
+Both carry a CRC-8 trailer (`bridgelogic::CredentialStore`), because
+`hal::IStore` hands a torn write back as a value with `kOk` and a half-written
+record has to read as *absent* rather than as something plausible.
 
-**The store outranks a compiled-in credential.** `secrets.h` is a first-boot
-seed; once the store holds anything, that is what every boot joins with. It read
-the other way round until review 3 — and a `!WIFI` rotation on a bench-flashed
-box then survived only until the next breaker trip, which is a USB reflash of
-the whole fleet to recover. The reflash rotation path still works: a box holding
-two different credentials alternates between them every 20 s while the link is
-down (`bridgelogic::WifiJoinPlan`), and whichever one joins is the one that gets
-persisted.
-
-The API base URL moved to the same checked-record scheme (`api_base`, up to 120
-characters — the OTA URL bound). The old `api_url` record was silently capped at
-32, which is why a DNS-named advertised base used to fail discovery with nothing
-on the glass. A box that only holds the old record still boots off it; a URL
-that will not fit paints `API URL TOO LONG` instead of being truncated.
-
-## Flashing
-
-**Mega** — DIP 1,2 OFF; 3,4 ON, then `pio run -e court_mega -t upload`.
-
-**ESP8266** — normally OTA. For a first flash, set the ESP-upload DIP row above
-(5, 6, 7 ON, others OFF), then restore the run positions.
-
-For the first flash of a box, either copy `src/common/secrets.h.example` to
-`secrets.h` and fill in the WiFi credential before building — it is persisted to
-the store on the first join, and no later image needs it — or flash the plain CI
-image and type the `!WIFI` line over USB. `secrets.h` is gitignored; it was
-committable until this project closed that gap. The `DEVICE_*` and `API_BASE_URL`
-lines in the example are not read by this firmware: the device key and the URL
-come from provisioning and discovery.
+**The WiFi credential is not in there.** It is compiled in from `secrets.h` —
+see *Flashing*.

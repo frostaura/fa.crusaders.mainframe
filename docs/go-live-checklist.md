@@ -33,13 +33,11 @@ the API. The box has no readback and cannot even detect it.
 
 ---
 
-## 2. Deploy secrets — seven unset
+## 2. Deploy secrets — six unset
 
 The release chain builds multi-arch images, pushes to Docker Hub and redeploys through
 Portainer. It has never run, because the repository secrets are unset and
-`workflow_dispatch` cannot trigger a deploy — only a real push to `main`. CI consumes the
-first six today; the seventh is read by the `iot-sign` firmware-signing job (item 6 —
-verify that job exists in `.github/workflows/ci.yml` before ticking its box).
+`workflow_dispatch` cannot trigger a deploy — only a real push to `main`.
 
 - [ ] `DOCKERHUB_USERNAME`
 - [ ] `DOCKERHUB_TOKEN`
@@ -47,7 +45,10 @@ verify that job exists in `.github/workflows/ci.yml` before ticking its box).
 - [ ] `PORTAINER_TOKEN`
 - [ ] `PORTAINER_STACK_ID`
 - [ ] `PORTAINER_ENDPOINT_ID`
-- [ ] `OTA_PRIVATE_KEY` — the PEM content of the firmware signing key (item 6)
+
+There was a seventh, `OTA_PRIVATE_KEY`, read by an `iot-sign` firmware-signing job. The
+firmware no longer takes over-the-air updates, so neither the key nor the job is needed;
+wherever either still exists, it is residue to remove rather than a secret to set.
 
 **If skipped:** the deploy job is skipped silently on every push and the club never gets a
 build. **The release chain stays unproven until these are set and one real push to `main`
@@ -91,151 +92,52 @@ indifferent to which end the debit is taken from.
 
 ---
 
-## 5. The first ESP8266 flash
+## 5. Flash both halves and see the box come up
 
-Every flash after the first is over the air. The first one is a DIP change like every
-other mode — the wiring sheet documents it directly:
+Both halves are flashed over USB, by DIP switch. No adapter, no soldering, no pad access,
+and no network path — the whole procedure is `src/iot/README.md`'s *Flashing* section and
+two `make` targets that print the switch positions as they go.
 
-> Upload to ESP8266 over USB (first flash) — 1 OFF, 2 OFF, 3 OFF, 4 OFF, **5 ON, 6 ON,
-> 7 ON**, 8 OFF
+The WiFi credential is **compiled in**. `src/iot/src/common/secrets.h` is gitignored and
+lives on the flashing machine only; `court_bridge` refuses to compile without it, so there
+is no way to produce an image that comes up on no network — and therefore no way to hand a
+box to the wall believing a credential landed when it did not.
 
-It differs from ESP run/monitor only in DIP 7, the flash-mode line. No external adapter,
-no soldering, no physical intervention.
+- [ ] `cp src/iot/src/common/secrets.h.example src/iot/src/common/secrets.h` on the
+      flashing machine, fill in `WIFI_SSID` and `WIFI_PASSWORD`, and do not commit it.
+- [ ] `make flash-mega` with DIP **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
+- [ ] `make flash-bridge` with DIP **1–4 OFF, 5 ON, 6 ON, 7 ON**, 8 OFF. It drops into the
+      serial monitor afterwards (DIP **5 ON, 6 ON, 7 OFF**) — **watch the monitor, not the
+      glass**: in that DIP position the ESP's UART is on the USB socket and the Mega is not
+      on the other end of it, so the LCD cannot change.
+- [ ] Restore the run positions (**1, 2, 3, 4 ON**, 5–8 OFF) and confirm the LCD now shows
+      `CLAIM CODE ...` or `CONNECTED / SCAN TO START`. That repaint is the proof the ESP and
+      the Mega are talking again, and it is the only positive confirmation the box gives.
 
-The WiFi credential is **not part of the image**. It lives in the box's own flash store
-(`bridgelogic::CredentialStore`), written the first time the box actually joins, and every
-later image — including the credential-free one CI signs and bakes into the API — reads it
-from there. **The store outranks a compiled-in credential**: `secrets.h` is a first-boot
-seed, and once the store holds anything, that is what the box joins with on every boot. (It
-used to be the other way round, which meant a `!WIFI` rotation lasted only until the next
-power cycle.) A box that cannot join with the stored credential and also carries a
-compiled-in one alternates between the two every 20 s, which is what keeps the reflash
-rotation path in item 7 working.
-
-There are two ways to get a credential onto a box for the first time; pick one per box:
-
-- **`secrets.h` compiled in.** Copy `src/iot/src/common/secrets.h.example` to `secrets.h`
-  on the flashing machine only (gitignored), fill `WIFI_SSID` / `WIFI_PASSWORD`, build and
-  flash. The credential is persisted on the first successful join.
-- **`!WIFI` typed over USB.** Flash the plain image (no `secrets.h` — what CI builds), set
-  DIP **5 and 6 ON** so the ESP's UART is on the USB socket, open a serial monitor at
-  **9600 8N1**, and type `!WIFI,<ssid>,<password>` followed by Enter (`,` `*` `%` inside
-  either value are written `%2C` `%2A` `%25`; an optional `*CC` XOR trailer is verified when
-  present).
-
-  **Watch the MONITOR, not the glass.** In this DIP position the ESP's only UART is on the
-  USB socket, so the Mega — and therefore the LCD — is not on the other end of it at all.
-  The firmware answers in the monitor with a plain line: `[wifi] saved, joining <ssid>`,
-  then `[wifi] joined <a.b.c.d>` when the association succeeds, or
-  `[wifi] line not understood: ...` / `[wifi] not saved, ...`. Alongside each of those an
-  `!LCD,WIFI SAVED,JOINING...*CC` frame also appears in the monitor; that is the frame the
-  glass would have shown, not noise, and it is **not** evidence the LCD updated. The LCD
-  itself only changes once DIP 1 and 2 are restored — the box repaints its identity screen
-  on the first `!PONG` it gets from the Mega after that.
-
-  `NO WIFI SET / !WIFI,SSID,PASS` is what the LCD shows on any boot with no credential from
-  any source, in the **run** DIP position.
-
-- [ ] Generate the signing key first — item 6 is a hard prerequisite of this flash.
-- [ ] Set DIP 5, 6, 7 ON (all others OFF), `pio run -e court_bridge -t upload`.
-- [ ] Provision the WiFi credential by one of the two paths above and see the box join
-      — in the monitor for the `!WIFI` path (`[wifi] joined ...`), on the glass for the
-      `secrets.h` path (the LCD leaves `NO WIFI SET`).
-- [ ] Restore the run positions (1, 2, 3, 4 ON, 5–8 OFF) and confirm the LCD now shows
-      `CLAIM CODE ...` or `CONNECTED / SCAN TO START` — that repaint is the proof the ESP
-      and the Mega are talking again.
-
-**If skipped:** the ESP cannot take its first image — but no adapter hunt and no physical
-intervention is ever needed; the fix is three DIP switches. A box flashed without a
-credential is not bricked: it says `NO WIFI SET` and waits for the `!WIFI` line.
+**If skipped:** the box has no firmware. Nothing here needs a second visit: the credential
+is in the image, so a box that flashed and painted its identity screen is a box that will
+join the network.
 
 ---
 
-## 6. Firmware signing key — mint it before the first flash
-
-OTA images are signed with RSA-2048/SHA-256 and verified against a public key compiled into
-the firmware. Only the **public** half is in the repository
-(`src/iot/lib/otacore/include/otacore/OtaPublicKey.h`); the matching private key does not
-exist anywhere. A board flashed with the current header will therefore reject **every**
-image until a key pair is minted and the header regenerated — which makes key generation a
-hard prerequisite of item 5, not a hardening step after it.
-
-- [ ] Run `src/iot/tools/generate_ota_keys.sh /secure/path/ota_private_key.pem`. This writes a
-      fresh private key where you point it and regenerates the committed public-key header.
-- [ ] Commit the regenerated public-key header. The **private** key goes into the
-      `OTA_PRIVATE_KEY` repository secret (PEM content, item 2) and nowhere else — it is
-      gitignored, and must never be committed.
-- [ ] Verify `.github/workflows/ci.yml` carries the `iot-sign` job and the backend serves
-      `/firmware/`. **That job now verifies the packaged image against the committed
-      `OtaPublicKey.h` and fails on a mismatch** — previously it only checked that
-      `OTA_PRIVATE_KEY` parsed, so a secret from a different key pair produced a CI-green
-      release every box rejected after downloading it, forever. Setting the secret and
-      committing the regenerated header are two separate acts and this is what couples
-      them. The box side is bounded too: an image that fails to install three times running
-      is skipped until the manifest changes. Both exist at HEAD: `iot-sign` is in `ci.yml` (Phase 5a) and
-      `Program.cs` serves `Firmware:PayloadPath` — `/app/firmware` in the image — at
-      `/firmware/` (Phase 5b), rate-limited per address (`RateLimits:FirmwarePerMinute`).
-      With the secret set, that job produces `firmware.signed.bin`
-      (`src/iot/tools/pio_sign_post.py`) and bakes it into the API image beside
-      `firmware.manifest.json`, which `OtaCatalogue` offers as Stable by default. **The
-      CI image carries no WiFi credential by design** — the box reads its credential from
-      its own flash store (item 5), so a CI-built OTA release does not take the fleet off
-      the network.
-- [ ] Confirm the OTA URL the box will be handed is one it can open. The catalogue makes
-      the manifest's relative `/firmware/...` absolute against `Discovery:AdvertisedBaseUrl`
-      if set, else **the scheme and host of the request that asked** — which is
-      `http://<ip>:8088` through the gateway only because nginx forwards
-      `X-Forwarded-Host: $http_host` (host *and port*) and the API trusts it from
-      `Gateway:TrustedProxies` (default loopback + `172.16.0.0/12`, where the compose
-      gateway stands). A box calling the host-networked API directly gets
-      `http://<ip>:5000`. If anything other than the compose gateway fronts the API, set
-      `Gateway__TrustedProxies__N` or the port is stripped and every box loops
-      UPDATING / UPDATE FAILED. An `https` advertised base or `Ota:*:Url` **refuses to
-      start** — the box cannot do TLS.
-- [ ] Confirm the deployed image is offering it **through the gateway**:
-      `GET http://<host>:8088/firmware/firmware.manifest.json` returns the version CI
-      packaged (nginx has a `/firmware/` proxy block; without it the SPA answers
-      `index.html` and the updater rejects it). A heartbeat from a box on an older build
-      then carries an `ota` object. **`nginx.conf` reaches the running gateway as part of a
-      built gateway image, pushed and re-pulled like the API and SPA images — not as a host
-      bind-mount from a checkout.** A deploy that moves only the two application images
-      leaves the gateway on its old config, and the `/firmware/` block and the
-      `X-Forwarded-Host` line are exactly the two things a stale gateway would be missing,
-      with the dashboard reporting a successful deploy.
-- [ ] `Ota:Stable:Version`, `Ota:Stable:Url` and `Ota:Stable:SizeBytes` are set only to pin
-      the fleet to an image other than the one baked into the container — and then **all
-      three or none**: a partial set stops the API at startup rather than silently
-      offering the baked image the override was meant to hold back. `Url` must be `http`.
-
-**If skipped:** OTA is impossible for boards flashed with this key — every later update is a
-USB/DIP visit. The private key is what a stolen board must *not* yield — that is the whole
-reason the signature is asymmetric rather than an HMAC keyed with the device key.
-
----
-
-## 7. Rotate the club WiFi password
+## 6. Rotate the club WiFi password
 
 The password is in Carl's original sketch, in plain text, in a file that has been on more
 than one machine.
 
 - [ ] Rotate it on the access point.
-- [ ] Deliver the new one to every box by one of the two item-5 paths: **reflash once**
-      with a new `secrets.h` (on the flashing machine only — gitignored, never committed;
-      the box tries the stored credential first, falls back to the compiled-in one after
-      20 s, and persists it on the join — so no later image needs it), **or** with DIP 5
-      and 6 ON type `!WIFI,<ssid>,<new password>` over USB at 9600 and see
-      `[wifi] saved, joining <ssid>` followed by `[wifi] joined ...` **in the serial
-      monitor** (item 5 — the LCD is not reachable in that DIP position).
-- [ ] For the `!WIFI` path, power-cycle one box afterwards and confirm it comes back on the
-      new password. The typed credential is in the store and the store outranks
-      `secrets.h`, so it survives; if it does not, the box is running firmware older than
-      this checklist and must be reflashed.
+- [ ] Edit `secrets.h` on the flashing machine and `make flash-bridge` (item 5). That is
+      the whole delivery mechanism: the credential is compiled into the image, so there is
+      no store to go stale, no precedence rule between two credentials, and nothing to
+      power-cycle to prove.
+- [ ] Confirm the box rejoins — the LCD returns to `CONNECTED / SCAN TO START` once the run
+      DIPs are restored, and the box shows as heartbeating on the admin Devices screen.
 
 **If skipped:** the club's WiFi credential is known to everyone who has seen that file.
 
 ---
 
-## 8. Power — measure both rails under load
+## 7. Power — measure both rails under load
 
 The supply is a Mean Well PSU feeding two fused LM2596 bucks: a **5V rail** carrying the
 relay coils, the LCD backlight and the scanner, and a **9V rail** into the Mega's VIN,
@@ -276,16 +178,16 @@ absence of a reset as a fault and started replacing bootloaders.
       power-up.
 
 **If skipped:** the rail faults go undetected and boards reset at random. The ESP hangs off
-the Mega's onboard regulators, so a sagging rail resets **it** too, and the OTA boot guard
-— which lives on the ESP — reads three unproven boots as a failed firmware and condemns a
-perfectly good build: the symptom looks like a bad release and is not one. Separately, and
-with nothing to do with the boot guard, the Mega's one hard-safety property — that a stall
-ends in a reset with every contact open — goes to site unverified on every unit, because
-(b) is the only thing in the tree that exercises it.
+the Mega's onboard regulators, so a sagging rail resets **it** too — and an ESP that
+reboots mid-evening loses the per-court booking ends `!EXT` needs, so a two-hour court
+adopted from the next `!STATE` darkens at the ninety-minute cap, mid-game. Separately, the
+Mega's one hard-safety property — that a stall ends in a reset with every contact open —
+goes to site unverified on every unit, because (b) is the only thing in the tree that
+exercises it.
 
 ---
 
-## 9. Event-queue durability, accepted knowingly
+## 8. Event-queue durability, accepted knowingly
 
 Queued events live in RAM. They survive the WiFi going away, a router reboot and a two-day
 outage — the API now believes a scan up to 30 days old (`DeviceEventEndpoints.MaxEventAge`)
@@ -300,11 +202,11 @@ version of it (a torn ring that replays a stale activation) charges a member twi
 **If accepted:** a court lit during an offline window that ended in a power cut is never
 reported, so the sweep treats it as a no-show and refunds it less a penalty the member did
 not earn. It is visible in the ledger and an admin can reverse it — which is why this is a
-recorded limitation and not a blocker. Item 8 makes it rarer.
+recorded limitation and not a blocker. Item 7 makes it rarer.
 
 ---
 
-## 10. Offline identification — the decided design, verified once
+## 9. Offline identification — the decided design, verified once
 
 The design is decided: each booking mints a **short access code**, scoped to that booking
 and expiring with it. The box works **online-first** — a scan hits the activation endpoint
@@ -328,7 +230,7 @@ first test of the exact regression the local-decision design was built to avoid.
 
 ---
 
-## 11. Real hardware, once
+## 10. Real hardware, once
 
 Everything below the API is proven on the host with no board attached, which is what makes
 CI meaningful. It is not the same as having been run.
@@ -343,7 +245,7 @@ The 2026-08-24 review's §4 adds seven checks that no software answer can close 
 a multimeter on the actual box:
 
 - [ ] Power topology confirmed: which LM2596 output feeds the ESP8266 side, and that rail
-      measured during WiFi transmit bursts (item 8).
+      measured during WiFi transmit bursts (item 7).
 - [ ] The physical 8-way DIP verified against the wiring sheet for all four modes — Mega
       upload, ESP upload, ESP USB monitor, run.
 - [ ] All firmware screens confirmed legible on the physical 20×4 glass (driven as 16×2 —
@@ -355,12 +257,12 @@ a multimeter on the actual box:
       codes, so the length question it was written for no longer exists.)
 - [ ] Scanner confirmed factory-set to 9600 baud on both fixed links. **Every UART in the
       box is 9600 8N1** — the Mega↔ESP link, the scanner, and the ESP's USB monitor (DIP 5
-      and 6 ON) that the `!WIFI` line is typed into. The only 115200 in `platformio.ini`
-      is the Mega's `upload_speed` for avrdude during a USB flash; no UART runs at it in
-      service, and the Mega has no monitor at all (it never opens Serial0). A monitor
-      opened at the wrong rate shows framing garbage that looks like a broken box and is
-      not one.
-- [ ] Item 8's check **(b)** done with the ESP plugged in as well as unplugged: the
+      and 6 ON, which is what `make monitor-bridge` opens). The only 115200 in
+      `platformio.ini` is the Mega's `upload_speed` for avrdude during a USB flash; no UART
+      runs at it in service, and the Mega has no monitor at all (it never opens Serial0). A
+      monitor opened at the wrong rate shows framing garbage that looks like a broken box
+      and is not one.
+- [ ] Item 7's check **(b)** done with the ESP plugged in as well as unplugged: the
       `court_mega_bench` build stalled with a court lit, box back within 2 s with relays
       open — and the production `-e court_mega` image reflashed afterwards.
 - [ ] Relay board JD-VCC jumper confirmed (which 5V feeds coil vs logic), and active-LOW
@@ -370,7 +272,7 @@ a multimeter on the actual box:
 
 ---
 
-## 12. LAN webhook consumers — the private-network allow-list
+## 11. LAN webhook consumers — the private-network allow-list
 
 Production rejects RFC1918 webhook destinations unless the endpoint is on
 `Webhooks:PrivateNetworkAllowList` (a CIDR list), with `Webhooks:AllowPrivateNetworks` as
