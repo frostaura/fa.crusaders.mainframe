@@ -117,7 +117,12 @@ export default function SchedulePage() {
                   <RowFragment key={t.utc} t={t}>
                     {day.courts.map((c) => {
                       const slot = slotsByCourtAndStart.get(`${c.id}|${new Date(t.utc).getTime()}`);
-                      return <SlotCell key={c.id + t.utc} slot={slot} isPast={isPast} priceCredits={c.slicePriceCredits} onBook={() => book(c, t.utc)} onCancel={(id) => cancel(id)} />;
+                      // `where` travels with the cell because the grid conveys the court and
+                      // the time by POSITION — a column header and a row label — and position
+                      // is not a thing a screen reader or a tabbing member can perceive. One
+                      // composed string rather than two props: the cell never wants them apart,
+                      // and seven parameters trips the complexity gate.
+                      return <SlotCell key={c.id + t.utc} slot={slot} isPast={isPast} priceCredits={c.slicePriceCredits} where={`${c.name} at ${t.label}`} onBook={() => book(c, t.utc)} onCancel={(id) => cancel(id)} />;
                     })}
                   </RowFragment>
                 );
@@ -141,13 +146,13 @@ function RowFragment({ t, children }: { t: TimeSlice; children: React.ReactNode 
   );
 }
 
-function SlotCell({ slot, isPast, priceCredits, onBook, onCancel }: { slot?: ScheduleSlot; isPast?: boolean; priceCredits?: number; onBook: () => void | Promise<void>; onCancel: (id: string) => void | Promise<void> }) {
+function SlotCell({ slot, isPast, priceCredits, where, onBook, onCancel }: { slot?: ScheduleSlot; isPast?: boolean; priceCredits?: number; /** "Court 1 at 12:45" — what this cell IS, for the accessible names below. */ where: string; onBook: () => void | Promise<void>; onCancel: (id: string) => void | Promise<void> }) {
   if (!slot) {
     if (isPast) {
       return (
         <div
-          className="m-0.5 h-12 rounded-md bg-bg-muted/60 border border-border/40 text-text-muted/70 flex items-center justify-center text-[11px] font-medium tracking-wide uppercase"
-          aria-label="Past slot"
+          className="m-0.5 h-12 rounded-md bg-bg-muted/60 border border-border/40 text-text-secondary flex items-center justify-center text-[11px] font-medium tracking-wide uppercase"
+          aria-label={`${where} — past`}
         >
           Past
         </div>
@@ -161,6 +166,7 @@ function SlotCell({ slot, isPast, priceCredits, onBook, onCancel }: { slot?: Sch
       <ConfirmButton
         idleLabel="Available"
         confirmLabel={price ? `Reserve for ${price}?` : "Confirm booking"}
+        ariaLabel={price ? `Book ${where} for ${price}` : `Book ${where}`}
         onConfirm={onBook}
         idleClassName="bg-success-soft text-success-strong hover:bg-success-soft/70"
         className="m-0.5 h-12"
@@ -168,14 +174,14 @@ function SlotCell({ slot, isPast, priceCredits, onBook, onCancel }: { slot?: Sch
     );
   }
   if (slot.status === "adminblock") {
-    return <div className="m-0.5 h-12 rounded-md bg-bg-muted bg-[repeating-linear-gradient(45deg,_rgba(0,0,0,0.04)_0,_rgba(0,0,0,0.04)_4px,_transparent_4px,_transparent_8px)] flex items-center justify-center text-xs text-text-secondary">{slot.blockLabel ?? "Blocked"}</div>;
+    return <div className="m-0.5 h-12 rounded-md bg-bg-muted bg-[repeating-linear-gradient(45deg,_rgba(0,0,0,0.04)_0,_rgba(0,0,0,0.04)_4px,_transparent_4px,_transparent_8px)] flex items-center justify-center text-xs text-text-secondary" aria-label={`${where} — ${slot.blockLabel ?? "blocked"}`}>{slot.blockLabel ?? "Blocked"}</div>;
   }
   if (slot.isMine) {
     if (isPast) {
       return (
         <div
-          className="m-0.5 h-12 rounded-md bg-info-soft/60 text-info-strong/80 border border-info-soft flex items-center justify-center text-xs font-medium"
-          aria-label="Past booking"
+          className="m-0.5 h-12 rounded-md bg-info-soft/60 text-info-strong border border-info-soft flex items-center justify-center text-xs font-medium"
+          aria-label={`${where} — your past booking`}
         >
           Mine · Past
         </div>
@@ -185,13 +191,14 @@ function SlotCell({ slot, isPast, priceCredits, onBook, onCancel }: { slot?: Sch
       <ConfirmButton
         idleLabel="Mine"
         confirmLabel="Confirm cancel"
+        ariaLabel={`Cancel your booking on ${where}`}
         onConfirm={async () => { if (slot.bookingId) await onCancel(slot.bookingId); }}
         className="m-0.5 h-12"
       />
     );
   }
   return (
-    <div className="m-0.5 h-12 rounded-md bg-bg-muted text-text-secondary flex items-center justify-center gap-2 text-xs overflow-visible">
+    <div className="m-0.5 h-12 rounded-md bg-bg-muted text-text-secondary flex items-center justify-center gap-2 text-xs overflow-visible" aria-label={`${where} — booked by ${slot.ownerFirstName ?? "another member"}`}>
       {slot.ownerPhotoUrl ? (
         <img src={slot.ownerPhotoUrl} alt="" style={{ width: 34, height: 34 }} className="rounded-full object-cover ring-2 ring-bg-surface shadow-sm shrink-0" />
       ) : (
