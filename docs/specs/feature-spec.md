@@ -136,12 +136,12 @@ A tenant admin can:
 - View / export all transactions, bookings, members, no-shows.
 - Configure the tenant's outbound webhooks.
 - View peripheral health (uptime, last-seen, error rate per court).
-- Configure the court-box **button map** — the club default and, per box, an override (below).
+- Configure the court-box **button map** — the club default and, per box, an override (below). Both live on the Devices page, not this one; see §8a.
 
 ### 8a. Court-box button map
 A court box has eight physical buttons (`ButtonMap.ButtonCount`), wired A/B/C/D then 15/30/45/60. The Mega reports raw presses and the bridge decides, so any button can be mapped to any action: select a court (by position in the box's own court list, relays A–D) or grant a number of minutes (bounded by the relay hard cap, `ButtonMap.MaxGrantMinutes`).
 
-- **Club default:** `tenant_settings.buttons`, edited on the Settings page. The default map is the wiring's original meaning, so a club that never touches it gets exactly what the hand-built box did.
+- **Club default:** `tenant_settings.buttons`, edited on the **Devices page**, beside the per-box override it is the fallback for. (This line used to say the Settings page, and the build has never done that. The two maps are validated against each other on every edit — an override is refused when it reaches past its box's court list, and the club default is refused when any box running it would — so an admin editing one needs the other in front of them. Splitting them across two screens would mean reading a refusal on one page about a value set on another.) The default map is the wiring's original meaning, so a club that never touches it gets exactly what the hand-built box did.
 - **Per-device override:** `button_map` on `PATCH /admin/devices/{id}`, stored as `Device.ButtonMapJson`. It is three-valued: absent leaves the override alone, `null` clears it (the box runs the club default), a list of eight entries sets it.
 - **Validated per box, not per club.** The *effective* map — the override if any, else the club default (`ButtonMap.EffectiveFor`) — is checked against that box's court list on every edit: a map whose court button reaches past the box's list is refused with `button_map_selects_court_beyond_device_courts` and the map named. A one-court annex box and a four-court main box can therefore both be valid under one club default, each with its own override where needed; the old single tenant-wide validation had no valid configuration for a mixed fleet.
 - **A box that registers itself is given a map it can honour.** Auto-registration stores the club's map trimmed to the box's court count when the club's map reaches past it, rather than leaving buttons that select nothing — the same rule as shrinking a box's court list by hand.

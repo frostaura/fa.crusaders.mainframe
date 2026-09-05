@@ -135,14 +135,30 @@ public sealed class DeviceRegistryService
 
         var settings = await _settings.GetAsync(ct);
 
-        // Asked for, and unusable: refuse, exactly as before. Covers both a map the caller
-        // wrote and an explicit "put this box back on the club's map".
+        // A map the caller WROTE and that overreaches is refused: quietly rewriting what
+        // somebody deliberately typed is worse than telling them it does not fit.
+        //
+        // An explicit CLEAR is not that. `button_map: null` means "run the club's map", and
+        // refusing it left a two-court annex box unable to go back to the club default at
+        // all — a one-way door out of an override, with on-screen advice ("give the box more
+        // courts, or change the button map first") that a genuinely two-court box can never
+        // take. Spec §8a promises the opposite: a one-court annex and a four-court main box
+        // are both valid under one club default. So a clear takes the same trim
+        // auto-registration and a by-hand court-list shrink already take — the club's map
+        // with the buttons this box has no relay for turned off, which is exactly what the
+        // admin would have typed themselves.
         if (requested is { } asked)
         {
-            var map = asked.Value ?? settings.Buttons;
-            return map.FirstSelectionBeyond(courtNumbers.Count) is null
-                ? new CourtAssignment(null, asked.Value, false)
-                : new CourtAssignment(ButtonMap.SelectsCourtBeyondDeviceCourts, null, false);
+            if (asked.Value is { } written)
+            {
+                return written.FirstSelectionBeyond(courtNumbers.Count) is null
+                    ? new CourtAssignment(null, written, false)
+                    : new CourtAssignment(ButtonMap.SelectsCourtBeyondDeviceCourts, null, false);
+            }
+
+            return settings.Buttons.FirstSelectionBeyond(courtNumbers.Count) is null
+                ? new CourtAssignment(null, null, false)
+                : new CourtAssignment(null, settings.Buttons.TrimmedTo(courtNumbers.Count), true);
         }
 
         var stored = ButtonMap.FromJson(storedOverrideJson);

@@ -208,11 +208,22 @@ export type AdminSettings = {
  * What a settings save may carry. The eight booking fields are required because every
  * form shows them; everything else is optional, and omitting it means unchanged.
  */
+/**
+ * The settings PUT.
+ *
+ * <p>
+ * `timezone` used to be excluded here, which was this type honestly describing a
+ * one-way field: the GET served it, the request record on the API had no member for it,
+ * and a club in another zone read its whole booking grid in South African wall-clock time
+ * with no correction short of an UPDATE on a JSON column. It is optional like the rest —
+ * omitted means unchanged — so a screen that edits only booking settings cannot reset it.
+ * </p>
+ */
 export type AdminSettingsSave =
   Pick<AdminSettings, "slice_minutes" | "slice_price_credits" | "advance_booking_days"
     | "day_start_minute" | "day_end_minute" | "penalty_pct" | "grace_window_minutes"
     | "penalty_window_minutes">
-  & Partial<Omit<AdminSettings, "timezone">>;
+  & Partial<AdminSettings>;
 
 /**
  * A court box, as the admin surface sees it.
@@ -341,11 +352,20 @@ export type MyProfile = {
   must_change_password?: boolean;
 };
 
+export type MemberClass = "Regular" | "LeagueOrSenior";
+
 export type AdminMember = {
   membership_id: string; user_id: string; email: string;
   full_name: string; membership_number: string; photo_url: string | null;
   status: string; created_at: string; rejection_reason: string | null;
-  member_class?: "Regular" | "LeagueOrSenior";   // Phase 8.1
+  member_class?: MemberClass;   // Phase 8.1
+  /**
+   * Whether the applicant ever clicked the link in their verification email. An
+   * unverified member cannot sign in with a password no matter what their status says,
+   * so the console has to show it — otherwise "the app won't let me in" from an
+   * approved, active member has no answer on this screen.
+   */
+  email_verified?: boolean;
   balance_credits: number;
 };
 
@@ -381,16 +401,25 @@ export type WebhookEndpointDto = {
   secret: string | null; // only present on create
 };
 
+/**
+ * A webhook delivery attempt, snake_case like every other admin projection.
+ *
+ * This type used to be PascalCase, matching nothing the API has ever sent. The endpoint
+ * projected with C# shorthand members, which take the serializer's camelCase policy, so
+ * the wire carried `createdAt`/`latencyMs` while this read `CreatedAt`/`LatencyMs` — every
+ * field was `undefined`, every row rendered "Invalid Date" and "undefinedms", and the row
+ * key was `undefined` for all of them. Both ends now agree on snake_case.
+ */
 export type WebhookDeliveryDto = {
-  Id: string;
-  EventType: string;
-  Url: string;
-  ResponseStatus: number | null;
-  LatencyMs: number;
-  Attempt: number;
-  FinalState: "pending" | "delivered" | "failed" | "abandoned";
-  CreatedAt: string;
-  ResponseBodyExcerpt: string | null;
+  id: string;
+  event_type: string;
+  url: string;
+  response_status: number | null;
+  latency_ms: number;
+  attempt: number;
+  final_state: "pending" | "delivered" | "failed" | "abandoned";
+  created_at: string;
+  response_body_excerpt: string | null;
 };
 
 export type BiometricTemplateRow = {
@@ -581,17 +610,35 @@ export const endpoints = {
   adminMembers: (status?: string) => api.get<AdminMember[]>(`/api/v1/admin/members/${status ? `?status=${status}` : ""}`),
   adminApprove: (memberId: string) => api.post<{ approved: boolean }>(`/api/v1/admin/members/${memberId}/approve`),
   adminReject: (memberId: string, reason: string) => api.post<{ rejected: boolean }>(`/api/v1/admin/members/${memberId}/reject`, { reason }),
+
+  /**
+   * Suspend / reactivate (spec §8) — the status a club reaches for when dues lapse.
+   *
+   * A suspension is not a rejection and not a deletion: the member's credit balance and
+   * their existing bookings are untouched, and reactivating restores access exactly as it
+   * was. A reason is required because the member is emailed it.
+   */
+  adminSuspend: (memberId: string, reason: string) =>
+    api.post<{ suspended: boolean }>(`/api/v1/admin/members/${memberId}/suspend`, { reason }),
+  adminReactivate: (memberId: string) =>
+    api.post<{ reactivated: boolean }>(`/api/v1/admin/members/${memberId}/reactivate`),
+
   /**
    * A manual credit movement. `relatedBookingId` is optional and OMITTED when not given:
    * an adjustment that names a booking is what lets a late box upload recognise that the
    * desk already compensated the member for a wrongly-swept no-show, and audit instead of
    * refunding twice (`BookingService.ReverseNoShowAsync`). One without it is plain money.
    */
-  adminAdjust: (userId: string, amountCredits: number, reason: string, relatedBookingId?: string) =>
+  adminAdjust: (userId: string, amountCredits: number, reason: string, relatedBookingId?: string, idempotencyKey?: string) =>
     api.post<{ entry_id: string; amount_credits: number; balance_after_credits: number }>(`/api/v1/admin/credit/${userId}/adjust`, {
       amountCredits,
       reason,
       ...(relatedBookingId ? { relatedBookingId } : {}),
+      // Names THIS movement, so every retry of one intended adjustment is the same
+      // movement and a genuinely second one of the same amount is not. A double-click on
+      // Apply used to post twice and move the balance twice; a slow connection and four
+      // clicks granted 44 credits where 11 were typed.
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     }),
   adminResetMemberPassword: (memberId: string) =>
     api.post<{ temp_password: string; email_sent_to: string; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
@@ -715,6 +762,7 @@ export const endpoints = {
     penaltyPct: req.penalty_pct,
     graceWindowMinutes: req.grace_window_minutes,
     penaltyWindowMinutes: req.penalty_window_minutes,
+    ...(req.timezone !== undefined ? { timezone: req.timezone } : {}),
     ...(req.button_map !== undefined ? { buttonMap: req.button_map } : {}),
     ...(req.credits_per_zar_regular !== undefined ? { creditsPerZarRegular: req.credits_per_zar_regular } : {}),
     ...(req.credits_per_zar_league !== undefined ? { creditsPerZarLeague: req.credits_per_zar_league } : {}),

@@ -127,6 +127,59 @@ public static class EmailTemplates
             </div>
             """);
 
+    public static EmailMessage MembershipSuspended(string to, string fullName, string reason, string clubName) => new(
+        To: to,
+        Subject: $"Your {clubName} membership is suspended",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">Hi {fullName},</h2>
+              <p>Your membership at {clubName} has been suspended, so you can't sign in, book a court or open a court with your fingerprint, PIN or code for now.</p>
+              <p style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:12px 14px"><strong>Reason:</strong> {reason}</p>
+              <p style="color:#475569">Your credit balance and your existing bookings are untouched. Speak to the club office to have the suspension lifted.</p>
+              {FooterHtml}
+            </div>
+            """);
+
+    public static EmailMessage MembershipReactivated(string to, string fullName, string clubName) => new(
+        To: to,
+        Subject: $"Your {clubName} membership is active again",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">Hi {fullName},</h2>
+              <p>Your membership at {clubName} has been reactivated. You can sign in, book courts and open a court at the box again — your credit balance is exactly as you left it.</p>
+              {FooterHtml}
+            </div>
+            """);
+
+    /// <summary>
+    /// The club desk's copy of a new registration (spec §2.3). Sent to each admin user of
+    /// the tenant, not to the applicant — the applicant gets <see cref="MembershipPending"/>.
+    /// </summary>
+    public static EmailMessage AdminNewRegistration(string to, string fullName, string applicantEmail, string membershipNumber, string clubName, string consoleUrl) => new(
+        To: to,
+        Subject: $"New membership application — {fullName}",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">A new application is waiting</h2>
+              <p>Somebody has registered for {clubName} and is waiting for approval.</p>
+              <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
+                <tr><td style="padding:4px 16px 4px 0;color:#64748B">Name</td><td style="padding:4px 0"><strong>{fullName}</strong></td></tr>
+                <tr><td style="padding:4px 16px 4px 0;color:#64748B">Email</td><td style="padding:4px 0">{applicantEmail}</td></tr>
+                <tr><td style="padding:4px 16px 4px 0;color:#64748B">Membership number</td><td style="padding:4px 0">{membershipNumber}</td></tr>
+              </table>
+              <p style="margin:24px 0">
+                <a href="{consoleUrl}"
+                   style="display:inline-block;background:#0369A1;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+                  Review applications
+                </a>
+              </p>
+              <p style="font-size:12px;color:#94A3B8">Or paste this into your browser: {consoleUrl}</p>
+            </div>
+            """);
+
     public static EmailMessage PasswordReset(string to, string resetUrl) => new(
         To: to,
         Subject: "Reset your password — Crusaders Mainframe",

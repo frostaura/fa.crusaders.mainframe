@@ -16,12 +16,14 @@ public sealed class AuthService
     private readonly IEmailService _email;
     private readonly IConfiguration _config;
     private readonly ILogger<AuthService> _logger;
+    private readonly MemberApprovalService _memberships;
 
     public AuthService(MainframeDbContext db, ITenantContext tenant, IPasswordHasher hasher,
-        IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger)
+        IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger,
+        MemberApprovalService memberships)
     {
         _db = db; _tenant = tenant; _hasher = hasher; _jwt = jwt;
-        _email = email; _config = config; _logger = logger;
+        _email = email; _config = config; _logger = logger; _memberships = memberships;
     }
 
     /// <summary>
@@ -196,6 +198,12 @@ public sealed class AuthService
         await SendOrLogAsync(EmailTemplates.VerifyEmail(email, verifyUrl), $"verification for {email}", ct);
         await SendOrLogAsync(EmailTemplates.MembershipPending(email), $"pending-approval notice for {email}", ct);
         await NotifyAdminsOfApplicationAsync(email, fullName, membershipNumber, ct);
+
+        // Owned by MemberApprovalService, not by this method: it emails the club's admins
+        // that an application is waiting (spec §2.3) and emits `member.registered`. Kept as
+        // one call so the registration path carries none of it — see
+        // MemberApprovalService.AnnounceRegistrationAsync.
+        await _memberships.AnnounceRegistrationAsync(user.Id, ct);
 
         return new RegistrationResult.Created(user.Id);
     }

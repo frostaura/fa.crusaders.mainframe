@@ -1,5 +1,6 @@
 import { useEffect, useState, cloneElement, isValidElement, useId } from "react";
 import { endpoints, type AdminSettings, type AdminCourt, ApiError } from "../lib/api";
+import { OFFLINE_FLOOR_SECONDS, describeOfflineAfter, timezoneOptions } from "../lib/tenantSettings";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -81,6 +82,22 @@ export default function AdminSettingsPage() {
           <Field label="Day ends">
             <Input type="time" value={minToHHMM(settings.day_end_minute)}
               onChange={(e) => setSettings({ ...settings, day_end_minute: hhmmToMin(e.target.value) })} />
+          </Field>
+          {/* The zone every wall-clock time on this page and every slot on the booking
+              grid is read in. It was served by the API and had nowhere to be set: a club
+              outside South Africa saw its whole schedule in Johannesburg time with no
+              correction short of an UPDATE on a JSON column. */}
+          <Field
+            label="Timezone"
+            hint="The zone the club's day is read in. Day start and end, the booking grid and every time a member sees are all in this zone."
+          >
+            <select
+              value={settings.timezone}
+              onChange={(e) => setSettings({ ...settings, timezone: e.target.value })}
+              className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+            >
+              {timezoneOptions(settings.timezone).map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+            </select>
           </Field>
         </div>
       </Card>
@@ -199,7 +216,17 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
             cadence to 15-300, and the Devices page then reported the whole fleet
             offline for most of every interval (review finding 22). The field states
             the range the box will honour, and the API holds the same bound. */}
-        <Field label="Heartbeat interval (seconds)" hint="15–300. How often a box calls in for its roster and button map. A box clamps anything outside 15–300 to that range, so a larger number here is not what it would run — and the Devices page decides online or offline from three missed beats.">
+        {/* The "three missed beats" half of this hint was true only above 60 s. Below it the
+            180-second floor takes over, so an admin lowering the interval to detect an
+            outage faster got none of the improvement and no explanation — at 15 s the box
+            reported offline_after_seconds: 180, not 45. The floor is deliberate (a club on
+            the 15-second minimum must not be called offline after 45 seconds of ordinary
+            jitter), so the hint states it and the derived line below says what THIS value
+            actually buys, rather than making the admin work it out. */}
+        <Field
+          label="Heartbeat interval (seconds)"
+          hint={`15–300. How often a box calls in for its roster and button map. A box clamps anything outside 15–300 to that range, so a larger number here is not what it would run. The Devices page calls a box offline after three missed beats or ${OFFLINE_FLOOR_SECONDS / 60} minutes, whichever is longer — at ${settings.heartbeat_seconds}s that is ${describeOfflineAfter(settings.heartbeat_seconds)}.`}
+        >
           <Input type="number" min={15} max={300} value={settings.heartbeat_seconds}
             onChange={(e) => set({ heartbeat_seconds: Number(e.target.value) })} />
         </Field>

@@ -368,14 +368,31 @@ public sealed class DeviceCourtNumbersTests
         var rename = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { name = "Renamed" });
         Assert.Equal(JsonValueKind.Array, (await BodyAsync(rename)).GetProperty("button_map").ValueKind);
 
-        // Clearing it puts the box back on the club's map — which a one-court box cannot honour.
+        // Clearing it on a box the club's four-court map reaches past is ACCEPTED, and the
+        // box is left running that map with the buttons it has no relay for turned off —
+        // the same trim auto-registration and a by-hand court-list shrink apply (spec §8a).
+        //
+        // This used to be a flat 400, and the screen's advice — "give the box more courts,
+        // or change the button map first" — was impossible for a genuinely one-court annex:
+        // the override was a one-way door, and §8a's promise that a one-court annex and a
+        // four-court main box are both valid under one club default could not hold.
         var clear = await client.SendAsync(new HttpRequestMessage(HttpMethod.Patch, $"{DevicesPath}{id}")
         {
             Content = new StringContent("""{"button_map":null}""", Encoding.UTF8, "application/json"),
         });
-        Assert.Equal(HttpStatusCode.BadRequest, clear.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, clear.StatusCode);
+        Assert.Equal(
+            new[] { "court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60" },
+            (await BodyAsync(clear)).GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
 
-        // Give it the courts back first, then clear: null on the wire.
+        // A map the admin WROTE that overreaches is still refused — trimming what somebody
+        // deliberately typed would be worse than telling them it does not fit.
+        var stillRefused = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { button_map = AnnexTwoCourtMap });
+        Assert.Equal(HttpStatusCode.BadRequest, stillRefused.StatusCode);
+        Assert.Equal(ButtonMap.SelectsCourtBeyondDeviceCourts, (await BodyAsync(stillRefused)).GetProperty("error").GetString());
+
+        // Give it the courts back, then clear: the club's map fits, so the override goes to
+        // null on the wire rather than to a frozen copy of the club map.
         Assert.Equal(HttpStatusCode.OK, (await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1, 2, 3, 4 } })).StatusCode);
         var cleared = await client.SendAsync(new HttpRequestMessage(HttpMethod.Patch, $"{DevicesPath}{id}")
         {
