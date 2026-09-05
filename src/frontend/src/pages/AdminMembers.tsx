@@ -9,6 +9,7 @@ import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { Modal } from "../components/Modal";
+import { ScrollArea } from "../components/ScrollArea";
 import { useToast } from "../components/Toast";
 import { cn, formatCredits } from "../lib/utils";
 
@@ -291,132 +292,72 @@ export default function AdminMembersPage() {
         </div>
       </Card>
 
-      {/* Table */}
+      {/*
+        ScrollArea, not a bare `overflow-x-auto` div, and a table that stops being a table
+        on a phone.
+
+        The bare div was silent in both directions. At 1440 px the nine-column table
+        measured 1006 px inside a 990 px box and clipped its own ACTIONS header mid-word;
+        at 375 px it was 1006 px inside 341 px, so status, class, balance and every row
+        action sat off the right edge behind a scrollbar macOS does not draw — and
+        scrolling to reach them took the member's NAME off screen, leaving an admin
+        pressing Suspend on a row they could no longer identify.
+
+        Three changes, none of which drops a column:
+        • below `sm` each row renders as a card (`block` rows and cells, with the column
+          name printed from `data-label`), so everything is on screen at 375 px with no
+          sideways scroll at all;
+        • from `sm` up the identity column is sticky, so the name stays put while the rest
+          of the row scrolls under it;
+        • the avatar moved into the name cell and the action icons run in a row rather than
+          a column, which took ~90 px off the table's width — it now fits the 990 px card
+          at desktop widths — and row height from 165 px to one line.
+
+        ScrollArea itself is the affordance for the band in between: a gradient, a keyboard
+        tab stop, and a sentence a screen reader can read, all of which the plain div had
+        none of. It was built in round 1 for exactly this and applied only to the ledger.
+      */}
       <Card className="!p-0 overflow-hidden">
         {filtered.length === 0 ? (
           <EmptyState loading={loading} hasFilters={search.trim().length > 0 || status !== "all"} />
         ) : (
-          <div className="overflow-x-auto">
+          <ScrollArea label="Members">
             <table className="w-full text-sm">
-              <thead className="bg-bg-muted/40 text-xs uppercase tracking-wide text-text-muted">
+              <thead className="hidden sm:table-header-group bg-bg-muted text-xs uppercase tracking-wide text-text-muted">
                 <tr>
-                  <th className="text-left px-4 py-3" style={{ width: 60 }}></th>
-                  <SortHeader label="Name" k="full_name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                  <SortHeader label="Name" k="full_name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="sticky left-0 z-20 bg-bg-muted" />
                   <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="text-left px-4 py-3">Class</th>
-                  <th className="text-right px-4 py-3">Balance</th>
+                  <th className="text-left px-3 py-3">Class</th>
+                  <th className="text-right px-3 py-3">Balance</th>
                   <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="text-right px-4 py-3">Actions</th>
+                  <th className="text-right px-3 py-3 whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {filtered.map((m) => (
-                  <tr key={m.membership_id} className="hover:bg-bg-muted/30">
-                    <td className="px-4 py-3 align-middle">
-                      {m.photo_url ? (
-                        <img
-                          src={m.photo_url}
-                          alt=""
-                          width={36}
-                          height={36}
-                          style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}
-                          className="rounded-full object-cover block shrink-0"
-                        />
-                      ) : (
-                        <div
-                          style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}
-                          className="rounded-full bg-bg-muted text-text-secondary flex items-center justify-center text-sm font-medium shrink-0"
-                        >
-                          {m.full_name[0]?.toUpperCase() ?? "?"}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-text-primary truncate max-w-[180px]" title={m.full_name}>{m.full_name}</p>
-                        {biometrics[m.user_id]?.templates.length ? (
-                          <span
-                            title={`${biometrics[m.user_id].templates.length} fingerprint(s) enrolled`}
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-info-soft text-info-strong"
-                          >
-                            <Fingerprint size={11} /> {biometrics[m.user_id].templates.length}
-                          </span>
-                        ) : null}
-                      </div>
-                      {m.rejection_reason && <p className="text-xs text-danger-strong truncate max-w-[260px]" title={m.rejection_reason}>{m.rejection_reason}</p>}
-                    </td>
-                    <td className="px-4 py-3 text-text-secondary max-w-[200px]" title={m.email}>
-                      <p className="truncate">{m.email}</p>
-                      {m.email_verified === false && (
-                        <span
-                          title="This member never confirmed their email address, so they cannot sign in with a password."
-                          className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-warning-soft text-warning-strong"
-                        >
-                          <MailWarning size={11} /> Unverified
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-text-secondary">{m.membership_number}</td>
-                    <td className="px-4 py-3"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></td>
-                    <td className="px-4 py-3">
-                      <MemberClassCell member={m} busy={busyId === m.membership_id} onChange={(next) => setMemberClass(m, next)} />
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
-                      <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
-                        {formatCredits(m.balance_credits)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-text-secondary whitespace-nowrap text-xs">
-                      {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col items-end gap-1">
-                        {m.status === "PendingApproval" && (
-                          <div className="flex gap-1.5">
-                            <Button onClick={() => approve(m)} disabled={busyId === m.membership_id} className="h-9 px-3 text-xs">Approve</Button>
-                            <Button variant="outline" onClick={() => { setRejectFor(m); setRejectReason(""); }} className="h-9 px-3 text-xs">Reject</Button>
-                          </div>
-                        )}
-                        {m.status === "Active" && (
-                          <>
-                            <IconAction title="Adjust credit" onClick={() => setCreditFor(m)} icon={<Wallet size={16} />} />
-                            <IconAction
-                              title={biometrics[m.user_id]?.templates.length ? "Manage biometrics" : "Enroll fingerprint"}
-                              onClick={() => setEnrollFor(m)}
-                              icon={<Fingerprint size={16} />}
-                            />
-                            <IconAction title="Reset password" onClick={() => setResetFor(m)} icon={<KeyRound size={16} />} />
-                            <IconAction
-                              title="Suspend member"
-                              onClick={() => { setSuspendFor(m); setSuspendReason(""); }}
-                              icon={<Ban size={16} />}
-                              tone="danger"
-                            />
-                          </>
-                        )}
-                        {m.status === "Suspended" && (
-                          <>
-                            <IconAction title="Reactivate member" onClick={() => reactivate(m)} icon={<RotateCcw size={16} />} />
-                            <IconAction title="Reset password" onClick={() => setResetFor(m)} icon={<KeyRound size={16} />} />
-                          </>
-                        )}
-                        {m.status === "Rejected" && (
-                          <IconAction title="Reset password" onClick={() => setResetFor(m)} icon={<KeyRound size={16} />} />
-                        )}
-                        {/* Available whatever the status: an applicant who never verified is
-                            stuck before approval matters, and an approved one is stuck after. */}
-                        {m.email_verified === false && (
-                          <IconAction title="Resend verification email" onClick={() => resendVerification(m)} icon={<MailWarning size={16} />} />
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                  <MemberRow
+                    key={m.membership_id}
+                    member={m}
+                    fingerprints={biometrics[m.user_id]?.templates.length ?? 0}
+                    busy={busyId === m.membership_id}
+                    onClass={(next) => setMemberClass(m, next)}
+                    actions={{
+                      approve: () => approve(m),
+                      reject: () => { setRejectFor(m); setRejectReason(""); },
+                      credit: () => setCreditFor(m),
+                      enroll: () => setEnrollFor(m),
+                      reset: () => setResetFor(m),
+                      suspend: () => { setSuspendFor(m); setSuspendReason(""); },
+                      reactivate: () => reactivate(m),
+                      resend: () => resendVerification(m),
+                    }}
+                  />
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollArea>
         )}
       </Card>
 
@@ -546,20 +487,226 @@ function patchMember(
   });
 }
 
-function IconAction({ title, icon, onClick, tone = "info" }: { title: string; icon: React.ReactNode; onClick: () => void; tone?: "info" | "danger" }) {
+/**
+ * One row action, as an icon.
+ *
+ * <p>
+ * <b>`disabled` is not decoration on this control.</b> Two of these fire a request straight
+ * from the click — Reactivate and Resend verification — and until it existed neither read the
+ * `busyId` the handlers were already setting. An ordinary impatient double-click on Reactivate
+ * therefore sent two requests: the first returned 200 and the second 409, and the admin was
+ * shown both toasts at once — "Aisha Patel is active again." in green above "Couldn't
+ * reactivate this member." in red, with nothing on screen saying which was true. Resend was
+ * worse than confusing: it sent two verification emails, and §2 spends any earlier unused link
+ * on a resend, so the first mail the member received contained a dead link.
+ * </p>
+ *
+ * <p>
+ * The guarded <code>Approve</code> button beside these had read <code>busyId</code> since it
+ * was written and fired exactly once on the same double-click, which is what made this an
+ * omission on one control rather than a missing pattern.
+ * </p>
+ */
+function IconAction({ title, icon, onClick, tone = "info", disabled = false }: { title: string; icon: React.ReactNode; onClick: () => void; tone?: "info" | "danger"; disabled?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
+      aria-busy={disabled}
       title={title}
       aria-label={title}
       className={cn(
-        "inline-flex items-center justify-center w-8 h-8 rounded-md text-text-secondary transition",
+        "inline-flex items-center justify-center w-8 h-8 rounded-md text-text-secondary transition shrink-0",
         tone === "danger" ? "hover:text-danger-strong hover:bg-danger-soft" : "hover:text-info-strong hover:bg-info-soft",
+        "disabled:opacity-40 disabled:cursor-wait disabled:hover:bg-transparent",
       )}
     >
       {icon}
     </button>
+  );
+}
+
+/** Everything a row can do, so the row itself holds no page state. */
+type MemberRowActions = {
+  approve: () => void;
+  reject: () => void;
+  credit: () => void;
+  enroll: () => void;
+  reset: () => void;
+  suspend: () => void;
+  reactivate: () => void;
+  resend: () => void;
+};
+
+/**
+ * A cell that is a table cell on a desktop and a labelled line of a card on a phone.
+ *
+ * <p>
+ * `data-label` is printed by a `::before` pseudo-element below `sm`, which is what lets the
+ * same DOM be a nine-column table at 1440 px and a readable card at 375 px without hiding a
+ * single column and without rendering the row twice. It has to be a pseudo-element rather
+ * than a second `<span>`: a duplicate label in the DOM is a duplicate accessible name, and
+ * every `getByText("Status")` in the suite would then match two nodes.
+ * </p>
+ */
+function Cell({ label, className, align = "left", children }: { label: string; className?: string; align?: "left" | "right"; children: React.ReactNode }) {
+  return (
+    <td
+      data-label={label}
+      className={cn(
+        "block sm:table-cell px-0 sm:px-3 py-0.5 sm:py-3 text-left",
+        // The label, on a phone only. `content-none` from `sm` up is what keeps it off the
+        // desktop table, where the column header already says it.
+        "before:content-[attr(data-label)] before:mr-2 before:text-[10px] before:uppercase before:tracking-wide before:text-text-muted sm:before:content-none",
+        "before:inline-block before:w-20 sm:before:w-0",
+        align === "right" && "sm:text-right",
+        className,
+      )}
+    >
+      {children}
+    </td>
+  );
+}
+
+/**
+ * One member, as a table row from `sm` up and as a card below it.
+ *
+ * <p>
+ * Lifted out of the page's JSX rather than left inline, because lizard's .tsx parser folds
+ * a page's whole return into whichever function precedes it and `make complexity` then
+ * measures the lot as one — see the note on {@link patchMember}. It also keeps the row's
+ * markup readable, which matters here: the identity cell is sticky, so its background has
+ * to be opaque, and that is easy to lose in a 120-line return.
+ * </p>
+ */
+function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
+  member: AdminMember;
+  fingerprints: number;
+  busy: boolean;
+  onClass: (next: MemberClass) => void;
+  actions: MemberRowActions;
+}) {
+  return (
+    <tr className="block sm:table-row p-3 sm:p-0 hover:bg-bg-muted/30">
+      {/*
+        Identity: avatar and name in ONE cell, and sticky from `sm` up.
+
+        Two defects at once. The avatar had a 60 px column of its own, which was 92 px of
+        the 1006 px that would not fit the 990 px card; and with the name scrolling away
+        with everything else, an admin who scrolled right to reach the actions was pressing
+        Suspend on a row they could no longer identify. A sticky cell needs an opaque
+        background or the columns underneath show through it as it passes.
+      */}
+      <td className="block sm:table-cell sm:sticky sm:left-0 sm:z-10 bg-bg-surface px-0 sm:px-3 py-1 sm:py-3 sm:align-middle">
+        <div className="flex items-center gap-2">
+          {m.photo_url ? (
+            <img
+              src={m.photo_url}
+              alt=""
+              width={36}
+              height={36}
+              style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}
+              className="rounded-full object-cover block shrink-0"
+            />
+          ) : (
+            <div
+              style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}
+              className="rounded-full bg-bg-muted text-text-secondary flex items-center justify-center text-sm font-medium shrink-0"
+            >
+              {m.full_name[0]?.toUpperCase() ?? "?"}
+            </div>
+          )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-text-primary truncate max-w-[180px]" title={m.full_name}>{m.full_name}</p>
+              {fingerprints > 0 ? (
+                <span
+                  title={`${fingerprints} fingerprint(s) enrolled`}
+                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-info-soft text-info-strong shrink-0"
+                >
+                  <Fingerprint size={11} /> {fingerprints}
+                </span>
+              ) : null}
+            </div>
+            {m.rejection_reason && <p className="text-xs text-danger-strong truncate max-w-[260px]" title={m.rejection_reason}>{m.rejection_reason}</p>}
+          </div>
+        </div>
+      </td>
+      <Cell label="Email" className="text-text-secondary sm:max-w-[200px]">
+        <span className="inline-block align-middle max-w-[200px] truncate" title={m.email}>{m.email}</span>
+        {m.email_verified === false && (
+          <span
+            title="This member never confirmed their email address, so they cannot sign in with a password."
+            className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-warning-soft text-warning-strong align-middle"
+          >
+            <MailWarning size={11} /> Unverified
+          </span>
+        )}
+      </Cell>
+      <Cell label="Member #" className="font-mono text-xs text-text-secondary">{m.membership_number}</Cell>
+      <Cell label="Status"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></Cell>
+      <Cell label="Class">
+        <MemberClassCell member={m} busy={busy} onChange={onClass} />
+      </Cell>
+      <Cell label="Balance" align="right" className="tabular-nums whitespace-nowrap">
+        <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
+          {formatCredits(m.balance_credits)}
+        </span>
+      </Cell>
+      <Cell label="Joined" className="text-text-secondary whitespace-nowrap text-xs">
+        {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
+      </Cell>
+      <Cell label="Actions" align="right" className="pt-2 sm:pt-3">
+        {/*
+          A row, not a column. Four icons stacked vertically made every row 165 px tall —
+          about two members on a phone screen, six on a 1440 px desktop — and pushed the
+          actions column wide enough to clip its own header. `flex-wrap` is what keeps that
+          honest at any width instead of trading one overflow for another.
+        */}
+        <div className="flex flex-wrap items-center gap-1 sm:justify-end">
+          {m.status === "PendingApproval" && (
+            <>
+              <Button onClick={actions.approve} disabled={busy} className="h-9 px-3 text-xs">Approve</Button>
+              <Button variant="outline" onClick={actions.reject} disabled={busy} className="h-9 px-3 text-xs">Reject</Button>
+            </>
+          )}
+          {m.status === "Active" && (
+            <>
+              <IconAction title="Adjust credit" onClick={actions.credit} icon={<Wallet size={16} />} disabled={busy} />
+              <IconAction
+                title={fingerprints > 0 ? "Manage biometrics" : "Enroll fingerprint"}
+                onClick={actions.enroll}
+                icon={<Fingerprint size={16} />}
+                disabled={busy}
+              />
+              <IconAction title="Reset password" onClick={actions.reset} icon={<KeyRound size={16} />} disabled={busy} />
+              <IconAction
+                title="Suspend member"
+                onClick={actions.suspend}
+                icon={<Ban size={16} />}
+                tone="danger"
+                disabled={busy}
+              />
+            </>
+          )}
+          {m.status === "Suspended" && (
+            <>
+              <IconAction title="Reactivate member" onClick={actions.reactivate} icon={<RotateCcw size={16} />} disabled={busy} />
+              <IconAction title="Reset password" onClick={actions.reset} icon={<KeyRound size={16} />} disabled={busy} />
+            </>
+          )}
+          {m.status === "Rejected" && (
+            <IconAction title="Reset password" onClick={actions.reset} icon={<KeyRound size={16} />} disabled={busy} />
+          )}
+          {/* Available whatever the status: an applicant who never verified is
+              stuck before approval matters, and an approved one is stuck after. */}
+          {m.email_verified === false && (
+            <IconAction title="Resend verification email" onClick={actions.resend} icon={<MailWarning size={16} />} disabled={busy} />
+          )}
+        </div>
+      </Cell>
+    </tr>
   );
 }
 
@@ -705,11 +852,11 @@ function RelatedBookingField(
   );
 }
 
-function SortHeader({ label, k, sortKey, sortDir, onSort }: { label: string; k: SortKey; sortKey: SortKey; sortDir: SortDir; onSort: (k: SortKey) => void }) {
+function SortHeader({ label, k, sortKey, sortDir, onSort, className }: { label: string; k: SortKey; sortKey: SortKey; sortDir: SortDir; onSort: (k: SortKey) => void; className?: string }) {
   const active = sortKey === k;
   const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <th className="text-left px-4 py-3">
+    <th className={cn("text-left px-3 py-3 whitespace-nowrap", className)}>
       <button type="button" onClick={() => onSort(k)} className={cn("inline-flex items-center gap-1 hover:text-text-primary", active && "text-text-primary")}>
         <span>{label}</span>
         <Icon size={12} className={cn(active ? "opacity-100" : "opacity-40")} />
