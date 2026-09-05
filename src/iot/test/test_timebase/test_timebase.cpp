@@ -190,6 +190,61 @@ void test_uptime64_is_monotonic_over_many_laps(void) {
   TEST_ASSERT_EQUAL_UINT64(8ULL * 0x100000000ULL, up.value());
 }
 
+void test_widen_puts_a_32_bit_stamp_back_on_the_right_side_of_the_wrap() {
+  // REVIEW 3, FINDING 25. An event is stamped with a 32-bit millis() reading
+  // and may sit in the queue for days. Sent as 32 bits, a stamp taken before
+  // the 49.7-day wrap and uploaded after it reads as a moment 49.7 days AHEAD
+  // of the batch's own 64-bit uptime, and the server — which dates an event by
+  // subtracting its uptime from the batch's — dates it at upload time.
+  const uint64_t wrap = 0x100000000ULL;
+
+  // The ordinary case: no wrap between stamp and upload.
+  TEST_ASSERT_EQUAL_UINT64(90000ULL, tb::widen(120000ULL, 90000UL));
+  TEST_ASSERT_EQUAL_UINT64(120000ULL, tb::widen(120000ULL, 120000UL));
+
+  // Four seconds before the wrap, uploaded twenty seconds after it.
+  TEST_ASSERT_EQUAL_UINT64(wrap - 4096ULL, tb::widen(wrap + 20000ULL, 0xFFFFF000UL));
+
+  // The instant of the wrap itself, from either side.
+  TEST_ASSERT_EQUAL_UINT64(wrap, tb::widen(wrap, 0U));
+  TEST_ASSERT_EQUAL_UINT64(wrap, tb::widen(wrap + 1ULL, 0U));
+
+  // Eight laps in: the answer is on THIS lap, not the first one.
+  const uint64_t deep = (8ULL * wrap) + 5000ULL;
+  TEST_ASSERT_EQUAL_UINT64((8ULL * wrap) + 1000ULL, tb::widen(deep, 1000UL));
+  TEST_ASSERT_EQUAL_UINT64((7ULL * wrap) + 0xFFFFF000ULL, tb::widen(deep, 0xFFFFF000UL));
+
+  // Never later than now: a stamp cannot be from the future.
+  for (uint32_t offset = 0U; offset < 5U; ++offset) {
+    const uint32_t stamp = 5000UL + offset;
+    TEST_ASSERT_TRUE(tb::widen(deep, stamp) <= deep);
+  }
+}
+
+void test_format_u64_renders_every_digit_or_refuses() {
+  char out[24] = {};
+  TEST_ASSERT_EQUAL_size_t(1U, tb::formatU64(0ULL, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("0", out);
+  TEST_ASSERT_EQUAL_size_t(6U, tb::formatU64(120000ULL, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("120000", out);
+  // Past 2^32, which is the whole point: `%lu` on a 32-bit long silently
+  // truncates exactly here.
+  TEST_ASSERT_EQUAL_size_t(10U, tb::formatU64(4294987296ULL, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("4294987296", out);
+  TEST_ASSERT_EQUAL_size_t(20U, tb::formatU64(UINT64_MAX, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("18446744073709551615", out);
+  // Refused, not truncated: half a number is a different number.
+  char tiny[4] = {'x', 'x', 'x', 'x'};
+  TEST_ASSERT_EQUAL_size_t(0U, tb::formatU64(120000ULL, tiny, sizeof(tiny)));
+  TEST_ASSERT_EQUAL_STRING("", tiny);
+  TEST_ASSERT_EQUAL_size_t(0U, tb::formatU64(1ULL, out, 0U));
+  TEST_ASSERT_EQUAL_size_t(0U, tb::formatU64(1ULL, nullptr, sizeof(out)));
+  // Exactly fits.
+  char exact[2] = {};
+  TEST_ASSERT_EQUAL_size_t(1U, tb::formatU64(7ULL, exact, sizeof(exact)));
+  TEST_ASSERT_EQUAL_STRING("7", exact);
+}
+
 // --- runner ----------------------------------------------------------------
 
 void setUp(void) {
@@ -210,5 +265,7 @@ int main(int, char**) {
   RUN_TEST(test_deadline_rearm_extends_from_now);
   RUN_TEST(test_uptime64_accumulates_across_the_wrap);
   RUN_TEST(test_uptime64_is_monotonic_over_many_laps);
+  RUN_TEST(test_widen_puts_a_32_bit_stamp_back_on_the_right_side_of_the_wrap);
+  RUN_TEST(test_format_u64_renders_every_digit_or_refuses);
   return UNITY_END();
 }

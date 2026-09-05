@@ -139,16 +139,53 @@ bool WifiCredential::equals(const WifiCredential& other) const {
 
 WifiSource chooseWifiCredential(const WifiCredential& compiledIn, const WifiCredential& stored,
                                 WifiCredential& out) {
-  if (compiledIn.present()) {
-    out = compiledIn;
-    return WifiSource::CompiledIn;
-  }
+  // The store first. A `!WIFI` rotation has to survive a power cycle, and it
+  // only does if what the technician typed outranks what the image was built
+  // with — see the header for what the other order cost.
   if (stored.present()) {
     out = stored;
     return WifiSource::Stored;
   }
+  if (compiledIn.present()) {
+    out = compiledIn;
+    return WifiSource::CompiledIn;
+  }
   out = WifiCredential();
   return WifiSource::None;
+}
+
+void WifiJoinPlan::begin(WifiSource source, bool alternate, uint32_t nowMs) {
+  source_ = source;
+  alternate_ = alternate && source != WifiSource::None;
+  switchAt_.disarm();
+  if (alternate_) {
+    switchAt_.arm(nowMs, kWifiJoinFallbackMs);
+  }
+}
+
+WifiSwitch WifiJoinPlan::tick(uint32_t nowMs) {
+  if (!alternate_ || !switchAt_.expired(nowMs)) {
+    return WifiSwitch::None;
+  }
+  switchAt_.arm(nowMs, kWifiJoinFallbackMs);
+  if (source_ == WifiSource::Stored) {
+    source_ = WifiSource::CompiledIn;
+    return WifiSwitch::ToCompiledIn;
+  }
+  source_ = WifiSource::Stored;
+  return WifiSwitch::ToStored;
+}
+
+void WifiJoinPlan::joined() {
+  alternate_ = false;
+  switchAt_.disarm();
+}
+
+void WifiJoinPlan::restart(uint32_t nowMs) {
+  static_cast<void>(nowMs);
+  source_ = WifiSource::Stored;
+  alternate_ = false;
+  switchAt_.disarm();
 }
 
 bool shouldPersistWifi(const WifiCredential& joined, const WifiCredential& stored) {

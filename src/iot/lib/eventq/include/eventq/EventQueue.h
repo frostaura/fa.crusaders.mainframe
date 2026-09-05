@@ -18,10 +18,19 @@
 // down, a router reboot, a two-day outage — because the box stays powered
 // throughout. It does not survive the breaker going off.
 //
-// That boundary is a consequence of the store port: hal::IStore holds values of
-// at most 32 bytes and an Event is larger, so there is no way to write one
-// through it. Persisting them needs a block-oriented port, which is a change to
-// make deliberately rather than to smuggle in here.
+// That boundary USED to be a consequence of the store port, and this comment
+// used to say so: hal::IStore capped a value at 32 bytes, an Event is 48, so
+// there was no way to write one through it. **That is no longer true.** The cap
+// is kStoreMaxValueLen = 128 and an Event fits with room to spare, so nothing
+// about the port stops it any more (review 3's dropped lead: a residual false
+// statement in a firmware comment, and this is the one that mattered — it gave
+// an accepted limitation a technical reason it no longer has).
+//
+// What is true now is smaller and less comfortable: persisting the ring has not
+// been built. It would need a record per slot plus a durable head and tail, and
+// the wrong version of that is worse than none — a torn ring that replays a
+// stale activation is a court charged twice. The trade is recorded and accepted
+// on the go-live checklist rather than dressed up as an impossibility.
 //
 // What it costs when it happens: a court that was lit during an offline window
 // that ended in a power cut is never reported, so the API still sees the

@@ -75,16 +75,83 @@ enum class Decision : uint8_t {
   WillNotFit = 4U,
   /// The manifest is malformed — no version, no URL, or a size of zero.
   Unusable = 5U,
+  /// A court is lit, an extension is owed, or a member is at the panel. The
+  /// install blocks for the whole download and then reboots, and the reboot
+  /// loses the per-court booking ends `!EXT` needs. Retried on the next
+  /// heartbeat, which is how it eventually installs on a quiet box.
+  Deferred = 6U,
+  /// This exact manifest has already failed to install kInstallAttempts times
+  /// in a row. Almost always a signature the box cannot verify — a release
+  /// signed with a private key that does not match the compiled-in public one
+  /// — which no number of retries fixes, and which costs a ~400 KB download
+  /// and a screen full of UPDATING / UPDATE FAILED on every heartbeat until
+  /// somebody notices.
+  InstallFailed = 7U,
+};
+
+/// How many times one manifest is allowed to fail before it is skipped.
+///
+/// Not one: an interrupted download on a flapping link is a transient and
+/// deserves another go. Not unbounded: a signature mismatch fails identically
+/// every time, and the loop it produces (review 3, finding 5) paints
+/// UPDATING / DO NOT POWER OFF over a live session at every heartbeat — 15 to
+/// 300 seconds apart — for as long as the release stands. Three bounds the
+/// damage to three downloads while leaving a genuine transient two retries.
+inline constexpr uint8_t kInstallAttempts = 3U;
+
+/// Remembers the manifest that is failing to install, so the fleet stops
+/// reflashing it.
+///
+/// Keyed on the whole offer — version, URL and size — rather than the version
+/// alone: re-signing a release and re-uploading it under the same version is
+/// exactly the repair an operator makes after a key mismatch, and it must
+/// clear the memory. Any change to any of the three is a different offer and
+/// gets a fresh set of attempts.
+///
+/// RAM-only, deliberately. A reboot gives the offer one more chance, which is
+/// the right trade for a box whose LittleFS holds the device credential and
+/// whose flash cells are not free: the loop this closes is a per-heartbeat
+/// loop, not a per-boot one.
+class InstallMemo {
+public:
+  /// An install of `manifest` was attempted and failed.
+  void failed(const Manifest& manifest);
+
+  /// True when `manifest` has run out of attempts.
+  bool exhausted(const Manifest& manifest) const;
+
+  /// The version currently being skipped, or "" when none is. What a heartbeat
+  /// would report if the API had a field for it.
+  const char* skippedVersion() const;
+
+private:
+  bool matches(const Manifest& manifest) const;
+
+  char version_[kMaxVersionLen] = {};
+  char url_[kMaxUrlLen + 1U] = {};
+  uint32_t sizeBytes_ = 0U;
+  uint8_t failures_ = 0U;
 };
 
 /// Reads the `ota` object out of a heartbeat response. `present` is false when
 /// there is no offer, which is not an error and is what most heartbeats carry.
 Manifest parseManifest(const char* body, size_t len);
 
+/// What the box is doing that an install must not interrupt, and what it has
+/// already learned about this offer. Both default to "nothing", so a host test
+/// that cares about neither passes nothing.
+struct InstallGate {
+  /// bridgelogic::anyCourtBusy — a court held, an `!EXT` owed, or an armed
+  /// button window.
+  bool courtsBusy = false;
+  /// The memo, or null when the caller keeps none.
+  const InstallMemo* memo = nullptr;
+};
+
 /// The decision. `freeSketchSpace` is what the platform says is available; pass
 /// 0 on a host test to skip the size check.
 Decision decide(const Manifest& manifest, const char* runningVersion, const BootGuard& guard,
-                uint32_t freeSketchSpace);
+                uint32_t freeSketchSpace, const InstallGate& gate = InstallGate{});
 
 /// A one-line reason for the admin screen and the heartbeat report. Never null.
 const char* describe(Decision decision);

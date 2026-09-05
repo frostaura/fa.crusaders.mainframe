@@ -67,6 +67,13 @@ public:
   /// one. Returns what to send the Mega.
   AuthCommand afterScan(const court::Outcome& outcome, uint32_t nowMs);
 
+  /// A member rescanned on a court this box already has lit. Nothing is
+  /// granted, but the window is armed and BOUND to that court: they are the
+  /// person standing at the panel and their OFF press has to work. Arming
+  /// unbound — which is what a plain recognised refusal does — would answer
+  /// that press with NOT YOUR COURT on their own game.
+  AuthCommand afterHeldCourtRescan(uint8_t court, uint32_t nowMs);
+
   /// A walk-up was answered. A grant binds the window to the court it lit so
   /// the buyer can release it; a refusal leaves the window as it was.
   AuthCommand afterWalkUp(const court::Outcome& outcome, uint32_t nowMs);

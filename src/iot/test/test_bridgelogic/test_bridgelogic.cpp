@@ -30,6 +30,8 @@
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/Cadence.h"
 #include "bridgelogic/CredentialStore.h"
+#include "bridgelogic/EventUpload.h"
+#include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterSync.h"
@@ -1674,7 +1676,7 @@ void test_on_retry_resends_the_last_on_once_and_only_inside_the_window() {
     TEST_ASSERT_FALSE(retry.shouldResend(base + 1000UL + bridgelogic::kRetryWindowMs, out));
     TEST_ASSERT_FALSE(retry.pending());
 
-    // Only an ON is kept; a release forgets it.
+    // Only a relay-affecting frame is kept; a repaint clears the memory.
     retry.sent(proto::Frame::lcd("A", "B"), base + 3000UL);
     TEST_ASSERT_FALSE(retry.pending());
     retry.sent(on, base + 3000UL);
@@ -1684,12 +1686,286 @@ void test_on_retry_resends_the_last_on_once_and_only_inside_the_window() {
   // Which uplink reports count.
   TEST_ASSERT_TRUE(bridgelogic::isReceiveError(proto::Verb::Err, "BADCRC", ""));
   TEST_ASSERT_TRUE(bridgelogic::isReceiveError(proto::Verb::Evt, "OVERRUN", "RX"));
+  // BADFRAME is the commonest loss of all: the production Mega refuses the
+  // legacy dialect and classifies a line by its first byte, so a glitch byte
+  // ahead of an idle-line `!ON` is BADFRAME, not BADCRC (review 3, finding 13).
+  // This assertion used to read FALSE.
+  TEST_ASSERT_TRUE(bridgelogic::isReceiveError(proto::Verb::Evt, "BADFRAME", "RX"));
   // The Mega dropping a frame on its way OUT says nothing about what it heard.
   TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::Evt, "OVERRUN", "TX"));
+  TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::Evt, "BADFRAME", "TX"));
   TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::Err, "BADARG", ""));
   TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::Evt, "AUTOOFF", "B"));
-  TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::Evt, "BADFRAME", "RX"));
   TEST_ASSERT_FALSE(bridgelogic::isReceiveError(proto::Verb::State, "BADCRC", ""));
+
+  // BADARG is not a lost frame at all: after an `!EXT` it is the Mega saying
+  // the relay is already open.
+  TEST_ASSERT_TRUE(bridgelogic::isExtRefusal(proto::Verb::Err, "BADARG"));
+  TEST_ASSERT_FALSE(bridgelogic::isExtRefusal(proto::Verb::Err, "BADCRC"));
+  TEST_ASSERT_FALSE(bridgelogic::isExtRefusal(proto::Verb::Evt, "BADARG"));
+}
+
+void test_on_retry_keeps_an_ext_too_and_a_lost_one_is_sent_again() {
+  // REVIEW 3, FINDING 7. A two-hour booking is held past the ninety-minute cap
+  // by one `!EXT`. Losing that one frame darkened the court mid-game, and
+  // OnRetry remembered only `!ON`, so nothing re-sent it.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::OnRetry retry;
+    proto::Frame out;
+
+    const proto::Frame ext = proto::Frame::ext(proto::Court::B, 1800U);
+    retry.sent(ext, base);
+    TEST_ASSERT_TRUE(retry.pending());
+    TEST_ASSERT_TRUE(retry.verb() == proto::Verb::Ext);
+    TEST_ASSERT_EQUAL_UINT8(1U, retry.court());
+
+    // `!ERR,BADCRC` in reply, inside the window: the same frame goes once more.
+    TEST_ASSERT_TRUE(bridgelogic::isReceiveError(proto::Verb::Err, "BADCRC", ""));
+    TEST_ASSERT_TRUE(retry.shouldResend(base + 30U, out));
+    TEST_ASSERT_TRUE(out == ext);
+    // Once. A second failure is a cable.
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 60U, out));
+    TEST_ASSERT_TRUE(retry.verb() == proto::Verb::Unknown);
+  }
+}
+
+void test_on_retry_a_release_on_another_court_keeps_this_courts_retry() {
+  // REVIEW 3, FINDING 24. Four courts expire at 19:00 while a member scans for
+  // a 19:00 booking on B: releaseCourt(A) used to clear() unconditionally and
+  // drop the retry B's grant was waiting on.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::OnRetry retry;
+    proto::Frame out;
+
+    retry.sent(proto::Frame::on(proto::Court::B, 2700U), base);
+    retry.clearIfCourt(0U); // court A released
+    TEST_ASSERT_TRUE(retry.pending());
+    TEST_ASSERT_TRUE(retry.shouldResend(base + 40U, out));
+    TEST_ASSERT_EQUAL_STRING("B", out.arg(0));
+
+    // The court it IS about still clears it: that grant is over.
+    retry.sent(proto::Frame::on(proto::Court::B, 2700U), base);
+    retry.clearIfCourt(1U);
+    TEST_ASSERT_FALSE(retry.pending());
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 40U, out));
+    TEST_ASSERT_EQUAL_UINT8(bridgelogic::kNoRetryCourt, retry.court());
+  }
+}
+
+void test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent() {
+  // REVIEW 3, FINDING 7. `Relight::extended` stamps the new relay deadline the
+  // instant the frame leaves the TX ring — a BELIEF. When the frame is
+  // corrupted on the wire the belief is ~29 minutes wrong, check() stays silent
+  // for that whole time, and the court goes dark mid-game with the bridge
+  // convinced it had extended it. The Mega publishes what its relay ACTUALLY
+  // has left in every `!STATE`; adopting it puts the deadline back.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::Relight relight;
+
+    // A two-hour booking on court B: 90 minutes on the relay, 120 in the slot.
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 1U, true);
+    grant.bookingRemainingMs = 2UL * kHourMs;
+    relight.onGrant(grant, base);
+    TEST_ASSERT_TRUE(relight.tracking(1U));
+
+    // At 89 minutes the extension is due, and is "sent".
+    const uint32_t due = base + (89UL * 60UL * 1000UL);
+    bridgelogic::Extension ext = relight.check(1U, due);
+    TEST_ASSERT_TRUE(ext.due);
+    relight.extended(1U, ext.seconds, due);
+    // Believed extended: nothing more is due.
+    TEST_ASSERT_FALSE(relight.check(1U, due + 1000UL).due);
+
+    // But the frame never arrived. Ten seconds later the Mega's own `!STATE`
+    // says the relay has 50 seconds left, not half an hour.
+    const uint32_t stateAt = due + 10000UL;
+    relight.observeRelayRemaining(1U, 50U, stateAt);
+    const bridgelogic::Extension again = relight.check(1U, stateAt);
+    TEST_ASSERT_TRUE(again.due);
+    TEST_ASSERT_TRUE(again.seconds > 0U);
+
+    // A court that is not being tracked is not written to.
+    relight.observeRelayRemaining(0U, 1200U, stateAt);
+    TEST_ASSERT_FALSE(relight.check(0U, stateAt).due);
+    // Nor is one past the end of the array.
+    relight.observeRelayRemaining(9U, 1200U, stateAt);
+  }
+}
+
+void test_state_seconds_parse_decimal_and_refuse_everything_else() {
+  uint16_t seconds = 0U;
+  TEST_ASSERT_TRUE(bridgelogic::parseStateSeconds("0", seconds));
+  TEST_ASSERT_EQUAL_UINT16(0U, seconds);
+  TEST_ASSERT_TRUE(bridgelogic::parseStateSeconds("5400", seconds));
+  TEST_ASSERT_EQUAL_UINT16(5400U, seconds);
+  TEST_ASSERT_TRUE(bridgelogic::parseStateSeconds("65535", seconds));
+  TEST_ASSERT_EQUAL_UINT16(65535U, seconds);
+  // An older Mega that sends the mask alone yields an empty argument, which is
+  // "no reading" and must not be read as zero.
+  TEST_ASSERT_FALSE(bridgelogic::parseStateSeconds("", seconds));
+  TEST_ASSERT_FALSE(bridgelogic::parseStateSeconds(nullptr, seconds));
+  TEST_ASSERT_FALSE(bridgelogic::parseStateSeconds("65536", seconds));
+  TEST_ASSERT_FALSE(bridgelogic::parseStateSeconds("-1", seconds));
+  TEST_ASSERT_FALSE(bridgelogic::parseStateSeconds(" 12", seconds));
+  TEST_ASSERT_FALSE(bridgelogic::parseStateSeconds("12x", seconds));
+}
+
+void test_a_box_with_a_court_in_use_is_busy_and_one_at_rest_is_not() {
+  // REVIEW 3, FINDING 8. An OTA install blocks for the whole download and then
+  // reboots, and the reboot loses the per-court booking ends `!EXT` needs — so
+  // a court adopted from the first `!STATE` afterwards darkens at the cap,
+  // mid-game. This is the gate that keeps the install for a quiet heartbeat.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::HeldState held[bridgelogic::kStateCourts];
+    for (uint8_t c = 0U; c < bridgelogic::kStateCourts; ++c) {
+      held[c] = bridgelogic::HeldState{base, false};
+    }
+    bridgelogic::Relight relight;
+    TEST_ASSERT_FALSE(bridgelogic::anyCourtBusy(held, relight, false));
+
+    // A member at the panel with an armed button window is mid-interaction.
+    TEST_ASSERT_TRUE(bridgelogic::anyCourtBusy(held, relight, true));
+
+    // A lit court.
+    held[2] = bridgelogic::HeldState{base, true};
+    TEST_ASSERT_TRUE(bridgelogic::anyCourtBusy(held, relight, false));
+    held[2] = bridgelogic::HeldState{base, false};
+    TEST_ASSERT_FALSE(bridgelogic::anyCourtBusy(held, relight, false));
+
+    // A court whose extension is still owed, even though `!STATE` has not yet
+    // said it is lit: rebooting would forget the booking end entirely.
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 3U, true);
+    grant.bookingRemainingMs = 2UL * kHourMs;
+    relight.onGrant(grant, base);
+    TEST_ASSERT_TRUE(bridgelogic::anyCourtBusy(held, relight, false));
+    relight.onRelease(3U);
+    TEST_ASSERT_FALSE(bridgelogic::anyCourtBusy(held, relight, false));
+  }
+}
+
+void test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant() {
+  // THE CLOSING-#10 RESIDUAL. The roster holds bookings, not lights: a booking
+  // is "allowed" for its whole window, so a member who scans again mid-game was
+  // re-granted — a second `!ON` re-arming the relay from the rescan, and a
+  // second Activation event for one booking.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::HeldState held[bridgelogic::kStateCourts];
+    for (uint8_t c = 0U; c < bridgelogic::kStateCourts; ++c) {
+      held[c] = bridgelogic::HeldState{base, false};
+    }
+
+    roster::Decision allow;
+    allow.verdict = roster::Verdict::Allow;
+    allow.entry.court = 1U;
+    allow.entry.valid = true;
+    allow.grantMs = 1500000UL;
+
+    court::Outcome out;
+    // Court B dark: an ordinary grant, and this guard says nothing.
+    TEST_ASSERT_FALSE(bridgelogic::regrantsHeldCourt(allow, held, out));
+
+    // Court B lit: refused, and the member is told the truth.
+    held[1] = bridgelogic::HeldState{base, true};
+    TEST_ASSERT_TRUE(bridgelogic::regrantsHeldCourt(allow, held, out));
+    TEST_ASSERT_TRUE(out.action == court::Action::Refuse);
+    TEST_ASSERT_EQUAL_STRING("COURT B IS ON", out.line1);
+    TEST_ASSERT_EQUAL_STRING("ALREADY LIT", out.line2);
+    TEST_ASSERT_TRUE(out.recognised);
+    TEST_ASSERT_EQUAL_UINT8(1U, out.court);
+
+    // A refusal is not a re-grant, whatever the mask says.
+    roster::Decision tooEarly = allow;
+    tooEarly.verdict = roster::Verdict::TooEarly;
+    TEST_ASSERT_FALSE(bridgelogic::regrantsHeldCourt(tooEarly, held, out));
+    roster::Decision stale;
+    stale.verdict = roster::Verdict::Stale;
+    TEST_ASSERT_FALSE(bridgelogic::regrantsHeldCourt(stale, held, out));
+    // A court past the end of the array is never dereferenced.
+    roster::Decision bogus = allow;
+    bogus.entry.court = 9U;
+    TEST_ASSERT_FALSE(bridgelogic::regrantsHeldCourt(bogus, held, out));
+
+    // And the window binds to the lit court, so THEIR off press still works.
+    bridgelogic::AuthPolicy auth(30000UL);
+    TEST_ASSERT_TRUE(auth.afterHeldCourtRescan(1U, base) == bridgelogic::AuthCommand::Arm);
+    TEST_ASSERT_TRUE(auth.allowsRelease(1U, base + 1U));
+    TEST_ASSERT_FALSE(auth.allowsRelease(0U, base + 1U));
+  }
+}
+
+void test_the_identity_screen_is_repainted_on_the_first_pong_and_after_a_mega_reset() {
+  // REVIEW 3, FINDING 9. `seconds < gMegaUptime` alone can never be true for
+  // the first pong of a boot, because gMegaUptime starts at 0 — so the only
+  // on-glass diagnostic the go-live checklist has (NO WIFI SET /
+  // !WIFI,SSID,PASS) was painted by no reachable path.
+  TEST_ASSERT_TRUE(bridgelogic::shouldRepaintIdentity(false, 0U, 0U));
+  TEST_ASSERT_TRUE(bridgelogic::shouldRepaintIdentity(false, 0U, 4213U));
+  // A running Mega: nothing to repaint.
+  TEST_ASSERT_FALSE(bridgelogic::shouldRepaintIdentity(true, 10U, 40U));
+  // Two pongs inside one second are ordinary, not a reset.
+  TEST_ASSERT_FALSE(bridgelogic::shouldRepaintIdentity(true, 40U, 40U));
+  // Backwards is a reset: the Mega is back on its idle text.
+  TEST_ASSERT_TRUE(bridgelogic::shouldRepaintIdentity(true, 4000U, 3U));
+}
+
+void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
+  // REVIEW 3, FINDING 25. Both `uptime_ms` fields went out as 32 bits while the
+  // accumulator behind them was 64-bit, so an activation queued before the
+  // 49.7-day wrap and uploaded after it was stamped 49.7 days AHEAD of the
+  // batch — the server dated it at upload time and filed a "counter cannot be
+  // believed" audit row against a healthy box.
+  eventq::Event event;
+  event.seq = 41U;
+  event.kind = eventq::Kind::Activation;
+  event.court = 1U;
+  event.method = eventq::Method::Qr;
+  event.durationMs = 2700000UL;
+  TEST_ASSERT_TRUE(event.setSubject("TOKEN-B"));
+
+  // Stamped four seconds before the wrap; uploaded twenty seconds after it.
+  event.uptimeMs = 0xFFFFF000UL;
+  const uint64_t wrap = 0x100000000ULL;
+  const uint64_t now = wrap + 20000ULL;
+
+  char body[bridgelogic::kEventBodyCap] = {};
+  const size_t len = bridgelogic::renderEventBody(body, sizeof(body), now, event);
+  TEST_ASSERT_TRUE(len > 0U);
+  TEST_ASSERT_EQUAL_size_t(strlen(body), len);
+  TEST_ASSERT_NOT_NULL(strstr(body, "{\"uptime_ms\":4294987296,"));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":4294963200,"));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"kind\":\"activation\""));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"court\":1"));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"method\":\"qr\""));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"subject\":\"TOKEN-B\""));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"duration_ms\":2700000"));
+
+  // The ordinary case is unchanged: no wrap, no widening.
+  event.uptimeMs = 90000UL;
+  TEST_ASSERT_TRUE(bridgelogic::renderEventBody(body, sizeof(body), 120000ULL, event) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(body, "{\"uptime_ms\":120000,"));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":90000,"));
+
+  // A release carries no identification method, and says so as a null rather
+  // than as the string "none".
+  eventq::Event release;
+  release.seq = 42U;
+  release.kind = eventq::Kind::Release;
+  release.court = eventq::Event::kNoCourt;
+  release.uptimeMs = 1000UL;
+  TEST_ASSERT_TRUE(bridgelogic::renderEventBody(body, sizeof(body), 2000ULL, release) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"method\":null"));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"court\":-1"));
+
+  // Refused rather than truncated: a half-rendered body comes back 4xx and the
+  // drain path drops the event as one the box caused.
+  char tiny[24] = {};
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderEventBody(tiny, sizeof(tiny), 2000ULL, release));
+  TEST_ASSERT_EQUAL_STRING("", tiny);
 }
 
 void test_credential_store_checked_text_survives_the_store_and_a_torn_write_reads_as_absent() {
@@ -1761,12 +2037,99 @@ void test_wifi_credential_is_persisted_on_first_join_and_read_back_by_a_ci_image
   TEST_ASSERT_FALSE(bridgelogic::shouldPersistWifi(joinsWith, nothing));
   TEST_ASSERT_FALSE(bridgelogic::storeWifiCredential(empty, joinsWith));
 
-  // A rotated password in a fresh secrets.h wins over the store, and lands.
+  // A rotated password in a fresh secrets.h does NOT win at boot. This
+  // assertion used to say CompiledIn, and pinning it that way is what let
+  // review 3 finding 1 ship: a `!WIFI` rotation on a box that had ever been
+  // flashed with secrets.h survived only until the next power cycle, because
+  // the compiled-in credential took the radio back on every boot. The store is
+  // the technician's most recent statement of intent, not the image.
   bridgelogic::WifiCredential rotated;
   TEST_ASSERT_TRUE(rotated.set("ClubWiFi", "new passphrase"));
   TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(rotated, fromStore, joinsWith) ==
+                   bridgelogic::WifiSource::Stored);
+  TEST_ASSERT_EQUAL_STRING("correct horse battery staple", joinsWith.password);
+  // Nothing to persist: the store already holds what is being joined with.
+  TEST_ASSERT_FALSE(bridgelogic::shouldPersistWifi(joinsWith, fromStore));
+}
+
+void test_a_wifi_line_outlives_the_reboot_that_used_to_undo_it() {
+  // REVIEW 3, FINDING 1, END TO END. secrets.h holds A. The club rotates to B
+  // and the technician types `!WIFI,...,B` at the box per go-live item 7. The
+  // next breaker trip must come back on B.
+  fakes::FakeStore store;
+  bridgelogic::WifiCredential compiledIn;
+  TEST_ASSERT_TRUE(compiledIn.set("ClubWiFi", "password-A"));
+
+  // Boot one: nothing stored, so the compiled-in credential seeds the box and
+  // is written when it joins.
+  bridgelogic::WifiCredential stored;
+  static_cast<void>(bridgelogic::loadWifiCredential(store, stored));
+  bridgelogic::WifiCredential joining;
+  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(compiledIn, stored, joining) ==
                    bridgelogic::WifiSource::CompiledIn);
-  TEST_ASSERT_TRUE(bridgelogic::shouldPersistWifi(joinsWith, fromStore));
+  TEST_ASSERT_TRUE(bridgelogic::storeWifiCredential(store, joining));
+
+  // The `!WIFI` line: parsed, and written to the store at once.
+  const char line[] = "!WIFI,ClubWiFi,password-B";
+  bridgelogic::WifiCredential typed;
+  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine(line, sizeof(line) - 1U, typed));
+  TEST_ASSERT_TRUE(bridgelogic::storeWifiCredential(store, typed));
+
+  // The reboot. Same image, same secrets.h, same macro values.
+  bridgelogic::WifiCredential afterReboot;
+  TEST_ASSERT_TRUE(bridgelogic::loadWifiCredential(store, afterReboot));
+  bridgelogic::WifiCredential joinsWith;
+  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(compiledIn, afterReboot, joinsWith) ==
+                   bridgelogic::WifiSource::Stored);
+  TEST_ASSERT_EQUAL_STRING("password-B", joinsWith.password);
+}
+
+void test_the_reflash_rotation_path_still_works_because_the_plan_alternates() {
+  // The other half of finding 1's fix. Store-wins would make go-live item 7's
+  // FIRST path — reflash with a new secrets.h — a no-op on any box that has
+  // joined before, because the stale stored credential would keep the radio
+  // forever. WifiJoinPlan hands the compiled-in one its turn.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::WifiJoinPlan plan;
+
+    // Two different credentials: the reflashed box.
+    plan.begin(bridgelogic::WifiSource::Stored, true, base);
+    TEST_ASSERT_TRUE(plan.source() == bridgelogic::WifiSource::Stored);
+    // Nothing happens while there is still time to join.
+    TEST_ASSERT_TRUE(plan.tick(base + 1000UL) == bridgelogic::WifiSwitch::None);
+    TEST_ASSERT_TRUE(plan.tick(base + bridgelogic::kWifiJoinFallbackMs - 1U) ==
+                     bridgelogic::WifiSwitch::None);
+    // Then the compiled-in one gets the radio.
+    TEST_ASSERT_TRUE(plan.tick(base + bridgelogic::kWifiJoinFallbackMs) ==
+                     bridgelogic::WifiSwitch::ToCompiledIn);
+    TEST_ASSERT_TRUE(plan.source() == bridgelogic::WifiSource::CompiledIn);
+    // And back, so a box that comes up while the AP is rebooting is not left
+    // on whichever credential lost the coin toss.
+    TEST_ASSERT_TRUE(plan.tick(base + (2UL * bridgelogic::kWifiJoinFallbackMs)) ==
+                     bridgelogic::WifiSwitch::ToStored);
+
+    // A join stops it for good.
+    plan.joined();
+    TEST_ASSERT_TRUE(plan.tick(base + (9UL * bridgelogic::kWifiJoinFallbackMs)) ==
+                     bridgelogic::WifiSwitch::None);
+
+    // A CI image, or a bench box whose two credentials agree: nothing to
+    // alternate with, so the radio is never touched.
+    bridgelogic::WifiJoinPlan only;
+    only.begin(bridgelogic::WifiSource::Stored, false, base);
+    TEST_ASSERT_TRUE(only.tick(base + (5UL * bridgelogic::kWifiJoinFallbackMs)) ==
+                     bridgelogic::WifiSwitch::None);
+
+    // A `!WIFI` line makes the typed credential the only candidate: secrets.h
+    // must not steal the radio back from the technician standing at the box.
+    bridgelogic::WifiJoinPlan typed;
+    typed.begin(bridgelogic::WifiSource::Stored, true, base);
+    typed.restart(base);
+    TEST_ASSERT_TRUE(typed.tick(base + (5UL * bridgelogic::kWifiJoinFallbackMs)) ==
+                     bridgelogic::WifiSwitch::None);
+    TEST_ASSERT_TRUE(typed.source() == bridgelogic::WifiSource::Stored);
+  }
 }
 
 void test_wifi_credential_refuses_what_the_standard_does_not_allow() {
@@ -2080,8 +2443,18 @@ int main(int, char**) {
   RUN_TEST(test_relight_a_three_hour_booking_needs_two_extensions_each_capped);
   RUN_TEST(test_relight_forgets_a_court_on_release_and_a_grant_inside_the_cap);
   RUN_TEST(test_on_retry_resends_the_last_on_once_and_only_inside_the_window);
+  RUN_TEST(test_on_retry_keeps_an_ext_too_and_a_lost_one_is_sent_again);
+  RUN_TEST(test_on_retry_a_release_on_another_court_keeps_this_courts_retry);
+  RUN_TEST(test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent);
+  RUN_TEST(test_state_seconds_parse_decimal_and_refuse_everything_else);
+  RUN_TEST(test_a_box_with_a_court_in_use_is_busy_and_one_at_rest_is_not);
+  RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);
+  RUN_TEST(test_the_identity_screen_is_repainted_on_the_first_pong_and_after_a_mega_reset);
+  RUN_TEST(test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap);
   RUN_TEST(test_credential_store_checked_text_survives_the_store_and_a_torn_write_reads_as_absent);
   RUN_TEST(test_wifi_credential_is_persisted_on_first_join_and_read_back_by_a_ci_image);
+  RUN_TEST(test_a_wifi_line_outlives_the_reboot_that_used_to_undo_it);
+  RUN_TEST(test_the_reflash_rotation_path_still_works_because_the_plan_alternates);
   RUN_TEST(test_wifi_credential_refuses_what_the_standard_does_not_allow);
   RUN_TEST(test_api_url_holds_the_ota_length_and_refuses_longer_loudly);
   RUN_TEST(test_wifi_line_is_parsed_with_escapes_and_an_optional_checksum);

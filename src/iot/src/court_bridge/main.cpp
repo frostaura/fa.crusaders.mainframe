@@ -23,12 +23,22 @@
 // announces itself instead. There is no WiFi.config() call anywhere in this
 // repo and there must not be one.
 //
-// WHY THERE IS NO SERIAL DEBUG OUTPUT
-// -----------------------------------
+// WHY THERE IS ALMOST NO SERIAL DEBUG OUTPUT
+// ------------------------------------------
 // `Serial` IS the link to the Mega on this board, at 9600 8N1, routed by the
 // DIP block. A Serial.println() here is a line of debug text arriving at the
-// Mega's frame decoder, which answers it with `!EVT,BADFRAME`. Diagnostics go
-// out as protocol frames or as the discovery beacon's fields, not as prose.
+// Mega's frame decoder, which answers it with `!EVT,BADFRAME` — and that report
+// is now an `!ON`/`!EXT` retry trigger, so stray prose is not merely untidy.
+// Diagnostics go out as protocol frames or as the discovery beacon's fields.
+//
+// The ONE exception is sendPlain(), and it is gated so tightly that it cannot
+// reach a frame decoder: it writes nothing until a `!WIFI` line has arrived on
+// this UART, which only happens with DIP 5 and 6 ON — the position in which the
+// UART is on the USB socket and the Mega is not attached at all. It exists
+// because in that position the LCD is unreachable, so the `!LCD` acknowledgement
+// the firmware used to send was the only answer a technician got, and it reached
+// them as `!LCD,WIFI SAVED,JOINING...*CC` in a serial monitor while the glass in
+// front of them still said NO WIFI SET (review 3, finding 19).
 //
 // THE COURT WORKS WHEN THE NETWORK DOES NOT
 // -----------------------------------------
@@ -73,6 +83,8 @@
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/Cadence.h"
 #include "bridgelogic/CredentialStore.h"
+#include "bridgelogic/EventUpload.h"
+#include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterSync.h"
@@ -229,6 +241,13 @@ char gMegaVersion[proto::kMaxArgLen + 1] = {'\0'};
 /// idea a claim is in progress.
 uint32_t gMegaUptime = 0U;
 
+/// Whether any `!PONG` has arrived since this bridge booted. A separate flag
+/// because `gMegaUptime` starts at 0 and 0 is a legal uptime: testing
+/// `seconds < gMegaUptime` alone made the first pong of every boot invisible,
+/// which is half of why the identity screen was never painted (review 3,
+/// finding 9). The rule is bridgelogic::shouldRepaintIdentity's.
+bool gMegaSeen = false;
+
 bool gWifiUp = false;
 
 /// The three things that let a court work with no network.
@@ -294,7 +313,8 @@ bridgelogic::ApiBreaker gBreaker;
 /// when each needs its `!EXT`. The Mega's cap is still the safety net.
 bridgelogic::Relight gRelight;
 
-/// The last `!ON`, kept for one retry if the Mega reports it did not decode.
+/// The last relay-affecting downlink (`!ON` or `!EXT`), kept for one retry if
+/// the Mega reports it did not decode.
 bridgelogic::OnRetry gOnRetry;
 
 /// What the eight buttons do, and the two presses that use them.
@@ -346,6 +366,10 @@ char gHeartbeatBody[2560] = {};
 /// without it a bad image would reflash itself forever on every board at once.
 ota::BootGuard gBootGuard(&gStore);
 
+/// Which offer is failing to install, so a release the box cannot verify stops
+/// being downloaded on every heartbeat (review 3, finding 5).
+ota::InstallMemo gInstallMemo;
+
 /// The credential, once provisioning has fetched it. Held as raw bytes plus the
 /// id text, because that is what dc::signer wants and re-decoding hex on every
 /// request would be work done four times a minute for no reason.
@@ -369,6 +393,23 @@ bridgelogic::WifiCredential gWifiStored;
 bridgelogic::WifiCredential gWifiActive;
 bridgelogic::WifiSource gWifiSource = bridgelogic::WifiSource::None;
 
+/// What secrets.h compiled in, if anything. Kept for the whole run rather than
+/// read once in setup(): the store outranks it at boot, and the ONLY thing that
+/// keeps the reflash-with-a-new-secrets.h rotation path working is being able
+/// to hand it the radio when the stored credential cannot join
+/// (bridgelogic::WifiJoinPlan).
+bridgelogic::WifiCredential gWifiCompiled;
+bridgelogic::WifiJoinPlan gWifiPlan;
+
+/// True once a `!WIFI` line has arrived on this UART. It is the only evidence
+/// this half ever gets that the DIP block has the ESP on the USB socket rather
+/// than on the Mega — the Mega never sends that line — and it is what gates the
+/// two plain-text acknowledgements below. Printing prose unconditionally would
+/// put a line into the Mega's frame decoder on every WiFi link-up, and the
+/// decoder answers prose with `!EVT,BADFRAME,RX`, which is now an `!ON` retry
+/// trigger.
+bool gWifiLineSeen = false;
+
 /// Watches the Mega link for a `!WIFI,<ssid>,<password>` line — the USB
 /// provisioning path, DIP 5 and 6 on. See CredentialStore.h for why taking it
 /// from this stream is safe.
@@ -387,6 +428,30 @@ bool sendToMega(const proto::Frame& frame) {
     return false;
   }
   return gMega.write(reinterpret_cast<const uint8_t*>(buf), len) == len;
+}
+
+/// Writes one line of PLAIN TEXT to the UART — the only place in this firmware
+/// that does, and it is gated on gWifiLineSeen for the reason stated there.
+///
+/// It exists because of what the `!WIFI` provisioning path actually looks like
+/// from the technician's side (review 3, finding 19): with DIP 5 and 6 ON the
+/// ESP's UART is on the USB socket, so the Mega is not attached and the LCD
+/// cannot be told anything. The only acknowledgement the firmware had was an
+/// `!LCD,WIFI SAVED,JOINING...*CC` frame, which arrives in the serial monitor
+/// as protocol noise while the glass — attached to a Mega the ESP is not
+/// talking to — still says NO WIFI SET. Installers read that as a refusal,
+/// retype, power-cycle, or fall back to a secrets.h reflash.
+void sendPlain(const char* text) {
+  if (!gWifiLineSeen) {
+    return;
+  }
+  const size_t len = strlen(text);
+  if (gMega.writable() < len + 1U) {
+    return;
+  }
+  static_cast<void>(gMega.write(reinterpret_cast<const uint8_t*>(text), len));
+  const uint8_t nl = static_cast<uint8_t>('\n');
+  static_cast<void>(gMega.write(&nl, 1U));
 }
 
 /// Paints what this board IS: the idle screen on a claimed board, the claim
@@ -629,11 +694,15 @@ void noteMegaPong(const proto::Frame& frame) {
   for (size_t j = 0U; text[j] >= '0' && text[j] <= '9'; ++j) {
     seconds = seconds * 10U + static_cast<uint32_t>(text[j] - '0');
   }
-  if (seconds < gMegaUptime) {
-    // The Mega restarted: its screen is back to the idle text and it has no
-    // idea whether a claim is in progress.
+  if (bridgelogic::shouldRepaintIdentity(gMegaSeen, gMegaUptime, seconds)) {
+    // Either the Mega restarted — its screen is back to the idle text and it
+    // has no idea whether a claim is in progress — or this is the first pong of
+    // this boot and it has never been told at all. The second case is the one
+    // that matters after a `!WIFI` session: the DIP block had the ESP on USB,
+    // and restoring DIP 1 and 2 is the first moment the glass is reachable.
     showIdentityScreen();
   }
+  gMegaSeen = true;
   gMegaUptime = seconds;
 }
 
@@ -728,6 +797,26 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // four seconds in a connect timeout, and a held-since stamped before that
   // call is old enough for the next `!STATE` to read as a lost release.
   const uint32_t now = gClock.nowMs();
+
+  // The roster has no idea whether a court is already lit — it holds bookings,
+  // and a booking is "allowed" for its whole window — so a member who scanned
+  // again mid-game was re-granted, which sent a second `!ON` (silently
+  // re-arming the relay from the rescan) and queued a second Activation for one
+  // booking. The decision, and the lines, are bridgelogic::regrantsHeldCourt's;
+  // the decide() here is the same pure call gSession.onScan makes below, run
+  // once more against sixteen entries so the guard sits in front of the event
+  // rather than behind it.
+  court::Outcome alreadyOn;
+  if (bridgelogic::regrantsHeldCourt(gRoster.decide(frame.arg(0), roster::CourtCount(gCourtCount), now),
+                                     gHeld, alreadyOn)) {
+    static_cast<void>(sendToMega(proto::Frame::lcd(alreadyOn.line1, alreadyOn.line2)));
+    // Bound to the lit court: they are the member standing at the panel and
+    // their OFF press has to work. The scan itself stays live, so they can
+    // still buy a second court at the buttons.
+    applyAuth(gAuth.afterHeldCourtRescan(alreadyOn.court, now));
+    return;
+  }
+
   settleScan(gSession.onScan(frame.arg(0), roster::CourtCount(gCourtCount), eventq::Method::Qr, now), now);
 }
 
@@ -737,23 +826,50 @@ void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
   applyOutcome(gSession.onRelease(court, heldMs, nowMs), nowMs);
   gHeld[court] = bridgelogic::HeldState{nowMs, false};
   gRelight.onRelease(court);
-  gOnRetry.clear();
+  // Only THIS court's retry. Clearing unconditionally meant court A's timer
+  // expiring inside the 1.5 s window threw away the retry court B's grant was
+  // waiting on — and A's coil switching is a plausible cause of B's CRC failure
+  // in the first place (review 3, finding 24).
+  gOnRetry.clearIfCourt(court);
 }
 
-/// The Mega said the last line it received did not decode. If that line was
-/// the `!ON` that lights a paid court, it goes once more; otherwise nothing —
-/// a repaint the Mega missed is a repaint, and the next one is a second away.
+/// The Mega said something about the last line it received. If that line was a
+/// relay-affecting frame — the `!ON` that lights a paid court, or the `!EXT`
+/// that holds a long booking past the ninety-minute cap — and the report means
+/// "did not decode", it goes once more; otherwise nothing, because a repaint
+/// the Mega missed is a repaint and the next one is a second away.
 void handleReceiveError(const proto::Frame& frame, uint32_t nowMs) {
-  proto::Frame on;
-  if (!bridgelogic::isReceiveError(frame.verb(), frame.arg(0), frame.arg(1)) ||
-      !gOnRetry.shouldResend(nowMs, on)) {
+  if (bridgelogic::isExtRefusal(frame.verb(), frame.arg(0)) && gOnRetry.verb() == proto::Verb::Ext) {
+    // `!ERR,BADARG` after an `!EXT` is not a lost frame. It is the Mega saying
+    // the relay is already OPEN — the court went dark between the extension
+    // being decided and the frame arriving — so there is nothing to extend and
+    // re-sending would be a court lit for nobody. Forget the extension and let
+    // the next `!STATE` reconcile the court, which is what queues the Release.
+    const uint8_t court = gOnRetry.court();
+    gOnRetry.clear();
+    if (court < bridgelogic::kStateCourts) {
+      gRelight.onRelease(court);
+    }
     return;
   }
-  const uint8_t court = static_cast<uint8_t>(on.arg(0)[0] - 'A');
+
+  proto::Frame pending;
+  if (!bridgelogic::isReceiveError(frame.verb(), frame.arg(0), frame.arg(1)) ||
+      !gOnRetry.shouldResend(nowMs, pending)) {
+    return;
+  }
+  const uint8_t court = static_cast<uint8_t>(pending.arg(0)[0] - 'A');
   if (court >= bridgelogic::kStateCourts) {
     return;
   }
-  const bool sent = sendToMega(on);
+  const bool sent = sendToMega(pending);
+  if (pending.verb() == proto::Verb::Ext) {
+    // An extension is about a court that is ALREADY held, so nothing about the
+    // held state changes either way. A second failure costs nothing beyond the
+    // lead time: `!STATE`'s remaining seconds keep gRelight honest, so the next
+    // pass sees the deadline is still short and tries again.
+    return;
+  }
   if (sent) {
     // Held from NOW: the first attempt's stamp is the one a `!STATE` in flight
     // would have contradicted.
@@ -801,6 +917,19 @@ void handleState(const proto::Frame& frame, uint32_t nowMs) {
   if (!bridgelogic::parseStateMask(frame.arg(0), mask)) {
     return;
   }
+  // The Mega's own account of what each relay has left. It is the AUTHORITY on
+  // the relay deadline; this half only ever had a belief about it, stamped the
+  // instant an `!EXT` left the TX ring. A corrupted extension therefore left
+  // gRelight quiet for another half hour and the court went dark mid-game with
+  // the bridge convinced it had extended it (review 3, finding 7). Adopting the
+  // truth here is what makes the next pass re-send it in time.
+  for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
+    uint16_t seconds = 0U;
+    if (bridgelogic::parseStateSeconds(frame.arg(static_cast<uint8_t>(i + 1U)), seconds)) {
+      gRelight.observeRelayRemaining(i, seconds, nowMs);
+    }
+  }
+
   const bridgelogic::Reconciliation plan = bridgelogic::reconcile(mask, gHeld, nowMs);
   for (uint8_t i = 0U; i < bridgelogic::kStateCourts; ++i) {
     switch (plan.action[i]) {
@@ -1143,9 +1272,11 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
 
 /// Persists what provisioning returned.
 ///
-/// The key is written in two halves because hal::IStore caps a value at 32 bytes
-/// and 32 key bytes are 64 hex characters. Both halves and the id must land or
-/// the whole thing is treated as absent — see loadCredentials.
+/// The key is written in two halves because hal::IStore capped a value at 32
+/// bytes when this was written and 32 key bytes are 64 hex characters. The cap
+/// is 128 now and one record would fit, but every provisioned box in the field
+/// holds it as two, so the layout stays — see kKeyDeviceKey2. Both halves and
+/// the id must land or the whole thing is treated as absent (loadCredentials).
 bool storeProvisioning(const char* body, size_t len) {
   char deviceId[devapi::kMaxDeviceIdLen + 1U] = {};
   char keyHex[(kDeviceKeyBytes * 2U) + 1U] = {};
@@ -1249,18 +1380,39 @@ void joinWifi(const bridgelogic::WifiCredential& credential) {
 /// typing it is standing at the box and needs to see it land whether or not
 /// the router agrees.
 void handleWifiLine(const char* line, size_t len) {
+  // Whatever else happens, a `!WIFI` line arrived on this UART, which is the
+  // one thing that proves a human with a serial monitor is on the other end of
+  // it — the Mega has no WIFI verb and never sends one. From here on the two
+  // acknowledgements below are safe to print as prose.
+  gWifiLineSeen = true;
+
   bridgelogic::WifiCredential credential;
   if (!bridgelogic::parseWifiLine(line, len, credential)) {
     static_cast<void>(sendToMega(proto::Frame::lcd("WIFI LINE BAD", "!WIFI,SSID,PASS")));
+    sendPlain("[wifi] line not understood: !WIFI,<ssid>,<password>");
     return;
   }
   if (!bridgelogic::storeWifiCredential(gStore, credential)) {
     static_cast<void>(sendToMega(proto::Frame::lcd("WIFI NOT SAVED", "STORE REFUSED")));
+    sendPlain("[wifi] not saved, the flash store refused the write");
     return;
   }
   gWifiStored = credential;
   gWifiSource = bridgelogic::WifiSource::Stored;
+  // The typed credential is now the only candidate: it outranks anything
+  // compiled in (chooseWifiCredential), and nothing may hand the radio back to
+  // secrets.h behind the technician's back.
+  gWifiPlan.restart(gClock.nowMs());
   static_cast<void>(sendToMega(proto::Frame::lcd("WIFI SAVED", "JOINING...")));
+
+  // The line the technician is actually looking at. The `!LCD` frame above
+  // reaches the glass only once DIP 1 and 2 are restored, and in this DIP
+  // position it arrives in their monitor as `!LCD,WIFI SAVED,JOINING...*CC`,
+  // which reads as noise.
+  char ack[80];
+  snprintf(ack, sizeof(ack), "[wifi] saved, joining %s", credential.ssid);
+  sendPlain(ack);
+
   WiFi.disconnect();
   joinWifi(credential);
 }
@@ -1271,30 +1423,75 @@ void pumpWifiLink(uint32_t nowMs) {
     return;
   }
   gWifiUp = up;
-  if (up) {
-    // The credential that JOINED is the one worth keeping. Written on the
-    // link-up edge rather than at boot so a typo in secrets.h cannot overwrite
-    // a stored credential that works; and only when it differs, so a box that
-    // joins every morning is not a box that wears a flash cell every morning.
-    if (bridgelogic::shouldPersistWifi(gWifiActive, gWifiStored) &&
-        bridgelogic::storeWifiCredential(gStore, gWifiActive)) {
-      gWifiStored = gWifiActive;
-    }
-    static_cast<void>(gUdp.begin(discovery::kUdpPort));
-    // Immediately, not after a full interval: the case that matters is a box
-    // that just got its DHCP lease with an admin standing at the cupboard.
-    gAnnouncer.linkUp(nowMs);
-    if (gProvisioned) {
-      // And the heartbeat that fills the court list and the roster. Until it
-      // has, a scan is refused locally rather than recorded server-side and
-      // then refused at the box (review #12).
-      gHeartbeat.arm(nowMs, 0U);
-    }
-    showIdentityScreen();
+  if (!up) {
+    gUdp.stop();
+    gAnnouncer.linkDown();
     return;
   }
-  gUdp.stop();
-  gAnnouncer.linkDown();
+
+  // The credential that JOINED is the one worth keeping. Written on the
+  // link-up edge rather than at boot so a typo in secrets.h cannot overwrite
+  // a stored credential that works; and only when it differs, so a box that
+  // joins every morning is not a box that wears a flash cell every morning.
+  // It is also what completes the reflash rotation path: the compiled-in
+  // credential pumpWifiFallback handed the radio to becomes the stored one the
+  // moment it proves it can join.
+  if (bridgelogic::shouldPersistWifi(gWifiActive, gWifiStored) &&
+      bridgelogic::storeWifiCredential(gStore, gWifiActive)) {
+    gWifiStored = gWifiActive;
+  }
+  // Nothing switches the credential after a successful join.
+  gWifiPlan.joined();
+
+  static_cast<void>(gUdp.begin(discovery::kUdpPort));
+  // Immediately, not after a full interval: the case that matters is a box
+  // that just got its DHCP lease with an admin standing at the cupboard.
+  gAnnouncer.linkUp(nowMs);
+  if (gProvisioned) {
+    // And the heartbeat that fills the court list and the roster. Until it
+    // has, a scan is refused locally rather than recorded server-side and
+    // then refused at the box (review #12).
+    gHeartbeat.arm(nowMs, 0U);
+  }
+  showIdentityScreen();
+
+  // The line the technician who typed `!WIFI` is watching for. Silent on every
+  // other box and every other boot — see sendPlain.
+  char ack[64];
+  const IPAddress ip = WiFi.localIP();
+  snprintf(ack, sizeof(ack), "[wifi] joined %u.%u.%u.%u", static_cast<unsigned>(ip[0]),
+           static_cast<unsigned>(ip[1]), static_cast<unsigned>(ip[2]), static_cast<unsigned>(ip[3]));
+  sendPlain(ack);
+}
+
+/// Gives the OTHER credential a turn when the current one will not join.
+///
+/// Only ever does anything on a box that holds two DIFFERENT credentials — a
+/// bench-flashed unit whose secrets.h has been updated to a rotated password
+/// while its store still holds the old one. Without it the store-wins rule
+/// (bridgelogic::chooseWifiCredential) would make the reflash rotation path in
+/// go-live item 7 a no-op; with it, the compiled-in credential gets the radio
+/// after kWifiJoinFallbackMs and, once it joins, pumpWifiLink persists it.
+/// On a CI image, or on a box whose two credentials agree, there is nothing to
+/// alternate with and the radio is never touched.
+void pumpWifiFallback(uint32_t nowMs) {
+  if (gWifiUp) {
+    return;
+  }
+  switch (gWifiPlan.tick(nowMs)) {
+  case bridgelogic::WifiSwitch::ToStored:
+    gWifiSource = bridgelogic::WifiSource::Stored;
+    WiFi.disconnect();
+    joinWifi(gWifiStored);
+    return;
+  case bridgelogic::WifiSwitch::ToCompiledIn:
+    gWifiSource = bridgelogic::WifiSource::CompiledIn;
+    WiFi.disconnect();
+    joinWifi(gWifiCompiled);
+    return;
+  case bridgelogic::WifiSwitch::None:
+    return;
+  }
 }
 
 /// Applies the `button_map` array out of a heartbeat response.
@@ -1351,12 +1548,33 @@ constexpr bool kOtaSignatureEnforced = (CRUSADERS_OTA_SIGNED != 0) && (kOtaPubli
 /// Every refusal reason is logged to the Mega's display rather than swallowed: a
 /// fleet quietly declining an update is exactly the silence that gets noticed a
 /// week after the release was promoted everywhere.
-void considerUpdate(const char* body, size_t len) {
+void considerUpdate(const char* body, size_t len, uint32_t nowMs) {
   const ota::Manifest manifest = ota::parseManifest(body, len);
+
+  // What an install must not interrupt, and what this box already knows about
+  // this offer.
+  //
+  // The install blocks for the whole ~400 KB download and then reboots. Across
+  // that reboot the bridge loses gRelight's per-court booking ends, the
+  // held-since stamps and the bound button window — nothing rebuilds them,
+  // because the Mega never knew the booking — so a two-hour court adopted from
+  // the first `!STATE` afterwards is never extended and goes dark at the cap,
+  // mid-game (review 3, finding 8). The memo is finding 5's half: an image the
+  // box cannot verify fails identically at every heartbeat, and without a
+  // memory of that the fleet paints UPDATING / UPDATE FAILED over every session
+  // for as long as the release stands.
+  ota::InstallGate gate;
+  gate.courtsBusy = bridgelogic::anyCourtBusy(gHeld, gRelight, gAuth.armed(nowMs));
+  gate.memo = &gInstallMemo;
+
   const ota::Decision decision =
-      ota::decide(manifest, fw::kFirmwareVersion, gBootGuard, ESP.getFreeSketchSpace());
+      ota::decide(manifest, fw::kFirmwareVersion, gBootGuard, ESP.getFreeSketchSpace(), gate);
 
   if (decision != ota::Decision::Install) {
+    // Deferred is not an error and says nothing on the glass: the box is busy
+    // BECAUSE a member is on a court, and painting an update notice over
+    // "COURT B 45 MIN" is the interruption this refusal exists to avoid. The
+    // next idle heartbeat installs it.
     return;
   }
 
@@ -1403,32 +1621,13 @@ void considerUpdate(const char* body, size_t len) {
     // Never installed, so the marker would condemn a build that never ran. Clearing
     // it by confirming is correct: nothing is pending.
     gBootGuard.confirm();
+    // Counted against THIS offer. A flapping link deserves another go; a
+    // signature the compiled-in public key cannot verify fails the same way
+    // every time and is skipped after ota::kInstallAttempts, until the manifest
+    // itself changes — which is exactly what re-signing and re-uploading does.
+    gInstallMemo.failed(manifest);
     static_cast<void>(sendToMega(proto::Frame::lcd("UPDATE FAILED", "SCAN TO START")));
   }
-}
-
-/// One queued event as the upload endpoint's JSON.
-///
-/// `method` is omitted as a null rather than sent as the string "none", matching what
-/// eventq::methodName returns — a release has no identification method, and pretending it
-/// had one puts a fiction in the audit trail.
-void renderEvent(const eventq::Event& event, char* out, size_t outCap) {
-  char subject[eventq::kMaxSubjectLen + 1U] = {};
-  memcpy(subject, event.subject, event.subjectLen);
-
-  const char* method = eventq::methodName(event.method);
-  char methodJson[16] = "null";
-  if (method != nullptr) {
-    snprintf(methodJson, sizeof(methodJson), "\"%s\"", method);
-  }
-
-  snprintf(out, outCap,
-           "{\"uptime_ms\":%lu,\"events\":[{\"seq\":%lu,\"uptime_ms\":%lu,\"kind\":\"%s\","
-           "\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu}]}",
-           static_cast<unsigned long>(gUptime.value()), static_cast<unsigned long>(event.seq),
-           static_cast<unsigned long>(event.uptimeMs), eventq::kindName(event.kind),
-           event.court == eventq::Event::kNoCourt ? -1 : static_cast<int>(event.court), methodJson, subject,
-           static_cast<unsigned long>(event.durationMs));
 }
 
 /// Uploads what the box did, oldest first, and releases only what was acknowledged.
@@ -1453,8 +1652,22 @@ void drainEvents(uint32_t nowMs) {
     return;
   }
 
-  char body[384];
-  renderEvent(event, body, sizeof(body));
+  // bridgelogic::renderEventBody, not a local snprintf: both `uptime_ms` fields
+  // have to be 64-bit and survive the 49.7-day millis() wrap, and this file is
+  // filtered out of the host test build, so a wrap bug here is a wrap bug no
+  // test can reach (review 3, finding 25).
+  char body[bridgelogic::kEventBodyCap];
+  if (bridgelogic::renderEventBody(body, sizeof(body), gUptime.value(), event) == 0U) {
+    // Unrenderable. The caps make this unreachable — the longest possible body
+    // is well under half the buffer — but if it ever happened, KEEPING the event
+    // would pin every later one behind it forever and the box would stop
+    // reporting attendance at all. Dropping it costs one member's event, which
+    // is the same outcome the pre-render truncation had (a malformed body comes
+    // back 4xx and the queue drops it as one the box caused), without putting
+    // half a JSON object on the wire.
+    static_cast<void>(gQueue.release());
+    return;
+  }
 
   char response[192] = {};
   devapi::Response result;
@@ -1538,7 +1751,7 @@ void pumpHeartbeat(uint32_t nowMs) {
     // above already used the old value, which is a one-interval delay and not
     // worth a re-arm that could shorten this interval to nothing.
     static_cast<void>(bridgelogic::parseHeartbeatInterval(response, responseLen, gHeartbeatMs));
-    considerUpdate(response, responseLen);
+    considerUpdate(response, responseLen, nowMs);
     return;
   }
   case devapi::Reaction::ClockCorrected:
@@ -1596,10 +1809,14 @@ void setup() {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   static_cast<void>(bridgelogic::loadWifiCredential(gStore, gWifiStored));
-  bridgelogic::WifiCredential compiledIn;
-  static_cast<void>(compiledIn.set(WIFI_SSID, WIFI_PASSWORD));
+  static_cast<void>(gWifiCompiled.set(WIFI_SSID, WIFI_PASSWORD));
   bridgelogic::WifiCredential joining;
-  gWifiSource = bridgelogic::chooseWifiCredential(compiledIn, gWifiStored, joining);
+  gWifiSource = bridgelogic::chooseWifiCredential(gWifiCompiled, gWifiStored, joining);
+  // Something to fall back to only when BOTH exist and they differ — the
+  // reflashed-with-a-new-password box. See pumpWifiFallback.
+  const bool alternate =
+      gWifiCompiled.present() && gWifiStored.present() && !gWifiCompiled.equals(gWifiStored);
+  gWifiPlan.begin(gWifiSource, alternate, gClock.nowMs());
   if (gWifiSource != bridgelogic::WifiSource::None) {
     joinWifi(joining);
   }
@@ -1630,6 +1847,18 @@ void setup() {
 
   gQueue.begin();
   gSession.onBoot(now);
+
+  // LAST, once gWifiSource and gProvisioned are both known.
+  //
+  // Nothing painted this at boot, so a credential-less box came up showing the
+  // Mega's own idle text — CRUSADERS COURTS / SCAN TO START — and the
+  // technician who had just flashed the credential-free CI image read that as
+  // "the credential persisted" and boxed a unit that never joins (review 3,
+  // finding 9). Three documents and the item-5 completion check all promise a
+  // NO WIFI SET screen; this is the call that makes them true. If the Mega is
+  // not on the other end of the UART yet — the `!WIFI` DIP position — the frame
+  // is simply lost, and the first `!PONG` repaints it (noteMegaPong).
+  showIdentityScreen();
 }
 
 void loop() {
@@ -1654,6 +1883,7 @@ void loop() {
   }
 
   pumpWifiLink(now);
+  pumpWifiFallback(now);
 
   // Drain the Mega link BEFORE the blocking calls below, so the receive ring
   // starts each HTTP call as empty as possible and has the whole kMegaRxBufferBytes

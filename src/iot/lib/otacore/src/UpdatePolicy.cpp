@@ -1,5 +1,6 @@
 #include "otacore/UpdatePolicy.h"
 
+#include <stddef.h>
 #include <string.h>
 
 #include "devapi/Json.h"
@@ -38,8 +39,46 @@ Manifest parseManifest(const char* body, size_t len) {
   return manifest;
 }
 
+namespace {
+
+void copyBounded(char* out, size_t cap, const char* text) {
+  size_t n = 0U;
+  while (text[n] != '\0' && n + 1U < cap) {
+    out[n] = text[n];
+    ++n;
+  }
+  out[n] = '\0';
+}
+
+} // namespace
+
+bool InstallMemo::matches(const Manifest& manifest) const {
+  return sizeBytes_ == manifest.sizeBytes && strcmp(version_, manifest.version) == 0 &&
+         strcmp(url_, manifest.url) == 0;
+}
+
+void InstallMemo::failed(const Manifest& manifest) {
+  if (!matches(manifest)) {
+    copyBounded(version_, sizeof(version_), manifest.version);
+    copyBounded(url_, sizeof(url_), manifest.url);
+    sizeBytes_ = manifest.sizeBytes;
+    failures_ = 0U;
+  }
+  if (failures_ < UINT8_MAX) {
+    ++failures_;
+  }
+}
+
+bool InstallMemo::exhausted(const Manifest& manifest) const {
+  return matches(manifest) && failures_ >= kInstallAttempts;
+}
+
+const char* InstallMemo::skippedVersion() const {
+  return failures_ >= kInstallAttempts ? version_ : "";
+}
+
 Decision decide(const Manifest& manifest, const char* runningVersion, const BootGuard& guard,
-                uint32_t freeSketchSpace) {
+                uint32_t freeSketchSpace, const InstallGate& gate) {
   if (!manifest.present) {
     return Decision::NothingOffered;
   }
@@ -68,6 +107,19 @@ Decision decide(const Manifest& manifest, const char* runningVersion, const Boot
     return Decision::WillNotFit;
   }
 
+  // Checked before the busy gate, so a box that is permanently busy still
+  // reports the right reason for not installing.
+  if (gate.memo != nullptr && gate.memo->exhausted(manifest)) {
+    return Decision::InstallFailed;
+  }
+
+  if (gate.courtsBusy) {
+    // Last, because it is the only refusal that is expected to go away by
+    // itself: the same offer installs on the next heartbeat that finds the box
+    // idle.
+    return Decision::Deferred;
+  }
+
   return Decision::Install;
 }
 
@@ -85,6 +137,10 @@ const char* describe(Decision decision) {
     return "image is larger than the free sketch space";
   case Decision::Unusable:
     return "update manifest is incomplete";
+  case Decision::Deferred:
+    return "a court is in use; retrying next heartbeat";
+  case Decision::InstallFailed:
+    return "this image failed to install repeatedly (check the signing key)";
   }
   return "unknown";
 }

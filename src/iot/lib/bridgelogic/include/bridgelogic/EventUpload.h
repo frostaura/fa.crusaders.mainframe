@@ -1,0 +1,63 @@
+// Crusaders Mainframe — one queued event, as the upload endpoint's JSON.
+//
+// WHY THIS IS NOT IN main.cpp ANY MORE
+// ------------------------------------
+// It was, and `pio test -e native` cannot see main.cpp (`build_src_filter =
+// -<*>`), so the one thing in it that had to be right across the 49.7-day
+// millis() wrap was the one thing no test could reach. What that hid (review 3,
+// finding 25): both `uptime_ms` fields were printed with `%lu` from a 32-bit
+// cast, while the accumulator behind them had been 64-bit since the signing
+// clock was fixed. An activation queued before the wrap and uploaded after it
+// therefore went up with a stamp 49.7 days AHEAD of the batch's own uptime, and
+// the API — which dates an event by subtracting its uptime from the batch's —
+// dated it at upload time and filed a "the counter cannot be believed" audit
+// row against a healthy box. The court usage record and any dispute about when
+// the lights were on are wrong; attendance still resolves by booking, which is
+// why it took three reviews to find.
+//
+// WHY THE STAMP IS WIDENED HERE RATHER THAN STORED WIDE
+// -----------------------------------------------------
+// eventq::Event is a trivially-copyable record in a fixed ring on a part with
+// 40 KB of usable heap, so four more bytes per slot is 256 bytes of RAM to
+// carry a value that is only ever needed at the moment it goes on the wire.
+// tb::widen reconstructs it from the accumulator instead: the largest 64-bit
+// uptime not after `now` whose low 32 bits are the stamp. Exact for anything
+// queued less than 49.7 days ago, which is everything the API will accept — its
+// own bound is 30 days.
+//
+// WHY NOT `%llu`
+// --------------
+// avr-libc has no 64-bit printf conversion at all and the ESP8266 core's is a
+// build-time choice this firmware does not make. A number that silently prints
+// as garbage on one target is exactly the class of defect this file exists to
+// close, so the digits come from tb::formatU64 and go in as `%s`.
+//
+// No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
+
+#ifndef CRUSADERS_BRIDGELOGIC_EVENTUPLOAD_H
+#define CRUSADERS_BRIDGELOGIC_EVENTUPLOAD_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "eventq/Event.h"
+
+namespace bridgelogic {
+
+/// The smallest buffer renderEventBody is ever given. The longest body is the
+/// fixed JSON, a 32-character subject, two 20-digit uptimes and three 10-digit
+/// numbers — comfortably inside this.
+inline constexpr size_t kEventBodyCap = 384U;
+
+/// Renders the `/api/v1/device/events` body for one queued event.
+///
+/// `nowUptimeMs` is the batch's own uptime, from the 64-bit accumulator; the
+/// event's stamp is widened against it. Returns the length written, or 0 —
+/// with `out` empty — when it would not fit. Never a truncated body: a
+/// half-rendered JSON object is a request the server rejects with no clue why,
+/// and the event behind it would be dropped as a 4xx the box caused.
+size_t renderEventBody(char* out, size_t cap, uint64_t nowUptimeMs, const eventq::Event& event);
+
+} // namespace bridgelogic
+
+#endif // CRUSADERS_BRIDGELOGIC_EVENTUPLOAD_H

@@ -1,6 +1,7 @@
 #include "bridgelogic/StateReconcile.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 namespace bridgelogic {
 
@@ -20,6 +21,25 @@ bool parseStateMask(const char* arg, uint8_t& mask) {
     }
   }
   mask = static_cast<uint8_t>(value);
+  return true;
+}
+
+bool parseStateSeconds(const char* arg, uint16_t& seconds) {
+  if (arg == nullptr || arg[0] == '\0') {
+    return false;
+  }
+  uint32_t value = 0U;
+  for (size_t i = 0U; arg[i] != '\0'; ++i) {
+    const char c = arg[i];
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    value = value * 10U + static_cast<uint32_t>(c - '0');
+    if (value > UINT16_MAX) {
+      return false; // also bounds the loop: six digits cannot get here
+    }
+  }
+  seconds = static_cast<uint16_t>(value);
   return true;
 }
 

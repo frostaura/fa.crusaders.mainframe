@@ -26,6 +26,7 @@
 #ifndef CRUSADERS_TIMEBASE_H
 #define CRUSADERS_TIMEBASE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 namespace tb {
@@ -121,6 +122,60 @@ private:
   uint32_t last_ = 0;
   uint64_t acc_ = 0;
 };
+
+/// The 64-bit uptime a 32-bit millis() stamp belongs to.
+///
+/// WHY THIS EXISTS
+/// ---------------
+/// An event is stamped with the 32-bit millis() reading of the moment it
+/// happened and may sit in the queue for days before it is uploaded. Sent as
+/// 32 bits, a stamp taken before the 49.7-day wrap and uploaded after it reads
+/// as a moment 49.7 days AHEAD of the batch's own 64-bit uptime, and the
+/// server — which dates an event by subtracting its uptime from the batch's —
+/// dates it at upload time and files a "the counter cannot be believed" audit
+/// row against a perfectly healthy box (review 3, finding 25).
+///
+/// So the stamp is widened at the moment it goes on the wire, against the
+/// accumulator that has been counting wraps all along: the answer is the
+/// LARGEST value not after `now64` whose low 32 bits are `stamp`. Exact for
+/// anything queued less than 49.7 days ago, which is every event the server
+/// will accept (its own bound is 30 days).
+inline uint64_t widen(uint64_t now64, uint32_t stamp) {
+  const uint32_t low = static_cast<uint32_t>(now64 & 0xFFFFFFFFULL);
+  const uint32_t back = low - stamp; // modulo 2^32, which is what makes this work
+  return now64 - static_cast<uint64_t>(back);
+}
+
+/// Renders `value` as decimal into `out`. Returns the length, or 0 when it
+/// would not fit — never a truncated number.
+///
+/// snprintf's `%llu` is NOT available: avr-libc has no 64-bit printf at all,
+/// and the ESP8266 core's is a build-time choice this firmware does not make.
+/// A number that silently prints as garbage on one of the two targets is the
+/// kind of thing that only shows up in an audit trail months later, so the
+/// conversion is done here, in code both targets compile and the host suite
+/// pins.
+inline size_t formatU64(uint64_t value, char* out, size_t cap) {
+  if (out == nullptr || cap == 0U) {
+    return 0U;
+  }
+  char digits[20]; // 2^64-1 is 20 digits
+  size_t n = 0U;
+  do {
+    digits[n] = static_cast<char>('0' + static_cast<char>(value % 10ULL));
+    ++n;
+    value /= 10ULL;
+  } while (value != 0ULL);
+  if (n + 1U > cap) {
+    out[0] = '\0';
+    return 0U;
+  }
+  for (size_t i = 0U; i < n; ++i) {
+    out[i] = digits[n - 1U - i];
+  }
+  out[n] = '\0';
+  return n;
+}
 
 } // namespace tb
 

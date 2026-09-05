@@ -89,6 +89,16 @@ struct Reconciliation {
 /// reconciled against.
 bool parseStateMask(const char* arg, uint8_t& mask);
 
+/// Parses one of `!STATE`'s four per-court remaining-seconds arguments:
+/// decimal, no sign, no whitespace, at most 65535. False on anything else —
+/// including an absent argument, which an older Mega that sends the mask alone
+/// produces — and `seconds` is left untouched.
+///
+/// The Mega publishes what its own relay timer has left, on every change and
+/// every ten seconds. Reading it is what corrects a relay deadline this half
+/// only BELIEVES it moved (bridgelogic::Relight::observeRelayRemaining).
+bool parseStateSeconds(const char* arg, uint16_t& seconds);
+
 /// Compares `mask` against `held` and says what to do about each court.
 Reconciliation reconcile(uint8_t mask, const HeldState held[kStateCourts], uint32_t nowMs);
 

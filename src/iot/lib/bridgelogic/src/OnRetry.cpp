@@ -4,6 +4,26 @@
 
 namespace bridgelogic {
 
+namespace {
+
+/// The court a relay-affecting frame names, or kNoRetryCourt. The argument is
+/// a single letter A-D by the wire contract; anything else is remembered as no
+/// court rather than as court 0.
+uint8_t courtOf(const proto::Frame& frame) {
+  const char* arg = frame.arg(0);
+  if (arg == nullptr || arg[0] < 'A' || arg[0] > 'D' || arg[1] != '\0') {
+    return kNoRetryCourt;
+  }
+  return static_cast<uint8_t>(arg[0] - 'A');
+}
+
+/// The two downlink verbs that change what a relay is doing.
+bool affectsRelay(proto::Verb verb) {
+  return verb == proto::Verb::On || verb == proto::Verb::Ext;
+}
+
+} // namespace
+
 bool isReceiveError(proto::Verb verb, const char* name, const char* detail) {
   if (name == nullptr || detail == nullptr) {
     return false;
@@ -12,16 +32,27 @@ bool isReceiveError(proto::Verb verb, const char* name, const char* detail) {
     return strcmp(name, proto::errorName(proto::DecodeError::BadCrc)) == 0;
   }
   if (verb == proto::Verb::Evt) {
-    return strcmp(name, proto::errorName(proto::DecodeError::Overrun)) == 0 && strcmp(detail, "RX") == 0;
+    // BADFRAME as well as OVERRUN: a glitch byte ahead of the `!` on an idle
+    // line is the commonest way an `!ON` is lost, and the Mega classifies that
+    // line by its first byte (review 3, finding 13).
+    const bool named = strcmp(name, proto::errorName(proto::DecodeError::Overrun)) == 0 ||
+                       strcmp(name, proto::errorName(proto::DecodeError::BadFrame)) == 0;
+    return named && strcmp(detail, "RX") == 0;
   }
   return false;
 }
 
+bool isExtRefusal(proto::Verb verb, const char* name) {
+  return verb == proto::Verb::Err && name != nullptr &&
+         strcmp(name, proto::errorName(proto::DecodeError::BadArg)) == 0;
+}
+
 void OnRetry::sent(const proto::Frame& on, uint32_t nowMs) {
-  if (on.verb() != proto::Verb::On) {
+  if (!affectsRelay(on.verb())) {
     return;
   }
   frame_ = on;
+  court_ = courtOf(on);
   window_.arm(nowMs, kRetryWindowMs);
 }
 
@@ -38,9 +69,20 @@ bool OnRetry::shouldResend(uint32_t nowMs, proto::Frame& out) {
   return true;
 }
 
+proto::Verb OnRetry::verb() const {
+  return window_.isArmed() ? frame_.verb() : proto::Verb::Unknown;
+}
+
 void OnRetry::clear() {
   window_.disarm();
   frame_ = proto::Frame();
+  court_ = kNoRetryCourt;
+}
+
+void OnRetry::clearIfCourt(uint8_t court) {
+  if (court_ == court) {
+    clear();
+  }
 }
 
 } // namespace bridgelogic

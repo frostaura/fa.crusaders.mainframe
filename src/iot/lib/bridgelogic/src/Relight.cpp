@@ -67,4 +67,26 @@ void Relight::extended(uint8_t court, uint32_t seconds, uint32_t nowMs) {
   courts_[court].relayEnd.arm(nowMs, ms > kCapMs ? kCapMs : ms);
 }
 
+void Relight::observeRelayRemaining(uint8_t court, uint32_t seconds, uint32_t nowMs) {
+  if (!tracking(court)) {
+    return;
+  }
+  // The same clamp as extended(): the Mega cannot hold a relay past its own
+  // cap, so a reading beyond it is a reading this build does not believe.
+  const uint32_t ms = seconds > UINT32_MAX / 1000U ? UINT32_MAX : seconds * 1000U;
+  courts_[court].relayEnd.arm(nowMs, ms > kCapMs ? kCapMs : ms);
+}
+
+bool anyCourtBusy(const HeldState held[kStateCourts], const Relight& relight, bool authArmed) {
+  if (authArmed) {
+    return true;
+  }
+  for (uint8_t i = 0U; i < kStateCourts; ++i) {
+    if (held[i].held || relight.tracking(i)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace bridgelogic

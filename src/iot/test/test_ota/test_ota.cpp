@@ -133,13 +133,84 @@ void test_policy_refuses_an_incomplete_manifest() {
 void test_policy_every_refusal_has_a_reason_worth_showing() {
   const ota::Decision all[] = {ota::Decision::Install,    ota::Decision::NothingOffered,
                                ota::Decision::NotNewer,   ota::Decision::KnownBad,
-                               ota::Decision::WillNotFit, ota::Decision::Unusable};
+                               ota::Decision::WillNotFit, ota::Decision::Unusable,
+                               ota::Decision::Deferred,   ota::Decision::InstallFailed};
   for (size_t i = 0U; i < sizeof(all) / sizeof(all[0]); ++i) {
     const char* text = ota::describe(all[i]);
     TEST_ASSERT_NOT_NULL(text);
     TEST_ASSERT_TRUE(strlen(text) > 0U);
     TEST_ASSERT_TRUE(strcmp(text, "unknown") != 0);
   }
+}
+
+void test_policy_defers_while_a_court_is_in_use_and_installs_on_the_next_quiet_beat() {
+  // REVIEW 3, FINDING 8. `considerUpdate` ran on every accepted heartbeat and
+  // `decide` looked only at the manifest, the version, the guard and free
+  // space. So an API deployed at 19:05 with a newer baked image had every box
+  // in the club painting UPDATING, blocking on a ~400 KB download and rebooting
+  // with courts lit — and the reboot loses the per-court booking ends `!EXT`
+  // needs, so a 20:30 booking darkens at 20:00 mid-game.
+  fakes::FakeStore store;
+  ota::BootGuard guard(&store);
+  static_cast<void>(guard.begin());
+
+  ota::InstallGate busy;
+  busy.courtsBusy = true;
+  TEST_ASSERT_TRUE(ota::decide(manifest("1.1.0"), "1.0.0", guard, 0U, busy) == ota::Decision::Deferred);
+
+  // Nothing else about the offer changed — it installs the moment the box is
+  // idle, which is what makes this a deferral rather than a refusal.
+  ota::InstallGate idle;
+  TEST_ASSERT_TRUE(ota::decide(manifest("1.1.0"), "1.0.0", guard, 0U, idle) == ota::Decision::Install);
+  TEST_ASSERT_TRUE(ota::decide(manifest("1.1.0"), "1.0.0", guard, 0U) == ota::Decision::Install);
+
+  // A busy box still refuses a downgrade for the RIGHT reason: the deferral is
+  // last, so the admin screen never blames the courts for a bad manifest.
+  TEST_ASSERT_TRUE(ota::decide(manifest("0.9.0"), "1.0.0", guard, 0U, busy) == ota::Decision::NotNewer);
+  TEST_ASSERT_TRUE(ota::decide(manifest("1.1.0"), "1.0.0", guard, 10U, busy) == ota::Decision::WillNotFit);
+}
+
+void test_policy_stops_reflashing_an_image_that_keeps_failing() {
+  // REVIEW 3, FINDING 5, BOX SIDE. `iot-sign` signs with whatever
+  // OTA_PRIVATE_KEY holds and nothing checks it against the committed public
+  // key. A mismatch ships a CI-green release every box rejects — after the full
+  // download — and `decide` had no memory of it, so the API re-offered on every
+  // heartbeat and the fleet painted UPDATING / UPDATE FAILED over every session
+  // for as long as the release stood.
+  fakes::FakeStore store;
+  ota::BootGuard guard(&store);
+  static_cast<void>(guard.begin());
+
+  ota::InstallMemo memo;
+  ota::InstallGate gate;
+  gate.memo = &memo;
+  const ota::Manifest bad = manifest("1.1.0");
+
+  // A transient — an interrupted download on a flapping link — deserves
+  // another go, so the first failures do not skip it.
+  for (uint8_t i = 1U; i < ota::kInstallAttempts; ++i) {
+    memo.failed(bad);
+    TEST_ASSERT_TRUE(ota::decide(bad, "1.0.0", guard, 0U, gate) == ota::Decision::Install);
+    TEST_ASSERT_EQUAL_STRING("", memo.skippedVersion());
+  }
+  memo.failed(bad);
+  TEST_ASSERT_TRUE(ota::decide(bad, "1.0.0", guard, 0U, gate) == ota::Decision::InstallFailed);
+  TEST_ASSERT_EQUAL_STRING("1.1.0", memo.skippedVersion());
+
+  // Re-signing and re-uploading is the operator's repair, and it must clear the
+  // memory. The version can even stay the same: the URL or the size moves.
+  const ota::Manifest resigned = manifest("1.1.0", "http://10.0.0.5/fw.bin", 300512U);
+  TEST_ASSERT_FALSE(memo.exhausted(resigned));
+  TEST_ASSERT_TRUE(ota::decide(resigned, "1.0.0", guard, 0U, gate) == ota::Decision::Install);
+
+  // A different release is a different offer, and gets its own attempts.
+  const ota::Manifest next = manifest("1.2.0");
+  TEST_ASSERT_FALSE(memo.exhausted(next));
+  TEST_ASSERT_TRUE(ota::decide(next, "1.0.0", guard, 0U, gate) == ota::Decision::Install);
+
+  // A box that keeps no memo behaves exactly as before.
+  ota::InstallGate none;
+  TEST_ASSERT_TRUE(ota::decide(bad, "1.0.0", guard, 0U, none) == ota::Decision::Install);
 }
 
 // --- the boot guard --------------------------------------------------------
@@ -339,6 +410,8 @@ int main(int, char**) {
   RUN_TEST(test_policy_refuses_an_image_that_will_not_fit_before_downloading_it);
   RUN_TEST(test_policy_refuses_an_incomplete_manifest);
   RUN_TEST(test_policy_every_refusal_has_a_reason_worth_showing);
+  RUN_TEST(test_policy_defers_while_a_court_is_in_use_and_installs_on_the_next_quiet_beat);
+  RUN_TEST(test_policy_stops_reflashing_an_image_that_keeps_failing);
 
   RUN_TEST(test_guard_an_ordinary_boot_is_settled);
   RUN_TEST(test_guard_an_update_is_proving_until_the_api_accepts_something);

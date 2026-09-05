@@ -32,6 +32,10 @@ AuthCommand AuthPolicy::afterScan(const court::Outcome& outcome, uint32_t nowMs)
   return arm(kUnbound, nowMs);
 }
 
+AuthCommand AuthPolicy::afterHeldCourtRescan(uint8_t court, uint32_t nowMs) {
+  return arm(court, nowMs);
+}
+
 AuthCommand AuthPolicy::afterWalkUp(const court::Outcome& outcome, uint32_t nowMs) {
   if (outcome.action != court::Action::TurnOn) {
     return AuthCommand::None;

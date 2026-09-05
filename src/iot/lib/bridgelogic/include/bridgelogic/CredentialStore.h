@@ -12,9 +12,11 @@
 // to survive a firmware update has to live in the part of flash a firmware
 // update does not touch.
 //
-// So: a build that carries secrets.h joins with it and, once it has actually
-// joined, writes it here; every later boot — and every CI image — reads it
-// from here. A box provisioned once at the bench works on every release after.
+// So: a build that carries secrets.h joins with it on the FIRST boot only —
+// the boot on which the store is still empty — and, once it has actually
+// joined, writes it here. Every boot after that, and every CI image, joins
+// with what the store holds. A box provisioned once at the bench works on
+// every release after.
 //
 // WHY THERE IS A `!WIFI` LINE
 // ---------------------------
@@ -54,6 +56,8 @@
 #include <stdint.h>
 
 #include "hal/Store.h"
+
+#include "timebase/TimeBase.h"
 
 namespace bridgelogic {
 
@@ -112,22 +116,97 @@ struct WifiCredential {
 enum class WifiSource : uint8_t {
   /// Neither a compiled-in nor a stored credential. The box cannot join.
   None = 0U,
-  /// secrets.h was present at build time. The bench / first-flash path.
+  /// secrets.h was present at build time AND the store was empty. The
+  /// first-flash path, and — through WifiJoinPlan — the reflash rotation path
+  /// when the stored credential cannot join.
   CompiledIn = 1U,
-  /// Read from the store. The OTA path, and every boot after the first join.
+  /// Read from the store. Every boot after the first join, every CI image, and
+  /// every box a `!WIFI` line has been typed into.
   Stored = 2U,
 };
 
-/// The boot rule. A compiled-in credential wins when there is one — it is the
-/// technician's most recent statement of intent, and the way a rotated
-/// password reaches the store — otherwise the stored one, otherwise nothing.
+/// The boot rule. THE STORE WINS whenever it holds a credential; a compiled-in
+/// one is a first-boot seed and nothing more.
+///
+/// It used to be the other way round, on the reasoning that secrets.h was "the
+/// technician's most recent statement of intent". It is not — it is the
+/// statement of intent of whoever last flashed that box, which on a bench-built
+/// unit is months ago. What that cost (review 3, finding 1): a club rotates its
+/// WiFi password, the technician types `!WIFI` at every box per go-live item 7,
+/// sees WIFI SAVED, and the next breaker trip boots every one of them back onto
+/// the stale compiled-in password. Nothing joins, every scan reads NO
+/// CONNECTION, and the recovery is the USB reflash of the whole fleet that the
+/// store exists to make unnecessary.
+///
+/// The reflash-with-a-new-secrets.h rotation path is NOT lost: see
+/// WifiJoinPlan, which hands the compiled-in credential its turn when the
+/// stored one cannot join.
 WifiSource chooseWifiCredential(const WifiCredential& compiledIn, const WifiCredential& stored,
                                 WifiCredential& out);
+
+/// How long one credential is given to join before the other is tried.
+/// Comfortably longer than a healthy association (a few seconds) and short
+/// enough that a technician who has just reflashed does not conclude the box
+/// is dead.
+inline constexpr uint32_t kWifiJoinFallbackMs = 20000UL;
+
+/// What the composition root should do about the radio, if anything.
+enum class WifiSwitch : uint8_t {
+  /// Leave it alone.
+  None = 0U,
+  /// Re-join with the stored credential.
+  ToStored = 1U,
+  /// Re-join with the compiled-in one.
+  ToCompiledIn = 2U,
+};
+
+/// Keeps the reflash rotation path alive under the store-wins rule above.
+///
+/// A box whose stored credential is stale (the club rotated the password and
+/// the technician chose the reflash path rather than the `!WIFI` one) would
+/// otherwise never try the credential that was just flashed into it. So while
+/// the link is down and BOTH credentials exist and differ, this alternates
+/// between them every kWifiJoinFallbackMs. The moment either one joins,
+/// alternating stops for good — the credential that worked is also the one
+/// pumpWifiLink persists.
+///
+/// It alternates rather than trying the second one once: a box that comes up
+/// while the AP is rebooting would otherwise be left on whichever credential
+/// happened to lose the coin toss. In the ordinary case — a CI image with no
+/// secrets.h, or a bench box whose two credentials agree — there is nothing to
+/// alternate with and the radio is never touched.
+class WifiJoinPlan {
+public:
+  /// `source` is what chooseWifiCredential picked; `alternate` is true only
+  /// when the OTHER credential is present and different, i.e. there is
+  /// something to fall back to at all.
+  void begin(WifiSource source, bool alternate, uint32_t nowMs);
+
+  /// The link is still down. Says what to re-join with, and remembers it.
+  WifiSwitch tick(uint32_t nowMs);
+
+  /// The link came up. Nothing switches the credential after this except a
+  /// `!WIFI` line.
+  void joined();
+
+  /// A `!WIFI` line replaced the stored credential: it is the only candidate
+  /// now, and the compiled-in one must not steal the radio back from it.
+  void restart(uint32_t nowMs);
+
+  WifiSource source() const { return source_; }
+
+private:
+  WifiSource source_ = WifiSource::None;
+  bool alternate_ = false;
+  tb::Deadline switchAt_;
+};
 
 /// True when a credential the box has just JOINED with should be written:
 /// it differs from what the store holds. Persisting on join rather than at
 /// boot is deliberate — a typo in secrets.h must not overwrite a credential
-/// that works.
+/// that works. It is also what completes the reflash rotation path: the
+/// compiled-in credential WifiJoinPlan fell back to becomes the stored one the
+/// moment it proves it can join.
 bool shouldPersistWifi(const WifiCredential& joined, const WifiCredential& stored);
 
 bool loadWifiCredential(hal::IStore& store, WifiCredential& out);

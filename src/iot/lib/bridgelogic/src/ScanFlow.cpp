@@ -144,6 +144,21 @@ bool relayForCourtNumber(int16_t courtNumber, const int16_t courtNumbers[kMaxCou
   return false;
 }
 
+bool regrantsHeldCourt(const roster::Decision& decision, const HeldState held[kStateCourts],
+                       court::Outcome& out) {
+  if (decision.verdict != roster::Verdict::Allow || decision.entry.court >= kStateCourts ||
+      !held[decision.entry.court].held) {
+    return false;
+  }
+  char line1[court::kLineLen + 1U] = "COURT ? IS ON";
+  line1[6] = static_cast<char>('A' + decision.entry.court);
+  out = refusal(line1, "ALREADY LIT", true);
+  // The refusal helper has no court to attribute a scan to; this one does, and
+  // the caller binds the button window to it.
+  out.court = decision.entry.court;
+  return true;
+}
+
 size_t renderActivateBody(char* out, size_t cap, const char* token) {
   if (out == nullptr || cap == 0U || token == nullptr) {
     return 0U;

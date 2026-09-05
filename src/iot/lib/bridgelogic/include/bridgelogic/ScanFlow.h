@@ -46,6 +46,7 @@
 #include <stdint.h>
 
 #include "bridgelogic/RosterSync.h"
+#include "bridgelogic/StateReconcile.h"
 #include "court/Session.h"
 
 namespace bridgelogic {
@@ -105,6 +106,27 @@ bool relayForCourtNumber(int16_t courtNumber, const int16_t courtNumbers[kMaxCou
 /// button window. A refusal leaves the scan live so the member can still buy
 /// time with the buttons.
 bool spendsScan(const court::Outcome& outcome);
+
+/// True — with `out` filled — when a roster decision would re-light a court
+/// this box already believes is lit, and must not.
+///
+/// The roster has no idea whether a court is on: it holds bookings, and a
+/// booking stays "allowed" for its whole window. So a member who scans again
+/// ten minutes into their own game — because the screen has moved on, or
+/// because they are showing a partner how it works — was re-granted from the
+/// roster, which sent a second `!ON` (re-arming the relay from now, silently
+/// extending the court past its slot) and queued a second Activation event for
+/// one booking. Two attendance events for one game is a duplicate the API
+/// deduplicates on `seq` and not on meaning, and the second `!ON`'s duration is
+/// whatever is left of the booking measured from the RESCAN.
+///
+/// The online path is untouched: an API grant is the API's decision, made with
+/// the booking in front of it, and this half does not second-guess one.
+///
+/// The member is told what is true — the court is on — and the button window is
+/// armed and bound to that court so their OFF press still works.
+bool regrantsHeldCourt(const roster::Decision& decision, const HeldState held[kStateCourts],
+                       court::Outcome& out);
 
 /// Renders the activate request body. Returns the length, or 0 when it would
 /// not fit — never a truncated body, which would be a request for a different

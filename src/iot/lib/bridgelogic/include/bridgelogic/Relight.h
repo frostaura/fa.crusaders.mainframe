@@ -65,7 +65,27 @@ public:
   Extension check(uint8_t court, uint32_t nowMs) const;
 
   /// The `!EXT` for `court` was sent for `seconds`: the relay deadline moves.
+  ///
+  /// Stamped on SEND, which is a belief and not a fact — the frame may still be
+  /// corrupted on the wire. observeRelayRemaining is what turns it back into a
+  /// fact, and bridgelogic::OnRetry re-sends a frame the Mega said it could not
+  /// decode.
   void extended(uint8_t court, uint32_t seconds, uint32_t nowMs);
+
+  /// The Mega's own account of how many seconds `court`'s relay has left,
+  /// taken from a `!STATE` frame.
+  ///
+  /// The Mega is the AUTHORITY on the relay deadline; this half only ever had a
+  /// belief about it, formed the instant an `!EXT` left the TX ring. When that
+  /// frame is lost the belief is ~29 minutes wrong and the court goes dark
+  /// mid-game with the bridge convinced it had extended it (review 3, finding
+  /// 7). `!STATE` carries the truth every ten seconds and on every change;
+  /// this adopts it, so a lost extension is corrected within one `!STATE` and
+  /// re-sent by the ordinary lead-time rule.
+  ///
+  /// Ignored for a court that is not being tracked: a court whose booking fits
+  /// inside one relay deadline has no extension to get wrong.
+  void observeRelayRemaining(uint8_t court, uint32_t seconds, uint32_t nowMs);
 
   /// True while `court` has a booking longer than its current relay deadline.
   bool tracking(uint8_t court) const;
@@ -80,6 +100,21 @@ private:
 
   Court courts_[kStateCourts];
 };
+
+/// True when this box is in the middle of something a reboot would break: a
+/// court held, a booking whose `!EXT` is still owed, or an armed button window
+/// with a member standing at the panel.
+///
+/// An OTA install blocks for the whole download and then reboots. Across that
+/// reboot the bridge loses Relight's per-court booking end, the held-since
+/// stamps and the bound button window — so a two-hour booking adopted from the
+/// first `!STATE` after the reboot is never extended and darkens at the cap,
+/// mid-game (review 3, finding 8). Nothing recovers those from the Mega,
+/// because the Mega never knew the booking. Deferring the install to a
+/// heartbeat when the box is idle costs at most one heartbeat interval per
+/// busy court and is the only bound available without persisting the booking
+/// ends.
+bool anyCourtBusy(const HeldState held[kStateCourts], const Relight& relight, bool authArmed);
 
 } // namespace bridgelogic
 
