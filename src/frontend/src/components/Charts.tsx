@@ -2,7 +2,7 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart,
   ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, Line, LineChart,
 } from "recharts";
-import { useEffect, useRef, useState } from "react";
+import { createElement, useEffect, useRef, useState } from "react";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 import { formatCredits } from "../lib/utils";
 
@@ -59,6 +59,17 @@ const COUNT_AXIS_WIDTH = 36;
 const LEFT_MARGIN = 0;
 
 /**
+ * The measured width of a {@link ChartFrame}'s box.
+ *
+ * A named alias rather than an inline `useState<{ width: number } | null>`, and that is not
+ * style: lizard's TSX parser reads the `<` of the generic as a JSX open tag and then swallows the
+ * rest of the file into whichever function it was last inside — it reported `ChartFrame` at 243
+ * lines and lost every function after it, tripping `make complexity`'s `-L 200` on lines nobody
+ * had touched. Naming the type puts the braces outside the angle brackets. See memory/gotchas.md.
+ */
+type FrameSize = { width: number };
+
+/**
  * The box a chart is drawn in, which does not draw the chart until the box has a size.
  *
  * <p>
@@ -108,17 +119,17 @@ function ChartFrame({ children }: { children: React.ReactNode }) {
   // measurement is kept, because after that `ResponsiveContainer`'s own ResizeObserver owns the
   // size — re-rendering the chart on every pixel of a window drag would buy nothing. The state
   // therefore changes only on a null↔sized transition.
-  const [frame, setFrame] = useState<{ width: number } | null>(null);
+  const [frame, setFrame] = useState<FrameSize | null>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // `width > 0`, never `width <= 0`: lizard reads a bare `<` in a .tsx file as a JSX open tag
+    // and swallows the rest of the file into whichever function it was last inside, reporting
+    // this one at 268 lines and tripping `-L 200` on a line nobody touched. See memory/gotchas.md.
     const check = () => {
       const width = el.clientWidth;
-      setFrame((previous) => {
-        if (width <= 0) return null;
-        return previous ?? { width };
-      });
+      setFrame((previous) => (width > 0 ? previous ?? { width } : null));
     };
     check();
     if (typeof ResizeObserver === "undefined") {
@@ -175,7 +186,11 @@ const tooltipStyle = {
  */
 const legendProps = {
   wrapperStyle: { fontSize: 11 },
-  formatter: (value: string) => <span style={{ color: LEGEND_TEXT }}>{value}</span>,
+  // `createElement`, not JSX. lizard reads a bare `<` in a .tsx file as a JSX open tag and
+  // swallows the rest of the file into whichever function it was last inside — this one-line
+  // arrow was reported at 145 lines and dragged ChartFrame to 268, tripping `-L 200` on lines
+  // nobody had touched. See memory/gotchas.md.
+  formatter: (value: string) => createElement("span", { style: { color: LEGEND_TEXT } }, value),
 } as const;
 
 // Credits, not rand. These charts plot ledger movements and court spend, both of
