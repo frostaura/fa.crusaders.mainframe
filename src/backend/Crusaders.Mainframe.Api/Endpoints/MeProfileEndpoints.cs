@@ -1,5 +1,6 @@
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
@@ -29,6 +30,7 @@ public static class MeProfileEndpoints
                 membership_number = membership?.MembershipNumber,
                 photo_url = membership?.PhotoUrl,
                 status = membership?.Status.ToString().ToLowerInvariant(),
+                must_change_password = user.MustChangePassword,
             });
         });
 
@@ -58,6 +60,34 @@ public static class MeProfileEndpoints
                 full_name = membership.FullName,
                 photo_url = membership.PhotoUrl,
             });
+        });
+
+        // The member changes their own password.
+        //
+        // There was no way to do this at all: `/profile` offered a photo, a name and passkeys,
+        // and the API had no endpoint. So an admin-issued temporary password — emailed in
+        // plaintext, shown on an admin's screen — was the account's permanent credential, and
+        // with no self-service reset either there was no path out of it.
+        //
+        // A wrong current password answers 400, never 401. A 401 on an authenticated route is
+        // the client's session-expired signal: answering one here would sign the member out for
+        // mistyping their old password.
+        g.MapPost("/password", async (ChangePasswordRequest req, HttpContext ctx, AuthService auth, CancellationToken ct) =>
+        {
+            if (string.IsNullOrEmpty(req.CurrentPassword) || string.IsNullOrEmpty(req.NewPassword))
+                return Results.BadRequest(new { error = "missing_fields" });
+            if (req.NewPassword.Length < 8) return Results.BadRequest(new { error = "password_too_short" });
+
+            var userId = ctx.User.Id() ?? Guid.Empty;
+            var result = await auth.ChangePasswordAsync(userId, req.CurrentPassword, req.NewPassword, ct);
+            return result switch
+            {
+                PasswordChangeResult.Ok => Results.Ok(new { changed = true }),
+                PasswordChangeResult.CurrentPasswordWrong => Results.BadRequest(new { error = "current_password_incorrect" }),
+                PasswordChangeResult.Unchanged => Results.BadRequest(new { error = "password_unchanged" }),
+                PasswordChangeResult.NoPasswordSet => Results.BadRequest(new { error = "no_password_set" }),
+                _ => Results.Problem("Unexpected"),
+            };
         });
 
         // Authenticated multipart upload: stores under the resolved tenant slug
@@ -107,3 +137,4 @@ public static class MeProfileEndpoints
 }
 
 public sealed record UpdateProfileRequest(string? FullName, string? PhotoUrl);
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
