@@ -502,7 +502,16 @@ export default function AdminMembersPage() {
       {/* Reset password — show generated password once */}
       {resetFor && resetResult && (
         <Modal onClose={() => { setResetFor(null); setResetResult(null); }} title="Temporary password generated">
-          <p className="text-sm text-text-secondary">Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. The member should change it after signing in.</p>
+          {/*
+            Not "should change it after signing in" — that was the advisory wording from before
+            the gate existed, and it left the admin telling the member something weaker than the
+            truth. The temporary password now unlocks one screen and nothing else, which is also
+            what the API's own response to this call says.
+          */}
+          <p className="text-sm text-text-secondary">
+            Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. It only unlocks the
+            change-password screen — they must choose a new password before they can do anything else.
+          </p>
           <div className="my-4 px-4 py-3 rounded-lg border border-border bg-bg-muted font-mono text-base tracking-wider text-center select-all">
             {resetResult.tempPassword}
           </div>
