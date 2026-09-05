@@ -55,8 +55,24 @@ export function BookingConfirmModal({ intent, balanceCredits, members, isAdmin, 
 
   const free = mode === "block";
   const cost = free ? 0 : intent.priceCredits;
-  const canAfford = free || balanceCredits === null || balanceCredits >= cost;
   const chargedToSomeoneElse = mode === "member";
+  // Affordability follows WHOEVER IS BEING CHARGED, which is not always the person
+  // looking at the screen.
+  //
+  // This read `free || balanceCredits === null || balanceCredits >= cost` — the
+  // signed-in viewer's balance, in every mode — so an admin booking on a member's
+  // behalf was refused out of the ADMIN's wallet. A desk account is never topped up
+  // because it never plays, so its balance is 0 and the third of §8's three admin
+  // actions was unreachable from the moment it shipped: the modal read "charged to the
+  // member" and "that's more than you have" in the same breath, with the button
+  // disabled. The other two (cancel on a member's behalf, block a court) worked, which
+  // is why it looked whole.
+  //
+  // A block is free and a member booking spends the member's credit — and §8 lets an
+  // admin push that member into a negative balance deliberately. Neither is the
+  // viewer's money, so neither is the viewer's balance to fail.
+  const spendingOwnCredit = !free && !chargedToSomeoneElse;
+  const canAfford = !spendingOwnCredit || balanceCredits === null || balanceCredits >= cost;
 
   const submit = async () => {
     if (busy) return;

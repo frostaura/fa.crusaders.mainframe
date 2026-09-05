@@ -340,6 +340,46 @@ describe("Schedule", () => {
     });
   });
 
+  it("books on a member's behalf out of the MEMBER's wallet, not the admin's", async () => {
+    const THEM = "55555555-5555-5555-5555-555555555555";
+    const whoami = signIn({ isAdmin: true });
+    const fetchStub = stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      // The seeded admin's own balance is zero, which is the ordinary state of a desk
+      // account: nobody tops up the club's admin login, because it never plays.
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+      { path: "/api/v1/admin/members/", body: [{ user_id: THEM, full_name: "Naledi Khumalo" }] },
+      { path: "/api/v1/schedule", body: DAY },
+      { method: "POST", path: "/api/v1/admin/bookings/", body: { booking_id: "88888888-8888-8888-8888-888888888888", balance_after_credits: 0 } },
+    ]);
+    renderPage(<SchedulePage />);
+    await openBookingModal();
+
+    // Booking it for THEMSELVES they genuinely cannot afford, and the modal says so.
+    // This also proves the wallet answer has landed, so the assertions below are not
+    // passing on a balance that is merely still null.
+    await screen.findByText(/more than you have/);
+
+    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
+    fireEvent.change(screen.getByLabelText("Member"), { target: { value: THEM } });
+
+    // The third admin action was unreachable: affordability was computed from the
+    // SIGNED-IN user's balance whatever the mode, so the desk could cancel for a member
+    // and block a court but could never book for one — the modal read "charged to the
+    // member" and "that's more than you have" at the same time and disabled the button.
+    // The money here is Naledi's; §8 lets an admin override even an insufficient member
+    // balance, so the admin's own wallet has no say in it at all.
+    expect(screen.queryByText(/more than you have/)).not.toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Book for 50.00 cr" });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+
+    await waitFor(() => {
+      const post = fetchStub.calls.find((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/");
+      expect(post?.body).toMatchObject({ courtId: COURT, userId: THEM, sliceCount: 1 });
+    });
+  });
+
   it("lets an admin block a slot for an event", async () => {
     const whoami = signIn({ isAdmin: true });
     const fetchStub = stubFetch([
