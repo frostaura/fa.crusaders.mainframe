@@ -50,8 +50,17 @@ type AuthCtx = AuthState & {
    */
   sessionExpired: boolean;
   clearSessionExpired: () => void;
-  /** Re-run the bootstrap probe immediately, cancelling the backoff. */
-  retryConnection: () => void;
+  /**
+   * Re-run the bootstrap probe immediately, cancelling the backoff.
+   *
+   * <p>
+   * Resolves when the probe has an answer — which is up to the 20s request budget on a
+   * backend that accepts the connection and never replies. The outage screen's button
+   * needs that promise: without it the member pressed the only control they were offered
+   * and nothing at all happened on screen for twenty-five seconds.
+   * </p>
+   */
+  retryConnection: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -201,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const retryConnection = useCallback(() => {
     if (probeTimer.current) { window.clearTimeout(probeTimer.current); probeTimer.current = null; }
     probeAttempt.current = 0;
-    refreshFromToken();
+    return refreshFromToken();
   }, [refreshFromToken]);
 
   const login = useCallback(async (email: string, password: string) => {

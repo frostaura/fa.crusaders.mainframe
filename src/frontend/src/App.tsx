@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
@@ -27,6 +28,7 @@ import { AdminDevicesPage } from "./pages/AdminDevices";
 import NotFoundPage from "./pages/NotFound";
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
+import { Loader2 } from "lucide-react";
 
 export default function App() {
   return (
@@ -93,7 +95,7 @@ export default function App() {
 function RequireAuth({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
   const auth = useAuth();
   const location = useLocation();
-  if (auth.status === "loading") return <p className="p-4 text-text-secondary">Loading…</p>;
+  if (auth.status === "loading") return <Booting />;
   // A session we cannot confirm is not a session we have lost. Bouncing to /login here is what
   // turned a few seconds of backend downtime into a permanent sign-out for everyone on the site.
   if (auth.status === "offline") return <ConnectionLost onRetry={auth.retryConnection} />;
@@ -113,7 +115,21 @@ function RequireAuth({ children, admin = false }: { children: React.ReactNode; a
  * carries on where it was — no re-typed password, and nothing lost to a redeploy.
  * </p>
  */
-function ConnectionLost({ onRetry }: { onRetry: () => void }) {
+function ConnectionLost({ onRetry }: { onRetry: () => Promise<void> }) {
+  // The button had no pending state of any kind: pressed against a backend that accepts
+  // the socket and never answers, it stayed `{ "Try again now", enabled, no aria-busy }`
+  // for the full 25 seconds it took to give up. The member presses the only control the
+  // outage screen offers and, as far as the screen is concerned, nothing happens — so
+  // they press it again, and again. A retry is worth nothing if it is not visibly a retry.
+  const [retrying, setRetrying] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+
+  const retry = async () => {
+    setRetrying(true);
+    try { await onRetry(); } finally { if (alive.current) setRetrying(false); }
+  };
+
   return (
     <div className="max-w-md mx-auto p-4">
       <Card>
@@ -123,9 +139,46 @@ function ConnectionLost({ onRetry }: { onRetry: () => void }) {
           page will carry on by itself once the connection is back.
         </p>
         <div className="mt-4">
-          <Button onClick={onRetry}>Try again now</Button>
+          <Button onClick={() => { void retry(); }} disabled={retrying} aria-busy={retrying}>
+            {retrying && <Loader2 size={16} className="animate-spin motion-reduce:animate-none mr-2" aria-hidden="true" />}
+            {retrying ? "Trying…" : "Try again now"}
+          </Button>
         </div>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * The screen between opening the app and knowing whether there is a session.
+ *
+ * <p>
+ * It was the literal word "Loading…" at 14px in the top-left corner, and against a backend
+ * that accepts the connection and never answers it stayed exactly that for the whole 20s
+ * request budget: no spinner, no skeleton, nothing clickable, no explanation. Twenty
+ * seconds of a single static word reads as a broken app, and the outage screen that comes
+ * after it is fine — it is the silence in front of it that costs the trust.
+ * </p>
+ *
+ * <p>
+ * `role="status"` so a screen reader is told at all, and a second sentence once the wait
+ * has stopped being ordinary. The spinner is what says the app is still trying; it is
+ * dropped under `prefers-reduced-motion` and the words carry the meaning on their own.
+ * </p>
+ */
+function Booting() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setSlow(true), 4_000);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  return (
+    <div role="status" aria-live="polite" className="max-w-md mx-auto px-4 py-16 flex flex-col items-center gap-3 text-center">
+      <Loader2 size={28} className="animate-spin motion-reduce:animate-none text-text-muted" aria-hidden="true" />
+      <p className="text-text-secondary">
+        {slow ? "Still connecting to the club — this is taking longer than usual." : "Connecting to the club…"}
+      </p>
     </div>
   );
 }
