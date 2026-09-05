@@ -90,12 +90,24 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
     danger: "bg-danger-soft text-danger-strong border-danger-strong/20",
   };
 
+  const dismiss = () => { setVisible(false); window.setTimeout(() => onDismiss(toast.id), 250); };
+
+  // A toast is dismissed by tapping it, and it used to be a plain div that said so with
+  // nothing but `cursor-pointer`: no focus ring, no keyboard route to it at all, and none
+  // of the hover treatment the rest of the product now shares. `data-interactive` is what
+  // the base layer in index.css keys on for a surface that is not a <button> — and once a
+  // thing can be pressed, it has to be pressable without a mouse. `role="status"` stays:
+  // the toast still has to ANNOUNCE itself, which is a different job from being pressable.
   return (
     <div
       role="status"
-      onClick={() => { setVisible(false); window.setTimeout(() => onDismiss(toast.id), 250); }}
+      data-interactive
+      tabIndex={0}
+      aria-label={`${toast.text} — dismiss`}
+      onClick={dismiss}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dismiss(); } }}
       className={cn(
-        "pointer-events-auto cursor-pointer select-none",
+        "pointer-events-auto select-none",
         "rounded-lg border px-4 py-2.5 text-sm font-medium shadow-md w-full",
         "transition-all duration-300 ease-out",
         tones[toast.tone],

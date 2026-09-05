@@ -68,11 +68,18 @@ function RowFragment({ t, children }: { t: TimeSlice; children: React.ReactNode 
   // interpolation as the start of a JSX tag, never finds its close, and swallows the
   // rest of the file into this one function — `make complexity` then reports it at
   // enormous NLOC and CCN and points at a line nobody touched.
+  // Never a faded label. `text-text-muted` at 12px is already the worst contrast on this
+  // screen (E-F08 measures it at 2.56:1 against white, where AA asks 4.5:1), and the time
+  // is the ONLY thing on the grid that says what time a slot is — the court and the price
+  // are column headers and the slot button carries no time at all. Fading it further to
+  // mark a closed row would have made the least readable text on the page less readable
+  // still; a closed row says so in its own cells instead.
   return (
     <>
       <div className={cn(
-        "sticky left-0 z-10 bg-bg-surface text-xs font-mono border-r border-border flex items-center justify-end pr-2",
-        t.outOfHours ? "text-text-muted/50" : "text-text-muted",
+        "sticky left-0 z-10 bg-bg-surface text-xs font-mono border-r border-border",
+        "flex items-center justify-end pr-2 text-text-secondary",
+        t.outOfHours && "italic",
       )}>
         {t.label}
       </div>
@@ -144,7 +151,7 @@ function EmptyCell({ isPast, outOfHours, priceCredits, onBook }: {
   if (outOfHours) {
     return (
       <div
-        className="m-0.5 h-12 rounded-md bg-bg-muted/40 border border-dashed border-border/60 text-text-muted/60 flex items-center justify-center text-[11px]"
+        className="m-0.5 h-12 rounded-md bg-bg-muted/40 border border-dashed border-border text-text-secondary flex items-center justify-center text-[11px]"
         aria-label="Club closed"
       >
         Closed
@@ -154,7 +161,7 @@ function EmptyCell({ isPast, outOfHours, priceCredits, onBook }: {
   if (isPast) {
     return (
       <div
-        className="m-0.5 h-12 rounded-md bg-bg-muted/60 border border-border/40 text-text-muted/70 flex items-center justify-center text-[11px] font-medium tracking-wide uppercase"
+        className="m-0.5 h-12 rounded-md bg-bg-muted/60 border border-border text-text-secondary flex items-center justify-center text-[11px] font-medium tracking-wide uppercase"
         aria-label="Past slot"
       >
         Past
@@ -179,7 +186,7 @@ function EmptyCell({ isPast, outOfHours, priceCredits, onBook }: {
 
 /** A later cell of a booking that started earlier. Reserved, and visibly the same booking. */
 function ContinuationCell({ slot }: { slot: ScheduleSlot }) {
-  const tone = slot.isMine ? "bg-info-soft/60 text-info-strong/70" : "bg-bg-muted text-text-muted";
+  const tone = slot.isMine ? "bg-info-soft/60 text-info-strong" : "bg-bg-muted text-text-secondary";
   return (
     <div className={cn("m-0.5 h-12 rounded-md flex items-center justify-center text-[11px]", tone)}
       aria-label={slot.isMine ? "Continues — my booking" : "Continues — reserved"}>
@@ -198,7 +205,7 @@ function MyCell({ slot, isPast, onCancel }: {
   if (isPast || !slot.bookingId) {
     return (
       <div
-        className="m-0.5 h-12 rounded-md bg-info-soft/60 text-info-strong/80 border border-info-soft flex items-center justify-center text-xs font-medium text-center px-1"
+        className="m-0.5 h-12 rounded-md bg-info-soft/60 text-info-strong border border-info-soft flex items-center justify-center text-xs font-medium text-center px-1"
         aria-label={slot.checkedIn ? "Past booking, attended" : "Past booking"}
       >
         {slot.checkedIn ? "Mine · played" : "Mine · past"}
