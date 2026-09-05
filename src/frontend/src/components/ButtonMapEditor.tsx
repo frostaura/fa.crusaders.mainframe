@@ -105,12 +105,16 @@ export function ButtonMapEditor({
       {rows.map((wire, index) => {
         const { kind, value: detail } = parseAction(wire);
         return (
-          <div key={index} className="flex items-center gap-2">
+          // flex-wrap, and selects that may shrink: eight rows of a fixed-width label plus
+          // two intrinsically-sized selects had a min-content of 362 px, which is what made
+          // the whole Devices page 410 px wide inside a 375 px phone even after the confirm
+          // button stopped forcing 435. A row that can wrap costs a desktop nothing.
+          <div key={index} className="flex flex-wrap items-center gap-2">
             <span className="w-20 shrink-0 text-sm text-slate-500">Button {index + 1}</span>
 
             <select
               aria-label={name(index, "action")}
-              className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+              className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm"
               value={kind}
               disabled={disabled}
               onChange={(e) => update(index, e.target.value as ActionKind, "")}
@@ -124,7 +128,7 @@ export function ButtonMapEditor({
             {kind === "court" && (
               <select
                 aria-label={name(index, "court")}
-                className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm"
                 value={detail || "A"}
                 disabled={disabled}
                 onChange={(e) => update(index, "court", e.target.value)}

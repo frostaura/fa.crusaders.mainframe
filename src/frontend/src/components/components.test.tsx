@@ -87,6 +87,29 @@ describe("Card", () => {
 });
 
 describe("ConfirmButton", () => {
+  /**
+   * R2 I-F6. The width sentinel that makes the button size to max(idle, confirm) held that
+   * measurement on ONE unbreakable line, so a confirm label that is a sentence — Devices'
+   * "Delete? The box re-registers on its next heartbeat." — measured 319 px and pushed the
+   * whole page to 435 px inside a 375 px phone, far enough that the club API key's Copy
+   * button sat 23 px off the right edge with no scrollbar to say so.
+   *
+   * <p>
+   * jsdom has no layout, so this holds the two properties the pixels depend on; the pixels
+   * themselves were re-measured in a headed Chromium at 375 px (435 → 375 page width, Copy
+   * on screen) and are quoted in the commit.
+   * </p>
+   */
+  it("lets a sentence-long confirm label wrap instead of widening the page", () => {
+    render(<ConfirmButton idleLabel="Delete" confirmLabel="Delete? The box re-registers on its next heartbeat." onConfirm={() => {}} />);
+
+    const button = screen.getByRole("button", { name: "Delete" });
+    expect(button.className).toContain("max-w-full");
+    const sentinel = button.querySelector("span[aria-hidden].invisible")!;
+    expect(sentinel).toBeTruthy();
+    expect(sentinel.className).not.toContain("whitespace-nowrap");
+  });
+
   it("needs two presses before it does anything", async () => {
     const user = setup();
     const onConfirm = vi.fn();

@@ -140,6 +140,8 @@ export function ConfirmButton({
       onClick={handleClick}
       className={cn(
         "relative overflow-hidden rounded-md text-xs font-medium transition-colors duration-200 ease-out",
+        // Never wider than what holds it. See the sentinel below.
+        "max-w-full min-w-0",
         // The lift, the cursor and the focus ring come from the base layer in index.css;
         // this control keeps only its own colour transition. `no-lift` because a grid
         // cell that rises would shift the cells packed against it.
@@ -161,8 +163,18 @@ export function ConfirmButton({
         strokeWidth={1.5}
       />
       {/* Width sentinel: stack both labels in the same grid cell so the button sizes
-          to max(idleLabel, confirmLabel) intrinsic width, regardless of node type. */}
-      <span aria-hidden className="invisible whitespace-nowrap px-3 py-2 grid">
+          to max(idleLabel, confirmLabel) intrinsic width, regardless of node type.
+
+          `whitespace-nowrap` here was a phone-sized bug. The sentinel sized the button to
+          the confirm label as ONE unbreakable line, so the Devices page's "Delete? The box
+          re-registers on its next heartbeat." measured 319 px and, with the paddings around
+          it, pushed the whole page to 435 px inside a 375 px phone — far enough that the API
+          key's Copy button sat 23 px off the right edge, reachable only by a horizontal drag
+          macOS draws no scrollbar for. The label is a sentence; a sentence may wrap. Without
+          `nowrap` the sentinel still sizes to the wider label wherever there is room, so
+          nothing changes on a desktop, and `max-w-full` + `min-w-0` is what lets it give way
+          rather than push its container wide when there is not. */}
+      <span aria-hidden className="invisible px-3 py-2 grid">
         <span className="col-start-1 row-start-1 flex items-center justify-center gap-2">{idleLabel}</span>
         <span className="col-start-1 row-start-1 flex items-center justify-center gap-2">{confirmLabel}</span>
       </span>
