@@ -17,11 +17,17 @@ import { expect, test } from "@playwright/test";
  * </p>
  *
  * <p>
- * <b>It also disproves a sentence that used to be written in four places.</b> Three files and the
- * spec claimed per-session cache keying had been rejected partly because "a service worker cannot
- * be registered in this repo's automation". It can, and this spec is the proof: it registers one
- * on the Chromium Playwright already drives for `narrow-viewport.spec.ts`. The rejection stands on
- * its own merits (see §12), not on a machine limitation that was never real.
+ * <b>It also disproves the reason this repository used to give for a design decision.</b>
+ * `public/sw.js` records that per-session cache keying was first rejected partly because "a
+ * service worker could not be registered in this repo's automation". It can, and this spec is the
+ * proof: it registers one on the Chromium Playwright already drives for `narrow-viewport.spec.ts`.
+ * The rejection stands on its own merits (see §12), not on a machine limitation that was never
+ * real.
+ *
+ * <b>How many places carried that sentence is deliberately not stated here.</b> The previous
+ * wording said "four places / three files", which was wrong, and no count of a claim in history
+ * can be checked by reading the tree this comment ships in. The live wording of the surviving
+ * note is in `public/sw.js` and `src/test/swHarness.ts`; that is what a reader can verify.
  * </p>
  *
  * <p>
