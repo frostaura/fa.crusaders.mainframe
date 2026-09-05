@@ -19,6 +19,13 @@ import { ORIGIN, loadServiceWorker, swRequest } from "./test/swHarness";
  * that is the defect, modelled, not a simplification. The shipped tests matched strings against
  * the source and would have passed against the leaking version unchanged.
  * </p>
+ *
+ * <p>
+ * A model is still a model. The unmodelled version of the same claim — a real
+ * `navigator.serviceWorker.register`, the browser's own Cache API, two members reading one URL
+ * over real HTTP — is `e2e/service-worker.spec.ts`. Keep both: this one runs on every commit,
+ * that one answers "but is the browser really like that?".
+ * </p>
  */
 
 /** Every authenticated GET the app makes. None of these may ever be stored. */

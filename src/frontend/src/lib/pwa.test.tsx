@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { tokenStore } from "./api";
+import { api, tokenStore } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 import { clearOfflineCache } from "./pwa";
 import { stubFetch } from "../test/harness";
@@ -102,7 +102,15 @@ describe("clearing the offline caches", () => {
 
 function SessionProbe() {
   const auth = useAuth();
-  return <span data-testid="status">{auth.status}</span>;
+  return (
+    <>
+      <span data-testid="status">{auth.status}</span>
+      {/* The two routes that used to be pinned only by counting `clearOfflineCache()` in the
+          source: the deliberate sign-out, and any 401 on an authenticated request. */}
+      <button onClick={() => { void auth.logout(); }}>Sign out</button>
+      <button onClick={() => { void api.get("/api/v1/wallet").catch(() => undefined); }}>Read wallet</button>
+    </>
+  );
 }
 
 function renderSession() {
@@ -114,6 +122,15 @@ function renderSession() {
     </MemoryRouter>,
   );
 }
+
+/** A whoami that answers "yes, signed in" — the starting point for the two routes below. */
+const SIGNED_IN = {
+  tenant_slug: "crusaders",
+  tenant_id: "00000000-0000-0000-0000-0000000000cc",
+  user_id: "44444444-4444-4444-4444-444444444444",
+  is_authenticated: true,
+  is_admin: false,
+};
 
 describe("every way a session ends drops the caches, not just the sign-out button", () => {
   it("clears them when the club refuses the stored token at bootstrap", async () => {
@@ -136,6 +153,47 @@ describe("every way a session ends drops the caches, not just the sign-out butto
     tokenStore.set("stale.token.value");
 
     renderSession();
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
+    await waitFor(() => expect(caches.names()).toEqual([]));
+  });
+
+  it("clears them when the member presses Sign out", async () => {
+    // The route the founder-facing blueprint names first. It was covered only by counting
+    // `clearOfflineCache()` occurrences in auth.tsx, which a rearrangement defeats: a refuter
+    // deleted this call, left a dead one behind to keep the count at three, and the whole suite
+    // stayed green. This asserts the caches, not the source text.
+    const caches = fakeCaches(["crusaders-shell-v2", "crusaders-assets-v2"]);
+    stubFetch([
+      { method: "GET", path: "/api/v1/whoami", body: SIGNED_IN },
+      { method: "POST", path: "/api/v1/auth/logout", status: 204, body: null },
+    ]);
+    tokenStore.set("good.token.value");
+
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
+    await waitFor(() => expect(caches.names()).toEqual([]));
+  });
+
+  it("clears them when the club refuses a request mid-session with a 401", async () => {
+    // The third route, and the one a member never chooses: the session is revoked or expires
+    // while the app is open, and the next read comes back 401. The api client drops the token
+    // and calls the handler AuthProvider registered; that handler owns this purge.
+    const caches = fakeCaches(["crusaders-shell-v2", "crusaders-api-v1"]);
+    stubFetch([
+      { method: "GET", path: "/api/v1/whoami", body: SIGNED_IN },
+      { method: "GET", path: "/api/v1/wallet", status: 401, body: { error: "unauthorized" } },
+    ]);
+    tokenStore.set("revoked.token.value");
+
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Read wallet" }));
 
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
     await waitFor(() => expect(caches.names()).toEqual([]));

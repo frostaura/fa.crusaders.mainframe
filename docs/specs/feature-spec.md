@@ -227,8 +227,23 @@ Required emails:
   ignores the `Authorization` header, and its storage belongs to the browser profile rather than
   to a login. A club-desk tablet therefore served the second member to open the wallet the first
   member's balance and ledger, and a cached session probe could boot the app under the first
-  member's identity and admin flag. Per-session cache keying was considered and rejected: it is
-  unobservable machinery guarding a privacy boundary in a money system, and not caching member
-  data has no failure mode. **No response carrying member data may be cached by the service
-  worker.** Revisit only with a design that survives two members sharing one device.
+  member's identity and admin flag. **No response carrying member data may be cached by the
+  service worker.**
+- **The narrowing is ratified on its merits, and the reason first recorded for it was false.**
+  That reason said per-session cache keying — a cache named for the token's subject, every other
+  session's cache evicted on first sight of a new one — had to be rejected because it could not
+  be exercised in this repo's automation. It can: a service worker registers on the first attempt
+  in the Chromium Playwright already drives here, and `src/frontend/e2e/service-worker.spec.ts`
+  now registers the real worker, reproduces the two-member leak against the old version and holds
+  the current rule. What the decision actually rests on, corrected 2026-09-05: (a) not caching
+  member data has no failure mode, while per-session keying has one that is silent — the cache
+  still answers, just with the wrong member's body; (b) it would make a privacy boundary depend on
+  the page's own guess at who is signed in, at the moments the page is least sure (a token that
+  expired while the tab was closed, a session ended in another tab, an admin acting on behalf of a
+  member); (c) what it would buy is a stale balance, and a balance that is not the ledger is the
+  one number this system may not show — nor could a member act on it, because every booking,
+  cancellation and top-up needs the network. **The price is accepted and is real:** a mobile-first
+  PWA whose members cannot read their balance where there is no signal. Revisit only with a design
+  that survives two members sharing one device — and it is now testable, so a revisit must arrive
+  with the test.
 - Push notifications: out of scope for v1 — emails carry the load. Revisit post-pilot.
