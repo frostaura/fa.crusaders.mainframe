@@ -27,10 +27,19 @@
  *
  * The alternative considered and rejected was keying the cache per session (a cache name
  * derived from the token's subject, evicting every other session's cache on first sight of a
- * new one). It works on paper. It was rejected because it is unobservable machinery guarding a
- * privacy boundary in a money system: it cannot be exercised in this repo's automation (the
- * headless Chromium here refuses to register a worker at all), and a subtle bug in it looks
- * exactly like a working cache. Not caching member data has no failure mode.
+ * new one). It works on paper, and it was first rejected here for a reason that was FALSE: that
+ * a service worker could not be registered in this repo's automation. One can — `npx playwright
+ * test e2e/service-worker.spec.ts` registers this file in a real Chromium, reproduces the
+ * two-member leak against the old version and holds the rule below. The reasons that survive:
+ *
+ *   - Not caching member data has no failure mode. Per-session keying has one and it is silent:
+ *     the cache still answers, just with the wrong member's body.
+ *   - It would make a privacy boundary depend on the page's own guess at who is signed in, at
+ *     the moments the page is least sure — a token that expired while the tab was closed, a
+ *     session ended in another tab, an admin acting on behalf of a member.
+ *   - What it would buy is a stale balance, and a balance that is not the ledger is the one
+ *     number this system may not show. Nothing can be done with it offline anyway: every
+ *     booking, cancellation and top-up needs the network.
  *
  * WHAT IS CACHED
  * --------------

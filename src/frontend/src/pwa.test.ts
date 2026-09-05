@@ -87,11 +87,16 @@ describe("the offline shell", () => {
     expect(read("src/main.tsx")).toMatch(/import\.meta\.env\.PROD.*registerServiceWorker/);
   });
 
-  it("clears the caches on every route by which a session ends, not only the sign-out button", () => {
-    const auth = read("src/lib/auth.tsx");
-    // endSession — an expiry, a revocation, an admin reset; the 401 handler; and the button.
-    // Three call sites, because on a shared club device the button is the rarest of the three.
-    expect(auth.match(/clearOfflineCache\(\)/g) ?? []).toHaveLength(3);
+  it("the page and the worker agree on the message that empties the caches", () => {
+    // This used to assert `auth.match(/clearOfflineCache\(\)/g)` had length 3, under a name that
+    // promised the three routes were covered. It did not cover them: a refuter deleted the call
+    // from the sign-out path, left a dead compensating call behind so the count stayed at 3, and
+    // the whole suite stayed green. All three routes are now pinned BEHAVIOURALLY in
+    // `src/lib/pwa.test.tsx` — the caches are asserted, not the source text.
+    //
+    // What is left here is the one fact that really is source-level: both halves of the message
+    // contract have to spell it the same way, and a rename on one side alone is silent at runtime
+    // because a worker simply ignores a message type it does not know.
     expect(read("src/lib/pwa.ts")).toContain("CLEAR_CACHES");
     expect(sw).toContain("CLEAR_CACHES");
   });

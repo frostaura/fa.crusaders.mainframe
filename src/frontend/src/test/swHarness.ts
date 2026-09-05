@@ -3,11 +3,18 @@
  * the two properties of the browser APIs that made the leak possible.
  *
  * <p>
- * A service worker cannot be registered in this repo's automation (headless Chromium here
- * refuses `navigator.serviceWorker.register('/sw.js')` outright), so a string-matching test
- * against the source was all the shipped version had. String matching cannot tell you what the
- * worker DOES. This does: it evaluates the file, captures its listeners and drives real fetch,
- * message and activate events through them.
+ * The shipped version of these tests matched strings against the source, and string matching
+ * cannot tell you what the worker DOES — it passed unchanged against a worker that served one
+ * member's wallet to another. This evaluates the file, captures its listeners and drives real
+ * fetch, message and activate events through them.
+ * </p>
+ *
+ * <p>
+ * This header used to say a service worker could not be registered in this repo's automation.
+ * That was false: `e2e/service-worker.spec.ts` registers this same file in a real Chromium and
+ * is where the unmodelled proof lives. This harness earns its place for a different reason —
+ * it runs in `vitest`, which is the gate every change goes through, in milliseconds and with no
+ * browser — so the rules below are checked on every commit rather than on every E2E run.
  * </p>
  *
  * <p>
