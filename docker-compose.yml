@@ -47,7 +47,19 @@ services:
       # MASTER_SECRETS_ENCRYPTION_KEY and friends — were read by nothing, so the API booted on
       # the appsettings.json placeholders while the file demanded values for them. This list is
       # also an allow-list: a name absent from it reaches the API not at all.
-      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      # Production by default, and Development only when somebody asks for it.
+      #
+      # This is the unqualified compose file — the one anyone reaches for first — and it used to
+      # default to Development. Development turns on POST /api/v1/auth/dev/admin-login, which is
+      # anonymous, returns an admin JWT, force-resets the seeded admin's password, and from there
+      # reaches the full member list and the device API key that switches the club's lights. It
+      # also runs the Development seeder against whatever database is configured and puts .NET
+      # stack traces in 400 bodies. One `docker compose up` against a club's real database was
+      # all of that, in one step, with nothing in CI checking for it.
+      #
+      # Local development is unaffected: this file cannot start without a .env (JWT_SECRET is
+      # `:?required`), and .env.example sets ASPNETCORE_ENVIRONMENT=Development.
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:5000
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-crusaders_mainframe};Username=${POSTGRES_USER:-crusaders};Password=${POSTGRES_PASSWORD}
       Database__AutoMigrateOnStartup: ${DATABASE__AUTOMIGRATEONSTARTUP:-true}
