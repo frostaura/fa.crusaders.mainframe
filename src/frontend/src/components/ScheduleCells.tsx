@@ -1,0 +1,271 @@
+import { memo } from "react";
+import type { ScheduleDay, ScheduleSlot } from "../lib/api";
+import { cn, formatCredits } from "../lib/utils";
+import { isSlotHead, slotAt, type TimeSlice } from "../lib/scheduleGrid";
+
+type GridProps = {
+  day: ScheduleDay;
+  slotsByCourt: Map<string, ScheduleSlot[]>;
+  timeSlices: TimeSlice[];
+  /** "Now", frozen when the schedule loaded, so past-slot styling is pure at render time. */
+  loadedAt: number;
+  isAdmin: boolean;
+  onBook: (courtId: string, courtName: string, startsAtUtc: string, priceCredits: number) => void;
+  onCancel: (slot: ScheduleSlot, courtName: string) => void;
+  onLiftBlock: (blockId: string) => void | Promise<void>;
+};
+
+/**
+ * The grid itself, memoised.
+ *
+ * <p>
+ * A club day is four courts by fifty-odd rows — a couple of hundred cells — and every one
+ * of them used to re-render whenever any state on the page moved. Opening the booking
+ * confirmation, closing it, arming a cancellation: each rebuilt the whole grid, for a
+ * modal that does not touch a single cell. Measured at 28 ms in jsdom just to open a
+ * dialog, which in a browser is the difference between a tap that lands and a tap that
+ * feels like it did not.
+ * </p>
+ *
+ * <p>
+ * The memo only bites because the callbacks are stable — they take the court and the
+ * instant as arguments rather than closing over them — so the page's modal state can
+ * change without giving the grid a new function on every render.
+ * </p>
+ */
+export const ScheduleGrid = memo(function ScheduleGrid(props: GridProps) {
+  const { day, slotsByCourt, timeSlices, loadedAt, isAdmin, onBook, onCancel, onLiftBlock } = props;
+  return (
+    <>
+      {timeSlices.map((t, rowIndex) => {
+        const cellStartMs = new Date(t.utc).getTime();
+        const isPast = cellStartMs < loadedAt;
+        return (
+          <RowFragment key={t.utc} t={t}>
+            {day.courts.map((c) => (
+              <SlotCell
+                key={c.id + t.utc}
+                slot={slotAt(slotsByCourt, c.id, cellStartMs, day.sliceMinutes)}
+                isHead={(s) => isSlotHead(s, cellStartMs, day.sliceMinutes, rowIndex === 0)}
+                isPast={isPast}
+                outOfHours={t.outOfHours}
+                isAdmin={isAdmin}
+                priceCredits={c.slicePriceCredits}
+                onBook={() => onBook(c.id, c.name, t.utc, c.slicePriceCredits)}
+                onCancel={(slot) => onCancel(slot, c.name)}
+                onLiftBlock={onLiftBlock}
+              />
+            ))}
+          </RowFragment>
+        );
+      })}
+    </>
+  );
+});
+
+function RowFragment({ t, children }: { t: TimeSlice; children: React.ReactNode }) {
+  // `cn`, not a template literal. lizard's .tsx parser reads a bare `<` inside an
+  // interpolation as the start of a JSX tag, never finds its close, and swallows the
+  // rest of the file into this one function — `make complexity` then reports it at
+  // enormous NLOC and CCN and points at a line nobody touched.
+  // Never a faded label. `text-text-muted` at 12px is already the worst contrast on this
+  // screen (E-F08 measures it at 2.56:1 against white, where AA asks 4.5:1), and the time
+  // is the ONLY thing on the grid that says what time a slot is — the court and the price
+  // are column headers and the slot button carries no time at all. Fading it further to
+  // mark a closed row would have made the least readable text on the page less readable
+  // still; a closed row says so in its own cells instead.
+  return (
+    <>
+      <div className={cn(
+        "sticky left-0 z-10 bg-bg-surface text-xs font-mono border-r border-border",
+        "flex items-center justify-end pr-2 text-text-secondary",
+        t.outOfHours && "italic",
+      )}>
+        {t.label}
+      </div>
+      {children}
+    </>
+  );
+}
+
+
+/**
+ * The cells of the schedule grid.
+ *
+ * <p>
+ * Lifted out of `pages/Schedule.tsx` so neither file runs long. It is also what keeps
+ * `make complexity` honest here: lizard's .tsx parser loses track inside a JSX fragment
+ * and reports the whole remainder of a file as one enormous function, so a long page
+ * component trips the length gate on a line nobody touched.
+ * </p>
+ */
+type SlotCellProps = {
+  slot?: ScheduleSlot;
+  isHead: (slot: ScheduleSlot) => boolean;
+  isPast?: boolean;
+  outOfHours?: boolean;
+  isAdmin: boolean;
+  priceCredits?: number;
+  onBook: () => void;
+  onCancel: (slot: ScheduleSlot) => void;
+  onLiftBlock: (blockId: string) => void | Promise<void>;
+};
+
+export function SlotCell(props: SlotCellProps) {
+  const { slot, isHead, isPast, outOfHours, isAdmin, priceCredits, onBook, onCancel, onLiftBlock } = props;
+
+  if (!slot) return <EmptyCell isPast={isPast} outOfHours={outOfHours} priceCredits={priceCredits} onBook={onBook} />;
+
+  // Only the booking's first cell carries its name and controls. Every later cell of the
+  // same booking is a continuation — which is what makes a 60-minute booking read as one
+  // block rather than as four identical buttons, and what stops a member from being
+  // offered "cancel" four times for one thing.
+  if (!isHead(slot)) return <ContinuationCell slot={slot} />;
+
+  if (slot.status === "adminblock") {
+    return (
+      <div className="m-0.5 h-12 rounded-md bg-bg-muted bg-[repeating-linear-gradient(45deg,_rgba(0,0,0,0.04)_0,_rgba(0,0,0,0.04)_4px,_transparent_4px,_transparent_8px)] flex items-center justify-center gap-1 text-xs text-text-secondary px-1">
+        <span className="truncate">{slot.blockLabel ?? "Blocked"}</span>
+        {isAdmin && slot.bookingId && !isPast && (
+          <button
+            type="button"
+            className="text-[10px] underline shrink-0 no-lift"
+            onClick={() => onLiftBlock(slot.bookingId!)}
+          >
+            lift
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (slot.isMine) return <MyCell slot={slot} isPast={isPast} onCancel={onCancel} />;
+  return <OtherCell slot={slot} isAdmin={isAdmin} isPast={isPast} onCancel={onCancel} />;
+}
+
+function EmptyCell({ isPast, outOfHours, priceCredits, onBook }: {
+  isPast?: boolean; outOfHours?: boolean; priceCredits?: number; onBook: () => void;
+}) {
+  // Closed, not merely empty. §5's `out_of_hours` — rendered and inert, so a member can
+  // see that the club is shut rather than seeing a grid that stops without explanation.
+  if (outOfHours) {
+    return (
+      <div
+        className="m-0.5 h-12 rounded-md bg-bg-muted/40 border border-dashed border-border text-text-secondary flex items-center justify-center text-[11px]"
+        aria-label="Club closed"
+      >
+        Closed
+      </div>
+    );
+  }
+  if (isPast) {
+    return (
+      <div
+        className="m-0.5 h-12 rounded-md bg-bg-muted/60 border border-border text-text-secondary flex items-center justify-center text-[11px] font-medium tracking-wide uppercase"
+        aria-label="Past slot"
+      >
+        Past
+      </div>
+    );
+  }
+  // The parameter used to be called priceZar and rendered with a rand sign. The
+  // name was the tell: it is a credit price, and at 1.6-2.4 credits per rand the
+  // grid was quoting a court at well under half what it costs.
+  const price = priceCredits !== undefined ? formatCredits(priceCredits) : "";
+  return (
+    <button
+      type="button"
+      onClick={onBook}
+      aria-label={price ? `Book this slot for ${price}` : "Book this slot"}
+      className="m-0.5 h-12 rounded-md bg-success-soft text-success-strong hover:bg-success-soft/70 text-xs font-medium"
+    >
+      Available
+    </button>
+  );
+}
+
+/** A later cell of a booking that started earlier. Reserved, and visibly the same booking. */
+function ContinuationCell({ slot }: { slot: ScheduleSlot }) {
+  const tone = slot.isMine ? "bg-info-soft/60 text-info-strong" : "bg-bg-muted text-text-secondary";
+  return (
+    <div className={cn("m-0.5 h-12 rounded-md flex items-center justify-center text-[11px]", tone)}
+      aria-label={slot.isMine ? "Continues — my booking" : "Continues — reserved"}>
+      ⋯
+    </div>
+  );
+}
+
+function MyCell({ slot, isPast, onCancel }: {
+  slot: ScheduleSlot; isPast?: boolean; onCancel: (slot: ScheduleSlot) => void;
+}) {
+  // Attendance, on screen at last. The schedule projection did not carry it, so no
+  // screen in the product could tell a member their court was lit — which is also why
+  // the cancel affordance could not warn that nothing would come back.
+  const label = slot.checkedIn ? "Mine · checked in" : "Mine";
+  if (isPast || !slot.bookingId) {
+    return (
+      <div
+        className="m-0.5 h-12 rounded-md bg-info-soft/60 text-info-strong border border-info-soft flex items-center justify-center text-xs font-medium text-center px-1"
+        aria-label={slot.checkedIn ? "Past booking, attended" : "Past booking"}
+      >
+        {slot.checkedIn ? "Mine · played" : "Mine · past"}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onCancel(slot)}
+      aria-label={`${label} — open cancellation`}
+      className={cn(
+        "m-0.5 h-12 rounded-md text-xs font-medium px-1 text-center",
+        slot.checkedIn
+          ? "bg-warning-soft text-warning-strong hover:bg-warning-soft/70"
+          : "bg-info-soft text-info-strong hover:bg-info-soft/80",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+function OtherCell({ slot, isAdmin, isPast, onCancel }: {
+  slot: ScheduleSlot; isAdmin: boolean; isPast?: boolean; onCancel: (slot: ScheduleSlot) => void;
+}) {
+  // "The booking grid shows photo + name only" — no email, phone or membership number.
+  const body = (
+    <>
+      {slot.ownerPhotoUrl ? (
+        <img src={slot.ownerPhotoUrl} alt="" style={{ width: 34, height: 34 }} className="rounded-full object-cover ring-2 ring-bg-surface shadow-sm shrink-0" />
+      ) : (
+        <div style={{ width: 34, height: 34 }} className="rounded-full bg-bg-surface border border-border flex items-center justify-center text-sm font-medium ring-2 ring-bg-surface shadow-sm shrink-0">
+          {slot.ownerFirstName?.[0] ?? "?"}
+        </div>
+      )}
+      <span className="truncate">{slot.ownerFirstName ?? "Reserved"}</span>
+      {slot.checkedIn && <span className="text-[10px] text-success-strong shrink-0">on court</span>}
+    </>
+  );
+
+  // §8: an admin can cancel any booking on behalf of any member, penalty waiveable. The
+  // endpoint has always existed; another member's slot was inert text with no way to
+  // reach it, so a club running the desk had to go to the database.
+  if (isAdmin && slot.bookingId && !isPast) {
+    return (
+      <button
+        type="button"
+        onClick={() => onCancel(slot)}
+        aria-label={`${slot.ownerFirstName ?? "Reserved"} — cancel on their behalf`}
+        className="m-0.5 h-12 w-[calc(100%-0.25rem)] rounded-md bg-bg-muted text-text-secondary hover:bg-bg-muted/70 flex items-center justify-center gap-2 text-xs px-1"
+      >
+        {body}
+      </button>
+    );
+  }
+
+  return (
+    <div className="m-0.5 h-12 rounded-md bg-bg-muted text-text-secondary flex items-center justify-center gap-2 text-xs overflow-visible px-1">
+      {body}
+    </div>
+  );
+}

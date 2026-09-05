@@ -61,7 +61,7 @@ public sealed class RevenueUnitTests
             db.TenantSettings.Add(new TenantSettings
             {
                 TenantId = tenant.Id,
-                SettingsJson = """{"slice_minutes":15,"credits_per_zar_regular":1.6,"credits_per_zar_league":2.4,"timezone":"UTC"}""",
+                SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"credits_per_zar_regular":1.6,"credits_per_zar_league":2.4,"timezone":"UTC"}""",
             });
 
             var admin = new User { TenantId = tenant.Id, Email = $"a-{slug}@test.local", PasswordHash = "x", EmailVerified = true, IsAdmin = true };

@@ -34,6 +34,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from decimal import ROUND_HALF_UP, Decimal
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -59,6 +60,9 @@ SEEDED_PAYFAST_PASSPHRASE = "REPLACE_WITH_PAYFAST_PASSPHRASE"
 SEEDED_PAYFAST_MERCHANT_ID = "REPLACE_WITH_PAYFAST_MERCHANT_ID"
 SEEDED_MEMBER_M = "MEM-1001"  # Naledi Khoza, Regular — the scanning member
 SEEDED_MEMBER_N = "MEM-1003"  # Aisha Patel, Regular — the no-show member
+# What M chooses when the temporary password forces a change. Long enough for the
+# eight-character minimum, and fixed so a failing run can be re-driven by hand.
+M_PASSWORD = "e2e-device-member-pw"
 
 RELAY_HARD_CAP_SECONDS = 5400
 
@@ -184,8 +188,24 @@ def tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:
         return False
 
 
-def dec(value: Any) -> float:
-    return float(value)
+def dec(value: Any) -> Decimal:
+    """
+    Credits, as a decimal — never a float.
+
+    Every money assertion in this file is an equality, and float equality on credits
+    holds only while every balance happens to be a whole number. It was, until walk-ups
+    began to truncate at closing time and a member bought fifty minutes for 26.67: from
+    that moment `451.33 + 160 == 611.33` was False, and a top-up that had credited
+    exactly the right 160 reported as a failure. The repo's own invariant is that money
+    is decimal; a harness that checks it in binary floating point is checking something
+    else.
+    """
+    return Decimal(str(value))
+
+
+def credits(value: Any) -> Decimal:
+    """A credit amount rounded to the ledger's own scale, the way the server rounds it."""
+    return dec(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +364,57 @@ def selftest_device_contract() -> None:
         raise StepFailed("no corpus request vector carries a `mac` in its body")
 
 
+def selftest_serial_codec() -> None:
+    """Pin this script's serial codec to the shared corpus, byte for byte.
+
+    The corpus's `encode` vectors carry the exact bytes the firmware puts on the
+    wire, checksums included, produced independently of `Codec.cpp`. Framing a
+    corpus case here and comparing bytes therefore checks BOTH halves of the
+    codec — the escaping and `xor_checksum` — against the same authority the C++
+    tests read, rather than against this script's own opinion of itself.
+
+    This exists because `xor_checksum` went missing (finding F12) and nothing
+    said so: it is called only from `serial_frame` / `serial_parse`, so every
+    serial step raised `NameError` several minutes into a run, after the API and
+    Postgres had been built and started. A preflight that frames one corpus case
+    fails in the first second instead.
+    """
+    cases = json.loads((ROOT / "src" / "contracts" / "device-protocol" / "serial" / "cases.json").read_text())
+    encodes = [c for c in cases.get("encode", []) if c.get("kind") == "encode_v2" and c.get("bytes")]
+    if not encodes:
+        raise StepFailed("the serial corpus carries no encode_v2 vectors to pin the codec against")
+    checked = 0
+    for case in encodes:
+        frame = case["frame"]
+        expected = case["bytes"]
+        args = list(frame.get("args", []))
+        # Some vectors encode an argument the FIRMWARE rewrites before framing
+        # (ON,D,60000 -> the 90-minute relay cap). That is the court box's rule,
+        # not the wire format's, so pin only the vectors whose arguments reach
+        # the wire verbatim. The checksum compared is still the corpus's own.
+        if "".join(args) not in expected:
+            continue
+        got = serial_frame(frame["verb"], *args).decode()
+        if got != expected:
+            raise StepFailed(
+                f"serial codec disagrees with corpus vector {case.get('id')}: "
+                f"framed {got!r}, corpus says {expected!r}")
+        parsed = serial_parse(expected)
+        if parsed is None or parsed.verb != frame["verb"] or parsed.args != args:
+            raise StepFailed(f"serial_parse could not read back corpus vector {case.get('id')}: {parsed}")
+        checked += 1
+    if checked == 0:
+        raise StepFailed("no serial corpus vector was usable to pin the codec")
+    # And a corrupted frame must be refused rather than quietly accepted, which
+    # is the only property the checksum field exists for.
+    good = encodes[0]["bytes"].rstrip("\n")
+    star = good.rfind("*")
+    corrupted = good[:star] + "*" + ("00" if good[star + 1:] != "00" else "01")
+    refused = serial_parse(corrupted)
+    if refused is None or refused.verb != "BADCRC?":
+        raise StepFailed(f"serial_parse accepted a frame whose checksum does not match: {corrupted!r}")
+
+
 # ---------------------------------------------------------------------------
 # Serial protocol: !VERB,arg,arg*CC
 # ---------------------------------------------------------------------------
@@ -355,6 +426,27 @@ def serial_escape(arg: str) -> str:
 
 def serial_unescape(arg: str) -> str:
     return arg.replace("%2C", ",").replace("%25", "%")
+
+
+def xor_checksum(body: bytes) -> str:
+    """The frame checksum, exactly as `proto::Codec` computes it.
+
+    XOR of every byte of the frame BODY — what sits between the leading `!` and
+    the `*`, escaping already applied, because the checksum covers what is on
+    the wire — rendered as two UPPERCASE hex digits. Uppercase is not cosmetic:
+    `Codec.cpp`'s `hexValue` rejects lowercase deliberately, so a lowercase
+    digit here would make every frame this harness sends a BADCRC.
+
+    This function was lost in d67f98e and nothing noticed, because it is called
+    only from `serial_frame` / `serial_parse` and every serial step therefore
+    died on `NameError` before it could assert anything — the harness that gates
+    all six image builds could not run at all. See `test_serial_codec`, which
+    pins it against the corpus.
+    """
+    cs = 0
+    for b in body:
+        cs ^= b
+    return f"{cs:02X}"
 
 
 def serial_frame(verb: str, *args: str) -> bytes:
@@ -805,7 +897,7 @@ class World:
     admin_user_id: str = ""
     tenant_tz: str = "Africa/Johannesburg"
     courts: dict[int, str] = field(default_factory=dict)  # court number -> id
-    court_price: float = 8.0
+    court_price: Decimal = Decimal("8")
     m_user_id: str = ""
     m_membership_id: str = ""
     m_token: str = ""
@@ -883,10 +975,28 @@ def seed_and_tune(w: World) -> None:
 
     # A seeded member has no password. The admin reset returns a one-shot temporary
     # password, which is the API's own out-of-band path — and what gives us M's JWT.
+    #
+    # The temporary password is TEMPORARY, and the API enforces that rather than advising
+    # it: `PasswordChangeGate` answers 403 `password_change_required` to every authenticated
+    # call from a must-change session except the change itself. So this walks the member's
+    # real journey — reset, sign in, choose a password — instead of holding a session that a
+    # real member could not use. Skipping the change is how this harness spent a whole run
+    # reporting failures on the wallet, the QR screen and the roster that were all one 403.
     reset = expect_status(w.http.post(f"/api/v1/admin/members/{w.m_membership_id}/reset-password", token=w.admin_token), 200, "reset-password")
     login = expect_status(w.http.post("/api/v1/auth/login", {"email": m["email"], "password": reset["temp_password"]}), 200, "member login")
     w.m_token = login["access_token"]
     REPORT.check("setup", f"member M ({SEEDED_MEMBER_M}) logged in via admin password reset", bool(w.m_token) and not login.get("is_admin"))
+
+    REPORT.check("setup", "the temporary password forces a change: an authenticated call is refused until it is done",
+                 w.http.get("/api/v1/wallet", token=w.m_token).status == 403 and login.get("must_change_password") is True)
+
+    expect_status(
+        w.http.post("/api/v1/me/password", {"currentPassword": reset["temp_password"], "newPassword": M_PASSWORD}, token=w.m_token),
+        200, "member chooses a password")
+    login = expect_status(w.http.post("/api/v1/auth/login", {"email": m["email"], "password": M_PASSWORD}), 200, "member re-login")
+    w.m_token = login["access_token"]
+    REPORT.check("setup", "and once it is changed the member holds an ordinary session",
+                 not login.get("must_change_password") and w.http.get("/api/v1/wallet", token=w.m_token).status == 200)
 
     # Credits through the admin API, on top of the seeded opening balance.
     adj = expect_status(w.http.post(f"/api/v1/admin/credit/{w.m_user_id}/adjust", {"amountCredits": 500, "reason": "e2e-device seed"}, token=w.admin_token), 200, "adjust M")
@@ -1176,24 +1286,50 @@ def offline_attendance(w: World) -> None:
                  wr.get("accepted_through") == 2 and wr.get("recorded") == 1)
 
 
+def walk_up_expectation(w: World, requested: int) -> tuple[int, Decimal]:
+    """How many minutes the club can sell right now, and what the server will charge."""
+    tz = ZoneInfo(w.tenant_tz) if ZoneInfo else timezone.utc
+    local = now_utc().astimezone(tz)
+    day = expect_status(
+        w.http.get(f"/api/v1/schedule?date={local.date().isoformat()}", token=w.m_token), 200, "schedule today").json
+    closes = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=int(day["dayEndMinute"]))
+    to_close = int((closes - local).total_seconds() // 60)
+    minutes = min(requested, max(to_close, 0))
+    # The server's own arithmetic: pro rata on the slice price, rounded away from zero to
+    # the ledger's two places.
+    cost = credits(w.court_price * minutes / int(day["sliceMinutes"]))
+    return minutes, cost
+
+
 def walk_up(w: World) -> None:
     step("C5/H3  Walk-up on an unbooked court, replay-safe by nonce")
     assert w.box is not None
     wallet_before = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
+
+    # What the club will actually sell right now, rather than a hard-coded hour.
+    #
+    # A walk-up truncates at closing time — an hour bought at 19:50 on a Saturday ends at
+    # 20:00 — so a fixed "60 minutes for 32 credits" is a test that passes all afternoon
+    # and fails after 19:00, which is the same wall-clock trap `BookableSlot` and the
+    # peak-window fixtures already exist to close, arriving from a third direction. It
+    # cost a whole red run at 19:09 SAST. The expectation is derived from the club's own
+    # hours for today and the pro-rata price the server computes from them.
+    minutes, cost = walk_up_expectation(w, requested=60)
+
     nonce = secrets.token_hex(8)
     req = {"minutes": 60, "method": "qr", "token": w.ident_code, "court": 2, "nonce": nonce}
     first = expect_status(w.box.call("POST", "/api/v1/device/walkup", req), 200, "walkup")
-    REPORT.check("C5", "walk-up on court 2 (named in the request, on the box) is granted 60 minutes (<= 90) for 32 credits",
-                 first.get("granted_minutes") == 60 and dec(first.get("amount_credits", 0)) == 32 and first.get("replayed") is False, f"resp={first.json}")
-    REPORT.check("C5", "balance_after_credits == wallet before - 32", dec(first.get("balance_after_credits", -1)) == wallet_before - 32)
+    REPORT.check("C5", f"walk-up on court 2 (named in the request, on the box) is granted {minutes} minutes (<= 90) for {cost} credits",
+                 first.get("granted_minutes") == minutes and credits(first.get("amount_credits", 0)) == cost and first.get("replayed") is False, f"resp={first.json}")
+    REPORT.check("C5", f"balance_after_credits == wallet before - {cost}", credits(first.get("balance_after_credits", -1)) == wallet_before - cost)
     replay = expect_status(w.box.call("POST", "/api/v1/device/walkup", req), 200, "walkup replay")
-    REPORT.check("H3", "resending the identical nonce answers replayed:true with the SAME booking_id and the remainder of the grant (60, seconds later)",
-                 replay.get("replayed") is True and replay.get("booking_id") == first.get("booking_id") and 59 <= replay.get("granted_minutes", 0) <= 60, f"resp={replay.json}")
+    REPORT.check("H3", f"resending the identical nonce answers replayed:true with the SAME booking_id and the remainder of the grant ({minutes}, seconds later)",
+                 replay.get("replayed") is True and replay.get("booking_id") == first.get("booking_id") and minutes - 1 <= replay.get("granted_minutes", 0) <= minutes, f"resp={replay.json}")
     wallet_after = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
-    REPORT.check("H3", "the replay charged nothing: wallet moved by exactly -32 across both calls", wallet_after == wallet_before - 32, f"{wallet_before} -> {wallet_after}")
+    REPORT.check("H3", f"the replay charged nothing: wallet moved by exactly -{cost} across both calls", wallet_after == wallet_before - cost, f"{wallet_before} -> {wallet_after}")
     ledger = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.m_user_id}&limit=200", token=w.admin_token), 200, "ledger M").json
     wu_rows = [r for r in ledger if r.get("relatedBookingId") == first.get("booking_id")]
-    REPORT.check("H3", "one LightsPurchase row of -32 for the walk-up booking, not two", len(wu_rows) == 1 and wu_rows[0]["type"] == "LightsPurchase" and dec(wu_rows[0]["signedAmountCredits"]) == -32,
+    REPORT.check("H3", f"one LightsPurchase row of -{cost} for the walk-up booking, not two", len(wu_rows) == 1 and wu_rows[0]["type"] == "LightsPurchase" and credits(wu_rows[0]["signedAmountCredits"]) == -cost,
                  f"rows={[(r['type'], r['signedAmountCredits']) for r in wu_rows]}")
     slot = find_slot(w, first.get("booking_id", ""), now_utc())
     REPORT.check("C5", "the walk-up is a real booking on court 2 in M's name, visible on the schedule",
@@ -1292,14 +1428,15 @@ def no_show_sweep(w: World) -> None:
     ledger_n = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.n_user_id}&limit=200", token=w.admin_token), 200, "ledger N").json
     rows7 = {r["type"]: dec(r["signedAmountCredits"]) for r in ledger_n if r.get("relatedBookingId") == w.b7["id"]}
     REPORT.check("H5", "N's ledger for B7: BookingCharge -24, CancellationRefund +24, NoShowPenalty -7.20 (30%) as separate rows",
-                 rows7.get("BookingCharge") == -24 and rows7.get("CancellationRefund") == 24 and rows7.get("NoShowPenalty") == -7.2, f"rows={rows7}")
+                 rows7.get("BookingCharge") == dec(-24) and rows7.get("CancellationRefund") == dec(24)
+                 and rows7.get("NoShowPenalty") == dec("-7.2"), f"rows={rows7}")
     n_after = next(m for m in expect_status(w.http.get("/api/v1/admin/members", token=w.admin_token), 200, "members").json if m["user_id"] == w.n_user_id)
     # Money is ledger-only: the balance the admin screen shows must be the sum of N's rows,
     # including the two the sweep just posted. (A plain before/after delta would also
     # pick up any seeded booking of N's the same sweep happened to settle.)
-    ledger_sum = round(sum(dec(r["signedAmountCredits"]) for r in ledger_n), 2)
+    ledger_sum = credits(sum(dec(r["signedAmountCredits"]) for r in ledger_n))
     REPORT.check("H5", "N's balance equals the sum of N's ledger rows after the sweep (no stored balance drift)",
-                 round(dec(n_after["balance_credits"]), 2) == ledger_sum and dec(n_after["balance_credits"]) >= dec(n_before["balance_credits"]) + 16.8,
+                 credits(n_after["balance_credits"]) == ledger_sum and dec(n_after["balance_credits"]) >= dec(n_before["balance_credits"]) + dec("16.8"),
                  f"{n_before['balance_credits']} -> {n_after['balance_credits']} (ledger sum {ledger_sum})")
     rebook = w.http.post("/api/v1/admin/bookings", {
         "courtId": w.courts[4], "userId": w.n_user_id, "startsAt": iso(now_utc() + timedelta(seconds=45)), "sliceCount": 1,
@@ -1396,6 +1533,8 @@ def main() -> int:
     step("Preflight")
     selftest_device_contract()
     REPORT.check("C1", "this script's device request shape matches the shared corpus (bearer header + normalised mac)", True)
+    selftest_serial_codec()
+    REPORT.check("F12", "this script's serial framing and checksum match the shared corpus byte for byte, and a bad checksum is refused", True)
 
     pg = Postgres(cfg)
     db_name = "e2e_device_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(2)

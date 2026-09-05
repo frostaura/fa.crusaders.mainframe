@@ -72,7 +72,7 @@ public sealed class ConcurrentDecisionTests
             // otherwise refuse the second for the cap rather than the balance — and which
             // limit a concurrent attempt hits first is exactly the timing this test must not
             // depend on.
-            SettingsJson = """{"slice_minutes":15,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":15,"advance_booking_days":30,"member_per_day_max_minutes":600,"timezone":"UTC"}""",
+            SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":15,"advance_booking_days":30,"member_per_day_max_minutes":600,"timezone":"UTC"}""",
         });
 
         var member = new User { TenantId = tenant.Id, Email = $"m-{slug}@test.local", PasswordHash = "x", EmailVerified = true };

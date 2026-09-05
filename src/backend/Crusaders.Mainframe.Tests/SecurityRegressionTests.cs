@@ -54,7 +54,7 @@ public sealed class SecurityRegressionTests
             TenantId = tenant.Id,
             // A penalty window wide enough that a cancellation now lands inside it, which is
             // what makes the IDOR cost the victim money rather than merely lose them a court.
-            SettingsJson = """{"slice_minutes":15,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":600,"timezone":"UTC"}""",
+            SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":600,"timezone":"UTC"}""",
         });
 
         var admin = new User { TenantId = tenant.Id, Email = $"a-{slug}@test.local", PasswordHash = "x", EmailVerified = true, IsAdmin = true };

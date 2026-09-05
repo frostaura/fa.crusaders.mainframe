@@ -12,7 +12,7 @@ public static class ScheduleEndpoints
         g.MapGet("/schedule", async (DateOnly? date, HttpContext ctx, ScheduleService schedule, CancellationToken ct) =>
         {
             var d = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
-            var day = await schedule.GetDayAsync(d, ctx.User.Id(), ct);
+            var day = await schedule.GetDayAsync(d, ctx.User.Id(), ctx.User.IsInRole("admin"), ct);
             return Results.Ok(day);
         });
 

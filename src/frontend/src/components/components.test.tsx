@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -99,6 +100,56 @@ describe("ConfirmButton", () => {
 
     await user.click(await screen.findByRole("button", { name: "Really revoke?" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays armed indefinitely unless a caller asks for a timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const onConfirm = vi.fn();
+      // No armedTimeoutMs. The default used to be 3000, and on the booking grid that
+      // meant a member who paused to read "Reserve for 50.00 cr?" tapped a control that
+      // had already gone back to idle: the second tap re-armed instead of confirming, no
+      // request left the browser, and a slow reader could tap for ever without booking.
+      render(<ConfirmButton idleLabel="Revoke" confirmLabel="Really revoke?" onConfirm={onConfirm} />);
+
+      act(() => { fireEvent.click(screen.getByRole("button", { name: "Revoke" })); });
+      act(() => { vi.advanceTimersByTime(30_000); });
+
+      expect(screen.getByRole("button", { name: "Really revoke?" })).toBeInTheDocument();
+      act(() => { fireEvent.click(screen.getByRole("button", { name: "Really revoke?" })); });
+      expect(onConfirm).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("goes back to idle after the action instead of sticking on Working…", async () => {
+    const user = setup();
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+
+    // StrictMode is what reproduces it, and it is what the dev server runs. The effect
+    // lifecycle is mount → cleanup → mount, and the component only ever wrote `false` on
+    // cleanup — so `mounted.current` was false before the first click ever happened.
+    // Rendering without StrictMode here would pass against the broken component.
+    render(
+      <StrictMode>
+        <ConfirmButton idleLabel="Revoke" confirmLabel="Really revoke?" onConfirm={onConfirm} />
+      </StrictMode>,
+    );
+    await user.click(screen.getByRole("button", { name: "Revoke" }));
+    await user.click(await screen.findByRole("button", { name: "Really revoke?" }));
+
+    // The `mounted` ref was only ever written on UNMOUNT, so React's development
+    // double-invoke (mount → cleanup → mount) left it false from the first render — and
+    // the `finally` that clears `pending` was then skipped for ever. The button stuck on
+    // "Working…" after its first successful action, on every screen that uses it, and it
+    // reads as a hung request rather than as a lifecycle bug.
+    // `aria-busy` and the accessible name, not the CSS: jsdom does not compute Tailwind's
+    // opacity, so every one of the stacked labels is "visible" to it. What a screen reader
+    // and a test can both check is which label the button is currently announcing.
+    const settled = await screen.findByRole("button", { name: "Revoke" });
+    expect(settled).toHaveAttribute("aria-busy", "false");
+    expect(settled).toBeEnabled();
   });
 
   it("disarms itself again after a while", async () => {

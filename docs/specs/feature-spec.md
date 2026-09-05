@@ -72,17 +72,19 @@ Class is admin-assignable and editable, audit-logged on every change.
 - Slice length is configurable per tenant: 15m / 30m / 1h.
 - Slice price is configurable per tenant per court (default flat across courts).
 - Bookings open `T` days into the future (configurable, default 14).
-- Operating hours per day per tenant: configurable (e.g. 06:00–22:00).
-- Date picker lets the player navigate ±N days.
+- Operating hours per day per tenant: configurable (e.g. 06:00–22:00). Held as `tenant_settings.operating_hours`, a per-weekday map; the flat `day_start_minute` / `day_end_minute` pair is the default for any weekday the map does not name. **Enforced by `BookingService`, not only drawn by the grid** — a member who reaches the API directly is refused `out_of_hours` with that day's opening and closing times, because a slot sold outside hours is a slot the grid cannot draw and the member therefore cannot see, cancel or be refunded from the app. A walk-up at the box is truncated at closing rather than refused. Admins bypass, so maintenance and events can be booked out of hours.
+- Date picker lets the player navigate ±N days. Forward is bounded by `advance_booking_days`; backward the player may look at the same number of days into the past, read-only — a past day's slots are never bookable, and until there is a bookings list elsewhere in the product this is the only way a player can review a booking they have already played.
 - **Slot states:**
   - `available` — green, clickable.
   - `reserved_by_me` — distinct color, shows my own name.
   - `reserved_by_other` — neutral color, shows the other player's photo + first name only.
   - `admin_block` — distinct color, label e.g. "Tournament", "Maintenance". Not bookable.
-  - `out_of_hours` — greyed out, not displayed.
+  - `out_of_hours` — greyed out and not bookable. *(This line used to read "greyed out, not displayed", which asks for two contradictory things. Rendered-and-inert is the reading that keeps the grid legible: a row that vanishes leaves the player unable to tell a closed club from a bug, and a booking that already exists outside hours — an admin block, a walk-up that ran to closing, a slot sold before the rule was enforced — must still be visible to its owner. The grid draws the day's operating window plus whatever range any existing booking on that day occupies.)*
 - **Booking action:**
   - Tap an `available` slot → confirmation modal showing court, time, duration, cost, current balance, balance after.
+  - The modal has an explicit confirm control and **no timer**: it stays open until the player confirms or dismisses it. A confirmation that disarms itself after a few seconds is a price the player was not given time to read.
   - On confirm: balance must cover cost. If not, prompt to top up.
+  - Every refusal carries a stable snake_case `error` code and the figures its sentence needs — `past_time`, `too_far_ahead`, `slot_taken`, `invalid_duration`, `insufficient_balance`, `peak_hours_league_only`, `per_day_cap_exceeded`, `out_of_hours`, `no_time_available`, `duplicate_request`, `court_not_found`. **A rule refusing a booking is never a 5xx.** The client maps codes to sentences; a code or an exception is never shown to a player.
   - Booking is committed atomically: ledger debit + booking row + confirmation email + receipt PDF + webhook event.
 - **Multi-slice bookings:** a player can select consecutive slots on the same court before confirming (e.g. two 30m slices = 1 hour). Each slice is its own booking row for clean cancellation accounting.
 - **Recurring bookings:** out of scope for v1.
@@ -113,7 +115,10 @@ Class is admin-assignable and editable, audit-logged on every change.
 - A player can cancel any of their own bookings from the app.
 - The cancellation modal clearly displays:
   - "Cancelling now is **free** — full refund to credit." (outside penalty window)
-  - **OR** "Cancelling within the penalty window — **30% (R{X}) penalty** will be deducted, R{Y} refunded." (inside)
+  - **OR** "Cancelling within the penalty window — **30% ({X} cr) penalty** will be deducted, {Y} cr refunded." (inside)
+  - **OR** "You have already checked in — the lights have been on, so **nothing is refunded**." (after check-in; `settlement-model.md` §2 S4)
+- **The figures come from the server, at the moment the modal opens** — `GET /api/v1/bookings/{id}/cancellation-quote`, computed through the same settlement the cancellation itself uses. They are not carried on the schedule payload and not re-derived in the client: the answer turns on the clock (the penalty window) and on attendance (a scan at the court), and both move after a schedule is loaded. The quote is a quote, not a reservation — the cancellation re-derives everything, and the confirmation states what actually moved.
+- The confirmation after a cancellation names the actual figures returned by the cancel call. "Refund pending" is not an acceptable message: it was shown identically when 50 credits came back, when 35 did, and when nothing did.
 - The penalty window is defined as `≤ penalty_window_minutes` (configurable, default 15) before the slice start.
 - On confirm:
   - Booking status → `cancelled`.
@@ -131,7 +136,8 @@ A tenant admin can:
 - **Run a biometric enrollment session for any member**, with the member physically present at a tenant machine that has a peripheral attached. Multiple finger / face templates per member supported. Re-enrollment replaces the previous template with full audit trail. See `biometric-abstraction.md` § Admin-led enrollment flow.
 - Book on behalf of any member (charges that member's credit; if insufficient, admin can override and create a negative balance, logged).
 - Cancel any booking on behalf of any member (penalty waiveable with reason).
-- Block a slot for an event (creates an `admin_block` entry; can be a single slot, range, or recurring weekly).
+- Block a slot for an event (creates an `admin_block` entry; can be a single slot or a range). `POST /api/v1/admin/blocks` creates one, `DELETE /api/v1/admin/blocks/{id}` lifts it. A block reserves the court through the same overlap exclusion constraint a booking does, takes no money and writes no ledger row. It **cannot be laid over an existing booking** — a player who paid must be refunded deliberately, through a cancellation, rather than overwritten. Lifting a block cancels rather than deletes it, so the trail survives. *Recurring weekly blocks are out of scope for v1, alongside recurring bookings (§5); a range is created as one block per slot run.*
+- The three admin actions above — book on behalf, cancel any booking with an optional waived penalty, and block — are reachable **from the schedule grid**, on the slot they act on. The endpoints existing without a screen is the same defect as the screen existing without the endpoints.
 - Issue a manual credit adjustment (positive or negative, reason required, logged in ledger).
 - View / export all transactions, bookings, members, no-shows.
 - Configure the tenant's outbound webhooks.

@@ -80,6 +80,13 @@ public sealed class BookingService
         var isAdminActor = actorId != userId;
         if (!isAdminActor)
         {
+            // §5 "Operating hours per day per tenant: configurable". Enforced here and not
+            // only drawn on the grid, because the grid is not the only way in: a member
+            // could POST 03:00 on a Sunday, be charged for it, and then find the slot on
+            // no screen in the product — bought, unrefundable and invisible.
+            var hoursResult = CheckOperatingHoursRule(startsAt, endsAt, settings);
+            if (hoursResult is not null) return hoursResult;
+
             var membership = await _db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.UserId == userId, ct);
             var memberClass = membership?.MemberClass ?? MemberClass.Regular;
 
@@ -168,26 +175,9 @@ public sealed class BookingService
         if (requestedMinutes <= 0) return new BookingResult.NoTimeAvailable(requestedMinutes, 0);
 
         var now = DateTimeOffset.UtcNow;
-        var requestedEnd = now.AddMinutes(requestedMinutes);
 
-        // Someone is on the court right now. Not a truncation case — there is no time to
-        // sell at all, and saying so is different from selling zero minutes.
-        var inProgress = await _db.Bookings.AnyAsync(b =>
-            b.CourtId == courtId &&
-            b.Status != BookingStatus.Cancelled &&
-            b.StartsAt <= now && b.EndsAt > now, ct);
-        if (inProgress) return new BookingResult.SlotTaken();
-
-        // Truncate at whoever is next through the door.
-        var nextStart = await _db.Bookings
-            .Where(b => b.CourtId == courtId
-                && b.Status != BookingStatus.Cancelled
-                && b.StartsAt > now && b.StartsAt < requestedEnd)
-            .OrderBy(b => b.StartsAt)
-            .Select(b => (DateTimeOffset?)b.StartsAt)
-            .FirstOrDefaultAsync(ct);
-
-        var endsAt = nextStart ?? requestedEnd;
+        var (refusal, endsAt) = await SellableEndAsync(courtId, now, requestedMinutes, settings, ct);
+        if (refusal is not null) return refusal;
 
         // Whole minutes: the member is buying light time off a wall clock, and a price
         // derived from a fractional minute is a price nobody can check.
@@ -231,6 +221,45 @@ public sealed class BookingService
             DurationLabel: $"{grantedMinutes} min",
             IsWalkUp: true,
             ExternalReference: externalReference), ct);
+    }
+
+    /// <summary>
+    /// How far a walk-up can actually run, or the refusal that says why none of it can.
+    ///
+    /// <para>
+    /// Three things bound it and all three are truncations rather than refusals wherever
+    /// there is still time worth selling: somebody already on the court (no time at all —
+    /// which is a different answer from selling zero minutes), whoever is next through the
+    /// door, and closing time. A box standing in a locked club must not sell the night, and
+    /// an hour bought at 19:50 on a Saturday ends at 20:00 rather than at 20:50.
+    /// </para>
+    /// </summary>
+    private async Task<(BookingResult? Refusal, DateTimeOffset EndsAt)> SellableEndAsync(
+        Guid courtId, DateTimeOffset now, int requestedMinutes, TenantSettingsView settings, CancellationToken ct)
+    {
+        var window = OpenWindowUtc(now, settings);
+        if (now < window.OpensAtUtc || now >= window.ClosesAtUtc)
+        {
+            return (new BookingResult.OutOfHours(window.OpensAtLocal, window.ClosesAtLocal), now);
+        }
+
+        var inProgress = await _db.Bookings.AnyAsync(b =>
+            b.CourtId == courtId &&
+            b.Status != BookingStatus.Cancelled &&
+            b.StartsAt <= now && b.EndsAt > now, ct);
+        if (inProgress) return (new BookingResult.SlotTaken(), now);
+
+        var requestedEnd = now.AddMinutes(requestedMinutes);
+        var nextStart = await _db.Bookings
+            .Where(b => b.CourtId == courtId
+                && b.Status != BookingStatus.Cancelled
+                && b.StartsAt > now && b.StartsAt < requestedEnd)
+            .OrderBy(b => b.StartsAt)
+            .Select(b => (DateTimeOffset?)b.StartsAt)
+            .FirstOrDefaultAsync(ct);
+
+        var endsAt = nextStart ?? requestedEnd;
+        return (null, endsAt < window.ClosesAtUtc ? endsAt : window.ClosesAtUtc);
     }
 
     /// <summary>
@@ -485,6 +514,58 @@ public sealed class BookingService
             : 0m;
 
         return (booking.AmountChargedCredits, penalty);
+    }
+
+    /// <summary>
+    /// What cancelling this booking, right now, would actually cost — before the member commits.
+    ///
+    /// <para>
+    /// §7 requires the cancellation modal to state the penalty and the refund in figures,
+    /// and the product stated neither: the whole confirmation was a button that changed
+    /// its label, and the toast afterwards said "refund pending" whether 50.00 had come
+    /// back, 35.00 had, or nothing had. A member who had already scanned in at the box
+    /// was told "refund pending" while losing the entire price in silence.
+    /// </para>
+    ///
+    /// <para>
+    /// Computed on the server, through the same <see cref="SettleCancellation"/> the
+    /// cancellation itself uses, and fetched when the modal opens rather than carried on
+    /// the schedule payload — the answer turns on the clock (the penalty window) and on
+    /// attendance (a scan at the court), both of which move after a schedule is loaded.
+    /// A quote baked into the grid would be a promise the product could not keep.
+    /// </para>
+    ///
+    /// <para>
+    /// It is a quote, not a reservation: the cancellation re-derives everything. If a
+    /// check-in lands between the quote and the tap, the member is charged what the
+    /// cancellation decides, and the response says so.
+    /// </para>
+    /// </summary>
+    public async Task<CancellationQuote?> QuoteCancellationAsync(Guid bookingId, Guid actorId, bool actorIsAdmin, CancellationToken ct)
+    {
+        var booking = await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
+        if (booking is null || booking.Status != BookingStatus.Booked || booking.UserId is null) return null;
+
+        // Same refusal shape as CancelAsync: a stranger learns nothing, not even that the
+        // id is real, and certainly not what the booking cost.
+        if (!actorIsAdmin && actorId != booking.UserId.Value) return null;
+
+        var settings = await _settings.GetAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        var minutesUntilStart = (booking.StartsAt - now).TotalMinutes;
+        var insidePenaltyWindow = minutesUntilStart < settings.PenaltyWindowMinutes;
+        var (refund, penalty) = SettleCancellation(booking, settings, insidePenaltyWindow, waivePenalty: false);
+
+        return new CancellationQuote(
+            BookingId: booking.Id,
+            AmountChargedCredits: booking.AmountChargedCredits,
+            RefundCredits: refund - penalty,
+            PenaltyCredits: penalty,
+            PenaltyPct: settings.PenaltyPct,
+            PenaltyWindowMinutes: settings.PenaltyWindowMinutes,
+            InsidePenaltyWindow: insidePenaltyWindow,
+            CheckedIn: booking.CheckedInAt is not null,
+            AlreadyStarted: !actorIsAdmin && booking.StartsAt <= now);
     }
 
     public async Task<CancellationResult> CancelAsync(Guid bookingId, Guid actorId, bool actorIsAdmin, bool waivePenalty, CancellationToken ct)
@@ -1837,6 +1918,52 @@ public sealed class BookingService
         && pg.SqlState == "23505"
         && pg.ConstraintName == ExternalReferenceIndexName;
 
+    /// <summary>
+    /// Refuses court time the club is not open for.
+    ///
+    /// <para>
+    /// Both ends are checked against the LOCAL day the booking starts on, so a booking
+    /// that runs past close is refused rather than silently truncated — the member asked
+    /// for an hour and half of it does not exist. A booking that would cross local
+    /// midnight fails the same test, because its end lands past that day's close.
+    /// </para>
+    /// </summary>
+    private static BookingResult? CheckOperatingHoursRule(DateTimeOffset startsAt, DateTimeOffset endsAt, TenantSettingsView settings)
+    {
+        var tz = ResolveTz(settings.Timezone);
+        var localStart = TimeZoneInfo.ConvertTimeFromUtc(startsAt.UtcDateTime, tz);
+        var localEnd = TimeZoneInfo.ConvertTimeFromUtc(endsAt.UtcDateTime, tz);
+        var (openMinute, closeMinute) = settings.HoursFor(localStart.DayOfWeek);
+
+        var startMinute = (localStart.Hour * 60) + localStart.Minute;
+        var endMinute = startMinute + (int)Math.Round((localEnd - localStart).TotalMinutes);
+
+        if (startMinute >= openMinute && endMinute <= closeMinute) return null;
+        return new BookingResult.OutOfHours(MinutesToHhmm(openMinute), MinutesToHhmm(closeMinute));
+    }
+
+    /// <summary>Minutes past midnight as <c>HH:mm</c> — the form the member is shown.</summary>
+    internal static string MinutesToHhmm(int minutes)
+    {
+        var clamped = Math.Clamp(minutes, 0, 24 * 60);
+        return $"{clamped / 60:D2}:{clamped % 60:D2}";
+    }
+
+    /// <summary>The club's open window for the local day containing <paramref name="at"/>, as UTC instants plus the local labels to show.</summary>
+    private sealed record OpenWindow(DateTimeOffset OpensAtUtc, DateTimeOffset ClosesAtUtc, string OpensAtLocal, string ClosesAtLocal);
+
+    private static OpenWindow OpenWindowUtc(DateTimeOffset at, TenantSettingsView settings)
+    {
+        var tz = ResolveTz(settings.Timezone);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(at.UtcDateTime, tz);
+        var (openMinute, closeMinute) = settings.HoursFor(local.DayOfWeek);
+        var midnightUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local.Date, DateTimeKind.Unspecified), tz);
+        var midnight = new DateTimeOffset(midnightUtc, TimeSpan.Zero);
+        return new OpenWindow(
+            midnight.AddMinutes(openMinute), midnight.AddMinutes(closeMinute),
+            MinutesToHhmm(openMinute), MinutesToHhmm(closeMinute));
+    }
+
     private static BookingResult? CheckPeakHoursRule(DateTimeOffset startsAt, DateTimeOffset endsAt, MemberClass memberClass, TenantSettingsView settings)
     {
         if (memberClass == MemberClass.LeagueOrSenior) return null;
@@ -1954,6 +2081,9 @@ public abstract record BookingResult
     public sealed record SlotTaken : BookingResult;
     public sealed record InsufficientBalance(decimal CurrentCredits, decimal RequiredCredits) : BookingResult;
     public sealed record PeakHoursLeagueOnly(string PeakStart, string PeakEnd, int RegularAdvanceHours) : BookingResult;
+
+    /// <summary>The club is shut for the whole or part of the requested window. Carries that day's hours so the member is told when to come back.</summary>
+    public sealed record OutOfHours(string OpensAt, string ClosesAt) : BookingResult;
     public sealed record PerDayCapExceeded(int CapMinutes, int AlreadyBookedMinutes, int AttemptedMinutes) : BookingResult;
 
     /// <summary>
@@ -1976,6 +2106,24 @@ public abstract record BookingResult
     /// </summary>
     public sealed record DuplicateRequest : BookingResult;
 }
+
+/// <summary>
+/// What a cancellation would cost right now, in figures, so the member reads the number
+/// before they tap rather than the ledger afterwards.
+/// </summary>
+/// <param name="RefundCredits">What actually lands back in the wallet — the refund NET of the penalty, which is the only figure a member can check against their balance.</param>
+/// <param name="PenaltyCredits">What is kept. Reported separately because the ledger posts it as its own row and a dispute asks for it by name.</param>
+/// <param name="CheckedIn">The lights have been on. Nothing comes back; <paramref name="RefundCredits"/> is zero and the copy must say why.</param>
+public sealed record CancellationQuote(
+    Guid BookingId,
+    decimal AmountChargedCredits,
+    decimal RefundCredits,
+    decimal PenaltyCredits,
+    decimal PenaltyPct,
+    int PenaltyWindowMinutes,
+    bool InsidePenaltyWindow,
+    bool CheckedIn,
+    bool AlreadyStarted);
 
 public abstract record CancellationResult
 {

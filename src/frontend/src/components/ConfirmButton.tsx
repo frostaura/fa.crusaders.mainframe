@@ -12,7 +12,21 @@ type ConfirmButtonProps = {
   idleClassName?: string;
   /** Armed (confirm) variant. Defaults to a warm orange alert. */
   armedClassName?: string;
-  /** ms to keep the armed state before snapping back. Default 3000. */
+  /**
+   * ms to keep the armed state before snapping back. **Off by default.**
+   *
+   * It used to default to 3000, and that silently broke the one control it most
+   * needed to get right. A member who took longer than three seconds to read
+   * "Reserve for 50.00 cr?" tapped a button that had already gone back to idle,
+   * so the second tap re-armed instead of confirming — a slow reader could tap
+   * for ever and never book anything, with no request leaving the browser and
+   * nothing on screen to explain it. A confirmation exists to be read; a
+   * confirmation with a stopwatch on it punishes the people who read it.
+   *
+   * Clicking elsewhere and pressing Escape still disarm, which is what actually
+   * addresses the concern the timer was reaching for — an armed control left on
+   * screen for the next person to touch.
+   */
   armedTimeoutMs?: number;
   disabled?: boolean;
 };
@@ -24,7 +38,7 @@ export function ConfirmButton({
   className,
   idleClassName = "bg-info-soft text-info-strong hover:bg-info-soft/80",
   armedClassName = "bg-[#F97316] text-white",
-  armedTimeoutMs = 3000,
+  armedTimeoutMs = 0,
   disabled = false,
 }: ConfirmButtonProps) {
   const [armed, setArmed] = useState(false);
@@ -32,7 +46,16 @@ export function ConfirmButton({
   const ref = useRef<HTMLButtonElement>(null);
   const timer = useRef<number | null>(null);
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  // Set on mount as well as cleared on unmount. Without the assignment this effect
+  // only ever wrote `false`, and React's development double-invoke runs
+  // mount → cleanup → mount — so `mounted.current` was false from the first render
+  // onwards and the `finally` below never cleared `pending`. The button stuck on
+  // "Working…" for ever after one successful action, in dev, on every screen that
+  // uses it. It reads as a hung request and is not one.
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const disarm = () => {
     if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
@@ -42,7 +65,8 @@ export function ConfirmButton({
   useEffect(() => {
     // Only run idle-disarm bookkeeping when armed and NOT in flight.
     if (!armed || pending) return;
-    timer.current = window.setTimeout(disarm, armedTimeoutMs);
+    // A timeout only when a caller asked for one. See armedTimeoutMs above.
+    if (armedTimeoutMs > 0) timer.current = window.setTimeout(disarm, armedTimeoutMs);
     const onDocPointerDown = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) disarm();
     };
@@ -83,7 +107,10 @@ export function ConfirmButton({
       onClick={handleClick}
       className={cn(
         "relative overflow-hidden rounded-md text-xs font-medium transition-colors duration-200 ease-out",
-        "disabled:cursor-not-allowed",
+        // The lift, the cursor and the focus ring come from the base layer in index.css;
+        // this control keeps only its own colour transition. `no-lift` because a grid
+        // cell that rises would shift the cells packed against it.
+        "no-lift",
         // While pending we keep the armed visual instead of greying out via the disabled style.
         (armed || pending) ? armedClassName : idleClassName,
         pending && "cursor-wait",

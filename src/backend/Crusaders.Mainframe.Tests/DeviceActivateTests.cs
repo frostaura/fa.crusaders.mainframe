@@ -170,6 +170,71 @@ public class DeviceActivateTests
     }
 
     /// <summary>
+    /// The same scan, fifteen seconds later — after <c>LightsCueWorker</c> has closed the
+    /// booking out — must still say SLOT ENDED.
+    ///
+    /// <para>
+    /// The <c>ended</c> arm above was reachable only in the gap between a slot's end and
+    /// the next worker tick, because the lookup filtered on <c>Status == Booked</c>: the
+    /// worker promotes an attended booking to <c>Completed</c> within fifteen seconds, and
+    /// from then on the member's still-valid code — it lives until slot end plus grace —
+    /// resolved to nothing and the glass read NO BOOKING. The member arriving two minutes
+    /// late is precisely the case SLOT ENDED exists for, and was the one case that could
+    /// never see it.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(BookingStatus.Completed)]
+    [InlineData(BookingStatus.NoShow)]
+    public async Task A_booking_the_sweep_has_already_closed_still_answers_ended(BookingStatus closed)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+        var booking = await BookAsync(f, courtIndex: 0, startsInMinutes: -47, minutes: 45);
+        var code = await BookingCodeAsync(f, booking);
+
+        // What the worker does a tick after the slot ends.
+        booking.Status = closed;
+        booking.LightsOffCuedAt = DateTimeOffset.UtcNow;
+        await f.Db.SaveChangesAsync();
+
+        var response = await ActivateAsync(f, box, code);
+
+        Assert.False(response.Activated);
+        Assert.Equal("ended", response.Reason);
+        Assert.Equal(0, response.GrantedSeconds);
+        Assert.Equal(1, response.CourtNumber);
+    }
+
+    /// <summary>
+    /// A cancelled booking is NOT "ended" — nothing was ever going to happen on that court,
+    /// so "no booking behind this code" is the true sentence and SEE THE DESK means
+    /// something different to the person reading it.
+    /// </summary>
+    [Fact]
+    public async Task A_cancelled_booking_is_still_no_booking()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+        var booking = await BookAsync(f, courtIndex: 0, startsInMinutes: -47, minutes: 45);
+        var code = await BookingCodeAsync(f, booking);
+
+        booking.Status = BookingStatus.Cancelled;
+        await f.Db.SaveChangesAsync();
+
+        var response = await ActivateAsync(f, box, code);
+
+        Assert.False(response.Activated);
+        Assert.Equal("no_booking", response.Reason);
+    }
+
+    /// <summary>
     /// A slot longer than the relay can hold is granted the cap, not the slot. The relay
     /// bank cuts the lights at ninety minutes whatever it is told; a grant of two hours
     /// would be thirty minutes of darkness the box could not explain.

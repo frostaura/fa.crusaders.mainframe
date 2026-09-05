@@ -41,7 +41,7 @@ public sealed class QrEndpointHttpTests
 
     private static async Task<Seeded> SeedAsync(
         TestWebAppFactory factory,
-        string settingsJson = """{"slice_minutes":15,"grace_window_minutes":5,"timezone":"UTC","qr_lifetime_seconds":45,"roster_window_minutes":120,"activation_cue_window_minutes":10}""")
+        string settingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","qr_lifetime_seconds":45,"roster_window_minutes":120,"activation_cue_window_minutes":10}""")
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
