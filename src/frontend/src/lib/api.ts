@@ -624,16 +624,6 @@ export const endpoints = {
     api.post<{ reactivated: boolean }>(`/api/v1/admin/members/${memberId}/reactivate`),
 
   /**
-   * Re-send the verification email to an applicant who never clicked the first one.
-   *
-   * Unauthenticated and keyed by email rather than member id, because the same endpoint
-   * serves the locked-out member on the sign-in screen; the admin console is simply the
-   * other caller. It answers 202 whether or not the address is on file, so it cannot be
-   * used to enumerate members.
-   */
-  resendVerification: (email: string) =>
-    api.post<{ sent: boolean }>("/api/v1/auth/resend-verification", { email }),
-  /**
    * A manual credit movement. `relatedBookingId` is optional and OMITTED when not given:
    * an adjustment that names a booking is what lets a late box upload recognise that the
    * desk already compensated the member for a wrongly-swept no-show, and audit instead of
