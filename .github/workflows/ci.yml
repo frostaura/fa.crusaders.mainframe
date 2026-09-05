@@ -470,6 +470,32 @@ jobs:
 
           if [ -f "$build/firmware.signed.bin" ]; then
             cp "$build/firmware.signed.bin" "$out/court_bridge.signed.bin"
+
+            # THE CHECK THAT MAKES A SIGNED BUILD MEAN SOMETHING.
+            #
+            # Materializing the secret proved only that it parses as a key, never that it
+            # is the other half of the public key committed in OtaPublicKey.h. Those are
+            # two separate operator acts (set the secret; commit the regenerated header)
+            # and the go-live checklist prescribes them separately, so a mismatch is not a
+            # remote possibility — it is the default outcome of doing item 6 out of order.
+            # A mismatched pair is a perfectly valid image that EVERY board rejects: each
+            # one paints UPDATING / DO NOT POWER OFF, downloads ~400 KB, fails the BearSSL
+            # verify, paints UPDATE FAILED, and repeats on every heartbeat until somebody
+            # reverts the image. Nothing on the Devices page can explain it, because a box
+            # in that loop is heartbeating happily and never reports a failed version.
+            #
+            # So the release runs the board's own verification against the COMMITTED
+            # header, here, before anything is published. It also fails when the header is
+            # missing, empty or a placeholder — a header that cannot verify anything is not
+            # a signed release either. (Round-3 finding 5.)
+            python3 src/iot/tools/sign_firmware.py --verify \
+              "$out/court_bridge.signed.bin" \
+              src/iot/lib/otacore/include/otacore/OtaPublicKey.h \
+              || {
+                echo "::error title=OTA key mismatch::the signed image does not verify against the committed OtaPublicKey.h — see the message above and go-live checklist item 6"
+                exit 1
+              }
+
             size=$(wc -c < "$out/court_bridge.signed.bin" | tr -d '[:space:]')
             printf '{"version":"%s","url":"/firmware/court_bridge.signed.bin","sizeBytes":%s}\n' \
               "$version" "$size" > "$out/firmware.manifest.json"
@@ -851,13 +877,101 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-arm64
 
   # ============================================================================
+  # Gateway — the nginx reverse proxy, as an image rather than a bind mount.
+  #
+  # nginx/nginx.conf carries the /firmware/ location and the X-Forwarded-Host that
+  # give every court box a reachable OTA URL and every member their own rate-limit
+  # bucket. It used to be mounted into stock nginx:alpine from a checkout on the
+  # host, and the deploy chain moves images and nothing else — so a club merging a
+  # gateway fix got a new backend behind the OLD config while the dashboard said
+  # deployed (round-3 finding 18). Built and pushed like the other two now, so the
+  # trap cannot recur on the next nginx.conf edit either.
+  # ============================================================================
+  build-gateway-amd64:
+    name: Build Gateway (amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push gateway (amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./nginx
+          file: ./nginx/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-amd64
+
+  build-gateway-arm64:
+    name: Build Gateway (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push gateway (arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./nginx
+          file: ./nginx/Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-arm64
+
+  merge-gateway-manifests:
+    name: Create Gateway Multi-arch Manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-gateway-amd64, build-gateway-arm64]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-arm64
+
+  # ============================================================================
   # Portainer deploy — re-pull images and redeploy the live stack
   # ============================================================================
   deploy-portainer:
     name: Re-pull image and redeploy on Portainer
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [merge-backend-manifests, merge-frontend-manifests]
+    needs: [merge-backend-manifests, merge-frontend-manifests, merge-gateway-manifests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Wait for Docker Hub propagation
@@ -871,12 +985,15 @@ jobs:
           PORTAINER_TOKEN: ${{ secrets.PORTAINER_TOKEN }}
           PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID }}
           PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
+          # Needed to name the gateway image in the stack check below.
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euo pipefail
           : "${PORTAINER_URL:?secret PORTAINER_URL is required}"
           : "${PORTAINER_TOKEN:?secret PORTAINER_TOKEN is required}"
           : "${PORTAINER_ENDPOINT_ID:?secret PORTAINER_ENDPOINT_ID is required}"
           : "${PORTAINER_STACK_ID:?secret PORTAINER_STACK_ID is required}"
+          : "${DOCKERHUB_USERNAME:?secret DOCKERHUB_USERNAME is required}"
 
           api="${PORTAINER_URL%/}/api"
 
@@ -885,6 +1002,29 @@ jobs:
             -H "X-API-Key: ${PORTAINER_TOKEN}" \
             "${api}/stacks/${PORTAINER_STACK_ID}/file" \
             | jq -r '.StackFileContent')
+
+          # The deploy is a re-PUT of the stack Portainer already holds with
+          # pullImage: true. That re-pulls the images the stack NAMES — so a stack still
+          # naming stock nginx:alpine with ./nginx/nginx.conf bind-mounted silently keeps
+          # the old gateway config while reporting a successful deploy, which is exactly
+          # how the /firmware/ route and the forwarded host would have been stranded
+          # (round-3 finding 18). Checked here, against the live stack, because nothing
+          # else in the chain can see it: the tests exercise the API given forwarded
+          # headers and cannot tell a stale deployed gateway from a fresh one.
+          gateway_image="${DOCKERHUB_USERNAME}/crusaders-mainframe-gateway"
+          stack_ok=1
+          if ! printf '%s' "${stack_file_content}" | grep -q "${gateway_image}"; then
+            echo "::error title=Portainer stack does not name the gateway image::the live stack has no '${gateway_image}' service. The gateway is built and pushed by this workflow; a stack that does not name it will keep whatever gateway it has, config included."
+            stack_ok=0
+          fi
+          if printf '%s' "${stack_file_content}" | grep -q 'nginx/nginx\.conf'; then
+            echo "::error title=Portainer stack bind-mounts nginx.conf::the live stack still mounts ./nginx/nginx.conf from a host checkout. That file is baked into the gateway image now; a bind mount silently overrides it with whatever is on the host and pins the club to a config the release cannot update."
+            stack_ok=0
+          fi
+          if [ "${stack_ok}" -ne 1 ]; then
+            echo "Refusing to deploy. Point the Portainer stack's gateway service at ${gateway_image}:latest and remove the nginx.conf volume; see docs/specs/deployment.md."
+            exit 1
+          fi
 
           echo "Fetching current stack metadata..."
           env_array=$(curl -fsSL \

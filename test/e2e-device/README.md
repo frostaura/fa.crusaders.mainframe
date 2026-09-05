@@ -127,38 +127,14 @@ simulator, wants a kernel-chosen port so two runs cannot collide, and must clean
 itself. It reads the same `imposter.json` and runs the same simulator binary, so nothing here
 is a second copy of the virtualization setup — only a different process manager for it.
 
-## CI wiring — a sketch, not wired
+## CI wiring
 
-Not added to `ci.yml` yet; the target needs a Postgres service, the pinned pio toolchain and
-`npx`, which are spread across three existing jobs today. The shape it would take:
+Wired. `.github/workflows/ci.yml` carries an `e2e-device` job (`needs: [backend, iot-build]`)
+with its own `postgres:16-alpine` service on 5432, the pinned pio toolchain and `npx`, and
+all six image builds gate on it. `E2E_PG_HOST`/`E2E_PG_PORT` point the script at the service
+container, so nothing reaches for docker, and `.tmp/e2e-device/` is uploaded as an artifact
+on failure.
 
-```yaml
-  # e2e-device:
-  #   name: End-to-end (device, no hardware)
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 20
-  #   needs: [backend, iot-build]
-  #   services:
-  #     postgres:
-  #       image: postgres:16-alpine
-  #       env: { POSTGRES_USER: crusaders, POSTGRES_PASSWORD: crusaders_test_pw, POSTGRES_DB: crusaders_mainframe_test }
-  #       ports: ["5439:5432"]
-  #       options: >-
-  #         --health-cmd "pg_isready -U crusaders" --health-interval 5s --health-timeout 5s --health-retries 10
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #     - uses: actions/setup-dotnet@v4
-  #       with: { dotnet-version: "10.0.x" }
-  #     - uses: actions/setup-node@v4
-  #       with: { node-version: "22" }
-  #     - uses: actions/setup-python@v5
-  #       with: { python-version: "3.12", cache: pip, cache-dependency-path: src/iot/requirements.txt }
-  #     - uses: actions/cache@v4
-  #       with: { path: ~/.platformio, key: "pio-boards-${{ runner.os }}-${{ hashFiles('src/iot/platformio.ini') }}" }
-  #     - run: pip install -r src/iot/requirements.txt
-  #     - run: make test-e2e-device PIO=pio PY=python3
-  #       env: { E2E_PG_HOST: localhost, E2E_PG_PORT: "5439" }
-  #     - if: failure()
-  #       uses: actions/upload-artifact@v4
-  #       with: { name: e2e-device-scratch, path: .tmp/e2e-device/, retention-days: 7 }
-```
+This section used to say "Not added to ci.yml yet" and describe the job as a commented-out
+sketch. It was added in the same wave that wrote that sentence and the sentence was never
+deleted — read the workflow, not this paragraph, if the two ever disagree again.
