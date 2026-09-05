@@ -305,7 +305,7 @@ export default function AdminMembersPage() {
           <Label htmlFor="credit-amount">Amount (credits — positive adds, negative deducts)</Label>
           <Input id="credit-amount" value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)} placeholder="e.g. 100" inputMode="decimal" />
           <Label htmlFor="credit-reason" className="mt-3">Reason (audit-logged)</Label>
-          <Input id="credit-reason" value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Voided 2026-05-04 booking, reissuing credit" />
+          <Input id="credit-reason" value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Goodwill — court 2 lights faulty on 2026-05-04" />
           <RelatedBookingField userId={creditFor.user_id} value={creditBooking} onChange={setCreditBooking} />
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="ghost" onClick={closeCredit}>Cancel</Button>
@@ -423,12 +423,28 @@ function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
 /**
  * The optional booking a credit adjustment is compensation for.
  *
- * Naming the booking is what turns a manual credit from plain money into evidence:
- * when the box's attendance upload later proves the member did show up, the no-show
- * reversal sees a positive AdminAdjustment naming that booking, audits it as manual
- * compensation, and does not refund a second time. An adjustment without one is
- * invisible to that check, so an admin who has already made the member whole and
- * leaves this blank has set up a double refund.
+ * <p>
+ * Naming the booking is what turns a manual credit from plain money into evidence: the
+ * no-show reversal reads the ledger for this booking and nets what it finds, so a
+ * positive adjustment already sitting there is counted rather than paid twice.
+ * </p>
+ *
+ * <p>
+ * <b>This is not the repair for a wrongly-recorded no-show, and the copy here used to
+ * read as if it were</b> (review finding 17). A no-show is reversed on its own the
+ * moment the box's attendance upload arrives — that is what the reversal is for, and
+ * the desk does not have to do anything. A positive adjustment naming the booking is
+ * for genuine compensation the club decided to give on top: goodwill, an unusable
+ * court, a mistake of the club's own. Steering the desk to credit the member first is
+ * how a member ends up keeping both a full refund and the credit.
+ * </p>
+ *
+ * <p>
+ * The booking must be this member's own. The picker only offers their bookings, and a
+ * typed id is checked here for shape — the server checks ownership and refuses one that
+ * belongs to somebody else, because naming another member's booking suppresses THEIR
+ * reversal, on a ledger where nothing explains why.
+ * </p>
  */
 function RelatedBookingField({ userId, value, onChange }: { userId: string; value: string; onChange: (next: string) => void }) {
   const [recent, setRecent] = useState<RecentBooking[] | null>(null);
@@ -460,7 +476,7 @@ function RelatedBookingField({ userId, value, onChange }: { userId: string; valu
         <option value="">Not for a specific booking</option>
         {recent === null && <option value="loading" disabled>Loading recent bookings…</option>}
         {(recent ?? []).map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
-        <option value={OTHER_BOOKING}>Another booking — enter its ID</option>
+        <option value={OTHER_BOOKING}>Another booking of this member's — enter its ID</option>
       </select>
       {choice === OTHER_BOOKING && (
         <Input
@@ -472,9 +488,16 @@ function RelatedBookingField({ userId, value, onChange }: { userId: string; valu
           autoComplete="off"
         />
       )}
+      {choice === OTHER_BOOKING && (
+        <p className="mt-1 text-xs text-text-muted">
+          It must be one of {"this member's"} own bookings. The server refuses another {"member's"}, because naming it
+          would change what that member is owed.
+        </p>
+      )}
       <p className="mt-1 text-xs text-text-muted">
-        Name the booking when this makes up for a wrongly-recorded no-show. If the court box later proves the member
-        did attend, the no-show is reversed without refunding them a second time.
+        Only for a credit that genuinely compensates this member for that booking. A wrongly-recorded no-show does not
+        need one: when the court box reports the member did attend, the refund and the penalty are reversed on their
+        own. Crediting them by hand as well leaves them holding both.
       </p>
     </div>
   );

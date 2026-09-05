@@ -8,12 +8,19 @@ import { ledgerRowFixture, memberFixture, renderPage, stubFetch } from "../test/
  *
  * <p>
  * An admin adjustment can name the booking it compensates for (`relatedBookingId` on
- * `AdjustRequest`). That is not decoration: when the court box later uploads proof the
- * member did attend, the no-show reversal looks for a positive AdminAdjustment naming
- * the booking and, finding one, audits it as manual compensation instead of refunding
- * a second time. An adjustment that should have named the booking and did not is a
- * double refund waiting for an upload. So these tests hold the wire shape both ways:
- * the id goes when picked, and no key goes when it is not.
+ * `AdjustRequest`). That is not decoration: the no-show reversal reads this booking's
+ * ledger and nets what it finds, so a positive adjustment already sitting there is
+ * counted rather than paid a second time. These tests hold the wire shape both ways —
+ * the id goes when picked, and no key goes when it is not — and the shape of the id,
+ * because the endpoint binds a Guid? and answers a bare 400 for anything else.
+ * </p>
+ *
+ * <p>
+ * They also hold the <em>copy</em>, which is the part that went wrong (review finding
+ * 17). The field used to read as though a credit were the repair for a wrongly-recorded
+ * no-show. It is not: the reversal happens on its own when the box's attendance upload
+ * arrives, and a credit on top leaves the member holding both. A wrong steer here costs
+ * real money on every league night, so it is pinned like any other contract.
  * </p>
  */
 describe("AdminMembers — adjust credit", () => {
@@ -85,6 +92,37 @@ describe("AdminMembers — adjust credit", () => {
       // Absent, not null: plain money, invisible to the no-show reversal by design.
       expect(post?.raw).not.toContain("relatedBookingId");
     });
+  });
+
+  it("does not steer the desk into crediting a wrongly-recorded no-show by hand", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await openAdjustAndFill("24", "Goodwill");
+    await screen.findByRole("option", { name: /No-show penalty/ });
+
+    // What the field is for, and what it is not for. The old copy said "name the
+    // booking when this makes up for a wrongly-recorded no-show", which is an
+    // instruction to pay twice.
+    expect(screen.getByText(/genuinely compensates this member/)).toBeInTheDocument();
+    expect(screen.getByText(/reversed on their own/)).toBeInTheDocument();
+    expect(screen.getByText(/leaves them holding both/)).toBeInTheDocument();
+    expect(screen.queryByText(/makes up for a wrongly-recorded no-show/)).not.toBeInTheDocument();
+  });
+
+  it("says whose booking a typed ID has to be, because the server refuses another member's", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await openAdjustAndFill("24", "Goodwill");
+    await screen.findByRole("option", { name: /No-show penalty/ });
+
+    // The picker only ever offers this member's bookings; the free-text escape hatch is
+    // the only way to name somebody else's, and naming somebody else's suppresses THEIR
+    // reversal. The option itself says whose it must be.
+    expect(screen.getByRole("option", { name: /Another booking of this member's/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("For booking (optional)"), { target: { value: "other" } });
+    expect(screen.getByText(/The server refuses another member's/)).toBeInTheDocument();
   });
 
   it("takes a booking ID the ledger has not seen, and refuses one that is not a GUID", async () => {
