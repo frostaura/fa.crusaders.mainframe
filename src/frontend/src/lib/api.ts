@@ -190,7 +190,16 @@ export type AdminSettingsSave =
     | "penalty_window_minutes">
   & Partial<Omit<AdminSettings, "timezone">>;
 
-/** A court box or gate controller, as the admin surface sees it. */
+/**
+ * A court box, as the admin surface sees it.
+ *
+ * <p>
+ * There is no per-device key here any more, and no claim, revoke or rotate. One static
+ * API key per tenant authenticates every box, and a box that presents it and a device
+ * code the club has never seen registers itself on that first heartbeat. What is left on
+ * this row is identity the box reported and configuration an admin owns.
+ * </p>
+ */
 export type AdminDevice = {
   id: string;
   device_code: string;
@@ -204,19 +213,26 @@ export type AdminDevice = {
    */
   court_numbers: number[];
   gate_key: string | null;
+  /** Read-only identity the box reported. Nothing is authenticated against it. */
   mac_address: string | null;
-  key_version: number;
   enabled: boolean;
-  revoked_at: string | null;
   last_seen_at: string | null;
   last_ip_address: string | null;
-  running_version: string | null;
-  mega_version: string | null;
-  ota_channel: string;
-  pinned_version: string | null;
-  /** A build this box installed and could never make a working call on. */
-  failed_version: string | null;
+  running_version?: string | null;
+  mega_version?: string | null;
   created_at: string;
+  /**
+   * True until an admin edits this row.
+   *
+   * <p>
+   * A box registers itself on its first heartbeat, which means it arrives named
+   * `box-xxxxxx` and driving whatever courts the API defaulted it to — almost certainly
+   * the wrong ones. The badge this drives is the only thing standing between that and a
+   * league night where button 1 lights the wrong court, so it stays up until somebody
+   * has actually looked.
+   * </p>
+   */
+  auto_registered: boolean;
   /**
    * This box's own button map, or null to use the club's. Optional because the field
    * is landing on the API alongside this screen: the per-box editor renders only when
@@ -225,97 +241,34 @@ export type AdminDevice = {
   button_map?: string[] | null;
   /**
    * The interval this box is actually running, seconds — the tenant setting after the
-   * firmware's own 15-300 clamp. Optional because the field is landing on the API
-   * alongside this screen; when it is absent the admin surface falls back to clamping
-   * the tenant setting itself, which is the same arithmetic one hop further from the
-   * box. Never read the raw tenant setting as if it were what the box runs: a club that
-   * sets 600 has boxes calling in every 300, and the difference is the whole of
-   * "the entire fleet reads offline".
+   * firmware's own 15-300 clamp. Never read the raw tenant setting as if it were what
+   * the box runs: a club that sets 600 has boxes calling in every 300, and the
+   * difference is the whole of "the entire fleet reads offline" (review finding 22).
    */
-  heartbeat_seconds?: number;
-};
-
-/** A board announcing itself on the LAN that has not been claimed yet. */
-export type DiscoveredBoard = {
-  mac: string;
-  address: string;
-  hardware: string;
-  firmware: string;
-  mega_version: string | null;
-  claimed: boolean;
-  claimable: boolean;
-  /** Null when there was nothing to verify. False means a board asserted an identity
-   *  it could not prove, which is what a spoof AND a rotated key both look like. */
-  signature_verified: boolean | null;
-  device_id: string | null;
-  tenant_slug: string | null;
-  first_seen_at: string;
-  last_seen_at: string;
-};
-
-export type DiscoveryStatus = {
-  state: string;
-  listening: boolean;
-  bound_endpoint: string | null;
-  detail: string | null;
-  packets_received: number;
-  packets_accepted: number;
-  packets_rejected: number;
-  last_packet_at: string | null;
-  started_at: string | null;
-  announcers: number;
-  capacity_reached: boolean;
-  hint: string | null;
-};
-
-export type ClaimResult = {
-  device: AdminDevice;
-  device_key: string;
-  key_version: number;
-  board: DiscoveredBoard;
+  effective_heartbeat_seconds?: number;
   /**
-   * True when this board already had a row here — revoked, reflashed, or key lost —
-   * and the claim re-keyed that row (same id, bumped key version, un-revoked) rather
-   * than registering the same hardware twice. Optional because the field arrived on
-   * the API after this screen; an older API reads as a first claim.
+   * How long since the last beat before this box is offline, seconds. The API's own
+   * arithmetic, so the screen and the fleet agree; absent, the screen derives it from
+   * the cadence above rather than from a frozen literal.
    */
-  reclaimed?: boolean;
-  note: string;
+  offline_after_seconds?: number;
 };
 
 /**
- * What a key rotation hands back. The key is shown once; the `note` says how it reaches
- * the board — it cannot be pushed, so the box 401s, drops to CLAIM CODE and is connected
- * again from the discovered list, which re-keys the same row.
+ * The club's one device API key.
+ *
+ * <p>
+ * Static, per tenant, and flashed into every box's `secrets.h`. It is not shown once and
+ * then derived away — the API can and does hand it back on every GET, because a club
+ * that adds a ninth box next season has to be able to read it again. That is the trade
+ * this contract makes: a key an admin can always retrieve, in exchange for no claim
+ * codes, no discovery listener and no per-device key to lose.
+ * </p>
  */
-export type KeyRotation = {
-  device: AdminDevice;
-  device_key: string;
-  key_version: number;
-  note?: string;
+export type DeviceApiKey = {
+  api_key: string;
+  regenerated_at: string;
 };
-
-/** What manual registration hands back: the row, and the key that is never shown again. */
-export type DeviceRegistration = {
-  device: AdminDevice;
-  device_key: string;
-  key_version: number;
-  note: string;
-};
-
-/** A court box's brain. Gates are modelled on the API but parked, so they are not offered here. */
-export type DeviceHardware = "Esp8266" | "Mega2560" | "Esp32";
-export type OtaChannel = "Stable" | "Canary" | "Pinned";
-
-/**
- * Enum values as the API binds them. It configures no string-enum converter, so requests
- * carry the integer; responses spell the name out (`DeviceView`), which is what the types
- * above hold. Keep in step with `DeviceKind`, `DeviceHardware` and `OtaChannel` in the
- * backend domain.
- */
-export const DEVICE_KIND_WIRE = { CourtBox: 0, Gate: 1 } as const;
-export const DEVICE_HARDWARE_WIRE: Record<DeviceHardware, number> = { Mega2560: 0, Esp8266: 1, Esp32: 2 };
-export const OTA_CHANNEL_WIRE: Record<OtaChannel, number> = { Stable: 0, Canary: 1, Pinned: 2 };
 
 /**
  * The code a member's phone shows the court box.
@@ -629,21 +582,14 @@ export const endpoints = {
 
   // Admin: devices.
   //
-  // `court_numbers` is snake_case on every request that carries it — register, update
-  // and claim — because the API pins that one property name (the rest bind from
-  // camelCase case-insensitively). It is a list in relay order: [court on A, on B, …].
+  // `court_numbers` is snake_case on every request that carries it, because the API pins
+  // that one property name (the rest bind from camelCase case-insensitively). It is a
+  // list in relay order: [court on A, on B, …].
   //
-  // Enums go over the wire as their integer values: the API configures no string-enum
-  // converter, so a name like "Canary" does not bind. (It used to be sent as a name.)
+  // Discovery, claim, manual registration, key rotation and revocation are gone: boxes
+  // authenticate with the tenant's one static API key and register themselves on their
+  // first heartbeat. What is left is the list, the edit and the delete.
   adminDevicesList: () => api.get<AdminDevice[]>("/api/v1/admin/devices/"),
-  adminDeviceRegister: (req: { deviceCode: string; name: string; hardware: DeviceHardware; court_numbers: number[] }) =>
-    api.post<DeviceRegistration>("/api/v1/admin/devices/", {
-      deviceCode: req.deviceCode,
-      name: req.name,
-      kind: DEVICE_KIND_WIRE.CourtBox,
-      hardware: DEVICE_HARDWARE_WIRE[req.hardware],
-      court_numbers: req.court_numbers,
-    }),
   /**
    * `button_map` is this box's override and the API binds it three-valued
    * (`UpdateDeviceRequest` takes it as a bare JsonElement, pinned snake_case like
@@ -651,33 +597,20 @@ export const endpoints = {
    * key leaves it alone. The spread below keeps that contract — a caller that does not
    * mention `button_map` sends no such key, and JSON.stringify drops an `undefined` one.
    */
-  adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; court_numbers?: number[]; otaChannel?: OtaChannel; pinnedVersion?: string | null; button_map?: string[] | null }) =>
-    api.patch<AdminDevice>(`/api/v1/admin/devices/${id}`, {
-      ...req,
-      ...(req.otaChannel !== undefined ? { otaChannel: OTA_CHANNEL_WIRE[req.otaChannel] } : {}),
-    }),
-  /** Answers with the row as it now is — `revoked_at` set. The box is refused until it is re-claimed. */
-  adminDeviceRevoke: (id: string) => api.post<AdminDevice>(`/api/v1/admin/devices/${id}/revoke`, {}),
-  /** The new key comes back once, exactly as on registration; the old one stops working at once. */
-  adminDeviceRotateKey: (id: string) => api.post<KeyRotation>(`/api/v1/admin/devices/${id}/rotate-key`, {}),
-
-  // Admin: connecting a board
-  adminDevicesDiscovered: () => api.get<DiscoveredBoard[]>("/api/v1/admin/devices/discovered"),
-  adminDiscoveryStatus: () => api.get<DiscoveryStatus>("/api/v1/admin/devices/discovery-status"),
+  adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; court_numbers?: number[]; button_map?: string[] | null }) =>
+    api.patch<AdminDevice>(`/api/v1/admin/devices/${id}`, { ...req }),
   /**
-   * Claims an announcing board. Every property here is pinned snake_case on the API
-   * (`ClaimBoardRequest`), and the board is matched by its commitment to `claim_code`,
-   * not by MAC — so the MAC the admin picked in the list is not sent. This used to send
-   * `{ mac, claimCode, courtNumber }`, none of which bound to anything, so no claim from
-   * this screen could ever have succeeded.
+   * Forgets a box. It is not a revocation and does not lock anything out: the box still
+   * holds the club's API key, so it registers itself again on its next heartbeat — as a
+   * fresh, auto-registered row with default courts. Deleting is for a box that is
+   * genuinely gone, or for starting its configuration over.
    */
-  adminDeviceClaim: (req: { claimCode: string; deviceCode: string; name: string; court_numbers: number[] }) =>
-    api.post<ClaimResult>("/api/v1/admin/devices/claim", {
-      claim_code: req.claimCode,
-      device_code: req.deviceCode,
-      name: req.name,
-      court_numbers: req.court_numbers,
-    }),
+  adminDeviceDelete: (id: string) => api.del<{ deleted: true }>(`/api/v1/admin/devices/${id}`),
+
+  // Admin: the club's one device API key.
+  adminDeviceApiKey: () => api.get<DeviceApiKey>("/api/v1/admin/devices/api-key"),
+  /** The old key stops working immediately, so every box has to be reflashed with this one. */
+  adminDeviceApiKeyRegenerate: () => api.post<DeviceApiKey>("/api/v1/admin/devices/api-key/regenerate", {}),
 
   // Admin: courts
   adminCourtsList: () => api.get<AdminCourt[]>("/api/v1/admin/courts/"),

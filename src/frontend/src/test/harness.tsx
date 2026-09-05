@@ -68,7 +68,7 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
 
     // Longest prefix wins, not first-declared.
     //
-    // "/api/v1/admin/devices/" is a prefix of "/api/v1/admin/devices/discovered", so
+    // "/api/v1/admin/devices/" is a prefix of "/api/v1/admin/devices/api-key", so
     // first-match order meant a caller could stub both and silently get the wrong one
     // depending on which they listed first — a test that fails with an empty screen
     // and no hint as to why. Ordering by specificity removes the trap rather than
@@ -184,16 +184,14 @@ export function deviceFixture(overrides: Record<string, unknown> = {}) {
     court_numbers: [1],
     gate_key: null,
     mac_address: "5ccf7f1a2b3c",
-    key_version: 1,
     enabled: true,
-    revoked_at: null,
     last_seen_at: new Date().toISOString(),
     last_ip_address: "192.168.68.150",
     running_version: "1.0.0",
     mega_version: "1.0.0",
-    ota_channel: "Stable",
-    pinned_version: null,
-    failed_version: null,
+    // False by default: most fixtures are boxes an admin has already configured. The
+    // badge is the interesting case, so a test that wants it asks for it.
+    auto_registered: false,
     created_at: new Date().toISOString(),
     ...overrides,
   };
@@ -213,24 +211,6 @@ export function courtFixture(courtNumber: number, overrides: Record<string, unkn
 
 /** The club's courts — what the device screens offer when assigning relays. */
 export const COURTS_FIXTURE = [courtFixture(1), courtFixture(2), courtFixture(3)];
-
-export function boardFixture(overrides: Record<string, unknown> = {}) {
-  return {
-    mac: "5ccf7f1a2b3c",
-    address: "192.168.68.151",
-    hardware: "esp8266",
-    firmware: "1.0.0",
-    mega_version: null,
-    claimed: false,
-    claimable: true,
-    signature_verified: null,
-    device_id: null,
-    tenant_slug: null,
-    first_seen_at: new Date().toISOString(),
-    last_seen_at: new Date().toISOString(),
-    ...overrides,
-  };
-}
 
 /** One row of the admin members list, as AdminMemberEndpoints shapes it. */
 export function memberFixture(overrides: Record<string, unknown> = {}) {
@@ -270,17 +250,8 @@ export function ledgerRowFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export const DISCOVERY_LISTENING = {
-  state: "Listening",
-  listening: true,
-  bound_endpoint: "0.0.0.0:48653",
-  detail: null,
-  packets_received: 12,
-  packets_accepted: 12,
-  packets_rejected: 0,
-  last_packet_at: new Date().toISOString(),
-  started_at: new Date().toISOString(),
-  announcers: 1,
-  capacity_reached: false,
-  hint: null,
+/** The club's one device API key, as GET /admin/devices/api-key answers it. */
+export const DEVICE_API_KEY_FIXTURE = {
+  api_key: "crsdr_live_9f3a7c21b8e4d650a1c2",
+  regenerated_at: "2026-09-01T08:30:00Z",
 };

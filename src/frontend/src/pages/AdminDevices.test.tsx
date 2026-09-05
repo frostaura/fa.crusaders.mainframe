@@ -3,30 +3,34 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { AdminDevicesPage } from "./AdminDevices";
 import {
   COURTS_FIXTURE,
-  DISCOVERY_LISTENING,
+  DEVICE_API_KEY_FIXTURE,
   SETTINGS_FIXTURE,
-  boardFixture,
   deviceFixture,
   renderPage,
   stubFetch,
 } from "../test/harness";
 
 /**
- * The Devices screen.
+ * The Devices screen, under the hobby-grade device contract.
  *
  * <p>
- * Eight device endpoints were live for weeks with zero frontend references — "connecting
- * a board" meant an admin reading an IP off a sticker. These tests are about the things
- * this screen has to get right for somebody standing at a cupboard: does a board that is
- * announcing itself appear, does the claim send what the API actually binds, do the
- * courts go over in relay order, and does saving the button map avoid trampling
- * everything else in the settings document.
+ * The screen this replaces managed a per-device key each box was issued once: a discovery
+ * listener, a claim code read off an LCD, rotate, revoke and re-claim. All of that is
+ * gone. One static key per club goes into every box's secrets.h, and a box that presents
+ * it with an unknown device code registers itself on its first heartbeat.
+ * </p>
+ *
+ * <p>
+ * So these tests are about three things: can an admin actually get the key (masked,
+ * revealed, copied, regenerated behind a confirm that says what it costs), does a box
+ * that registered itself say so loudly enough that somebody checks its courts, and do
+ * edit and delete send what the API binds.
  * </p>
  *
  * <p>
  * A court box drives up to four courts, one per relay, so "which court is this box for"
  * is a list, `court_numbers`, indexed A–D. It is snake_case on every request because the
- * API pins that name; the previous claim body sent camelCase fields that bound to nothing.
+ * API pins that name.
  * </p>
  */
 describe("AdminDevices", () => {
@@ -39,18 +43,156 @@ describe("AdminDevices", () => {
   });
 
   const baseRoutes = () => [
-    { path: "/api/v1/admin/devices/discovered", body: [] },
-    { path: "/api/v1/admin/devices/discovery-status", body: DISCOVERY_LISTENING },
+    { path: "/api/v1/admin/devices/api-key", body: DEVICE_API_KEY_FIXTURE },
     { path: "/api/v1/admin/devices/", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
     { path: "/api/v1/admin/courts/", body: COURTS_FIXTURE },
   ];
 
-  it("lists a connected board with its firmware and courts, relay by relay", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1, 3] })] },
+  /** The base routes with the device list replaced — the shape most tests want. */
+  const withDevices = (body: unknown[]) => [
+    ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+    { path: "/api/v1/admin/devices/", body },
+  ];
+
+  // --- the club's device API key -----------------------------------------------
+
+  it("masks the device key until it is revealed, and copies the whole thing either way", async () => {
+    stubFetch(baseRoutes());
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+
+    renderPage(<AdminDevicesPage />);
+
+    // Masked at rest: the ends are kept so an admin can tell one key from another
+    // without putting the whole secret on a projector.
+    const field = await screen.findByLabelText("Device API key");
+    expect(field).toHaveTextContent("crsd••••••••a1c2");
+    expect(field).not.toHaveTextContent(DEVICE_API_KEY_FIXTURE.api_key);
+
+    // Copy takes the real key, not what is on screen — that is the whole point of
+    // being able to copy a masked value.
+    fireEvent.click(screen.getByRole("button", { name: "Copy device API key" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(DEVICE_API_KEY_FIXTURE.api_key));
+
+    fireEvent.click(screen.getByRole("button", { name: "Reveal device API key" }));
+    expect(screen.getByLabelText("Device API key")).toHaveTextContent(DEVICE_API_KEY_FIXTURE.api_key);
+
+    // And it goes back. A key left revealed on a club laptop is the failure mode the
+    // mask exists for.
+    fireEvent.click(screen.getByRole("button", { name: "Hide device API key" }));
+    expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••a1c2");
+  });
+
+  it("says when the key was last regenerated", async () => {
+    stubFetch(baseRoutes());
+    renderPage(<AdminDevicesPage />);
+
+    // Not the ISO string. The question this answers is "is this from before or after
+    // I flashed the boxes", and an admin cannot read that off a Z-suffixed timestamp.
+    const line = await screen.findByText(/Last regenerated/);
+    expect(line).not.toHaveTextContent("2026-09-01T08:30:00Z");
+  });
+
+  it("regenerates the key only behind a confirm that says every box must be reflashed", async () => {
+    const next = { api_key: "crsdr_live_0000111122223333aaaa", regenerated_at: "2026-09-05T09:00:00Z" };
+    const stub = stubFetch([
+      ...baseRoutes(),
+      { method: "POST", path: "/api/v1/admin/devices/api-key/regenerate", body: next },
     ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    // The cost of this button is a physical trip to every box with a laptop, so the
+    // armed label says so rather than asking "are you sure?".
+    const regenerate = await screen.findByRole("button", { name: /Regenerate key/ });
+    expect(screen.getByText(/old key stops working immediately/)).toBeInTheDocument();
+
+    // First click arms, and sends nothing.
+    fireEvent.click(regenerate);
+    expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    expect(await screen.findByRole("button", { name: /Reflash every box after this/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Reflash every box after this/ }));
+
+    await waitFor(() => {
+      const post = stub.calls.find((c) => c.method === "POST");
+      expect(post?.path).toBe("/api/v1/admin/devices/api-key/regenerate");
+    });
+
+    // The panel shows the NEW key, masked, without a reload.
+    await waitFor(() => expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••aaaa"));
+    expect(await screen.findByText(/New key issued/)).toHaveTextContent(/every box has to be reflashed/i);
+  });
+
+  it("explains a refused regeneration instead of silently keeping the old key on screen", async () => {
+    stubFetch([
+      ...baseRoutes(),
+      { method: "POST", path: "/api/v1/admin/devices/api-key/regenerate", status: 500, body: { message: "Key store is unavailable." } },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Regenerate key/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Reflash every box after this/ }));
+
+    // The failure mode this stops: a silent refusal, an admin who believes the key
+    // rotated, and a fleet flashed with a key the API never issued.
+    expect(await screen.findByText("Key store is unavailable.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••a1c2");
+  });
+
+  it("says so when the key cannot be read at all, rather than showing an empty panel", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/api-key"),
+      { path: "/api/v1/admin/devices/api-key", status: 500, body: { message: "boom" } },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    expect(await screen.findByText(/Could not read the club's device key/)).toBeInTheDocument();
+    // No pairing instructions without a key to paste into them.
+    expect(screen.queryByText(/How to pair a box/)).not.toBeInTheDocument();
+  });
+
+  it("tells an admin how to pair a box, including why a key is needed at all", async () => {
+    stubFetch(baseRoutes());
+    renderPage(<AdminDevicesPage />);
+
+    expect(await screen.findByText(/How to pair a box/)).toBeInTheDocument();
+    expect(screen.getByText(/secrets\.h/)).toBeInTheDocument();
+    expect(screen.getByText(/make flash-bridge/)).toBeInTheDocument();
+    expect(screen.getByText(/box-xxxxxx/)).toBeInTheDocument();
+    // The topology nobody guesses: LAN for the box, tunnel for the app, which is why
+    // "it is on our network" cannot be the box's identity.
+    expect(screen.getByText(/club LAN/)).toHaveTextContent(/through the tunnel/);
+  });
+
+  // --- the removed contract ------------------------------------------------------
+
+  it("no longer discovers, claims, registers, rotates or revokes anything", async () => {
+    const stub = stubFetch(withDevices([deviceFixture()]));
+
+    renderPage(<AdminDevicesPage />);
+    await screen.findByText("Court 1 box");
+
+    // The stub rejects any path it was not given, so a call to a removed endpoint
+    // would already have failed the render. This pins the screen's controls too.
+    for (const gone of [/Connect this board/i, /Claim/i, /Register/i, /Rotate/i, /Revoke/i, /Re-claim/i]) {
+      expect(screen.queryByRole("button", { name: gone })).not.toBeInTheDocument();
+    }
+    // The OTA channel picker went with the firmware endpoints it drove.
+    expect(screen.queryByLabelText(/update channel/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Code on the box/i)).not.toBeInTheDocument();
+    for (const gone of ["discovered", "discovery-status", "claim", "rotate-key", "revoke", "firmware"]) {
+      expect(stub.calls.some((c) => c.path.includes(gone))).toBe(false);
+    }
+  });
+
+  // --- the fleet ------------------------------------------------------------------
+
+  it("lists a connected board with its firmware and courts, relay by relay", async () => {
+    stubFetch(withDevices([deviceFixture({ court_numbers: [1, 3] })]));
 
     renderPage(<AdminDevicesPage />);
 
@@ -61,13 +203,7 @@ describe("AdminDevices", () => {
   });
 
   it("shows a board that has not called in as offline", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      {
-        path: "/api/v1/admin/devices/",
-        body: [deviceFixture({ last_seen_at: new Date(Date.now() - 10 * 60_000).toISOString() })],
-      },
-    ]);
+    stubFetch(withDevices([deviceFixture({ last_seen_at: new Date(Date.now() - 10 * 60_000).toISOString() })]));
 
     renderPage(<AdminDevicesPage />);
 
@@ -87,18 +223,37 @@ describe("AdminDevices", () => {
     stubFetch([
       ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/" && r.path !== "/api/v1/admin/settings/"),
       { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, heartbeat_seconds: 300 } },
-      {
-        path: "/api/v1/admin/devices/",
-        // Six minutes since the last beat. Two beats of a 300 s cadence: not an outage,
-        // and the old fixed threshold called it one after three.
-        body: [deviceFixture({ last_seen_at: new Date(Date.now() - 6 * 60_000).toISOString() })],
-      },
+      // Six minutes since the last beat. Two beats of a 300 s cadence: not an outage,
+      // and the old fixed threshold called it one after three.
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ last_seen_at: new Date(Date.now() - 6 * 60_000).toISOString() })] },
     ]);
 
     renderPage(<AdminDevicesPage />);
 
     expect(await screen.findByText("online")).toBeInTheDocument();
     expect(screen.queryByText(/last seen 6m ago/)).not.toBeInTheDocument();
+  });
+
+  it("takes the API's own offline threshold over any arithmetic of its own", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/" && r.path !== "/api/v1/admin/settings/"),
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, heartbeat_seconds: 15 } },
+      {
+        path: "/api/v1/admin/devices/",
+        // Ten minutes. Three beats of the club's 15 s setting would call this offline
+        // twenty times over; the API says this box gets an hour, and the API is the
+        // one that decides what a missed beat means.
+        body: [deviceFixture({
+          effective_heartbeat_seconds: 15,
+          offline_after_seconds: 3600,
+          last_seen_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+        })],
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    expect(await screen.findByText("online")).toBeInTheDocument();
   });
 
   it("reads the interval the box reports over the club setting, because the box clamps its own", async () => {
@@ -110,7 +265,7 @@ describe("AdminDevices", () => {
       {
         path: "/api/v1/admin/devices/",
         body: [deviceFixture({
-          heartbeat_seconds: 300,
+          effective_heartbeat_seconds: 300,
           last_seen_at: new Date(Date.now() - 16 * 60_000).toISOString(),
         })],
       },
@@ -130,13 +285,10 @@ describe("AdminDevices", () => {
     stubFetch([
       ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/" && r.path !== "/api/v1/admin/settings/"),
       { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, heartbeat_seconds: 3600 } },
-      {
-        path: "/api/v1/admin/devices/",
-        // Twenty minutes. Under a believed 3600 s cadence this is barely a third of one
-        // beat and would read online for three hours; under the real 300 s clamp it is
-        // four missed beats and a box worth looking at.
-        body: [deviceFixture({ last_seen_at: new Date(Date.now() - 20 * 60_000).toISOString() })],
-      },
+      // Twenty minutes. Under a believed 3600 s cadence this is barely a third of one
+      // beat and would read online for three hours; under the real 300 s clamp it is
+      // four missed beats and a box worth looking at.
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ last_seen_at: new Date(Date.now() - 20 * 60_000).toISOString() })] },
     ]);
 
     renderPage(<AdminDevicesPage />);
@@ -144,201 +296,134 @@ describe("AdminDevices", () => {
     expect(await screen.findByText(/last seen 20m ago/)).toBeInTheDocument();
   });
 
-  it("says loudly when a board could not start its firmware", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture({ failed_version: "1.1.0" })] },
-    ]);
+  // --- self-registration ------------------------------------------------------------
+
+  /**
+   * A box arrives named `box-a1b2c3` driving whatever courts the API defaulted it to,
+   * which are almost certainly the wrong ones. Nothing else on the screen distinguishes
+   * that row from one an admin configured months ago, and the cost of missing it is a
+   * league night with button 1 lighting the wrong court.
+   */
+  it("badges a box that registered itself, until somebody edits it", async () => {
+    stubFetch(withDevices([
+      deviceFixture({ id: "aaaa1111-1111-1111-1111-111111111111", device_code: "box-a1b2c3", name: "box-a1b2c3", auto_registered: true }),
+      deviceFixture({ id: "bbbb2222-2222-2222-2222-222222222222", device_code: "court-box-2", name: "Court 2 box", auto_registered: false }),
+    ]));
 
     renderPage(<AdminDevicesPage />);
 
-    // The firmware's own guard already refuses to reinstall it. This is so a person
-    // finds out — a fleet quietly declining an update is the silence noticed a week
-    // after the release was promoted everywhere.
-    expect(await screen.findByText(/firmware 1\.1\.0 failed to start/)).toBeInTheDocument();
+    expect(await screen.findByText("New — check court numbers")).toBeInTheDocument();
+    // One badge, on the one row that has not been looked at.
+    expect(screen.getAllByText("New — check court numbers")).toHaveLength(1);
   });
 
-  it("warns when nothing is listening for boards", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovery-status"),
-      {
-        path: "/api/v1/admin/devices/discovery-status",
-        body: { ...DISCOVERY_LISTENING, listening: false, state: "Disabled", hint: "Discovery is not enabled on this deployment." },
-      },
-    ]);
+  // --- edit -------------------------------------------------------------------------
 
-    renderPage(<AdminDevicesPage />);
-
-    // The single most likely reason nothing appears, and completely invisible from
-    // the cupboard. Without this an admin power-cycles a working board for an hour.
-    const warning = await screen.findByText(/Not listening for boards/);
-    // The hint from the server is what turns "nothing here" into an action. Asserted
-    // on the enclosing block because the two sentences are separate nodes.
-    expect(warning.parentElement).toHaveTextContent(/not enabled on this deployment/);
-  });
-
-  it("sends the claim in the shape the API binds: snake_case, courts as a list", async () => {
-    const stub = stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
-      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
-      {
-        method: "POST",
-        path: "/api/v1/admin/devices/claim",
-        body: { device: deviceFixture(), device_key: "abc", key_version: 1, board: boardFixture(), note: "" },
-      },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
-    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "k7rm4xpt" } });
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Court 2 box" } });
-    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
-
-    await waitFor(() => {
-      const claim = stub.calls.find((c) => c.path.includes("/claim"));
-      expect(claim).toBeTruthy();
-      // Upper-cased, because the code on the LCD is upper-case and nobody types it
-      // that way on a phone. Getting this wrong is a claim that fails for no visible
-      // reason while the admin is looking at a code that matches.
-      //
-      // Every property pinned snake_case, as ClaimBoardRequest declares them. The
-      // device code is derived from the courts when the admin leaves it blank.
-      expect(claim!.body).toEqual({ claim_code: "K7RM4XPT", device_code: "court-box-2", name: "Court 2 box", court_numbers: [2] });
-      // The MAC is how the admin picks a board to read the LCD of; the server matches
-      // on the code's commitment, and a stray property would only suggest otherwise.
-      expect(claim!.body).not.toHaveProperty("mac");
-      expect(claim!.body).not.toHaveProperty("courtNumber");
-    });
-  });
-
-  it("sends courts in relay order, A first, and keeps the list contiguous", async () => {
-    const stub = stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
-      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
-      {
-        method: "POST",
-        path: "/api/v1/admin/devices/claim",
-        body: { device: deviceFixture(), device_key: "abc", key_version: 1, board: boardFixture(), note: "" },
-      },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
-    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
-
-    // B is not reachable until A is set: the list is positional and a gap is not a
-    // thing the API can store.
-    expect(screen.getByLabelText("Relay B court")).toBeDisabled();
-
-    // Court 3 on relay A, court 1 on relay B — the ORDER is the assignment, so a
-    // sorted list would be a wiring change.
-    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "3" } });
-    expect(screen.getByLabelText("Relay B court")).toBeEnabled();
-    fireEvent.change(screen.getByLabelText("Relay B court"), { target: { value: "1" } });
-    expect(screen.getByLabelText("Relay C court")).toBeEnabled();
-    expect(screen.getByLabelText("Relay D court")).toBeDisabled();
-
-    fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
-
-    await waitFor(() => {
-      const claim = stub.calls.find((c) => c.path.includes("/claim"));
-      expect(claim?.body).toMatchObject({ court_numbers: [3, 1] });
-    });
-  });
-
-  it("clearing relay A clears the relays after it", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
-      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
-    fireEvent.change(await screen.findByLabelText("Relay A court"), { target: { value: "3" } });
-    fireEvent.change(screen.getByLabelText("Relay B court"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "" } });
-
-    expect(screen.getByLabelText("Relay A court")).toHaveValue("");
-    expect(screen.getByLabelText("Relay B court")).toHaveValue("");
-    expect(screen.getByLabelText("Relay B court")).toBeDisabled();
-  });
-
-  it("will not send a claim without a code, or without a court", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
-      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
-    // The code is the whole security of claiming — it proves the admin is standing in
-    // front of the box. A claim with an empty one must not even be attempted.
-    expect(screen.getByRole("button", { name: /Connect this board/ })).toBeDisabled();
-
-    // And a court box with no courts is refused by the API anyway
-    // (court_numbers_required_for_court_box); better not to make the call.
-    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
-    expect(screen.getByRole("button", { name: /Connect this board/ })).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "1" } });
-    expect(screen.getByRole("button", { name: /Connect this board/ })).toBeEnabled();
-  });
-
-  it("turns a button-map mismatch on claim into a sentence", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
-      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
-      {
-        method: "POST",
-        path: "/api/v1/admin/devices/claim",
-        status: 400,
-        body: {
-          error: "button_map_selects_court_beyond_device_courts",
-          message: "The club's button map selects a court this board would not drive. Give the board that many courts, or change the button map first.",
-        },
-      },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
-    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
-    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "1" } });
-    fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
-
-    // Not "HTTP 400", and not the raw token. The fixture's map has court buttons A–D;
-    // a one-court box cannot honour it, and the admin is told what to change.
-    expect(await screen.findByText(/button map selects a court this box does not drive/i)).toBeInTheDocument();
-  });
-
-  it("changes a box's courts and sends them in relay order", async () => {
+  it("saves a box's name and courts together, in relay order", async () => {
     const stub = stubFetch([
       ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1] })] },
-      { method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture({ court_numbers: [1, 2] }) },
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ name: "box-a1b2c3", auto_registered: true })] },
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture({ name: "Court 1 box", court_numbers: [1, 2] }) },
     ]);
 
     renderPage(<AdminDevicesPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Edit courts/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Edit name and courts/ }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Court 1 box" } });
     // The row's editor is labelled by the box, so two editors on one screen cannot be
     // confused for each other.
-    expect(screen.getByLabelText("Court 1 box relay A court")).toHaveValue("1");
-    fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save courts/ }));
+    expect(screen.getByLabelText("box-a1b2c3 relay A court")).toHaveValue("1");
+    fireEvent.change(screen.getByLabelText("box-a1b2c3 relay B court"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save box/ }));
 
     await waitFor(() => {
       const patch = stub.calls.find((c) => c.method === "PATCH");
       expect(patch?.path).toBe("/api/v1/admin/devices/11111111-1111-1111-1111-111111111111");
-      expect(patch?.body).toEqual({ court_numbers: [1, 2] });
+      // Name and courts in one call: they are one job, and two calls would be two
+      // chances to clear the "new" badge with half the work done.
+      expect(patch?.body).toEqual({ name: "Court 1 box", court_numbers: [1, 2] });
     });
     expect(await screen.findByText(/now drives A: court 1, B: court 2/)).toBeInTheDocument();
   });
+
+  it("clearing relay A clears the relays after it", async () => {
+    stubFetch(withDevices([deviceFixture({ court_numbers: [1, 2] })]));
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Edit name and courts/ }));
+    expect(screen.getByLabelText("Court 1 box relay B court")).toHaveValue("2");
+    // A gap would be a relay index `court_numbers` cannot represent — it is positional
+    // — so the editor makes one impossible rather than validating it away.
+    fireEvent.change(screen.getByLabelText("Court 1 box relay A court"), { target: { value: "" } });
+    expect(screen.getByLabelText("Court 1 box relay B court")).toHaveValue("");
+    expect(screen.getByRole("button", { name: /Save box/ })).toBeDisabled();
+  });
+
+  it("turns court_number_not_found into a sentence", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1] })] },
+      // The courts table is checked on update. The picker only offers real courts, so
+      // this is a court deleted while the form was open.
+      { method: "PATCH", path: "/api/v1/admin/devices/", status: 400, body: { error: "court_number_not_found" } },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Edit name and courts/ }));
+    fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save box/ }));
+
+    // Not "court number not found" with the underscores swapped for spaces.
+    expect(await screen.findByText(/not a court at this club/)).toHaveTextContent(/add it under Admin settings/);
+    // And the editor stays open, since the save did not go through.
+    expect(screen.getByRole("button", { name: /Save box/ })).toBeInTheDocument();
+  });
+
+  // --- delete -----------------------------------------------------------------------
+
+  it("deletes a box behind a confirm that says it comes straight back", async () => {
+    const stub = stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", sequence: [[deviceFixture()], []], body: [] },
+      { method: "DELETE", path: "/api/v1/admin/devices/", body: { deleted: true } },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+    // Deleting is not a revocation — the box still holds the club's key. Saying so on
+    // the armed button is what stops an admin believing they took a box off the network.
+    const armed = await screen.findByRole("button", { name: /re-registers on its next heartbeat/ });
+    expect(stub.calls.some((c) => c.method === "DELETE")).toBe(false);
+
+    fireEvent.click(armed);
+
+    await waitFor(() => {
+      const del = stub.calls.find((c) => c.method === "DELETE");
+      expect(del?.path).toBe("/api/v1/admin/devices/11111111-1111-1111-1111-111111111111");
+    });
+    expect(await screen.findByText(/still has the club's key, so it re-registers/)).toBeInTheDocument();
+  });
+
+  it("explains a refused delete", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
+      { method: "DELETE", path: "/api/v1/admin/devices/", status: 409, body: { message: "That box has activations today." } },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /re-registers on its next heartbeat/ }));
+
+    expect(await screen.findByText("That box has activations today.")).toBeInTheDocument();
+    expect(screen.getByText("Court 1 box")).toBeInTheDocument();
+  });
+
+  // --- button maps --------------------------------------------------------------------
 
   it("names the box when the button map reaches past its courts", async () => {
     stubFetch([
@@ -460,157 +545,8 @@ describe("AdminDevices", () => {
     expect(screen.getByRole("button", { name: /Save button map/ })).toBeEnabled();
   });
 
-  /**
-   * A dropped lead from the round-3 review, verified: `ReclaimAsync` is the only thing
-   * in the system that clears `RevokedAt`, and it is reachable only through the claim
-   * path, which matches a board by the MAC it announces against the MAC on the row. A
-   * box registered by hand has never announced, so its row has none. The screen used to
-   * tell the admin to register it again by hand — which returns device_code_taken and
-   * changes nothing. Saying what is actually true, and naming the path that does work,
-   * is the honest fix; un-revoking such a row needs an endpoint that does not exist.
-   */
-  it("does not send an admin down a dead end to recover a revoked box registered by hand", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      {
-        path: "/api/v1/admin/devices/",
-        body: [deviceFixture({ mac_address: null, revoked_at: new Date().toISOString() })],
-      },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    expect(await screen.findByText("no board address")).toBeInTheDocument();
-    expect(screen.getByText(/re-claiming matches boards by address/)).toBeInTheDocument();
-    expect(screen.getByText(/with a different device code/)).toBeInTheDocument();
-    // The instruction that does not work, gone.
-    expect(screen.queryByText(/Register it again by hand/)).not.toBeInTheDocument();
-  });
-
-  it("changes a box's update channel, as the integer the API binds", async () => {
-    const stub = stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
-      { method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture({ ota_channel: "Canary" }) },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.change(await screen.findByLabelText("Court 1 box update channel"), { target: { value: "Canary" } });
-
-    await waitFor(() => {
-      const patch = stub.calls.find((c) => c.method === "PATCH");
-      // One box goes first so the rest of the club is not the experiment. The API
-      // has no string-enum converter, so Canary goes over as 1 — the name never bound.
-      expect(patch?.body).toEqual({ otaChannel: 1 });
-    });
-  });
-
-  it("shows the claim's one-time key until dismissed, and keeps it out of storage", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
-      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
-      {
-        method: "POST",
-        path: "/api/v1/admin/devices/claim",
-        body: { device: deviceFixture({ name: "Court 2 box" }), device_key: "c0ffee1234", key_version: 1, board: boardFixture({ claimed: true }), note: "Store this key on the board now." },
-      },
-    ]);
-    const writeText = vi.fn(() => Promise.resolve());
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
-    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
-    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
-
-    // The claim used to toast and drop the key. A board that misses its single-use
-    // ten-minute grant was then stranded with nothing an admin could act on.
-    const key = await screen.findByLabelText("Device key");
-    expect(key).toHaveTextContent("c0ffee1234");
-    const panel = key.parentElement?.parentElement;
-    expect(panel).toHaveTextContent(/within ten minutes of Connect/);
-    expect(panel).toHaveTextContent(/secrets\.h as DEVICE_KEY/);
-    // And what to do when it lapses, without the instruction that cannot work. A board
-    // mints a NEW claim code every time it comes up unclaimed, and this form is cleared
-    // on success, so "press Connect again" named neither the code to type nor the fact
-    // that the board has to reappear in the list first.
-    expect(panel).toHaveTextContent(/NEW code on its screen/);
-    expect(panel).not.toHaveTextContent(/press Connect again/);
-
-    fireEvent.click(screen.getByRole("button", { name: /Copy device key/ }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("c0ffee1234"));
-
-    // Shown once means shown once: nothing a later visitor to this browser can read back.
-    for (let i = 0; i < localStorage.length; i++) {
-      expect(localStorage.getItem(localStorage.key(i)!)).not.toContain("c0ffee1234");
-    }
-
-    fireEvent.click(screen.getByRole("button", { name: /I've stored it/ }));
-    expect(screen.queryByLabelText("Device key")).not.toBeInTheDocument();
-  });
-
-  it("says what revoking does, and offers to re-claim a revoked box with its details filled in", async () => {
-    const stub = stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1, 2] })], sequence: [
-        [deviceFixture({ court_numbers: [1, 2] })],
-        [deviceFixture({ court_numbers: [1, 2], revoked_at: new Date().toISOString() })],
-      ] },
-      { method: "POST", path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111/revoke", body: deviceFixture({ revoked_at: new Date().toISOString() }) },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    // "Really revoke?" told nobody what it did. The armed label says: the box is
-    // refused until it is re-claimed.
-    fireEvent.click(await screen.findByRole("button", { name: "Revoke" }));
-    fireEvent.click(screen.getByRole("button", { name: "Refuse this box until re-claimed?" }));
-
-    await waitFor(() => expect(stub.calls.some((c) => c.path.endsWith("/revoke"))).toBe(true));
-    expect(await screen.findByText(/revoked — refused until re-claimed/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
-
-    // A revoked MAC is claimable again on the API; the row hands the claim form the
-    // box's details so the admin only types the code on the LCD. The board is not
-    // announcing yet in this fixture, and the form says so rather than failing later.
-    fireEvent.click(screen.getByRole("button", { name: /Re-claim/ }));
-    expect(screen.getByLabelText("Name")).toHaveValue("Court 1 box");
-    expect(screen.getByLabelText("Device code")).toHaveValue("court-box-1");
-    expect(screen.getByLabelText("Relay A court")).toHaveValue("1");
-    expect(screen.getByLabelText("Relay B court")).toHaveValue("2");
-    expect(screen.getByText(/5ccf7f1a2b3c is not announcing a claim code yet/)).toBeInTheDocument();
-  });
-
-  it("rotates a box's key and shows the new one once", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
-      {
-        method: "POST",
-        path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111/rotate-key",
-        body: { device: deviceFixture({ key_version: 2 }), device_key: "feedface", key_version: 2 },
-      },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Rotate key" }));
-    fireEvent.click(screen.getByRole("button", { name: "Refuse it until it has the new key?" }));
-
-    const key = await screen.findByLabelText("Device key");
-    expect(key).toHaveTextContent("feedface");
-    expect(key.parentElement?.parentElement).toHaveTextContent(/version 2/);
-    expect(key.parentElement?.parentElement).toHaveTextContent(/old key stopped working/);
-  });
-
   it("offers a box its own button map only when the API sends the field", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
-    ]);
+    stubFetch(withDevices([deviceFixture()]));
 
     renderPage(<AdminDevicesPage />);
 
@@ -673,138 +609,6 @@ describe("AdminDevices", () => {
     });
   });
 
-  it("registers a box by hand and shows its key once", async () => {
-    const stub = stubFetch([
-      ...baseRoutes(),
-      {
-        method: "POST",
-        path: "/api/v1/admin/devices/",
-        body: { device: deviceFixture({ name: "Bench box", court_numbers: [2, 3] }), device_key: "deadbeef", key_version: 1, note: "Store this key on the device now." },
-      },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: /Register a box by hand/ }));
-    fireEvent.change(screen.getByLabelText("Device code"), { target: { value: "bench-box" } });
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Bench box" } });
-    fireEvent.change(screen.getByLabelText("New box relay A court"), { target: { value: "2" } });
-    fireEvent.change(screen.getByLabelText("New box relay B court"), { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("button", { name: /Register box/ }));
-
-    await waitFor(() => {
-      const post = stub.calls.find((c) => c.method === "POST" && c.path === "/api/v1/admin/devices/");
-      // Enums as integers (CourtBox = 0, Esp8266 = 1); courts snake_case, in relay order.
-      expect(post?.body).toEqual({ deviceCode: "bench-box", name: "Bench box", kind: 0, hardware: 1, court_numbers: [2, 3] });
-    });
-    // The key is derived, not stored: this is the only time it will ever be visible,
-    // so it stays on screen until the admin says they have it.
-    expect(await screen.findByLabelText("Device key")).toHaveTextContent("deadbeef");
-  });
-
-  /** Picks the announcing board, types a code and a court, and presses Connect. */
-  async function connectTheBoard() {
-    fireEvent.click(await screen.findByLabelText("Board 5ccf7f1a2b3c"));
-    fireEvent.change(await screen.findByLabelText(/Code on the box/), { target: { value: "K7RM4XPT" } });
-    fireEvent.change(screen.getByLabelText("Relay A court"), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: /Connect this board/ }));
-  }
-
-  it("says when a claim re-keyed a board the club already had, rather than adding it twice", async () => {
-    const note = "This board was already registered here; its row has been re-keyed and re-enabled. The board collects the new key on its next announce.";
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
-      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
-      {
-        method: "POST",
-        path: "/api/v1/admin/devices/claim",
-        // What AdminDeviceDiscoveryEndpoints returns for a MAC with an existing row:
-        // the same id, key version bumped, reclaimed true.
-        body: { device: deviceFixture({ name: "Court 2 box", key_version: 3 }), device_key: "c0ffee", key_version: 3, board: boardFixture({ claimed: true }), reclaimed: true, note },
-      },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-    await connectTheBoard();
-
-    // "Connected" on a box the admin revoked last week reads as a duplicate row. The
-    // outcome is named: re-keyed, same row, new key version.
-    expect(await screen.findByText(/Re-keyed Court 2 box/)).toHaveTextContent(/re-enabled with a new key \(version 3\) rather than added twice/);
-    const panel = screen.getByLabelText("Device key").parentElement?.parentElement;
-    expect(panel).toHaveTextContent(/version 3 \(re-keyed\)/);
-    expect(panel).toHaveTextContent(/already had a row here/);
-    // The API's own sentence, verbatim, next to the key it is about.
-    expect(screen.getByLabelText("Note from the server")).toHaveTextContent(note);
-  });
-
-  it("calls a first claim a first claim", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/discovered"),
-      { path: "/api/v1/admin/devices/discovered", body: [boardFixture()] },
-      {
-        method: "POST",
-        path: "/api/v1/admin/devices/claim",
-        body: { device: deviceFixture({ name: "Court 2 box" }), device_key: "c0ffee", key_version: 1, board: boardFixture({ claimed: true }), reclaimed: false, note: "" },
-      },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-    await connectTheBoard();
-
-    expect(await screen.findByText(/Connected Court 2 box/)).toBeInTheDocument();
-    const panel = screen.getByLabelText("Device key").parentElement?.parentElement;
-    expect(panel).toHaveTextContent(/version 1 \(first claim\)/);
-    expect(panel).not.toHaveTextContent(/already had a row here/);
-    // An empty note is no note — not an empty paragraph.
-    expect(screen.queryByLabelText("Note from the server")).not.toBeInTheDocument();
-  });
-
-  it("shows the rotation note from the API next to the new key", async () => {
-    const note = "The board's old key stops working now. It will show a new claim code on its LCD; connect it again from the discovered boards list to deliver the new key.";
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture()] },
-      {
-        method: "POST",
-        path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111/rotate-key",
-        body: { device: deviceFixture({ key_version: 2 }), device_key: "feedface", key_version: 2, note },
-      },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Rotate key" }));
-    fireEvent.click(screen.getByRole("button", { name: "Refuse it until it has the new key?" }));
-
-    // The key cannot be pushed to the board; delivery is by re-claim. The API says so
-    // in one sentence and that sentence is shown as sent, not paraphrased into a toast
-    // that is gone in four seconds.
-    expect(await screen.findByLabelText("Device key")).toHaveTextContent("feedface");
-    expect(screen.getByLabelText("Note from the server")).toHaveTextContent(note);
-    expect(screen.getByLabelText("Device key").parentElement?.parentElement).toHaveTextContent(/version 2 \(rotated\)/);
-  });
-
-  it("turns court_number_not_found into a sentence", async () => {
-    stubFetch([
-      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-      { path: "/api/v1/admin/devices/", body: [deviceFixture({ court_numbers: [1] })] },
-      // The courts table is checked on register, update and claim. The picker only offers
-      // real courts, so this is a court deleted while the form was open.
-      { method: "PATCH", path: "/api/v1/admin/devices/", status: 400, body: { error: "court_number_not_found" } },
-    ]);
-
-    renderPage(<AdminDevicesPage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: /Edit courts/ }));
-    fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save courts/ }));
-
-    // Not "court number not found" with the underscores swapped for spaces.
-    expect(await screen.findByText(/not a court at this club/)).toHaveTextContent(/add it under Admin settings/);
-    // And the editor stays open, since the save did not go through.
-    expect(screen.getByRole("button", { name: /Save courts/ })).toBeInTheDocument();
-  });
-
   it("leaves button_map out of a PATCH that does not touch it, and sends null only to clear it", async () => {
     const ownMap = ["court:A", "off", "none", "none", "none", "none", "none", "none"];
     const stub = stubFetch([
@@ -816,15 +620,11 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    // A courts change.
-    fireEvent.click(await screen.findByRole("button", { name: /Edit courts/ }));
+    // A name-and-courts change.
+    fireEvent.click(await screen.findByRole("button", { name: /Edit name and courts/ }));
     fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save courts/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save box/ }));
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
-
-    // A channel change.
-    fireEvent.change(screen.getByLabelText("Court 1 box update channel"), { target: { value: "Canary" } });
-    await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
 
     // The API binds button_map three-valued — absent leaves the override alone, null
     // clears it, a list sets it — so a PATCH about something else must not carry the key
@@ -832,16 +632,15 @@ describe("AdminDevices", () => {
     // (a stale echo racing another admin's edit). Asserted on the wire text, because a
     // parsed object cannot tell "absent" from "present as undefined".
     const patches = stub.calls.filter((c) => c.method === "PATCH");
-    expect(Object.keys(patches[0].body as object)).toEqual(["court_numbers"]);
-    expect(Object.keys(patches[1].body as object)).toEqual(["otaChannel"]);
-    for (const patch of patches) expect(patch.raw).not.toContain("button_map");
+    expect(Object.keys(patches[0].body as object)).toEqual(["name", "court_numbers"]);
+    expect(patches[0].raw).not.toContain("button_map");
 
     // And "club default" is a PATCH whose body is exactly `{"button_map":null}` — the
     // one value the API reads as "clear the override".
-    fireEvent.click(screen.getByRole("button", { name: /Edit buttons/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Edit buttons/ }));
     fireEvent.click(screen.getByLabelText(/Use the club's button map/));
     fireEvent.click(screen.getByRole("button", { name: /Save buttons/ }));
-    await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(3));
-    expect(stub.calls.filter((c) => c.method === "PATCH")[2].raw).toBe('{"button_map":null}');
+    await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
+    expect(stub.calls.filter((c) => c.method === "PATCH")[1].raw).toBe('{"button_map":null}');
   });
 });
