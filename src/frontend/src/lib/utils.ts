@@ -43,7 +43,13 @@ export function formatZar(value: number) {
  * the tabular-nums column.
  */
 export function formatSignedCredits(value: number) {
-  return `${value >= 0 ? "+" : "−"}${formatCredits(Math.abs(value))}`;
+  // Zero has no direction, so it gets no sign. This used to render "+0.00 cr", and the
+  // reports card — hardcoding its own minus around `formatCredits` rather than coming
+  // through here — rendered "−0.00 cr" for a member who had spent nothing and been
+  // penalised nothing. On the one screen whose whole job is to reconcile, a signed zero
+  // reads as a movement that did not happen. Note `-0 === 0`, so a negated zero lands here.
+  if (value === 0) return formatCredits(0);
+  return `${value > 0 ? "+" : "−"}${formatCredits(Math.abs(value))}`;
 }
 
 /**

@@ -17,13 +17,25 @@ import { formatCredits, formatRate, formatZar } from "../lib/utils";
  * </p>
  *
  * <p>
- * `Number(text)` rather than `parseFloat`: `parseFloat` accepted "200abc" as 200 and
- * "1e3" as 1000 and enabled the button on both.
+ * The shape is checked before the value. `parseFloat` accepted "200abc" as 200, and
+ * `Number` — which replaced it — is right about that one and wrong about the rest of
+ * the family: it reads "1e3" as 1000, "0x64" as 100, "0b11" as 3 and a string of spaces
+ * as 0. This comment used to claim "1e3" was refused; it never was, the button enabled
+ * and the screen quoted 1600 credits for it. The amount is not wrong money — the server
+ * registers R1000 and the ledger agrees — but a rand field that silently accepts
+ * programmer notation will mislead the next person who reads this, and a member who
+ * meant 13 and typed 1e3 is quoted eighty times what they meant with nothing to say so.
+ * A rand amount is digits, optionally a decimal point and more digits, and nothing else;
+ * the leading minus is allowed through so a typed "-100" still gets the sentence about
+ * zero rather than the one about digits.
  * </p>
  */
+const PLAIN_RAND = /^-?\d+(\.\d+)?$/;
+
 function amountProblem(text: string, o: TopUpOptions | null): string | null {
   const trimmed = text.trim();
   if (trimmed === "") return "Enter an amount in rand.";
+  if (!PLAIN_RAND.test(trimmed)) return "That isn't a number — enter an amount in rand.";
   const value = Number(trimmed);
   if (!Number.isFinite(value)) return "That isn't a number — enter an amount in rand.";
   if (!o) return null;

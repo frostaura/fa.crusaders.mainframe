@@ -155,10 +155,18 @@ export default function ReportsPage() {
             the difference. The net line at the bottom is the arithmetic, spelled out.
           */}
           <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <Stat label="Top-ups" value={`+${formatCredits(wallet.top_ups_credits)}`} />
-            <Stat label="Spent" value={`−${formatCredits(wallet.spent_credits)}`} />
+            {/*
+              Every one of these goes through `formatSignedCredits`, including the two
+              whose direction is fixed. Hardcoding "+" and "−" around `formatCredits`
+              looked equivalent and was not: a period with no spend and no penalties read
+              "−0.00 cr", and on the one screen whose job is to reconcile, a signed zero
+              reads as a movement that did not happen. Spend and penalties leave the
+              wallet, so they are negated rather than labelled negative.
+            */}
+            <Stat label="Top-ups" value={formatSignedCredits(wallet.top_ups_credits)} />
+            <Stat label="Spent" value={formatSignedCredits(-wallet.spent_credits)} />
             <Stat label="Refunds (net)" value={formatSignedCredits(wallet.refunds_credits)} />
-            <Stat label="Penalties" value={`−${formatCredits(wallet.penalties_credits)}`} />
+            <Stat label="Penalties" value={formatSignedCredits(-wallet.penalties_credits)} />
             <Stat label="Adjustments" value={formatSignedCredits(wallet.adjustments_credits)} />
             <Stat label="Penalty count" value={String(wallet.penalty_count)} />
             <Stat label="Bookings played" value={`${wallet.attended_bookings} · ${formatMinutes(wallet.minutes_on_court)}`} />

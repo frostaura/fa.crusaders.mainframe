@@ -175,6 +175,35 @@ describe("Top-up — what the checkout actually sends", () => {
     expect(screen.getByRole("button", { name: "Continue to PayFast" })).toBeDisabled();
   });
 
+  /**
+   * `Number` fixed "200abc" and left the rest of the family behind: "1e3" enabled the
+   * button and quoted 1600 credits, which is R1000 the member did not ask for. The
+   * comment beside the code asserted the opposite, which is how it survived a round.
+   */
+  it("refuses programmer notation in a rand field", async () => {
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+
+    const input = await screen.findByPlaceholderText(/Custom amount/);
+    const submit = screen.getByRole("button", { name: "Continue to PayFast" });
+
+    for (const typed of ["1e3", "1E3", "0x64", "0b1100100", "1_000", "1,000", "Infinity", "+200", "2e2"]) {
+      fireEvent.change(input, { target: { value: typed } });
+      expect(screen.getByText("That isn't a number — enter an amount in rand.")).toBeInTheDocument();
+      expect(submit).toBeDisabled();
+      expect(screen.queryByText(/You receive/)).not.toHaveTextContent(/1600|320/);
+    }
+
+    // Nothing a member actually types is caught by the same net.
+    fireEvent.change(input, { target: { value: "200" } });
+    expect(submit).not.toBeDisabled();
+    fireEvent.change(input, { target: { value: " 200 " } });
+    expect(submit).not.toBeDisabled();
+    // And a negative still gets the sentence about zero, not the one about digits.
+    fireEvent.change(input, { target: { value: "-100" } });
+    expect(screen.getByText("Enter an amount greater than zero.")).toBeInTheDocument();
+  });
+
   it("turns a rejection from the API into a sentence, never a code", async () => {
     stubFetch(routes([
       { method: "POST", path: "/api/v1/credit/topup", status: 503, body: { error: "payments_not_configured" } },
