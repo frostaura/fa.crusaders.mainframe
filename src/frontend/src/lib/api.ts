@@ -55,8 +55,28 @@ export const api = {
 
 // ---- Typed endpoints ----
 
-export type WhoAmI = { tenant_slug: string; tenant_id: string; user_id: string | null; is_authenticated: boolean; is_admin: boolean };
-export type LoginResponse = { access_token: string; user_id: string; is_admin: boolean };
+export type WhoAmI = {
+  tenant_slug: string; tenant_id: string; user_id: string | null; is_authenticated: boolean; is_admin: boolean;
+  /**
+   * Set while an admin-issued temporary password is still in force. It is on the bootstrap
+   * probe and not only on the login response because the browser reloads: without it a member
+   * who refreshes mid-forced-change renders the app and then meets a 403 on every screen
+   * instead of the one screen they need.
+   */
+  must_change_password?: boolean;
+};
+export type LoginResponse = { access_token: string; user_id: string; is_admin: boolean; must_change_password?: boolean };
+
+/**
+ * The stable snake_case code the API puts on a refusal. Never shown to a member — every screen
+ * maps it to a sentence — but the mapping has to start somewhere, and reading `err.payload.error`
+ * off `unknown` at four call sites is how a screen ends up mapping every 400 to one message.
+ */
+export function errorCode(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const payload = err.payload as { error?: unknown } | null;
+  return typeof payload?.error === "string" ? payload.error : null;
+}
 /**
  * Every ledger entry type the backend can emit.
  *
@@ -314,6 +334,7 @@ export type MyProfile = {
   membership_number: string | null;
   photo_url: string | null;
   status: string | null;
+  must_change_password?: boolean;
 };
 
 export type AdminMember = {
@@ -448,6 +469,15 @@ export const endpoints = {
   magicLink: (token: string) => api.post<LoginResponse>(`/api/v1/auth/magic-link/${token}`),
   forgotPassword: (email: string) => api.post<{ ok: boolean }>("/api/v1/auth/forgot-password", { email }),
   resetPassword: (token: string, newPassword: string) => api.post<{ reset: boolean }>("/api/v1/auth/reset-password", { token, newPassword }),
+  /**
+   * Re-sends the address-confirmation email. Answers 200 whatever the address is, so a caller
+   * cannot use it to find out who is registered — which is also why the screen's confirmation
+   * says "if that address is registered" rather than claiming a mail was sent.
+   */
+  resendVerification: (email: string) => api.post<{ ok: boolean }>("/api/v1/auth/resend-verification", { email }),
+  /** The signed-in member replacing their own password — and, in doing so, retiring a temporary one. */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.post<{ changed: boolean }>("/api/v1/me/password", { currentPassword, newPassword }),
 
   wallet: () => api.get<WalletResponse>("/api/v1/wallet"),
   schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}`),

@@ -15,9 +15,14 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Hide the chrome on auth-flow routes — login/register/verify/welcome — so the
+  // Hide the chrome on auth-flow routes — login/register/verify/welcome/reset — so the
   // user only sees the auth modal itself.
-  const headerless = /^\/(login|register|verify-email|welcome|forgot-password)(\/|$)/.test(location.pathname);
+  //
+  // `change-password` is in here because of the forced case: a session holding an
+  // admin-issued temporary password can reach nothing else, so a nav bar and a wallet
+  // chip would be links to 403s. Members changing their password by choice do it from
+  // the card on /profile, with the chrome where they expect it.
+  const headerless = /^\/(login|register|verify-email|welcome|forgot-password|reset-password|change-password)(\/|$)/.test(location.pathname);
 
   useEffect(() => {
     if (!menuOpen) return;

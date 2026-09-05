@@ -5,7 +5,16 @@ import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
 type AuthState =
   | { status: "loading" }
   | { status: "anonymous" }
-  | { status: "authenticated"; userId: string; isAdmin: boolean };
+  | {
+      status: "authenticated"; userId: string; isAdmin: boolean;
+      /**
+       * The session is holding an admin-issued temporary password and can reach nothing but the
+       * screen that replaces it. The API enforces this regardless (`PasswordChangeGate`); this
+       * flag is only what lets the app route there instead of letting every screen fail with a
+       * 403 the member cannot act on.
+       */
+      mustChangePassword: boolean;
+    };
 
 type AuthCtx = AuthState & {
   login: (email: string, password: string) => Promise<void>;
@@ -13,6 +22,15 @@ type AuthCtx = AuthState & {
   loginAsSeededAdmin: () => Promise<void>;
   setSessionFromMagicLink: (token: string) => Promise<void>;
   logout: () => void;
+  /** The forced change is done — clears the flag without a whole re-bootstrap. */
+  passwordChanged: () => void;
+  /**
+   * True when a session was taken away underneath the member rather than never having existed —
+   * an expiry, a revocation, an admin reset. `/login` says so instead of presenting a blank
+   * sign-in form to someone who was signed in a second ago.
+   */
+  sessionExpired: boolean;
+  clearSessionExpired: () => void;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -40,6 +58,7 @@ function nextRefreshDelayMs(token: string): number {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
+  const [sessionExpired, setSessionExpired] = useState(false);
   const refreshTimer = useRef<number | null>(null);
 
   const refreshFromToken = useCallback(async () => {
@@ -50,14 +69,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     try {
       const w = await endpoints.whoami();
-      if (w.is_authenticated && w.user_id) setState({ status: "authenticated", userId: w.user_id, isAdmin: w.is_admin });
-      else {
+      if (w.is_authenticated && w.user_id) {
+        setState({ status: "authenticated", userId: w.user_id, isAdmin: w.is_admin, mustChangePassword: w.must_change_password === true });
+      } else {
         // Token present but server doesn't recognise it — most likely expired or signed by an old key.
+        // The member had a session and no longer does, which is a different thing from arriving
+        // signed out, and /login says the different thing.
         tokenStore.clear();
+        setSessionExpired(true);
         setState({ status: "anonymous" });
       }
     } catch {
       tokenStore.clear();
+      setSessionExpired(true);
       setState({ status: "anonymous" });
     }
   }, []);
@@ -68,7 +92,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Centralised session-expired handler — wired to the api client so any 401 on an authenticated
   // request flips the app back to anonymous and lets RequireAuth route the user to /login.
   useEffect(() => {
-    setUnauthorizedHandler(() => setState({ status: "anonymous" }));
+    setUnauthorizedHandler(() => {
+      setSessionExpired(true);
+      setState({ status: "anonymous" });
+    });
     return () => setUnauthorizedHandler(null);
   }, []);
 
@@ -101,35 +128,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const r = await endpoints.login(email, password);
     tokenStore.set(r.access_token);
-    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin });
+    setSessionExpired(false);
+    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
   }, []);
 
   const loginWithPasskey = useCallback(async () => {
     const r = await runPasskeyLogin();
     tokenStore.set(r.access_token);
-    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin });
+    setSessionExpired(false);
+    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
   }, []);
 
   const loginAsSeededAdmin = useCallback(async () => {
     const r = await endpoints.devAdminLogin();
     tokenStore.set(r.access_token);
-    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin });
+    setSessionExpired(false);
+    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
   }, []);
 
   const setSessionFromMagicLink = useCallback(async (token: string) => {
     const r = await endpoints.magicLink(token);
     tokenStore.set(r.access_token);
-    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin });
+    setSessionExpired(false);
+    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
   }, []);
 
   const logout = useCallback(() => {
     tokenStore.clear();
+    // Signing out on purpose is not losing a session; /login should not commiserate about it.
+    setSessionExpired(false);
     setState({ status: "anonymous" });
   }, []);
 
+  // The refresh call answers with the flag too, so this is belt-and-braces — but a member who
+  // has just replaced their password should not be held on the change screen by a stale flag
+  // while a background refresh decides otherwise.
+  const passwordChanged = useCallback(() => {
+    setState((s) => (s.status === "authenticated" ? { ...s, mustChangePassword: false } : s));
+  }, []);
+
+  const clearSessionExpired = useCallback(() => setSessionExpired(false), []);
+
   const value = useMemo<AuthCtx>(
-    () => ({ ...state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout }),
-    [state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout],
+    () => ({ ...state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, passwordChanged, sessionExpired, clearSessionExpired }),
+    [state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, passwordChanged, sessionExpired, clearSessionExpired],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

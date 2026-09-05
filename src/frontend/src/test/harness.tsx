@@ -55,6 +55,10 @@ export type FetchStub = {
   calls: StubCall[];
 };
 
+function parseIfJson(raw: string): unknown {
+  try { return JSON.parse(raw); } catch { return raw; }
+}
+
 export function stubFetch(routes: StubRoute[]): FetchStub {
   const calls: StubCall[] = [];
   const served = new Map<StubRoute, number>();
@@ -63,7 +67,11 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
     const path = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
     const raw = init?.body ? String(init.body) : undefined;
-    const body = raw ? JSON.parse(raw) : undefined;
+    // Not every request body is JSON — the photo upload posts FormData, which stringifies to
+    // "[object FormData]" and used to throw a SyntaxError out of the fetch mock itself. The page
+    // then reported a generic network failure, and a test asserting the real error message failed
+    // with no hint that the stub, not the page, was the problem.
+    const body = raw ? parseIfJson(raw) : undefined;
     calls.push({ method, path, body, raw });
 
     // Longest prefix wins, not first-declared.
@@ -94,10 +102,15 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
     // fixture to the end of the file tripped the length gate on a line nobody touched.
     const status = route.status ?? 200;
     const ok = status < 400;
+    // `json()` as well as `text()`: the typed client reads text and parses it, but the
+    // multipart photo upload calls `res.json()` directly. A stub with only one of them
+    // makes that upload throw a TypeError the page reports as a generic failure — which
+    // is indistinguishable, from the test's side, from the page being broken.
     return Promise.resolve({
       ok,
       status,
       text: () => Promise.resolve(JSON.stringify(answer)),
+      json: () => Promise.resolve(answer),
     } as unknown as Response);
   }));
 

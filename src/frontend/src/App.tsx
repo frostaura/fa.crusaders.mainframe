@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
 import { ToastProvider } from "./components/Toast";
@@ -8,6 +8,9 @@ import HomePage from "./pages/Home";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
 import VerifyEmailPage from "./pages/VerifyEmail";
+import ForgotPasswordPage from "./pages/ForgotPassword";
+import ResetPasswordPage from "./pages/ResetPassword";
+import ChangePasswordPage from "./pages/ChangePassword";
 import WelcomePage from "./pages/Welcome";
 import WalletPage from "./pages/Wallet";
 import SchedulePage from "./pages/Schedule";
@@ -35,12 +38,18 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
+            {/* Both halves of the self-service reset. The link on /login and the link in the
+                reset email have always pointed here; neither route existed, so the catch-all
+                below sent a locked-out member to the marketing page with no explanation. */}
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
             <Route path="/welcome/:token" element={<WelcomePage />} />
             <Route path="/wallet" element={<RequireAuth><WalletPage /></RequireAuth>} />
             <Route path="/wallet/topup" element={<RequireAuth><TopUpPage /></RequireAuth>} />
             <Route path="/wallet/topup/:topupId" element={<RequireAuth><TopUpStatusPage /></RequireAuth>} />
             <Route path="/schedule" element={<RequireAuth><SchedulePage /></RequireAuth>} />
             <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
+            <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
             <Route path="/court-code" element={<RequireAuth><CourtCodePage /></RequireAuth>} />
             <Route path="/reports" element={<RequireAuth><ReportsPage /></RequireAuth>} />
             <Route path="/admin/members" element={<RequireAuth admin><AdminMembersPage /></RequireAuth>} />
@@ -60,10 +69,30 @@ export default function App() {
   );
 }
 
+/**
+ * The guard on every member and admin route.
+ *
+ * <p>
+ * It carries the location it turned away in router state, so `/login` can finish the journey the
+ * member actually started. Without that, a "top up" link from an email or a bookmarked
+ * `/wallet` was silently discarded and every sign-in landed on `/schedule` — the member had to
+ * navigate to the thing they had already asked for.
+ * </p>
+ *
+ * <p>
+ * It also holds a session whose password an admin has just reset on `/change-password`. That is
+ * courtesy, not security: `PasswordChangeGate` on the API refuses the same session everywhere
+ * else regardless, because a redirect is only ever a suggestion to whatever holds the token.
+ * </p>
+ */
 function RequireAuth({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
   const auth = useAuth();
+  const location = useLocation();
   if (auth.status === "loading") return <p className="p-4 text-text-secondary">Loading…</p>;
-  if (auth.status !== "authenticated") return <Navigate to="/login" replace />;
+  if (auth.status !== "authenticated") return <Navigate to="/login" replace state={{ from: location }} />;
+  if (auth.mustChangePassword && location.pathname !== "/change-password") {
+    return <Navigate to="/change-password" replace />;
+  }
   if (admin && !auth.isAdmin) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
