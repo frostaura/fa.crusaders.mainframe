@@ -20,6 +20,8 @@ export default defineConfig({
       // `location /uploads/` since it was written; only the dev config disagreed — which
       // meant photo-on-the-grid, the identification mechanism the whole registration flow
       // makes photos mandatory for, could never be seen working locally.
+      // The Playwright suite runs against this same dev server, so until now no browser test
+      // could have caught a photo regression either.
       "/uploads": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
     },
   },

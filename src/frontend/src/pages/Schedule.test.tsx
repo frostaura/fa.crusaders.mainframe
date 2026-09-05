@@ -103,7 +103,7 @@ describe("Schedule", () => {
 
   /** Opens the confirmation for the first free slot on the grid — a whole day of them is free. */
   async function openBookingModal() {
-    const cells = await screen.findAllByRole("button", { name: /Book this slot for 50\.00 cr/ });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court .* for 50\.00 cr/ });
     fireEvent.click(cells[0]);
     return await screen.findByRole("dialog", { name: "Confirm booking" });
   }
@@ -131,7 +131,7 @@ describe("Schedule", () => {
       stub([]);
       renderPage(<SchedulePage />);
       const modal = await vi.waitFor(async () => {
-        const cells = screen.getAllByRole("button", { name: /Book this slot for 50\.00 cr/ });
+        const cells = screen.getAllByRole("button", { name: /^Book Court .* for 50\.00 cr/ });
         fireEvent.click(cells[0]);
         return screen.getByRole("dialog", { name: "Confirm booking" });
       });
@@ -156,7 +156,7 @@ describe("Schedule", () => {
     await openBookingModal();
 
     // Opening the modal must not have booked anything.
-    expect(fetchStub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    expect(fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/bookings/")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
 
@@ -264,7 +264,7 @@ describe("Schedule", () => {
     stubWithMyBooking({ insidePenaltyWindow: true, penaltyCredits: 15, refundCredits: 35 });
     renderPage(<SchedulePage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Mine — open cancellation/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Cancel your booking on Court / }));
 
     const modal = await screen.findByRole("dialog", { name: "Cancel this booking?" });
     // §7 asks for both figures, and 15.00 credits used to be taken with nothing on
@@ -279,7 +279,7 @@ describe("Schedule", () => {
 
     // The grid says it too — the schedule projection did not carry attendance at all, so
     // no screen in the product could tell a member their court was lit.
-    const cell = await screen.findByRole("button", { name: /Mine · checked in/ });
+    const cell = await screen.findByRole("button", { name: /^Cancel your booking on Court .* — checked in$/ });
     fireEvent.click(cell);
 
     const modal = await screen.findByRole("dialog", { name: "Cancel this booking?" });
@@ -290,7 +290,7 @@ describe("Schedule", () => {
   it("says a free cancellation is free", async () => {
     stubWithMyBooking({});
     renderPage(<SchedulePage />);
-    fireEvent.click(await screen.findByRole("button", { name: /Mine — open cancellation/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Cancel your booking on Court / }));
 
     const modal = await screen.findByRole("dialog", { name: "Cancel this booking?" });
     await waitFor(() => expect(modal).toHaveTextContent(/Cancelling now is free/));
@@ -301,7 +301,7 @@ describe("Schedule", () => {
       { method: "POST", path: `/api/v1/bookings/${BOOKING_ID}/cancel`, body: { refunded_credits: 50, penalty_credits: 15 } },
     ]);
     renderPage(<SchedulePage />);
-    fireEvent.click(await screen.findByRole("button", { name: /Mine — open cancellation/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Cancel your booking on Court / }));
     await screen.findByRole("dialog", { name: "Cancel this booking?" });
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel the booking" }));
@@ -411,7 +411,7 @@ describe("Schedule", () => {
     await openBookingModal();
     fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
 
-    expect(await screen.findByRole("button", { name: /Mine — open cancellation/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Cancel your booking on Court / })).toBeInTheDocument();
     // And the balance came off the booking response rather than a second wallet read.
     const walletReads = fetchStub.calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/v1/wallet"));
     expect(walletReads).toHaveLength(1);
@@ -420,7 +420,7 @@ describe("Schedule", () => {
   it("does not rebuild the grid when a modal opens", async () => {
     stub([]);
     renderPage(<SchedulePage />);
-    await screen.findAllByRole("button", { name: /Book this slot for 50\.00 cr/ });
+    await screen.findAllByRole("button", { name: /^Book Court .* for 50\.00 cr/ });
 
     // A club day is a couple of hundred cells. Every one of them re-rendered whenever any
     // state on the page moved — opening the confirmation, closing it, arming a cancel —

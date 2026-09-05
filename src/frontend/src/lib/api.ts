@@ -44,6 +44,63 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The request never produced a response at all — the connection was refused, the network
+ * dropped, or the server accepted the socket and never answered.
+ *
+ * <p>
+ * This is a different thing from an {@link ApiError} and every screen has to be able to tell
+ * them apart: an `ApiError` carries a decision the club made, a `NetworkError` carries the
+ * absence of one. Without the distinction a stalled backend was indistinguishable from a
+ * pending request, and the Book button sat on "Working…" with `aria-busy` forever — the
+ * member could not tell whether they had been charged for a court.
+ * </p>
+ */
+export class NetworkError extends Error {
+  constructor(public kind: "timeout" | "unreachable", options?: { cause?: unknown }) {
+    super(kind === "timeout" ? "The request timed out." : "The server could not be reached.", options);
+    this.name = "NetworkError";
+  }
+}
+
+/**
+ * How long any single API call may take before we give up on it.
+ *
+ * <p>
+ * A stalled upstream — a wedged gateway, a backend hung on a slow query, a phone whose mobile
+ * data dropped mid-request — never closes the socket, so `fetch` alone waits indefinitely.
+ * The ceiling has to sit above a slow-but-real club connection and well below a member's
+ * patience; 20s clears the slowest real response measured against this API by an order of
+ * magnitude.
+ * </p>
+ */
+export const REQUEST_TIMEOUT_MS = 20_000;
+
+/** File uploads carry a phone photo over club WiFi, so they get their own, longer budget. */
+export const UPLOAD_TIMEOUT_MS = 60_000;
+
+/**
+ * `fetch` with a deadline. Rejects with a {@link NetworkError} rather than a bare
+ * `DOMException`/`TypeError`, so callers have one type to catch and one place to ask
+ * "was this the club refusing, or the club not answering?".
+ */
+export async function fetchWithTimeout(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    return await fetch(path, { ...init, signal: controller.signal });
+  } catch (cause) {
+    throw new NetworkError(timedOut ? "timeout" : "unreachable", { cause });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Paths that should not trigger session-expired handling on 401. Login itself returns 401 on bad
 // credentials, and the unauthenticated whoami probe is allowed to come back 401.
 const UNAUTH_BYPASS = ["/api/v1/auth/login", "/api/v1/auth/webauthn/login", "/api/v1/whoami"];
@@ -53,7 +110,7 @@ export function setUnauthorizedHandler(fn: (() => void) | null) { unauthorizedHa
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const hadToken = !!tokenStore.get();
-  const res = await fetch(path, {
+  const res = await fetchWithTimeout(path, {
     method,
     headers: {
       "content-type": "application/json",
@@ -606,13 +663,32 @@ export type RevenueReport = {
 export async function uploadPhoto(file: File): Promise<{ url: string }> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch("/api/v1/uploads/photo", { method: "POST", body: fd });
+  const res = await fetchWithTimeout("/api/v1/uploads/photo", { method: "POST", body: fd }, UPLOAD_TIMEOUT_MS);
   if (!res.ok) throw new ApiError(res.status, await res.text());
   return res.json();
 }
 
 export const endpoints = {
   whoami: () => api.get<WhoAmI>("/api/v1/whoami"),
+  /**
+   * Ends the session on the server as well as in this browser.
+   *
+   * <p>
+   * Deleting the stored token is not a sign-out — a JWT is a bearer credential and keeps
+   * working wherever else it reached until it expires. This is what makes the credential stop.
+   * </p>
+   */
+  logout: () => api.post<void>("/api/v1/auth/logout"),
+  /**
+   * A one-minute, stream-only credential for the wallet SSE connection.
+   *
+   * <p>
+   * `EventSource` cannot send an Authorization header, so something has to travel in the URL,
+   * where every proxy logs it. The full access token used to; this is the thing that is worth
+   * nothing to whoever reads that log ten minutes later.
+   * </p>
+   */
+  walletStreamTicket: () => api.post<{ ticket: string; expires_in_seconds: number }>("/api/v1/wallet/stream-ticket"),
   register: (req: { email: string; password: string; fullName: string; membershipNumber: string; photoUrl?: string }) =>
     api.post<{ user_id: string; status: string }>("/api/v1/auth/register", {
       email: req.email,
@@ -785,7 +861,7 @@ export const endpoints = {
    * no file, no toast, no console error, the page identical before and after.
    */
   walletCsv: async (from?: string, to?: string): Promise<{ blob: Blob; filename: string }> => {
-    const res = await fetch(endpoints.walletCsvUrl(from, to), {
+    const res = await fetchWithTimeout(endpoints.walletCsvUrl(from, to), {
       headers: { ...(tokenStore.get() ? { authorization: `Bearer ${tokenStore.get()}` } : {}) },
     });
     if (!res.ok) throw new ApiError(res.status, await res.text());
@@ -890,11 +966,11 @@ export const endpoints = {
     const fd = new FormData();
     fd.append("file", file);
     const tok = tokenStore.get();
-    const res = await fetch("/api/v1/me/photo", {
+    const res = await fetchWithTimeout("/api/v1/me/photo", {
       method: "POST",
       headers: tok ? { Authorization: `Bearer ${tok}` } : undefined,
       body: fd,
-    });
+    }, UPLOAD_TIMEOUT_MS);
     if (!res.ok) throw new ApiError(res.status, await res.text());
     return res.json();
   },

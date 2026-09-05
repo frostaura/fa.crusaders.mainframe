@@ -6,6 +6,18 @@ public enum TokenKind
     MagicLink = 1,
     PasswordReset = 2,
     AdminTempPassword = 3,
+
+    /// <summary>
+    /// A signed-out access token, held by its <c>jti</c> until its own expiry passes.
+    ///
+    /// <para>
+    /// The durable half of <c>AccessTokenRevocationList</c>: without it a restart inside a
+    /// token's fifteen-minute lifetime would resurrect every credential a member had signed
+    /// out. Unlike the other kinds this row is never redeemed — <c>UsedAt</c> stays null and
+    /// the row is simply spent when <c>ExpiresAt</c> passes.
+    /// </para>
+    /// </summary>
+    RevokedAccess = 4,
 }
 
 /// <summary>

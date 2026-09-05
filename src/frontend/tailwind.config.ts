@@ -26,7 +26,21 @@ const config: Config = {
         text: {
           primary: "#0F172A",
           secondary: "#475569",
-          muted: "#94A3B8",
+          /**
+           * Muted, not invisible.
+           *
+           * Was #94A3B8, which measures 2.56:1 on white and 2.34:1 on bg-muted — well under
+           * the 4.5:1 body-text floor docs/specs/design-system.md commits to, at the 11-12px
+           * sizes this token is actually used at. The worst case was the booking grid's row
+           * labels: the ONLY thing on that screen that says what time a slot is, and the least
+           * readable text on the page. This value clears 4.5:1 against every background token
+           * in this palette, including the soft chips, and stays visibly lighter than
+           * text-secondary so the hierarchy the token exists for survives.
+           *
+           * tokens.test.ts measures every text/background pair here, so a future "let's lighten
+           * this a bit" fails a test rather than a user.
+           */
+          muted: "#5B6879",
         },
         success: { soft: "#DCFCE7", strong: "#15803D" },
         info:    { soft: "#DBEAFE", strong: "#1D4ED8" },

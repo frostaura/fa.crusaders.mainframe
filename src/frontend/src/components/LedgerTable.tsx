@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpDown } from "lucide-react";
 import type { LedgerRow } from "../lib/api";
 import { cn, formatInstant, formatSignedCredits } from "../lib/utils";
+import { ScrollArea } from "./ScrollArea";
 
 type Column = "time" | "from" | "to" | "amount" | "comment";
 type SortDir = "asc" | "desc";
@@ -14,11 +15,18 @@ export function LedgerTable({
   emptyText = "No movements yet.",
   /** When true, the table fills its parent and scrolls internally with a sticky header. */
   fill = false,
+  /**
+   * Names the scrolling region for assistive tech. Required, not defaulted: two ledgers exist —
+   * a member's wallet and the club's whole book — and "Ledger" would be a lie on one of them.
+   * A default here would also be a branch, and lizard charges the whole component for it.
+   */
+  label,
 }: {
   rows: LedgerRow[];
   columns?: Column[];
   emptyText?: string;
   fill?: boolean;
+  label: string;
 }) {
   const [sortKey, setSortKey] = useState<Column>("time");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -49,7 +57,11 @@ export function LedgerTable({
   if (rows.length === 0) return <p className="text-sm text-text-secondary px-4 sm:px-6 py-3">{emptyText}</p>;
 
   return (
-    <div className={cn("overflow-auto", fill && "flex-1 min-h-0")}>
+    // ScrollArea, not a bare overflow-auto div: the ledger is wider than a phone, and a
+    // container that silently cuts off the Amount column reads as a missing column rather
+    // than as one swipe away. It also makes the region keyboard-reachable, which a plain
+    // scrolling div is not.
+    <ScrollArea label={label} className={cn(fill && "flex-1 min-h-0")}>
       <table className="w-full text-sm">
         <thead className="text-xs uppercase tracking-wide text-text-muted bg-bg-muted sticky top-0 z-10 [&>tr>th]:border-b [&>tr>th]:border-border">
           <tr>
@@ -100,7 +112,7 @@ export function LedgerTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollArea>
   );
 }
 

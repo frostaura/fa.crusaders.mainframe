@@ -113,7 +113,7 @@ export default function AdminLedgerPage() {
           <Stat label="Debits" value={`−${formatCredits(totals.debits)}`} tone="warning" />
           <Stat label="Net" value={formatSignedCredits(totals.net)} tone={totals.net >= 0 ? "success" : "warning"} />
         </div>
-        <LedgerTable rows={filtered} emptyText={loading ? "Loading…" : "No movements match these filters."} fill />
+        <LedgerTable rows={filtered} emptyText={loading ? "Loading…" : "No movements match these filters."} fill label="Club ledger" />
       </Card>
     </div>
   );

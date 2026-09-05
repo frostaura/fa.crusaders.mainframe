@@ -24,6 +24,9 @@ import ProfilePage from "./pages/Profile";
 import CourtCodePage from "./pages/CourtCode";
 import ReportsPage from "./pages/Reports";
 import { AdminDevicesPage } from "./pages/AdminDevices";
+import NotFoundPage from "./pages/NotFound";
+import { Card } from "./components/Card";
+import { Button } from "./components/Button";
 
 export default function App() {
   return (
@@ -58,7 +61,9 @@ export default function App() {
             <Route path="/admin/devices" element={<RequireAuth admin><AdminDevicesPage /></RequireAuth>} />
             <Route path="/admin/settings" element={<RequireAuth admin><AdminSettingsPage /></RequireAuth>} />
             <Route path="/admin/ledger" element={<RequireAuth admin><AdminLedgerPage /></RequireAuth>} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            {/* A real 404, not a redirect. The catch-all used to send every unknown path to the
+                marketing page, which is how a dead link in an email looked like a working one. */}
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>
         </ToastProvider>
@@ -89,10 +94,38 @@ function RequireAuth({ children, admin = false }: { children: React.ReactNode; a
   const auth = useAuth();
   const location = useLocation();
   if (auth.status === "loading") return <p className="p-4 text-text-secondary">Loading…</p>;
+  // A session we cannot confirm is not a session we have lost. Bouncing to /login here is what
+  // turned a few seconds of backend downtime into a permanent sign-out for everyone on the site.
+  if (auth.status === "offline") return <ConnectionLost onRetry={auth.retryConnection} />;
   if (auth.status !== "authenticated") return <Navigate to="/login" replace state={{ from: location }} />;
   if (auth.mustChangePassword && location.pathname !== "/change-password") {
     return <Navigate to="/change-password" replace />;
   }
   if (admin && !auth.isAdmin) return <Navigate to="/" replace />;
   return <>{children}</>;
+}
+
+/**
+ * Shown while a stored session exists and the club cannot be reached to confirm it.
+ *
+ * <p>
+ * The member keeps their token throughout, so the moment the backend answers again the app
+ * carries on where it was — no re-typed password, and nothing lost to a redeploy.
+ * </p>
+ */
+function ConnectionLost({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="max-w-md mx-auto p-4">
+      <Card>
+        <h1 className="text-xl font-semibold text-text-primary">Can't reach the club right now</h1>
+        <p className="mt-2 text-text-secondary">
+          You're still signed in. This is usually a brief interruption — we'll keep trying, and the
+          page will carry on by itself once the connection is back.
+        </p>
+        <div className="mt-4">
+          <Button onClick={onRetry}>Try again now</Button>
+        </div>
+      </Card>
+    </div>
+  );
 }

@@ -56,7 +56,7 @@ describe("LedgerTable — what survives a 375px screen", () => {
   };
 
   it("keeps Amount and Comment on a phone and folds From/To away", () => {
-    render(<LedgerTable rows={rows} />);
+    render(<LedgerTable rows={rows} label="Ledger" />);
 
     // The two columns a member opened the wallet to read. Neither may carry a
     // hidden-below-sm class, because that is the state the finder photographed.
@@ -79,7 +79,7 @@ describe("LedgerTable — what survives a 375px screen", () => {
   });
 
   it("carries the counterparty under the amount, so folding From/To loses no information", () => {
-    render(<LedgerTable rows={rows} />);
+    render(<LedgerTable rows={rows} label="Ledger" />);
     const amounts = cellsOf("Amount");
     const text = amounts.map((c) => c.textContent);
 

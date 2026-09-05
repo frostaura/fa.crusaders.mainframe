@@ -129,12 +129,20 @@ export default function AdminSettingsPage() {
           Credits are the unit of account. A member pays in rand and receives credits at the rate for their class.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* step 0.01, not 0.1.
+              A number input's valid values step from `min`, not from zero, so min=0.01 with
+              step=0.1 made the valid set 0.01, 0.11, … 1.51, 1.61 — and the club's own shipped
+              rates, 1.6 and 2.4, were both stepMismatch. Every round rate an admin would type
+              (1.5, 2.0, 2.5) was invalid, the arrows turned 1.6 into 1.61, and because Save is
+              not a native submit nothing ever said so: the field looked fine while the arrows
+              quietly moved the money conversion rate by a hundredth. Cents are the smallest unit
+              anyone would express a rand rate in, so 0.01 is both the granularity and the base. */}
           <Field label="Credits per R1 — members" hint="R100 at 1.6 gives 160 credits.">
-            <Input type="number" min={0.01} max={1000} step={0.1} value={settings.credits_per_zar_regular}
+            <Input type="number" min={0.01} max={1000} step={0.01} value={settings.credits_per_zar_regular}
               onChange={(e) => setSettings({ ...settings, credits_per_zar_regular: Number(e.target.value) })} />
           </Field>
           <Field label="Credits per R1 — league / over-65" hint="R100 at 2.4 gives 240 credits.">
-            <Input type="number" min={0.01} max={1000} step={0.1} value={settings.credits_per_zar_league}
+            <Input type="number" min={0.01} max={1000} step={0.01} value={settings.credits_per_zar_league}
               onChange={(e) => setSettings({ ...settings, credits_per_zar_league: Number(e.target.value) })} />
           </Field>
           <Field label="Top-up block (R)" hint="Members top up in multiples of this.">

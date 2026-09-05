@@ -29,7 +29,38 @@ type ConfirmButtonProps = {
    */
   armedTimeoutMs?: number;
   disabled?: boolean;
+  /**
+   * What this button acts ON, in a sentence, for assistive tech.
+   *
+   * <p>
+   * The visible label alone is often not a name. A booking grid is a hundred buttons all
+   * reading "Available", laid out so that the court and the time are conveyed by <em>visual
+   * position</em> against a column header and a row label — which is nothing at all to somebody
+   * tabbing through them. Passing "Book Court 1 at 12:45 for 50.00 credits" replaces the name
+   * with one that says which court and which time the credits are about to leave for.
+   * </p>
+   *
+   * <p>
+   * The armed and working states are appended to it, because with an aria-label in place the
+   * visible label copies are no longer the accessible name and "confirm" would otherwise be
+   * invisible to the one person who most needs to hear it.
+   * </p>
+   */
+  ariaLabel?: string;
 };
+
+/**
+ * The accessible name: what the button acts on, plus the state it is in.
+ *
+ * Returns undefined when no context was given, which leaves the button named by its visible
+ * text exactly as before — this is opt-in, and a call site that has nothing to add adds nothing.
+ */
+function accessibleName(context: string | undefined, armed: boolean, pending: boolean): string | undefined {
+  if (!context) return undefined;
+  if (pending) return `${context} — working`;
+  if (armed) return `${context} — tap again to confirm`;
+  return context;
+}
 
 export function ConfirmButton({
   idleLabel,
@@ -40,6 +71,7 @@ export function ConfirmButton({
   armedClassName = "bg-[#F97316] text-white",
   armedTimeoutMs = 0,
   disabled = false,
+  ariaLabel,
 }: ConfirmButtonProps) {
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
@@ -102,6 +134,7 @@ export function ConfirmButton({
       ref={ref}
       type="button"
       disabled={disabled || pending}
+      aria-label={accessibleName(ariaLabel, armed, pending)}
       aria-pressed={armed}
       aria-busy={pending}
       onClick={handleClick}

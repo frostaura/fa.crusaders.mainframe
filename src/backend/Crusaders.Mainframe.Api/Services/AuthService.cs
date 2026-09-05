@@ -17,13 +17,15 @@ public sealed class AuthService
     private readonly IConfiguration _config;
     private readonly ILogger<AuthService> _logger;
     private readonly MemberApprovalService _memberships;
+    private readonly AccessTokenRevocationList _revocations;
 
     public AuthService(MainframeDbContext db, ITenantContext tenant, IPasswordHasher hasher,
         IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger,
-        MemberApprovalService memberships)
+        MemberApprovalService memberships, AccessTokenRevocationList revocations)
     {
         _db = db; _tenant = tenant; _hasher = hasher; _jwt = jwt;
-        _email = email; _config = config; _logger = logger; _memberships = memberships;
+        _email = email; _config = config; _logger = logger;
+        _memberships = memberships; _revocations = revocations;
     }
 
     /// <summary>
@@ -93,30 +95,6 @@ public sealed class AuthService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not remove orphaned registration photo {Url}", photoUrl);
-        }
-    }
-
-    /// <summary>
-    /// Tells the club's admins that somebody is waiting on them.
-    ///
-    /// <para>
-    /// Spec §2.3 promises it and nothing sent it: both registration emails went to the
-    /// applicant, so the only cue an admin ever got was the pending counter on a screen they
-    /// had to think to open. An application nobody is told about is an application nobody
-    /// approves.
-    /// </para>
-    /// </summary>
-    private async Task NotifyAdminsOfApplicationAsync(string applicantEmail, string fullName, string membershipNumber, CancellationToken ct)
-    {
-        var admins = await _db.Users.Where(u => u.IsAdmin).Select(u => u.Email).ToListAsync(ct);
-        var clubName = await _db.Tenants.Where(t => t.Id == _tenant.TenantId).Select(t => t.DisplayName).FirstOrDefaultAsync(ct)
-                       ?? _tenant.TenantSlug;
-        var reviewUrl = $"{PublicBaseUrl()}/admin/members";
-        foreach (var adminEmail in admins)
-        {
-            await SendOrLogAsync(
-                EmailTemplates.MembershipPendingAdminNotice(adminEmail, fullName, applicantEmail, membershipNumber, clubName, reviewUrl),
-                $"admin new-application notice to {adminEmail}", ct);
         }
     }
 
@@ -197,12 +175,11 @@ public sealed class AuthService
         var verifyUrl = $"{PublicBaseUrl()}/verify-email/{token}";
         await SendOrLogAsync(EmailTemplates.VerifyEmail(email, verifyUrl), $"verification for {email}", ct);
         await SendOrLogAsync(EmailTemplates.MembershipPending(email), $"pending-approval notice for {email}", ct);
-        await NotifyAdminsOfApplicationAsync(email, fullName, membershipNumber, ct);
-
-        // Owned by MemberApprovalService, not by this method: it emails the club's admins
-        // that an application is waiting (spec §2.3) and emits `member.registered`. Kept as
-        // one call so the registration path carries none of it — see
-        // MemberApprovalService.AnnounceRegistrationAsync.
+        // ONE call, and it is this one. Two fixers closed spec §2.3 independently — a private
+        // helper here and MemberApprovalService.AnnounceRegistrationAsync — and the merge left
+        // both live, so every application put two near-identical emails in front of the club's
+        // desk. The service is the survivor because it also emits `member.registered`, which a
+        // private helper in the auth path had no business doing.
         await _memberships.AnnounceRegistrationAsync(user.Id, ct);
 
         return new RegistrationResult.Created(user.Id);
@@ -445,6 +422,42 @@ public sealed class AuthService
         user.MustChangePassword = false;
         await _db.SaveChangesAsync(ct);
         return await RefreshAsync(user.Id, ct);
+    }
+
+    /// <summary>
+    /// Signs one access token out, for real.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deleting the client's copy is not a sign-out — a JWT is a bearer credential and stays
+    /// valid wherever else it reached. The token is put on the in-process revocation list so
+    /// the next request carrying it is refused, and written to <c>auth_tokens</c> so a restart
+    /// inside its remaining lifetime does not bring it back.
+    /// </para>
+    /// <para>
+    /// Idempotent by design: signing out twice, or signing out a token already recorded, is a
+    /// no-op rather than an error. There is nothing a member gains by being told which.
+    /// </para>
+    /// </remarks>
+    public async Task RevokeAccessTokenAsync(Guid userId, string jti, DateTimeOffset expiresAt, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(jti)) return;
+        _revocations.Revoke(jti, expiresAt);
+
+        var hash = TokenHashing.Hash(jti);
+        var already = await _db.AuthTokens.IgnoreQueryFilters()
+            .AnyAsync(t => t.TokenHash == hash && t.Kind == TokenKind.RevokedAccess, ct);
+        if (already) return;
+
+        _db.AuthTokens.Add(new AuthToken
+        {
+            TenantId = _tenant.IsResolved ? _tenant.TenantId : Guid.Empty,
+            UserId = userId,
+            Kind = TokenKind.RevokedAccess,
+            TokenHash = hash,
+            ExpiresAt = expiresAt,
+        });
+        await _db.SaveChangesAsync(ct);
     }
 
     private string PublicBaseUrl() => _config["App:PublicBaseUrl"] ?? "http://localhost:8088";

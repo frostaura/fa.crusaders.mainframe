@@ -132,6 +132,12 @@ public class MemberAuthRegressionTests
         Assert.NotEmpty(toAdmin);
         Assert.Contains(toAdmin, m => m.Subject.Contains("New membership application", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(toAdmin, m => m.HtmlBody.Contains("applicant@test.local", StringComparison.Ordinal));
+
+        // EXACTLY one. Two fixers closed spec §2.3 in parallel — a helper in AuthService and
+        // MemberApprovalService.AnnounceRegistrationAsync — and the merge kept both, so the
+        // club's desk got two near-identical emails per application. `Contains` passed happily
+        // through that, which is why the count is asserted and not merely the presence.
+        Assert.Single(toAdmin, m => m.Subject.Contains("New membership application", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

@@ -85,7 +85,7 @@ describe("Top-up — what the checkout actually sends", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     await vi.waitFor(() => expect(stub.calls.some((c) => c.method === "POST")).toBe(true));
-    const post = stub.calls.find((c) => c.method === "POST")!;
+    const post = stub.calls.find((c) => c.method === "POST" && c.path.includes("/credit/topup"))!;
 
     // The bug, exactly: `amountCredits` bound to nothing on the server, `AmountZar` came
     // through as 0, and the positivity guard rejected every top-up the product could make.

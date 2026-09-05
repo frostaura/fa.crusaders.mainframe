@@ -1,10 +1,28 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { endpoints, setUnauthorizedHandler, tokenStore } from "./api";
+import { ApiError, endpoints, setUnauthorizedHandler, tokenStore } from "./api";
 import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
+import { clearOfflineCache } from "./pwa";
 
 type AuthState =
   | { status: "loading" }
   | { status: "anonymous" }
+  /**
+   * There is a stored token and the club cannot be reached to say anything about it.
+   *
+   * <p>
+   * This state exists because the bootstrap probe used to treat "the server says this token
+   * is bad" and "I could not reach the server" as the same event, and both deleted the token.
+   * One 502 from the gateway — the few seconds a container spends restarting during a
+   * redeploy — therefore signed out every member and admin on the site permanently: the token
+   * was gone from storage, so restoring the backend and reloading still landed on /login.
+   * </p>
+   *
+   * <p>
+   * Only an authentication refusal may clear a session. An outage is a wait, not a sign-out,
+   * so the token is kept and the probe retried with backoff until the club answers.
+   * </p>
+   */
+  | { status: "offline" }
   | {
       status: "authenticated"; userId: string; isAdmin: boolean;
       /**
@@ -21,7 +39,8 @@ type AuthCtx = AuthState & {
   loginWithPasskey: () => Promise<void>;
   loginAsSeededAdmin: () => Promise<void>;
   setSessionFromMagicLink: (token: string) => Promise<void>;
-  logout: () => void;
+  /** Resolves once the server has been told; the local session is gone before it resolves. */
+  logout: () => Promise<void>;
   /** The forced change is done — clears the flag without a whole re-bootstrap. */
   passwordChanged: () => void;
   /**
@@ -31,6 +50,8 @@ type AuthCtx = AuthState & {
    */
   sessionExpired: boolean;
   clearSessionExpired: () => void;
+  /** Re-run the bootstrap probe immediately, cancelling the backoff. */
+  retryConnection: () => void;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -56,10 +77,40 @@ function nextRefreshDelayMs(token: string): number {
   return Math.max(15_000, Math.min(target, 12 * 60 * 1000));
 }
 
+/**
+ * Did the club actually refuse this token, or did it never answer?
+ *
+ * <p>
+ * Only the first may end a session. A 5xx, a timeout, a refused connection and an HTML error
+ * page from the gateway all arrive at the same `catch` and none of them is evidence about the
+ * token. A 401 is — and so is a 200 whose body says `is_authenticated: false`, which the caller
+ * handles separately because it is a successful response rather than a thrown one.
+ * </p>
+ */
+function isAuthRefusal(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 401 || err.status === 403);
+}
+
+/** Retry schedule for the bootstrap probe while the club is unreachable: 1s, 2s, 4s … 30s. */
+function nextProbeDelayMs(attempt: number): number {
+  return Math.min(1000 * 2 ** attempt, 30_000);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
   const [sessionExpired, setSessionExpired] = useState(false);
   const refreshTimer = useRef<number | null>(null);
+  const probeTimer = useRef<number | null>(null);
+  const probeAttempt = useRef(0);
+  // The retry re-enters the probe, and a `useCallback` cannot name itself in its own body.
+  // A ref to the latest one keeps the recursion honest without re-creating the callback.
+  const probeAgain = useRef<() => void>(() => {});
+
+  const endSession = useCallback(() => {
+    tokenStore.clear();
+    setSessionExpired(true);
+    setState({ status: "anonymous" });
+  }, []);
 
   const refreshFromToken = useCallback(async () => {
     const t = tokenStore.get();
@@ -70,24 +121,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const w = await endpoints.whoami();
       if (w.is_authenticated && w.user_id) {
+        probeAttempt.current = 0;
         setState({ status: "authenticated", userId: w.user_id, isAdmin: w.is_admin, mustChangePassword: w.must_change_password === true });
       } else {
         // Token present but server doesn't recognise it — most likely expired or signed by an old key.
         // The member had a session and no longer does, which is a different thing from arriving
         // signed out, and /login says the different thing.
-        tokenStore.clear();
-        setSessionExpired(true);
-        setState({ status: "anonymous" });
+        endSession();
       }
-    } catch {
-      tokenStore.clear();
-      setSessionExpired(true);
-      setState({ status: "anonymous" });
+    } catch (err) {
+      if (isAuthRefusal(err)) {
+        endSession();
+        return;
+      }
+      // The club is down, not the session. Keep the token — a redeploy must not cost every
+      // signed-in member their session — and keep asking until somebody answers.
+      setState({ status: "offline" });
+      const delay = nextProbeDelayMs(probeAttempt.current);
+      probeAttempt.current += 1;
+      if (probeTimer.current) window.clearTimeout(probeTimer.current);
+      probeTimer.current = window.setTimeout(() => { probeAgain.current(); }, delay);
     }
-  }, []);
+  }, [endSession]);
+
+  useEffect(() => { probeAgain.current = refreshFromToken; }, [refreshFromToken]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- session bootstrap on mount; no-token path resolves to anonymous synchronously
   useEffect(() => { refreshFromToken(); }, [refreshFromToken]);
+
+  useEffect(() => () => { if (probeTimer.current) window.clearTimeout(probeTimer.current); }, []);
 
   // Centralised session-expired handler — wired to the api client so any 401 on an authenticated
   // request flips the app back to anonymous and lets RequireAuth route the user to /login.
@@ -125,6 +187,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [state.status]);
 
+  /** Ask the club again right now — what the "Try again" button on the outage screen does. */
+  const retryConnection = useCallback(() => {
+    if (probeTimer.current) { window.clearTimeout(probeTimer.current); probeTimer.current = null; }
+    probeAttempt.current = 0;
+    refreshFromToken();
+  }, [refreshFromToken]);
+
   const login = useCallback(async (email: string, password: string) => {
     const r = await endpoints.login(email, password);
     tokenStore.set(r.access_token);
@@ -154,10 +223,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Tell the server first, while the token is still in storage for the client to send: the
+    // API puts that jti on its revocation list, so the credential stops working rather than
+    // merely stopping being presented. A failure here is not worth blocking the sign-out —
+    // the local half must happen either way — but it is worth attempting before the local half
+    // rather than after, because after, there is nothing left to authenticate the call with.
+    const ending = endpoints.logout().catch(() => undefined);
     tokenStore.clear();
+    // The offline shell caches this member's schedule, wallet and profile. A club phone is a
+    // shared device; the next person to sign in must not find the last one's balance in it.
+    clearOfflineCache();
     // Signing out on purpose is not losing a session; /login should not commiserate about it.
     setSessionExpired(false);
     setState({ status: "anonymous" });
+    return ending;
   }, []);
 
   // The refresh call answers with the flag too, so this is belt-and-braces — but a member who
@@ -170,8 +249,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearSessionExpired = useCallback(() => setSessionExpired(false), []);
 
   const value = useMemo<AuthCtx>(
-    () => ({ ...state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, passwordChanged, sessionExpired, clearSessionExpired }),
-    [state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, passwordChanged, sessionExpired, clearSessionExpired],
+    () => ({ ...state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, passwordChanged, sessionExpired, clearSessionExpired, retryConnection }),
+    [state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, passwordChanged, sessionExpired, clearSessionExpired, retryConnection],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

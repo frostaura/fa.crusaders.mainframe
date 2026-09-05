@@ -67,20 +67,50 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
   }, [auth.status, refresh]);
 
   // Live push: subscribe to /api/v1/wallet/stream so admin top-ups and other ledger movements
-  // reflect immediately. EventSource cannot send the Authorization header, so the JWT rides on
-  // ?access_token=... — accepted on this path by JwtBearer.OnMessageReceived.
+  // reflect immediately.
+  //
+  // Two things about this connection were wrong at once, and they compounded.
+  //
+  // The credential was the full access JWT, in the query string — `?access_token=…` — which
+  // nginx's `location /api/` writes to its access log verbatim, on the first connect and again
+  // on every reconnect. A fifteen-minute credential for the entire API, in a log file that
+  // outlives it by months. It is a one-minute stream-only ticket now, minted by a POST.
+  //
+  // And the token was captured ONCE, outside `connect`, with `[auth.status]` as the only
+  // dependency. `auth.status` does not change when the access token is refreshed, so every
+  // reconnect re-used the token captured at sign-in; once that had expired the retry loop
+  // settled into a permanent 30s poll of an endpoint answering 401, and the header pill froze
+  // for the life of the tab. Any session older than the token lifetime that suffered a single
+  // network blip — a phone waking up in a squash club — lost its live balance for good.
+  // Minting the ticket inside `connect` is what fixes it: every attempt, including every
+  // reconnect, authenticates with whatever the session holds *now*.
   useEffect(() => {
     if (auth.status !== "authenticated") return;
-    const token = tokenStore.get();
-    if (!token) return;
+    if (!tokenStore.get()) return;
     let es: EventSource | null = null;
     let cancelled = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let backoffMs = 1000;
 
-    const connect = () => {
+    const retryLater = () => {
       if (cancelled) return;
-      es = new EventSource(`/api/v1/wallet/stream?access_token=${encodeURIComponent(token)}`);
+      reconnectTimer = setTimeout(() => { void connect(); }, backoffMs);
+      backoffMs = Math.min(backoffMs * 2, 30_000);
+    };
+
+    const connect = async () => {
+      if (cancelled) return;
+      let ticket: string;
+      try {
+        ({ ticket } = await endpoints.walletStreamTicket());
+      } catch {
+        // No ticket means no stream. A 401 has already been turned into a session-expired by
+        // the api client; anything else is the club being unreachable, so back off and retry.
+        retryLater();
+        return;
+      }
+      if (cancelled) return;
+      es = new EventSource(`/api/v1/wallet/stream?ticket=${encodeURIComponent(ticket)}`);
       es.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data) as { balance_credits: number };
@@ -91,14 +121,12 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
       es.onerror = () => {
         es?.close();
         es = null;
-        if (cancelled) return;
         // Exponential backoff capped at 30s — covers network blips + container restarts.
-        reconnectTimer = setTimeout(connect, backoffMs);
-        backoffMs = Math.min(backoffMs * 2, 30_000);
+        retryLater();
       };
     };
 
-    connect();
+    void connect();
     return () => {
       cancelled = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);

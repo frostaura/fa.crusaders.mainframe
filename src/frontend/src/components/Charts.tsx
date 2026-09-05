@@ -2,6 +2,7 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart,
   ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, Line, LineChart,
 } from "recharts";
+import { useEffect, useRef, useState } from "react";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 import { formatCredits } from "../lib/utils";
 
@@ -14,6 +15,56 @@ const DANGER = "#B91C1C";
 const TEXT_MUTED = "#6B7280";
 
 const CHART_HEIGHT = 240;
+
+/**
+ * The box a chart is drawn in, which does not draw the chart until the box has a size.
+ *
+ * <p>
+ * recharts' <code>ResponsiveContainer</code> measures its parent and, when it cannot, renders
+ * nothing and logs <i>"The width(-1) and height(-1) of chart should be greater than 0"</i>. On
+ * /reports that happened sixteen times per page load: the report charts live in a carousel whose
+ * off-screen slides are laid out at zero width, so every chart that was not the visible slide
+ * measured -1 and complained. The charts themselves were fine — they render the moment their
+ * slide is scrolled to.
+ * </p>
+ *
+ * <p>
+ * Sixteen warnings a load is not a cosmetic problem. /reports is the one screen an admin opens
+ * when they think something is wrong, and a console that is already full of red is a console
+ * nobody reads the seventeenth line of.
+ * </p>
+ *
+ * <p>
+ * Holding the chart back until the box is measurable removes the warning at its cause rather
+ * than silencing it, and costs nothing visible: a slide with no width has nothing to show
+ * anyway. The height is fixed, so only the width is ever in question.
+ * </p>
+ */
+function ChartFrame({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [measurable, setMeasurable] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setMeasurable(el.clientWidth > 0);
+    check();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", check);
+      return () => window.removeEventListener("resize", check);
+    }
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} style={{ height: CHART_HEIGHT }} data-testid="chart-frame" data-measurable={measurable}>
+      {measurable ? <ResponsiveContainer>{children as React.ReactElement}</ResponsiveContainer> : null}
+    </div>
+  );
+}
+
 
 const tooltipStyle = {
   contentStyle: { borderRadius: 8, border: "1px solid #E5E7EB", fontSize: 12, padding: "6px 10px" },
@@ -66,8 +117,7 @@ const ZERO_LINE_STROKE = TEXT_MUTED;
 
 export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
   return (
-    <div style={{ height: CHART_HEIGHT }}>
-      <ResponsiveContainer>
+    <ChartFrame>
         <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
           <defs>
             <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
@@ -81,8 +131,7 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Area type="monotone" dataKey="top_ups_credits" name="Top-ups" stroke={ACCENT} fill="url(#revFill)" strokeWidth={2} />
         </AreaChart>
-      </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 
@@ -93,8 +142,7 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
  */
 export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
   return (
-    <div style={{ height: CHART_HEIGHT }}>
-      <ResponsiveContainer>
+    <ChartFrame>
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
@@ -106,15 +154,13 @@ export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
           <Bar dataKey="booking_charges_credits" name="Bookings" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
           <Bar dataKey="penalties_credits" name="Penalties (net)" stackId="b" fill={WARNING} radius={[3, 3, 0, 0]} />
         </BarChart>
-      </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 
 export function BookingsLineChart({ data }: { data: DailyAdminPoint[] }) {
   return (
-    <div style={{ height: CHART_HEIGHT }}>
-      <ResponsiveContainer>
+    <ChartFrame>
         <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
@@ -124,15 +170,13 @@ export function BookingsLineChart({ data }: { data: DailyAdminPoint[] }) {
           <Line type="monotone" dataKey="bookings" name="Bookings" stroke={ACCENT} strokeWidth={2} dot={false} />
           <Line type="monotone" dataKey="no_shows" name="No-shows" stroke={DANGER} strokeWidth={2} dot={false} />
         </LineChart>
-      </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 
 export function CourtsRevenueBarChart({ data }: { data: { court_name: string; revenue_credits: number; bookings: number }[] }) {
   return (
-    <div style={{ height: CHART_HEIGHT }}>
-      <ResponsiveContainer>
+    <ChartFrame>
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="court_name" fontSize={11} stroke={TEXT_MUTED} />
@@ -140,8 +184,7 @@ export function CourtsRevenueBarChart({ data }: { data: { court_name: string; re
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} />
           <Bar dataKey="revenue_credits" name="Revenue" fill={ACCENT} radius={[6, 6, 0, 0]} />
         </BarChart>
-      </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 
@@ -152,8 +195,7 @@ export function NoShowDonut({ total, noShow }: { total: number; noShow: number }
     { name: "No-shows", value: noShow, color: DANGER },
   ];
   return (
-    <div style={{ height: CHART_HEIGHT }}>
-      <ResponsiveContainer>
+    <ChartFrame>
         <PieChart>
           <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2} stroke="none">
             {data.map((d) => <Cell key={d.name} fill={d.color} />)}
@@ -161,15 +203,13 @@ export function NoShowDonut({ total, noShow }: { total: number; noShow: number }
           <Tooltip {...tooltipStyle} />
           <Legend verticalAlign="bottom" wrapperStyle={{ fontSize: 11 }} />
         </PieChart>
-      </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 
 export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
   return (
-    <div style={{ height: CHART_HEIGHT }}>
-      <ResponsiveContainer>
+    <ChartFrame>
         <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
           <defs>
             <linearGradient id="balFill" x1="0" y1="0" x2="0" y2="1">
@@ -183,8 +223,7 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Area type="monotone" dataKey="balance_credits" name="Balance" stroke={ACCENT} fill="url(#balFill)" strokeWidth={2} />
         </AreaChart>
-      </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 
@@ -196,8 +235,7 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
  */
 export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
   return (
-    <div style={{ height: CHART_HEIGHT }}>
-      <ResponsiveContainer>
+    <ChartFrame>
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
@@ -209,8 +247,7 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
           <Bar dataKey="refunds_credits" name="Refunds (net)" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />
           <Bar dataKey="spent_credits" name="Spent" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
         </BarChart>
-      </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 
@@ -229,8 +266,7 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
  */
 export function MyBookingsBarChart({ data }: { data: DailyMePoint[] }) {
   return (
-    <div style={{ height: CHART_HEIGHT }}>
-      <ResponsiveContainer>
+    <ChartFrame>
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
@@ -240,8 +276,7 @@ export function MyBookingsBarChart({ data }: { data: DailyMePoint[] }) {
           <Bar dataKey="bookings" name="Booked" fill={ACCENT_SOFT} radius={[3, 3, 0, 0]} />
           <Bar dataKey="attended" name="Played" fill={ACCENT} radius={[3, 3, 0, 0]} />
         </BarChart>
-      </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   );
 }
 

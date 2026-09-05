@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Security;
@@ -105,6 +106,18 @@ public static class AuthEndpoints
             };
         }).RequireAuthorization();
 
+        // Sign out, on the server as well as in the browser.
+        //
+        // Clearing localStorage is not a sign-out: a JWT is a bearer credential and stays valid
+        // wherever else it reached — a second tab, a proxy log, anything that captured it —
+        // until it expires on its own. This puts the presented token on the revocation list, so
+        // the very next request carrying it is refused.
+        //
+        // Answers 204 whether or not there was anything to revoke. A member signing out has
+        // nothing to do differently on a failure, and an endpoint that reported which tokens it
+        // recognised would be an oracle for exactly the wrong audience.
+        g.MapPost("/logout", SignOutAsync).RequireAuthorization();
+
         // Dev-only shortcut: force-resets the seeded admin's password and returns a session token.
         // Keeps the "Sign in as seeded admin" UI button reliable even after password drift during tests.
         g.MapPost("/dev/admin-login", async (AuthService auth, IHostEnvironment env, CancellationToken ct) =>
@@ -119,6 +132,31 @@ public static class AuthEndpoints
         }).AllowAnonymous();
 
         return app;
+    }
+
+    /// <summary>
+    /// Revokes the access token the caller presented.
+    /// </summary>
+    /// <remarks>
+    /// A named method rather than an inline lambda because <c>MapAuthEndpoints</c> is scored by
+    /// lizard as one function, and three more branches inside it pushed the whole registration
+    /// over the complexity gate. The handler is the thing with the branches; it can own them.
+    /// </remarks>
+    private static async Task<IResult> SignOutAsync(HttpContext ctx, AuthService auth, CancellationToken ct)
+    {
+        var userId = ctx.User.Id();
+        var jti = ctx.User.FindFirstValue(JwtRegisteredClaimNames.Jti) ?? ctx.User.FindFirstValue("jti");
+        if (userId is null || jti is null) return Results.NoContent();
+
+        // A token with an unreadable `exp` is held for an hour rather than trusted: the ceiling
+        // only bounds how long the revocation is remembered, and remembering one too long costs
+        // a row, while remembering one too briefly un-revokes a live credential.
+        var expiresAt = long.TryParse(ctx.User.FindFirstValue(JwtRegisteredClaimNames.Exp), out var unix)
+            ? DateTimeOffset.FromUnixTimeSeconds(unix)
+            : DateTimeOffset.UtcNow.AddHours(1);
+
+        await auth.RevokeAccessTokenAsync(userId.Value, jti, expiresAt, ct);
+        return Results.NoContent();
     }
 }
 

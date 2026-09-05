@@ -6,6 +6,25 @@ namespace Crusaders.Mainframe.Api.Email;
 /// Minimal inline templates. Will graduate to Razor / MJML files once the count grows past a handful.
 /// All templates take primitives only — no domain types — so they remain trivially testable.
 /// </summary>
+/// <summary>
+/// Everything a booking confirmation states, as named members.
+/// </summary>
+/// <remarks>
+/// Every figure here is <b>credits</b>. Credits are this system's unit of account and rand
+/// exists only on the top-up row for reconciliation; a field that mixes the two is a
+/// money-correctness bug by the repo's own invariants. <c>PenaltyWindowMinutes</c> and
+/// <c>PenaltyPct</c> travel with them because the template used to hardcode "15 minutes / 30%"
+/// and went on saying so after an admin moved the club to 30 minutes at 50%.
+/// </remarks>
+public sealed record BookingConfirmationDetails(
+    string CourtName,
+    string StartsAtLocal,
+    string Duration,
+    decimal AmountCredits,
+    decimal BalanceAfterCredits,
+    int PenaltyWindowMinutes,
+    decimal PenaltyPct);
+
 public static class EmailTemplates
 {
     /// <summary>
@@ -65,33 +84,6 @@ public static class EmailTemplates
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">Thanks — we've got your details</h2>
               <p>An admin will review your registration and get back to you. You'll get an email either way.</p>
-              {FooterHtml}
-            </div>
-            """);
-
-    /// <summary>
-    /// Tells a tenant admin that an application is waiting. Spec §2.3 has always required it and
-    /// nothing sent it — both registration mails went to the applicant.
-    /// </summary>
-    public static EmailMessage MembershipPendingAdminNotice(string to, string fullName, string applicantEmail, string membershipNumber, string clubName, string reviewUrl) => new(
-        To: to,
-        Subject: $"New membership application — {clubName}",
-        HtmlBody:
-            $"""
-            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
-              <h2 style="margin:0 0 12px">Someone's waiting on you</h2>
-              <p>A new application needs review at {System.Net.WebUtility.HtmlEncode(clubName)}.</p>
-              <p style="margin:16px 0;background:#F1F5F9;border:1px solid #E2E8F0;border-radius:8px;padding:14px 18px">
-                <b>{System.Net.WebUtility.HtmlEncode(fullName)}</b><br />
-                {System.Net.WebUtility.HtmlEncode(applicantEmail)}<br />
-                Membership number {System.Net.WebUtility.HtmlEncode(membershipNumber)}
-              </p>
-              <p style="margin:24px 0">
-                <a href="{reviewUrl}"
-                   style="display:inline-block;background:#0369A1;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
-                  Review applications
-                </a>
-              </p>
               {FooterHtml}
             </div>
             """);
@@ -238,29 +230,44 @@ public static class EmailTemplates
     /// template hardcoded "within 15 minutes … 30%" and went on saying it after an admin had
     /// moved the club to 30 minutes at 50%.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Takes a <see cref="BookingConfirmationDetails"/> rather than seven positional parameters.
+    /// Seven was already over the complexity gate's argument limit, and every one of them is a
+    /// decimal, an int or a string, so a transposed pair — the charge and the balance, the
+    /// penalty window and the penalty percentage — would have compiled and shipped a wrong
+    /// number to a member. Named members make that transposition a compile error.
+    /// </para>
+    /// <para>
+    /// The receipt is an <b>attachment</b> and not a link, deliberately: a link to a receipt is a
+    /// link that needs a session, and the member who most wants one is forwarding the mail to
+    /// somebody who has not got one. It is optional so a missing receipt is a message with no
+    /// attachment rather than a failed send.
+    /// </para>
+    /// </remarks>
     public static EmailMessage BookingConfirmation(
-        string to, string courtName, string startsAtLocal, string duration,
-        decimal amountCredits, decimal balanceAfterCredits,
-        int penaltyWindowMinutes, decimal penaltyPct) => new(
+        string to, BookingConfirmationDetails d, EmailAttachment? receipt = null) => new(
         To: to,
-        Subject: $"Booking confirmed — {courtName} {startsAtLocal}",
+        Subject: $"Booking confirmed — {d.CourtName} {d.StartsAtLocal}",
         HtmlBody:
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">You're booked</h2>
               <table style="border-collapse:collapse;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Court</td><td><strong>{courtName}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Starts</td><td><strong>{startsAtLocal}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Duration</td><td><strong>{duration}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Charged</td><td><strong>{Cr(amountCredits)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(balanceAfterCredits)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Court</td><td><strong>{d.CourtName}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Starts</td><td><strong>{d.StartsAtLocal}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Duration</td><td><strong>{d.Duration}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Charged</td><td><strong>{Cr(d.AmountCredits)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(d.BalanceAfterCredits)}</strong></td></tr>
               </table>
               <p style="margin-top:16px;font-size:13px;color:#A16207">
-                Heads-up: cancelling within {penaltyWindowMinutes} minutes of the start, or not turning the lights on, incurs a {Num(penaltyPct)}% penalty.
+                Heads-up: cancelling within {d.PenaltyWindowMinutes} minutes of the start, or not turning the lights on, incurs a {Num(d.PenaltyPct)}% penalty.
               </p>
+              <p style="margin-top:16px;font-size:13px;color:#475569">Your receipt is attached.</p>
               {FooterHtml}
             </div>
-            """);
+            """,
+        Attachments: receipt is null ? null : [receipt]);
 
     /// <summary>Both figures are <b>credits</b>. See <see cref="Cr"/>.</summary>
     public static EmailMessage BookingCancellation(string to, string courtName, decimal refundedCredits, decimal? penaltyCredits) => new(

@@ -46,6 +46,7 @@ export const ScheduleGrid = memo(function ScheduleGrid(props: GridProps) {
               <SlotCell
                 key={c.id + t.utc}
                 slot={slotAt(slotsByCourt, c.id, cellStartMs, day.sliceMinutes)}
+                where={`${c.name} at ${t.label}`}
                 isHead={(s) => isSlotHead(s, cellStartMs, day.sliceMinutes, rowIndex === 0)}
                 isPast={isPast}
                 outOfHours={t.outOfHours}
@@ -101,6 +102,17 @@ function RowFragment({ t, children }: { t: TimeSlice; children: React.ReactNode 
  */
 type SlotCellProps = {
   slot?: ScheduleSlot;
+  /**
+   * "Court 1 at 06:00" — what this cell IS, carried rather than inferred.
+   *
+   * <p>
+   * The grid conveys court and time by POSITION: a column header and a row label. Position
+   * is exactly what a screen reader, or anyone tabbing, cannot perceive — so eleven
+   * identically-named "Available" buttons were the same button as far as assistive tech was
+   * concerned. One composed string rather than two props: no cell ever wants them apart.
+   * </p>
+   */
+  where: string;
   isHead: (slot: ScheduleSlot) => boolean;
   isPast?: boolean;
   outOfHours?: boolean;
@@ -112,25 +124,26 @@ type SlotCellProps = {
 };
 
 export function SlotCell(props: SlotCellProps) {
-  const { slot, isHead, isPast, outOfHours, isAdmin, priceCredits, onBook, onCancel, onLiftBlock } = props;
+  const { slot, isHead, isPast, outOfHours, isAdmin, priceCredits, where, onBook, onCancel, onLiftBlock } = props;
 
-  if (!slot) return <EmptyCell isPast={isPast} outOfHours={outOfHours} priceCredits={priceCredits} onBook={onBook} />;
+  if (!slot) return <EmptyCell isPast={isPast} outOfHours={outOfHours} priceCredits={priceCredits} where={where} onBook={onBook} />;
 
   // Only the booking's first cell carries its name and controls. Every later cell of the
   // same booking is a continuation — which is what makes a 60-minute booking read as one
   // block rather than as four identical buttons, and what stops a member from being
   // offered "cancel" four times for one thing.
-  if (!isHead(slot)) return <ContinuationCell slot={slot} />;
+  if (!isHead(slot)) return <ContinuationCell slot={slot} where={where} />;
 
   if (slot.status === "adminblock") {
     return (
       <div className="m-0.5 h-12 rounded-md bg-bg-muted bg-[repeating-linear-gradient(45deg,_rgba(0,0,0,0.04)_0,_rgba(0,0,0,0.04)_4px,_transparent_4px,_transparent_8px)] flex items-center justify-center gap-1 text-xs text-text-secondary px-1">
-        <span className="truncate">{slot.blockLabel ?? "Blocked"}</span>
+        <span className="truncate" aria-label={`${where} — ${slot.blockLabel ?? "blocked"}`}>{slot.blockLabel ?? "Blocked"}</span>
         {isAdmin && slot.bookingId && !isPast && (
           <button
             type="button"
             className="text-[10px] underline shrink-0 no-lift"
             onClick={() => onLiftBlock(slot.bookingId!)}
+            aria-label={`Lift the hold on ${where}`}
           >
             lift
           </button>
@@ -139,12 +152,12 @@ export function SlotCell(props: SlotCellProps) {
     );
   }
 
-  if (slot.isMine) return <MyCell slot={slot} isPast={isPast} onCancel={onCancel} />;
-  return <OtherCell slot={slot} isAdmin={isAdmin} isPast={isPast} onCancel={onCancel} />;
+  if (slot.isMine) return <MyCell slot={slot} isPast={isPast} where={where} onCancel={onCancel} />;
+  return <OtherCell slot={slot} isAdmin={isAdmin} isPast={isPast} where={where} onCancel={onCancel} />;
 }
 
-function EmptyCell({ isPast, outOfHours, priceCredits, onBook }: {
-  isPast?: boolean; outOfHours?: boolean; priceCredits?: number; onBook: () => void;
+function EmptyCell({ isPast, outOfHours, priceCredits, where, onBook }: {
+  isPast?: boolean; outOfHours?: boolean; priceCredits?: number; where: string; onBook: () => void;
 }) {
   // Closed, not merely empty. §5's `out_of_hours` — rendered and inert, so a member can
   // see that the club is shut rather than seeing a grid that stops without explanation.
@@ -152,7 +165,7 @@ function EmptyCell({ isPast, outOfHours, priceCredits, onBook }: {
     return (
       <div
         className="m-0.5 h-12 rounded-md bg-bg-muted/40 border border-dashed border-border text-text-secondary flex items-center justify-center text-[11px]"
-        aria-label="Club closed"
+        aria-label={`${where} — the club is closed`}
       >
         Closed
       </div>
@@ -162,7 +175,7 @@ function EmptyCell({ isPast, outOfHours, priceCredits, onBook }: {
     return (
       <div
         className="m-0.5 h-12 rounded-md bg-bg-muted/60 border border-border text-text-secondary flex items-center justify-center text-[11px] font-medium tracking-wide uppercase"
-        aria-label="Past slot"
+        aria-label={`${where} — past`}
       >
         Past
       </div>
@@ -176,7 +189,7 @@ function EmptyCell({ isPast, outOfHours, priceCredits, onBook }: {
     <button
       type="button"
       onClick={onBook}
-      aria-label={price ? `Book this slot for ${price}` : "Book this slot"}
+      aria-label={price ? `Book ${where} for ${price}` : `Book ${where}`}
       className="m-0.5 h-12 rounded-md bg-success-soft text-success-strong hover:bg-success-soft/70 text-xs font-medium"
     >
       Available
@@ -185,18 +198,18 @@ function EmptyCell({ isPast, outOfHours, priceCredits, onBook }: {
 }
 
 /** A later cell of a booking that started earlier. Reserved, and visibly the same booking. */
-function ContinuationCell({ slot }: { slot: ScheduleSlot }) {
+function ContinuationCell({ slot, where }: { slot: ScheduleSlot; where: string }) {
   const tone = slot.isMine ? "bg-info-soft/60 text-info-strong" : "bg-bg-muted text-text-secondary";
   return (
     <div className={cn("m-0.5 h-12 rounded-md flex items-center justify-center text-[11px]", tone)}
-      aria-label={slot.isMine ? "Continues — my booking" : "Continues — reserved"}>
+      aria-label={slot.isMine ? `${where} — continues, your booking` : `${where} — continues, reserved`}>
       ⋯
     </div>
   );
 }
 
-function MyCell({ slot, isPast, onCancel }: {
-  slot: ScheduleSlot; isPast?: boolean; onCancel: (slot: ScheduleSlot) => void;
+function MyCell({ slot, isPast, where, onCancel }: {
+  slot: ScheduleSlot; isPast?: boolean; where: string; onCancel: (slot: ScheduleSlot) => void;
 }) {
   // Attendance, on screen at last. The schedule projection did not carry it, so no
   // screen in the product could tell a member their court was lit — which is also why
@@ -206,7 +219,7 @@ function MyCell({ slot, isPast, onCancel }: {
     return (
       <div
         className="m-0.5 h-12 rounded-md bg-info-soft/60 text-info-strong border border-info-soft flex items-center justify-center text-xs font-medium text-center px-1"
-        aria-label={slot.checkedIn ? "Past booking, attended" : "Past booking"}
+        aria-label={slot.checkedIn ? `${where} — your past booking, attended` : `${where} — your past booking`}
       >
         {slot.checkedIn ? "Mine · played" : "Mine · past"}
       </div>
@@ -216,7 +229,9 @@ function MyCell({ slot, isPast, onCancel }: {
     <button
       type="button"
       onClick={() => onCancel(slot)}
-      aria-label={`${label} — open cancellation`}
+      aria-label={slot.checkedIn
+        ? `Cancel your booking on ${where} — checked in`
+        : `Cancel your booking on ${where}`}
       className={cn(
         "m-0.5 h-12 rounded-md text-xs font-medium px-1 text-center",
         slot.checkedIn
@@ -229,8 +244,8 @@ function MyCell({ slot, isPast, onCancel }: {
   );
 }
 
-function OtherCell({ slot, isAdmin, isPast, onCancel }: {
-  slot: ScheduleSlot; isAdmin: boolean; isPast?: boolean; onCancel: (slot: ScheduleSlot) => void;
+function OtherCell({ slot, isAdmin, isPast, where, onCancel }: {
+  slot: ScheduleSlot; isAdmin: boolean; isPast?: boolean; where: string; onCancel: (slot: ScheduleSlot) => void;
 }) {
   // "The booking grid shows photo + name only" — no email, phone or membership number.
   const body = (
@@ -255,7 +270,7 @@ function OtherCell({ slot, isAdmin, isPast, onCancel }: {
       <button
         type="button"
         onClick={() => onCancel(slot)}
-        aria-label={`${slot.ownerFirstName ?? "Reserved"} — cancel on their behalf`}
+        aria-label={`${slot.ownerFirstName ?? "Reserved"} — cancel on their behalf, ${where}`}
         className="m-0.5 h-12 w-[calc(100%-0.25rem)] rounded-md bg-bg-muted text-text-secondary hover:bg-bg-muted/70 flex items-center justify-center gap-2 text-xs px-1"
       >
         {body}
@@ -264,7 +279,8 @@ function OtherCell({ slot, isAdmin, isPast, onCancel }: {
   }
 
   return (
-    <div className="m-0.5 h-12 rounded-md bg-bg-muted text-text-secondary flex items-center justify-center gap-2 text-xs overflow-visible px-1">
+    <div className="m-0.5 h-12 rounded-md bg-bg-muted text-text-secondary flex items-center justify-center gap-2 text-xs overflow-visible px-1"
+      aria-label={`${where} — booked by ${slot.ownerFirstName ?? "another member"}`}>
       {body}
     </div>
   );
