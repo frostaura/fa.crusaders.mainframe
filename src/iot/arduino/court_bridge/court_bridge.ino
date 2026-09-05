@@ -116,7 +116,7 @@
 // The four compiled-in values, all MANDATORY. There is no runtime store and no
 // provisioning line: one box, one club, and the person who flashes it is the
 // person who knows the WiFi password and holds the API key. Changing any of
-// them is `make flash-bridge`, which is a two-minute job and cannot leave a box
+// them is another Upload from the Arduino IDE, which is a two-minute job and cannot leave a box
 // holding a credential nobody can see.
 //
 // The build fails rather than producing an image with a blank in it — an image

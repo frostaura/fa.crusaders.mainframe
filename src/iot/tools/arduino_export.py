@@ -302,6 +302,8 @@ BRIDGE_SUBS = [
     ),
     ("see src/iot/src/common/secrets.h.example", "see secrets.h.example, next to court_bridge.ino"),
     ("compiled in from src/common/secrets.h", "compiled in from secrets.h, next to this sketch"),
+    ("them is `make flash-bridge`, which is a two-minute job",
+     "them is another Upload from the Arduino IDE, which is a two-minute job"),
 ]
 
 TARGETS = [
