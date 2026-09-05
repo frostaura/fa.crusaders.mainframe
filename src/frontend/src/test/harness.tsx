@@ -4,6 +4,7 @@ import { vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
 import { ToastProvider } from "../components/Toast";
 import { AuthProvider } from "../lib/auth";
+import { BalanceProvider } from "../lib/balance";
 import { tokenStore } from "../lib/api";
 
 /**
@@ -118,7 +119,15 @@ function Providers({ children }: { children: ReactNode }) {
   return (
     <MemoryRouter>
       <AuthProvider>
-        <ToastProvider>{children}</ToastProvider>
+        {/*
+          BalanceProvider is here for the same reason AuthProvider is: a page that reads
+          `useBalance` throws outright without it, which reads as a broken page rather
+          than a missing wrapper. Anonymous, it fetches nothing; signed in it asks for
+          /api/v1/wallet, so a test that calls `signIn` stubs that route too.
+        */}
+        <BalanceProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </BalanceProvider>
       </AuthProvider>
     </MemoryRouter>
   );

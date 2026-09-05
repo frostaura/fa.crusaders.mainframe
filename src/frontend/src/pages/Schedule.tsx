@@ -1,85 +1,128 @@
-import { useEffect, useMemo, useState } from "react";
-import { endpoints, type ScheduleDay, type ScheduleSlot, ApiError } from "../lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { endpoints, type ScheduleDay } from "../lib/api";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
-import { ConfirmButton } from "../components/ConfirmButton";
 import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
-import { formatCredits } from "../lib/utils";
+import { cn, formatCredits } from "../lib/utils";
+import { cancellationOutcome, describeBookingError } from "../lib/bookingErrors";
+import { BookingConfirmModal, type AdminOption, type BookingIntent } from "../components/BookingConfirmModal";
+import { CancelBookingModal } from "../components/CancelBookingModal";
+import { SlotCell } from "../components/ScheduleCells";
+import {
+  buildTimeSlices, groupSlotsByCourt, isSlotHead, slotAt, type TimeSlice,
+} from "../lib/scheduleGrid";
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
+
+type CancelTarget = { bookingId: string; courtName: string; whenLabel: string; mine: boolean };
 
 export default function SchedulePage() {
   const auth = useAuth();
   const toast = useToast();
-  const { refresh: refreshBalance } = useBalance();
+  const { balance, refresh: refreshBalance } = useBalance();
+  const isAdmin = auth.status === "authenticated" && auth.isAdmin;
+
   const today = useMemo(() => ymd(new Date()), []);
   const [date, setDate] = useState(today);
   const [day, setDay] = useState<ScheduleDay | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [booking, setBooking] = useState<BookingIntent | null>(null);
+  const [cancelling, setCancelling] = useState<CancelTarget | null>(null);
+  const [members, setMembers] = useState<{ userId: string; name: string }[]>([]);
   // Snapshot of "now", taken when the schedule loads, so past-slot styling is pure at render time.
   const [loadedAt, setLoadedAt] = useState(0);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       setDay(await endpoints.schedule(date));
       setLoadedAt(Date.now());
     }
-    catch { setError("Couldn't load schedule."); }
+    catch { setError("Couldn't load the schedule. Check your connection and press Refresh."); }
     finally { setLoading(false); }
-  };
+  }, [date]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [date]);
+  useEffect(() => { load(); }, [load]);
 
-  const slotsByCourtAndStart = useMemo(() => {
-    if (!day) return new Map<string, ScheduleSlot>();
-    const m = new Map<string, ScheduleSlot>();
-    for (const s of day.slots) m.set(`${s.courtId}|${new Date(s.startsAtUtc).getTime()}`, s);
-    return m;
-  }, [day]);
+  // The member picker for "book on behalf". Admin-only and loaded once — a member never
+  // asks for it, and asking would be a 403 on every schedule visit.
+  useEffect(() => {
+    if (!isAdmin) return;
+    let live = true;
+    endpoints.adminMembers("Active")
+      .then((rows) => { if (live) setMembers(rows.map((m) => ({ userId: m.user_id, name: m.full_name }))); })
+      .catch(() => { /* the picker is unavailable; booking for oneself still works */ });
+    return () => { live = false; };
+  }, [isAdmin]);
 
-  const timeSlices = useMemo(
-    () => buildTimeSlices(date, day?.sliceMinutes ?? 30, day?.timezone ?? "UTC", day?.dayStartMinute ?? 6 * 60, day?.dayEndMinute ?? 22 * 60),
-    [date, day?.sliceMinutes, day?.timezone, day?.dayStartMinute, day?.dayEndMinute],
-  );
+  const slotsByCourt = useMemo(() => groupSlotsByCourt(day), [day]);
+  const timeSlices = useMemo(() => (day ? buildTimeSlices(day) : []), [day]);
 
-  const maxDate = useMemo(() => {
-    if (auth.status === "authenticated" && auth.isAdmin) return undefined;
-    const d = new Date();
-    d.setDate(d.getDate() + (day?.advanceBookingDays ?? 14));
-    return ymd(d);
-  }, [auth, day?.advanceBookingDays]);
+  const dateBounds = useMemo(() => {
+    const span = day?.advanceBookingDays ?? 14;
+    const back = new Date();
+    const forward = new Date();
+    // §5 "Date picker lets the player navigate ±N days". `min` was pinned to today for
+    // everyone but an admin, so a member could only ever move forward — and with no
+    // bookings list anywhere else in the product, there was no way to look at a booking
+    // they had already played. Past days are read-only: every slot on them renders as
+    // Past and none of them is bookable.
+    back.setDate(back.getDate() - span);
+    forward.setDate(forward.getDate() + span);
+    return { min: isAdmin ? undefined : ymd(back), max: isAdmin ? undefined : ymd(forward) };
+  }, [isAdmin, day?.advanceBookingDays]);
 
-  const book = async (court: { id: string; name: string }, startUtc: string) => {
+  const whenLabel = useCallback(
+    (utc: string) => formatTime(utc, day?.timezone ?? "UTC"), [day?.timezone]);
+
+  const confirmBooking = async (option: AdminOption) => {
+    if (!booking) return;
     try {
-      await endpoints.book(court.id, startUtc, 1);
-      toast.push({ tone: "success", text: `Booked ${court.name} at ${formatTime(startUtc, day?.timezone ?? "UTC")}.` });
+      if (option.kind === "block") {
+        await endpoints.adminBlock(booking.courtId, booking.startsAtUtc, 1, option.label);
+        toast.push({ tone: "success", text: `${booking.courtName} held for "${option.label}" at ${booking.whenLabel}.` });
+      } else if (option.kind === "member") {
+        await endpoints.adminBook(booking.courtId, option.userId, booking.startsAtUtc, 1);
+        toast.push({ tone: "success", text: `Booked ${booking.courtName} at ${booking.whenLabel} for that member.` });
+      } else {
+        await endpoints.book(booking.courtId, booking.startsAtUtc, 1);
+        toast.push({ tone: "success", text: `Booked ${booking.courtName} at ${booking.whenLabel}.` });
+      }
+      setBooking(null);
       await Promise.all([load(), refreshBalance()]);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 402) toast.push({ tone: "danger", text: "Insufficient balance — please top up." });
-      else if (err instanceof ApiError && err.status === 409) toast.push({ tone: "danger", text: "Slot was just taken — refresh the schedule." });
-      else if (err instanceof ApiError && err.status === 400) toast.push({ tone: "danger", text: "That slot is in the past." });
-      else toast.push({ tone: "danger", text: "Booking failed." });
+      toast.push({ tone: "danger", text: describeBookingError(err, "Couldn't make that booking. Refresh the schedule and try again.") });
     }
   };
 
-  const cancel = async (bookingId: string) => {
+  const confirmCancel = async (waivePenalty: boolean) => {
+    if (!cancelling) return;
     try {
-      await endpoints.cancelBooking(bookingId);
-      toast.push({ tone: "success", text: "Booking cancelled — refund pending." });
+      const result = cancelling.mine
+        ? await endpoints.cancelBooking(cancelling.bookingId)
+        : await endpoints.adminCancelBooking(cancelling.bookingId, waivePenalty);
+      setCancelling(null);
+      // The figures the server actually moved, not "refund pending" — which was shown
+      // identically whether 50.00 came back, 35.00 came back, or nothing did.
+      toast.push({ tone: "success", text: cancellationOutcome(result.refunded_credits, result.penalty_credits) });
       await Promise.all([load(), refreshBalance()]);
+    } catch (err) {
+      toast.push({ tone: "danger", text: describeBookingError(err, "Couldn't cancel that booking. Refresh the schedule and try again.") });
     }
-    catch (err) {
-      if (err instanceof ApiError && err.status === 400) {
-        toast.push({ tone: "danger", text: "That booking has already started — it can't be cancelled." });
-      } else {
-        toast.push({ tone: "danger", text: "Cancellation failed." });
-      }
+  };
+
+  const liftBlock = async (blockId: string) => {
+    try {
+      await endpoints.adminUnblock(blockId);
+      toast.push({ tone: "success", text: "Block lifted — the court is free again." });
+      await load();
+    } catch (err) {
+      toast.push({ tone: "danger", text: describeBookingError(err, "Couldn't lift that block.") });
     }
   };
 
@@ -88,9 +131,10 @@ export default function SchedulePage() {
       <div className="flex items-center gap-3">
         <input
           type="date"
+          aria-label="Schedule date"
           value={date}
-          min={auth.status === "authenticated" && auth.isAdmin ? undefined : today}
-          max={maxDate}
+          min={dateBounds.min}
+          max={dateBounds.max}
           onChange={(e) => setDate(e.target.value)}
           className="h-11 px-3 rounded-lg border border-border bg-bg-surface"
         />
@@ -111,14 +155,37 @@ export default function SchedulePage() {
                   <div>{formatCredits(c.slicePriceCredits)}/slice</div>
                 </div>
               ))}
-              {timeSlices.map((t) => {
-                const isPast = new Date(t.utc).getTime() < loadedAt;
+              {timeSlices.map((t, rowIndex) => {
+                const cellStartMs = new Date(t.utc).getTime();
+                const isPast = cellStartMs < loadedAt;
                 return (
                   <RowFragment key={t.utc} t={t}>
-                    {day.courts.map((c) => {
-                      const slot = slotsByCourtAndStart.get(`${c.id}|${new Date(t.utc).getTime()}`);
-                      return <SlotCell key={c.id + t.utc} slot={slot} isPast={isPast} priceCredits={c.slicePriceCredits} onBook={() => book(c, t.utc)} onCancel={(id) => cancel(id)} />;
-                    })}
+                    {day.courts.map((c) => (
+                      <SlotCell
+                        key={c.id + t.utc}
+                        slot={slotAt(slotsByCourt, c.id, cellStartMs, day.sliceMinutes)}
+                        isHead={(s) => isSlotHead(s, cellStartMs, day.sliceMinutes, rowIndex === 0)}
+                        isPast={isPast}
+                        outOfHours={t.outOfHours}
+                        isAdmin={isAdmin}
+                        priceCredits={c.slicePriceCredits}
+                        onBook={() => setBooking({
+                          courtId: c.id,
+                          courtName: c.name,
+                          startsAtUtc: t.utc,
+                          whenLabel: whenLabel(t.utc),
+                          sliceMinutes: day.sliceMinutes,
+                          priceCredits: c.slicePriceCredits,
+                        })}
+                        onCancel={(slot) => setCancelling({
+                          bookingId: slot.bookingId!,
+                          courtName: c.name,
+                          whenLabel: whenLabel(slot.startsAtUtc),
+                          mine: slot.isMine,
+                        })}
+                        onLiftBlock={liftBlock}
+                      />
+                    ))}
                   </RowFragment>
                 );
               })}
@@ -126,81 +193,47 @@ export default function SchedulePage() {
           </div>
         </Card>
       )}
+
+      {booking && (
+        <BookingConfirmModal
+          intent={booking}
+          balanceCredits={balance}
+          members={members}
+          isAdmin={isAdmin}
+          onCancel={() => setBooking(null)}
+          onConfirm={confirmBooking}
+        />
+      )}
+
+      {cancelling && (
+        <CancelBookingModal
+          bookingId={cancelling.bookingId}
+          courtName={cancelling.courtName}
+          whenLabel={cancelling.whenLabel}
+          asAdmin={isAdmin && !cancelling.mine}
+          onClose={() => setCancelling(null)}
+          onConfirm={confirmCancel}
+        />
+      )}
     </div>
   );
 }
 
 function RowFragment({ t, children }: { t: TimeSlice; children: React.ReactNode }) {
+  // `cn`, not a template literal. lizard's .tsx parser reads a bare `<` inside an
+  // interpolation as the start of a JSX tag, never finds its close, and swallows the
+  // rest of the file into this one function — `make complexity` then reports
+  // RowFragment at 153 NLOC and 43 CCN and points at a line nobody touched.
   return (
     <>
-      <div className="sticky left-0 z-10 bg-bg-surface text-xs text-text-muted font-mono border-r border-border flex items-center justify-end pr-2">
+      <div className={cn(
+        "sticky left-0 z-10 bg-bg-surface text-xs font-mono border-r border-border flex items-center justify-end pr-2",
+        t.outOfHours ? "text-text-muted/50" : "text-text-muted",
+      )}>
         {t.label}
       </div>
       {children}
     </>
-  );
-}
-
-function SlotCell({ slot, isPast, priceCredits, onBook, onCancel }: { slot?: ScheduleSlot; isPast?: boolean; priceCredits?: number; onBook: () => void | Promise<void>; onCancel: (id: string) => void | Promise<void> }) {
-  if (!slot) {
-    if (isPast) {
-      return (
-        <div
-          className="m-0.5 h-12 rounded-md bg-bg-muted/60 border border-border/40 text-text-muted/70 flex items-center justify-center text-[11px] font-medium tracking-wide uppercase"
-          aria-label="Past slot"
-        >
-          Past
-        </div>
-      );
-    }
-    // The parameter used to be called priceZar and rendered with a rand sign. The
-    // name was the tell: it is a credit price, and at 1.6-2.4 credits per rand the
-    // grid was quoting a court at well under half what it costs.
-    const price = priceCredits !== undefined ? formatCredits(priceCredits) : "";
-    return (
-      <ConfirmButton
-        idleLabel="Available"
-        confirmLabel={price ? `Reserve for ${price}?` : "Confirm booking"}
-        onConfirm={onBook}
-        idleClassName="bg-success-soft text-success-strong hover:bg-success-soft/70"
-        className="m-0.5 h-12"
-      />
-    );
-  }
-  if (slot.status === "adminblock") {
-    return <div className="m-0.5 h-12 rounded-md bg-bg-muted bg-[repeating-linear-gradient(45deg,_rgba(0,0,0,0.04)_0,_rgba(0,0,0,0.04)_4px,_transparent_4px,_transparent_8px)] flex items-center justify-center text-xs text-text-secondary">{slot.blockLabel ?? "Blocked"}</div>;
-  }
-  if (slot.isMine) {
-    if (isPast) {
-      return (
-        <div
-          className="m-0.5 h-12 rounded-md bg-info-soft/60 text-info-strong/80 border border-info-soft flex items-center justify-center text-xs font-medium"
-          aria-label="Past booking"
-        >
-          Mine · Past
-        </div>
-      );
-    }
-    return (
-      <ConfirmButton
-        idleLabel="Mine"
-        confirmLabel="Confirm cancel"
-        onConfirm={async () => { if (slot.bookingId) await onCancel(slot.bookingId); }}
-        className="m-0.5 h-12"
-      />
-    );
-  }
-  return (
-    <div className="m-0.5 h-12 rounded-md bg-bg-muted text-text-secondary flex items-center justify-center gap-2 text-xs overflow-visible">
-      {slot.ownerPhotoUrl ? (
-        <img src={slot.ownerPhotoUrl} alt="" style={{ width: 34, height: 34 }} className="rounded-full object-cover ring-2 ring-bg-surface shadow-sm shrink-0" />
-      ) : (
-        <div style={{ width: 34, height: 34 }} className="rounded-full bg-bg-surface border border-border flex items-center justify-center text-sm font-medium ring-2 ring-bg-surface shadow-sm shrink-0">
-          {slot.ownerFirstName?.[0] ?? "?"}
-        </div>
-      )}
-      <span className="truncate">{slot.ownerFirstName ?? "Reserved"}</span>
-    </div>
   );
 }
 
@@ -214,33 +247,4 @@ function formatTime(utc: string, timezone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     timeZone: timezone, hour: "2-digit", minute: "2-digit", weekday: "short", day: "2-digit", month: "short",
   }).format(new Date(utc));
-}
-
-type TimeSlice = { utc: string; label: string };
-
-// Returns the IANA-timezone offset (minutes) for a given UTC instant.
-function tzOffsetMinutes(timezone: string, atUtcMs: number): number {
-  const dtf = new Intl.DateTimeFormat("en-US", { timeZone: timezone, timeZoneName: "longOffset" });
-  const tzPart = dtf.formatToParts(new Date(atUtcMs)).find((p) => p.type === "timeZoneName")?.value ?? "GMT";
-  const m = tzPart.match(/GMT([+-])(\d+)(?::(\d+))?/);
-  if (!m) return 0;
-  const sign = m[1] === "-" ? -1 : 1;
-  return sign * (parseInt(m[2], 10) * 60 + parseInt(m[3] ?? "0", 10));
-}
-
-// Builds the wall-clock slice grid in the tenant timezone, returning UTC ISO that matches API rows.
-function buildTimeSlices(date: string, sliceMinutes: number, timezone: string, startMinutes: number, endMinutes: number): TimeSlice[] {
-  const slices: TimeSlice[] = [];
-  const [y, m, d] = date.split("-").map(Number);
-  for (let mins = startMinutes; mins < endMinutes; mins += sliceMinutes) {
-    const hh = Math.floor(mins / 60);
-    const mm = mins % 60;
-    // Treat hh:mm as wall-clock in `timezone`. Convert to UTC by subtracting the tz offset at that instant.
-    const naiveUtcMs = Date.UTC(y, m - 1, d, hh, mm, 0, 0);
-    const offset = tzOffsetMinutes(timezone, naiveUtcMs);
-    const utc = new Date(naiveUtcMs - offset * 60_000).toISOString();
-    const label = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-    slices.push({ utc, label });
-  }
-  return slices;
 }

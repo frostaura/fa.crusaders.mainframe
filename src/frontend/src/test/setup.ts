@@ -21,3 +21,32 @@ for (const target of [globalThis, window]) {
     configurable: true,
   });
 }
+
+// jsdom has no EventSource, and `BalanceProvider` opens one against
+// /api/v1/wallet/stream the moment a test signs in. Without this, any test that renders
+// a page inside the balance provider dies on "EventSource is not defined" — a failure
+// that reads as a broken page and is a missing browser API.
+//
+// Inert on purpose: it connects to nothing and never fires. A test that wants to prove
+// something about the live balance push should drive `onmessage` on the instance it
+// captures, rather than relying on this doing anything.
+class InertEventSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+  readonly url: string;
+  readyState = InertEventSource.CONNECTING;
+  onmessage: ((e: MessageEvent) => void) | null = null;
+  onerror: ((e: Event) => void) | null = null;
+  onopen: ((e: Event) => void) | null = null;
+  constructor(url: string) { this.url = url; }
+  addEventListener() { /* nothing arrives */ }
+  removeEventListener() { /* nothing to remove */ }
+  dispatchEvent() { return false; }
+  close() { this.readyState = InertEventSource.CLOSED; }
+}
+if (!("EventSource" in globalThis)) {
+  Object.defineProperty(globalThis, "EventSource", {
+    value: InertEventSource, writable: true, configurable: true,
+  });
+}

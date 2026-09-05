@@ -14,6 +14,34 @@ export class ApiError extends Error {
   constructor(public status: number, public payload: unknown) {
     super(`HTTP ${status}`);
   }
+
+  /**
+   * The API's stable snake_case `error` code, or null when the body carries none.
+   *
+   * Branching on the STATUS alone is what put "That slot is in the past." on screen
+   * for a member whose session had merely lapsed: the schedule mapped every 400 to
+   * the past-slot sentence, so `tenant_unresolved` — and `too_far_ahead`, and
+   * `invalid_duration` — all came out as the same wrong sentence. Two different
+   * refusals sharing a status code is normal and the code is what tells them apart.
+   */
+  get code(): string | null {
+    const payload = this.payload;
+    if (payload && typeof payload === "object" && "error" in payload) {
+      const value = (payload as { error: unknown }).error;
+      if (typeof value === "string") return value;
+    }
+    return null;
+  }
+
+  /** One field off the error body — the figures a sentence needs, e.g. `peak_start`. */
+  detail(key: string): string | number | null {
+    const payload = this.payload;
+    if (payload && typeof payload === "object" && key in payload) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === "string" || typeof value === "number") return value;
+    }
+    return null;
+  }
 }
 
 // Paths that should not trigger session-expired handling on 401. Login itself returns 401 on bad
@@ -123,12 +151,32 @@ export type ScheduleSlot = {
   isMine: boolean;
   bookingId: string | null;
   blockLabel: string | null;
+  /** Whether the lights have been on. Null for another member's booking — attendance is not public. */
+  checkedIn: boolean | null;
+  /** What the booking cost. Null for another member's booking, for the same reason. */
+  amountChargedCredits: number | null;
 };
 export type ScheduleCourt = { id: string; courtNumber: number; name: string; slicePriceCredits: number };
 export type ScheduleDay = {
   date: string; timezone: string; sliceMinutes: number;
+  /** The club's opening and closing for THIS day, minutes past local midnight — per weekday, not a flat pair. */
   dayStartMinute: number; dayEndMinute: number; advanceBookingDays: number;
+  penaltyPct: number; penaltyWindowMinutes: number;
   courts: ScheduleCourt[]; slots: ScheduleSlot[]
+};
+
+/** What cancelling a booking would cost right now — server-computed, read when the modal opens. */
+export type CancellationQuote = {
+  bookingId: string;
+  amountChargedCredits: number;
+  /** What actually lands back in the wallet: the refund NET of any penalty. */
+  refundCredits: number;
+  penaltyCredits: number;
+  penaltyPct: number;
+  penaltyWindowMinutes: number;
+  insidePenaltyWindow: boolean;
+  checkedIn: boolean;
+  alreadyStarted: boolean;
 };
 
 export type AdminSettings = {
@@ -454,6 +502,19 @@ export const endpoints = {
   book: (courtId: string, startsAt: string, sliceCount: number) =>
     api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),
   cancelBooking: (bookingId: string) => api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/bookings/${bookingId}/cancel`),
+  /** Read when the cancellation modal opens, never cached with the schedule — the answer moves with the clock and with a scan at the box. */
+  cancellationQuote: (bookingId: string) => api.get<CancellationQuote>(`/api/v1/bookings/${bookingId}/cancellation-quote`),
+
+  /** Admin: book on behalf of a member. The member is charged; the admin is the actor on the audit row. */
+  adminBook: (courtId: string, userId: string, startsAt: string, sliceCount: number) =>
+    api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/admin/bookings/", { courtId, userId, startsAt, sliceCount }),
+  /** Admin: cancel anyone's booking, optionally waiving the late-cancellation penalty. */
+  adminCancelBooking: (bookingId: string, waivePenalty: boolean) =>
+    api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/admin/bookings/${bookingId}/cancel`, { waivePenalty }),
+  /** Admin: hold a court for an event. Takes no money and refuses to sit over a paid booking. */
+  adminBlock: (courtId: string, startsAt: string, sliceCount: number, label: string) =>
+    api.post<{ booking_id: string }>("/api/v1/admin/blocks/", { courtId, startsAt, sliceCount, label }),
+  adminUnblock: (blockId: string) => api.del<void>(`/api/v1/admin/blocks/${blockId}`),
 
   adminMembers: (status?: string) => api.get<AdminMember[]>(`/api/v1/admin/members/${status ? `?status=${status}` : ""}`),
   adminApprove: (memberId: string) => api.post<{ approved: boolean }>(`/api/v1/admin/members/${memberId}/approve`),
