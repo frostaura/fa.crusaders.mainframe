@@ -59,6 +59,9 @@ SEEDED_PAYFAST_PASSPHRASE = "REPLACE_WITH_PAYFAST_PASSPHRASE"
 SEEDED_PAYFAST_MERCHANT_ID = "REPLACE_WITH_PAYFAST_MERCHANT_ID"
 SEEDED_MEMBER_M = "MEM-1001"  # Naledi Khoza, Regular — the scanning member
 SEEDED_MEMBER_N = "MEM-1003"  # Aisha Patel, Regular — the no-show member
+# What M chooses when the temporary password forces a change. Long enough for the
+# eight-character minimum, and fixed so a failing run can be re-driven by hand.
+M_PASSWORD = "e2e-device-member-pw"
 
 RELAY_HARD_CAP_SECONDS = 5400
 
@@ -955,10 +958,28 @@ def seed_and_tune(w: World) -> None:
 
     # A seeded member has no password. The admin reset returns a one-shot temporary
     # password, which is the API's own out-of-band path — and what gives us M's JWT.
+    #
+    # The temporary password is TEMPORARY, and the API enforces that rather than advising
+    # it: `PasswordChangeGate` answers 403 `password_change_required` to every authenticated
+    # call from a must-change session except the change itself. So this walks the member's
+    # real journey — reset, sign in, choose a password — instead of holding a session that a
+    # real member could not use. Skipping the change is how this harness spent a whole run
+    # reporting failures on the wallet, the QR screen and the roster that were all one 403.
     reset = expect_status(w.http.post(f"/api/v1/admin/members/{w.m_membership_id}/reset-password", token=w.admin_token), 200, "reset-password")
     login = expect_status(w.http.post("/api/v1/auth/login", {"email": m["email"], "password": reset["temp_password"]}), 200, "member login")
     w.m_token = login["access_token"]
     REPORT.check("setup", f"member M ({SEEDED_MEMBER_M}) logged in via admin password reset", bool(w.m_token) and not login.get("is_admin"))
+
+    REPORT.check("setup", "the temporary password forces a change: an authenticated call is refused until it is done",
+                 w.http.get("/api/v1/wallet", token=w.m_token).status == 403 and login.get("must_change_password") is True)
+
+    expect_status(
+        w.http.post("/api/v1/me/password", {"currentPassword": reset["temp_password"], "newPassword": M_PASSWORD}, token=w.m_token),
+        200, "member chooses a password")
+    login = expect_status(w.http.post("/api/v1/auth/login", {"email": m["email"], "password": M_PASSWORD}), 200, "member re-login")
+    w.m_token = login["access_token"]
+    REPORT.check("setup", "and once it is changed the member holds an ordinary session",
+                 not login.get("must_change_password") and w.http.get("/api/v1/wallet", token=w.m_token).status == 200)
 
     # Credits through the admin API, on top of the seeded opening balance.
     adj = expect_status(w.http.post(f"/api/v1/admin/credit/{w.m_user_id}/adjust", {"amountCredits": 500, "reason": "e2e-device seed"}, token=w.admin_token), 200, "adjust M")
