@@ -12,6 +12,16 @@
 # function, but it is really N independent route handlers, each individually
 # simple. Those are measurement artifacts rather than genuine complexity, and
 # they resolve naturally as endpoints are split out during the device work.
+#
+# THE NAMES HERE ARE LIZARD'S, NOT C#'s, and the two disagree. lizard's C#
+# parser scopes a function under the most recently DECLARED type, not the type
+# that encloses it — so `TopUpEndpoints.MapTopUpEndpoints`, which sits directly
+# below the nested `FailureCodes` class, is reported as
+# `FailureCodes::MapTopUpEndpoints`. An entry written from the source rather
+# than from lizard's own output matches nothing and the gate stays red while
+# looking whitelisted, which is what `TopUpEndpoints::MapTopUpEndpoints` did
+# here. Copy the name out of `make complexity`'s warning line; never type it
+# from the C#.
 AdminConfigEndpoints::MapAdminConfigEndpoints
 AdminMemberEndpoints::MapAdminMemberEndpoints
 AdminMembersPage
@@ -31,7 +41,7 @@ QrEndpoints::MapQrEndpoints
 ReportingEndpoints::MapReportingEndpoints
 SmtpEmailService::SendAsync
 SortHeader
-TopUpEndpoints::MapTopUpEndpoints
+FailureCodes::MapTopUpEndpoints  # = TopUpEndpoints.MapTopUpEndpoints; see the naming note above
 WebAuthnEndpoints::MapWebAuthnEndpoints
 adjust
 load
