@@ -39,15 +39,12 @@ namespace hal {
 
 /// Longest value the port accepts.
 ///
-/// 128, not 32. The port was sized for "a device id plus a bridge token" and the
-/// 32-byte cap then quietly decided two things nobody meant it to: the API base
-/// URL was truncated to 32 characters (a DNS-named advertised base failed
-/// discovery with nothing on the glass), and a WPA2 passphrase — up to 63
-/// characters by the standard — could not be stored at all, which is why the
-/// WiFi credential lived in a compile-time header and every CI-built OTA image
-/// shipped without one. 128 holds an SSID (32), a passphrase (63) and an OTA
-/// URL (ota::kMaxUrlLen, 120) each with a trailing integrity byte. Still a
-/// uint8_t length, still identifiers and tokens, never blobs.
+/// 128, not 32. The port was sized for "a device id plus a bridge token", and
+/// the 32-byte cap then quietly truncated the API base URL to 32 characters —
+/// a DNS-named advertised base failed discovery with nothing on the glass. 128
+/// holds a URL (bridgelogic::kMaxApiUrlLen, 120) with its trailing integrity
+/// byte, and each half of the device key with room to spare. Still a uint8_t
+/// length, still identifiers and tokens, never blobs.
 constexpr uint8_t kStoreMaxValueLen = 128U;
 
 /// Longest key, excluding the terminator. Keys are short ASCII literals.

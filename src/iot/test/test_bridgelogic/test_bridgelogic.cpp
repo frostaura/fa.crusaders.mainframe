@@ -1813,40 +1813,6 @@ void test_state_seconds_parse_decimal_and_refuse_everything_else() {
   TEST_ASSERT_FALSE(bridgelogic::parseStateSeconds("12x", seconds));
 }
 
-void test_a_box_with_a_court_in_use_is_busy_and_one_at_rest_is_not() {
-  // REVIEW 3, FINDING 8. An OTA install blocks for the whole download and then
-  // reboots, and the reboot loses the per-court booking ends `!EXT` needs — so
-  // a court adopted from the first `!STATE` afterwards darkens at the cap,
-  // mid-game. This is the gate that keeps the install for a quiet heartbeat.
-  for (size_t i = 0U; i < kBaseCount; ++i) {
-    const uint32_t base = kBases[i];
-    bridgelogic::HeldState held[bridgelogic::kStateCourts];
-    for (uint8_t c = 0U; c < bridgelogic::kStateCourts; ++c) {
-      held[c] = bridgelogic::HeldState{base, false};
-    }
-    bridgelogic::Relight relight;
-    TEST_ASSERT_FALSE(bridgelogic::anyCourtBusy(held, relight, false));
-
-    // A member at the panel with an armed button window is mid-interaction.
-    TEST_ASSERT_TRUE(bridgelogic::anyCourtBusy(held, relight, true));
-
-    // A lit court.
-    held[2] = bridgelogic::HeldState{base, true};
-    TEST_ASSERT_TRUE(bridgelogic::anyCourtBusy(held, relight, false));
-    held[2] = bridgelogic::HeldState{base, false};
-    TEST_ASSERT_FALSE(bridgelogic::anyCourtBusy(held, relight, false));
-
-    // A court whose extension is still owed, even though `!STATE` has not yet
-    // said it is lit: rebooting would forget the booking end entirely.
-    court::Outcome grant = outcomeOf(court::Action::TurnOn, 3U, true);
-    grant.bookingRemainingMs = 2UL * kHourMs;
-    relight.onGrant(grant, base);
-    TEST_ASSERT_TRUE(bridgelogic::anyCourtBusy(held, relight, false));
-    relight.onRelease(3U);
-    TEST_ASSERT_FALSE(bridgelogic::anyCourtBusy(held, relight, false));
-  }
-}
-
 void test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant() {
   // THE CLOSING-#10 RESIDUAL. The roster holds bookings, not lights: a booking
   // is "allowed" for its whole window, so a member who scans again mid-game was
@@ -1900,9 +1866,10 @@ void test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant() {
 
 void test_the_identity_screen_is_repainted_on_the_first_pong_and_after_a_mega_reset() {
   // REVIEW 3, FINDING 9. `seconds < gMegaUptime` alone can never be true for
-  // the first pong of a boot, because gMegaUptime starts at 0 — so the only
-  // on-glass diagnostic the go-live checklist has (NO WIFI SET /
-  // !WIFI,SSID,PASS) was painted by no reachable path.
+  // the first pong of a boot, because gMegaUptime starts at 0 — so the screen
+  // that tells a technician what the box IS (CLAIM CODE <hex>, or CONNECTED /
+  // SCAN TO START) was painted by no reachable path after a USB flash, where
+  // the Mega was not on the other end of the UART to hear setup()'s frame.
   TEST_ASSERT_TRUE(bridgelogic::shouldRepaintIdentity(false, 0U, 0U));
   TEST_ASSERT_TRUE(bridgelogic::shouldRepaintIdentity(false, 0U, 4213U));
   // A running Mega: nothing to repaint.
@@ -1996,179 +1963,7 @@ void test_credential_store_checked_text_survives_the_store_and_a_torn_write_read
   TEST_ASSERT_FALSE(bridgelogic::putCheckedText(store, "h", huge));
 }
 
-void test_wifi_credential_is_persisted_on_first_join_and_read_back_by_a_ci_image() {
-  // THE #1 PIN. Boot one carries secrets.h: it wins, and once it has joined it
-  // is written. Boot two is a CI image with nothing compiled in: it reads the
-  // store and joins with the same credential.
-  fakes::FakeStore store;
-  bridgelogic::WifiCredential compiledIn;
-  TEST_ASSERT_TRUE(compiledIn.set("ClubWiFi", "correct horse battery staple"));
-  bridgelogic::WifiCredential stored;
-  TEST_ASSERT_FALSE(bridgelogic::loadWifiCredential(store, stored));
-  TEST_ASSERT_FALSE(stored.present());
-
-  bridgelogic::WifiCredential joining;
-  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(compiledIn, stored, joining) ==
-                   bridgelogic::WifiSource::CompiledIn);
-  TEST_ASSERT_TRUE(joining.equals(compiledIn));
-  // Joined: differs from the store, so it is written.
-  TEST_ASSERT_TRUE(bridgelogic::shouldPersistWifi(joining, stored));
-  TEST_ASSERT_TRUE(bridgelogic::storeWifiCredential(store, joining));
-  stored = joining;
-  // Joins again tomorrow: nothing to write, no flash wear.
-  TEST_ASSERT_FALSE(bridgelogic::shouldPersistWifi(joining, stored));
-
-  // The CI image.
-  bridgelogic::WifiCredential none;
-  bridgelogic::WifiCredential fromStore;
-  TEST_ASSERT_TRUE(bridgelogic::loadWifiCredential(store, fromStore));
-  bridgelogic::WifiCredential joinsWith;
-  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(none, fromStore, joinsWith) ==
-                   bridgelogic::WifiSource::Stored);
-  TEST_ASSERT_EQUAL_STRING("ClubWiFi", joinsWith.ssid);
-  TEST_ASSERT_EQUAL_STRING("correct horse battery staple", joinsWith.password);
-
-  // Nothing anywhere: the box says so rather than joining an empty SSID.
-  fakes::FakeStore empty;
-  bridgelogic::WifiCredential nothing;
-  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(none, nothing, joinsWith) ==
-                   bridgelogic::WifiSource::None);
-  TEST_ASSERT_FALSE(joinsWith.present());
-  TEST_ASSERT_FALSE(bridgelogic::shouldPersistWifi(joinsWith, nothing));
-  TEST_ASSERT_FALSE(bridgelogic::storeWifiCredential(empty, joinsWith));
-
-  // A rotated password in a fresh secrets.h does NOT win at boot. This
-  // assertion used to say CompiledIn, and pinning it that way is what let
-  // review 3 finding 1 ship: a `!WIFI` rotation on a box that had ever been
-  // flashed with secrets.h survived only until the next power cycle, because
-  // the compiled-in credential took the radio back on every boot. The store is
-  // the technician's most recent statement of intent, not the image.
-  bridgelogic::WifiCredential rotated;
-  TEST_ASSERT_TRUE(rotated.set("ClubWiFi", "new passphrase"));
-  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(rotated, fromStore, joinsWith) ==
-                   bridgelogic::WifiSource::Stored);
-  TEST_ASSERT_EQUAL_STRING("correct horse battery staple", joinsWith.password);
-  // Nothing to persist: the store already holds what is being joined with.
-  TEST_ASSERT_FALSE(bridgelogic::shouldPersistWifi(joinsWith, fromStore));
-}
-
-void test_a_wifi_line_outlives_the_reboot_that_used_to_undo_it() {
-  // REVIEW 3, FINDING 1, END TO END. secrets.h holds A. The club rotates to B
-  // and the technician types `!WIFI,...,B` at the box per go-live item 7. The
-  // next breaker trip must come back on B.
-  fakes::FakeStore store;
-  bridgelogic::WifiCredential compiledIn;
-  TEST_ASSERT_TRUE(compiledIn.set("ClubWiFi", "password-A"));
-
-  // Boot one: nothing stored, so the compiled-in credential seeds the box and
-  // is written when it joins.
-  bridgelogic::WifiCredential stored;
-  static_cast<void>(bridgelogic::loadWifiCredential(store, stored));
-  bridgelogic::WifiCredential joining;
-  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(compiledIn, stored, joining) ==
-                   bridgelogic::WifiSource::CompiledIn);
-  TEST_ASSERT_TRUE(bridgelogic::storeWifiCredential(store, joining));
-
-  // The `!WIFI` line: parsed, and written to the store at once.
-  const char line[] = "!WIFI,ClubWiFi,password-B";
-  bridgelogic::WifiCredential typed;
-  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine(line, sizeof(line) - 1U, typed));
-  TEST_ASSERT_TRUE(bridgelogic::storeWifiCredential(store, typed));
-
-  // The reboot. Same image, same secrets.h, same macro values.
-  bridgelogic::WifiCredential afterReboot;
-  TEST_ASSERT_TRUE(bridgelogic::loadWifiCredential(store, afterReboot));
-  bridgelogic::WifiCredential joinsWith;
-  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(compiledIn, afterReboot, joinsWith) ==
-                   bridgelogic::WifiSource::Stored);
-  TEST_ASSERT_EQUAL_STRING("password-B", joinsWith.password);
-}
-
-void test_the_reflash_rotation_path_still_works_because_the_plan_alternates() {
-  // The other half of finding 1's fix. Store-wins would make go-live item 7's
-  // FIRST path — reflash with a new secrets.h — a no-op on any box that has
-  // joined before, because the stale stored credential would keep the radio
-  // forever. WifiJoinPlan hands the compiled-in one its turn.
-  for (size_t i = 0U; i < kBaseCount; ++i) {
-    const uint32_t base = kBases[i];
-    bridgelogic::WifiJoinPlan plan;
-
-    // Two different credentials: the reflashed box.
-    plan.begin(bridgelogic::WifiSource::Stored, true, base);
-    TEST_ASSERT_TRUE(plan.source() == bridgelogic::WifiSource::Stored);
-    // Nothing happens while there is still time to join.
-    TEST_ASSERT_TRUE(plan.tick(base + 1000UL) == bridgelogic::WifiSwitch::None);
-    TEST_ASSERT_TRUE(plan.tick(base + bridgelogic::kWifiJoinFallbackMs - 1U) ==
-                     bridgelogic::WifiSwitch::None);
-    // Then the compiled-in one gets the radio.
-    TEST_ASSERT_TRUE(plan.tick(base + bridgelogic::kWifiJoinFallbackMs) ==
-                     bridgelogic::WifiSwitch::ToCompiledIn);
-    TEST_ASSERT_TRUE(plan.source() == bridgelogic::WifiSource::CompiledIn);
-    // And back, so a box that comes up while the AP is rebooting is not left
-    // on whichever credential lost the coin toss.
-    TEST_ASSERT_TRUE(plan.tick(base + (2UL * bridgelogic::kWifiJoinFallbackMs)) ==
-                     bridgelogic::WifiSwitch::ToStored);
-
-    // A join stops it for good.
-    plan.joined();
-    TEST_ASSERT_TRUE(plan.tick(base + (9UL * bridgelogic::kWifiJoinFallbackMs)) ==
-                     bridgelogic::WifiSwitch::None);
-
-    // A CI image, or a bench box whose two credentials agree: nothing to
-    // alternate with, so the radio is never touched.
-    bridgelogic::WifiJoinPlan only;
-    only.begin(bridgelogic::WifiSource::Stored, false, base);
-    TEST_ASSERT_TRUE(only.tick(base + (5UL * bridgelogic::kWifiJoinFallbackMs)) ==
-                     bridgelogic::WifiSwitch::None);
-
-    // A `!WIFI` line makes the typed credential the only candidate: secrets.h
-    // must not steal the radio back from the technician standing at the box.
-    bridgelogic::WifiJoinPlan typed;
-    typed.begin(bridgelogic::WifiSource::Stored, true, base);
-    typed.restart(base);
-    TEST_ASSERT_TRUE(typed.tick(base + (5UL * bridgelogic::kWifiJoinFallbackMs)) ==
-                     bridgelogic::WifiSwitch::None);
-    TEST_ASSERT_TRUE(typed.source() == bridgelogic::WifiSource::Stored);
-  }
-}
-
-void test_wifi_credential_refuses_what_the_standard_does_not_allow() {
-  bridgelogic::WifiCredential c;
-  char ssid33[34];
-  memset(ssid33, 's', 33U);
-  ssid33[33] = '\0';
-  TEST_ASSERT_FALSE(c.set(ssid33, "pw"));
-  TEST_ASSERT_FALSE(c.present());
-  char pw64[65];
-  memset(pw64, 'p', 64U);
-  pw64[64] = '\0';
-  TEST_ASSERT_FALSE(c.set("ok", pw64));
-  TEST_ASSERT_FALSE(c.set("", "pw"));
-  ssid33[32] = '\0';
-  pw64[63] = '\0';
-  TEST_ASSERT_TRUE(c.set(ssid33, pw64)); // exactly the limits
-  TEST_ASSERT_TRUE(c.set("open", ""));   // an open network
-  TEST_ASSERT_TRUE(c.present());
-
-  // A torn write of the password reads the whole credential as absent — a
-  // credential that is half the previous password is one that cannot join
-  // and cannot say why.
-  fakes::FakeStore store;
-  bridgelogic::WifiCredential good;
-  TEST_ASSERT_TRUE(good.set("ClubWiFi", "one-passphrase"));
-  TEST_ASSERT_TRUE(bridgelogic::storeWifiCredential(store, good));
-  bridgelogic::WifiCredential next;
-  TEST_ASSERT_TRUE(next.set("ClubWiFi", "two-passphrase"));
-  // Power goes five bytes into the password record: "two-p" + "assphrase" +
-  // the OLD trailer, handed back with kOk by the store. The trailer refuses it.
-  store.tearNextWriteAfter(5U);
-  TEST_ASSERT_FALSE(bridgelogic::storeWifiCredential(store, next));
-  bridgelogic::WifiCredential back;
-  TEST_ASSERT_FALSE(bridgelogic::loadWifiCredential(store, back));
-  TEST_ASSERT_FALSE(back.present());
-}
-
-void test_api_url_holds_the_ota_length_and_refuses_longer_loudly() {
+void test_api_url_survives_a_reboot_and_refuses_a_longer_one_loudly() {
   fakes::FakeStore store;
   char out[bridgelogic::kMaxApiUrlLen + 1U] = {};
   // The 32-character cap was silent: this is 53 characters, a DNS-named
@@ -2208,74 +2003,38 @@ void test_api_url_holds_the_ota_length_and_refuses_longer_loudly() {
   TEST_ASSERT_EQUAL_STRING("", out);
 }
 
-void test_wifi_line_is_parsed_with_escapes_and_an_optional_checksum() {
-  bridgelogic::WifiCredential c;
-  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine("!WIFI,ClubWiFi,secret pass", 26U, c));
-  TEST_ASSERT_EQUAL_STRING("ClubWiFi", c.ssid);
-  TEST_ASSERT_EQUAL_STRING("secret pass", c.password);
-  // Escaped comma and percent, an open network, and a verified trailer.
-  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine("!WIFI,Club%2C Bar,100%25", 24U, c));
-  TEST_ASSERT_EQUAL_STRING("Club, Bar", c.ssid);
-  TEST_ASSERT_EQUAL_STRING("100%", c.password);
-  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine("!WIFI,Open,", 11U, c));
-  TEST_ASSERT_EQUAL_STRING("", c.password);
-  // XOR of "WIFI,a,b" is 0x57^0x49^0x46^0x49^0x2C^0x61^0x2C^0x62 = 0x2C^... computed once here:
-  uint8_t x = 0U;
-  const char body[] = "WIFI,a,b";
-  for (size_t i = 0U; body[i] != '\0'; ++i) {
-    x = static_cast<uint8_t>(x ^ static_cast<uint8_t>(body[i]));
-  }
-  char signedLine[32];
-  snprintf(signedLine, sizeof(signedLine), "!WIFI,a,b*%02X", x);
-  TEST_ASSERT_TRUE(bridgelogic::parseWifiLine(signedLine, strlen(signedLine), c));
-  TEST_ASSERT_EQUAL_STRING("a", c.ssid);
-  snprintf(signedLine, sizeof(signedLine), "!WIFI,a,b*%02X", static_cast<uint8_t>(x ^ 1U));
-  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine(signedLine, strlen(signedLine), c));
-  // Refusals: no password field, wrong prefix, bad escape, over-long.
-  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine("!WIFI,onlyssid", 14U, c));
-  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine("!WIFX,a,b", 9U, c));
-  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine("!WIFI,a%2,b", 11U, c));
-  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine("!WIFI,a,b%", 10U, c));
-  char longLine[128] = "!WIFI,";
-  memset(longLine + 6U, 's', 33U);
-  strcpy(longLine + 39U, ",pw");
-  TEST_ASSERT_FALSE(bridgelogic::parseWifiLine(longLine, strlen(longLine), c));
-  TEST_ASSERT_FALSE(c.present());
-}
+void test_a_heartbeat_response_ignores_every_key_this_build_does_not_read() {
+  // The firmware no longer takes over-the-air updates, but the shared corpus
+  // and a deployed API may still carry the keys that drove them — and a later
+  // contract will add keys nobody has thought of yet. Every reader here looks
+  // up the one key it wants and steps over the rest, so an unknown key is not
+  // a parse failure, not a dropped roster, and not a court list left empty.
+  // This is the property the corpus rests on; without it, retiring a field on
+  // one side of the wire is a fleet-wide outage on the other.
+  Cache cache(kSixHoursMs);
+  const char body[] = "{\"server_unix\":1750000000,\"heartbeat_seconds\":45,"
+                      "\"ota\":{\"version\":\"9.9.9\",\"url\":\"http://x/f.bin\",\"size_bytes\":400000},"
+                      "\"court_numbers\":[7,8,9,10],"
+                      "\"something_from_2027\":{\"nested\":[1,2,3]},"
+                      "\"roster\":[\"TOKALICE|1|-60|2640\"],"
+                      "\"config\":{\"button_map\":[\"court:A\",\"minutes:30\"]}}";
 
-void test_wifi_line_assembler_keeps_only_that_one_line() {
-  bridgelogic::WifiLineAssembler lines;
-  // Ordinary Mega traffic: never kept, never completes.
-  const char frame[] = "!SCAN,4T8Y2K9QW3ZM*3A\r\n!EVT,AUTOOFF,B*11\n";
-  for (size_t i = 0U; frame[i] != '\0'; ++i) {
-    TEST_ASSERT_FALSE(lines.feed(frame[i]));
-  }
-  // The line, CRLF-terminated, after a fragment of garbage.
-  const char typed[] = "xx\n!WIFI,ClubWiFi,pw\r\n";
-  bool ready = false;
-  for (size_t i = 0U; typed[i] != '\0'; ++i) {
-    if (lines.feed(typed[i])) {
-      TEST_ASSERT_FALSE(ready); // exactly once, on the CR
-      ready = true;
-      TEST_ASSERT_EQUAL_STRING("!WIFI,ClubWiFi,pw", lines.line());
-      TEST_ASSERT_EQUAL_size_t(17U, lines.length());
-    }
-  }
-  TEST_ASSERT_TRUE(ready);
-  // The next line starts fresh.
-  TEST_ASSERT_FALSE(lines.feed('!'));
-  TEST_ASSERT_EQUAL_size_t(1U, lines.length());
-  // A bare prefix with nothing after it is not a line; an over-long one is
-  // discarded to the terminator.
-  lines.reset();
-  const char bare[] = "!WIFI,\n";
-  for (size_t i = 0U; bare[i] != '\0'; ++i) {
-    TEST_ASSERT_FALSE(lines.feed(bare[i]));
-  }
-  for (size_t i = 0U; i < bridgelogic::WifiLineAssembler::kMaxLineLen + 10U; ++i) {
-    TEST_ASSERT_FALSE(lines.feed(i < 6U ? "!WIFI,"[i] : 'x'));
-  }
-  TEST_ASSERT_FALSE(lines.feed('\n'));
+  const bridgelogic::SyncResult r = bridgelogic::applyRoster(body, len(body), cache, kBaseMid);
+  TEST_ASSERT_TRUE(r.replaced);
+  TEST_ASSERT_EQUAL_UINT8(1U, r.accepted);
+  TEST_ASSERT_EQUAL_UINT8(0U, r.rejected);
+  TEST_ASSERT_TRUE(cache.decide("TOKALICE", 1U, kBaseMid + 1000U).verdict == roster::Verdict::Allow);
+
+  int16_t courts[bridgelogic::kMaxCourts] = {-1, -1, -1, -1};
+  uint8_t count = 0U;
+  TEST_ASSERT_TRUE(bridgelogic::parseCourtNumbers(body, len(body), courts, count));
+  TEST_ASSERT_EQUAL_UINT8(4U, count);
+  TEST_ASSERT_EQUAL_INT16(7, courts[0]);
+  TEST_ASSERT_EQUAL_INT16(10, courts[3]);
+
+  uint32_t ms = 30000UL;
+  TEST_ASSERT_TRUE(bridgelogic::parseHeartbeatInterval(body, len(body), ms));
+  TEST_ASSERT_EQUAL_UINT32(45000UL, ms);
 }
 
 /// Appends `frame` to `stream` as the Mega sends it, checksum and terminator
@@ -2293,60 +2052,46 @@ void appendRaw(const char* text, char* stream, size_t cap, size_t& at) {
   at += n;
 }
 
-void test_wifi_line_is_taken_from_mega_traffic_and_no_mega_frame_is_ever_one() {
-  // pumpMegaLink feeds every byte of the one UART to BOTH the frame decoder
-  // and the line assembler, and this is the whole contract between them: the
-  // assembler keeps exactly the line that STARTS `!WIFI,` and the decoder
-  // keeps every frame around it. A technician types the line while the Mega
-  // is still talking — a scan, a button, a `!PONG` — so the two interleave,
-  // and every uplink verb the Mega can send is in the stream.
-  bridgelogic::WifiLineAssembler lines;
+void test_the_uplink_decoder_keeps_every_mega_frame_around_the_noise() {
+  // The Mega link carries frames and, occasionally, bytes that are not one: an
+  // ESP boot banner at 74880 baud, a line a technician typed, a frame whose
+  // checksum died on the wire. The decoder must resynchronise on the next
+  // terminator every time and lose nothing on either side of the noise — every
+  // uplink verb the Mega can send is in this stream, with rubbish between them.
   proto::Decoder uplink(proto::Link::Uplink);
 
   char stream[512] = {};
   size_t at = 0U;
   appendFrame(proto::Frame::scan("4T8Y2K9QW3ZM"), stream, sizeof(stream), at);
   appendFrame(proto::Frame::btn(proto::Key::CourtB), stream, sizeof(stream), at);
-  appendRaw("!WIFI,ClubWiFi,pw\r\n", stream, sizeof(stream), at);
+  appendRaw("ets Jan  8 2013,rst cause:2\r\n", stream, sizeof(stream), at);
   appendFrame(proto::Frame::evt("AUTOOFF", "B"), stream, sizeof(stream), at);
-  // The prefix INSIDE a line, not at its start. The assembler is anchored to
-  // the line, so this is discarded to the terminator; the decoder drops it on
-  // its checksum. Neither side keeps it.
-  appendRaw("!SCAN,AB!WIFI,x,y*00\r\n", stream, sizeof(stream), at);
-  appendFrame(proto::Frame::pong("1.1.0", 42U), stream, sizeof(stream), at);
+  // A frame prefix INSIDE a line: dropped on its checksum, and it takes
+  // nothing after the terminator with it.
+  appendRaw("!SCAN,AB!SCAN,x,y*00\r\n", stream, sizeof(stream), at);
+  appendFrame(proto::Frame::pong("1.2.0", 42U), stream, sizeof(stream), at);
   const uint16_t remaining[4] = {0U, 600U, 0U, 0U};
   appendFrame(proto::Frame::state(2U, remaining), stream, sizeof(stream), at);
   appendFrame(proto::Frame::err(proto::DecodeError::BadCrc), stream, sizeof(stream), at);
-  // A second WIFI line is a second line: not merged with the first.
-  appendRaw("!WIFI,Other,pw2\n", stream, sizeof(stream), at);
   appendFrame(proto::Frame::scan("7Q3F9KM2XZ8B"), stream, sizeof(stream), at);
 
-  uint8_t wifiLines = 0U;
   uint8_t frames = 0U;
   uint8_t byVerb[proto::kVerbCount] = {};
   for (size_t i = 0U; i < at; ++i) {
-    if (lines.feed(stream[i])) {
-      ++wifiLines;
-      TEST_ASSERT_EQUAL_STRING(wifiLines == 1U ? "!WIFI,ClubWiFi,pw" : "!WIFI,Other,pw2", lines.line());
-      // Handed out mid-stream: the byte that completed it was a terminator,
-      // never a byte of a Mega frame.
-      TEST_ASSERT_TRUE(stream[i] == '\r' || stream[i] == '\n');
-    }
     if (!uplink.feed(stream[i])) {
       continue;
     }
     proto::Decoder::Result result;
     while (uplink.pop(result)) {
       if (!result.isFrame()) {
-        // The WIFI lines and the mid-line garbage: counted by the decoder,
-        // never a frame. Whatever they were, they were not a Mega verb.
+        // The banner and the mid-line garbage: counted by the decoder, never a
+        // frame. Whatever they were, they were not a Mega verb.
         continue;
       }
       ++frames;
       ++byVerb[static_cast<size_t>(result.frame.verb())];
     }
   }
-  TEST_ASSERT_EQUAL_UINT8(2U, wifiLines);
   TEST_ASSERT_EQUAL_UINT8(7U, frames);
   TEST_ASSERT_EQUAL_UINT8(2U, byVerb[static_cast<size_t>(proto::Verb::Scan)]);
   TEST_ASSERT_EQUAL_UINT8(1U, byVerb[static_cast<size_t>(proto::Verb::Btn)]);
@@ -2447,19 +2192,13 @@ int main(int, char**) {
   RUN_TEST(test_on_retry_a_release_on_another_court_keeps_this_courts_retry);
   RUN_TEST(test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent);
   RUN_TEST(test_state_seconds_parse_decimal_and_refuse_everything_else);
-  RUN_TEST(test_a_box_with_a_court_in_use_is_busy_and_one_at_rest_is_not);
   RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);
   RUN_TEST(test_the_identity_screen_is_repainted_on_the_first_pong_and_after_a_mega_reset);
   RUN_TEST(test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap);
   RUN_TEST(test_credential_store_checked_text_survives_the_store_and_a_torn_write_reads_as_absent);
-  RUN_TEST(test_wifi_credential_is_persisted_on_first_join_and_read_back_by_a_ci_image);
-  RUN_TEST(test_a_wifi_line_outlives_the_reboot_that_used_to_undo_it);
-  RUN_TEST(test_the_reflash_rotation_path_still_works_because_the_plan_alternates);
-  RUN_TEST(test_wifi_credential_refuses_what_the_standard_does_not_allow);
-  RUN_TEST(test_api_url_holds_the_ota_length_and_refuses_longer_loudly);
-  RUN_TEST(test_wifi_line_is_parsed_with_escapes_and_an_optional_checksum);
-  RUN_TEST(test_wifi_line_assembler_keeps_only_that_one_line);
-  RUN_TEST(test_wifi_line_is_taken_from_mega_traffic_and_no_mega_frame_is_ever_one);
+  RUN_TEST(test_api_url_survives_a_reboot_and_refuses_a_longer_one_loudly);
+  RUN_TEST(test_a_heartbeat_response_ignores_every_key_this_build_does_not_read);
+  RUN_TEST(test_the_uplink_decoder_keeps_every_mega_frame_around_the_noise);
 
   return UNITY_END();
 }

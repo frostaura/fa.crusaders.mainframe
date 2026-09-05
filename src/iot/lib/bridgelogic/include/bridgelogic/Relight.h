@@ -101,21 +101,6 @@ private:
   Court courts_[kStateCourts];
 };
 
-/// True when this box is in the middle of something a reboot would break: a
-/// court held, a booking whose `!EXT` is still owed, or an armed button window
-/// with a member standing at the panel.
-///
-/// An OTA install blocks for the whole download and then reboots. Across that
-/// reboot the bridge loses Relight's per-court booking end, the held-since
-/// stamps and the bound button window — so a two-hour booking adopted from the
-/// first `!STATE` after the reboot is never extended and darkens at the cap,
-/// mid-game (review 3, finding 8). Nothing recovers those from the Mega,
-/// because the Mega never knew the booking. Deferring the install to a
-/// heartbeat when the box is idle costs at most one heartbeat interval per
-/// busy court and is the only bound available without persisting the booking
-/// ends.
-bool anyCourtBusy(const HeldState held[kStateCourts], const Relight& relight, bool authArmed);
-
 } // namespace bridgelogic
 
 #endif // CRUSADERS_BRIDGELOGIC_RELIGHT_H

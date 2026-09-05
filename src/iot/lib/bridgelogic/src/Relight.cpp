@@ -77,16 +77,4 @@ void Relight::observeRelayRemaining(uint8_t court, uint32_t seconds, uint32_t no
   courts_[court].relayEnd.arm(nowMs, ms > kCapMs ? kCapMs : ms);
 }
 
-bool anyCourtBusy(const HeldState held[kStateCourts], const Relight& relight, bool authArmed) {
-  if (authArmed) {
-    return true;
-  }
-  for (uint8_t i = 0U; i < kStateCourts; ++i) {
-    if (held[i].held || relight.tracking(i)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 } // namespace bridgelogic

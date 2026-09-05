@@ -10,9 +10,13 @@
 //
 // WHY THIS HALF EXISTS
 // --------------------
-// It is the half that can be updated. The ATmega cannot be flashed over WiFi —
-// its ESP sits on Serial3, not the Serial0 bootloader port, and no GPIO reaches
-// RESET — so everything volatile lives here and the Mega stays near-static.
+// It is the half that talks to the network, so everything volatile lives here
+// and the Mega stays near-static. Both halves are flashed over USB by DIP
+// switch: there is no over-the-air path, no signing key and no runtime
+// credential store, because one club with one box does not need a fleet update
+// mechanism and every one of those parts was a way for the box to break itself.
+// The WiFi credential is compiled in from src/common/secrets.h and a password
+// change is a reflash — see src/iot/README.md's Flashing section.
 //
 // NO STATIC IP, DELIBERATELY
 // --------------------------
@@ -31,14 +35,9 @@
 // is now an `!ON`/`!EXT` retry trigger, so stray prose is not merely untidy.
 // Diagnostics go out as protocol frames or as the discovery beacon's fields.
 //
-// The ONE exception is sendPlain(), and it is gated so tightly that it cannot
-// reach a frame decoder: it writes nothing until a `!WIFI` line has arrived on
-// this UART, which only happens with DIP 5 and 6 ON — the position in which the
-// UART is on the USB socket and the Mega is not attached at all. It exists
-// because in that position the LCD is unreachable, so the `!LCD` acknowledgement
-// the firmware used to send was the only answer a technician got, and it reached
-// them as `!LCD,WIFI SAVED,JOINING...*CC` in a serial monitor while the glass in
-// front of them still said NO WIFI SET (review 3, finding 19).
+// There are now no exceptions: nothing in this file writes prose to the UART.
+// The one that existed was the `!WIFI` provisioning acknowledgement, and the
+// whole provisioning path went with the credential store.
 //
 // THE COURT WORKS WHEN THE NETWORK DOES NOT
 // -----------------------------------------
@@ -69,7 +68,6 @@
 #include <Arduino.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266httpUpdate.h>
 #include <WiFiUdp.h>
 
 #include <stddef.h>
@@ -104,31 +102,37 @@
 #include "discovery/Offer.h"
 #include "eventq/EventQueue.h"
 #include "fwversion/Version.h"
-#include "otacore/BootGuard.h"
-#include "otacore/UpdatePolicy.h"
 #include "protocol/Codec.h"
 #include "protocol/Protocol.h"
 #include "roster/Roster.h"
 #include "timebase/TimeBase.h"
 
-// secrets.h is gitignored and is absent on a CI runner, so its presence cannot
-// be a build requirement — a firmware that only compiles on the machine holding
-// the club's WiFi password is a firmware CI never checks. And the CI image is
-// the one every box installs over the air, so the credential CANNOT live in the
-// image at all: it lives in the LittleFS store beside the device key, written
-// the first time a build that carries secrets.h actually joins, and read from
-// there by every boot and every OTA image after (bridgelogic::CredentialStore).
-// The empty defaults below mean "nothing compiled in; use the store".
-#if __has_include("common/secrets.h")
-#include "common/secrets.h"
+// The club WiFi credential, compiled in and MANDATORY. There is no runtime
+// credential store and no `!WIFI` provisioning line any more: one box, one
+// club, and the person who flashes it is the person who knows the password. A
+// password change is a reflash, which is a two-minute job (`make flash-bridge`)
+// and cannot leave a box holding a credential nobody can see.
+//
+// The build fails rather than producing an image that joins an empty SSID —
+// that image looks identical to a working one until it is screwed to a wall.
+#if !__has_include("common/secrets.h")
+#error                                                                                                       \
+    "src/iot/src/common/secrets.h is missing — copy secrets.h.example to secrets.h and fill in WIFI_SSID and WIFI_PASSWORD"
 #endif
+#include "common/secrets.h"
 
 #ifndef WIFI_SSID
-#define WIFI_SSID ""
+#error                                                                                                       \
+    "secrets.h does not define WIFI_SSID — copy secrets.h.example to secrets.h and fill in WIFI_SSID and WIFI_PASSWORD"
 #endif
 #ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD ""
+#error                                                                                                       \
+    "secrets.h does not define WIFI_PASSWORD — copy secrets.h.example to secrets.h and fill in WIFI_SSID and WIFI_PASSWORD"
 #endif
+static_assert(sizeof(WIFI_SSID) > 1U,
+              "WIFI_SSID in secrets.h is empty — fill it in before flashing the bridge");
+static_assert(sizeof(WIFI_PASSWORD) > 1U,
+              "WIFI_PASSWORD in secrets.h is empty — fill it in before flashing the bridge");
 
 namespace {
 
@@ -352,23 +356,11 @@ tb::Deadline gScanAt;
 bridgelogic::AuthPolicy gAuth(kScanMemoryMs);
 
 /// The heartbeat response. File scope, not stack: the contract allows 2048
-/// bytes — sixteen roster entries plus the button map plus an OTA offer — and
+/// bytes — sixteen roster entries plus the button map, plus whatever else the
+/// API chooses to send that this build does not read — and
 /// loop() runs on the ESP8266's 4 KB continuation stack, where a 2.5 KB local
 /// under an HTTP call is a crash that looks like a random reset.
 char gHeartbeatBody[2560] = {};
-
-/// The guard that stops a broken build being taken twice.
-///
-/// There is no reverting on this part — a 4M ESP carrying a 1 MB sketch and 2 MB
-/// of LittleFS has no second OTA slot, and the filesystem is not optional because
-/// it holds the device credential. What the guard buys instead is the thing that
-/// actually takes out a fleet: every box heartbeats against the same manifest, so
-/// without it a bad image would reflash itself forever on every board at once.
-ota::BootGuard gBootGuard(&gStore);
-
-/// Which offer is failing to install, so a release the box cannot verify stops
-/// being downloaded on every heartbeat (review 3, finding 5).
-ota::InstallMemo gInstallMemo;
 
 /// The credential, once provisioning has fetched it. Held as raw bytes plus the
 /// id text, because that is what dc::signer wants and re-decoding hex on every
@@ -385,36 +377,6 @@ char gTenantSlug[hal::kStoreMaxValueLen + 1U] = {};
 /// Where the API is, learned from the discovery OFFER or from provisioning.
 char gApiUrl[bridgelogic::kMaxApiUrlLen + 1U] = {};
 
-/// The WiFi credential: what the store holds, and what the radio is joining
-/// with right now. The two differ only between a boot that carried secrets.h
-/// (or received a `!WIFI` line) and the moment that credential first joins,
-/// which is when it is written.
-bridgelogic::WifiCredential gWifiStored;
-bridgelogic::WifiCredential gWifiActive;
-bridgelogic::WifiSource gWifiSource = bridgelogic::WifiSource::None;
-
-/// What secrets.h compiled in, if anything. Kept for the whole run rather than
-/// read once in setup(): the store outranks it at boot, and the ONLY thing that
-/// keeps the reflash-with-a-new-secrets.h rotation path working is being able
-/// to hand it the radio when the stored credential cannot join
-/// (bridgelogic::WifiJoinPlan).
-bridgelogic::WifiCredential gWifiCompiled;
-bridgelogic::WifiJoinPlan gWifiPlan;
-
-/// True once a `!WIFI` line has arrived on this UART. It is the only evidence
-/// this half ever gets that the DIP block has the ESP on the USB socket rather
-/// than on the Mega — the Mega never sends that line — and it is what gates the
-/// two plain-text acknowledgements below. Printing prose unconditionally would
-/// put a line into the Mega's frame decoder on every WiFi link-up, and the
-/// decoder answers prose with `!EVT,BADFRAME,RX`, which is now an `!ON` retry
-/// trigger.
-bool gWifiLineSeen = false;
-
-/// Watches the Mega link for a `!WIFI,<ssid>,<password>` line — the USB
-/// provisioning path, DIP 5 and 6 on. See CredentialStore.h for why taking it
-/// from this stream is safe.
-bridgelogic::WifiLineAssembler gWifiLine;
-
 uint32_t uptimeSeconds() {
   return static_cast<uint32_t>(gUptime.value() / 1000ULL);
 }
@@ -428,30 +390,6 @@ bool sendToMega(const proto::Frame& frame) {
     return false;
   }
   return gMega.write(reinterpret_cast<const uint8_t*>(buf), len) == len;
-}
-
-/// Writes one line of PLAIN TEXT to the UART — the only place in this firmware
-/// that does, and it is gated on gWifiLineSeen for the reason stated there.
-///
-/// It exists because of what the `!WIFI` provisioning path actually looks like
-/// from the technician's side (review 3, finding 19): with DIP 5 and 6 ON the
-/// ESP's UART is on the USB socket, so the Mega is not attached and the LCD
-/// cannot be told anything. The only acknowledgement the firmware had was an
-/// `!LCD,WIFI SAVED,JOINING...*CC` frame, which arrives in the serial monitor
-/// as protocol noise while the glass — attached to a Mega the ESP is not
-/// talking to — still says NO WIFI SET. Installers read that as a refusal,
-/// retype, power-cycle, or fall back to a secrets.h reflash.
-void sendPlain(const char* text) {
-  if (!gWifiLineSeen) {
-    return;
-  }
-  const size_t len = strlen(text);
-  if (gMega.writable() < len + 1U) {
-    return;
-  }
-  static_cast<void>(gMega.write(reinterpret_cast<const uint8_t*>(text), len));
-  const uint8_t nl = static_cast<uint8_t>('\n');
-  static_cast<void>(gMega.write(&nl, 1U));
 }
 
 /// Paints what this board IS: the idle screen on a claimed board, the claim
@@ -468,13 +406,11 @@ void showIdentityScreen() {
     static_cast<void>(sendToMega(proto::Frame::lcd("CONNECTED", "SCAN TO START")));
     return;
   }
-  if (gWifiSource == bridgelogic::WifiSource::None) {
-    // No network to be claimed over. A claim code here would be a prompt for a
-    // step that cannot succeed; the line that helps is the one that says what
-    // to type over USB.
-    static_cast<void>(sendToMega(proto::Frame::lcd("NO WIFI SET", "!WIFI,SSID,PASS")));
-    return;
-  }
+  // Not claimed yet. There is no third state any more: the credential is
+  // compiled in, so "no WiFi set" cannot happen, and a box that cannot reach
+  // the AP shows whatever the WiFi-down path shows rather than a provisioning
+  // prompt for a path that no longer exists.
+  //
   // The claim code goes out on the ONE channel nothing on the network can read:
   // the Mega's LCD. That is the whole point of the commitment scheme — the code
   // is never on the wire, only SHA256(code ":" nonce) truncated to 16 hex.
@@ -698,8 +634,9 @@ void noteMegaPong(const proto::Frame& frame) {
     // Either the Mega restarted — its screen is back to the idle text and it
     // has no idea whether a claim is in progress — or this is the first pong of
     // this boot and it has never been told at all. The second case is the one
-    // that matters after a `!WIFI` session: the DIP block had the ESP on USB,
-    // and restoring DIP 1 and 2 is the first moment the glass is reachable.
+    // that matters after a USB flash of the ESP: the DIP block had the ESP on
+    // the USB socket, and restoring DIP 1 and 2 is the first moment the glass
+    // is reachable at all.
     showIdentityScreen();
   }
   gMegaSeen = true;
@@ -1026,16 +963,9 @@ void handleUplink(const proto::Decoder::Result& result, uint32_t nowMs) {
   }
 }
 
-void handleWifiLine(const char* line, size_t len);
-
 void pumpMegaLink(uint32_t nowMs) {
   uint8_t byte = 0U;
   for (uint16_t i = 0U; i < kBytesPerPass && gMega.read(byte); ++i) {
-    // The same bytes, watched for the one line the Mega never sends: a
-    // technician's `!WIFI,...` over USB with DIP 5 and 6 on.
-    if (gWifiLine.feed(static_cast<char>(byte))) {
-      handleWifiLine(gWifiLine.line(), gWifiLine.length());
-    }
     if (!gUplink.feed(static_cast<char>(byte))) {
       continue;
     }
@@ -1367,56 +1297,6 @@ void tryProvision(uint32_t nowMs) {
   }
 }
 
-/// Joins the network with `credential`. What every credential source —
-/// secrets.h, the store, a `!WIFI` line — funnels into.
-void joinWifi(const bridgelogic::WifiCredential& credential) {
-  gWifiActive = credential;
-  // DHCP. No WiFi.config(), no static address — see the header.
-  WiFi.begin(credential.ssid, credential.password);
-}
-
-/// A `!WIFI,<ssid>,<password>` line arrived on the UART. Stored and joined at
-/// once; the store write here rather than on join, because the technician
-/// typing it is standing at the box and needs to see it land whether or not
-/// the router agrees.
-void handleWifiLine(const char* line, size_t len) {
-  // Whatever else happens, a `!WIFI` line arrived on this UART, which is the
-  // one thing that proves a human with a serial monitor is on the other end of
-  // it — the Mega has no WIFI verb and never sends one. From here on the two
-  // acknowledgements below are safe to print as prose.
-  gWifiLineSeen = true;
-
-  bridgelogic::WifiCredential credential;
-  if (!bridgelogic::parseWifiLine(line, len, credential)) {
-    static_cast<void>(sendToMega(proto::Frame::lcd("WIFI LINE BAD", "!WIFI,SSID,PASS")));
-    sendPlain("[wifi] line not understood: !WIFI,<ssid>,<password>");
-    return;
-  }
-  if (!bridgelogic::storeWifiCredential(gStore, credential)) {
-    static_cast<void>(sendToMega(proto::Frame::lcd("WIFI NOT SAVED", "STORE REFUSED")));
-    sendPlain("[wifi] not saved, the flash store refused the write");
-    return;
-  }
-  gWifiStored = credential;
-  gWifiSource = bridgelogic::WifiSource::Stored;
-  // The typed credential is now the only candidate: it outranks anything
-  // compiled in (chooseWifiCredential), and nothing may hand the radio back to
-  // secrets.h behind the technician's back.
-  gWifiPlan.restart(gClock.nowMs());
-  static_cast<void>(sendToMega(proto::Frame::lcd("WIFI SAVED", "JOINING...")));
-
-  // The line the technician is actually looking at. The `!LCD` frame above
-  // reaches the glass only once DIP 1 and 2 are restored, and in this DIP
-  // position it arrives in their monitor as `!LCD,WIFI SAVED,JOINING...*CC`,
-  // which reads as noise.
-  char ack[80];
-  snprintf(ack, sizeof(ack), "[wifi] saved, joining %s", credential.ssid);
-  sendPlain(ack);
-
-  WiFi.disconnect();
-  joinWifi(credential);
-}
-
 void pumpWifiLink(uint32_t nowMs) {
   const bool up = WiFi.status() == WL_CONNECTED;
   if (up == gWifiUp) {
@@ -1429,20 +1309,6 @@ void pumpWifiLink(uint32_t nowMs) {
     return;
   }
 
-  // The credential that JOINED is the one worth keeping. Written on the
-  // link-up edge rather than at boot so a typo in secrets.h cannot overwrite
-  // a stored credential that works; and only when it differs, so a box that
-  // joins every morning is not a box that wears a flash cell every morning.
-  // It is also what completes the reflash rotation path: the compiled-in
-  // credential pumpWifiFallback handed the radio to becomes the stored one the
-  // moment it proves it can join.
-  if (bridgelogic::shouldPersistWifi(gWifiActive, gWifiStored) &&
-      bridgelogic::storeWifiCredential(gStore, gWifiActive)) {
-    gWifiStored = gWifiActive;
-  }
-  // Nothing switches the credential after a successful join.
-  gWifiPlan.joined();
-
   static_cast<void>(gUdp.begin(discovery::kUdpPort));
   // Immediately, not after a full interval: the case that matters is a box
   // that just got its DHCP lease with an admin standing at the cupboard.
@@ -1454,44 +1320,6 @@ void pumpWifiLink(uint32_t nowMs) {
     gHeartbeat.arm(nowMs, 0U);
   }
   showIdentityScreen();
-
-  // The line the technician who typed `!WIFI` is watching for. Silent on every
-  // other box and every other boot — see sendPlain.
-  char ack[64];
-  const IPAddress ip = WiFi.localIP();
-  snprintf(ack, sizeof(ack), "[wifi] joined %u.%u.%u.%u", static_cast<unsigned>(ip[0]),
-           static_cast<unsigned>(ip[1]), static_cast<unsigned>(ip[2]), static_cast<unsigned>(ip[3]));
-  sendPlain(ack);
-}
-
-/// Gives the OTHER credential a turn when the current one will not join.
-///
-/// Only ever does anything on a box that holds two DIFFERENT credentials — a
-/// bench-flashed unit whose secrets.h has been updated to a rotated password
-/// while its store still holds the old one. Without it the store-wins rule
-/// (bridgelogic::chooseWifiCredential) would make the reflash rotation path in
-/// go-live item 7 a no-op; with it, the compiled-in credential gets the radio
-/// after kWifiJoinFallbackMs and, once it joins, pumpWifiLink persists it.
-/// On a CI image, or on a box whose two credentials agree, there is nothing to
-/// alternate with and the radio is never touched.
-void pumpWifiFallback(uint32_t nowMs) {
-  if (gWifiUp) {
-    return;
-  }
-  switch (gWifiPlan.tick(nowMs)) {
-  case bridgelogic::WifiSwitch::ToStored:
-    gWifiSource = bridgelogic::WifiSource::Stored;
-    WiFi.disconnect();
-    joinWifi(gWifiStored);
-    return;
-  case bridgelogic::WifiSwitch::ToCompiledIn:
-    gWifiSource = bridgelogic::WifiSource::CompiledIn;
-    WiFi.disconnect();
-    joinWifi(gWifiCompiled);
-    return;
-  case bridgelogic::WifiSwitch::None:
-    return;
-  }
 }
 
 /// Applies the `button_map` array out of a heartbeat response.
@@ -1517,116 +1345,6 @@ void applyButtonMap(const char* body, size_t len) {
     // A token this build does not understand leaves that entry at its default,
     // which is a working button rather than a dead one.
     static_cast<void>(gButtons.setFromWire(index, token));
-  }
-}
-
-/// The public half of the firmware signing pair, compiled in when it exists.
-///
-/// Enforcement is driven by the PRESENCE of the committed public-key header: if
-/// otacore/OtaPublicKey.h is there, OTA verifies every image against it; if it is
-/// not, OTA refuses every image. There is no build flag to forget — checking the
-/// key in is what turns signing on, which is exactly the state you want to be
-/// unambiguous on a mains-lighting controller.
-///
-/// RSA-2048, not an HMAC with the device key: a shared secret means one
-/// compromised box can forge firmware for the whole fleet, which is the failure
-/// this is here to prevent. The private half is not in this repository and never
-/// will be — it signs releases from wherever the operator keeps it. See
-/// src/iot/tools/sign_firmware.py and the header's own comment.
-#if __has_include("otacore/OtaPublicKey.h")
-#include "otacore/OtaPublicKey.h"
-#define CRUSADERS_OTA_SIGNED 1
-constexpr const char* kOtaPublicKey = otacore::kOtaPublicKeyPem;
-#else
-#define CRUSADERS_OTA_SIGNED 0
-constexpr const char* kOtaPublicKey = "";
-#endif
-
-/// True only when this build carries a key it can verify against.
-constexpr bool kOtaSignatureEnforced = (CRUSADERS_OTA_SIGNED != 0) && (kOtaPublicKey[0] != '\0');
-
-/// Every refusal reason is logged to the Mega's display rather than swallowed: a
-/// fleet quietly declining an update is exactly the silence that gets noticed a
-/// week after the release was promoted everywhere.
-void considerUpdate(const char* body, size_t len, uint32_t nowMs) {
-  const ota::Manifest manifest = ota::parseManifest(body, len);
-
-  // What an install must not interrupt, and what this box already knows about
-  // this offer.
-  //
-  // The install blocks for the whole ~400 KB download and then reboots. Across
-  // that reboot the bridge loses gRelight's per-court booking ends, the
-  // held-since stamps and the bound button window — nothing rebuilds them,
-  // because the Mega never knew the booking — so a two-hour court adopted from
-  // the first `!STATE` afterwards is never extended and goes dark at the cap,
-  // mid-game (review 3, finding 8). The memo is finding 5's half: an image the
-  // box cannot verify fails identically at every heartbeat, and without a
-  // memory of that the fleet paints UPDATING / UPDATE FAILED over every session
-  // for as long as the release stands.
-  ota::InstallGate gate;
-  gate.courtsBusy = bridgelogic::anyCourtBusy(gHeld, gRelight, gAuth.armed(nowMs));
-  gate.memo = &gInstallMemo;
-
-  const ota::Decision decision =
-      ota::decide(manifest, fw::kFirmwareVersion, gBootGuard, ESP.getFreeSketchSpace(), gate);
-
-  if (decision != ota::Decision::Install) {
-    // Deferred is not an error and says nothing on the glass: the box is busy
-    // BECAUSE a member is on a court, and painting an update notice over
-    // "COURT B 45 MIN" is the interruption this refusal exists to avoid. The
-    // next idle heartbeat installs it.
-    return;
-  }
-
-  // Armed BEFORE the flash. An update interrupted mid-write leaves a box that may
-  // not come up at all, and this marker is the only thing that will tell the next
-  // working firmware what happened.
-  gBootGuard.arm(manifest.version);
-  static_cast<void>(sendToMega(proto::Frame::lcd("UPDATING", "DO NOT POWER OFF")));
-
-  // NOTHING IS INSTALLED UNTIL THERE IS A KEY TO VERIFY IT WITH.
-  //
-  // This used to carry a comment saying "the image is signature-checked by the
-  // core's Updater against a public key compiled into this build". It was not.
-  // There is no Update.installSignature call, no BearSSL::PublicKey, no
-  // SigningVerifier and no .pem anywhere in the tree — the key pair has never
-  // been generated, which is go-live item 5 and known. The comment described the
-  // intended design as though it were the shipped one, which is the worst kind of
-  // comment to leave on a security boundary: a reviewer reads it and signs off.
-  //
-  // What was actually there: a plain-HTTP fetch of a URL taken from an
-  // unauthenticated response body, flashed and rebooted into, on a board driving
-  // four mains lighting relays. Refusing is the only honest behaviour until the
-  // key exists, and refusing LOUDLY — on the display and through the boot guard —
-  // is what stops a fleet silently declining every release.
-  if (!kOtaSignatureEnforced) {
-    gBootGuard.confirm();
-    static_cast<void>(sendToMega(proto::Frame::lcd("UPDATE BLOCKED", "NO SIGNING KEY")));
-    return;
-  }
-
-  WiFiClient client;
-  ESPhttpUpdate.rebootOnUpdate(true);
-#if CRUSADERS_OTA_SIGNED
-  // Verified by the core's Updater against the key compiled into this build. A
-  // box that has been stolen yields nothing that can sign firmware for any other,
-  // which is why this is a public key here and not the device's HMAC secret.
-  static BearSSL::PublicKey otaKey(kOtaPublicKey);
-  static BearSSL::HashSHA256 otaHash;
-  static BearSSL::SigningVerifier otaVerifier(&otaKey);
-  Update.installSignature(&otaHash, &otaVerifier);
-#endif
-  const t_httpUpdate_return outcome = ESPhttpUpdate.update(client, manifest.url);
-  if (outcome == HTTP_UPDATE_FAILED) {
-    // Never installed, so the marker would condemn a build that never ran. Clearing
-    // it by confirming is correct: nothing is pending.
-    gBootGuard.confirm();
-    // Counted against THIS offer. A flapping link deserves another go; a
-    // signature the compiled-in public key cannot verify fails the same way
-    // every time and is skipped after ota::kInstallAttempts, until the manifest
-    // itself changes — which is exactly what re-signing and re-uploading does.
-    gInstallMemo.failed(manifest);
-    static_cast<void>(sendToMega(proto::Frame::lcd("UPDATE FAILED", "SCAN TO START")));
   }
 }
 
@@ -1708,13 +1426,15 @@ void pumpHeartbeat(uint32_t nowMs) {
     return;
   }
 
+  // `running_version` is what the Devices screen reports as this box's firmware.
+  // It is the whole of what is left of the update machinery: the box is flashed
+  // over USB, so this is a fact about the board, not an input to any decision.
   char body[192];
   snprintf(body, sizeof(body),
            "{\"running_version\":\"%s\",\"mega_version\":\"%s\",\"uptime_seconds\":%lu,"
-           "\"wifi_rssi\":%ld,\"failed_version\":\"%s\"}",
+           "\"wifi_rssi\":%ld}",
            fw::kFirmwareVersion, gMegaVersion[0] == '\0' ? "" : gMegaVersion,
-           static_cast<unsigned long>(uptimeSeconds()), static_cast<long>(WiFi.RSSI()),
-           gBootGuard.badVersion());
+           static_cast<unsigned long>(uptimeSeconds()), static_cast<long>(WiFi.RSSI()));
 
   char* response = gHeartbeatBody;
   response[0] = '\0';
@@ -1733,10 +1453,6 @@ void pumpHeartbeat(uint32_t nowMs) {
 
   switch (gApi.react(result, gUptime.value())) {
   case devapi::Reaction::Accepted: {
-    // The evidence that clears a pending update. Not "it booted" — a firmware that
-    // comes up and cannot authenticate looks alive and does nothing, which is worse
-    // than one that does not come up at all.
-    gBootGuard.confirm();
     applyButtonMap(response, responseLen);
     // Absent keys leave the previous set alone, for the same reason the button
     // map's does: an older API must not blank what a newer one configured.
@@ -1751,7 +1467,9 @@ void pumpHeartbeat(uint32_t nowMs) {
     // above already used the old value, which is a one-interval delay and not
     // worth a re-arm that could shorten this interval to nothing.
     static_cast<void>(bridgelogic::parseHeartbeatInterval(response, responseLen, gHeartbeatMs));
-    considerUpdate(response, responseLen, nowMs);
+    // Unknown keys in the response — an `ota` object from an API that still
+    // offers one, anything a later contract adds — are ignored by construction:
+    // every reader above looks up the key it wants and leaves the rest alone.
     return;
   }
   case devapi::Reaction::ClockCorrected:
@@ -1803,33 +1521,20 @@ void setup() {
   gMega.begin(kMegaRxBufferBytes);
   static_cast<void>(gStore.begin());
 
-  // The credential comes from the store or from secrets.h, never from the
-  // SDK's own flash record — persistent(false) keeps the core from writing a
-  // second, invisible copy that would outlive a rotation.
+  // The credential is the compiled-in one and nothing else — persistent(false)
+  // keeps the core from writing a second, invisible copy in its own flash
+  // record, which would outlive a reflash and join the wrong network.
+  // DHCP: no WiFi.config(), no static address — see the header.
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  static_cast<void>(bridgelogic::loadWifiCredential(gStore, gWifiStored));
-  static_cast<void>(gWifiCompiled.set(WIFI_SSID, WIFI_PASSWORD));
-  bridgelogic::WifiCredential joining;
-  gWifiSource = bridgelogic::chooseWifiCredential(gWifiCompiled, gWifiStored, joining);
-  // Something to fall back to only when BOTH exist and they differ — the
-  // reflashed-with-a-new-password box. See pumpWifiFallback.
-  const bool alternate =
-      gWifiCompiled.present() && gWifiStored.present() && !gWifiCompiled.equals(gWifiStored);
-  gWifiPlan.begin(gWifiSource, alternate, gClock.nowMs());
-  if (gWifiSource != bridgelogic::WifiSource::None) {
-    joinWifi(joining);
-  }
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   setupIdentity();
 
   // A box that has been claimed before comes back up already provisioned: the key
   // is in flash and there is nothing for an admin to do. One that has not falls
   // through to announcing itself, which is the same path a brand-new board takes.
-  // Before anything else touches the store: this counts the boot against a pending
-  // update and may condemn a build that has never worked.
-  static_cast<void>(gBootGuard.begin());
-
+  // This is the whole reason the flash store still exists.
   static_cast<void>(bridgelogic::loadApiUrl(gStore, gApiUrl, sizeof(gApiUrl)));
   gProvisioned = loadCredentials();
 
@@ -1848,16 +1553,12 @@ void setup() {
   gQueue.begin();
   gSession.onBoot(now);
 
-  // LAST, once gWifiSource and gProvisioned are both known.
-  //
-  // Nothing painted this at boot, so a credential-less box came up showing the
-  // Mega's own idle text — CRUSADERS COURTS / SCAN TO START — and the
-  // technician who had just flashed the credential-free CI image read that as
-  // "the credential persisted" and boxed a unit that never joins (review 3,
-  // finding 9). Three documents and the item-5 completion check all promise a
-  // NO WIFI SET screen; this is the call that makes them true. If the Mega is
-  // not on the other end of the UART yet — the `!WIFI` DIP position — the frame
-  // is simply lost, and the first `!PONG` repaints it (noteMegaPong).
+  // LAST, once gProvisioned is known. A freshly flashed box should say what it
+  // is — CLAIM CODE <hex>, or CONNECTED / SCAN TO START once claimed — from the
+  // moment it comes up, rather than leaving the Mega's own idle text on the
+  // glass and letting the technician read that as "already working" (review 3,
+  // finding 9). If the Mega has not answered yet the frame is simply lost, and
+  // the first `!PONG` repaints it (noteMegaPong).
   showIdentityScreen();
 }
 
@@ -1883,7 +1584,6 @@ void loop() {
   }
 
   pumpWifiLink(now);
-  pumpWifiFallback(now);
 
   // Drain the Mega link BEFORE the blocking calls below, so the receive ring
   // starts each HTTP call as empty as possible and has the whole kMegaRxBufferBytes
