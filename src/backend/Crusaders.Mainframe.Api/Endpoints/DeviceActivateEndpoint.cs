@@ -90,8 +90,15 @@ public static class DeviceActivateEndpoint
         Device device, DeviceActivateRequest req, ResolvedAccessCode resolved,
         DeviceActivateServices services, DateTimeOffset now, CancellationToken ct)
     {
+        // Matched WITHOUT a status filter, then judged. Filtering on `Status == Booked` in
+        // the query made every closed booking indistinguishable from a code that names
+        // nothing at all, which is what put NO BOOKING on the glass for the one case
+        // SLOT ENDED exists to cover: LightsCueWorker promotes an attended booking to
+        // Completed within fifteen seconds of its end, and the sweeper moves an unattended
+        // one to NoShow, so a member arriving two minutes late — code still valid, it lives
+        // until slot end plus grace — was told there was no booking behind it.
         var booking = await services.Db.Bookings
-            .FirstOrDefaultAsync(b => b.Id == resolved.BookingId && b.Status == BookingStatus.Booked, ct);
+            .FirstOrDefaultAsync(b => b.Id == resolved.BookingId, ct);
         if (booking is null) return new Found(null, null, "no_booking");
 
         var court = await services.Db.Courts.FirstOrDefaultAsync(c => c.Id == booking.CourtId && c.IsActive, ct);
@@ -99,6 +106,21 @@ public static class DeviceActivateEndpoint
 
         if (!device.CourtNumbers.Contains(court.CourtNumber)) return new Found(null, court, "wrong_court");
         if (req.Court is { } named && named != court.CourtNumber) return new Found(null, court, "wrong_court");
+
+        // Closed out and over: SLOT ENDED, the screen `docs/court-lights-flows.html`
+        // promises and `ScanFlow.cpp` already maps. Refused here rather than through the
+        // activation service, because a booking the sweep has finished with must not be
+        // charged, stamped or lit — `ended` is a message, not an activation.
+        //
+        // A CANCELLED booking is deliberately not this: nothing was ever going to happen
+        // on that court, so "no booking behind this code" is the true sentence. An
+        // AdminBlock is not a member's booking at all and falls through the same way.
+        if (booking.Status is BookingStatus.Completed or BookingStatus.NoShow && booking.EndsAt <= now)
+        {
+            return new Found(null, court, "ended");
+        }
+
+        if (booking.Status != BookingStatus.Booked) return new Found(null, court, "no_booking");
 
         // The code outlives the window — it is valid until the slot ends plus grace — but a
         // booking days away is not something a scan can act on. Outside the forward window
