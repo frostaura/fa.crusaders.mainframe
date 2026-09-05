@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QrCode as QrIcon, RefreshCw } from "lucide-react";
-import { ApiError, endpoints, type MyQrCode } from "../lib/api";
+import { ApiError, endpoints, type MyQrCode, type MyQrKind } from "../lib/api";
 import { encodeQr, qrPath } from "../lib/qr";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
@@ -27,7 +27,19 @@ import { cn } from "../lib/utils";
  * locked in a pocket fires no ticks, and used to wake showing a live countdown over a
  * dead code. And the next code is fetched shortly <em>before</em> the current one runs
  * out and swapped in one state update, so a member at the box is never holding up a
- * code that has just died while the page fetches another.
+ * code that has just died while the page fetches another. That pre-fetch is only worth
+ * anything if the server actually rotates: it is allowed to answer with the code the
+ * page already holds, and when it does, this page re-polls quickly rather than sitting
+ * out the pacing gap over a dying QR (review finding 21).
+ * </p>
+ *
+ * <p>
+ * <b>Which code.</b> Left alone, the server picks: a booking code when the member has a
+ * booking inside the roster window, an ident code otherwise. A booking code is refused
+ * at every court but its own, so for the couple of hours before a booking that default
+ * left the member with no way to walk up to a free court or pay for someone else — the
+ * exact members who use the club most, sent to the desk (review finding 6). The
+ * "walk up / pay for someone" switch asks for an ident code outright.
  * </p>
  */
 
@@ -41,6 +53,27 @@ const MIN_REFRESH_GAP_MS = 10_000;
 
 /** How long before expiry the next code is fetched. Ten seconds covers a slow fetch with room to spare. */
 const PREFETCH_LEAD_S = 10;
+
+/**
+ * The gap between re-polls when the server answered a pre-fetch with the code the page
+ * already holds.
+ *
+ * <p>
+ * A code that is about to die and a server that keeps handing it back is the whole of
+ * the dead-QR window: waiting {@link MIN_REFRESH_GAP_MS} between attempts guarantees
+ * the code reaches zero first. The server mints a fresh one once the current has less
+ * than the lead time left, so in practice this fires at most once — but the page must
+ * not depend on that, because a server that reuses is exactly what shipped.
+ * </p>
+ */
+const NOT_ROTATED_GAP_MS = 2_000;
+
+/**
+ * How many times in a row the page will chase a code the server would not rotate.
+ * Bounded, so a server that will never rotate costs a handful of requests per code
+ * rather than one every two seconds for as long as the page is open.
+ */
+const MAX_NOT_ROTATED_TRIES = 3;
 
 const QUIET_ZONE = 4;
 
@@ -72,18 +105,29 @@ function formatCountdown(seconds: number): string {
   return `${seconds}s`;
 }
 
-/** The one-line meaning of a code, in the member's terms. */
+/**
+ * The one-line meaning of a code, in the member's terms.
+ *
+ * <p>
+ * Says which of the two codes is on screen and what it will and will not do, because
+ * the two behave differently at the box and the member cannot tell them apart by
+ * looking: a booking code opens one court at one time, an ident code identifies the
+ * member anywhere. Presenting the wrong one is SEE THE DESK.
+ * </p>
+ */
 function describeKind(qr: MyQrCode): { headline: string; detail: string } {
   if (qr.kind === "booking") {
     const when = qr.starts_at ? ` · starts ${formatStart(qr.starts_at)}` : "";
     return {
-      headline: qr.court_number != null ? `Court ${qr.court_number}${when}` : `Your booking${when}`,
-      detail: "This code is for your booking. It works from a few minutes before your slot until it ends.",
+      headline: qr.court_number != null ? `Booking code · court ${qr.court_number}${when}` : `Booking code${when}`,
+      detail: "For your booking only — it works at that court, from a few minutes before your slot until it ends. "
+        + "At any other court it will not be recognised.",
     };
   }
   return {
-    headline: "Identifies you at any court",
-    detail: "You have no booking coming up. Use this to walk up to a free court, or to pay for someone else's.",
+    headline: "Walk-up code · any court",
+    detail: "Identifies you at any court box: start a walk-up on a free court, or pay for someone else's time. "
+      + "It is not tied to a booking.",
   };
 }
 
@@ -119,17 +163,24 @@ export default function CourtCodePage() {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** On: ask for an ident code outright, whatever bookings the member has. */
+  const [walkUp, setWalkUp] = useState(false);
   const lastFetchAt = useRef(0);
   const inflight = useRef(false);
   /** The code a pre-fetch was last made for, so the same code is not pre-fetched over and over as it runs out. */
   const prefetchedFor = useRef<string | null>(null);
+  /** The code currently held, read inside the fetch — state would be a frame stale there. */
+  const held = useRef<string | null>(null);
+  /** Consecutive pre-fetches that answered with the code already held. See NOT_ROTATED_GAP_MS. */
+  const notRotated = useRef(0);
 
   /**
    * Gets a code. "replace" is what the member sees happening — first load, the Refresh
-   * button, or a code that died with nothing ready; "prefetch" is silent, and a failure
-   * is left for the expiry path to surface, by which time it may well have cleared.
+   * button, the walk-up switch, or a code that died with nothing ready; "prefetch" is
+   * silent, and a failure is left for the expiry path to surface, by which time it may
+   * well have cleared.
    */
-  const fetchCode = useCallback(async (mode: "replace" | "prefetch") => {
+  const fetchCode = useCallback(async (mode: "replace" | "prefetch", kind: MyQrKind | undefined) => {
     if (inflight.current) return;
     inflight.current = true;
     lastFetchAt.current = Date.now();
@@ -138,9 +189,18 @@ export default function CourtCodePage() {
       setError(null);
     }
     try {
-      const next = await endpoints.meQrGenerate();
+      const next = await endpoints.meQrGenerate(kind);
+      // Did anything actually change hands? The server is entitled to answer with the
+      // code the page already holds — it reuses one that has not expired — and that
+      // answer is not a rotation however healthy the request looked. Counting it lets
+      // the pre-fetch effect chase it instead of declaring victory over a dying QR.
+      const rotated = next.code !== held.current;
+      notRotated.current = mode === "prefetch" && !rotated ? notRotated.current + 1 : 0;
+      held.current = next.code;
       // One batch: code, deadline and countdown move together, so no render ever shows
-      // the new code with the old clock or the old code with the new one.
+      // the new code with the old clock or the old code with the new one. The deadline
+      // is re-read even on a reused code: the server's remaining time is the truth, and
+      // it is what makes the countdown honest about how little is left.
       setQr(next);
       setDeadline(deadlineFor(next.expires_in_seconds));
       setSecondsLeft(next.expires_in_seconds);
@@ -159,8 +219,15 @@ export default function CourtCodePage() {
     }
   }, []);
 
+  /** The switch. A different code is wanted now, so one is fetched now. */
+  function chooseWalkUp(next: boolean) {
+    setWalkUp(next);
+    prefetchedFor.current = null;
+    void fetchCode("replace", next ? "ident" : undefined);
+  }
+
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader, the house idiom
-  useEffect(() => { void fetchCode("replace"); }, [fetchCode]);
+  useEffect(() => { void fetchCode("replace", undefined); }, [fetchCode]);
 
   // The countdown is read off the clock, once a second while the page is visible and
   // again the moment it becomes visible. A tick that never fired — the phone was
@@ -187,14 +254,21 @@ export default function CourtCodePage() {
   useEffect(() => {
     if (!qr || loading || secondsLeft > PREFETCH_LEAD_S) return;
     const expired = secondsLeft === 0;
-    if (!expired && prefetchedFor.current === qr.code) return;
-    const wait = Math.max(0, MIN_REFRESH_GAP_MS - (Date.now() - lastFetchAt.current));
+    // A pre-fetch answered with the code already on screen: nothing rotated, the member
+    // is still holding one that is about to die, and waiting out the pacing gap is what
+    // guarantees it dies. Try again on the short gap, a bounded number of times.
+    const stalled = !expired && notRotated.current > 0;
+    if (stalled && notRotated.current > MAX_NOT_ROTATED_TRIES) return;
+    if (!expired && !stalled && prefetchedFor.current === qr.code) return;
+    const gap = stalled ? NOT_ROTATED_GAP_MS : MIN_REFRESH_GAP_MS;
+    const wait = Math.max(0, gap - (Date.now() - lastFetchAt.current));
+    const kind = walkUp ? "ident" : undefined;
     const timer = setTimeout(() => {
       if (!expired) prefetchedFor.current = qr.code;
-      void fetchCode(expired ? "replace" : "prefetch");
+      void fetchCode(expired ? "replace" : "prefetch", kind);
     }, wait);
     return () => clearTimeout(timer);
-  }, [qr, loading, secondsLeft, fetchCode]);
+  }, [qr, loading, secondsLeft, walkUp, fetchCode]);
 
   const meaning = qr ? describeKind(qr) : null;
 
@@ -207,11 +281,33 @@ export default function CourtCodePage() {
         </p>
       </div>
 
+      {/* Without this, a member with a booking within a couple of hours is handed a
+          booking code and nothing else — and a booking code is refused at every court
+          but its own, so walking up to a free court or paying for a friend was a trip
+          to the desk. */}
+      <Card className="flex items-start gap-3 py-4">
+        <input
+          id="walk-up"
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 shrink-0"
+          checked={walkUp}
+          disabled={loading}
+          onChange={(e) => chooseWalkUp(e.target.checked)}
+        />
+        <div className="min-w-0">
+          <label htmlFor="walk-up" className="text-sm font-medium">Walk up / pay for someone</label>
+          <p className="text-xs text-text-muted">
+            Shows the code that works at any court, even when you have a booking coming up — for starting on a
+            free court now, or paying for someone else's time.
+          </p>
+        </div>
+      </Card>
+
       <Card className="space-y-5">
         {error && !qr ? (
           <div className="space-y-3">
             <p className="text-sm text-danger-strong">{error}</p>
-            <Button onClick={() => void fetchCode("replace")} disabled={loading}>Try again</Button>
+            <Button onClick={() => void fetchCode("replace", walkUp ? "ident" : undefined)} disabled={loading}>Try again</Button>
           </div>
         ) : !qr ? (
           <p className="text-sm text-text-secondary">Getting your code…</p>
@@ -232,7 +328,12 @@ export default function CourtCodePage() {
                 <QrIcon size={14} />
                 {secondsLeft > 0 ? `Refreshes in ${formatCountdown(secondsLeft)}` : loading ? "Refreshing…" : "Expired — refreshing"}
               </p>
-              <Button variant="outline" className="h-9 px-3 text-xs" onClick={() => void fetchCode("replace")} disabled={loading}>
+              <Button
+                variant="outline"
+                className="h-9 px-3 text-xs"
+                onClick={() => void fetchCode("replace", walkUp ? "ident" : undefined)}
+                disabled={loading}
+              >
                 <RefreshCw size={14} className={cn("mr-1", loading && "animate-spin")} /> Refresh
               </Button>
             </div>

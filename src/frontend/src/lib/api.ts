@@ -164,7 +164,11 @@ export type AdminSettings = {
   // of them. Bounds are the API's (AdminConfigEndpoints.ValidateDeviceNumbers).
   /** 1–90. The relay bank's hard cap is 90; a setting above it sells minutes the lights cannot deliver. */
   walk_up_max_minutes: number;
-  /** 10–3600. */
+  /**
+   * 15–300. The box clamps its own cadence to this range, so a value outside it is not
+   * what the fleet runs — and the Devices page derives "offline" from three missed
+   * beats of it (review finding 22).
+   */
   heartbeat_seconds: number;
   /** 1–1440. How far ahead of a booking a scan may activate it. */
   activation_forward_window_minutes: number;
@@ -219,6 +223,16 @@ export type AdminDevice = {
    * the payload actually carries it, so an older API simply shows no override.
    */
   button_map?: string[] | null;
+  /**
+   * The interval this box is actually running, seconds — the tenant setting after the
+   * firmware's own 15-300 clamp. Optional because the field is landing on the API
+   * alongside this screen; when it is absent the admin surface falls back to clamping
+   * the tenant setting itself, which is the same arithmetic one hop further from the
+   * box. Never read the raw tenant setting as if it were what the box runs: a club that
+   * sets 600 has boxes calling in every 300, and the difference is the whole of
+   * "the entire fleet reads offline".
+   */
+  heartbeat_seconds?: number;
 };
 
 /** A board announcing itself on the LAN that has not been claimed yet. */
@@ -315,6 +329,9 @@ export const OTA_CHANNEL_WIRE: Record<OtaChannel, number> = { Stable: 0, Canary:
  * they are — for a walk-up, or for paying at somebody else's court — and lives for the
  * tenant's `qr_lifetime_seconds`.
  */
+/** What the member can ask the generate endpoint for. Omitted means "you decide". */
+export type MyQrKind = "ident";
+
 export type MyQrCode = {
   code: string;
   kind: "booking" | "ident";
@@ -521,7 +538,19 @@ export const endpoints = {
     api.post<{ matched: boolean; user_id: string | null }>(`/api/v1/court/${courtNumber}/pin/match`, { pin }),
 
   // Phase 8.6 — QR identification (third leg of the triple-stack). See MyQrCode.
-  meQrGenerate: () => api.post<MyQrCode>("/api/v1/me/qr/generate"),
+  /**
+   * The member's court code.
+   *
+   * <p>
+   * With no `kind` the server decides: a booking code when one of the member's bookings
+   * is inside the roster window, an ident code otherwise. That default is right for the
+   * common case and wrong for the one that costs the club money — a member with a
+   * booking two hours out cannot walk up to a free court or pay for a friend, because a
+   * booking code is refused at every court but its own and the resolver takes nothing
+   * else. `kind: "ident"` asks for the walk-up code explicitly, whatever bookings exist.
+   * </p>
+   */
+  meQrGenerate: (kind?: MyQrKind) => api.post<MyQrCode>(`/api/v1/me/qr/generate${qs({ kind })}`),
   courtQrMatch: (courtNumber: number, token: string) =>
     api.post<{ matched: boolean; user_id?: string; reason?: string }>(`/api/v1/court/${courtNumber}/qr/match`, { token }),
 
