@@ -203,6 +203,49 @@ public class WalletStreamPumpTests
     }
 
     /// <summary>
+    /// A movement that commits while the opening balance is being read still reaches the
+    /// member.
+    ///
+    /// <para>
+    /// The endpoint read the balance, wrote it, and only then subscribed — so anything
+    /// published inside that window, the round trip of a database read, had no subscriber
+    /// and was gone. Far narrower than the keep-alive defect, and the same wrong number left
+    /// on the screen. Found while proving the keep-alive fix in a real browser: a desk
+    /// adjustment fired at the instant the page connected never appeared.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task AMovementDuringTheOpeningReadIsNotLost()
+    {
+        var broadcaster = new BalanceBroadcaster();
+        var userId = Guid.NewGuid();
+        var sink = new Sink();
+        using var cts = new CancellationTokenSource();
+
+        // The desk posts +8 while this read is in flight, and the read returns the balance
+        // as it stood before it — the ordering a slow query makes ordinary.
+        var channel = await WalletEndpoints.SubscribeThenSendAsync(
+            broadcaster, userId,
+            async () =>
+            {
+                await Task.Yield();
+                broadcaster.Publish(userId, 108.00m);
+                return 100.00m;
+            },
+            balance => sink.WriteBalance(balance, cts.Token));
+
+        var pump = WalletEndpoints.PumpAsync(
+            channel.Reader, KeepAlive, sink.WriteBalance, sink.WriteKeepAlive, cts.Token);
+
+        Assert.True(await WaitUntilAsync(() => sink.Balances.Count == 2),
+            "the movement posted during the opening read never reached the stream");
+        Assert.Equal(new[] { 100.00m, 108.00m }, sink.Balances.ToArray());
+
+        broadcaster.Unsubscribe(userId, channel);
+        await pump.WaitAsync(Deadline);
+    }
+
+    /// <summary>
     /// Unsubscribing completes the channel, and the pump then returns rather than spinning
     /// keep-alives at a response nobody is reading.
     /// </summary>

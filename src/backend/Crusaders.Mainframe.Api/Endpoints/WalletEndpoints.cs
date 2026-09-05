@@ -79,13 +79,14 @@ public static class WalletEndpoints
             // nginx defaults buffer proxied responses; this header disables that for SSE.
             ctx.Response.Headers["X-Accel-Buffering"] = "no";
 
-            // Send the current balance once so the UI converges immediately on connect.
-            var initial = await ledger.GetBalanceAsync(userId, ct);
-            await WriteEventAsync(ctx, initial, ct);
-
-            var channel = broadcaster.Subscribe(userId);
+            Channel<decimal>? channel = null;
             try
             {
+                channel = await SubscribeThenSendAsync(
+                    broadcaster, userId,
+                    () => ledger.GetBalanceAsync(userId, ct),
+                    balance => WriteEventAsync(ctx, balance, ct));
+
                 await PumpAsync(
                     channel.Reader,
                     KeepAliveInterval,
@@ -96,7 +97,7 @@ public static class WalletEndpoints
             catch (OperationCanceledException) { /* client disconnect */ }
             finally
             {
-                broadcaster.Unsubscribe(userId, channel);
+                if (channel is not null) broadcaster.Unsubscribe(userId, channel);
             }
         });
 
@@ -349,6 +350,41 @@ public static class WalletEndpoints
     {
         await ctx.Response.WriteAsync("event: ping\ndata: {}\n\n", ct);
         await ctx.Response.Body.FlushAsync(ct);
+    }
+
+    /// <summary>
+    /// Takes the subscription, then sends the balance the stream opens on.
+    ///
+    /// <para>
+    /// The order is the whole point, and it used to be the other way round: the balance was
+    /// read, written, and only then was the subscription taken. A ledger movement that
+    /// committed inside that window — the round trip of a database read — had no subscriber
+    /// to publish to and was simply gone, and the member's chip then sat on a figure that was
+    /// already out of date for as long as nothing else moved. It is a far narrower window
+    /// than the keep-alive defect this endpoint was fixed for, but it is the same failure and
+    /// it leaves the same wrong number on the screen. Subscribing first cannot lose it: the
+    /// movement is queued, and the balance read afterwards already reflects it, so the worst
+    /// case is the same figure written twice.
+    /// </para>
+    /// </summary>
+    internal static async Task<Channel<decimal>> SubscribeThenSendAsync(
+        BalanceBroadcaster broadcaster,
+        Guid userId,
+        Func<Task<decimal>> readBalance,
+        Func<decimal, Task> write)
+    {
+        var channel = broadcaster.Subscribe(userId);
+        try
+        {
+            await write(await readBalance());
+            return channel;
+        }
+        catch
+        {
+            // The caller never gets the channel, so it could never unsubscribe it.
+            broadcaster.Unsubscribe(userId, channel);
+            throw;
+        }
     }
 
     /// <summary>
