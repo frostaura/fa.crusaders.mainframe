@@ -275,7 +275,7 @@ The outbound event stream + the Arduino lights integration. Specs: [`webhooks.md
 
 **Frontend deliverables:**
 - `/settings/webhooks` (player) — list, create with URL-template hints, view delivery log, "Send test" button
-- `/admin/webhooks` (tenant admin) — same plus tenant-wide endpoints; pre-filled "Lights on" and "Lights off" templates pointing at `arduino.local/court/{court_number}/turn/{action}`
+- `/admin/webhooks` (tenant admin) — same plus tenant-wide endpoints; pre-filled "Lights on" and "Lights off" templates pointing at `arduino.local/court/{court_number}/turn/{action}` *(historical: the court box is pull-only and is never a webhook destination — see `docs/specs/webhooks.md`; these templates were never shipped)*
 - Delivery log row: status, attempt count, latency, peek-at-payload modal
 
 **Arduino firmware (`src/firmware/lights-controller/`):**

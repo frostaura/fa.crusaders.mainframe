@@ -4,7 +4,7 @@ User- and admin-configurable HTTP callbacks fired on system events. Lets externa
 
 ## Configuration
 - A tenant admin (or a player, scoped to their own events only) can register an endpoint:
-  - `url` — HTTPS by default; **HTTP allowed for LAN / RFC1918 hosts** (lights controllers etc.). Supports template variables (see "URL templating" below).
+  - `url` — HTTPS by default; **HTTP allowed for LAN / RFC1918 hosts** on the private-network allow-list (a scoreboard, an accounting box, any LAN consumer the club points a webhook at — never the court box, which is pull-only). Supports template variables (see "URL templating" below).
   - `event_filter` — array of event names, or `["*"]` for all
   - `secret` — auto-generated, used to sign payloads (HMAC-SHA256)
   - `enabled` — bool
@@ -13,7 +13,7 @@ User- and admin-configurable HTTP callbacks fired on system events. Lets externa
 - Endpoints can be tested via a "Send test ping" button — sends a `webhook.test` event.
 
 ## URL templating
-The webhook URL supports **single-brace placeholder substitution** — `{variable_name}` — resolved per-event from the event payload at delivery time. This lets one webhook config target many resources without registering N separate endpoints. Example: for the on-court Arduino lights controller, a single config with `url = http://arduino.local/court/{court_number}/turn/on` filtered to `booking.lights_on` covers every court.
+The webhook URL supports **single-brace placeholder substitution** — `{variable_name}` — resolved per-event from the event payload at delivery time. This lets one webhook config target many resources without registering N separate endpoints. Example: a club scoreboard on a DHCP reservation, allow-listed as `10.0.40.7/32`, with a single config `url = http://10.0.40.7/court/{court_number}/lit` filtered to `booking.lights_on` covers every court. **Do not template a URL at the court box** — it has no HTTP listener and switches its own relays (see below).
 
 **Available variables** (always present, regardless of event):
 - `{tenant_id}`, `{tenant_slug}`
@@ -30,9 +30,10 @@ The webhook URL supports **single-brace placeholder substitution** — `{variabl
 
 **Body templating** uses the same syntax inside string fields of the JSON body. Default body remains the standard event payload; templating is opt-in via a "custom body" field in the endpoint config (advanced users only).
 
-## Internal LAN consumers (Arduino lights controller)
-The on-court Arduino lights controller is a **first-class internal webhook consumer** — it receives `booking.lights_on` and `booking.lights_off` events from the same delivery worker that fans out external webhooks. This is intentional: no separate code path for "internal" vs "external" listeners. See `lights-controller.md` for the full architecture, the URL template pattern (`http://arduino.local/court/{court_number}/turn/on` and `.../turn/off`), and the auth posture (shared secret in body; HMAC sig where compute allows).
+## The court box is not a webhook consumer
+The court lights are switched by the court box itself — an ESP8266 bridge and a Mega with its own relay bank and independent auto-off timer — which decides locally from an online activation or its cached heartbeat roster and **pulls** everything it needs from the API (`docs/specs/device-discovery.md`, `docs/specs/device-serial-protocol.md`). It has no inbound HTTP listener, no `arduino.local` name, and nothing in the delivery worker targets it. `docs/specs/lights-controller.md`, which described a webhook-driven Arduino at `http://arduino.local/court/{court_number}/turn/...`, is superseded and must not be used as a templating example.
 
+`booking.lights_on` and `booking.lights_off` are therefore what they are for every other event: a programmatic **mirror** of something that already happened at the court, for whatever external consumer wants to know.
 
 ## Event catalogue
 | Event | Triggered when |
@@ -45,9 +46,13 @@ The on-court Arduino lights controller is a **first-class internal webhook consu
 | `booking.cancelled` | A booking is cancelled (free) |
 | `booking.late_cancellation` | A booking is cancelled inside the penalty window |
 | `booking.no_show` | No-show penalty applied after grace expires |
-| `booking.lights_on` | Biometric match succeeds and lights are activated |
+| `booking.lights_on` | A court was activated (online activation, roster fallback uploaded later, or a walk-up) |
+| `booking.lights_off` | The lights-off cue fires at the end of a slot |
+| `booking.no_show_reversed` | Late attendance evidence from a box reversed a settled no-show |
+| `booking.displaced` | A booking sold into a released tail was cancelled and refunded by a no-show reversal (`ResoldTailRefunded`) |
+| `booking.cancelled_lights_charged` | A cancelled booking was lit from an offline box's roster and charged pro rata for the lit minutes |
 | `booking.completed` | A booking's slice ends naturally |
-| `credit.topped_up` | PeachPayments confirms a top-up |
+| `credit.topped_up` | PayFast confirms a top-up (ITN) |
 | `credit.refunded` | A cancellation/no-show ledger entry is written |
 | `credit.penalty_applied` | A penalty ledger entry is written |
 | `credit.adjusted` | An admin issues a manual adjustment |
@@ -96,9 +101,6 @@ All payloads are JSON, structured:
 - **Retry policy.** On any non-2xx response (or timeout >10s): retry with exponential backoff at 1m, 5m, 30m, 2h, 12h, 24h. After 6 failures the endpoint is auto-disabled and the owner is emailed. Driven by `WebhookRetryWorker`, which sweeps due deliveries every 30s in batches of 50. A blocked destination is exempt and is abandoned on the first attempt.
 - **Per-endpoint queue.** Slow / failing endpoints don't block others. Each endpoint has its own delivery worker.
 - **Retention.** Each event keeps its delivery log (status code, response time, retry count) for 30 days, viewable in admin UI.
-
-## Internal LAN consumers (Arduino lights controller)
-The on-court Arduino lights controller is a **first-class internal webhook consumer** — it receives `booking.lights_on` and `booking.lights_off` events from the same delivery worker that fans out external webhooks. This is intentional: no separate code path for "internal" vs "external" listeners. See `lights-controller.md` for the full architecture, the per-court channel mapping, and the auth posture (shared secret in body; HMAC sig where compute allows).
 
 ## Player-scoped vs tenant-wide
 - A **player-registered** endpoint receives only events where the player is the subject (`data.user_id == player.id`) or actor.

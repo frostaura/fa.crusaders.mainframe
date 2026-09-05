@@ -102,12 +102,31 @@ other mode — the wiring sheet documents it directly:
 It differs from ESP run/monitor only in DIP 7, the flash-mode line. No external adapter,
 no soldering, no physical intervention.
 
+The WiFi credential is **not part of the image**. It lives in the box's own flash store
+(`bridgelogic::CredentialStore`), written the first time the box actually joins, and every
+later image — including the credential-free one CI signs and bakes into the API — reads it
+from there. There are two ways to get it onto a box for the first time; pick one per box:
+
+- **`secrets.h` compiled in.** Copy `src/iot/src/common/secrets.h.example` to `secrets.h`
+  on the flashing machine only (gitignored), fill `WIFI_SSID` / `WIFI_PASSWORD`, build and
+  flash. The credential is persisted on the first successful join.
+- **`!WIFI` typed over USB.** Flash the plain image (no `secrets.h` — what CI builds), set
+  DIP **5 and 6 ON** so the ESP's UART is on the USB socket, open a serial monitor at
+  **9600 8N1**, and type `!WIFI,<ssid>,<password>` followed by Enter (`,` `*` `%` inside
+  either value are written `%2C` `%2A` `%25`; an optional `*CC` XOR trailer is verified when
+  present). The LCD answers `WIFI SAVED / JOINING...`, or `WIFI LINE BAD` for a line it
+  could not parse, or `NO WIFI SET / !WIFI,SSID,PASS` on any boot that has no credential
+  from any source.
+
 - [ ] Generate the signing key first — item 6 is a hard prerequisite of this flash.
 - [ ] Set DIP 5, 6, 7 ON (all others OFF), `pio run -e court_bridge -t upload`.
+- [ ] Provision the WiFi credential by one of the two paths above and see the box join
+      (the LCD leaves `NO WIFI SET`).
 - [ ] Restore the run positions (1, 2, 3, 4 ON, 5–8 OFF).
 
 **If skipped:** the ESP cannot take its first image — but no adapter hunt and no physical
-intervention is ever needed; the fix is three DIP switches.
+intervention is ever needed; the fix is three DIP switches. A box flashed without a
+credential is not bricked: it says `NO WIFI SET` and waits for the `!WIFI` line.
 
 ---
 
@@ -128,16 +147,33 @@ hard prerequisite of item 5, not a hardening step after it.
 - [ ] Verify `.github/workflows/ci.yml` carries the `iot-sign` job and the backend serves
       `/firmware/`. Both exist at HEAD: `iot-sign` is in `ci.yml` (Phase 5a) and
       `Program.cs` serves `Firmware:PayloadPath` — `/app/firmware` in the image — at
-      `/firmware/` (Phase 5b). With the secret set, that job produces
-      `firmware.signed.bin` (`src/iot/tools/pio_sign_post.py`) and bakes it into the API
-      image beside `firmware.manifest.json`, which `OtaCatalogue` offers as Stable by
-      default — at an absolute URL built from `Discovery:AdvertisedBaseUrl` or the address
-      the box heartbeats on (`docs/specs/deployment.md`).
-- [ ] Confirm the deployed image is offering it: a heartbeat from a box on an older build
-      carries an `ota` object, or `GET /firmware/firmware.manifest.json` on the deployed
-      API returns the version CI packaged. Set `Ota:Stable:Version`, `Ota:Stable:Url` and
-      `Ota:Stable:SizeBytes` only to pin the fleet to an image other than the one baked
-      into the container; they are no longer required for OTA to work.
+      `/firmware/` (Phase 5b), rate-limited per address (`RateLimits:FirmwarePerMinute`).
+      With the secret set, that job produces `firmware.signed.bin`
+      (`src/iot/tools/pio_sign_post.py`) and bakes it into the API image beside
+      `firmware.manifest.json`, which `OtaCatalogue` offers as Stable by default. **The
+      CI image carries no WiFi credential by design** — the box reads its credential from
+      its own flash store (item 5), so a CI-built OTA release does not take the fleet off
+      the network.
+- [ ] Confirm the OTA URL the box will be handed is one it can open. The catalogue makes
+      the manifest's relative `/firmware/...` absolute against `Discovery:AdvertisedBaseUrl`
+      if set, else **the scheme and host of the request that asked** — which is
+      `http://<ip>:8088` through the gateway only because nginx forwards
+      `X-Forwarded-Host: $http_host` (host *and port*) and the API trusts it from
+      `Gateway:TrustedProxies` (default loopback + `172.16.0.0/12`, where the compose
+      gateway stands). A box calling the host-networked API directly gets
+      `http://<ip>:5000`. If anything other than the compose gateway fronts the API, set
+      `Gateway__TrustedProxies__N` or the port is stripped and every box loops
+      UPDATING / UPDATE FAILED. An `https` advertised base or `Ota:*:Url` **refuses to
+      start** — the box cannot do TLS.
+- [ ] Confirm the deployed image is offering it **through the gateway**:
+      `GET http://<host>:8088/firmware/firmware.manifest.json` returns the version CI
+      packaged (nginx has a `/firmware/` proxy block; without it the SPA answers
+      `index.html` and the updater rejects it). A heartbeat from a box on an older build
+      then carries an `ota` object.
+- [ ] `Ota:Stable:Version`, `Ota:Stable:Url` and `Ota:Stable:SizeBytes` are set only to pin
+      the fleet to an image other than the one baked into the container — and then **all
+      three or none**: a partial set stops the API at startup rather than silently
+      offering the baked image the override was meant to hold back. `Url` must be `http`.
 
 **If skipped:** OTA is impossible for boards flashed with this key — every later update is a
 USB/DIP visit. The private key is what a stolen board must *not* yield — that is the whole
@@ -151,8 +187,11 @@ The password is in Carl's original sketch, in plain text, in a file that has bee
 than one machine.
 
 - [ ] Rotate it on the access point.
-- [ ] Put the new one in `src/iot/src/common/secrets.h` on the flashing machine only —
-      gitignored, never committed.
+- [ ] Deliver the new one to every box by one of the two item-5 paths: **reflash once**
+      with a new `secrets.h` (on the flashing machine only — gitignored, never committed;
+      the box persists the new credential on its first join and no later image needs it),
+      **or** with DIP 5 and 6 ON type `!WIFI,<ssid>,<new password>` over USB at 9600 and
+      see `WIFI SAVED`. No image rebuild is needed for the second path.
 
 **If skipped:** the club's WiFi credential is known to everyone who has seen that file.
 
@@ -171,6 +210,14 @@ faults that get blamed on software.
 - [ ] Measure the Mega's VIN/5V during ESP WiFi transmit bursts — the ESP hangs off the
       Mega's onboard regulators, not the LM2596 5V rail.
 - [ ] If either sags below ~4.7V at the 5V point, split the load or fit a larger regulator.
+- [ ] Confirm the Mega bootloader survives a watchdog reset: with a court lit, short SDA to
+      ground for a few seconds. The Mega now runs the AVR watchdog (2 s, `wdt_enable(WDTO_2S)`,
+      MCUSR cleared in `.init3` so the firmware side never contributes to a WDT boot loop)
+      and a `Wire` bus timeout under the LCD, so the wedge must end in a reset — and the
+      box must come back with **every relay open** (`ArduinoRelay::begin` drives the
+      released level before `pinMode`). A board that stays dark or loops on reset has a
+      bootloader that does not survive a WDT reset (older Mega2560 stk500v2 bootloaders);
+      that is a bootloader replacement, not a firmware fix, and it is out of software's reach.
 
 **If skipped:** boards reset at random. The OTA boot guard will read three of those as a
 failed firmware and condemn a perfectly good build — the symptom will look like a bad
@@ -181,8 +228,11 @@ release and will not be one.
 ## 9. Event-queue durability, accepted knowingly
 
 Queued events live in RAM. They survive the WiFi going away, a router reboot and a two-day
-outage; they do not survive a power cut. `hal::IStore` holds 32-byte values and an event is
-larger, so persisting them needs a block-oriented port.
+outage — the API now believes a scan up to 30 days old (`DeviceEventEndpoints.MaxEventAge`)
+and keeps booking codes resolvable that long, so a long outage's attendance still lands and
+reverses the sweep; they do not survive a power cut. `hal::IStore` is a key/value port for
+short identifiers (128-byte values), not blocks, and persisting events needs a
+block-oriented port.
 
 - [ ] Somebody accepts this, or schedules the work.
 
@@ -207,6 +257,10 @@ is a member's identity.
 - [ ] One activation confirmed through the online path.
 - [ ] One activation confirmed from the roster fallback with the WAN deliberately down.
 - [ ] The roster confirmed to age out (`ROSTER_MAX_AGE_MS`) and refuse rather than guess.
+- [ ] `heartbeat_seconds` confirmed honoured by the box: change it in tenant settings and
+      watch the heartbeat cadence follow on the next accepted heartbeat. The API accepts
+      10–3600; the box clamps what it is sent into **15–300 s** (`bridgelogic::Cadence`)
+      and keeps its previous interval when the field is absent.
 
 **If skipped:** the fallback path goes live unproven, and the first WiFi outage is the
 first test of the exact regression the local-decision design was built to avoid.
@@ -235,8 +289,15 @@ a multimeter on the actual box:
       no wrapped or orphaned half-lines).
 - [ ] A real minted membership QR fed to the physical scanner and its TX output captured:
       terminator, whether a ~200+ character payload emits at all, where it truncates.
-- [ ] Scanner confirmed factory-set to 9600 baud on both fixed links; `monitor_speed 115200`
-      confirmed to be monitor-side only.
+- [ ] Scanner confirmed factory-set to 9600 baud on both fixed links. **Every UART in the
+      box is 9600 8N1** — the Mega↔ESP link, the scanner, and the ESP's USB monitor (DIP 5
+      and 6 ON) that the `!WIFI` line is typed into. The only 115200 in `platformio.ini`
+      is the Mega's `upload_speed` for avrdude during a USB flash; no UART runs at it in
+      service, and the Mega has no monitor at all (it never opens Serial0). A monitor
+      opened at the wrong rate shows framing garbage that looks like a broken box and is
+      not one.
+- [ ] Watchdog bench check from item 8 done with the ESP plugged in as well as unplugged:
+      SDA shorted while a court is lit, box back with relays open.
 - [ ] Relay board JD-VCC jumper confirmed (which 5V feeds coil vs logic), and active-LOW
       behaviour re-confirmed end to end on all four channels.
 - [ ] Physical A/B/C/D and 15/30/45/60 buttons confirmed on pins 22/24/26/28 and

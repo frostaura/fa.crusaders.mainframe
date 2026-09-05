@@ -143,7 +143,12 @@ test.
 
 `t` is optional on receipt: a box treats an absent or unparseable value as "no
 clock update" rather than rejecting the packet, since the URL is the part it
-actually needs.
+actually needs. A verified OFFER's `t` is adopted only to **bootstrap** a box
+that has no clock yet, or to move a known clock **forward within the skew
+window**; a value behind the box's clock, or further ahead than the window, is
+counted and ignored (`DeviceClient::adoptOfferTime`). It never feeds the
+reprovision strike counter, so a replayed OFFER cannot rewind a box into
+re-claiming.
 
 ### Canonical form for signing
 
@@ -188,10 +193,10 @@ not a path.
 
 ### After a match — the board fetches, the API does not push
 
-The API creates the `Device` row, derives the key, and issues a **provisioning
-grant**: single-use, ten minutes, keyed on the board's MAC and holding a hash of
-the claim code. The board then collects its own key with
-`POST /api/v1/device/provision {mac, claim_code}`.
+The API creates the `Device` row (or re-keys the one it already has — below),
+derives the key, and issues a **provisioning grant**: single-use, ten minutes,
+keyed on the board's MAC and holding a hash of the claim code. The board then
+collects its own key with `POST /api/v1/device/provision {mac, claim_code}`.
 
 **The direction is inverted deliberately.** The obvious design has the API POST
 the key to the address the board announced from — and that address arrived in an
@@ -208,12 +213,45 @@ refusals are deliberately uniform: a wrong code, an unknown MAC and an expired
 grant are indistinguishable, or it becomes an oracle for which boards are
 mid-claim. A wrong guess burns the grant rather than granting another turn.
 
-The key is **also** returned to the admin, because a technician with a serial
-cable is the fallback for a board that cannot reach the API yet — and an
-automatic path with no manual equivalent is exactly what the layer table above
-refuses to ship.
+The key is **also** returned to the admin and shown once (copy, dismiss, never
+stored by the UI). That is a record for the operator, not a delivery path:
+nothing in the firmware ingests a hand-typed key — the only credential path a
+box has is `/provision`. A board that missed its grant (power-cycled between
+Connect and collection, the API redeployed inside the window) is recovered by
+**connecting it again**, which the next section makes possible.
 
 The board then persists the key and switches to `claimed`. Three wrong codes lock claiming until reboot.
+
+### Re-claiming a board the club already owns
+
+A board that was reflashed, revoked, or that lost its key announces
+`st=unclaimed` with a fresh claim code — indistinguishable from a new board
+except by its MAC. The old answer to a MAC match was a refusal ("rotate that
+device's key"), and since revoking left `RevokedAt` set for ever and rotation
+issued no grant, a revoked box was permanently unregistrable from any product
+surface. There is no `board_already_registered` refusal any more.
+
+**A claim against a MAC this club already holds re-keys that row**
+(`DeviceRegistryService.ReclaimAsync`): `KeyVersion` is bumped, `RevokedAt` is
+cleared and the device re-enabled, the row takes the claim's device code, name,
+court numbers and button-map override, keeps its id and its history, and a fresh
+provisioning grant is issued exactly as for a new board. Audited as
+`device.reclaimed` (with `was_revoked` and both key versions); the claim
+endpoint's response carries `reclaimed: true`. The justification is that the
+claim code read off the board's own LCD is proof of physical presence — whoever
+can present it could reflash the board anyway.
+
+This is also **how key rotation is delivered.** `POST
+/admin/devices/{id}/rotate-key` bumps `KeyVersion` and shows the admin the new
+key once, but the board cannot be handed it: its next signed call is refused,
+the 401 strikes drop it to `CLAIM CODE`, it announces unclaimed, and the admin
+connects it again from the discovered-boards list — which re-keys the same row
+and issues the grant it collects. Revoke → Re-claim is the same loop; the
+Devices screen offers **Re-claim** on a revoked row, pre-filling the claim form.
+
+`board_already_claimed` still exists and means something narrower: the board is
+announcing `st=claimed` with a key that still works. Rotate or revoke it, reboot
+it, and it will show a new claim code.
 
 ## What is deliberately not authenticated
 
@@ -235,6 +273,8 @@ different address.
   a firmware fault.
 - **Two boards, one claim code collision.** Astronomically unlikely by chance;
   treated as a spoof and refused either way.
+- **A box shows `CLAIM CODE` after a revoke, a key rotation, or a missed
+  grant.** Not a fault: connect it again. The row is re-keyed, not duplicated.
 - **DHCP moves the box mid-session.** The relay auto-off timer on the Mega is
   independent of the network, so lights still release. The box re-announces on
   link-up and the API updates `LastIpAddress` on the next heartbeat.

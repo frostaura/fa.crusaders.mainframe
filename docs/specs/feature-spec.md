@@ -90,7 +90,7 @@ Class is admin-assignable and editable, audit-logged on every change.
 
 ## 6a. The biometric peripheral & no-show detection
 - Each court has a physical biometric peripheral attached to the on-site machine. The .NET app talks to it via `IBiometricDevice` (see `biometric-abstraction.md`).
-- The court lights are switched by an Arduino + 6-channel relay on the club LAN, driven via the standard webhook system. See `lights-controller.md`.
+- The court lights are switched by the **court box** (ESP8266 bridge + Mega relay bank with an independent auto-off timer), which decides locally from an online activation or its cached heartbeat roster and pulls everything from the API; it is never a webhook destination. `lights-controller.md` (webhook-driven Arduino) is superseded — see `device-discovery.md` and `device-serial-protocol.md`.
 - When a player has a booking that becomes "live" (current time falls within the booked slice):
   1. The on-court UI awaits a biometric match.
   2. On a successful match against the booked player, the mainframe fires a `booking.lights_on` webhook to the Arduino, the relay flips, and a `LightsOn` event is recorded.
@@ -131,6 +131,15 @@ A tenant admin can:
 - View / export all transactions, bookings, members, no-shows.
 - Configure the tenant's outbound webhooks.
 - View peripheral health (uptime, last-seen, error rate per court).
+- Configure the court-box **button map** — the club default and, per box, an override (below).
+
+### 8a. Court-box button map
+A court box has eight physical buttons (`ButtonMap.ButtonCount`), wired A/B/C/D then 15/30/45/60. The Mega reports raw presses and the bridge decides, so any button can be mapped to any action: select a court (by position in the box's own court list, relays A–D) or grant a number of minutes (bounded by the relay hard cap, `ButtonMap.MaxGrantMinutes`).
+
+- **Club default:** `tenant_settings.buttons`, edited on the Settings page. The default map is the wiring's original meaning, so a club that never touches it gets exactly what the hand-built box did.
+- **Per-device override:** `button_map` on `POST /admin/devices` (register), on the claim command (`ClaimBoardCommand.ButtonMap`), and on `PATCH /admin/devices/{id}`, stored as `Device.ButtonMapJson` (migration `AddDeviceButtonMapOverride`). On PATCH it is three-valued: absent leaves the override alone, `null` clears it (the box runs the club default), a list of eight entries sets it. A re-claim carries the claim's override onto the existing row.
+- **Validated per box, not per club.** The *effective* map — the override if any, else the club default (`ButtonMap.EffectiveFor`) — is checked against that box's court list at register, claim and PATCH: a map whose court button reaches past the box's list is refused with `button_map_selects_court_beyond_device_courts` and the map named. A one-court annex box and a four-court main box can therefore both be valid under one club default, each with its own override where needed; the old single tenant-wide validation had no valid configuration for a mixed fleet.
+- **The heartbeat sends the effective map** (`button_map` in the heartbeat response, `ButtonMap.EffectiveFor(device.ButtonMapJson, settings.Buttons)`), so the box never has to know whether it is running an override. The Devices screen renders the override editor only when the API carries the field.
 
 A platform admin can additionally:
 - Onboard a new tenant (creates the tenant, the first admin user, the default settings).
