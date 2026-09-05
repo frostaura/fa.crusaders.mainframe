@@ -105,7 +105,14 @@ no soldering, no physical intervention.
 The WiFi credential is **not part of the image**. It lives in the box's own flash store
 (`bridgelogic::CredentialStore`), written the first time the box actually joins, and every
 later image — including the credential-free one CI signs and bakes into the API — reads it
-from there. There are two ways to get it onto a box for the first time; pick one per box:
+from there. **The store outranks a compiled-in credential**: `secrets.h` is a first-boot
+seed, and once the store holds anything, that is what the box joins with on every boot. (It
+used to be the other way round, which meant a `!WIFI` rotation lasted only until the next
+power cycle.) A box that cannot join with the stored credential and also carries a
+compiled-in one alternates between the two every 20 s, which is what keeps the reflash
+rotation path in item 7 working.
+
+There are two ways to get a credential onto a box for the first time; pick one per box:
 
 - **`secrets.h` compiled in.** Copy `src/iot/src/common/secrets.h.example` to `secrets.h`
   on the flashing machine only (gitignored), fill `WIFI_SSID` / `WIFI_PASSWORD`, build and
@@ -114,15 +121,29 @@ from there. There are two ways to get it onto a box for the first time; pick one
   DIP **5 and 6 ON** so the ESP's UART is on the USB socket, open a serial monitor at
   **9600 8N1**, and type `!WIFI,<ssid>,<password>` followed by Enter (`,` `*` `%` inside
   either value are written `%2C` `%2A` `%25`; an optional `*CC` XOR trailer is verified when
-  present). The LCD answers `WIFI SAVED / JOINING...`, or `WIFI LINE BAD` for a line it
-  could not parse, or `NO WIFI SET / !WIFI,SSID,PASS` on any boot that has no credential
-  from any source.
+  present).
+
+  **Watch the MONITOR, not the glass.** In this DIP position the ESP's only UART is on the
+  USB socket, so the Mega — and therefore the LCD — is not on the other end of it at all.
+  The firmware answers in the monitor with a plain line: `[wifi] saved, joining <ssid>`,
+  then `[wifi] joined <a.b.c.d>` when the association succeeds, or
+  `[wifi] line not understood: ...` / `[wifi] not saved, ...`. Alongside each of those an
+  `!LCD,WIFI SAVED,JOINING...*CC` frame also appears in the monitor; that is the frame the
+  glass would have shown, not noise, and it is **not** evidence the LCD updated. The LCD
+  itself only changes once DIP 1 and 2 are restored — the box repaints its identity screen
+  on the first `!PONG` it gets from the Mega after that.
+
+  `NO WIFI SET / !WIFI,SSID,PASS` is what the LCD shows on any boot with no credential from
+  any source, in the **run** DIP position.
 
 - [ ] Generate the signing key first — item 6 is a hard prerequisite of this flash.
 - [ ] Set DIP 5, 6, 7 ON (all others OFF), `pio run -e court_bridge -t upload`.
 - [ ] Provision the WiFi credential by one of the two paths above and see the box join
-      (the LCD leaves `NO WIFI SET`).
-- [ ] Restore the run positions (1, 2, 3, 4 ON, 5–8 OFF).
+      — in the monitor for the `!WIFI` path (`[wifi] joined ...`), on the glass for the
+      `secrets.h` path (the LCD leaves `NO WIFI SET`).
+- [ ] Restore the run positions (1, 2, 3, 4 ON, 5–8 OFF) and confirm the LCD now shows
+      `CLAIM CODE ...` or `CONNECTED / SCAN TO START` — that repaint is the proof the ESP
+      and the Mega are talking again.
 
 **If skipped:** the ESP cannot take its first image — but no adapter hunt and no physical
 intervention is ever needed; the fix is three DIP switches. A box flashed without a
@@ -145,7 +166,13 @@ hard prerequisite of item 5, not a hardening step after it.
       `OTA_PRIVATE_KEY` repository secret (PEM content, item 2) and nowhere else — it is
       gitignored, and must never be committed.
 - [ ] Verify `.github/workflows/ci.yml` carries the `iot-sign` job and the backend serves
-      `/firmware/`. Both exist at HEAD: `iot-sign` is in `ci.yml` (Phase 5a) and
+      `/firmware/`. **That job now verifies the packaged image against the committed
+      `OtaPublicKey.h` and fails on a mismatch** — previously it only checked that
+      `OTA_PRIVATE_KEY` parsed, so a secret from a different key pair produced a CI-green
+      release every box rejected after downloading it, forever. Setting the secret and
+      committing the regenerated header are two separate acts and this is what couples
+      them. The box side is bounded too: an image that fails to install three times running
+      is skipped until the manifest changes. Both exist at HEAD: `iot-sign` is in `ci.yml` (Phase 5a) and
       `Program.cs` serves `Firmware:PayloadPath` — `/app/firmware` in the image — at
       `/firmware/` (Phase 5b), rate-limited per address (`RateLimits:FirmwarePerMinute`).
       With the secret set, that job produces `firmware.signed.bin`
@@ -169,7 +196,12 @@ hard prerequisite of item 5, not a hardening step after it.
       `GET http://<host>:8088/firmware/firmware.manifest.json` returns the version CI
       packaged (nginx has a `/firmware/` proxy block; without it the SPA answers
       `index.html` and the updater rejects it). A heartbeat from a box on an older build
-      then carries an `ota` object.
+      then carries an `ota` object. **`nginx.conf` reaches the running gateway as part of a
+      built gateway image, pushed and re-pulled like the API and SPA images — not as a host
+      bind-mount from a checkout.** A deploy that moves only the two application images
+      leaves the gateway on its old config, and the `/firmware/` block and the
+      `X-Forwarded-Host` line are exactly the two things a stale gateway would be missing,
+      with the dashboard reporting a successful deploy.
 - [ ] `Ota:Stable:Version`, `Ota:Stable:Url` and `Ota:Stable:SizeBytes` are set only to pin
       the fleet to an image other than the one baked into the container — and then **all
       three or none**: a partial set stops the API at startup rather than silently
@@ -189,9 +221,15 @@ than one machine.
 - [ ] Rotate it on the access point.
 - [ ] Deliver the new one to every box by one of the two item-5 paths: **reflash once**
       with a new `secrets.h` (on the flashing machine only — gitignored, never committed;
-      the box persists the new credential on its first join and no later image needs it),
-      **or** with DIP 5 and 6 ON type `!WIFI,<ssid>,<new password>` over USB at 9600 and
-      see `WIFI SAVED`. No image rebuild is needed for the second path.
+      the box tries the stored credential first, falls back to the compiled-in one after
+      20 s, and persists it on the join — so no later image needs it), **or** with DIP 5
+      and 6 ON type `!WIFI,<ssid>,<new password>` over USB at 9600 and see
+      `[wifi] saved, joining <ssid>` followed by `[wifi] joined ...` **in the serial
+      monitor** (item 5 — the LCD is not reachable in that DIP position).
+- [ ] For the `!WIFI` path, power-cycle one box afterwards and confirm it comes back on the
+      new password. The typed credential is in the store and the store outranks
+      `secrets.h`, so it survives; if it does not, the box is running firmware older than
+      this checklist and must be reflashed.
 
 **If skipped:** the club's WiFi credential is known to everyone who has seen that file.
 
@@ -210,18 +248,40 @@ faults that get blamed on software.
 - [ ] Measure the Mega's VIN/5V during ESP WiFi transmit bursts — the ESP hangs off the
       Mega's onboard regulators, not the LM2596 5V rail.
 - [ ] If either sags below ~4.7V at the 5V point, split the load or fit a larger regulator.
-- [ ] Confirm the Mega bootloader survives a watchdog reset: with a court lit, short SDA to
-      ground for a few seconds. The Mega now runs the AVR watchdog (2 s, `wdt_enable(WDTO_2S)`,
-      MCUSR cleared in `.init3` so the firmware side never contributes to a WDT boot loop)
-      and a `Wire` bus timeout under the LCD, so the wedge must end in a reset — and the
-      box must come back with **every relay open** (`ArduinoRelay::begin` drives the
-      released level before `pinMode`). A board that stays dark or loops on reset has a
-      bootloader that does not survive a WDT reset (older Mega2560 stk500v2 bootloaders);
-      that is a bootloader replacement, not a firmware fix, and it is out of software's reach.
+These are **two separate checks and they prove different things.** They used to be one
+bullet, and once the `Wire` bus timeout was added that one bullet could no longer fire: the
+short is absorbed, so a technician either ticked a box that tested nothing or read the
+absence of a reset as a fault and started replacing bootloaders.
 
-**If skipped:** boards reset at random. The OTA boot guard will read three of those as a
-failed firmware and condemn a perfectly good build — the symptom will look like a bad
-release and will not be one.
+- [ ] **(a) The bus timeout and the hold-off.** With a court lit, short SDA to ground for a
+      few seconds. **Expected: no reset.** Each LCD write gives up in ~25 ms
+      (`Wire.setWireTimeout`), the next 20 writes are skipped (`courtlogic::DisplayHoldoff`),
+      `loop()` keeps returning and the watchdog keeps being kicked — so the court stays lit
+      to its own deadline and `!PING` is still answered. The LCD freezes on its last
+      message; on removing the short it must resume rendering **legibly** within a
+      handful of writes (the driver re-syncs the controller before the first write after a
+      hold-off run — that is the check for garbled characters). A reset here is a fault.
+- [ ] **(b) The watchdog itself, and the bootloader behind it.** This needs the bench
+      build, because nothing in a production image can stall a pass:
+      `pio run -e court_mega_bench -t upload`. Sixty seconds after boot the firmware stops
+      returning from `loop()` on purpose. **Expected: a hardware reset within 2 s, and the
+      box back with every relay open** (`ArduinoRelay::begin` drives the released level
+      before `pinMode`). Light a court first, so "relays open" is observable. Do it once
+      with the ESP plugged in and once without.
+      A board that stays dark or loops on reset has a bootloader that does not survive a
+      WDT reset (older Mega2560 stk500v2 bootloaders); that is a bootloader replacement, not
+      a firmware fix, and it is out of software's reach.
+- [ ] **Reflash `-e court_mega` before the box goes to site.** `court_mega_bench` is a bench
+      environment and nothing else; a club box running it dies sixty seconds after every
+      power-up.
+
+**If skipped:** the rail faults go undetected and boards reset at random. The ESP hangs off
+the Mega's onboard regulators, so a sagging rail resets **it** too, and the OTA boot guard
+— which lives on the ESP — reads three unproven boots as a failed firmware and condemns a
+perfectly good build: the symptom looks like a bad release and is not one. Separately, and
+with nothing to do with the boot guard, the Mega's one hard-safety property — that a stall
+ends in a reset with every contact open — goes to site unverified on every unit, because
+(b) is the only thing in the tree that exercises it.
 
 ---
 
@@ -231,8 +291,9 @@ Queued events live in RAM. They survive the WiFi going away, a router reboot and
 outage — the API now believes a scan up to 30 days old (`DeviceEventEndpoints.MaxEventAge`)
 and keeps booking codes resolvable that long, so a long outage's attendance still lands and
 reverses the sweep; they do not survive a power cut. `hal::IStore` is a key/value port for
-short identifiers (128-byte values), not blocks, and persisting events needs a
-block-oriented port.
+short identifiers (128-byte values) with no ring semantics — an `Event` is 48 bytes and
+would fit in one record, so this is unbuilt work rather than a hard limit, and the half-right
+version of it (a torn ring that replays a stale activation) charges a member twice.
 
 - [ ] Somebody accepts this, or schedules the work.
 
@@ -287,8 +348,11 @@ a multimeter on the actual box:
       upload, ESP upload, ESP USB monitor, run.
 - [ ] All firmware screens confirmed legible on the physical 20×4 glass (driven as 16×2 —
       no wrapped or orphaned half-lines).
-- [ ] A real minted membership QR fed to the physical scanner and its TX output captured:
-      terminator, whether a ~200+ character payload emits at all, where it truncates.
+- [ ] A real minted **12-character access code** QR fed to the physical scanner and its TX
+      output captured: the terminator, and that the whole code arrives intact. (This bullet
+      used to describe a ~200-character JWT payload and ask where it truncates; the system
+      has not minted those since the resolver was narrowed to booking- and member-scoped
+      codes, so the length question it was written for no longer exists.)
 - [ ] Scanner confirmed factory-set to 9600 baud on both fixed links. **Every UART in the
       box is 9600 8N1** — the Mega↔ESP link, the scanner, and the ESP's USB monitor (DIP 5
       and 6 ON) that the `!WIFI` line is typed into. The only 115200 in `platformio.ini`
@@ -296,8 +360,9 @@ a multimeter on the actual box:
       service, and the Mega has no monitor at all (it never opens Serial0). A monitor
       opened at the wrong rate shows framing garbage that looks like a broken box and is
       not one.
-- [ ] Watchdog bench check from item 8 done with the ESP plugged in as well as unplugged:
-      SDA shorted while a court is lit, box back with relays open.
+- [ ] Item 8's check **(b)** done with the ESP plugged in as well as unplugged: the
+      `court_mega_bench` build stalled with a court lit, box back within 2 s with relays
+      open — and the production `-e court_mega` image reflashed afterwards.
 - [ ] Relay board JD-VCC jumper confirmed (which 5V feeds coil vs logic), and active-LOW
       behaviour re-confirmed end to end on all four channels.
 - [ ] Physical A/B/C/D and 15/30/45/60 buttons confirmed on pins 22/24/26/28 and

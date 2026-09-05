@@ -32,8 +32,13 @@ close the workbook mid-session and a court burned until somebody noticed.
 
 Two things stand behind that timer on the Mega itself:
 
-- **A hardware watchdog (2 s).** Enabled at the end of `setup()`, kicked once per
-  pass of `loop()` and nowhere else. Anything that stops `loop()` returning —
+- **A hardware watchdog.** Armed at **8 s at the top of `setup()`** and re-armed to
+  **2 s at the end of it**, then kicked once per pass of `loop()` and nowhere
+  else. Two periods because the init it has to survive is over a second long
+  (the LCD's own power-on sequence) while a healthy `loop()` pass is ~10 ms —
+  arming only at the end left the one path that can hang forever, the LCD's
+  synchronous I²C traffic, with nothing behind it. Anything that stops `loop()`
+  returning —
   which used to include a wedged I²C bus under the LCD — ends in a reset that
   re-runs `ArduinoRelay::begin()`, which drives every relay pin to the released
   level *before* configuring it as an output. A watchdog reset therefore lands
@@ -42,13 +47,26 @@ Two things stand behind that timer on the Mega itself:
   contribute to a WDT boot loop; whether the club's Mega2560 **bootloader**
   survives a WDT reset is a bench check (older stk500v2 bootloaders loop) and is
   on the go-live checklist.
-- **An I²C bus timeout on the LCD.** The pinned AVR core ships with `Wire`'s
-  timeout *disabled*, so one corrupted PCF8574 transaction spun forever inside a
-  paint. `LcdDisplay::begin()` now arms `Wire.setWireTimeout(25 ms, reset)`;
-  a timeout abandons the rest of that write, skips the next 20 writes
-  (`courtlogic::DisplayHoldoff`, host-tested), then tries the panel again. A dead
-  display costs one bounded stall per holdoff; the relay timer never waits on
-  the glass.
+- **An I²C bus timeout on the LCD, and a bounded re-sync behind it.** The pinned
+  AVR core ships with `Wire`'s timeout *disabled*, so one corrupted PCF8574
+  transaction spun forever inside a paint. `LcdDisplay::begin()` brings the bus
+  up and arms `Wire.setWireTimeout(25 ms, reset)` **before** it touches the
+  panel — the library's own `init()` is over a second of synchronous traffic and
+  used to run with the timeout still off. A timeout then abandons the rest of
+  that write, skips the next 20 writes (`courtlogic::DisplayHoldoff`,
+  host-tested), and the first write allowed after that **re-synchronises the
+  controller** before it paints: up to nine bit-banged SCL clocks and a STOP
+  while SDA reads low, `Wire.begin()` again, then the 4-bit reset sequence at the
+  datasheet's ~10 ms rather than the library's 1.05 s of power-on waits.
+  That last step is not decoration. **The timeout bounds the stall; it does not
+  recover the display.** An abandoned write can take an En edge with it, and the
+  HD44780 then pairs every later nibble wrongly — without the re-sync, one coil
+  transient at 18:05 leaves every screen for the rest of the evening as garbage
+  on a bus that is now perfectly healthy. The relay timer never waits on the
+  glass either way.
+  Still out of software's reach and on the go-live checklist: whether a PCF8574
+  on this backpack really does hold SDA across a Mega-only reset, and how often a
+  transient desynchronises a nibble in practice.
 
 ## Wiring
 
@@ -312,8 +330,12 @@ changing any of it:
 
 **A power cut.** The ring is in RAM. It survives the WiFi going away, a router
 reboot, a two-day outage — the box stays powered throughout — and it does not
-survive the breaker, because `hal::IStore` holds 32-byte values and an event is
-larger. Persisting them needs a block-oriented port.
+survive the breaker. This used to say the store made that impossible
+(`hal::IStore` held 32-byte values, an `Event` is 48); the cap is **128** now and
+an event would fit, so the honest statement is that persisting the ring has not
+been built, not that it cannot be. It needs a record per slot plus a durable head
+and tail, and a half-right version — a torn ring that replays a stale activation
+— charges a member twice.
 
 The cost when it happens: a court lit during an outage that ended in a power cut is
 never reported, so the sweep treats it as a no-show and refunds it less a penalty
@@ -370,15 +392,24 @@ reads as *absent* rather than as half a passphrase. Three ways in, one rule:
 
 | Path | What happens |
 |---|---|
-| **Bench / first flash** — `secrets.h` present at build | The compiled-in credential is used to join. The first time it actually joins, it is written to the store (only when it differs from what is stored, so a working box does not wear a flash cell every morning). |
+| **Bench / first flash** — `secrets.h` present, store empty | The compiled-in credential is used to join. The first time it actually joins, it is written to the store (only when it differs from what is stored, so a working box does not wear a flash cell every morning). |
 | **OTA / CI image** — no `secrets.h` | The stored credential is read at boot and used to join. Every box provisioned once at the bench works on every release after. |
-| **USB, no `secrets.h` at all** — DIP 5, 6 ON, monitor at 9600 | Type `!WIFI,<ssid>,<password>` (optionally with the v2 `*CC` XOR trailer; escape `,` `*` `%` as `%2C` `%2A` `%25`). The box stores it, paints `WIFI SAVED / JOINING...` and joins. A box with no credential anywhere shows `NO WIFI SET / !WIFI,SSID,PASS` instead of a claim code. |
+| **USB** — DIP 5, 6 ON, monitor at 9600 | Type `!WIFI,<ssid>,<password>` (optionally with the v2 `*CC` XOR trailer; escape `,` `*` `%` as `%2C` `%2A` `%25`). The box stores it and joins, and answers **in the monitor** with `[wifi] saved, joining <ssid>` then `[wifi] joined <ip>`. The `!LCD,WIFI SAVED,JOINING...*CC` frame arrives in the monitor too — the Mega is not attached in this DIP position, so that frame is what the glass *would* have shown, not proof that it did. The glass itself catches up when DIP 1 and 2 are restored: the bridge repaints its identity screen (`CLAIM CODE ...`, `CONNECTED / SCAN TO START`, or `NO WIFI SET / !WIFI,SSID,PASS`) on the first `!PONG` after the link returns, and also once at the end of `setup()`. |
 
 The `!WIFI` line rides the same UART as the Mega link; that is safe because the
 Mega only ever emits frames from its fixed verb table, none of which is `WIFI`.
-A compiled-in credential wins over a stored one, which is how a rotated
-password reaches the store: reflash once with the new `secrets.h`, or type the
-line.
+It is also what gates the plain-text acknowledgements above: prose on that UART
+would otherwise reach the Mega's frame decoder, which answers it with
+`!EVT,BADFRAME,RX`.
+
+**The store outranks a compiled-in credential.** `secrets.h` is a first-boot
+seed; once the store holds anything, that is what every boot joins with. It read
+the other way round until review 3 — and a `!WIFI` rotation on a bench-flashed
+box then survived only until the next breaker trip, which is a USB reflash of
+the whole fleet to recover. The reflash rotation path still works: a box holding
+two different credentials alternates between them every 20 s while the link is
+down (`bridgelogic::WifiJoinPlan`), and whichever one joins is the one that gets
+persisted.
 
 The API base URL moved to the same checked-record scheme (`api_base`, up to 120
 characters — the OTA URL bound). The old `api_url` record was silently capped at

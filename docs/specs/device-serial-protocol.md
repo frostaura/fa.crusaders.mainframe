@@ -49,7 +49,7 @@ guessed at: a half-understood relay command is worse than a missing one.
 |---|---|
 | `!ON,<court>,<seconds>` | Close the relay for **at most** `seconds`. Duration is **mandatory**. |
 | `!OFF,<court>` | Open the relay now. |
-| `!EXT,<court>,<seconds>` | Extend the deadline to now + `seconds`. Refused if the relay is open. The bridge emits it itself: for a lit court whose booking outlasts the relay deadline, `bridgelogic::Relight` sends `!EXT` **60 s before each cap expiry** (`kExtLeadMs`), so a two-hour booking stays lit while the ESP lives and still fails open at the next cap when it dies. |
+| `!EXT,<court>,<seconds>` | Extend the deadline to now + `seconds`. Refused with `!ERR,BADARG` if the relay is open — which the bridge reads as "that court is already dark", forgetting the extension rather than re-sending it. The bridge emits `!EXT` itself: for a lit court whose booking outlasts the relay deadline, `bridgelogic::Relight` sends one **60 s before each cap expiry** (`kExtLeadMs`), so a two-hour booking stays lit while the ESP lives and still fails open at the next cap when it dies. A lost `!EXT` is re-sent once by `bridgelogic::OnRetry`, on the same rule as a lost `!ON`. |
 | `!LCD,<line1>,<line2>` | Display. Truncated to 16 columns; the panel is physically 20×4 and driven as 16×2. |
 | `!AUTH,<seconds>` | Accept button input for this long. `0` disarms. When the bridge sends it is `bridgelogic::AuthPolicy`'s decision — see safety rule 2. |
 | `!RST` | Relays open, buttons disarmed, default screen. |
@@ -64,10 +64,10 @@ clamped light is a wrong-length game, a rejected one is a dark court.
 |---|---|
 | `!BTN,<key>` | A debounced press. `key` ∈ `A`–`D`, `1`–`4`. |
 | `!SCAN,<code>` | A complete line from the QR scanner on Serial2. |
-| `!STATE,<mask>,<remA>,<remB>,<remC>,<remD>` | Relay bitmask and per-relay seconds remaining. Sent on change and every 10s. |
+| `!STATE,<mask>,<remA>,<remB>,<remC>,<remD>` | Relay bitmask and per-relay seconds remaining. Sent on change and every 10s. **The Mega is the authority on the relay deadline and the bridge consumes both fields:** the mask reconciles held state (`bridgelogic::reconcile`), and the per-court seconds correct the deadline `bridgelogic::Relight` only *believes* it moved when it sent an `!EXT` — so an extension lost on the wire is detected within one `!STATE` and re-sent, instead of the court going dark half an hour later. |
 | `!PONG,<version>,<uptime_s>` | Answer to `!PING`. |
 | `!EVT,<name>,<detail>` | `AUTOOFF,<court>` (the Mega's own timer opened the relay), `OFF,<court>` (a commanded `!OFF` opened it — emitted on **every** commanded release, so an early release is accounted for as the time actually used rather than the time booked), `AUTHEXPIRED`, `BADFRAME,RX` (also raised for any non-`!` line on the production Mega), `OVERRUN,TX`. |
-| `!ERR,<code>` | `BADCRC`, `BADVERB`, `BADARG`, `NOCOURT`. |
+| `!ERR,<code>` | `BADCRC`, `BADVERB`, `BADARG`, `NOCOURT`. `BADCRC` — and the `!EVT` reports `OVERRUN,RX` and `BADFRAME,RX` — all mean "your last line did not decode", and the bridge re-sends the last relay-affecting frame (`!ON` or `!EXT`) once if one is inside its 1.5 s window. **`BADFRAME,RX` is the commonest of the three**, not the rarest: the production Mega refuses the legacy dialect and classifies a line by its first byte, so a glitch byte landing on an idle line ahead of an `!ON` produces `BADFRAME`, not `BADCRC`. |
 
 ## The two safety rules
 
@@ -141,10 +141,24 @@ frames from (`bridgelogic::WifiLineAssembler`, fed byte-by-byte ahead of the
 uplink decoder) for one complete `!WIFI,...` line. Values are `%`-escaped
 (`,` `*` `%` as `%2C` `%2A` `%25`) and bounded by 802.11 (SSID ≤ 32, passphrase
 ≤ 63); the `*CC` XOR trailer is optional and verified when present. A parsed
-line is written to the flash store at once and joined; the answer is on the LCD
-(`WIFI SAVED / JOINING...`, `WIFI LINE BAD`, or `WIFI NOT SAVED / STORE
-REFUSED`). This is what lets a box that was flashed with the credential-free CI
-image be given the club's WiFi without a machine holding `secrets.h`.
+line is written to the flash store at once and joined. This is what lets a box
+that was flashed with the credential-free CI image be given the club's WiFi
+without a machine holding `secrets.h`.
+
+**Where the answer appears.** In this DIP position the ESP's UART is on the USB
+socket, so the Mega — and with it the LCD — is not on the other end of it. The
+box therefore answers twice, and only one of the two is visible to the person
+typing:
+
+| What | Where it shows |
+|---|---|
+| `[wifi] saved, joining <ssid>` · `[wifi] joined <a.b.c.d>` · `[wifi] line not understood: ...` · `[wifi] not saved, ...` | **The serial monitor.** Plain text, the only prose this firmware ever writes to a UART, and emitted only after a `!WIFI` line has arrived on it — the Mega has no `WIFI` verb, so that line is the one thing that proves a human is on the other end rather than a frame decoder. |
+| `!LCD,WIFI SAVED,JOINING...*CC` (and the `WIFI LINE BAD` / `WIFI NOT SAVED` frames) | **Also the serial monitor**, as a frame — that is where an `!LCD` goes when the Mega is not attached. It is what the glass *would* have shown, and it is not evidence that the glass changed. |
+| `CLAIM CODE ...` / `CONNECTED / SCAN TO START` / `NO WIFI SET / !WIFI,SSID,PASS` | **The LCD**, only after DIP 1 and 2 are restored. The bridge repaints its identity screen on the first `!PONG` it receives from the Mega, which is the first moment the link exists again. |
+
+Reading the glass during the `!WIFI` step is what makes an installer conclude
+the credential was refused, retype it, and eventually fall back to a `secrets.h`
+reflash.
 
 ## Screens the bridge paints
 
@@ -158,7 +172,7 @@ spec is where their meaning is pinned:
 | `SLOT ENDED / SEE THE DESK` | The API activated with `granted_seconds` 0 — a rescan inside the post-slot grace window. Treated as a refusal rather than a one-second relay pulse. |
 | `TRY AGAIN / SCAN TO START` | The grant was painted but the `!ON` could not be sent (full TX ring, dead cable); the court is left dark in the bridge's books so the next `!STATE` does not synthesise a Release for a session that never started. |
 | `API URL TOO LONG / SEE THE DESK` | A discovered or provisioned API base URL is longer than `bridgelogic::kMaxApiUrlLen` (120). Refused rather than truncated — half a URL is a request to somewhere else. |
-| `NO WIFI SET / !WIFI,SSID,PASS` | No credential from any source (no `secrets.h` at build, nothing in the store). Says what to type over USB. |
+| `NO WIFI SET / !WIFI,SSID,PASS` | No credential from any source (no `secrets.h` at build, nothing in the store). Says what to type over USB. Painted once at the end of `setup()` and again on the first `!PONG` of the boot, so it appears in the **run** DIP position — including after a `!WIFI` session, where the Mega was not on the other end of the UART to receive it. |
 | `WIFI SAVED / JOINING...` | A `!WIFI` line parsed and persisted. |
 | `WIFI LINE BAD / !WIFI,SSID,PASS` | A `!WIFI` line that did not parse (bad escape, over-long value, trailer mismatch). |
 | `WIFI NOT SAVED / STORE REFUSED` | The line parsed but the flash store refused the write. |
