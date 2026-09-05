@@ -269,7 +269,7 @@ The outbound event stream + the Arduino lights integration. Specs: [`webhooks.md
   - SSRF guard: production rejects RFC1918 destinations *unless* the endpoint is registered against an internal-LAN allow-list (the lights-controller use case)
 - Endpoints: `GET/POST/PUT/DELETE /api/v1/webhooks` (player-scoped), `GET/POST/PUT/DELETE /api/v1/admin/webhooks` (tenant-wide), `POST /api/v1/webhooks/{id}/test` (sends `webhook.test`), `GET /api/v1/webhooks/{id}/deliveries`
 - Lights flow: `BookingService` emits `booking.lights_on` with `duration_seconds` derived from the booking → standard webhook delivery hits the Arduino URL
-- `peripheral.unhealthy` event from the Arduino health-poll worker
+- `peripheral.unhealthy` / `peripheral.recovered` from `PeripheralHealthWorker` *(built — but not by polling the board: the health-poll design here is historical. The box pushes a heartbeat and the worker sweeps `Device.LastSeenAt` against `offline_after_seconds`. See `docs/specs/feature-spec.md` §6a and §9.)*
 
 **Frontend deliverables:**
 - `/settings/webhooks` (player) — list, create with URL-template hints, view delivery log, "Send test" button

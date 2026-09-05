@@ -290,6 +290,11 @@ builder.Services.AddHostedService<WebhookRetryWorker>();
 builder.Services.AddHostedService<LightsCueWorker>();
 builder.Services.AddHostedService<NoShowWorker>();
 
+// §6a / §9 — notices a court box that has stopped heart-beating, alerts the club's admins and
+// emits peripheral.unhealthy / peripheral.recovered. The outage rows it writes are also what
+// lets the no-show sweep waive a penalty nobody could have avoided.
+builder.Services.AddHostedService<PeripheralHealthWorker>();
+
 // Phase 8.8 — retention worker (nightly anonymisation of records older than retention_years)
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.RetentionWorker>();
 

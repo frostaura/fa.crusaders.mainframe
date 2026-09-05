@@ -190,6 +190,16 @@ public class BookingTests
                 Assert.False(slot.Hour is >= 16 and < 19,
                     $"slot at {slot:HH:mm} lands in peak (from {hour:00}:00, +{ahead}h)");
                 Assert.True(slot > midnight.AddHours(hour), "a bookable slot must be in the future");
+
+                // The same trap from the other end of the day, and the reason this loop
+                // exists rather than one spot check. CheckOperatingHoursRule measures a
+                // booking's END against the local day it STARTS on, so a slot at 23:50 ends
+                // at minute 1445 of a 1440-minute day and is refused OutOfHours — even by
+                // the fixture's 00:00-24:00 club. `now.AddHours(2)` landed there for about
+                // fifteen minutes of every evening, and the failure surfaced as an
+                // OutOfHours cast error inside a test about ledger wording.
+                Assert.False(slot.Hour >= 22 || slot.Hour < 8,
+                    $"slot at {slot:HH:mm} cannot run to its end inside the club's day (from {hour:00}:00, +{ahead}h)");
             }
         }
     }

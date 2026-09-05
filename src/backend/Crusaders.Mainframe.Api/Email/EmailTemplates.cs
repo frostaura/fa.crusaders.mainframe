@@ -25,6 +25,20 @@ public sealed record BookingConfirmationDetails(
     int PenaltyWindowMinutes,
     decimal PenaltyPct);
 
+/// <summary>
+/// Everything the two peripheral alerts state, as named members — the same shape, and the same
+/// reason, as <see cref="BookingConfirmationDetails"/>: seven loose parameters is past the
+/// complexity gate's six, and a named member cannot be passed in the wrong position.
+/// </summary>
+/// <param name="Minutes">Silent-for, on the alert; outage length, on the all-clear.</param>
+public sealed record PeripheralAlert(
+    string DeviceName,
+    string DeviceCode,
+    IReadOnlyList<int> CourtNumbers,
+    int Minutes,
+    string ClubName,
+    string ConsoleUrl);
+
 public static class EmailTemplates
 {
     /// <summary>
@@ -339,4 +353,95 @@ public static class EmailTemplates
               {FooterHtml}
             </div>
             """);
+
+    /// <summary>
+    /// The club's admins, told a court box has gone quiet — <c>feature-spec.md</c> §6a's
+    /// "admin gets a high-priority alert".
+    ///
+    /// <para>
+    /// It names the courts rather than only the box, because that is what the admin has to
+    /// decide about: a dark box on courts 1 and 2 means two courts nobody can light, and the
+    /// desk needs to know which two before it can put a sign on a door.
+    /// </para>
+    /// </summary>
+    public static EmailMessage AdminPeripheralUnhealthy(string to, PeripheralAlert alert) => new(
+        To: to,
+        Subject: $"Court box not reporting — {alert.DeviceCode}",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">A court box has stopped reporting</h2>
+              <p><strong>{System.Net.WebUtility.HtmlEncode(alert.DeviceName)}</strong> at {System.Net.WebUtility.HtmlEncode(alert.ClubName)} last called home {alert.Minutes} minutes ago.</p>
+              <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
+                <tr><td style="padding:4px 16px 4px 0;color:#64748B">Box</td><td style="padding:4px 0"><strong>{System.Net.WebUtility.HtmlEncode(alert.DeviceCode)}</strong></td></tr>
+                <tr><td style="padding:4px 16px 4px 0;color:#64748B">Courts</td><td style="padding:4px 0">{Courts(alert.CourtNumbers)}</td></tr>
+                <tr><td style="padding:4px 16px 4px 0;color:#64748B">Silent for</td><td style="padding:4px 0">{alert.Minutes} minutes</td></tr>
+              </table>
+              <p>Check its power and its WiFi. While it is dark, members on those courts cannot check in — bookings that pass their grace window are refunded in full with <strong>no no-show penalty</strong>, and the members are told why.</p>
+              <p style="margin:24px 0">
+                <a href="{alert.ConsoleUrl}"
+                   style="display:inline-block;background:#B91C1C;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+                  Open the Devices page
+                </a>
+              </p>
+              <p style="font-size:12px;color:#94A3B8">Or paste this into your browser: {alert.ConsoleUrl}</p>
+            </div>
+            """,
+        HighPriority: true);
+
+    /// <summary>The all-clear, so an admin who was sent to a cupboard knows to stop looking.</summary>
+    public static EmailMessage AdminPeripheralRecovered(string to, PeripheralAlert alert) => new(
+        To: to,
+        Subject: $"Court box back online — {alert.DeviceCode}",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">The court box is reporting again</h2>
+              <p><strong>{System.Net.WebUtility.HtmlEncode(alert.DeviceName)}</strong> ({System.Net.WebUtility.HtmlEncode(alert.DeviceCode)}) at {System.Net.WebUtility.HtmlEncode(alert.ClubName)} is back after {alert.Minutes} minutes.</p>
+              <p style="font-size:13px;color:#475569">Anything the box recorded while it was offline uploads on its next few calls, so a member who did play during the outage still settles as attended.</p>
+              <p style="margin:24px 0">
+                <a href="{alert.ConsoleUrl}"
+                   style="display:inline-block;background:#0369A1;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+                  Open the Devices page
+                </a>
+              </p>
+            </div>
+            """);
+
+    /// <summary>
+    /// What a member is told when their booking was swept while the court's own box was
+    /// unreachable — <c>feature-spec.md</c> §6a, <c>settlement-model.md</c> S5a.
+    ///
+    /// <para>
+    /// A distinct template rather than the no-show notice with a softer sentence. The
+    /// no-show notice says the member did not turn up and quotes a penalty; this member may
+    /// well have been standing at a dark court, and telling them they were a no-show is the
+    /// club blaming them for its own hardware.
+    /// </para>
+    /// </summary>
+    public static EmailMessage BookingRefundedForOutage(
+        string to, string courtName, decimal refundedCredits, string clubName) => new(
+        To: to,
+        Subject: $"Refunded — {courtName} was offline",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">Your booking has been refunded in full</h2>
+              <p>The court controller at {System.Net.WebUtility.HtmlEncode(clubName)} was offline during your booking on <strong>{System.Net.WebUtility.HtmlEncode(courtName)}</strong>, so the lights could not be released against your name.</p>
+              <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Refunded</td><td><strong>{Cr(refundedCredits)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Penalty</td><td><strong>None</strong></td></tr>
+              </table>
+              <p style="font-size:13px;color:#475569">You have not been marked down for missing it, and nothing has been deducted. If you did get onto the court, the box uploads its record when it reconnects and the booking settles as attended — the refund is reversed and you are charged the original price, with no penalty either way.</p>
+              {FooterHtml}
+            </div>
+            """);
+
+    /// <summary>Court numbers, for a sentence. "court 3" reads better than "[3]".</summary>
+    private static string Courts(IReadOnlyList<int> courtNumbers)
+    {
+        if (courtNumbers.Count == 0) return "none recorded";
+        var numbers = string.Join(", ", courtNumbers);
+        return (courtNumbers.Count == 1 ? "court " : "courts ") + numbers;
+    }
 }

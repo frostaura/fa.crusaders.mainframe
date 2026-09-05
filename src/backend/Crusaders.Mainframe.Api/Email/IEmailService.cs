@@ -26,4 +26,12 @@ public sealed record EmailMessage(
     /// attachment, and a member had nothing to forward to a treasurer or keep against a
     /// disputed charge.
     /// </summary>
-    IReadOnlyList<EmailAttachment>? Attachments = null);
+    IReadOnlyList<EmailAttachment>? Attachments = null,
+    /// <summary>
+    /// True for a message a club must act on now — today, only the peripheral alert
+    /// (<c>feature-spec.md</c> §6a's "admin gets a high-priority alert"). The transport turns
+    /// it into a real <c>X-Priority: 1</c> / <c>Importance: high</c> mail rather than an
+    /// urgent-sounding subject line, because a mail client sorts on the header and a member
+    /// of staff sorts on what their client shows them.
+    /// </summary>
+    bool HighPriority = false);
