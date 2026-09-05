@@ -379,17 +379,20 @@ public sealed class BookingService
         await payerLock.CommitAsync(ct);
 
         var user = await _db.Users.FirstAsync(u => u.Id == userId, ct);
+        var startsAtLocal = TimeZoneInfo
+            .ConvertTimeFromUtc(booking.StartsAt.UtcDateTime, ResolveTz(settings.Timezone))
+            .ToString("ddd dd MMM HH:mm");
         // Build the message in the request scope; dispatch in the background so SMTP latency
         // (Mailhog/EHLO can take seconds) does not block the booking response.
-        var confirmationMsg = EmailTemplates.BookingConfirmation(
-            user.Email, court.Name,
-            TimeZoneInfo.ConvertTimeFromUtc(booking.StartsAt.UtcDateTime, ResolveTz(settings.Timezone)).ToString("ddd dd MMM HH:mm"),
-            spec.DurationLabel,
-            // Credits, not rand — the template printed a rand sign over both of these.
-            // The penalty policy travels with them for the same reason: it was hardcoded
-            // "15 minutes / 30%" and went on saying so after an admin moved the club.
+        // Credits, not rand — the template printed a rand sign over both of these. The penalty
+        // policy travels with them for the same reason: it was hardcoded "15 minutes / 30%" and
+        // went on saying so after an admin moved the club.
+        var details = new Email.BookingConfirmationDetails(
+            court.Name, startsAtLocal, spec.DurationLabel,
             spec.TotalCost, balance,
             settings.PenaltyWindowMinutes, settings.PenaltyPct);
+        var confirmationMsg = EmailTemplates.BookingConfirmation(
+            user.Email, details, await BuildReceiptAsync(booking, details, userId, ct));
         SendEmailInBackground(confirmationMsg, $"booking confirmation for {booking.Id}");
 
         await _bus.EmitAsync(new DomainEvent(
@@ -1901,6 +1904,52 @@ public sealed class BookingService
     {
         try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
         catch { return TimeZoneInfo.Utc; }
+    }
+
+    /// <summary>
+    /// The receipt PDF that rides on the booking confirmation, per spec §11.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Never throws. A receipt that could not be built — a member row that has moved, a tenant
+    /// display name that is not there — must not turn a completed, charged booking into a failed
+    /// request, and must not cost the member the confirmation email either. The booking is
+    /// already committed by the time this runs; the worst outcome available here is a
+    /// confirmation with nothing attached, and that is strictly better than the alternatives.
+    /// </para>
+    /// <para>
+    /// The reference on the receipt is the booking id, because that is the identifier a member
+    /// can be asked for and the one the ledger row already carries — a receipt whose number
+    /// matches nothing in the ledger cannot settle the dispute it exists for.
+    /// </para>
+    /// </remarks>
+    private async Task<Email.EmailAttachment?> BuildReceiptAsync(
+        Domain.Booking booking, Email.BookingConfirmationDetails details, Guid userId, CancellationToken ct)
+    {
+        try
+        {
+            var membership = await _db.Memberships.FirstOrDefaultAsync(m => m.UserId == userId, ct);
+            var tenant = await _db.Tenants.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(t => t.Id == _tenant.TenantId, ct);
+
+            var pdf = Email.ReceiptPdf.ForBooking(
+                clubName: tenant?.DisplayName ?? "Crusaders Mainframe",
+                memberName: membership?.FullName ?? "Member",
+                bookingReference: booking.Id.ToString(),
+                courtName: details.CourtName,
+                startsAtLocal: details.StartsAtLocal,
+                duration: details.Duration,
+                amountCredits: details.AmountCredits,
+                balanceAfterCredits: details.BalanceAfterCredits,
+                issuedAt: DateTimeOffset.UtcNow);
+
+            return new Email.EmailAttachment($"receipt-{booking.Id:N}.pdf", "application/pdf", pdf);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not build the receipt for booking {BookingId}; sending the confirmation without it", booking.Id);
+            return null;
+        }
     }
 
     /// <summary>

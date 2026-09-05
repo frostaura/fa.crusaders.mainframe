@@ -30,10 +30,10 @@ public class MoneySurfaceTests
     [Fact]
     public void The_booking_confirmation_states_credits_and_never_rand()
     {
-        var mail = EmailTemplates.BookingConfirmation(
-            "member@test.local", "Court 3", "Wed 16 Sep 10:00", "15 min",
-            amountCredits: 50m, balanceAfterCredits: 60m,
-            penaltyWindowMinutes: 15, penaltyPct: 30m);
+        var mail = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
+            CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "15 min",
+            AmountCredits: 50m, BalanceAfterCredits: 60m,
+            PenaltyWindowMinutes: 15, PenaltyPct: 30m));
 
         Assert.Contains("50.00 credits", mail.HtmlBody);
         Assert.Contains("60.00 credits", mail.HtmlBody);
@@ -59,9 +59,9 @@ public class MoneySurfaceTests
     [Fact]
     public void The_booking_confirmation_quotes_the_tenants_penalty_policy_not_a_literal()
     {
-        var mail = EmailTemplates.BookingConfirmation(
-            "member@test.local", "Court 3", "Wed 16 Sep 10:00", "15 min",
-            50m, 60m, penaltyWindowMinutes: 30, penaltyPct: 50m);
+        var mail = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
+            "Court 3", "Wed 16 Sep 10:00", "15 min", 50m, 60m,
+            PenaltyWindowMinutes: 30, PenaltyPct: 50m));
 
         Assert.Contains("within 30 minutes", mail.HtmlBody);
         Assert.Contains("50% penalty", mail.HtmlBody);

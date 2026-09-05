@@ -50,6 +50,17 @@ public sealed class SmtpEmailService : IEmailService
                 message.HtmlBody, null, "text/html"));
         }
 
+        // Attachments last: a MailMessage's parts are disposed with the message, and building the
+        // streams after the alternate views keeps the multipart/mixed wrapper around the whole
+        // multipart/alternative body rather than around only the HTML half.
+        var streams = new List<MemoryStream>();
+        foreach (var attachment in message.Attachments ?? Array.Empty<EmailAttachment>())
+        {
+            var stream = new MemoryStream(attachment.Content);
+            streams.Add(stream);
+            mail.Attachments.Add(new Attachment(stream, attachment.FileName, attachment.ContentType));
+        }
+
         try
         {
             await smtp.SendMailAsync(mail, ct);
@@ -59,6 +70,10 @@ public sealed class SmtpEmailService : IEmailService
         {
             _logger.LogError(ex, "Failed to send email to {To} subject='{Subject}'", message.To, message.Subject);
             throw;
+        }
+        finally
+        {
+            foreach (var stream in streams) await stream.DisposeAsync();
         }
     }
 }
