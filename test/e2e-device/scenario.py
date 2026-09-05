@@ -344,6 +344,57 @@ def selftest_device_contract() -> None:
         raise StepFailed("no corpus request vector carries a `mac` in its body")
 
 
+def selftest_serial_codec() -> None:
+    """Pin this script's serial codec to the shared corpus, byte for byte.
+
+    The corpus's `encode` vectors carry the exact bytes the firmware puts on the
+    wire, checksums included, produced independently of `Codec.cpp`. Framing a
+    corpus case here and comparing bytes therefore checks BOTH halves of the
+    codec — the escaping and `xor_checksum` — against the same authority the C++
+    tests read, rather than against this script's own opinion of itself.
+
+    This exists because `xor_checksum` went missing (finding F12) and nothing
+    said so: it is called only from `serial_frame` / `serial_parse`, so every
+    serial step raised `NameError` several minutes into a run, after the API and
+    Postgres had been built and started. A preflight that frames one corpus case
+    fails in the first second instead.
+    """
+    cases = json.loads((ROOT / "src" / "contracts" / "device-protocol" / "serial" / "cases.json").read_text())
+    encodes = [c for c in cases.get("encode", []) if c.get("kind") == "encode_v2" and c.get("bytes")]
+    if not encodes:
+        raise StepFailed("the serial corpus carries no encode_v2 vectors to pin the codec against")
+    checked = 0
+    for case in encodes:
+        frame = case["frame"]
+        expected = case["bytes"]
+        args = list(frame.get("args", []))
+        # Some vectors encode an argument the FIRMWARE rewrites before framing
+        # (ON,D,60000 -> the 90-minute relay cap). That is the court box's rule,
+        # not the wire format's, so pin only the vectors whose arguments reach
+        # the wire verbatim. The checksum compared is still the corpus's own.
+        if "".join(args) not in expected:
+            continue
+        got = serial_frame(frame["verb"], *args).decode()
+        if got != expected:
+            raise StepFailed(
+                f"serial codec disagrees with corpus vector {case.get('id')}: "
+                f"framed {got!r}, corpus says {expected!r}")
+        parsed = serial_parse(expected)
+        if parsed is None or parsed.verb != frame["verb"] or parsed.args != args:
+            raise StepFailed(f"serial_parse could not read back corpus vector {case.get('id')}: {parsed}")
+        checked += 1
+    if checked == 0:
+        raise StepFailed("no serial corpus vector was usable to pin the codec")
+    # And a corrupted frame must be refused rather than quietly accepted, which
+    # is the only property the checksum field exists for.
+    good = encodes[0]["bytes"].rstrip("\n")
+    star = good.rfind("*")
+    corrupted = good[:star] + "*" + ("00" if good[star + 1:] != "00" else "01")
+    refused = serial_parse(corrupted)
+    if refused is None or refused.verb != "BADCRC?":
+        raise StepFailed(f"serial_parse accepted a frame whose checksum does not match: {corrupted!r}")
+
+
 # ---------------------------------------------------------------------------
 # Serial protocol: !VERB,arg,arg*CC
 # ---------------------------------------------------------------------------
@@ -355,6 +406,27 @@ def serial_escape(arg: str) -> str:
 
 def serial_unescape(arg: str) -> str:
     return arg.replace("%2C", ",").replace("%25", "%")
+
+
+def xor_checksum(body: bytes) -> str:
+    """The frame checksum, exactly as `proto::Codec` computes it.
+
+    XOR of every byte of the frame BODY — what sits between the leading `!` and
+    the `*`, escaping already applied, because the checksum covers what is on
+    the wire — rendered as two UPPERCASE hex digits. Uppercase is not cosmetic:
+    `Codec.cpp`'s `hexValue` rejects lowercase deliberately, so a lowercase
+    digit here would make every frame this harness sends a BADCRC.
+
+    This function was lost in d67f98e and nothing noticed, because it is called
+    only from `serial_frame` / `serial_parse` and every serial step therefore
+    died on `NameError` before it could assert anything — the harness that gates
+    all six image builds could not run at all. See `test_serial_codec`, which
+    pins it against the corpus.
+    """
+    cs = 0
+    for b in body:
+        cs ^= b
+    return f"{cs:02X}"
 
 
 def serial_frame(verb: str, *args: str) -> bytes:
@@ -1396,6 +1468,8 @@ def main() -> int:
     step("Preflight")
     selftest_device_contract()
     REPORT.check("C1", "this script's device request shape matches the shared corpus (bearer header + normalised mac)", True)
+    selftest_serial_codec()
+    REPORT.check("F12", "this script's serial framing and checksum match the shared corpus byte for byte, and a bad checksum is refused", True)
 
     pg = Postgres(cfg)
     db_name = "e2e_device_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(2)
