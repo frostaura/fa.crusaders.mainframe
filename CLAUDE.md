@@ -16,6 +16,11 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
   **all volatile logic lives on the ESP8266**, because the ATmega cannot be flashed over WiFi — its ESP sits
   on Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET. Everything under `lib/` except
   `arduino_hal/` and `posix_hal/` is free of Arduino headers so it compiles for the host test runner.
+  **PlatformIO is the tested build; the Arduino IDE is the deployment route.** `src/iot/arduino/` holds
+  two generated sketch folders and is never hand-edited — `make arduino-export` writes it from `lib/`,
+  `src/` and the `-D` flags in `platformio.ini`, and `make arduino-check` regenerates and fails on a diff.
+  A consequence binds the sources: the Arduino AVR core hard-codes `-std=gnu++11` and the IDE cannot
+  override it, so **anything `court_mega` links must be valid C++11 as well as C++17.**
 - **`src/contracts/device-protocol`** — the wire-protocol fixture corpus, consumed by *both* the C++ and the
   .NET tests. Neutral ground: neither side may drift from the other without a test going red.
 
@@ -57,6 +62,8 @@ make lint           # dotnet format + eslint/tsc
 make build          # lint, then build both
 make test           # unit
 make test-integration
+make arduino-export # regenerate src/iot/arduino/ from the PlatformIO sources
+make arduino-check  # regenerate and fail if the committed sketches are stale
 make up / make down / make down-reset / make clean
 ```
 

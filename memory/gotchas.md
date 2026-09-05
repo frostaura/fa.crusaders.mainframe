@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas
-description: "Money bug FIXED 2026-08-22 (credits rename done, schema deployable); .env holds real SMTP creds; three CI gates were incapable of failing; a PlatformIO coordinate is owner/name and the wrong owner hid two more build bugs behind it; the rollover grep gate keys on identifier names and has a blind spot; dotnet and pio are absent from fresh remote sessions; on the founder's Mac make install dies on python 3.9 (uv venv 3.12 fixes it) and strict_compile.sh cannot run at all (bash 3.2 + Apple clang) — hand-compile touched files, CI is the gate; a worktree under .claude/ carries the macOS hidden flag and .NET then ignores appsettings.json"
+description: "Money bug FIXED 2026-08-22 (credits rename done, schema deployable); .env holds real SMTP creds; three CI gates were incapable of failing; a PlatformIO coordinate is owner/name and the wrong owner hid two more build bugs behind it; the rollover grep gate keys on identifier names and has a blind spot; dotnet and pio are absent from fresh remote sessions; on the founder's Mac make install dies on python 3.9 (uv venv 3.12 fixes it) and strict_compile.sh cannot run at all (bash 3.2 + Apple clang) — hand-compile touched files, CI is the gate; a worktree under .claude/ carries the macOS hidden flag and .NET then ignores appsettings.json; the Arduino AVR core hard-codes -std=gnu++11 so anything court_mega links must be valid C++11 too, and src/iot/arduino/ is GENERATED — never hand-edit it"
 type: gotcha
-last_verified: 2026-09-04
+last_verified: 2026-09-05
 ---
 
 # Gotchas
@@ -71,4 +71,29 @@ tidy-up on the side.
 - **A fetch stub that matches routes by first-declared prefix is a trap.** `/api/v1/admin/devices/` is a prefix of `/api/v1/admin/devices/discovered`, so a test stubbing both got whichever came first and failed with an empty screen and no hint why. Both the vitest harness and the Playwright fixture sort by longest prefix.
 - **A mutation that does not apply looks exactly like a passing gate.** Shell escaping inside a `python3 -c` one-liner silently made an edit a no-op, so good tests appeared to prove nothing. Use a heredoc, and confirm the mutant is present (`grep MUTANT`) before believing the result.
 - **A checkout under a dot-directory on macOS boots the API with no `appsettings.json`.** Every file in a `.claude/worktrees/<agent>` worktree carries the BSD `hidden` flag (`ls -lO` shows it, inherited from `.claude/`), and .NET's `PhysicalFileProvider` runs with `ExclusionFilters.Sensitive`, which silently excludes `Hidden` files — so `dotnet Crusaders.Mainframe.Api.dll` dies on "Jwt:Secret is required" while the file sits right there, from the project dir AND from `bin/`. Found 2026-09-04 building `make test-e2e-device`; the harness gives the API a scratch content root holding byte-copies of `appsettings*.json` (a fresh write carries no flag). `chflags -R nohidden` is the other cure. Plain `dotnet test` in the main checkout is unaffected because its files were never under a dot-directory.
+- **The Arduino AVR core hard-codes `-std=gnu++11` and the IDE cannot override it.** `platform.txt`
+  puts it in `compiler.cpp.flags`; there is no sketch-level build-flag mechanism, `sketch.yaml`
+  profiles carry no build properties, and `compiler.cpp.extra_flags` is not settable from a sketch.
+  Verified on arduino:avr **1.8.6 and 1.8.8** — both. So the deployment route (`src/iot/arduino/`,
+  the generated sketches the box is actually flashed from) compiles `lib/` at C++11 while PlatformIO
+  compiles it at C++17, and **anything `court_mega` links must be valid in both**. Found 2026-09-05:
+  the ONLY thing in `lib/` that was not was `proto::verbSpecsAreInEnumOrder()`, a constexpr function
+  with a loop, now recursive with one return statement. `inline constexpr` variables are fine —
+  GCC 7.3 accepts them in C++11 mode as an extension. This is the mirror image of the
+  `build_unflags = -std=gnu++11` trap already recorded above, from the other side of the same core.
+- **`src/iot/arduino/` is generated output and three gates have to know it.** `make arduino-export`
+  writes it; `make arduino-check` regenerates and fails on `git diff` (proved to fail 2026-09-05 by
+  adding a `-D` to `platformio.ini` without re-exporting). It holds machine-rewritten copies of
+  `lib/` plus two vendored third-party libraries, so **the clang-format file list must exclude it**
+  (`':(exclude)src/iot/arduino/**'` — the Makefile does; the CI `iot` job duplicates that list
+  inline and needs the same). `strict_compile.sh`, the purity grep, the rollover grep and lizard all
+  scope to `lib/` and `src/` and are unaffected. A hand-edit in there is not flagged, it is simply
+  deleted by the next export.
+- **arduino-cli cores are pinned to match the PlatformIO platforms**: `arduino:avr@1.8.6`
+  (= framework-arduino-avr 5.2.0) and `esp8266:esp8266@3.1.2` (= framework-arduinoespressif8266
+  3.30102.0), the second needing `--additional-urls https://arduino.esp8266.com/stable/package_esp8266com_index.json`.
+  Only one version of a core can be installed at a time, so checking a second version replaces the
+  first. `court_mega` compiles **byte-identical** to `pio run` (16378 flash / 1966 RAM); the bridge
+  differs by ~20 bytes RAM and ~196 bytes flash, from the generic ESP8266 board's default lwIP/SSL
+  menu selections rather than from anything in our code.
 - **Playwright refuses a browser revision it did not pin.** A runner that already ships Chromium (`/opt/pw-browsers`) is unusable unless `executablePath` points at it; otherwise every CI run re-downloads a few hundred megabytes to get a build differing by a revision number. `PLAYWRIGHT_CHROMIUM_PATH` in `playwright.config.ts` handles it and is a no-op when unset.
