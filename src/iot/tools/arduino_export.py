@@ -597,6 +597,27 @@ def write_cli_config() -> None:
 # ---------------------------------------------------------------------------
 
 
+ICLOUD_DUPLICATE_RE = re.compile(r" \d+$")
+
+
+def strip_icloud_duplicates() -> list[Path]:
+    """Delete iCloud's fabricated `Name 2.h` / `Name 3.cpp` copies from the export.
+
+    This tree lives on an iCloud Drive path, and iCloud invents numbered
+    duplicates of files it has just seen written — the repo has already been
+    bitten by them under bin/ and obj/. Here they are worse than noise: they sit
+    inside a sketch's src/, so the Arduino IDE COMPILES them, and 27 of them
+    were committed once before this swept them (2026-09-05). The export owns
+    this directory outright, so removing them is unambiguous.
+    """
+    removed = []
+    for path in sorted(OUT.rglob("*")):
+        if path.is_file() and ICLOUD_DUPLICATE_RE.search(path.stem):
+            path.unlink()
+            removed.append(path)
+    return removed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.parse_args()
@@ -615,6 +636,9 @@ def main() -> int:
     results = [export_target(t, ini, ns_map) for t in TARGETS]
     (OUT / "README.md").write_text(render_readme(results), encoding="utf-8")
     write_cli_config()
+
+    for path in strip_icloud_duplicates():
+        print(f"removed iCloud duplicate: {path.relative_to(OUT)}")
 
     for r in results:
         print(

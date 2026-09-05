@@ -108,6 +108,14 @@ src/iot/**/*.bin
 src/iot/**/*.elf
 src/iot/**/*.hex
 
+# iCloud's fabricated numbered duplicates inside the generated Arduino sketches.
+# This checkout is on an iCloud Drive path and iCloud invents `Name 2.h` /
+# `Name 3.cpp` copies of files it has just seen written. Inside a sketch's src/
+# the Arduino IDE COMPILES them, and 27 of them were committed once before this
+# rule existed. `make arduino-export` also deletes them; belt and braces.
+src/iot/arduino/**/* [0-9].*
+src/iot/arduino/**/* [0-9]
+
 # Firmware secrets — a filled-in secrets.h was previously committable.
 # Two copies exist by design and both are covered by this one rule:
 #   src/iot/src/common/secrets.h                    the PlatformIO build's
