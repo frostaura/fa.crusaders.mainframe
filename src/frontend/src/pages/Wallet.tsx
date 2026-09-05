@@ -82,7 +82,7 @@ export default function WalletPage() {
         {rows.length === 0 ? (
           <p className="px-4 sm:px-6 pb-4 text-sm text-text-secondary">No movements yet. Top up or wait for an admin credit.</p>
         ) : (
-          <LedgerTable rows={rows} fill />
+          <LedgerTable rows={rows} fill label="Wallet ledger" />
         )}
         {shown < total && (
           <div className="px-4 sm:px-6 py-3 shrink-0 border-t border-border">
