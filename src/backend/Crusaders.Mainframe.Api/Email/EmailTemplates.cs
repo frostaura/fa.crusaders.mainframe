@@ -245,6 +245,27 @@ public static class EmailTemplates
     /// attachment rather than a failed send.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The one sentence a member needs when the club desk has booked for them under
+    /// <c>feature-spec.md</c> §8's override and their balance is now below zero.
+    ///
+    /// <para>
+    /// Without it the confirmation states "Balance after: −40,00 credits" and nothing
+    /// else — a negative number with no account of itself, on the artifact a member
+    /// reconciles against. The club took the booking deliberately and the member is owed
+    /// the reason, not just the figure. Empty on every ordinary booking, so nothing that
+    /// is not an overdraft acquires an explanation for one.
+    /// </para>
+    /// </summary>
+    private static string OverdrawnNoticeHtml(decimal balanceAfterCredits) =>
+        balanceAfterCredits >= 0 ? "" : $"""
+            <p style="margin-top:16px;font-size:13px;color:#B91C1C">
+              This booking was made for you at the club and takes your balance to
+              <strong>{Cr(balanceAfterCredits)}</strong>. Top up to clear it — the amount owing comes
+              off your next top-up.
+            </p>
+            """;
+
     public static EmailMessage BookingConfirmation(
         string to, BookingConfirmationDetails d, EmailAttachment? receipt = null) => new(
         To: to,
@@ -260,6 +281,7 @@ public static class EmailTemplates
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Charged</td><td><strong>{Cr(d.AmountCredits)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(d.BalanceAfterCredits)}</strong></td></tr>
               </table>
+              {OverdrawnNoticeHtml(d.BalanceAfterCredits)}
               <p style="margin-top:16px;font-size:13px;color:#A16207">
                 Heads-up: cancelling within {d.PenaltyWindowMinutes} minutes of the start, or not turning the lights on, incurs a {Num(d.PenaltyPct)}% penalty.
               </p>

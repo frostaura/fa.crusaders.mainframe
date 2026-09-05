@@ -42,8 +42,22 @@ public sealed class BookingService
         IEmailService email, IEventBus bus, AccessCodeService codes, ILogger<BookingService> logger)
     { _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus; _codes = codes; _logger = logger; }
 
-    public async Task<BookingResult> CreateAsync(Guid courtId, Guid userId, Guid actorId, DateTimeOffset startsAt, int sliceCount, CancellationToken ct)
+    /// <summary>
+    /// A booking nobody is overriding anything for — the member's own, or an admin's
+    /// on-behalf booking that the member can afford. Delegates to the overload below.
+    /// </summary>
+    public Task<BookingResult> CreateAsync(Guid courtId, Guid userId, Guid actorId, DateTimeOffset startsAt, int sliceCount, CancellationToken ct)
+        => CreateAsync(courtId, new BookingPayer(userId, actorId), startsAt, sliceCount, ct);
+
+    /// <summary>
+    /// <paramref name="payer"/> carries who is charged, who is doing it, and whether the
+    /// desk has explicitly authorised an overdraft (<c>feature-spec.md</c> §8). It is a
+    /// parameter object rather than a seventh argument because the complexity gate caps
+    /// signatures at six — and because the three travel together everywhere they are read.
+    /// </summary>
+    public async Task<BookingResult> CreateAsync(Guid courtId, BookingPayer payer, DateTimeOffset startsAt, int sliceCount, CancellationToken ct)
     {
+        var (userId, actorId) = (payer.UserId, payer.ActorId);
         // Bounds before arithmetic, because the arithmetic is signed.
         //
         // sliceCount arrives straight off the request body and was never checked. A negative
@@ -101,8 +115,33 @@ public sealed class BookingService
 
         var pricePerSlice = court.SlicePriceCredits;      // Now in credits per blueprint A.8/A.9.
         var totalCost = pricePerSlice * sliceCount;
+
+        // §8's third admin action: "Book on behalf of any member (charges that member's
+        // credit; if insufficient, admin can override and create a negative balance,
+        // logged)."
+        //
+        // The override is DELIBERATE and NARROW, and both halves matter.
+        //
+        // Deliberate: it is never implied by being an admin. The desk gets the ordinary
+        // 402 first, with the member's balance and the price in it, and has to come back
+        // asking for the overdraft by name. An admin who mis-picks a member from a
+        // dropdown must not silently put a stranger 50 credits in the red.
+        //
+        // Narrow: `isAdminActor` is `actorId != userId`, so it is true only when somebody
+        // is acting FOR somebody else — and the flag only reaches here from the
+        // admin-only route group. An admin cannot overdraw their own wallet with it, and
+        // a member's own POST carries no such field to set. The rule lives here, next to
+        // the check it lifts, rather than in the endpoint that happens to pass it.
+        //
+        // Nothing else about the booking changes: the debit is the same BookingCharge for
+        // the same price, so `Owed(b) = P` and settlement-model.md I1 is untouched. What
+        // moves is the WALLET, which is a sum over the ledger and has never been
+        // constrained to be non-negative — DeviceEventHttpTests already covers a member
+        // going negative when a release correction lands on spent credit.
+        var overdraftAuthorised = payer.AllowNegativeBalance && isAdminActor;
+
         var balance = await _ledger.GetBalanceAsync(userId, ct);
-        if (balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
+        if (!overdraftAuthorised && balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
 
         var booking = new Booking
         {
@@ -128,7 +167,8 @@ public sealed class BookingService
             Settings: settings,
             TotalCost: totalCost,
             DurationLabel: $"{settings.SliceMinutes * sliceCount} min",
-            IsWalkUp: false), ct);
+            IsWalkUp: false,
+            AllowNegativeBalance: overdraftAuthorised), ct);
     }
 
     /// <summary>
@@ -272,10 +312,18 @@ public sealed class BookingService
     /// point of a walk-up being a real booking is that there is one money path, not two.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// <c>AllowNegativeBalance</c> is the desk's explicit §8 overdraft authorisation, already
+    /// checked against "the actor is not the payer" by the caller. It travels on the spec
+    /// rather than being re-derived here because <see cref="CommitAsync"/> must lift the
+    /// same guard the caller lifted, under the lock, or the two disagree at the one moment
+    /// that decides whether money moves.
+    /// </summary>
     private sealed record NewBooking(
         Booking Row, Court Court, TenantSettingsView Settings,
         decimal TotalCost, string DurationLabel, bool IsWalkUp,
-        string? ExternalReference = null);
+        string? ExternalReference = null,
+        bool AllowNegativeBalance = false);
 
     private async Task<BookingResult> CommitAsync(NewBooking spec, CancellationToken ct)
     {
@@ -298,7 +346,14 @@ public sealed class BookingService
         await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, userId, ct);
 
         var openingBalance = await _ledger.GetBalanceAsync(userId, ct);
-        if (openingBalance < spec.TotalCost)
+
+        // Read under the lock, so this is the answer and not a guess: nothing else can move
+        // this payer's balance between here and the debit below, which makes
+        // `openingBalance − TotalCost` exactly the balance the booking leaves behind. It is
+        // negative precisely when the payer could not cover the court, which is what "the
+        // desk overdrew this member" means and what the audit row records.
+        var overdrawn = openingBalance < spec.TotalCost;
+        if (overdrawn && !spec.AllowNegativeBalance)
         {
             // Detached, not left tracked: the row was built optimistically and this request
             // is over. Leaving it attached would have the next SaveChanges on this context
@@ -383,7 +438,12 @@ public sealed class BookingService
             TenantId = _tenant.TenantId,
             ActorUserId = actorId,
             SubjectUserId = userId,
-            Action = AuditActionFor(spec, actorId, userId),
+            Action = AuditActionFor(spec, actorId, userId, overdrawn),
+            // ActorUserId / SubjectUserId above are already the {admin, member} pair the
+            // repo's "admins act on behalf of users" invariant asks for. The two balance
+            // figures are what §8's "logged" needs on top of that: the overdraft is only
+            // reviewable if the row says how deep it went, and re-deriving it later from
+            // the ledger means replaying every row that has landed since.
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
             {
                 booking_id = booking.Id,
@@ -392,6 +452,9 @@ public sealed class BookingService
                 slice_count = booking.SliceCount,
                 minutes = booking.SliceMinutes * booking.SliceCount,
                 amount_credits = spec.TotalCost,
+                balance_before_credits = openingBalance,
+                balance_after_credits = openingBalance - spec.TotalCost,
+                overdrawn,
             }),
         });
 
@@ -469,10 +532,17 @@ public sealed class BookingService
         }
     }
 
-    private static string AuditActionFor(NewBooking spec, Guid actorId, Guid userId)
+    /// <summary>
+    /// The action name is the OUTCOME, not the request. An admin who ticks the §8 override
+    /// for a member who turns out to be able to afford the court has done an ordinary
+    /// on-behalf booking and the trail should say so; <c>overdrawn</c> is true only when the
+    /// balance the booking leaves behind is actually below zero.
+    /// </summary>
+    private static string AuditActionFor(NewBooking spec, Guid actorId, Guid userId, bool overdrawn)
     {
         if (spec.IsWalkUp) return "booking.walk_up_created";
-        return actorId == userId ? "booking.created" : "booking.created_on_behalf";
+        if (actorId == userId) return "booking.created";
+        return overdrawn ? "booking.created_on_behalf_overdrawn" : "booking.created_on_behalf";
     }
 
     /// <summary>
@@ -2120,6 +2190,24 @@ public sealed class BookingService
         });
     }
 }
+
+/// <summary>
+/// Who a booking is charged to, who is making it, and whether the desk has explicitly
+/// authorised pushing that member below zero.
+/// </summary>
+/// <param name="UserId">The member whose credit pays and whose booking it is.</param>
+/// <param name="ActorId">
+/// Who pressed the button. Equal to <paramref name="UserId"/> for a member's own booking;
+/// the admin's id when the club desk is acting for somebody. The difference is what
+/// <c>BookingService</c> reads as "this is an on-behalf booking".
+/// </param>
+/// <param name="AllowNegativeBalance">
+/// <c>feature-spec.md</c> §8's admin override, asked for by name. It is honoured only when
+/// <paramref name="ActorId"/> differs from <paramref name="UserId"/>, so it can never
+/// overdraw the actor's own wallet, and it defaults to <c>false</c> so no existing caller
+/// acquires it by accident.
+/// </param>
+public readonly record struct BookingPayer(Guid UserId, Guid ActorId, bool AllowNegativeBalance = false);
 
 public abstract record BookingResult
 {

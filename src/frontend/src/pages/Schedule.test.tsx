@@ -474,4 +474,163 @@ describe("Schedule", () => {
 
     expect(cellLookups.count).toBe(before);
   });
+
+  // ---- §8: "if insufficient, admin can override and create a negative balance, logged" ----
+
+  const THEM = "55555555-5555-5555-5555-555555555555";
+  const OTHER = "66666666-6666-6666-6666-666666666666";
+
+  /**
+   * A desk signed in as admin, looking at a free day, with one member on file who is
+   * short. `postStatus` and `postBody` drive what the admin booking endpoint answers,
+   * per attempt — the whole interaction is refuse-then-override, so a stub with one
+   * answer cannot express it.
+   */
+  function adminAtTheDesk(postStatus: number | number[], postBody: unknown, postSequence?: unknown[]) {
+    const whoami = signIn({ isAdmin: true });
+    return stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      // Zero, which is the ordinary state of a club desk account: it never plays.
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+      { path: "/api/v1/admin/members/", body: [
+        { user_id: THEM, full_name: "Naledi Khumalo" },
+        { user_id: OTHER, full_name: "Liam O'Connor" },
+      ] },
+      { path: "/api/v1/schedule", body: DAY },
+      { method: "POST", path: "/api/v1/admin/bookings/", status: postStatus, body: postBody, sequence: postSequence },
+    ]);
+  }
+
+  const SHORT = { error: "insufficient_balance", current_credits: 10, required_credits: 50 };
+
+  /** Opens the confirmation and switches it to "on behalf of Naledi". */
+  async function chooseMember() {
+    await openBookingModal();
+    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
+    fireEvent.change(screen.getByLabelText("Member"), { target: { value: THEM } });
+  }
+
+  it("tells the admin what the member is short by, instead of a toast about the admin's own wallet", async () => {
+    adminAtTheDesk(402, SHORT);
+    renderPage(<SchedulePage />);
+    await chooseMember();
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+
+    // The refusal used to leave as "Not enough credits — top up your wallet and try
+    // again.", shown to a desk account whose wallet has nothing to do with it, and the
+    // modal closed on the member's name. Now the modal stays open and states the case.
+    const dialog = await screen.findByRole("dialog", { name: "Confirm booking" });
+    expect(dialog).toHaveTextContent("Naledi Khumalo doesn't have enough credit");
+    expect(dialog).toHaveTextContent("10.00 cr");
+    expect(dialog).toHaveTextContent("50.00 cr");
+    expect(dialog).toHaveTextContent("-40.00 cr");
+    expect(screen.queryByText(/top up your wallet/i)).not.toBeInTheDocument();
+  });
+
+  it("does not overdraw anybody until the admin asks for it a second time", async () => {
+    const fetchStub = adminAtTheDesk(402, SHORT);
+    renderPage(<SchedulePage />);
+    await chooseMember();
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    await screen.findByRole("button", { name: "Book anyway — leaves -40.00 cr" });
+
+    // The first attempt is an ORDINARY booking. An override that rode along with it
+    // would make §8's "admin can override" mean "admins are never refused", which is a
+    // different and much worse promise.
+    const posts = fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/");
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({ allowNegativeBalance: false });
+  });
+
+  it("sends the override on the second press, and says what it left the member owing", async () => {
+    // `sequence` and `status` are indexed together: the refusal, then the booking, with
+    // the MEMBER's balance in the answer.
+    const fetchStub = adminAtTheDesk([402, 200], SHORT, [
+      SHORT,
+      { booking_id: "88888888-8888-8888-8888-888888888888", balance_after_credits: -40 },
+    ]);
+    renderPage(<SchedulePage />);
+    await chooseMember();
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Book anyway — leaves -40.00 cr" }));
+
+    await waitFor(() => {
+      const posts = fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/");
+      expect(posts).toHaveLength(2);
+      expect(posts[1].body).toMatchObject({ courtId: COURT, userId: THEM, allowNegativeBalance: true });
+    });
+
+    // The admin who has just put somebody in the red is told by how much, there and then.
+    expect(await screen.findByText(/Their balance is now -40\.00 cr/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  /** Drives the modal to the point where the override is on offer against Naledi. */
+  async function offerOnScreen() {
+    renderPage(<SchedulePage />);
+    await chooseMember();
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    await screen.findByRole("button", { name: "Book anyway — leaves -40.00 cr" });
+  }
+
+  function offerIsGone() {
+    expect(screen.queryByRole("button", { name: /Book anyway/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/doesn't have enough credit/)).not.toBeInTheDocument();
+  }
+
+  it("drops the offer when the admin picks a different member", async () => {
+    adminAtTheDesk(402, SHORT);
+    await offerOnScreen();
+
+    // Naledi's figures must never stand over somebody else's name. Switching the member
+    // is the dangerous one: the panel names a person and a shortfall, and the button
+    // states a balance — all three would be about the wrong member.
+    fireEvent.change(screen.getByLabelText("Member"), { target: { value: OTHER } });
+    offerIsGone();
+  });
+
+  it("drops the offer when the admin stops booking on a member's behalf", async () => {
+    adminAtTheDesk(402, SHORT);
+    await offerOnScreen();
+
+    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "block" } });
+    offerIsGone();
+  });
+
+  it("never tells a desk to top up its own wallet about a member's shortfall", async () => {
+    // The degenerate path: `insufficient_balance` with no figures on it, so there is
+    // nothing to offer an override against. The shared sentence for this code is "top up
+    // YOUR wallet", which is right for a member and wrong for a club desk — the short
+    // wallet is not theirs, and a desk account's balance is zero permanently.
+    adminAtTheDesk(402, { error: "insufficient_balance" });
+    renderPage(<SchedulePage />);
+    await chooseMember();
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+
+    expect(await screen.findByText(/That member doesn't have enough credit/)).toBeInTheDocument();
+    expect(screen.queryByText(/top up your wallet/i)).not.toBeInTheDocument();
+  });
+
+  it("still refuses a MEMBER booking their own slot, with no override on offer", async () => {
+    const whoami = signIn({ isAdmin: false });
+    const fetchStub = stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 10, entries: [] } },
+      { path: "/api/v1/schedule", body: DAY },
+      { method: "POST", path: "/api/v1/bookings/", status: 402, body: SHORT },
+    ]);
+    renderPage(<SchedulePage />);
+    await openBookingModal();
+
+    // The client refuses it before the request, and the sentence is the member's own —
+    // this is the wallet that really is short.
+    expect(await screen.findByText(/That's more than you have/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Book anyway/ })).not.toBeInTheDocument();
+    expect(fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/bookings/")).toHaveLength(0);
+  });
 });
