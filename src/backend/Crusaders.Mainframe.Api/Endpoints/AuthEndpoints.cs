@@ -93,6 +93,12 @@ public static class AuthEndpoints
 
         // Refresh the access token for an already-authenticated user. Caller must present a still-valid
         // JWT; we re-mint with a fresh expiry so an active session never silently expires under the user.
+        //
+        // A membership that is no longer Active comes back as `NotApproved` and falls into the 401
+        // below, deliberately: 403 would be the more descriptive status, but the browser client
+        // ends a session on 401 and merely reports a 403, so a suspended member's open tab would
+        // keep running on the token it already holds until that token expired on its own. The
+        // sentence they get is the sign-in screen's, where the reason is named properly.
         g.MapPost("/refresh", async (HttpContext ctx, AuthService auth, CancellationToken ct) =>
         {
             var sub = ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value

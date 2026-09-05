@@ -306,7 +306,120 @@ public class MemberAuthRegressionTests
         }
     }
 
+    /// <summary>
+    /// Spec §11 and §3: every successful password change emails the member — "the one signal a
+    /// member has that somebody else changed it".
+    ///
+    /// <para>
+    /// The admin-issued and self-service paths sent it and the RESET path did not, which is the
+    /// one where it matters most: a reset link that was forwarded, or read out of a mailbox
+    /// somebody else has, changes the password and, before this, told the owner nothing. The
+    /// "Reset your password" mail is not that signal — it is sent before anything happens, and
+    /// it is the mail the person holding the link has already read.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_self_service_reset_tells_the_member_their_password_changed()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var token = await IssueTokenAsync(host, host.PlayerUser.Id, TokenKind.PasswordReset, TimeSpan.FromHours(1));
+
+        using (var scope = host.NewScope())
+        {
+            Assert.True(await Auth(scope).ResetPasswordAsync(token, "ResetByMe12!", default));
+        }
+
+        Assert.Single(
+            host.EmailService.Sent,
+            m => m.To == host.PlayerUser.Email && m.Subject.Contains("password was changed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Suspension ends the session a member already has, not merely the next one.
+    ///
+    /// <para>
+    /// The app refreshes its access token on a timer for as long as a tab is open, and
+    /// <c>RefreshAsync</c> re-minted a full fifteen-minute session for anybody who asked with a
+    /// still-valid one — it loaded the user and never looked at the membership, unlike the
+    /// sign-in path right beside it. So a suspended member's open tab renewed itself
+    /// indefinitely and kept reading their wallet, their ledger and the schedule, while the
+    /// sign-in screen correctly refused them.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_suspended_member_cannot_renew_the_session_they_already_hold()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await SetMembershipStatusAsync(host, host.PlayerUser.Id, MembershipStatus.Suspended);
+
+        using var scope = host.NewScope();
+        var result = await Auth(scope).RefreshAsync(host.PlayerUser.Id, default);
+
+        var refused = Assert.IsType<LoginResult.NotApproved>(result);
+        Assert.Equal(MembershipStatus.Suspended, refused.Status);
+    }
+
+    /// <summary>The control: an active member's tab still renews, which is the whole point of refresh.</summary>
+    [Fact]
+    public async Task An_active_member_still_renews_normally()
+    {
+        await using var host = await TestHost.CreateAsync();
+
+        using var scope = host.NewScope();
+        Assert.IsType<LoginResult.Ok>(await Auth(scope).RefreshAsync(host.PlayerUser.Id, default));
+    }
+
+    /// <summary>
+    /// A decision the club has already taken outranks an unconfirmed address.
+    ///
+    /// <para>
+    /// Verification was tested first for everybody, so a rejected applicant who had never
+    /// clicked the verify link was told to go and confirm their email — and offered a resend to
+    /// do it with. Following that repair to its end verifies the address and lands on "an admin
+    /// will review your application", which had already happened and had been a refusal.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_rejected_applicant_is_told_they_were_rejected_not_asked_to_confirm_their_email()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var userId = await SeedApprovedButUnverifiedAsync(host, "rejected@test.local", "Pass1234!");
+        await SetMembershipStatusAsync(host, userId, MembershipStatus.Rejected);
+
+        using var scope = host.NewScope();
+        var result = await Auth(scope).LoginAsync("rejected@test.local", "Pass1234!", default);
+
+        var refused = Assert.IsType<LoginResult.NotApproved>(result);
+        Assert.Equal(MembershipStatus.Rejected, refused.Status);
+    }
+
+    /// <summary>
+    /// The other half of the same rule, and the reason it is not simply "status first": an
+    /// applicant who is genuinely pending still owes the club a confirmed address, so that is
+    /// what they are asked for — with the resend that repairs it.
+    /// </summary>
+    [Fact]
+    public async Task A_pending_applicant_is_still_asked_to_confirm_their_email()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var userId = await SeedApprovedButUnverifiedAsync(host, "pending@test.local", "Pass1234!");
+        await SetMembershipStatusAsync(host, userId, MembershipStatus.PendingApproval);
+
+        using var scope = host.NewScope();
+        Assert.IsType<LoginResult.EmailNotVerified>(await Auth(scope).LoginAsync("pending@test.local", "Pass1234!", default));
+    }
+
     // ---- helpers -------------------------------------------------------------------------
+
+    /// <summary>Puts a membership into the state a desk action would have left it in.</summary>
+    private static async Task SetMembershipStatusAsync(TestHost host, Guid userId, MembershipStatus status)
+    {
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var membership = await db.Memberships.IgnoreQueryFilters().FirstAsync(m => m.UserId == userId);
+        membership.Status = status;
+        await db.SaveChangesAsync();
+    }
 
     /// <summary>Writes a file where the upload endpoint would have put it, and returns both halves.</summary>
     private static (string Url, string Path) SeedPhoto(TestHost host, string fileName)
