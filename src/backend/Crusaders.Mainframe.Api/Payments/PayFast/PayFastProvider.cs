@@ -38,9 +38,29 @@ public sealed class PayFastProvider : IPaymentProvider
         "w2w.payfast.co.za",
     ];
 
-    private readonly ILogger<PayFastProvider> _logger;
+    /// <summary>
+    /// Configuration key that overrides the process URL: <c>PayFast:ProcessUrl</c>
+    /// (<c>PayFast__ProcessUrl</c> as an environment variable).
+    ///
+    /// <para>
+    /// Exists so a test stack can point the checkout at a stand-in — the mountebank
+    /// imposter, a staging proxy — instead of at PayFast itself. Without it the redirect
+    /// was a hardcoded constant and the imposter could only ever be reached by POSTing to
+    /// it by hand, which meant the one leg it exists to prove was never driven by the app.
+    /// Unset in production, where the environment picks sandbox or live as before.
+    /// </para>
+    /// </summary>
+    public const string ProcessUrlConfigKey = "PayFast:ProcessUrl";
 
-    public PayFastProvider(ILogger<PayFastProvider> logger) => _logger = logger;
+    private readonly ILogger<PayFastProvider> _logger;
+    private readonly string? _processUrlOverride;
+
+    public PayFastProvider(ILogger<PayFastProvider> logger, IConfiguration? config = null)
+    {
+        _logger = logger;
+        var configured = config?[ProcessUrlConfigKey];
+        _processUrlOverride = string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
+    }
 
     public string ProviderName => "PayFast";
 
@@ -82,7 +102,7 @@ public sealed class PayFastProvider : IPaymentProvider
         return Task.FromResult(new RegisterCheckoutResult(
             Ok: true,
             CheckoutId: req.MerchantTransactionId,
-            RedirectUrl: ProcessUrlFor(req.Creds.Environment),
+            RedirectUrl: _processUrlOverride ?? ProcessUrlFor(req.Creds.Environment),
             FailureReason: null)
         {
             FormFields = formFields,

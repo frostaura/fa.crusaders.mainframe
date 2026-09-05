@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
-import { formatCredits } from "../lib/utils";
+import { formatCredits, formatSignedCredits } from "../lib/utils";
 import { Card } from "../components/Card";
 import { Input, Label } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
@@ -24,13 +24,22 @@ export default function AdminLedgerPage() {
     setLoading(true);
     try {
       const r = await endpoints.adminLedger({
-        from: `${from}T00:00:00Z`,
-        to: `${to}T23:59:59Z`,
+        // An empty date input means UNBOUNDED, not the malformed "T00:00:00Z" this used
+        // to send. That produced a 400, a "Couldn't load ledger." toast, and the table and
+        // all four totals left showing the PREVIOUS result — so a cleared filter looked
+        // like one that had applied and found the same 52 rows.
+        from: from ? `${from}T00:00:00Z` : undefined,
+        to: to ? `${to}T23:59:59Z` : undefined,
         type: type || undefined,
         limit: 1000,
       });
       setRows(r);
-    } catch { toast.push({ tone: "danger", text: "Couldn't load ledger." }); }
+    } catch {
+      // And the stale rows go with it. Showing the last successful answer under a failed
+      // filter is worse than showing nothing, because nothing on screen says it is stale.
+      setRows(null);
+      toast.push({ tone: "danger", text: "Couldn't load those movements — check the dates and try again." });
+    }
     finally { setLoading(false); }
   };
 
@@ -102,7 +111,7 @@ export default function AdminLedgerPage() {
           <Stat label="Movements" value={String(totals.count)} />
           <Stat label="Credits" value={`+${formatCredits(totals.credits)}`} tone="success" />
           <Stat label="Debits" value={`−${formatCredits(totals.debits)}`} tone="warning" />
-          <Stat label="Net" value={`${totals.net >= 0 ? "+" : "−"}${formatCredits(Math.abs(totals.net))}`} tone={totals.net >= 0 ? "success" : "warning"} />
+          <Stat label="Net" value={formatSignedCredits(totals.net)} tone={totals.net >= 0 ? "success" : "warning"} />
         </div>
         <LedgerTable rows={filtered} emptyText={loading ? "Loading…" : "No movements match these filters."} fill />
       </Card>

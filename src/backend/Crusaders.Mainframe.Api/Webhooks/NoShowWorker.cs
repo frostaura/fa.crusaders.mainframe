@@ -112,7 +112,7 @@ public sealed class NoShowWorker : BackgroundService
             postings.Add(new LedgerPosting(
                 UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountCredits: -penalty,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id,
-                Reason: $"No-show penalty ({tSettings.PenaltyPct}% of {b.AmountChargedCredits:0.00} credits)"));
+                Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Cr(b.AmountChargedCredits)})"));
         }
 
         // Status FIRST, then one save carrying it and both movements together.
