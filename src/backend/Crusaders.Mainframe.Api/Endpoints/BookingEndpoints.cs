@@ -1,5 +1,8 @@
+using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
@@ -9,9 +12,18 @@ public static class BookingEndpoints
     {
         var g = app.MapGroup("/api/v1/bookings").RequireAuthorization();
 
-        g.MapPost("/", async (CreateBookingRequest req, HttpContext ctx, BookingService svc, CancellationToken ct) =>
+        g.MapPost("/", async (CreateBookingRequest req, HttpContext ctx, BookingService svc, MainframeDbContext db, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
+
+            // A suspension revokes access, and sign-in already refuses one — but an access
+            // token minted before the suspension stays valid until it expires, and booking
+            // court time is exactly what a club suspending a member for unpaid dues is
+            // stopping. Checked here rather than inside BookingService because it is an
+            // authorization question about the caller, not a rule about the slot.
+            if (await db.Memberships.AnyAsync(m => m.UserId == userId && m.Status == MembershipStatus.Suspended, ct))
+                return Results.Json(new { error = "member_suspended" }, statusCode: 403);
+
             var result = await svc.CreateAsync(req.CourtId, userId, userId, req.StartsAt, req.SliceCount, ct);
             return result switch
             {

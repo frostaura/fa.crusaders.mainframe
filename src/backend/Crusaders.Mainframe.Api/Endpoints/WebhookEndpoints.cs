@@ -102,7 +102,23 @@ public static class WebhookEndpoints
                 .Where(d => d.EndpointId == id)
                 .OrderByDescending(d => d.CreatedAt)
                 .Take(100)
-                .Select(d => new { d.Id, d.EventType, d.Url, d.ResponseStatus, d.LatencyMs, d.Attempt, d.FinalState, d.CreatedAt, d.ResponseBodyExcerpt })
+                // Named explicitly, in snake_case, like every other admin projection here.
+                // Shorthand members (`d.Id`) take the serializer's camelCase policy instead,
+                // which is how this one endpoint came to answer `createdAt` while the typed
+                // client read `CreatedAt` — every cell on the only screen that shows whether
+                // webhooks are being delivered rendered "Invalid Date" and "undefinedms".
+                .Select(d => new
+                {
+                    id = d.Id,
+                    event_type = d.EventType,
+                    url = d.Url,
+                    response_status = d.ResponseStatus,
+                    latency_ms = d.LatencyMs,
+                    attempt = d.Attempt,
+                    final_state = d.FinalState,
+                    created_at = d.CreatedAt,
+                    response_body_excerpt = d.ResponseBodyExcerpt,
+                })
                 .ToListAsync(ct);
             return Results.Ok(rows);
         });

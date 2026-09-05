@@ -83,6 +83,31 @@ public static class AdminConfigEndpoints
             if (req.PenaltyPct is < 0 or > 100)
                 return Results.BadRequest(new { error = "penalty_pct_out_of_range" });
 
+            // The two settings that take money off a member were the only two on this PUT
+            // with no bound at all. Both were accepted at any value and both reach the box
+            // in the heartbeat config.
+            //
+            // Grace is capped at the hour the Settings field already declares: no-show
+            // detection must stay reachable inside an operating day, and a grace window of
+            // 4321 minutes (72 hours) meant `no_show_penalty` could never fire on a
+            // 06:00-22:00 club — the sweep's own lookback expires first. Late-cancel is
+            // capped at a day, also the field's own declared bound: beyond that every
+            // cancellation is inside the window, so a member cancelling a fortnight ahead
+            // paid the 30% penalty. Every other setting on this endpoint enforces exactly
+            // the range its input declares; these two now do too.
+            if (req.GraceWindowMinutes is < 0 or > 60)
+                return Results.BadRequest(new { error = "grace_window_minutes_out_of_range" });
+            if (req.PenaltyWindowMinutes is < 0 or > 1440)
+                return Results.BadRequest(new { error = "penalty_window_minutes_out_of_range" });
+
+            // Timezone was readable and not writable: GET served it, UpdateSettingsRequest
+            // had no member for it, so a second club in another zone saw its whole booking
+            // grid in South African wall-clock time with no correction short of an UPDATE
+            // on the JSON column. Validated against the platform's IANA tzdb — the free-tier
+            // dependency CLAUDE.md names — rather than a hand-kept list that would rot.
+            if (req.Timezone is not null && !IsKnownTimezone(req.Timezone))
+                return Results.BadRequest(new { error = "timezone_invalid" });
+
             // Strict here, lenient on read. This is the one moment an admin is standing
             // in front of the screen to be told what is wrong with their map; a box
             // reading a broken one later has nobody to ask and must keep working.
@@ -158,6 +183,8 @@ public static class AdminConfigEndpoints
             doc["penalty_pct"] = ToElement(req.PenaltyPct);
             doc["grace_window_minutes"] = ToElement(req.GraceWindowMinutes);
             doc["penalty_window_minutes"] = ToElement(req.PenaltyWindowMinutes);
+            // Omitted means unchanged, like the economics and device keys below it.
+            if (req.Timezone is not null) doc["timezone"] = ToElement(req.Timezone.Trim());
             // Omitted means unchanged, not "reset to default": a screen that does not
             // yet edit the button map must not wipe one an admin set through another.
             if (buttons is not null) doc["button_map"] = ToElement(buttons.ToWire());
@@ -297,6 +324,22 @@ public static class AdminConfigEndpoints
         return null;
     }
 
+    /// <summary>
+    /// Whether the platform's IANA tzdb knows this zone id.
+    ///
+    /// <para>
+    /// Block body rather than an expression one, and the id is trimmed here so the check and
+    /// the write agree on what was validated. <c>TryFindSystemTimeZoneById</c> is
+    /// case-insensitive and accepts Windows ids on Windows, which is fine: the value is only
+    /// ever read back through <c>TimeZoneInfo</c>.
+    /// </para>
+    /// </summary>
+    private static bool IsKnownTimezone(string id)
+    {
+        var trimmed = id.Trim();
+        return trimmed.Length > 0 && TimeZoneInfo.TryFindSystemTimeZoneById(trimmed, out _);
+    }
+
     private static bool TryParsePeakHours(string range)
     {
         var parts = range.Split('-');
@@ -367,6 +410,13 @@ public sealed record UpdateSettingsRequest(
     int GraceWindowMinutes,
     int PenaltyWindowMinutes,
     IReadOnlyList<string>? ButtonMap = null,
+
+    /// <summary>
+    /// The tenant's IANA zone. Optional on the same omitted-means-unchanged terms as the
+    /// keys below; it drives the whole booking grid (<c>ScheduleDay.timezone</c>) and was
+    /// served by GET while this record had no member for it, so it could not be set.
+    /// </summary>
+    string? Timezone = null,
 
     // The nine economics keys. All nullable, all optional: omitted means unchanged, so a
     // screen that edits only booking settings cannot revert an economics change made from

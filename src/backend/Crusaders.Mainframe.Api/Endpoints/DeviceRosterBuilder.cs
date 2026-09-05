@@ -160,7 +160,12 @@ public static class DeviceRosterBuilder
                         && b.Status == BookingStatus.Booked
                         && b.UserId != null
                         && b.StartsAt <= latestStart
-                        && b.EndsAt >= now)
+                        && b.EndsAt >= now
+                        // A suspended member is not on the cached roster either. Without
+                        // this, suspension holds only while the box can reach the API — the
+                        // one window in which a club most wants it to hold is the one where
+                        // nobody is watching.
+                        && !db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Suspended))
             .OrderBy(b => b.StartsAt)
             .Take(RosterMaxEntries)
             .ToListAsync(ct);

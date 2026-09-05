@@ -117,7 +117,20 @@ public sealed class CourtActivationService
             now.AddMinutes(settings.ActivationForwardWindowMinutes));
     }
 
-    /// <summary>The bookings on this court that an identification could activate right now.</summary>
+    /// <summary>
+    /// The bookings on this court that an identification could activate right now.
+    ///
+    /// <para>
+    /// A <b>suspended</b> member's booking is not among them. A suspension takes access away
+    /// without touching money or bookings — the row, the ledger and every future slot stand,
+    /// and reactivating restores all of it — so it is enforced on the candidate set rather
+    /// than as a new <see cref="ActivationResult"/> case. That is what keeps it to one clause
+    /// with no caller changes: PIN, biometric, QR and the activation endpoints all answer
+    /// their existing "no booking", and no new refusal has to be routed through four screens.
+    /// The member was told why by email; a court box is not the place to explain it, and one
+    /// that named the reason would be explaining it to whoever is standing there.
+    /// </para>
+    /// </summary>
     public async Task<List<Booking>> CandidatesAsync(Guid courtId, DateTimeOffset now, CancellationToken ct)
     {
         var (start, end) = await WindowAsync(now, ct);
@@ -125,7 +138,8 @@ public sealed class CourtActivationService
         return await _db.Bookings
             .Where(b => b.CourtId == courtId
                         && b.Status == BookingStatus.Booked
-                        && b.StartsAt < end && b.EndsAt > start)
+                        && b.StartsAt < end && b.EndsAt > start
+                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Suspended))
             .OrderBy(b => b.StartsAt)
             .ToListAsync(ct);
     }
@@ -139,7 +153,8 @@ public sealed class CourtActivationService
             .Where(b => b.CourtId == courtId
                         && b.UserId == userId
                         && b.Status == BookingStatus.Booked
-                        && b.StartsAt < end && b.EndsAt > start)
+                        && b.StartsAt < end && b.EndsAt > start
+                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Suspended))
             .OrderBy(b => b.StartsAt)
             .FirstOrDefaultAsync(ct);
     }

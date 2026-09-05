@@ -271,6 +271,18 @@ public sealed class AdminSettingsHttpTests
     [InlineData("memberPerDayMaxMinutes", 2000, "member_per_day_max_minutes_out_of_range")]
     [InlineData("retentionYears", 0, "retention_years_out_of_range")]
     [InlineData("noShowLookbackDays", 0, "no_show_lookback_days_out_of_range")]
+
+    // The two that take money off a member, and the only two on this PUT that had no bound
+    // at all — every value was accepted and persisted, and both reach the court box in the
+    // heartbeat config. A grace window of 4321 minutes (72 hours) puts no-show detection
+    // beyond the end of an operating day, so `no_show_penalty` never fires; a late-cancel
+    // window of 99999 (69 days) puts EVERY cancellation inside the penalty window, so a
+    // member cancelling a fortnight ahead pays the 30% penalty.
+    [InlineData("graceWindowMinutes", 999, "grace_window_minutes_out_of_range")]
+    [InlineData("graceWindowMinutes", 4321, "grace_window_minutes_out_of_range")]
+    [InlineData("graceWindowMinutes", -1, "grace_window_minutes_out_of_range")]
+    [InlineData("penaltyWindowMinutes", 99999, "penalty_window_minutes_out_of_range")]
+    [InlineData("penaltyWindowMinutes", -1, "penalty_window_minutes_out_of_range")]
     public async Task An_economics_value_that_would_break_the_club_is_refused(string field, double value, string expected)
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
@@ -298,6 +310,77 @@ public sealed class AdminSettingsHttpTests
         Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
         var body = await save.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(expected, body.GetProperty("error").GetString());
+    }
+
+    /// <summary>
+    /// The timezone is writable, and it is the zone the schedule actually renders in.
+    ///
+    /// <para>
+    /// It was served by GET and had no member on <c>UpdateSettingsRequest</c>, so the PUT
+    /// could not carry one: a second club in another zone saw its whole booking grid in
+    /// South African wall-clock time, with no correction short of an UPDATE on the
+    /// <c>tenant_settings</c> JSON column. "Multi-tenancy is structural from day one" and a
+    /// tenant-scoped setting that only the database can change are not compatible.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_timezone_is_writable_and_reaches_the_engine()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory, """{"timezone":"Africa/Johannesburg"}""");
+        var client = AdminClient(factory, seeded);
+
+        var save = await client.PutAsJsonAsync(SettingsPath, BaseSettings(tz: "Europe/London"));
+        Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+
+        var read = await (await client.GetAsync(SettingsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Europe/London", read.GetProperty("timezone").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<Api.Multitenancy.ITenantContext>();
+        tenantContext.Set(seeded.TenantId, seeded.Slug);
+        Assert.Equal("Europe/London", (await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default)).Timezone);
+    }
+
+    [SkippableTheory]
+    [InlineData("Mars/Olympus_Mons")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task A_timezone_the_tzdb_does_not_know_is_refused(string tz)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory, """{"timezone":"Africa/Johannesburg"}""");
+        var client = AdminClient(factory, seeded);
+
+        var save = await client.PutAsJsonAsync(SettingsPath, BaseSettings(tz: tz));
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        Assert.Equal("timezone_invalid", (await save.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        // And nothing was written: a refused save must not half-apply.
+        var read = await (await client.GetAsync(SettingsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Africa/Johannesburg", read.GetProperty("timezone").GetString());
+    }
+
+    /// <summary>The eight required booking fields at their fixture values, plus an optional timezone.</summary>
+    private static Dictionary<string, object> BaseSettings(string? tz = null)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["sliceMinutes"] = 15,
+            ["slicePriceCredits"] = 8m,
+            ["advanceBookingDays"] = 14,
+            ["dayStartMinute"] = 360,
+            ["dayEndMinute"] = 1320,
+            ["penaltyPct"] = 30m,
+            ["graceWindowMinutes"] = 5,
+            ["penaltyWindowMinutes"] = 15,
+        };
+        if (tz is not null) payload["timezone"] = tz;
+        return payload;
     }
 
     [SkippableFact]

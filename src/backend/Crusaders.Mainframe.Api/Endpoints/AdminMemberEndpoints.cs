@@ -29,6 +29,10 @@ public static class AdminMemberEndpoints
                 photo_url = m.PhotoUrl,
                 status = m.Status.ToString(),
                 member_class = m.MemberClass.ToString(),
+                // An unverified member cannot sign in and nothing on this screen said so,
+                // so "they say the app won't let them in" had no answer here. The console
+                // now shows it and offers a resend.
+                email_verified = m.User!.EmailVerified,
                 created_at = m.CreatedAt,
                 rejection_reason = m.RejectionReason,
                 // Correlated subquery — EF translates to a single per-row SUM. Cheap at member-list scale.
@@ -78,6 +82,24 @@ public static class AdminMemberEndpoints
             var actor = ctx.User.Id() ?? Guid.Empty;
             var ok = await svc.RejectAsync(memberId, actor, req.Reason, ct);
             return ok ? Results.Ok(new { rejected = true }) : Results.NotFound();
+        });
+
+        // Suspend / reactivate (spec §8). The enum value and the console's "Suspended"
+        // filter both existed; the operation did not, so a club could not lock out a
+        // member whose dues had lapsed and the filter was permanently empty.
+        g.MapPost("/{memberId:guid}/suspend", async (
+            Guid memberId, SuspendRequest req, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
+            var outcome = await svc.SuspendAsync(memberId, ctx.User.Id() ?? Guid.Empty, req.Reason.Trim(), ct);
+            return TransitionResult(outcome, new { suspended = true }, "member_already_suspended", "member_not_active");
+        });
+
+        g.MapPost("/{memberId:guid}/reactivate", async (
+            Guid memberId, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
+        {
+            var outcome = await svc.ReactivateAsync(memberId, ctx.User.Id() ?? Guid.Empty, ct);
+            return TransitionResult(outcome, new { reactivated = true }, "member_already_active", "member_not_suspended");
         });
 
         // Admin-initiated password reset. Generates a strong temporary password, sets it as
@@ -185,6 +207,23 @@ public static class AdminMemberEndpoints
         return app;
     }
 
+    /// <summary>
+    /// One mapping from a lifecycle outcome to an HTTP answer, so suspend and reactivate
+    /// cannot drift apart. A 409 rather than a 400 for the two conflict cases: the request
+    /// was well-formed and the row was simply not in the state it names, which is a
+    /// different repair (reload the list) from a malformed one.
+    /// </summary>
+    private static IResult TransitionResult(MembershipTransition outcome, object ok, string alreadyError, string wrongStatusError)
+    {
+        return outcome switch
+        {
+            MembershipTransition.Ok => Results.Ok(ok),
+            MembershipTransition.NotFound => Results.NotFound(),
+            MembershipTransition.AlreadyInState => Results.Json(new { error = alreadyError }, statusCode: 409),
+            _ => Results.Json(new { error = wrongStatusError }, statusCode: 409),
+        };
+    }
+
     private static string GenerateTempPassword()
     {
         // 12 chars, mixed case + digits, no easily-confused glyphs.
@@ -197,4 +236,5 @@ public static class AdminMemberEndpoints
 }
 
 public sealed record RejectRequest(string Reason);
+public sealed record SuspendRequest(string Reason);
 public sealed record AssignClassRequest(string MemberClass);

@@ -71,6 +71,12 @@ public sealed class LightsCueWorker : BackgroundService
                 && b.EndsAt <= now)
             .ToListAsync(ct);
 
+        // Every booking this pass promotes to Completed, so `booking.completed` (spec §9)
+        // fires once per booking from the two places that promote one — this sweep and the
+        // reversed-no-show catch-up below. Collected rather than emitted inline so the emit
+        // happens after the SaveChanges that makes the promotion real.
+        var completed = new List<Booking>();
+
         foreach (var b in dueOff)
         {
             await FireLightsAsync(db, tenant, b, on: false, ct);
@@ -83,6 +89,7 @@ public sealed class LightsCueWorker : BackgroundService
             if (b.Status == BookingStatus.Booked && b.CheckedInAt is not null)
             {
                 b.Status = BookingStatus.Completed;
+                completed.Add(b);
             }
         }
 
@@ -99,9 +106,55 @@ public sealed class LightsCueWorker : BackgroundService
                 && b.LightsOffCuedAt != null
                 && b.EndsAt <= now)
             .ToListAsync(ct);
-        foreach (var b in attendedAndOver) b.Status = BookingStatus.Completed;
+        foreach (var b in attendedAndOver)
+        {
+            b.Status = BookingStatus.Completed;
+            completed.Add(b);
+        }
 
         if (dueOff.Count > 0 || attendedAndOver.Count > 0) await db.SaveChangesAsync(ct);
+
+        foreach (var b in completed) await FireCompletedAsync(db, tenant, b, ct);
+    }
+
+    /// <summary>
+    /// <c>booking.completed</c> — a booking's slice ended naturally with the member having
+    /// actually been there.
+    ///
+    /// <para>
+    /// Distinct from <c>booking.lights_off</c>, which fires for every booking whose end has
+    /// passed including a no-show: this one is the "played and finished" signal a club's
+    /// utilisation reporting needs, and it fires only where <c>Status</c> becomes
+    /// <see cref="BookingStatus.Completed"/> — which under this worker's ordering means
+    /// <c>CheckedInAt</c> was set. After the save, so nothing is mirrored that the database
+    /// did not accept.
+    /// </para>
+    /// </summary>
+    private async Task FireCompletedAsync(MainframeDbContext db, ITenantContext tenant, Booking b, CancellationToken ct)
+    {
+        var court = await db.Courts.IgnoreQueryFilters().FirstAsync(c => c.Id == b.CourtId, ct);
+        var tenantRow = await db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == b.TenantId, ct);
+        tenant.Set(tenantRow.Id, tenantRow.Slug);
+
+        await _bus.EmitAsync(new DomainEvent(
+            Id: $"evt_{Guid.NewGuid():N}",
+            Type: "booking.completed",
+            TenantId: b.TenantId, TenantSlug: tenantRow.Slug,
+            OccurredAt: DateTimeOffset.UtcNow,
+            ActorUserId: null, ActorIsAdmin: false,
+            SubjectUserId: b.UserId,
+            Data: new()
+            {
+                ["booking_id"] = b.Id,
+                ["court_id"] = b.CourtId,
+                ["court_number"] = court.CourtNumber,
+                ["court_name"] = court.Name,
+                ["user_id"] = b.UserId,
+                ["starts_at"] = b.StartsAt,
+                ["ends_at"] = b.EndsAt,
+                ["checked_in_at"] = b.CheckedInAt,
+                ["amount_charged_credits"] = b.AmountChargedCredits,
+            }), ct);
     }
 
     private async Task FireLightsAsync(MainframeDbContext db, ITenantContext tenant, Booking b, bool on, CancellationToken ct)
