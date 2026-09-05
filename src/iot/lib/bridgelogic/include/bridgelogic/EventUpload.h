@@ -45,18 +45,22 @@
 namespace bridgelogic {
 
 /// The smallest buffer renderEventBody is ever given. The longest body is the
-/// fixed JSON, a 32-character subject, two 20-digit uptimes and three 10-digit
-/// numbers — comfortably inside this.
+/// fixed JSON, a 12-hex MAC, a 32-character subject, two 20-digit uptimes and
+/// three 10-digit numbers — comfortably inside this.
 inline constexpr size_t kEventBodyCap = 384U;
 
 /// Renders the `/api/v1/device/events` body for one queued event.
+///
+/// `mac` names this box at the top level of the batch, as 12 lowercase hex
+/// characters with no separators; a body without it names no device.
 ///
 /// `nowUptimeMs` is the batch's own uptime, from the 64-bit accumulator; the
 /// event's stamp is widened against it. Returns the length written, or 0 —
 /// with `out` empty — when it would not fit. Never a truncated body: a
 /// half-rendered JSON object is a request the server rejects with no clue why,
 /// and the event behind it would be dropped as a 4xx the box caused.
-size_t renderEventBody(char* out, size_t cap, uint64_t nowUptimeMs, const eventq::Event& event);
+size_t renderEventBody(char* out, size_t cap, const char* mac, uint64_t nowUptimeMs,
+                       const eventq::Event& event);
 
 } // namespace bridgelogic
 

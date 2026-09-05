@@ -159,11 +159,11 @@ bool regrantsHeldCourt(const roster::Decision& decision, const HeldState held[kS
   return true;
 }
 
-size_t renderActivateBody(char* out, size_t cap, const char* token) {
-  if (out == nullptr || cap == 0U || token == nullptr) {
+size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* token) {
+  if (out == nullptr || cap == 0U || token == nullptr || mac == nullptr || mac[0] == '\0') {
     return 0U;
   }
-  const int n = snprintf(out, cap, "{\"method\":\"qr\",\"token\":\"%s\"}", token);
+  const int n = snprintf(out, cap, "{\"mac\":\"%s\",\"method\":\"qr\",\"token\":\"%s\"}", mac, token);
   if (n <= 0 || static_cast<size_t>(n) >= cap) {
     out[0] = '\0';
     return 0U;
@@ -172,9 +172,9 @@ size_t renderActivateBody(char* out, size_t cap, const char* token) {
 }
 
 Attempt ScanFlow::onScan(const LinkState& link) const {
-  const bool canSign = link.provisioned && link.wifiUp && link.clockKnown;
-  const bool canAct = link.courtCount > 0U && !link.apiDown;
-  return canSign && canAct ? Attempt::Online : Attempt::RosterOnly;
+  const bool canAsk = link.wifiUp && !link.apiDown;
+  const bool canAct = link.courtCount > 0U;
+  return canAsk && canAct ? Attempt::Online : Attempt::RosterOnly;
 }
 
 ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body, size_t len,

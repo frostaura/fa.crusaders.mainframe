@@ -1,8 +1,8 @@
 {
   "name": "devcrypto",
-  "version": "1.0.0",
-  "description": "SHA-256, HMAC-SHA256, HKDF and the device request signer. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
-  "keywords": "crypto, sha256, hmac, hkdf, signing, embedded",
+  "version": "2.0.0",
+  "description": "Lowercase hex encode/decode. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
+  "keywords": "hex, embedded",
   "frameworks": "*",
   "platforms": "*",
   "build": { "flags": ["-I include"] }

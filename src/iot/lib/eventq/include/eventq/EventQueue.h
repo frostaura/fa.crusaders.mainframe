@@ -57,12 +57,22 @@
 //
 // WHY THE SEQUENCE NUMBER PERSISTS AND THE QUEUE'S CONTENTS NEED NOT
 // ------------------------------------------------------------------
-// `seq` is the idempotency key, so reusing one after a reboot would let the API
-// discard a genuine event as a duplicate of an unrelated older one. It is
-// therefore checkpointed to the store in blocks — see kSeqCheckpointStride —
-// rather than on every push, which would wear the flash out. A reboot resumes
-// from the checkpoint, which is at or AHEAD of the true last value: skipping
-// sequence numbers is free, reusing one is a lost event.
+// `seq` is the idempotency key, and the API enforces it with a PERMANENT unique
+// index on (tenant, device, seq): a number seen before is silently receipted as
+// a duplicate, forever, not merely for a while. So a box that restarted its
+// numbering at 1 after a power cut would have every event up to its old
+// high-water discarded as a duplicate — and under charge-at-booking that is the
+// no-show sweep refunding-and-penalising members who actually played.
+//
+// It is therefore checkpointed to the store in blocks — see
+// kSeqCheckpointStride — rather than on every push, which would wear the flash
+// out. A reboot resumes from the checkpoint, which is at or AHEAD of the true
+// last value: skipping sequence numbers is free, reusing one is a lost event.
+//
+// THIS IS THE ONLY THING THE BRIDGE PERSISTS. The device credential, the WiFi
+// details and the API base URL are compiled into the image as of firmware
+// 2.0.0; this one record is what keeps hal::IStore and the ESP's LittleFS
+// partition alive, and it earns it.
 //
 // WHY THERE IS NO ALLOCATOR AND NO std::deque
 // -------------------------------------------

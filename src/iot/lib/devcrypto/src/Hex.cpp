@@ -1,7 +1,5 @@
 #include "devcrypto/Hex.h"
 
-#include <string.h>
-
 namespace dc {
 namespace hex {
 namespace {
@@ -62,32 +60,6 @@ bool decode(const char* text, size_t textLen, uint8_t* out, size_t outCap, size_
     *outLen = textLen / 2;
   }
   return true;
-}
-
-bool constantTimeEquals(const uint8_t* a, size_t aLen, const uint8_t* b, size_t bLen) {
-  if (aLen != bLen) {
-    return false;
-  }
-  if (a == nullptr || b == nullptr) {
-    return a == b;
-  }
-
-  // The accumulator is the whole point: every byte is examined on every call,
-  // and the result is only inspected at the end. Rewriting this as an early
-  // `return false` reintroduces the timing oracle described in the header.
-  uint8_t difference = 0U;
-  for (size_t i = 0; i < aLen; ++i) {
-    difference = static_cast<uint8_t>(difference | static_cast<uint8_t>(a[i] ^ b[i]));
-  }
-  return difference == 0U;
-}
-
-bool constantTimeEqualsText(const char* expected, const char* presented) {
-  if (expected == nullptr || presented == nullptr) {
-    return false;
-  }
-  return constantTimeEquals(reinterpret_cast<const uint8_t*>(expected), strlen(expected),
-                            reinterpret_cast<const uint8_t*>(presented), strlen(presented));
 }
 
 } // namespace hex

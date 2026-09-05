@@ -46,17 +46,17 @@ size_t findKey(const char* body, size_t len, const char* key);
 /// Copies the string value of `key` into `out`. False when the key is absent, the
 /// value is not a string, or it would not fit.
 ///
-/// <b>Refuses rather than truncates.</b> Half a device key signs every request
-/// wrongly, and the 401 it earns reads exactly like a revoked credential — which
-/// would send a perfectly good board off to be re-claimed.
+/// <b>Refuses rather than truncates.</b> Half a value is a different value, and
+/// every caller here treats absence as "learned nothing" while a truncation
+/// would be acted on as fact.
 bool stringField(const char* body, size_t len, const char* key, char* out, size_t outCap);
 
 /// Reads the unsigned integer value of `key`. False when the key is absent, the value is
 /// not a bare integer, or it would overflow.
 ///
 /// <b>Saturating, never wrapping.</b> A body claiming 10^30 is nonsense; wrapping it
-/// produces a plausible small number, and a plausible small number for an image size
-/// passes the fit check and then runs out of flash halfway through a write.
+/// produces a plausible small number, and a plausible small number for a granted
+/// duration or an accepted sequence is acted on rather than questioned.
 bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out);
 
 /// Reads the boolean value of `key`. False when the key is absent or the value

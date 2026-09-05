@@ -1,4 +1,5 @@
-// Crusaders Mainframe — the heartbeat interval the API asked for.
+// Crusaders Mainframe — the heartbeat: the body the box sends, and the
+// interval the API asks for in reply.
 //
 // The tenant setting `heartbeat_seconds` was served on every heartbeat and
 // read by nothing; the box heartbeated every thirty seconds whatever an admin
@@ -25,6 +26,21 @@ inline constexpr uint32_t kMaxHeartbeatMs = 300000UL;
 /// clamped into [kMinHeartbeatMs, kMaxHeartbeatMs]. False, with `intervalMs`
 /// untouched, when the field is absent or not a bare integer.
 bool parseHeartbeatInterval(const char* body, size_t len, uint32_t& intervalMs);
+
+/// The smallest buffer renderHeartbeatBody is ever given: three keys, a 12-hex
+/// MAC, a short version string and a 20-digit uptime.
+inline constexpr size_t kHeartbeatBodyCap = 128U;
+
+/// Renders the `/api/v1/device/heartbeat` body. Returns the length written, or
+/// 0 — with `out` empty — when it would not fit or `mac` is missing. Never a
+/// truncated body: a half-rendered object is a 400 the box cannot read, and a
+/// box that cannot heartbeat has no court list and refuses every scan.
+///
+/// `uptimeMs` is the 64-bit tb::Uptime64 value, not a cast of it. The same
+/// 49.7-day wrap that used to move the signing clock backwards would report a
+/// box that had been up for two months as one that had been up for ten days.
+size_t renderHeartbeatBody(char* out, size_t cap, const char* mac, const char* firmwareVersion,
+                           uint64_t uptimeMs);
 
 } // namespace bridgelogic
 

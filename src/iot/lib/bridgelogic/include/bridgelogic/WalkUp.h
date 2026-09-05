@@ -69,10 +69,32 @@ private:
   bool undecided_ = false;
 };
 
+/// Everything one walk-up request names.
+///
+/// A struct rather than five more parameters on renderWalkUpBody(): the
+/// complexity gate caps a function at six arguments and "out, cap, mac, intent,
+/// courtNumber, token, nonce" is seven. It is also the safer shape — `court`
+/// and `minutes` are both small integers, and swapping them at a call site
+/// sells the wrong court for the wrong length with nothing failing to compile.
+struct WalkUpRequest {
+  /// This box, as 12 lowercase hex characters with no separators. Upper case or
+  /// colons are a different string to the server.
+  const char* mac = nullptr;
+  /// The pressed relay and the minutes chosen at the panel.
+  court::WalkUpIntent intent;
+  /// The CLUB court number that relay maps to, from the heartbeat's
+  /// `court_numbers` — never the relay index. The API books what this names.
+  int16_t courtNumber = 0;
+  /// What the scanner read, verbatim: who is buying.
+  const char* token = nullptr;
+  /// The 16-hex per-purchase idempotency key. See the file header.
+  const char* nonce = nullptr;
+};
+
 /// Renders the walk-up request body. Returns the length, or 0 when it would not
-/// fit — never a truncated body, which is a request for something else.
-size_t renderWalkUpBody(char* out, size_t cap, const court::WalkUpIntent& intent, int16_t courtNumber,
-                        const char* token, const char* nonce);
+/// fit — never a truncated body, which is a request for something else. The
+/// field order is the corpus's (`http/cases.json`, `walkup-request`).
+size_t renderWalkUpBody(char* out, size_t cap, const WalkUpRequest& request);
 
 /// What the API's answer means for the box.
 struct WalkUpResult {

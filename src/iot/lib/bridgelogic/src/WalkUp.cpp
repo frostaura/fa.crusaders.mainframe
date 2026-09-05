@@ -120,14 +120,16 @@ void WalkUpNonce::decided() {
   undecided_ = false;
 }
 
-size_t renderWalkUpBody(char* out, size_t cap, const court::WalkUpIntent& intent, int16_t courtNumber,
-                        const char* token, const char* nonce) {
-  if (out == nullptr || cap == 0U || token == nullptr || nonce == nullptr) {
+size_t renderWalkUpBody(char* out, size_t cap, const WalkUpRequest& request) {
+  if (out == nullptr || cap == 0U || request.token == nullptr || request.nonce == nullptr ||
+      request.mac == nullptr || request.mac[0] == '\0') {
     return 0U;
   }
-  const int n =
-      snprintf(out, cap, "{\"minutes\":%u,\"method\":\"qr\",\"token\":\"%s\",\"court\":%d,\"nonce\":\"%s\"}",
-               static_cast<unsigned>(intent.minutes), token, static_cast<int>(courtNumber), nonce);
+  const int n = snprintf(
+      out, cap,
+      "{\"mac\":\"%s\",\"minutes\":%u,\"method\":\"qr\",\"token\":\"%s\",\"court\":%d,\"nonce\":\"%s\"}",
+      request.mac, static_cast<unsigned>(request.intent.minutes), request.token,
+      static_cast<int>(request.courtNumber), request.nonce);
   if (n <= 0 || static_cast<size_t>(n) >= cap) {
     out[0] = '\0';
     return 0U;

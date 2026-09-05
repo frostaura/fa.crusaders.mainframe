@@ -33,8 +33,8 @@
 //     scenario, not an installation.
 //   * Persistence. arduino_hal::EepromStore is built and compiled by this
 //     environment but nothing here instantiates it: the Mega has nothing of its
-//     own to remember. The device key, the API URL and the WiFi credentials all
-//     belong to the ESP, which is the half that can be re-provisioned. An
+//     own to remember. The one thing the box persists — the event queue's
+//     sequence high-water mark — is the ESP's, because the event queue is. An
 //     unused store would cost SRAM on a part that has 8 KB of it.
 //   * Anything that knows what a member is. Bookings, credits and the roster
 //     are the ESP's, because they will change and this half cannot be updated.

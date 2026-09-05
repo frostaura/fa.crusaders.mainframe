@@ -1,5 +1,5 @@
 // Unity tests for the ESP8266 half: the event queue, the roster cache and the
-// signed-request client.
+// API client.
 //
 // WHY THESE THREE ARE ONE SUITE
 // -----------------------------
@@ -23,7 +23,6 @@
 #include "court/WalkUpPad.h"
 #include "devapi/DeviceClient.h"
 #include "devapi/Json.h"
-#include "devcrypto/Hex.h"
 #include "eventq/Event.h"
 #include "eventq/EventQueue.h"
 #include "fakes/FakeStore.h"
@@ -74,18 +73,6 @@ void loadRoster(Cache& cache, uint32_t nowMs, const roster::Entry* entries, uint
   }
   cache.commitReplace();
 }
-
-/// Deterministic bytes, so a signature can be compared against a fixture. A
-/// client that reached for a platform RNG could only be tested against itself.
-class ScriptedEntropy final : public devapi::IEntropySource {
-public:
-  explicit ScriptedEntropy(uint8_t seed = 0U) : next_(seed) {}
-
-  uint8_t nextByte() override { return next_++; }
-
-private:
-  uint8_t next_;
-};
 
 // ---------------------------------------------------------------------------
 // Event queue
@@ -502,481 +489,81 @@ void test_roster_token_copy_refuses_rather_than_truncates() {
 }
 
 // ---------------------------------------------------------------------------
-// Device client
+// Device client — the bearer header and the response policy
 // ---------------------------------------------------------------------------
+//
+// This block used to be four hundred lines: canonical strings, HMACs, a nonce
+// per request, a clock held as an offset over millis(), a zero-timestamp probe
+// whose 401 seeded that clock, a skew tolerance pinned against the server's,
+// and two strike counters deciding when a 401 meant a dead credential. All of
+// it existed to let a board with no RTC sign a request. With signing gone,
+// what is left to be wrong about is the header and the status mapping.
 
-const uint8_t kKeyBytes[] = {0x00U, 0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U};
-
-devapi::Credentials credentials() {
-  devapi::Credentials c;
-  c.deviceId = "11111111-2222-3333-4444-555555555555";
-  c.key = dc::ByteSpan{kKeyBytes, sizeof(kKeyBytes)};
-  return c;
+void test_client_renders_the_bearer_header_the_server_expects() {
+  char header[devapi::kAuthorizationBufSize] = {};
+  const size_t n = devapi::renderAuthorization(header, sizeof(header), "k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU");
+  TEST_ASSERT_EQUAL_size_t(strlen("Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU"), n);
+  TEST_ASSERT_EQUAL_STRING("Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU", header);
 }
 
-devapi::Call heartbeatCall(const char* body) {
-  devapi::Call call;
-  call.method = "POST";
-  call.pathAndQuery = "/api/v1/device/heartbeat";
-  call.body = body;
-  call.bodyLen = strlen(body);
-  return call;
+void test_client_a_key_that_would_not_fit_is_refused_not_truncated() {
+  // Half a key is a 401 that reads exactly like the wrong key, and the box
+  // cannot tell the two apart — so it never sends one.
+  char tiny[16] = {};
+  TEST_ASSERT_EQUAL_size_t(0U, devapi::renderAuthorization(tiny, sizeof(tiny), "0123456789abcdef"));
+  TEST_ASSERT_EQUAL_STRING("", tiny);
+
+  char header[devapi::kAuthorizationBufSize] = {};
+  char oversize[devapi::kMaxApiKeyLen + 2U];
+  memset(oversize, 'k', sizeof(oversize) - 1U);
+  oversize[sizeof(oversize) - 1U] = '\0';
+  TEST_ASSERT_EQUAL_size_t(0U, devapi::renderAuthorization(header, sizeof(header), oversize));
+  TEST_ASSERT_EQUAL_STRING("", header);
+
+  // An exactly-maximum key still fits, so the bound is not off by one.
+  char exact[devapi::kMaxApiKeyLen + 1U];
+  memset(exact, 'k', devapi::kMaxApiKeyLen);
+  exact[devapi::kMaxApiKeyLen] = '\0';
+  TEST_ASSERT_EQUAL_size_t(sizeof(devapi::kBearerPrefix) - 1U + devapi::kMaxApiKeyLen,
+                           devapi::renderAuthorization(header, sizeof(header), exact));
 }
 
-void test_client_refuses_to_sign_before_it_knows_the_time() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-
-  devapi::RequestBuffers buffers;
-  devapi::SignedRequest request;
-  // A box with no clock signs a timestamp of zero, gets a 401, and reads it as
-  // a revoked key — then re-provisions over what was only an unsynchronised
-  // clock. Failing locally is how that loop is not entered.
-  TEST_ASSERT_FALSE(client.sign(heartbeatCall("{}"), 1000U, buffers, request));
-}
-
-void test_client_signs_the_current_time_not_the_boot_time() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::RequestBuffers early;
-  devapi::SignedRequest earlyRequest;
-  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), 0U, early, earlyRequest));
-
-  devapi::RequestBuffers later;
-  devapi::SignedRequest laterRequest;
-  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), 3600000U, later, laterRequest));
-
-  // An hour of uptime is an hour on the timestamp. Signing the offset alone
-  // works for the first few minutes of a board's life and then produces a
-  // permanent 401 that reads exactly like a revoked key.
-  TEST_ASSERT_EQUAL_STRING("1750000000", earlyRequest.timestamp);
-  TEST_ASSERT_EQUAL_STRING("1750003600", laterRequest.timestamp);
-}
-
-void test_client_every_request_gets_a_fresh_nonce() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::RequestBuffers first;
-  devapi::SignedRequest firstRequest;
-  devapi::RequestBuffers second;
-  devapi::SignedRequest secondRequest;
-  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), 1000U, first, firstRequest));
-  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), 1000U, second, secondRequest));
-
-  // Same second, same body, same path — and still a different signature,
-  // because the server remembers recent nonces and refuses a replay.
-  TEST_ASSERT_TRUE(strcmp(firstRequest.nonce, secondRequest.nonce) != 0);
-  TEST_ASSERT_TRUE(strcmp(firstRequest.signature, secondRequest.signature) != 0);
-}
-
-void test_client_a_different_body_is_a_different_signature() {
-  ScriptedEntropy a(7U);
-  ScriptedEntropy b(7U); // identical nonce stream, so only the body differs
-  devapi::DeviceClient first(credentials(), a);
-  devapi::DeviceClient second(credentials(), b);
-  first.adoptServerTime(1750000000ULL, 0U);
-  second.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::RequestBuffers bufA;
-  devapi::SignedRequest reqA;
-  devapi::RequestBuffers bufB;
-  devapi::SignedRequest reqB;
-  TEST_ASSERT_TRUE(first.sign(heartbeatCall("{\"uptime_seconds\":1}"), 1000U, bufA, reqA));
-  TEST_ASSERT_TRUE(second.sign(heartbeatCall("{\"uptime_seconds\":2}"), 1000U, bufB, reqB));
-
-  TEST_ASSERT_EQUAL_STRING(reqA.nonce, reqB.nonce);
-  TEST_ASSERT_TRUE(strcmp(reqA.signature, reqB.signature) != 0);
-}
-
-void test_client_a_different_path_is_a_different_signature() {
-  ScriptedEntropy a(7U);
-  ScriptedEntropy b(7U);
-  devapi::DeviceClient first(credentials(), a);
-  devapi::DeviceClient second(credentials(), b);
-  first.adoptServerTime(1750000000ULL, 0U);
-  second.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::Call events;
-  events.method = "POST";
-  events.pathAndQuery = "/api/v1/device/events";
-  events.body = "{}";
-  events.bodyLen = 2U;
-
-  devapi::RequestBuffers bufA;
-  devapi::SignedRequest reqA;
-  devapi::RequestBuffers bufB;
-  devapi::SignedRequest reqB;
-  TEST_ASSERT_TRUE(first.sign(heartbeatCall("{}"), 1000U, bufA, reqA));
-  TEST_ASSERT_TRUE(second.sign(events, 1000U, bufB, reqB));
-
-  // A signature for one endpoint must not be replayable against another.
-  TEST_ASSERT_TRUE(strcmp(reqA.signature, reqB.signature) != 0);
-}
-
-void test_client_refuses_to_sign_without_a_credential() {
-  ScriptedEntropy entropy;
-  devapi::Credentials none;
-  devapi::DeviceClient client(none, entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::RequestBuffers buffers;
-  devapi::SignedRequest request;
-  TEST_ASSERT_FALSE(client.sign(heartbeatCall("{}"), 1000U, buffers, request));
-}
-
-void test_client_learns_the_clock_from_any_response_including_a_failure() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  TEST_ASSERT_FALSE(client.clockKnown());
-
-  devapi::Response rejected;
-  rejected.status = 401U;
-  rejected.serverUnix = 1750000000ULL;
-  static_cast<void>(client.react(rejected, 5000U));
-
-  // The 401 that rejected it is the response that fixes it.
-  TEST_ASSERT_TRUE(client.clockKnown());
-  TEST_ASSERT_EQUAL_UINT64(1750000005ULL, client.unixNow(10000U));
-}
-
-void test_client_a_401_with_a_big_skew_is_a_clock_problem_not_a_key_problem() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-
-  devapi::Response rejected;
-  rejected.status = 401U;
-  rejected.serverUnix = 1750000000ULL;
-
-  // First contact: the box had no clock at all, so a 401 says nothing about
-  // the key. Re-provisioning here would abandon a working credential.
-  TEST_ASSERT_TRUE(client.react(rejected, 0U) == devapi::Reaction::ClockCorrected);
-}
-
-void test_client_a_401_with_a_good_clock_means_the_key_is_gone() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::Response rejected;
-  rejected.status = 401U;
-  rejected.serverUnix = 1750000010ULL;
-
-  // Ten seconds of drift is not why this was refused. The credential is.
-  TEST_ASSERT_TRUE(client.react(rejected, 10000U) == devapi::Reaction::Reprovision);
+void test_client_an_absent_key_renders_nothing_rather_than_a_bare_bearer() {
+  // `Authorization: Bearer ` with nothing after it is a request the server
+  // answers 401 — indistinguishable, from the box, from a revoked key.
+  char header[devapi::kAuthorizationBufSize] = {};
+  TEST_ASSERT_EQUAL_size_t(0U, devapi::renderAuthorization(header, sizeof(header), ""));
+  TEST_ASSERT_EQUAL_STRING("", header);
+  TEST_ASSERT_EQUAL_size_t(0U, devapi::renderAuthorization(header, sizeof(header), nullptr));
 }
 
 void test_client_transient_failures_keep_the_event_and_permanent_ones_do_not() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
+  // The mapping the event drain acts on. Getting Rejected wrong in either
+  // direction is a queue that either loses attendance or never empties.
+  TEST_ASSERT_TRUE(devapi::react(200U) == devapi::Reaction::Accepted);
+  TEST_ASSERT_TRUE(devapi::react(204U) == devapi::Reaction::Accepted);
 
-  devapi::Response r;
+  TEST_ASSERT_TRUE(devapi::react(0U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(408U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(429U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(500U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(503U) == devapi::Reaction::Retry);
 
-  r.status = 200U;
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Accepted);
-
-  r.status = 0U; // never completed — no route, DNS, TLS
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Retry);
-
-  r.status = 503U;
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Retry);
-
-  r.status = 429U; // rate limited: back off, do not discard
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Retry);
-
-  // A 400 the box caused. Retrying an identical request forever pins every
-  // later event behind one the server will never accept.
-  r.status = 400U;
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(400U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(404U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(409U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(422U) == devapi::Reaction::Rejected);
 }
 
-void test_client_a_response_without_a_clock_does_not_reset_a_good_one() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::Response r;
-  r.status = 503U;
-  r.serverUnix = 0U; // absent, not "the epoch"
-  static_cast<void>(client.react(r, 1000U));
-
-  TEST_ASSERT_TRUE(client.clockKnown());
-  TEST_ASSERT_EQUAL_UINT64(1750000001ULL, client.unixNow(1000U));
-}
-
-void test_find_server_unix_reads_the_field_and_refuses_nonsense() {
-  const char ok[] = "{\"server_time\":\"x\",\"server_unix\":1750000000,\"tenant_slug\":\"c\"}";
-  TEST_ASSERT_EQUAL_UINT64(1750000000ULL, devapi::findServerUnix(ok, sizeof(ok) - 1U));
-
-  const char spaced[] = "{ \"server_unix\" : 42 }";
-  TEST_ASSERT_EQUAL_UINT64(42ULL, devapi::findServerUnix(spaced, sizeof(spaced) - 1U));
-
-  const char absent[] = "{\"tenant_slug\":\"crusaders\"}";
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(absent, sizeof(absent) - 1U));
-
-  // A string where an integer belongs, and a body cut off mid-number: both
-  // reported as absent rather than half-read into a plausible clock.
-  const char quoted[] = "{\"server_unix\":\"1750000000\"}";
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(quoted, sizeof(quoted) - 1U));
-
-  const char truncated[] = "{\"server_unix\":";
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(truncated, sizeof(truncated) - 1U));
-
-  const char absurd[] = "{\"server_unix\":999999999999999999999999}";
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(absurd, sizeof(absurd) - 1U));
-
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(nullptr, 0U));
-}
-
-// ---------------------------------------------------------------------------
-// Device client — clock bootstrap (probe) against the shared corpus
-// ---------------------------------------------------------------------------
-
-corpus::File g_httpCases;
-
-/// Replays exactly the bytes it was handed. The corpus vector pins a SPECIFIC
-/// nonce, and ScriptedEntropy's incrementing stream cannot produce it.
-class ReplayEntropy final : public devapi::IEntropySource {
-public:
-  ReplayEntropy(const uint8_t* bytes, size_t len) : bytes_(bytes), len_(len) {}
-
-  uint8_t nextByte() override {
-    const uint8_t b = bytes_[at_ % len_];
-    ++at_;
-    return b;
-  }
-
-private:
-  const uint8_t* bytes_;
-  size_t len_;
-  size_t at_ = 0U;
-};
-
-/// The clock-bootstrap probe, byte for byte against the shared corpus.
-///
-/// The fixture is the `requests` vector whose nonce is the pinned
-/// feedface… value — found by nonce rather than by index, so a reordered
-/// corpus cannot silently detach this test from its vector. The server executes
-/// the same vector from the other side; a probe whose canonical string differs
-/// by one byte fails here rather than as a field 401 with no diagnostic.
-void test_client_probe_renders_unix_seconds_zero_with_a_real_hmac() {
-  TEST_ASSERT_TRUE_MESSAGE(g_httpCases.load("http", "cases.json"),
-                           "http corpus not found — a skipped corpus proves nothing");
-
-  const char* requests = corpus::member(g_httpCases.root(), "requests");
-  TEST_ASSERT_NOT_NULL(requests);
-
-  static const char kProbeNonce[] = "feedfacefeedfacefeedfacefeedface";
-  corpus::ArrayIter it(requests);
-  const char* element = nullptr;
-  const char* vector = nullptr;
-  char nonce[64] = {};
-  while (it.next(&element)) {
-    const char* nonceValue = corpus::member(element, "nonce");
-    TEST_ASSERT_NOT_NULL(nonceValue);
-    TEST_ASSERT_TRUE(corpus::stringValue(nonceValue, nonce, sizeof(nonce), nullptr));
-    if (strcmp(nonce, kProbeNonce) == 0) {
-      vector = element;
-      break;
-    }
-  }
-  TEST_ASSERT_NOT_NULL_MESSAGE(vector, "corpus lost its clock-bootstrap probe vector");
-  TEST_ASSERT_EQUAL_UINT64(0ULL, corpus::unsignedValue(corpus::member(vector, "unix_seconds")));
-
-  // The signing key, the path, the body and the expected signature all come
-  // from the corpus — this test hardcodes nothing the two sides must agree on.
-  uint8_t keyBytes[32] = {};
-  size_t keyLen = 0U;
-  {
-    const char* keyValue = corpus::member(g_httpCases.root(), "signing_key_hex");
-    TEST_ASSERT_NOT_NULL(keyValue);
-    char keyText[128] = {};
-    size_t keyTextLen = 0U;
-    TEST_ASSERT_TRUE(corpus::stringValue(keyValue, keyText, sizeof(keyText), &keyTextLen));
-    TEST_ASSERT_TRUE(dc::hex::decode(keyText, keyTextLen, keyBytes, sizeof(keyBytes), &keyLen));
-  }
-
-  char path[128] = {};
-  TEST_ASSERT_TRUE(
-      corpus::stringValue(corpus::member(vector, "path_and_query"), path, sizeof(path), nullptr));
-  TEST_ASSERT_EQUAL_STRING("/api/v1/device/heartbeat", path);
-
-  uint8_t bodyBytes[128] = {};
-  size_t bodyLen = 0U;
-  TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(vector, "body_hex", bodyBytes, sizeof(bodyBytes) - 1U, &bodyLen),
-                           "body_hex");
-  char body[128] = {};
-  memcpy(body, bodyBytes, bodyLen);
-  TEST_ASSERT_EQUAL_STRING("{\"running_version\":\"1.0.0\"}", body);
-
-  char expectedSignature[dc::signer::kSignatureBufSize] = {};
-  TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(vector, "signature"), expectedSignature,
-                                       sizeof(expectedSignature), nullptr));
-
-  uint8_t nonceBytes[devapi::kNonceBytes] = {};
-  size_t nonceLen = 0U;
-  TEST_ASSERT_TRUE(dc::hex::decode(nonce, strlen(nonce), nonceBytes, sizeof(nonceBytes), &nonceLen));
-  TEST_ASSERT_EQUAL_size_t(devapi::kNonceBytes, nonceLen);
-
-  ReplayEntropy entropy(nonceBytes, nonceLen);
-  devapi::Credentials c;
-  c.deviceId = "11111111-2222-3333-4444-555555555555";
-  c.key = dc::ByteSpan{keyBytes, keyLen};
-  devapi::DeviceClient client(c, entropy);
-
-  devapi::Call call;
-  call.method = "POST";
-  call.pathAndQuery = path;
-  call.body = body;
-  call.bodyLen = bodyLen;
-
-  // The scenario probe() exists for: provisioned, power-cycled, no clock.
-  // sign() must still refuse — its refusal protects every NORMAL call — while
-  // probe() renders the zero-timestamp request whose 401 carries the clock.
-  TEST_ASSERT_FALSE(client.clockKnown());
-  devapi::RequestBuffers refused;
-  devapi::SignedRequest refusedRequest;
-  TEST_ASSERT_FALSE(client.sign(call, 5000U, refused, refusedRequest));
-
-  devapi::RequestBuffers buffers;
-  devapi::SignedRequest request;
-  TEST_ASSERT_TRUE(client.probe(call, buffers, request));
-
-  TEST_ASSERT_EQUAL_STRING("0", request.timestamp);
-  TEST_ASSERT_EQUAL_STRING(kProbeNonce, request.nonce);
-  TEST_ASSERT_EQUAL_STRING(expectedSignature, request.signature);
-}
-
-void test_client_a_probe_401_with_time_seeds_the_clock() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  TEST_ASSERT_FALSE(client.clockKnown());
-
-  // What the probe's expected rejection looks like: 401, body carrying
-  // server_unix. That closes the loop — corrected offset, ClockCorrected,
-  // immediate re-arm — without ever abandoning the credential.
-  devapi::Response rejected;
-  rejected.status = 401U;
-  rejected.serverUnix = 1750000000ULL;
-  TEST_ASSERT_TRUE(client.react(rejected, 3000U) == devapi::Reaction::ClockCorrected);
-  TEST_ASSERT_TRUE(client.clockKnown());
-  TEST_ASSERT_EQUAL_UINT64(1750000000ULL, client.unixNow(3000U));
-}
-
-void test_client_drift_the_server_refuses_is_read_as_skew_not_a_dead_key() {
-  // The server refuses signatures from 120 s of drift (DeviceVerifier
-  // ClockSkew); the local threshold must sit BELOW that window, at 90 s. When
-  // it sat above (300 s), a board drifted 2–5 minutes got the 401, measured a
-  // correction under its own threshold, concluded "not skew" and abandoned a
-  // healthy credential. 121 s is the smallest whole-second drift the server
-  // always refuses — it must be read as a clock problem.
-  for (size_t i = 0U; i < kBaseCount; ++i) {
-    ScriptedEntropy entropy;
-    devapi::DeviceClient client(credentials(), entropy);
-    client.adoptServerTime(1750000000ULL, kBases[i]);
-
-    devapi::Response rejected;
-    rejected.status = 401U;
-    rejected.serverUnix = 1750000121ULL; // the box is 121 s behind the server
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
-  }
-}
-
-void test_client_drift_inside_the_local_window_still_means_the_key_is_gone() {
-  // The other side of the 90 s boundary: 30 s of drift is inside the server's
-  // window, so the signature was verifiable and the 401 was about the key.
-  for (size_t i = 0U; i < kBaseCount; ++i) {
-    ScriptedEntropy entropy;
-    devapi::DeviceClient client(credentials(), entropy);
-    client.adoptServerTime(1750000000ULL, kBases[i]);
-
-    devapi::Response rejected;
-    rejected.status = 401U;
-    rejected.serverUnix = 1750000030ULL; // 30 s out — under the 90 s threshold
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::Reprovision);
-  }
-}
-
-void test_client_skew_tolerance_is_pinned_by_the_corpus_below_the_servers_window() {
-  // The 90 s / 120 s asymmetry above is a two-sided invariant: the server's
-  // window is DeviceVerifier.ClockSkew, the local threshold is
-  // kSkewToleranceSeconds, and neither side can see the other's source. The
-  // corpus carries both numbers; the .NET suite asserts the server half, this
-  // asserts the firmware half, and the strict inequality is what closes the
-  // dead band described on the constant.
-  TEST_ASSERT_TRUE_MESSAGE(g_httpCases.load("http", "cases.json"),
-                           "http corpus not found — a skipped corpus proves nothing");
-
-  const char* clock = corpus::member(g_httpCases.root(), "clock");
-  TEST_ASSERT_NOT_NULL_MESSAGE(clock, "corpus lost its clock section");
-
-  const char* tolerance = corpus::member(clock, "client_skew_tolerance_seconds");
-  const char* serverSkew = corpus::member(clock, "server_skew_seconds");
-  TEST_ASSERT_NOT_NULL(tolerance);
-  TEST_ASSERT_NOT_NULL(serverSkew);
-
-  TEST_ASSERT_EQUAL_UINT64(corpus::unsignedValue(tolerance),
-                           static_cast<uint64_t>(devapi::kSkewToleranceSeconds));
-  TEST_ASSERT_TRUE(static_cast<uint64_t>(devapi::kSkewToleranceSeconds) < corpus::unsignedValue(serverSkew));
-}
-
-void test_client_a_second_consecutive_clock_correction_is_a_dead_key() {
-  // ClockCorrected is self-curing: the retry carries the adopted time and is
-  // accepted. If that retry is refused WITH yet another time, the server is
-  // rejecting-with-time indefinitely, and a box that keeps believing it
-  // retries at 1 s for the rest of its life. Two strikes is Reprovision.
-  for (size_t i = 0U; i < kBaseCount; ++i) {
-    ScriptedEntropy entropy;
-    devapi::DeviceClient client(credentials(), entropy);
-    client.adoptServerTime(1750000000ULL, kBases[i]);
-
-    devapi::Response rejected;
-    rejected.status = 401U;
-    rejected.serverUnix = 1750000121ULL; // 121 s out: skew, corrected
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
-
-    // A transient failure in between neither clears nor counts.
-    devapi::Response blip;
-    blip.status = 503U;
-    TEST_ASSERT_TRUE(client.react(blip, kBases[i]) == devapi::Reaction::Retry);
-
-    rejected.serverUnix = 1750000242ULL; // another 121 s out of the CORRECTED clock
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::Reprovision);
-
-    // The strike is spent with the Reprovision: a fresh credential does not
-    // inherit half of one, so the next skew is again a correction.
-    rejected.serverUnix = 1750000363ULL;
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
-  }
-}
-
-void test_client_an_accepted_call_clears_the_clock_correction_strike() {
-  // Correction, then the cured retry is accepted, then — much later — the
-  // clock has drifted again. That is two corrections in a lifetime, not two
-  // in a row, and must still be read as a clock problem.
-  for (size_t i = 0U; i < kBaseCount; ++i) {
-    ScriptedEntropy entropy;
-    devapi::DeviceClient client(credentials(), entropy);
-    client.adoptServerTime(1750000000ULL, kBases[i]);
-
-    devapi::Response rejected;
-    rejected.status = 401U;
-    rejected.serverUnix = 1750000121ULL;
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
-
-    devapi::Response accepted;
-    accepted.status = 200U;
-    accepted.serverUnix = 1750000121ULL;
-    TEST_ASSERT_TRUE(client.react(accepted, kBases[i]) == devapi::Reaction::Accepted);
-
-    rejected.serverUnix = 1750000242ULL;
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected);
-  }
+void test_client_a_401_is_kept_because_it_is_about_the_key_not_the_event() {
+  // The one mapping worth arguing about. A 401 now means one thing: the
+  // compiled-in key is not this tenant's. That is true of every request the box
+  // will ever make, so dropping on it would empty the queue of a whole
+  // evening's attendance while somebody found a laptop — and under
+  // charge-at-booking a lost activation is a member refunded-and-penalised for
+  // a game they played. The cure is a reflash; the queue waits.
+  TEST_ASSERT_TRUE(devapi::react(401U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(403U) == devapi::Reaction::Retry);
 }
 
 // ---------------------------------------------------------------------------
@@ -1660,120 +1247,6 @@ void test_json_a_key_that_is_a_prefix_of_another_does_not_match_it() {
 
 } // namespace
 
-void test_client_an_offer_seeds_a_box_with_no_clock_and_never_rewinds_a_known_one() {
-  // THE #5 PIN. A signed OFFER is bound to this boot's nonce, and the nonce is
-  // per boot — so one captured today verifies all week, and replaying it used
-  // to set the clock BACK to the capture instant. Two 401s later the box read
-  // its own rewound clock as a dead credential and threw the key away.
-  //
-  // Uptimes here are the monotonic milliseconds the composition root feeds the
-  // client (tb::Uptime64), not raw millis(): a base that wraps mid-test would
-  // be testing the caller's contract, not this rule.
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  // No clock: the OFFER is the bootstrap, whatever it says.
-  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000000ULL, 5000U) == devapi::OfferClock::Bootstrapped);
-  TEST_ASSERT_TRUE(client.clockKnown());
-  TEST_ASSERT_EQUAL_UINT64(1750000000ULL, client.unixNow(5000U));
-
-  // Sixty seconds on, a replay of that same OFFER: behind the clock, ignored.
-  const uint32_t later = 65000U;
-  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000000ULL, later) == devapi::OfferClock::IgnoredBehind);
-  TEST_ASSERT_EQUAL_UINT64(1750000060ULL, client.unixNow(later));
-  TEST_ASSERT_EQUAL_UINT16(1U, client.offersIgnored());
-
-  // A fresh OFFER thirty seconds ahead (drift): adopted.
-  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000090ULL, later) == devapi::OfferClock::Adopted);
-  TEST_ASSERT_EQUAL_UINT64(1750000090ULL, client.unixNow(later));
-  // Exactly the window is still a correction; one past it is not this
-  // channel's to make.
-  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000090ULL + 90ULL, later) == devapi::OfferClock::Adopted);
-  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000180ULL + 91ULL, later) == devapi::OfferClock::IgnoredTooFar);
-  TEST_ASSERT_EQUAL_UINT64(1750000180ULL, client.unixNow(later));
-  // The same second again is neither behind nor ahead: adopted, harmlessly.
-  TEST_ASSERT_TRUE(client.adoptOfferTime(1750000180ULL, later) == devapi::OfferClock::Adopted);
-  // No `t` at all teaches nothing.
-  TEST_ASSERT_TRUE(client.adoptOfferTime(0ULL, later) == devapi::OfferClock::Absent);
-  TEST_ASSERT_EQUAL_UINT16(2U, client.offersIgnored());
-}
-
-void test_client_offers_never_feed_the_reprovision_strike() {
-  // The strike counter is evidence about the CREDENTIAL, gathered from signed
-  // 401s. Any number of OFFERs — adopted, ignored, replayed — leaves it where
-  // it was, so a datagram cannot walk a box into Reprovision.
-  for (size_t i = 0U; i < kBaseCount; ++i) {
-    ScriptedEntropy entropy;
-    devapi::DeviceClient client(credentials(), entropy);
-    client.adoptServerTime(1750000000ULL, kBases[i]);
-
-    devapi::Response rejected;
-    rejected.status = 401U;
-    rejected.serverUnix = 1750000121ULL;
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected); // strike one
-
-    // A storm of replayed OFFERs, all behind the corrected clock.
-    for (uint8_t n = 0U; n < 10U; ++n) {
-      static_cast<void>(client.adoptOfferTime(1750000000ULL, kBases[i] + n));
-    }
-    TEST_ASSERT_EQUAL_UINT64(1750000121ULL, client.unixNow(kBases[i]));
-
-    // The cured retry is accepted: the strike clears. Had the replays moved
-    // the clock back, this call would have been another 401 and strike two.
-    devapi::Response accepted;
-    accepted.status = 200U;
-    accepted.serverUnix = 1750000121ULL;
-    TEST_ASSERT_TRUE(client.react(accepted, kBases[i]) == devapi::Reaction::Accepted);
-    rejected.serverUnix = 1750000242ULL;
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) ==
-                     devapi::Reaction::ClockCorrected); // not Reprovision
-  }
-}
-
-void test_client_uptime_past_49_days_does_not_rewind_the_clock() {
-  // The uptime the composition root feeds this client is tb::Uptime64 —
-  // monotonic milliseconds that pass 2^32 at 49.7 days. Every method here used
-  // to take it as a uint32_t, cast at the call site, so at day 49.7 the cast
-  // wrapped and every signed timestamp jumped back 49.7 days: a 401 for skew
-  // on a healthy box, "corrected" from the 401's server_unix, and again at day
-  // 99.4. Self-healing — and still a raw wrap in the clock path, briefly
-  // desynchronising signing on a box that has done nothing wrong.
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  client.adoptServerTime(1750000000ULL, 1000ULL); // offset: 1749999999
-
-  constexpr uint64_t kWrapMs = 4294967296ULL; // 2^32 ms, 49.7 days
-  const uint64_t justBefore = kWrapMs - 1000ULL;
-  const uint64_t justAfter = kWrapMs + 1000ULL;
-  TEST_ASSERT_EQUAL_UINT64(1749999999ULL + (justBefore / 1000ULL), client.unixNow(justBefore));
-  TEST_ASSERT_EQUAL_UINT64(1749999999ULL + (justAfter / 1000ULL), client.unixNow(justAfter));
-  // Two seconds of uptime are two seconds on the clock, across the wrap.
-  TEST_ASSERT_EQUAL_UINT64(2ULL, client.unixNow(justAfter) - client.unixNow(justBefore));
-
-  // A day past the wrap, signed: the timestamp is the real time, not the boot
-  // time plus one day. 1749999999 + (2^32 + 86400000) / 1000.
-  devapi::RequestBuffers buffers;
-  devapi::SignedRequest request;
-  const uint64_t dayAfter = kWrapMs + 86400000ULL;
-  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), dayAfter, buffers, request));
-  TEST_ASSERT_EQUAL_STRING("1754381366", request.timestamp);
-
-  // A 401 that carries the server's real time, five seconds later, measures
-  // NO correction: the clock was never out, so this is about the key. Under
-  // the wrap it read as a 4,294,967-second skew and a ClockCorrected.
-  devapi::Response rejected;
-  rejected.status = 401U;
-  rejected.serverUnix = 1754381371ULL;
-  TEST_ASSERT_TRUE(client.react(rejected, dayAfter + 5000ULL) == devapi::Reaction::Reprovision);
-  TEST_ASSERT_EQUAL_INT64(1749999999LL, client.clockOffset());
-
-  // Learning the clock past the wrap, and an OFFER's drift past it, both
-  // reason about the same 64-bit uptime.
-  client.adoptServerTime(1760000000ULL, kWrapMs + 5000ULL);
-  TEST_ASSERT_EQUAL_UINT64(1760000010ULL, client.unixNow(kWrapMs + 15000ULL));
-  TEST_ASSERT_TRUE(client.adoptOfferTime(1760000040ULL, kWrapMs + 15000ULL) == devapi::OfferClock::Adopted);
-  TEST_ASSERT_EQUAL_UINT64(1760000040ULL, client.unixNow(kWrapMs + 15000ULL));
-}
-
 void setUp() {
 }
 
@@ -1932,29 +1405,11 @@ int main(int, char**) {
   RUN_TEST(test_json_an_absent_or_non_array_value_is_reported_as_absent);
   RUN_TEST(test_json_a_key_that_is_a_prefix_of_another_does_not_match_it);
 
-  RUN_TEST(test_client_refuses_to_sign_before_it_knows_the_time);
-  RUN_TEST(test_client_signs_the_current_time_not_the_boot_time);
-  RUN_TEST(test_client_every_request_gets_a_fresh_nonce);
-  RUN_TEST(test_client_a_different_body_is_a_different_signature);
-  RUN_TEST(test_client_a_different_path_is_a_different_signature);
-  RUN_TEST(test_client_refuses_to_sign_without_a_credential);
-  RUN_TEST(test_client_learns_the_clock_from_any_response_including_a_failure);
-  RUN_TEST(test_client_a_401_with_a_big_skew_is_a_clock_problem_not_a_key_problem);
-  RUN_TEST(test_client_a_401_with_a_good_clock_means_the_key_is_gone);
+  RUN_TEST(test_client_renders_the_bearer_header_the_server_expects);
+  RUN_TEST(test_client_a_key_that_would_not_fit_is_refused_not_truncated);
+  RUN_TEST(test_client_an_absent_key_renders_nothing_rather_than_a_bare_bearer);
   RUN_TEST(test_client_transient_failures_keep_the_event_and_permanent_ones_do_not);
-  RUN_TEST(test_client_a_response_without_a_clock_does_not_reset_a_good_one);
-  RUN_TEST(test_find_server_unix_reads_the_field_and_refuses_nonsense);
-
-  RUN_TEST(test_client_probe_renders_unix_seconds_zero_with_a_real_hmac);
-  RUN_TEST(test_client_a_probe_401_with_time_seeds_the_clock);
-  RUN_TEST(test_client_drift_the_server_refuses_is_read_as_skew_not_a_dead_key);
-  RUN_TEST(test_client_drift_inside_the_local_window_still_means_the_key_is_gone);
-  RUN_TEST(test_client_skew_tolerance_is_pinned_by_the_corpus_below_the_servers_window);
-  RUN_TEST(test_client_a_second_consecutive_clock_correction_is_a_dead_key);
-  RUN_TEST(test_client_an_accepted_call_clears_the_clock_correction_strike);
-  RUN_TEST(test_client_an_offer_seeds_a_box_with_no_clock_and_never_rewinds_a_known_one);
-  RUN_TEST(test_client_offers_never_feed_the_reprovision_strike);
-  RUN_TEST(test_client_uptime_past_49_days_does_not_rewind_the_clock);
+  RUN_TEST(test_client_a_401_is_kept_because_it_is_about_the_key_not_the_event);
 
   return UNITY_END();
 }

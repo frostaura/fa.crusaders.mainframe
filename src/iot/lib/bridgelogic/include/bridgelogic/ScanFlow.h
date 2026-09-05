@@ -55,17 +55,19 @@ namespace bridgelogic {
 enum class Attempt : uint8_t {
   /// Ask `/api/v1/device/activate`; the roster only if that yields no decision.
   Online = 0U,
-  /// Decide from the roster cache. The API is not reachable, or could not be
-  /// asked correctly — an unsynchronised clock signs a request the server will
-  /// refuse for skew, which would read as a decision when it is not one.
+  /// Decide from the roster cache. The API is not reachable, or the box is not
+  /// yet in a state where its answer could be acted on.
   RosterOnly = 1U,
 };
 
 /// What the bridge knows about its link when the scan arrives.
+///
+/// It used to carry `provisioned` and `clockKnown` too. Neither exists any
+/// more: the key and the API base URL are compiled in, so a box is provisioned
+/// from its first instruction, and nothing signs anything, so there is no clock
+/// to be unsynchronised. What is left is genuinely about the link.
 struct LinkState {
-  bool provisioned = false;
   bool wifiUp = false;
-  bool clockKnown = false;
   /// Relays the heartbeat has mapped to court numbers. Zero for ~30 s after
   /// every reboot, and an online grant then names a court the box cannot map:
   /// the API records the attendance and the court stays dark (review #12). A
@@ -131,17 +133,21 @@ bool regrantsHeldCourt(const roster::Decision& decision, const HeldState held[kS
 /// Renders the activate request body. Returns the length, or 0 when it would
 /// not fit — never a truncated body, which would be a request for a different
 /// token. The field order is the corpus's (`http/cases.json`, the
-/// `/api/v1/device/activate` request): the signature covers these exact bytes.
-size_t renderActivateBody(char* out, size_t cap, const char* token);
+/// `activate-request` vector).
+///
+/// `mac` is how the request names this box; a body without it names no device
+/// and is refused. It is 12 lowercase hex characters with no separators —
+/// upper case or colons are a different string to the server, and the symptom
+/// is a box that authenticates fine and activates nothing.
+size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* token);
 
 /// The decision core. Stateless; every input is an argument so the host suite
 /// can drive each branch without a socket.
 class ScanFlow {
 public:
-  /// Online only when every precondition for a SIGNED call that the server
-  /// will accept AND act on holds: provisioned, linked, clock known, at least
-  /// one court mapped, and the API not currently judged down. Anything less is
-  /// the roster's scan.
+  /// Online only when every precondition for a call the server will accept AND
+  /// act on holds: linked, at least one court mapped, and the API not currently
+  /// judged down. Anything less is the roster's scan.
   Attempt onScan(const LinkState& link) const;
 
   /// Interprets the activate response.

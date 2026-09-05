@@ -7,11 +7,15 @@
 
 namespace bridgelogic {
 
-size_t renderEventBody(char* out, size_t cap, uint64_t nowUptimeMs, const eventq::Event& event) {
+size_t renderEventBody(char* out, size_t cap, const char* mac, uint64_t nowUptimeMs,
+                       const eventq::Event& event) {
   if (out == nullptr || cap == 0U) {
     return 0U;
   }
   out[0] = '\0';
+  if (mac == nullptr || mac[0] == '\0') {
+    return 0U;
+  }
 
   char subject[eventq::kMaxSubjectLen + 1U] = {};
   const size_t subjectLen =
@@ -34,13 +38,13 @@ size_t renderEventBody(char* out, size_t cap, uint64_t nowUptimeMs, const eventq
     return 0U;
   }
 
-  const int written =
-      snprintf(out, cap,
-               "{\"uptime_ms\":%s,\"events\":[{\"seq\":%lu,\"uptime_ms\":%s,\"kind\":\"%s\","
-               "\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu}]}",
-               batchUptime, static_cast<unsigned long>(event.seq), eventUptime, eventq::kindName(event.kind),
-               event.court == eventq::Event::kNoCourt ? -1 : static_cast<int>(event.court), methodJson,
-               subject, static_cast<unsigned long>(event.durationMs));
+  const int written = snprintf(
+      out, cap,
+      "{\"mac\":\"%s\",\"uptime_ms\":%s,\"events\":[{\"seq\":%lu,\"uptime_ms\":%s,"
+      "\"kind\":\"%s\",\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu}]}",
+      mac, batchUptime, static_cast<unsigned long>(event.seq), eventUptime, eventq::kindName(event.kind),
+      event.court == eventq::Event::kNoCourt ? -1 : static_cast<int>(event.court), methodJson, subject,
+      static_cast<unsigned long>(event.durationMs));
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     // snprintf truncated. A half-rendered body is a request the server refuses
     // as malformed, and the drain path treats a 4xx as "the box caused this"

@@ -1,9 +1,0 @@
-{
-  "name": "discovery",
-  "version": "1.0.0",
-  "description": "UDP discovery beacon codec, claim commitment and announce state machine. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
-  "keywords": "discovery, beacon, udp, claiming, embedded",
-  "frameworks": "*",
-  "platforms": "*",
-  "build": { "flags": ["-I include"] }
-}

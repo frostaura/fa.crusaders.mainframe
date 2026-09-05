@@ -26,9 +26,10 @@
 // ----------------------------------------
 //   * The ESP8266 half. This is a MEGA simulator: it speaks the downlink side
 //     of the serial protocol and expects a bridge — or a test — on the socket.
-//     Simulating the bridge as well would mean simulating WiFi, UDP discovery
-//     and an HTTP client, and the parts of that worth testing are already
-//     covered by lib/discovery's corpus tests.
+//     Simulating the bridge as well would mean simulating WiFi and an HTTP
+//     client, and the parts of that worth testing — every request body and
+//     every response reading — are already covered by lib/bridgelogic's corpus
+//     tests.
 //   * Torn writes. posix_hal::FileStore cannot produce one; a local filesystem
 //     write of 32 bytes either happens or does not. fakes::FakeStore is where
 //     that case is exercised.

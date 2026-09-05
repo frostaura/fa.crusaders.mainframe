@@ -1,11 +1,8 @@
 {
-  "description": "Canonical signing string, HMAC-SHA256 request signature, and HKDF device-key derivation.",
-  "authority": "src/backend/Crusaders.Mainframe.Api/Security/DeviceAuth/ \u2014 the server is the reference implementation; the firmware must match it.",
+  "description": "Device HTTP request and response body shapes, plus the bearer header every device request carries.",
+  "authority": "src/backend/Crusaders.Mainframe.Api/Endpoints/Device*Endpoints.cs and its device auth scheme \u2014 the server is the reference implementation; the firmware must match it.",
   "case_count": {
-    "sha256": 9,
-    "hmac_sha256": 6,
-    "requests": 17,
-    "hkdf": 3,
-    "responses": 11
+    "requests": 4,
+    "responses": 9
   }
 }

@@ -29,7 +29,6 @@
 #include "bridgelogic/ApiBreaker.h"
 #include "bridgelogic/AuthPolicy.h"
 #include "bridgelogic/Cadence.h"
-#include "bridgelogic/CredentialStore.h"
 #include "bridgelogic/EventUpload.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
@@ -466,25 +465,19 @@ void test_session_a_refusal_that_matched_a_booking_carries_that_bookings_court()
 // ScanFlow — which path, and what the API's answer means
 // ---------------------------------------------------------------------------
 
-bridgelogic::LinkState link(bool provisioned, bool wifiUp, bool clockKnown) {
+bridgelogic::LinkState link(bool wifiUp) {
   bridgelogic::LinkState l;
-  l.provisioned = provisioned;
   l.wifiUp = wifiUp;
-  l.clockKnown = clockKnown;
   l.courtCount = kCourtCount;
   l.apiDown = false;
   return l;
 }
 
-void test_scan_flow_asks_the_api_only_when_a_signed_call_can_succeed() {
+void test_scan_flow_asks_the_api_only_when_the_answer_can_be_acted_on() {
   const bridgelogic::ScanFlow flow;
-  TEST_ASSERT_TRUE(flow.onScan(link(true, true, true)) == bridgelogic::Attempt::Online);
+  TEST_ASSERT_TRUE(flow.onScan(link(true)) == bridgelogic::Attempt::Online);
   // Offline: the roster's scan, in microseconds, as before.
-  TEST_ASSERT_TRUE(flow.onScan(link(true, false, true)) == bridgelogic::Attempt::RosterOnly);
-  // No clock: sign() would refuse, and a probe's 401 is not a decision.
-  TEST_ASSERT_TRUE(flow.onScan(link(true, true, false)) == bridgelogic::Attempt::RosterOnly);
-  // Not provisioned: nothing to sign with.
-  TEST_ASSERT_TRUE(flow.onScan(link(false, true, true)) == bridgelogic::Attempt::RosterOnly);
+  TEST_ASSERT_TRUE(flow.onScan(link(false)) == bridgelogic::Attempt::RosterOnly);
 }
 
 void test_scan_flow_a_grant_lights_the_relay_the_court_number_maps_to() {
@@ -599,13 +592,19 @@ void test_scan_flow_no_answer_is_the_rosters_scan() {
 }
 
 void test_scan_flow_renders_the_activate_body() {
-  char body[96] = {};
-  TEST_ASSERT_TRUE(bridgelogic::renderActivateBody(body, sizeof(body), "4T8Y2K9QW3ZM") > 0U);
-  TEST_ASSERT_EQUAL_STRING("{\"method\":\"qr\",\"token\":\"4T8Y2K9QW3ZM\"}", body);
+  char body[128] = {};
+  TEST_ASSERT_TRUE(bridgelogic::renderActivateBody(body, sizeof(body), "5ccf7f0a1b2c", "4T8Y2K9QW3ZM") > 0U);
+  TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"method\":\"qr\",\"token\":\"4T8Y2K9QW3ZM\"}", body);
 
   char tiny[16] = {};
-  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderActivateBody(tiny, sizeof(tiny), "4T8Y2K9QW3ZM"));
+  TEST_ASSERT_EQUAL_size_t(
+      0U, bridgelogic::renderActivateBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "4T8Y2K9QW3ZM"));
   TEST_ASSERT_EQUAL_STRING("", tiny);
+
+  // A body with no MAC names no device, and an auto-registering backend keys
+  // everything off that field — so it is refused here rather than sent.
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderActivateBody(body, sizeof(body), "", "4T8Y2K9QW3ZM"));
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderActivateBody(body, sizeof(body), nullptr, "4T8Y2K9QW3ZM"));
 }
 
 void test_display_minutes_never_promise_more_than_the_relay_gives() {
@@ -677,17 +676,26 @@ void test_walkup_body_names_the_court_and_carries_the_nonce() {
   intent.court = 1U; // relay B
   intent.minutes = 45U;
 
+  bridgelogic::WalkUpRequest request;
+  request.mac = "5ccf7f0a1b2c";
+  request.intent = intent;
+  request.courtNumber = kCourts[intent.court];
+  request.token = "4T8Y2K9QW3ZM";
+  request.nonce = "0001020304050607";
+
   char body[320] = {};
-  TEST_ASSERT_TRUE(bridgelogic::renderWalkUpBody(body, sizeof(body), intent, kCourts[intent.court],
-                                                 "4T8Y2K9QW3ZM", "0001020304050607") > 0U);
-  TEST_ASSERT_EQUAL_STRING("{\"minutes\":45,\"method\":\"qr\",\"token\":\"4T8Y2K9QW3ZM\",\"court\":8,"
-                           "\"nonce\":\"0001020304050607\"}",
+  TEST_ASSERT_TRUE(bridgelogic::renderWalkUpBody(body, sizeof(body), request) > 0U);
+  TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"minutes\":45,\"method\":\"qr\","
+                           "\"token\":\"4T8Y2K9QW3ZM\",\"court\":8,\"nonce\":\"0001020304050607\"}",
                            body);
 
   // Never truncated: half a body is a request for something else.
   char tiny[40] = {};
-  TEST_ASSERT_EQUAL_size_t(
-      0U, bridgelogic::renderWalkUpBody(tiny, sizeof(tiny), intent, 8, "TOK", "0001020304050607"));
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderWalkUpBody(tiny, sizeof(tiny), request));
+
+  // And never without a MAC.
+  request.mac = "";
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderWalkUpBody(body, sizeof(body), request));
 }
 
 void test_walkup_nonce_is_reused_only_for_the_same_undecided_purchase() {
@@ -1006,12 +1014,11 @@ void test_after_on_attempt_marks_held_only_when_the_frame_left() {
 // The shared corpus — the bytes the server and this box must agree on
 // ---------------------------------------------------------------------------
 //
-// Located BY ID (responses) or by path and pinned nonce (requests), never by
-// index: a reordered or extended corpus must not silently detach a test from
-// its vector. A vector that has gone missing is a failure, not a skip — this
-// suite binds to ids that are committed, and losing one is a contract change.
-// The executed-count gate on these sections is devcrypto's; none is repeated
-// here.
+// Located BY ID, never by index: a reordered or extended corpus must not
+// silently detach a test from its vector. A vector that has gone missing is a
+// failure, not a skip — this suite binds to ids that are committed, and losing
+// one is a contract change. The executed-count gate on the whole corpus is
+// asserted at the end of this section.
 
 /// Static, not stack: 64 KB of corpus in a Unity test frame is a stack
 /// overflow on some hosts.
@@ -1045,29 +1052,33 @@ const char* responseVector(const char* id) {
   return nullptr;
 }
 
-/// The `requests` vector for `path` carrying `nonce`. Two keys, because a
-/// path may gain a second vector with a different body; the nonce is what
-/// pins THIS one, exactly as the probe test pins its own.
-const char* requestVector(const char* path, const char* nonce) {
+/// The `requests` vector whose `id` is `id`. Fails the test when absent — this
+/// suite binds to ids that are committed, and losing one is a contract change.
+const char* requestVector(const char* id) {
   const char* requests = corpus::member(g_httpCases.root(), "requests");
   TEST_ASSERT_NOT_NULL_MESSAGE(requests, "http corpus has no requests section");
 
   corpus::ArrayIter it(requests);
   const char* element = nullptr;
-  char foundPath[128] = {};
-  char foundNonce[64] = {};
+  char found[64] = {};
   while (it.next(&element)) {
-    const char* pathValue = corpus::member(element, "path_and_query");
-    const char* nonceValue = corpus::member(element, "nonce");
-    if (pathValue != nullptr && nonceValue != nullptr &&
-        corpus::stringValue(pathValue, foundPath, sizeof(foundPath), nullptr) &&
-        corpus::stringValue(nonceValue, foundNonce, sizeof(foundNonce), nullptr) &&
-        strcmp(foundPath, path) == 0 && strcmp(foundNonce, nonce) == 0) {
+    const char* idValue = corpus::member(element, "id");
+    if (idValue != nullptr && corpus::stringValue(idValue, found, sizeof(found), nullptr) &&
+        strcmp(found, id) == 0) {
       return element;
     }
   }
-  TEST_FAIL_MESSAGE(path);
+  TEST_FAIL_MESSAGE(id);
   return nullptr;
+}
+
+/// The MAC every request vector names this box by.
+const char* corpusMac() {
+  static char mac[devapi::kMacHexLen + 1U] = {};
+  TEST_ASSERT_TRUE_MESSAGE(
+      corpus::stringValue(corpus::member(g_httpCases.root(), "device_mac"), mac, sizeof(mac), nullptr),
+      "http corpus has no device_mac");
+  return mac;
 }
 
 /// Decodes a vector's `body_hex` into `out` as a NUL-terminated string,
@@ -1237,55 +1248,238 @@ void test_corpus_heartbeat_cadence_is_the_vectors_heartbeat_seconds() {
                            "no heartbeat vector declares heartbeat_seconds — nothing was checked");
 }
 
-void test_corpus_every_bound_response_carries_the_clock_the_reader_finds() {
+void test_corpus_activate_body_is_byte_identical_to_the_contract() {
   loadHttpCorpus();
-  // Every response body the box reads is also a clock source. The expectation
-  // is the vector's own, so this hardcodes nothing the two sides must agree on.
-  const char* const ids[] = {
-      "provision-response-server-unix",    "device-401-body",         "activate-response-ok",
-      "activate-response-too-early",       "activate-response-ended", "walkup-response-replayed",
-      "walkup-response-replayed-remainder"};
-  for (const char* id : ids) {
-    const char* vector = responseVector(id);
-    char body[512] = {};
-    const size_t n = bodyOf(vector, body, sizeof(body));
-
-    const char* expect = corpus::member(vector, "expect");
-    TEST_ASSERT_NOT_NULL_MESSAGE(expect, id);
-    const uint64_t expected = corpus::unsignedValue(corpus::member(expect, "server_unix"));
-    TEST_ASSERT_NOT_EQUAL_MESSAGE(0U, expected, id);
-    TEST_ASSERT_EQUAL_UINT64_MESSAGE(expected, devapi::findServerUnix(body, n), id);
-  }
-}
-
-void test_corpus_activate_body_is_byte_identical_to_the_signed_request() {
-  loadHttpCorpus();
-  // The signature covers these exact bytes. A field reordered or a space
-  // added on this side is a 401 with no diagnostic on the other.
+  // A field reordered, renamed or spaced differently on this side is a request
+  // the server reads differently, with no diagnostic on either end.
   char expected[512] = {};
-  const size_t n = bodyOf(requestVector("/api/v1/device/activate", "c0ffee00c0ffee00c0ffee00c0ffee00"),
-                          expected, sizeof(expected));
+  const size_t n = bodyOf(requestVector("activate-request"), expected, sizeof(expected));
 
-  char rendered[96] = {};
-  const size_t renderedLen = bridgelogic::renderActivateBody(rendered, sizeof(rendered), "7Q3F9KM2XZ8B");
+  char rendered[128] = {};
+  const size_t renderedLen =
+      bridgelogic::renderActivateBody(rendered, sizeof(rendered), corpusMac(), "7Q3F9KM2XZ8B");
   TEST_ASSERT_EQUAL_size_t(n, renderedLen);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
   TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
 }
 
-void test_corpus_walkup_body_is_byte_identical_to_the_signed_request() {
+void test_corpus_heartbeat_body_is_byte_identical_to_the_contract() {
+  loadHttpCorpus();
+  // The vector's firmware version is a literal, not fw::kFirmwareVersion: this
+  // pins the SHAPE, and a corpus that moved every time the patch number did
+  // would be a corpus nobody could bump.
+  char expected[512] = {};
+  const size_t n = bodyOf(requestVector("heartbeat-request"), expected, sizeof(expected));
+
+  char rendered[bridgelogic::kHeartbeatBodyCap] = {};
+  const size_t renderedLen =
+      bridgelogic::renderHeartbeatBody(rendered, sizeof(rendered), corpusMac(), "2.0.0", 86400000ULL);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
+}
+
+void test_corpus_the_bearer_header_is_the_one_the_contract_declares() {
+  loadHttpCorpus();
+  // The key and the whole header value are both in the corpus, so the header
+  // NAME and the `Bearer ` prefix are pinned from both sides. A correct key
+  // under the wrong name is a 401 nobody can explain.
+  char key[devapi::kMaxApiKeyLen + 1U] = {};
+  TEST_ASSERT_TRUE(
+      corpus::stringValue(corpus::member(g_httpCases.root(), "device_api_key"), key, sizeof(key), nullptr));
+
+  char expected[devapi::kAuthorizationBufSize] = {};
+  TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(requestVector("heartbeat-request"), "authorization"),
+                                       expected, sizeof(expected), nullptr));
+
+  char rendered[devapi::kAuthorizationBufSize] = {};
+  TEST_ASSERT_TRUE(devapi::renderAuthorization(rendered, sizeof(rendered), key) > 0U);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_STRING("Authorization", devapi::kHeaderAuthorization);
+}
+
+void test_corpus_events_body_is_byte_identical_to_the_contract() {
+  loadHttpCorpus();
+  // The wrap vector doubles as the events body's shape: `mac` at the top level
+  // beside the batch uptime, and both uptimes past 2^32.
+  char expected[512] = {};
+  const size_t n = bodyOf(requestVector("events-request-across-the-millis-wrap"), expected, sizeof(expected));
+
+  eventq::Event event;
+  event.seq = 41U;
+  event.kind = eventq::Kind::Activation;
+  event.court = 1U;
+  event.method = eventq::Method::Qr;
+  event.durationMs = 2700000UL;
+  event.uptimeMs = 0xFFFFF000UL;
+  TEST_ASSERT_TRUE(event.setSubject("TOKEN-B"));
+
+  char rendered[bridgelogic::kEventBodyCap] = {};
+  const size_t renderedLen =
+      bridgelogic::renderEventBody(rendered, sizeof(rendered), corpusMac(), 0x100000000ULL + 20000ULL, event);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
+}
+
+void test_corpus_roster_pushes_load_exactly_as_the_contract_declares_them() {
+  loadHttpCorpus();
+  // The three roster vectors, driven through the reader that actually consumes
+  // them. Each declares its own expected roster in `expect`, so this hardcodes
+  // nothing the two sides have to agree on separately.
+  const char* const ids[] = {"heartbeat-response-court-numbers", "heartbeat-response-roster-single",
+                             "heartbeat-response-roster-full", "heartbeat-response-roster-negative-opens"};
+
+  // Static: the roster-full body is allowed the box's whole 2048-byte response
+  // buffer, which is too much for a Unity test frame on some hosts.
+  static uint8_t bytes[2048];
+  static char body[sizeof(bytes) + 1U];
+
+  for (const char* id : ids) {
+    const char* vector = responseVector(id);
+    size_t n = 0U;
+    TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(vector, "body_hex", bytes, sizeof(bytes), &n), id);
+    memcpy(body, bytes, n);
+    body[n] = '\0';
+
+    // The declared roster length, counted from the vector rather than typed here.
+    const char* expect = corpus::member(vector, "expect");
+    TEST_ASSERT_NOT_NULL_MESSAGE(expect, id);
+    size_t declared = 0U;
+    const char* element = nullptr;
+    corpus::ArrayIter entries(corpus::member(expect, "roster"));
+    while (entries.next(&element)) {
+      ++declared;
+    }
+
+    Cache cache(kSixHoursMs);
+    const bridgelogic::SyncResult r = bridgelogic::applyRoster(body, n, cache, kBaseMid);
+    TEST_ASSERT_TRUE_MESSAGE(r.replaced, id);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, r.rejected, id);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, r.dropped, id);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(declared, static_cast<size_t>(r.accepted), id);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(declared, static_cast<size_t>(cache.size()), id);
+
+    // And the court list, which is what a granted court number is resolved
+    // through. Every vector declares [1,2,3,4].
+    int16_t courts[bridgelogic::kMaxCourts] = {};
+    uint8_t count = 0U;
+    TEST_ASSERT_TRUE_MESSAGE(bridgelogic::parseCourtNumbers(body, n, courts, count), id);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(4U, count, id);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(1, courts[0], id);
+    TEST_ASSERT_EQUAL_INT16_MESSAGE(4, courts[3], id);
+  }
+
+  // The negative-opens vector is the one with a rule of its own: a booking that
+  // started thirty minutes ago clamps to "open now" rather than wrapping into a
+  // window half a century away.
+  size_t n = 0U;
+  TEST_ASSERT_TRUE(corpus::hexField(responseVector("heartbeat-response-roster-negative-opens"), "body_hex",
+                                    bytes, sizeof(bytes), &n));
+  memcpy(body, bytes, n);
+  body[n] = '\0';
+  Cache cache(kSixHoursMs);
+  TEST_ASSERT_TRUE(bridgelogic::applyRoster(body, n, cache, kBaseMid).replaced);
+  TEST_ASSERT_TRUE(cache.decide("K4TQ8N2ZV7BM", 0U, kBaseMid).verdict == roster::Verdict::Allow);
+}
+
+/// Every http vector this suite binds to, by id. The executed-count gate below
+/// compares this against the corpus and the manifest in both directions.
+const char* const kBoundHttpVectors[] = {
+    "heartbeat-request",
+    "activate-request",
+    "walkup-request",
+    "events-request-across-the-millis-wrap",
+    "activate-response-ok",
+    "activate-response-too-early",
+    "activate-response-ended",
+    "walkup-response-replayed",
+    "walkup-response-replayed-remainder",
+    "heartbeat-response-court-numbers",
+    "heartbeat-response-roster-single",
+    "heartbeat-response-roster-full",
+    "heartbeat-response-roster-negative-opens",
+};
+
+bool isBound(const char* id) {
+  for (const char* bound : kBoundHttpVectors) {
+    if (strcmp(bound, id) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void test_corpus_every_http_section_is_declared_and_every_vector_is_bound() {
+  loadHttpCorpus();
+  // The anti-drift assertion, moved here when the crypto suite it used to live
+  // in lost its reason to read this corpus. It has teeth in three directions:
+  // a section in cases.json the manifest does not declare, a section the
+  // manifest declares that cases.json does not hold, and — the one a checksum
+  // over the file would miss — a vector nobody in this suite actually executes.
+  corpus::File manifest;
+  TEST_ASSERT_TRUE_MESSAGE(manifest.load("http", "manifest.json"), "http manifest not found");
+  const char* counts = corpus::member(manifest.root(), "case_count");
+  TEST_ASSERT_NOT_NULL(counts);
+
+  char name[corpus::kMaxNameLen] = {};
+  const char* value = nullptr;
+  size_t sectionsSeen = 0U;
+  size_t bound = 0U;
+
+  corpus::ObjectIter sections(g_httpCases.root());
+  while (sections.next(name, sizeof(name), &value)) {
+    if (!corpus::isArray(value)) {
+      continue; // device_api_key and device_mac are inputs, not case lists.
+    }
+    ++sectionsSeen;
+
+    const char* declared = corpus::member(counts, name);
+    TEST_ASSERT_NOT_NULL_MESSAGE(declared, "corpus section is not declared in the manifest");
+
+    size_t inSection = 0U;
+    const char* element = nullptr;
+    corpus::ArrayIter it(value);
+    while (it.next(&element)) {
+      ++inSection;
+      char id[64] = {};
+      TEST_ASSERT_TRUE_MESSAGE(corpus::stringValue(corpus::member(element, "id"), id, sizeof(id), nullptr),
+                               "every http vector needs an id — this suite binds by id, never by index");
+      TEST_ASSERT_TRUE_MESSAGE(isBound(id), "corpus vector is executed by no test in this suite");
+      ++bound;
+    }
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(corpus::unsignedValue(declared), inSection, name);
+  }
+
+  size_t declaredSections = 0U;
+  const char* countValue = nullptr;
+  corpus::ObjectIter declaredIt(counts);
+  while (declaredIt.next(name, sizeof(name), &countValue)) {
+    ++declaredSections;
+    TEST_ASSERT_NOT_NULL_MESSAGE(corpus::member(g_httpCases.root(), name),
+                                 "manifest declares a section cases.json does not contain");
+  }
+
+  TEST_ASSERT_EQUAL_size_t(declaredSections, sectionsSeen);
+  TEST_ASSERT_EQUAL_size_t(sizeof(kBoundHttpVectors) / sizeof(kBoundHttpVectors[0]), bound);
+}
+
+void test_corpus_walkup_body_is_byte_identical_to_the_contract() {
   loadHttpCorpus();
   char expected[512] = {};
-  const size_t n = bodyOf(requestVector("/api/v1/device/walkup", "0a1b2c3d4e5f60718293a4b5c6d7e8f9"),
-                          expected, sizeof(expected));
+  const size_t n = bodyOf(requestVector("walkup-request"), expected, sizeof(expected));
 
   // Sixty minutes on relay C, which this box maps to club court 3.
-  court::WalkUpIntent intent;
-  intent.court = 2U;
-  intent.minutes = 60U;
+  bridgelogic::WalkUpRequest request;
+  request.mac = corpusMac();
+  request.intent.court = 2U;
+  request.intent.minutes = 60U;
+  request.courtNumber = kCorpusCourts[request.intent.court];
+  request.token = "7Q3F9KM2XZ8B";
+  request.nonce = "9f2a4c6e8b0d1f3a";
+
   char rendered[320] = {};
-  const size_t renderedLen = bridgelogic::renderWalkUpBody(
-      rendered, sizeof(rendered), intent, kCorpusCourts[intent.court], "7Q3F9KM2XZ8B", "9f2a4c6e8b0d1f3a");
+  const size_t renderedLen = bridgelogic::renderWalkUpBody(rendered, sizeof(rendered), request);
   TEST_ASSERT_EQUAL_size_t(n, renderedLen);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
   TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
@@ -1302,7 +1496,7 @@ void test_scan_flow_a_box_with_no_court_list_is_not_online() {
   // server-side and refuses the member at the box, because the granted court
   // number maps to nothing. Not ready is not online.
   const bridgelogic::ScanFlow flow;
-  bridgelogic::LinkState l = link(true, true, true);
+  bridgelogic::LinkState l = link(true);
   TEST_ASSERT_TRUE(flow.onScan(l) == bridgelogic::Attempt::Online);
   l.courtCount = 0U;
   TEST_ASSERT_TRUE(flow.onScan(l) == bridgelogic::Attempt::RosterOnly);
@@ -1312,7 +1506,7 @@ void test_scan_flow_a_box_with_no_court_list_is_not_online() {
 
 void test_scan_flow_an_open_breaker_is_the_rosters_scan() {
   const bridgelogic::ScanFlow flow;
-  bridgelogic::LinkState l = link(true, true, true);
+  bridgelogic::LinkState l = link(true);
   l.apiDown = true;
   TEST_ASSERT_TRUE(flow.onScan(l) == bridgelogic::Attempt::RosterOnly);
 }
@@ -1900,10 +2094,11 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   const uint64_t now = wrap + 20000ULL;
 
   char body[bridgelogic::kEventBodyCap] = {};
-  const size_t len = bridgelogic::renderEventBody(body, sizeof(body), now, event);
+  const size_t len = bridgelogic::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", now, event);
   TEST_ASSERT_TRUE(len > 0U);
   TEST_ASSERT_EQUAL_size_t(strlen(body), len);
-  TEST_ASSERT_NOT_NULL(strstr(body, "{\"uptime_ms\":4294987296,"));
+  TEST_ASSERT_NOT_NULL(strstr(body, "{\"mac\":\"5ccf7f0a1b2c\","));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":4294987296,"));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":4294963200,"));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"kind\":\"activation\""));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"court\":1"));
@@ -1913,8 +2108,8 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
 
   // The ordinary case is unchanged: no wrap, no widening.
   event.uptimeMs = 90000UL;
-  TEST_ASSERT_TRUE(bridgelogic::renderEventBody(body, sizeof(body), 120000ULL, event) > 0U);
-  TEST_ASSERT_NOT_NULL(strstr(body, "{\"uptime_ms\":120000,"));
+  TEST_ASSERT_TRUE(bridgelogic::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 120000ULL, event) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":120000,"));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":90000,"));
 
   // A release carries no identification method, and says so as a null rather
@@ -1924,83 +2119,48 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   release.kind = eventq::Kind::Release;
   release.court = eventq::Event::kNoCourt;
   release.uptimeMs = 1000UL;
-  TEST_ASSERT_TRUE(bridgelogic::renderEventBody(body, sizeof(body), 2000ULL, release) > 0U);
+  TEST_ASSERT_TRUE(bridgelogic::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 2000ULL, release) > 0U);
   TEST_ASSERT_NOT_NULL(strstr(body, "\"method\":null"));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"court\":-1"));
 
   // Refused rather than truncated: a half-rendered body comes back 4xx and the
   // drain path drops the event as one the box caused.
   char tiny[24] = {};
-  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderEventBody(tiny, sizeof(tiny), 2000ULL, release));
+  TEST_ASSERT_EQUAL_size_t(
+      0U, bridgelogic::renderEventBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", 2000ULL, release));
   TEST_ASSERT_EQUAL_STRING("", tiny);
+
+  // And never without a MAC: an events batch that names no device is one the
+  // server cannot file against a box.
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderEventBody(body, sizeof(body), "", 2000ULL, release));
 }
 
-void test_credential_store_checked_text_survives_the_store_and_a_torn_write_reads_as_absent() {
-  fakes::FakeStore store;
-  char out[64] = {};
-  TEST_ASSERT_TRUE(bridgelogic::putCheckedText(store, "k", "hello"));
-  TEST_ASSERT_TRUE(bridgelogic::getCheckedText(store, "k", out, sizeof(out)));
-  TEST_ASSERT_EQUAL_STRING("hello", out);
-  // An empty text is a record (an open network's passphrase).
-  TEST_ASSERT_TRUE(bridgelogic::putCheckedText(store, "e", ""));
-  TEST_ASSERT_TRUE(bridgelogic::getCheckedText(store, "e", out, sizeof(out)));
-  TEST_ASSERT_EQUAL_STRING("", out);
-  // Absent.
-  TEST_ASSERT_FALSE(bridgelogic::getCheckedText(store, "none", out, sizeof(out)));
-  TEST_ASSERT_EQUAL_STRING("", out);
-  // Torn: the store hands back a mongrel with kOk; the trailer refuses it.
-  store.tearNextWriteAfter(2U);
-  TEST_ASSERT_FALSE(bridgelogic::putCheckedText(store, "k", "world"));
-  TEST_ASSERT_FALSE(bridgelogic::getCheckedText(store, "k", out, sizeof(out)));
-  // Too long for the caller's buffer: refused, not truncated.
-  TEST_ASSERT_TRUE(bridgelogic::putCheckedText(store, "l", "0123456789"));
-  char tiny[8] = {};
-  TEST_ASSERT_FALSE(bridgelogic::getCheckedText(store, "l", tiny, sizeof(tiny)));
-  // Too long for the record: refused, not truncated.
-  char huge[hal::kStoreMaxValueLen + 1U];
-  memset(huge, 'x', sizeof(huge) - 1U);
-  huge[sizeof(huge) - 1U] = '\0';
-  TEST_ASSERT_FALSE(bridgelogic::putCheckedText(store, "h", huge));
-}
+void test_heartbeat_body_names_the_box_and_survives_the_millis_wrap() {
+  // The one field an auto-registering backend keys everything off. It was a
+  // snprintf in the composition root, which `pio test` cannot see — so this is
+  // the first version of it any test has been able to reach.
+  char body[bridgelogic::kHeartbeatBodyCap] = {};
+  const size_t len =
+      bridgelogic::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 86400000ULL);
+  TEST_ASSERT_TRUE(len > 0U);
+  TEST_ASSERT_EQUAL_size_t(strlen(body), len);
+  TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"2.0.0\",\"uptime_ms\":86400000}",
+                           body);
 
-void test_api_url_survives_a_reboot_and_refuses_a_longer_one_loudly() {
-  fakes::FakeStore store;
-  char out[bridgelogic::kMaxApiUrlLen + 1U] = {};
-  // The 32-character cap was silent: this is 53 characters, a DNS-named
-  // advertised base, and it must survive a reboot intact.
-  const char named[] = "http://mainframe.crusaders-squash.example.co.za:8088";
-  TEST_ASSERT_TRUE(bridgelogic::storeApiUrl(store, named));
-  TEST_ASSERT_TRUE(bridgelogic::loadApiUrl(store, out, sizeof(out)));
-  TEST_ASSERT_EQUAL_STRING(named, out);
+  // Past 2^32: a 32-bit conversion here would report a box that had been up for
+  // two months as one that had been up for ten days.
+  TEST_ASSERT_TRUE(bridgelogic::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0",
+                                                    0x100000000ULL + 20000ULL) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":4294987296}"));
 
-  char exact[bridgelogic::kMaxApiUrlLen + 1U];
-  memset(exact, 'u', bridgelogic::kMaxApiUrlLen);
-  exact[bridgelogic::kMaxApiUrlLen] = '\0';
-  TEST_ASSERT_TRUE(bridgelogic::storeApiUrl(store, exact));
-  char over[bridgelogic::kMaxApiUrlLen + 2U];
-  memset(over, 'u', bridgelogic::kMaxApiUrlLen + 1U);
-  over[bridgelogic::kMaxApiUrlLen + 1U] = '\0';
-  TEST_ASSERT_FALSE(bridgelogic::storeApiUrl(store, over));
-  TEST_ASSERT_FALSE(bridgelogic::storeApiUrl(store, ""));
-  TEST_ASSERT_TRUE(bridgelogic::loadApiUrl(store, out, sizeof(out)));
-  TEST_ASSERT_EQUAL_STRING(exact, out); // the refused one changed nothing
-
-  // A box provisioned before the checked record: the legacy key still boots
-  // it, and the first new store retires the legacy record.
-  fakes::FakeStore old;
-  const char legacy[] = "http://192.168.68.10:8088";
-  TEST_ASSERT_TRUE(old.put(bridgelogic::kKeyApiUrlLegacy, reinterpret_cast<const uint8_t*>(legacy),
-                           static_cast<uint8_t>(strlen(legacy))) == hal::StoreResult::kOk);
-  TEST_ASSERT_TRUE(bridgelogic::loadApiUrl(old, out, sizeof(out)));
-  TEST_ASSERT_EQUAL_STRING(legacy, out);
-  TEST_ASSERT_TRUE(bridgelogic::storeApiUrl(old, named));
-  TEST_ASSERT_FALSE(old.exists(bridgelogic::kKeyApiUrlLegacy));
-  TEST_ASSERT_TRUE(bridgelogic::loadApiUrl(old, out, sizeof(out)));
-  TEST_ASSERT_EQUAL_STRING(named, out);
-
-  fakes::FakeStore none;
-  TEST_ASSERT_FALSE(bridgelogic::loadApiUrl(none, out, sizeof(out)));
-  TEST_ASSERT_EQUAL_STRING("", out);
+  // Refused rather than truncated, and never without a MAC.
+  char tiny[16] = {};
+  TEST_ASSERT_EQUAL_size_t(
+      0U, bridgelogic::renderHeartbeatBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "2.0.0", 1000ULL));
+  TEST_ASSERT_EQUAL_STRING("", tiny);
+  TEST_ASSERT_EQUAL_size_t(0U, bridgelogic::renderHeartbeatBody(body, sizeof(body), "", "2.0.0", 1000ULL));
+  TEST_ASSERT_EQUAL_size_t(0U,
+                           bridgelogic::renderHeartbeatBody(body, sizeof(body), nullptr, "2.0.0", 1000ULL));
 }
 
 void test_a_heartbeat_response_ignores_every_key_this_build_does_not_read() {
@@ -2137,7 +2297,7 @@ int main(int, char**) {
   RUN_TEST(test_session_lights_the_court_the_booking_names_not_the_one_it_was_handed);
   RUN_TEST(test_session_a_refusal_that_matched_a_booking_carries_that_bookings_court);
 
-  RUN_TEST(test_scan_flow_asks_the_api_only_when_a_signed_call_can_succeed);
+  RUN_TEST(test_scan_flow_asks_the_api_only_when_the_answer_can_be_acted_on);
   RUN_TEST(test_scan_flow_a_grant_lights_the_relay_the_court_number_maps_to);
   RUN_TEST(test_scan_flow_display_clamps_a_grant_past_the_relay_cap);
   RUN_TEST(test_scan_flow_a_grant_with_no_seconds_in_it_is_no_decision);
@@ -2168,9 +2328,13 @@ int main(int, char**) {
   RUN_TEST(test_corpus_activate_ended_is_a_refusal_the_roster_does_not_second_guess);
   RUN_TEST(test_corpus_walkup_replayed_remainder_is_what_is_left_not_what_was_bought);
   RUN_TEST(test_corpus_heartbeat_cadence_is_the_vectors_heartbeat_seconds);
-  RUN_TEST(test_corpus_every_bound_response_carries_the_clock_the_reader_finds);
-  RUN_TEST(test_corpus_activate_body_is_byte_identical_to_the_signed_request);
-  RUN_TEST(test_corpus_walkup_body_is_byte_identical_to_the_signed_request);
+  RUN_TEST(test_corpus_activate_body_is_byte_identical_to_the_contract);
+  RUN_TEST(test_corpus_heartbeat_body_is_byte_identical_to_the_contract);
+  RUN_TEST(test_corpus_the_bearer_header_is_the_one_the_contract_declares);
+  RUN_TEST(test_corpus_walkup_body_is_byte_identical_to_the_contract);
+  RUN_TEST(test_corpus_events_body_is_byte_identical_to_the_contract);
+  RUN_TEST(test_corpus_roster_pushes_load_exactly_as_the_contract_declares_them);
+  RUN_TEST(test_corpus_every_http_section_is_declared_and_every_vector_is_bound);
 
   RUN_TEST(test_scan_flow_a_box_with_no_court_list_is_not_online);
   RUN_TEST(test_scan_flow_an_open_breaker_is_the_rosters_scan);
@@ -2195,8 +2359,7 @@ int main(int, char**) {
   RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);
   RUN_TEST(test_the_identity_screen_is_repainted_on_the_first_pong_and_after_a_mega_reset);
   RUN_TEST(test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap);
-  RUN_TEST(test_credential_store_checked_text_survives_the_store_and_a_torn_write_reads_as_absent);
-  RUN_TEST(test_api_url_survives_a_reboot_and_refuses_a_longer_one_loudly);
+  RUN_TEST(test_heartbeat_body_names_the_box_and_survives_the_millis_wrap);
   RUN_TEST(test_a_heartbeat_response_ignores_every_key_this_build_does_not_read);
   RUN_TEST(test_the_uplink_decoder_keeps_every_mega_frame_around_the_noise);
 

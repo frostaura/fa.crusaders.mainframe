@@ -111,8 +111,7 @@ test-integration:
 # regeneration leaves the C++ suite green against the old vectors.
 corpus-check:
 	$(PY) src/iot/tools/gen_corpus.py
-	$(PY) src/iot/tools/gen_discovery_corpus.py
-	git diff --exit-code -- src/iot/test/test_protocol/corpus_generated.h src/iot/test/test_discovery/corpus_generated.h \
+	git diff --exit-code -- src/iot/test/test_protocol/corpus_generated.h \
 	  || (echo "generated corpus headers are stale — rerun the generators and commit" && exit 1)
 
 # Flash the ATmega2560 over USB.
@@ -131,14 +130,16 @@ flash-mega:
 
 # Flash the ESP8266 over USB, then watch it.
 #
-# Refuses without secrets.h, rather than building an image that joins an empty
-# SSID — court_bridge/main.cpp #errors on it too; this is the friendlier half of
-# the same rule, before twenty seconds of compiler output.
+# Refuses without secrets.h, rather than building an image with a blank in it —
+# court_bridge/main.cpp #errors on a missing value and static_asserts on an
+# empty one; this is the friendlier half of the same rule, before twenty seconds
+# of compiler output.
 flash-bridge:
 	@test -f src/iot/src/common/secrets.h || ( \
 	  echo "src/iot/src/common/secrets.h is missing."; \
 	  echo "  cp src/iot/src/common/secrets.h.example src/iot/src/common/secrets.h"; \
-	  echo "  then fill in WIFI_SSID and WIFI_PASSWORD (it is gitignored)"; \
+	  echo "  then fill in all four values (it is gitignored):"; \
+	  echo "    WIFI_SSID  WIFI_PASSWORD  API_BASE_URL  DEVICE_API_KEY"; \
 	  exit 1)
 	@echo "DIP switches for an ESP8266 upload:  1-4 OFF  5 ON  6 ON  7 ON  8 OFF"
 	@echo "Set them now, then leave the box powered."
