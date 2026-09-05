@@ -47,10 +47,13 @@ public interface IRelayClient
 /// The default. Records what it was asked to do and reports success.
 ///
 /// <para>
-/// Registered in <c>Program.cs</c> and <c>TestHost.cs</c> alike, so CI passes with no
-/// hardware — the same interface-plus-null-driver shape the repository already sanctions
-/// for <c>IBiometricDevice</c>, and required by the invariant that hardware abstractions
-/// ship before drivers.
+/// <b>Not registered in the container</b>, in <c>Program.cs</c> or <c>TestHost.cs</c>. It
+/// was, with no injection site anywhere — and a registration nothing resolves is a claim
+/// that the API actuates lights when the court box is pull-only and does its own switching
+/// (original review A2-16). The type stays because the invariant is that hardware
+/// abstractions ship before drivers: this is the shape any future API-driven actuation has
+/// to take, and <c>LightsCueTests</c> constructs it directly to pin that every overload
+/// carries a duration. Register it in the same commit as the first caller, not before.
 /// </para>
 ///
 /// <para>

@@ -130,13 +130,20 @@ public sealed class DeviceDiscoveryService
             : await _devices.DeviceCodeTakenAsync(cmd.DeviceCode.Trim(), existing.Id, ct);
         if (codeTaken) return await RefuseAsync(ClaimFailure.DeviceCodeTaken, board, cmd, actorUserId, ct);
 
-        // The same check manual registration makes, against the map this box would run:
-        // a box whose court buttons reach past its list is refused with the map named,
-        // rather than handed a key and left with buttons that select nothing.
-        var assignment = await _devices.CourtAssignmentErrorAsync(cmd.CourtNumbers!, cmd.ButtonMap, existing?.ButtonMapJson, ct);
-        if (assignment is not null)
+        // The same reconciliation manual registration makes, against the map this box would
+        // run. A court list naming a court the club does not have is refused; so is a map
+        // the ADMIN supplied that reaches past the list. A box with fewer courts than the
+        // club's default map selects is not: the discovery claim sends no button_map at
+        // all, so refusing there made every two- or three-court box unclaimable from the
+        // list until somebody edited the club map or hand-registered it. It gets the club's
+        // map trimmed to its relays instead. See ResolveCourtAssignmentAsync.
+        var assignment = await _devices.ResolveCourtAssignmentAsync(
+            cmd.CourtNumbers!,
+            cmd.ButtonMap is null ? null : new Optional<ButtonMap?>(cmd.ButtonMap),
+            existing?.ButtonMapJson, ct);
+        if (assignment.Error is { } error)
         {
-            var reason = assignment == DeviceRegistryService.CourtNumberNotFound
+            var reason = error == DeviceRegistryService.CourtNumberNotFound
                 ? ClaimFailure.CourtNumberNotFound
                 : ClaimFailure.ButtonMapMismatch;
             return await RefuseAsync(reason, board, cmd, actorUserId, ct);
@@ -144,7 +151,7 @@ public sealed class DeviceDiscoveryService
 
         var command = new RegisterDeviceCommand(
             cmd.DeviceCode, cmd.Name, DeviceKind.CourtBox, HardwareOf(board.Hardware), cmd.CourtNumbers, null)
-        { MacAddress = board.Mac, ButtonMap = cmd.ButtonMap };
+        { MacAddress = board.Mac, ButtonMap = assignment.Override };
 
         var registration = existing is null
             ? await _devices.RegisterAsync(command, actorUserId, ct)

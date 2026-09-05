@@ -17,10 +17,12 @@ The webhook URL supports **single-brace placeholder substitution** — `{variabl
 
 **Available variables** (always present, regardless of event):
 - `{tenant_id}`, `{tenant_slug}`
-- `{event_id}`, `{event_type}`
+- `{id}`, `{type}` — the envelope's own field names, and what a delivered body carries. `{event_id}` and `{event_type}` are accepted as aliases: this document promised those two names while the envelope only ever had `id` and `type`, so a template written against it was refused at delivery as a missing variable — a config error, deliberately not retried, so the endpoint just stopped (review A2-16). Both spellings work now; the short ones are canonical.
 - `{occurred_at}` (ISO8601), `{occurred_at_unix}`
 
 **Event-specific variables** are flattened from `data` — every key in the event's `data` object is available as `{key}`. For booking events that means `{court_id}`, `{court_number}`, `{court_name}`, `{user_id}`, `{user_name}`, `{booking_id}`, `{starts_at}`, `{ends_at}`, `{slice_count}`, `{amount_charged_zar}`, `{balance_after_zar}`, etc.
+
+`actor` and `subject` are **objects** in the envelope and are not flattened, so `{user_id}` resolves only from `data`, on the events that carry one — not from `actor.user_id` or `subject.user_id`. There is no alias for it: two different user ids in one envelope have no single right answer.
 
 **Resolution rules**:
 - Missing variable at delivery time → delivery fails with a clear error in the delivery log; endpoint owner is emailed; not retried (a missing variable is a config bug, not a transient failure).

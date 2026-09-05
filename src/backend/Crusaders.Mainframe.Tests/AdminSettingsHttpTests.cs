@@ -465,6 +465,13 @@ public sealed class AdminSettingsHttpTests
     [InlineData("walkUpMaxMinutes", 0, "walk_up_max_minutes_out_of_range")]
     [InlineData("walkUpMaxMinutes", 91, "walk_up_max_minutes_out_of_range")]      // the relay bank's hard cap
     [InlineData("heartbeatSeconds", 5, "heartbeat_seconds_out_of_range")]
+    // The firmware clamps into [15, 300]. The API used to accept up to 3600 and the page
+    // said so, so an admin could set 600, read 600 back, and have the whole fleet run at
+    // 300 with nothing anywhere saying otherwise (round-3 finding 22).
+    [InlineData("heartbeatSeconds", 14, "heartbeat_seconds_out_of_range")]
+    [InlineData("heartbeatSeconds", 301, "heartbeat_seconds_out_of_range")]
+    [InlineData("heartbeatSeconds", 600, "heartbeat_seconds_out_of_range")]
+    [InlineData("heartbeatSeconds", 3600, "heartbeat_seconds_out_of_range")]
     [InlineData("activationForwardWindowMinutes", 0, "activation_forward_window_minutes_out_of_range")]
     [InlineData("activationCueWindowMinutes", -1, "activation_cue_window_minutes_out_of_range")]
     [InlineData("qrLifetimeSeconds", 10, "qr_lifetime_seconds_out_of_range")]

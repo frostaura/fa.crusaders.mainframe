@@ -224,6 +224,77 @@ public sealed class AccessCodeTests
         Assert.NotEqual(first.Code, replacement.Code);
     }
 
+    /// <summary>
+    /// Reuse stops short of expiry, and that is the whole of round-3 finding 21.
+    ///
+    /// <para>
+    /// The Court Code page re-fetches ten seconds before its code dies so the member never
+    /// holds a dead QR. Against unconditional reuse that pre-fetch got the same code back
+    /// with nine seconds on it — one extra request per lifetime and no change at all to
+    /// what the member was holding up at the box. A code inside the refresh lead is
+    /// replaced now, so the pre-fetch returns something the member can actually scan.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task An_ident_code_inside_the_refresh_lead_is_replaced_rather_than_handed_out_again()
+    {
+        await using var host = await TestHost.CreateAsync();
+
+        using var scope = host.NewScope();
+        var codes = scope.ServiceProvider.GetRequiredService<AccessCodeService>();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var lifetime = TimeSpan.FromSeconds(60);
+        var first = await codes.MintIdentAsync(host.PlayerUser.Id, lifetime, default);
+
+        // Still comfortably outside the lead: the same code.
+        first.ExpiresAt = DateTimeOffset.UtcNow.Add(AccessCodeService.IdentRefreshLead).AddSeconds(5);
+        await db.SaveChangesAsync();
+        Assert.Equal(first.Code, (await codes.MintIdentAsync(host.PlayerUser.Id, lifetime, default)).Code);
+
+        // Inside it — where the page's pre-fetch lands: a fresh code.
+        first.ExpiresAt = DateTimeOffset.UtcNow.Add(AccessCodeService.IdentRefreshLead).AddSeconds(-5);
+        await db.SaveChangesAsync();
+        var fresh = await codes.MintIdentAsync(host.PlayerUser.Id, lifetime, default);
+        Assert.NotEqual(first.Code, fresh.Code);
+
+        // And the one it replaced is left alone — a member may be holding it up at a box
+        // right now, and the box decides scans offline. Both resolve to the same member.
+        var stillThere = await db.AccessCodes.SingleAsync(c => c.Code == first.Code, default);
+        Assert.True(stillThere.IsLiveAt(DateTimeOffset.UtcNow));
+        Assert.NotNull(await codes.ResolveAsync(first.Code, default));
+        Assert.NotNull(await codes.ResolveAsync(fresh.Code, default));
+    }
+
+    /// <summary>
+    /// The lead is capped at half the lifetime, so a club that sets a very short
+    /// <c>qr_lifetime_seconds</c> gets rotation rather than a new row on every poll — the
+    /// confetti the reuse rule exists to prevent.
+    /// </summary>
+    [Fact]
+    public async Task A_lifetime_shorter_than_the_lead_still_reuses_rather_than_minting_every_call()
+    {
+        await using var host = await TestHost.CreateAsync();
+
+        using var scope = host.NewScope();
+        var codes = scope.ServiceProvider.GetRequiredService<AccessCodeService>();
+
+        var lifetime = TimeSpan.FromSeconds(10);   // shorter than IdentRefreshLead
+        var first = await codes.MintIdentAsync(host.PlayerUser.Id, lifetime, default);
+        var again = await codes.MintIdentAsync(host.PlayerUser.Id, lifetime, default);
+
+        Assert.Equal(first.Code, again.Code);
+    }
+
+    /// <summary>
+    /// Documents the contract the Court Code page's pre-fetch is written against: the
+    /// server's lead must be longer than the page's ten seconds, or a pre-fetch lands on
+    /// the reuse side of the line and the fix is a no-op again.
+    /// </summary>
+    [Fact]
+    public void The_refresh_lead_is_longer_than_the_pages_prefetch()
+        => Assert.True(AccessCodeService.IdentRefreshLead > TimeSpan.FromSeconds(10));
+
     // ---- Resolution --------------------------------------------------------
 
     [Fact]

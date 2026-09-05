@@ -68,8 +68,11 @@ public sealed class TestHost : IAsyncDisposable
         services.AddSingleton<IEmailService>(emailStub);
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
-        services.AddSingleton<Crusaders.Mainframe.Api.Lights.IRelayClient,
-                              Crusaders.Mainframe.Api.Lights.NullRelayClient>();
+        // IRelayClient is not registered here either, for the reason Program.cs gives: the
+        // court box is pull-only, nothing resolves one, and a test host that registered a
+        // service the app does not would be the divergence this comment exists to prevent.
+        // LightsCueTests constructs NullRelayClient directly to pin the interface's shape.
+        //
         // Mirrors Program.cs — the hardware abstraction and its key deriver must be
         // registered in both, or a test host diverges from the app it stands in for.
         services.AddSingleton<Crusaders.Mainframe.Api.Security.DeviceAuth.IDeviceKeyDeriver>(

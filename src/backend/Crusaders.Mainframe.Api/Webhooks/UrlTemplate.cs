@@ -37,10 +37,33 @@ public static class UrlTemplate
     }
 
     /// <summary>
-    /// Flattens the event envelope into a string-keyed dictionary. Top-level scalar fields are
-    /// available by their name; everything inside the <c>data</c> object is also available by its
-    /// short name. So <c>{event_id}</c>, <c>{tenant_slug}</c>, <c>{court_number}</c>, <c>{user_id}</c>
-    /// all resolve from a standard envelope.
+    /// Flattens the event envelope into a string-keyed dictionary.
+    ///
+    /// <para>
+    /// Top-level scalar fields are available by their own name — <c>{id}</c>, <c>{type}</c>,
+    /// <c>{tenant_id}</c>, <c>{tenant_slug}</c>, <c>{occurred_at}</c>,
+    /// <c>{occurred_at_unix}</c> — and everything inside the <c>data</c> object by its short
+    /// name, so <c>{court_number}</c> and <c>{booking_id}</c> resolve on the events that
+    /// carry them and are a config error on the events that do not.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>{event_id}</c> and <c>{event_type}</c> are aliases of <c>{id}</c> and
+    /// <c>{type}</c>. Both were promised — here and in <c>docs/specs/webhooks.md</c>, under
+    /// "always present, regardless of event" — and neither existed (original review A2-16):
+    /// the envelope's fields have always been <c>id</c> and <c>type</c>, so a club that
+    /// followed the documentation got a delivery refused as a missing variable, which is a
+    /// config error and deliberately not retryable, so their endpoint simply stopped.
+    /// Aliasing rather than renaming, because <c>id</c> and <c>type</c> are on the wire in
+    /// every body delivered so far and in every signature computed over one.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>actor</c> and <c>subject</c> are objects and are NOT flattened, so there is no
+    /// <c>{user_id}</c> from the envelope — only from <c>data</c>, on events that carry one.
+    /// The doc claimed otherwise; it was wrong in the same way and is not aliased, because
+    /// two different user ids in one envelope have no single right answer.
+    /// </para>
     /// </summary>
     private static Dictionary<string, string> Flatten(JsonElement root)
     {
@@ -54,6 +77,12 @@ public static class UrlTemplate
             }
             else if (TryStringValue(prop.Value, out var s)) dict[prop.Name] = s;
         }
+
+        // TryAdd, after everything: a `data.event_id` on some future event is that event's
+        // own and must win over the alias.
+        if (dict.TryGetValue("id", out var eventId)) dict.TryAdd("event_id", eventId);
+        if (dict.TryGetValue("type", out var eventType)) dict.TryAdd("event_type", eventType);
+
         return dict;
     }
 

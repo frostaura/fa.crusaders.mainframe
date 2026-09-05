@@ -37,11 +37,20 @@
 # 3. Port conflicts are now real. 5000/tcp and 48653/udp must be free on the
 #    host. A second stack on the same machine will not start, which is correct.
 #
-# 4. **The API is exposed on every host interface on :5000**, not only through
-#    the gateway on :8088. That is the price of host networking. Firewall 5000
-#    at the host, or accept that the LAN can reach the API directly — it is the
-#    same API either way, with the same authentication, but it bypasses any rate
-#    limiting or TLS the gateway would add.
+# 4. **Kestrel is bound explicitly, not to every interface.** Host networking
+#    used to put the API on :5000 on every host interface — the club LAN
+#    included. Combined with the API's old `172.16.0.0/12` trusted-proxy default
+#    that was a hole: a laptop on a 172.16.x.x club LAN could POST straight to
+#    :5000 with a rotating `X-Forwarded-For` and guess passwords past every rate
+#    limit, because the API believed the header from anything inside the /12
+#    (round-3 finding 15). The trusted range is now the compose bridge alone, and
+#    ASPNETCORE_URLS below binds loopback plus the one address the gateway dials.
+#
+#    **The boxes are unaffected.** They reach the API through the gateway on
+#    :8088 — the port the discovery OFFER advertises (`Discovery__AdvertisedPort`)
+#    and the only one the topology in docs/specs/deployment.md gives them. Direct
+#    :5000 from the LAN was a side effect of host networking, never a path the
+#    system hands out.
 #
 # ---------------------------------------------------------------------------
 # Checking it worked
@@ -77,6 +86,19 @@ services:
   backend:
     network_mode: host
     environment:
+      # Loopback for the healthcheck and anything on the host, plus the ONE address the
+      # gateway container dials: `extra_hosts: backend:host-gateway` below resolves to the
+      # host's docker bridge address, 172.17.0.1 on a stock daemon. Confirm it on this host
+      #
+      #   docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'
+      #
+      # and set BACKEND_BIND_ADDRESS in .env if it differs (a custom --host-gateway-ip, or
+      # a daemon whose default bridge was re-pooled). Getting it wrong is loud rather than
+      # silent: nginx answers 502 and the healthcheck still passes on loopback.
+      #
+      # This is what closes the LAN's direct route to :5000. See note 4 in the header.
+      ASPNETCORE_URLS: http://127.0.0.1:5000;http://${BACKEND_BIND_ADDRESS:-172.17.0.1}:5000
+
       # Service names are gone with the bridge; everything is loopback now.
       ConnectionStrings__DefaultConnection: Host=127.0.0.1;Port=5432;Database=${POSTGRES_DB:-crusaders_mainframe};Username=${POSTGRES_USER:-crusaders};Password=${POSTGRES_PASSWORD}
       SMTP_HOST: 127.0.0.1
@@ -111,10 +133,16 @@ services:
     # gateway address instead and nginx.conf stays as it is.
     #
     # The gateway reaches the host-networked backend FROM the compose bridge, so
-    # the backend sees it as a 172.16.0.0/12 peer — inside the API's default
-    # Gateway:TrustedProxies — and believes its X-Forwarded-* headers: that is
-    # what gives every box a provisioning/OTA URL on :8088 rather than :80, and
-    # every member their own rate-limit bucket. A club that fronts the API with
-    # anything else sets Gateway__TrustedProxies__0 (see .env.example).
+    # the backend sees it as a 172.29.83.0/24 peer — the ipam subnet pinned in
+    # docker-compose.yml, which is the API's default Gateway:TrustedProxies — and
+    # believes its X-Forwarded-* headers: that is what gives every box a
+    # provisioning/OTA URL on :8088 rather than :80, and every member their own
+    # rate-limit bucket rather than one shared club-wide one.
+    #
+    # cloudflared runs on this host and dials the published gateway port, so the
+    # gateway sees it as the bridge's own gateway address — also inside that /24,
+    # which is what lets Gateway:ForwardLimit=2 walk back past cloudflared to the
+    # real visitor. A club that fronts the API with anything else sets
+    # GATEWAY_TRUSTED_PROXIES to a comma-delimited list (see .env.example).
     extra_hosts:
       - "backend:host-gateway"

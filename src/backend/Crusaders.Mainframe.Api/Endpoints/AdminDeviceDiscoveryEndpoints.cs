@@ -90,7 +90,8 @@ public static class AdminDeviceDiscoveryEndpoints
     }
 
     private static async Task<IResult> ClaimAsync(
-        ClaimBoardRequest req, DeviceDiscoveryService discovery, HttpContext ctx, CancellationToken ct)
+        ClaimBoardRequest req, DeviceDiscoveryService discovery, TenantSettingsAccessor settingsAccessor,
+        HttpContext ctx, CancellationToken ct)
     {
         ButtonMap? buttons = null;
         if (req.ButtonMap is not null && !ButtonMap.TryParse(req.ButtonMap, out buttons, out var reason))
@@ -113,7 +114,7 @@ public static class AdminDeviceDiscoveryEndpoints
         // POST at arbitrary LAN addresses.
         return Results.Ok(new
         {
-            device = DeviceView.Of(result.Registration!.Device),
+            device = DeviceView.Of(result.Registration!.Device, (await settingsAccessor.GetAsync(ct)).HeartbeatSeconds),
             device_key = result.Registration.DeviceKey,
             key_version = result.Registration.Device.KeyVersion,
             board = DiscoveredBoardView.Of(result.Board!),

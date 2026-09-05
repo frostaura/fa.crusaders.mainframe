@@ -98,16 +98,49 @@ public sealed class AccessCodeService
     }
 
     /// <summary>
-    /// A member-ident code for this user. An unexpired one is reused — the PWA polls
-    /// this, and a fresh row per poll would be a table of confetti — else one is minted
-    /// with <paramref name="lifetime"/> from now.
+    /// How much life a member-ident code must have left to be handed out again.
+    ///
+    /// <para>
+    /// The Court Code page re-fetches ten seconds before the code it holds expires, so it
+    /// never shows a dead QR. That was a no-op against the server: reuse was unconditional
+    /// on "not yet expired", so the pre-fetch got the SAME code back with nine seconds on
+    /// it, the page short-circuited its own retry on seeing no rotation, and the member
+    /// held a dead QR for one to two seconds per rollover — up to ten if they opened the
+    /// app with a nearly-spent code (round-3 finding 21). Fifteen seconds is deliberately
+    /// LONGER than the page's ten: a pre-fetch must land on the mint side of this line, and
+    /// equal would make it a race against the round trip.
+    /// </para>
+    /// </summary>
+    public static readonly TimeSpan IdentRefreshLead = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// A member-ident code for this user. A live one with more than
+    /// <see cref="IdentRefreshLead"/> left is reused — the PWA polls this, and a fresh row
+    /// per poll would be a table of confetti — else one is minted with
+    /// <paramref name="lifetime"/> from now.
+    ///
+    /// <para>
+    /// The code being replaced is left alone rather than expired. A member may already be
+    /// holding it up at a box, and the box decides scans offline against a roster it
+    /// fetched minutes ago; revoking on rotation would turn every rollover into a
+    /// NOT RECOGNISED for whoever was mid-scan. Both live briefly, both resolve to the
+    /// same member, and the older one lapses on its own schedule.
+    /// </para>
+    ///
+    /// <para>
+    /// The lead is capped at half the lifetime so a club that sets a very short
+    /// <c>qr_lifetime_seconds</c> gets rotation rather than a new row on every single poll
+    /// — which is the confetti this reuse exists to prevent.
+    /// </para>
     /// </summary>
     public async Task<AccessCode> MintIdentAsync(Guid userId, TimeSpan lifetime, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
+        var lead = lifetime / 2 < IdentRefreshLead ? lifetime / 2 : IdentRefreshLead;
+        var usableUntil = now.Add(lead);
 
         var existing = await _db.AccessCodes
-            .Where(c => c.UserId == userId && c.Purpose == AccessCodePurpose.MemberIdent && c.ExpiresAt > now)
+            .Where(c => c.UserId == userId && c.Purpose == AccessCodePurpose.MemberIdent && c.ExpiresAt > usableUntil)
             .OrderByDescending(c => c.ExpiresAt)
             .FirstOrDefaultAsync(ct);
         if (existing is not null) return existing;

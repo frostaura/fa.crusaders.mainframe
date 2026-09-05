@@ -56,6 +56,20 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
     /// </summary>
     public System.Net.IPAddress? RemoteIpAddress { get; init; }
 
+    /// <summary>
+    /// <c>Gateway:TrustedProxies</c>, as a deployment would set it: one delimited string.
+    /// Null leaves <c>appsettings.json</c>'s default (loopback + the pinned compose bridge)
+    /// in place. Set it to prove a deployment can NARROW that default — the shape .NET
+    /// configuration's index-merged arrays made impossible. See <c>GatewayTrust</c>.
+    /// </summary>
+    public string? TrustedProxies { get; init; }
+
+    /// <summary>
+    /// <c>Gateway:ForwardLimit</c> — how many X-Forwarded-For hops the middleware walks
+    /// back. Null leaves the default of 2 (cloudflared in front of the gateway).
+    /// </summary>
+    public int? ForwardLimit { get; init; }
+
     private static readonly Dictionary<string, int> DefaultRateLimits = new()
     {
         ["AuthPerMinute"] = 100_000,
@@ -80,6 +94,13 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         // and failed somewhere unrecognisable. Clearing it is what makes ConnectionString
         // == null actually mean no database.
         Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", ConnectionString);
+
+        // Same constraint as the connection string: Program.cs reads the gateway trust
+        // configuration while it builds, before ConfigureAppConfiguration hooks fire.
+        // Cleared rather than left when null, for the reason spelled out above — these
+        // variables are process-wide and outlive the factory that set them.
+        Environment.SetEnvironmentVariable("Gateway__TrustedProxies", TrustedProxies);
+        Environment.SetEnvironmentVariable("Gateway__ForwardLimit", ForwardLimit?.ToString());
 
         // Read by Program.cs at limiter-registration time, so this has the same
         // must-be-an-environment-variable constraint as the connection string above.

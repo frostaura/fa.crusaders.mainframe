@@ -15,7 +15,12 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </summary>
 public static class DeviceView
 {
-    public static object Of(Device d) => new
+    /// <param name="heartbeatSeconds">
+    /// The tenant's configured <c>heartbeat_seconds</c>. Carried through so the two derived
+    /// fields below can be computed once, on the server, from the same numbers the box is
+    /// given on its heartbeat.
+    /// </param>
+    public static object Of(Device d, int heartbeatSeconds) => new
     {
         id = d.Id,
         device_code = d.DeviceCode,
@@ -42,5 +47,18 @@ public static class DeviceView
         // week after the release was promoted everywhere.
         failed_version = d.FailedVersion,
         created_at = d.CreatedAt,
+
+        // What this box will ACTUALLY heartbeat at, and how long silence has to last
+        // before it is offline. Both are derived here rather than on the page because the
+        // page cannot know the firmware's clamp: it had a hardcoded 180 000 ms threshold
+        // and a stale "every 30 s" comment while the interval was editable up to 3600, so
+        // an admin who raised it to reduce chatter saw every box read WifiOff for 40% of
+        // every interval and went power-cycling healthy hardware (round-3 finding 22).
+        // effective_heartbeat_seconds is the tenant's setting after the firmware's own
+        // [15, 300] clamp — equal to the setting now that the API refuses anything
+        // outside it, and still computed rather than assumed, because a value stored
+        // before that rule existed is still in some club's settings row.
+        effective_heartbeat_seconds = HeartbeatCadence.Effective(heartbeatSeconds),
+        offline_after_seconds = HeartbeatCadence.OfflineAfterSeconds(heartbeatSeconds),
     };
 }

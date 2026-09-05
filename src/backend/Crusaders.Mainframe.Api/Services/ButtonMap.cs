@@ -280,4 +280,36 @@ public sealed class ButtonMap
         }
         return null;
     }
+
+    /// <summary>
+    /// This map with every court button the box has no relay for turned off, or
+    /// <c>this</c> when there is nothing to trim.
+    ///
+    /// <para>
+    /// A club's map names courts A–D because most boxes drive four. Registering a two-court
+    /// box under it used to be a flat 400 with no way forward from the screen the admin was
+    /// on: they had to go and edit the club's map — changing every OTHER box's behaviour —
+    /// or hand-register the box with a map they had to compose themselves. A two-court box
+    /// with buttons C and D turned off is what they would have written, so it is what is
+    /// derived (closing re-review #13 residual). Buttons that are not court selections are
+    /// untouched: 15/30/45/60 mean the same thing on a box of any size.
+    /// </para>
+    ///
+    /// <para>
+    /// Only ever applied to a map the admin did NOT just type. An override that arrives in
+    /// the request and overreaches is still refused — quietly rewriting what someone
+    /// deliberately wrote is a worse failure than telling them it does not fit.
+    /// </para>
+    /// </summary>
+    public ButtonMap TrimmedTo(int courtCount)
+    {
+        if (FirstSelectionBeyond(courtCount) is null) return this;
+
+        return new ButtonMap(Actions
+            .Select(a => a is ButtonAction.SelectCourt c && c.CourtIndex >= courtCount ? new ButtonAction.None() : a)
+            .ToList());
+    }
+
+    /// <summary>Value equality on the wire form — two maps are the same map when they say the same thing.</summary>
+    public bool SameAs(ButtonMap? other) => other is not null && ToWire().SequenceEqual(other.ToWire());
 }
