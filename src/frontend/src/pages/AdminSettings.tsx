@@ -82,6 +82,22 @@ export default function AdminSettingsPage() {
             <Input type="time" value={minToHHMM(settings.day_end_minute)}
               onChange={(e) => setSettings({ ...settings, day_end_minute: hhmmToMin(e.target.value) })} />
           </Field>
+          {/* The zone every wall-clock time on this page and every slot on the booking
+              grid is read in. It was served by the API and had nowhere to be set: a club
+              outside South Africa saw its whole schedule in Johannesburg time with no
+              correction short of an UPDATE on a JSON column. */}
+          <Field
+            label="Timezone"
+            hint="The zone the club's day is read in. Day start and end, the booking grid and every time a member sees are all in this zone."
+          >
+            <select
+              value={settings.timezone}
+              onChange={(e) => setSettings({ ...settings, timezone: e.target.value })}
+              className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+            >
+              {timezoneOptions(settings.timezone).map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+            </select>
+          </Field>
         </div>
       </Card>
 
@@ -342,3 +358,34 @@ function CourtRow({ court, reload }: { court: AdminCourt; reload: () => Promise<
     </div>
   );
 }
+
+/**
+ * The zones offered in the timezone picker.
+ *
+ * <p>
+ * `Intl.supportedValuesOf("timeZone")` is the browser's own copy of the IANA tzdb, which
+ * is exactly the free-tier dependency CLAUDE.md names — no hand-kept list to go stale
+ * when a country moves its clocks. It is not in every runtime (jsdom does not carry it),
+ * so a small fallback covers the zones a club in this product's markets would pick, and
+ * the tenant's current value is always present whatever the runtime answered: a select
+ * that silently drops the saved zone would show the club the wrong one and then save it.
+ * </p>
+ */
+export function timezoneOptions(current: string): string[] {
+  const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
+  let zones: string[] = [];
+  try {
+    zones = intl.supportedValuesOf?.("timeZone") ?? [];
+  } catch {
+    zones = [];
+  }
+  if (zones.length === 0) zones = [...FALLBACK_TIMEZONES];
+  return zones.includes(current) ? zones : [current, ...zones];
+}
+
+const FALLBACK_TIMEZONES = [
+  "Africa/Johannesburg", "Africa/Cairo", "Africa/Lagos", "Africa/Nairobi",
+  "Europe/London", "Europe/Amsterdam", "Europe/Monaco", "Europe/Lisbon",
+  "Asia/Dubai", "Asia/Singapore", "Australia/Sydney",
+  "America/New_York", "America/Chicago", "America/Los_Angeles", "UTC",
+] as const;

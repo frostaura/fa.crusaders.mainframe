@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Fingerprint, KeyRound, Plus, Search, Users, Wallet, X } from "lucide-react";
-import { ApiError, endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type LedgerEntryType, type LedgerRow } from "../lib/api";
+import { ArrowDown, ArrowUp, ArrowUpDown, Ban, Fingerprint, KeyRound, MailWarning, Plus, RotateCcw, Search, Users, Wallet, X } from "lucide-react";
+import { ApiError, endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type LedgerEntryType, type LedgerRow, type MemberClass } from "../lib/api";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -45,6 +45,8 @@ export default function AdminMembersPage() {
   const [creditBookingError, setCreditBookingError] = useState<string | null>(null);
   const [resetFor, setResetFor] = useState<AdminMember | null>(null);
   const [resetResult, setResetResult] = useState<{ tempPassword: string; emailSentTo: string } | null>(null);
+  const [suspendFor, setSuspendFor] = useState<AdminMember | null>(null);
+  const [suspendReason, setSuspendReason] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [enrollFor, setEnrollFor] = useState<AdminMember | null>(null);
   const [biometrics, setBiometrics] = useState<Record<string, BiometricEnrollmentRow>>({});
@@ -146,6 +148,71 @@ export default function AdminMembersPage() {
     finally { setBusyId(null); }
   };
 
+  /**
+   * Assign a member's class.
+   *
+   * The endpoint and a typed client for it both existed and nothing called either, so
+   * every member onboarded through the product was permanently Regular — while the class
+   * decides the top-up rate (R100 buys 160 credits as Regular and 240 as league/senior)
+   * and peak-hour exclusivity. The row is corrected locally rather than by refetching the
+   * list, so a sorted, filtered, scrolled table does not jump under the admin's cursor.
+   */
+  const setMemberClass = async (m: AdminMember, next: MemberClass) => {
+    const previous = m.member_class;
+    if (next === previous) return;
+    setBusyId(m.membership_id);
+    setMembers((prev) => prev?.map((r) => r.membership_id === m.membership_id ? { ...r, member_class: next } : r) ?? prev);
+    try {
+      await endpoints.adminSetMemberClass(m.membership_id, next);
+      toast.push({ tone: "success", text: `${m.full_name} is now ${classLabel(next).toLowerCase()}.` });
+    } catch {
+      // Put the old value back: a select that keeps a class the server refused is a lie
+      // about a field that doubles what the member's money buys.
+      setMembers((prev) => prev?.map((r) => r.membership_id === m.membership_id ? { ...r, member_class: previous } : r) ?? prev);
+      toast.push({ tone: "danger", text: `Couldn't change ${m.full_name}'s class. Their rate is unchanged.` });
+    } finally { setBusyId(null); }
+  };
+
+  const suspend = async () => {
+    if (!suspendFor || !suspendReason.trim()) return;
+    setBusyId(suspendFor.membership_id);
+    try {
+      await endpoints.adminSuspend(suspendFor.membership_id, suspendReason);
+      toast.push({ tone: "success", text: `${suspendFor.full_name} suspended.` });
+      setSuspendFor(null); setSuspendReason("");
+      await load();
+    } catch { toast.push({ tone: "danger", text: "Couldn't suspend this member." }); }
+    finally { setBusyId(null); }
+  };
+
+  const reactivate = async (m: AdminMember) => {
+    setBusyId(m.membership_id);
+    try {
+      await endpoints.adminReactivate(m.membership_id);
+      toast.push({ tone: "success", text: `${m.full_name} is active again.` });
+      await load();
+    } catch { toast.push({ tone: "danger", text: "Couldn't reactivate this member." }); }
+    finally { setBusyId(null); }
+  };
+
+  /**
+   * Send the verification email again.
+   *
+   * An unverified member cannot sign in with a password however active their membership
+   * is, and this is the button that unsticks them. The endpoint answers the same way for
+   * an address it does not hold, so the toast promises delivery to the address rather
+   * than confirming the account — there is nothing here to leak either way, but the copy
+   * should not imply a lookup that did not happen.
+   */
+  const resendVerification = async (m: AdminMember) => {
+    setBusyId(m.membership_id);
+    try {
+      await endpoints.resendVerification(m.email);
+      toast.push({ tone: "success", text: `Verification email sent to ${m.email}.` });
+    } catch { toast.push({ tone: "danger", text: "Couldn't send the verification email. Check the mail settings and try again." }); }
+    finally { setBusyId(null); }
+  };
+
   const counts = useMemo(() => {
     if (!members) return { total: 0, pending: 0, active: 0, suspended: 0, rejected: 0 };
     return {
@@ -210,6 +277,7 @@ export default function AdminMembersPage() {
                   <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                  <th className="text-left px-4 py-3">Class</th>
                   <th className="text-right px-4 py-3">Balance</th>
                   <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <th className="text-right px-4 py-3">Actions</th>
@@ -251,9 +319,22 @@ export default function AdminMembersPage() {
                       </div>
                       {m.rejection_reason && <p className="text-xs text-danger-strong truncate max-w-[260px]" title={m.rejection_reason}>{m.rejection_reason}</p>}
                     </td>
-                    <td className="px-4 py-3 text-text-secondary truncate max-w-[200px]" title={m.email}>{m.email}</td>
+                    <td className="px-4 py-3 text-text-secondary max-w-[200px]" title={m.email}>
+                      <p className="truncate">{m.email}</p>
+                      {m.email_verified === false && (
+                        <span
+                          title="This member never confirmed their email address, so they cannot sign in with a password."
+                          className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-warning-soft text-warning-strong"
+                        >
+                          <MailWarning size={11} /> Unverified
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs text-text-secondary">{m.membership_number}</td>
                     <td className="px-4 py-3"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></td>
+                    <td className="px-4 py-3">
+                      <MemberClassCell member={m} busy={busyId === m.membership_id} onChange={(next) => setMemberClass(m, next)} />
+                    </td>
                     <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
                       <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
                         {formatCredits(m.balance_credits)}
@@ -279,10 +360,27 @@ export default function AdminMembersPage() {
                               icon={<Fingerprint size={16} />}
                             />
                             <IconAction title="Reset password" onClick={() => setResetFor(m)} icon={<KeyRound size={16} />} />
+                            <IconAction
+                              title="Suspend member"
+                              onClick={() => { setSuspendFor(m); setSuspendReason(""); }}
+                              icon={<Ban size={16} />}
+                              tone="danger"
+                            />
                           </>
                         )}
-                        {m.status !== "Active" && m.status !== "PendingApproval" && (
+                        {m.status === "Suspended" && (
+                          <>
+                            <IconAction title="Reactivate member" onClick={() => reactivate(m)} icon={<RotateCcw size={16} />} />
+                            <IconAction title="Reset password" onClick={() => setResetFor(m)} icon={<KeyRound size={16} />} />
+                          </>
+                        )}
+                        {m.status === "Rejected" && (
                           <IconAction title="Reset password" onClick={() => setResetFor(m)} icon={<KeyRound size={16} />} />
+                        )}
+                        {/* Available whatever the status: an applicant who never verified is
+                            stuck before approval matters, and an approved one is stuck after. */}
+                        {m.email_verified === false && (
+                          <IconAction title="Resend verification email" onClick={() => resendVerification(m)} icon={<MailWarning size={16} />} />
                         )}
                       </div>
                     </td>
@@ -302,6 +400,25 @@ export default function AdminMembersPage() {
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="ghost" onClick={() => setRejectFor(null)}>Cancel</Button>
             <Button variant="danger" onClick={reject} disabled={!rejectReason.trim()}>Reject</Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Suspend modal */}
+      {suspendFor && (
+        <Modal onClose={() => setSuspendFor(null)} title={`Suspend ${suspendFor.full_name}?`}>
+          <p className="text-sm text-text-secondary">
+            They won't be able to sign in, book a court, or open a court at the box. Their credit balance
+            and any bookings they already have are left exactly as they are, and reactivating restores
+            everything. The reason is emailed to them.
+          </p>
+          <Label className="mt-3">Reason (visible to the member)</Label>
+          <Input value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} placeholder="e.g. Membership dues unpaid since March." />
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="ghost" onClick={() => setSuspendFor(null)}>Cancel</Button>
+            <Button variant="danger" onClick={suspend} disabled={!suspendReason.trim() || busyId === suspendFor.membership_id}>
+              {busyId === suspendFor.membership_id ? "Suspending…" : "Suspend"}
+            </Button>
           </div>
         </Modal>
       )}
@@ -369,17 +486,54 @@ export default function AdminMembersPage() {
   );
 }
 
-function IconAction({ title, icon, onClick }: { title: string; icon: React.ReactNode; onClick: () => void }) {
+function IconAction({ title, icon, onClick, tone = "info" }: { title: string; icon: React.ReactNode; onClick: () => void; tone?: "info" | "danger" }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
       aria-label={title}
-      className="inline-flex items-center justify-center w-8 h-8 rounded-md text-text-secondary hover:text-info-strong hover:bg-info-soft transition"
+      className={cn(
+        "inline-flex items-center justify-center w-8 h-8 rounded-md text-text-secondary transition",
+        tone === "danger" ? "hover:text-danger-strong hover:bg-danger-soft" : "hover:text-info-strong hover:bg-info-soft",
+      )}
     >
       {icon}
     </button>
+  );
+}
+
+const MEMBER_CLASSES: MemberClass[] = ["Regular", "LeagueOrSenior"];
+
+function classLabel(c: MemberClass): string {
+  return c === "LeagueOrSenior" ? "League or senior" : "Regular";
+}
+
+/**
+ * The member's class, editable in place.
+ *
+ * <p>
+ * A select rather than a modal because this is a two-value field an admin changes while
+ * reading down a list, and a confirmation step for it would be ceremony. It is read-only
+ * for a rejected application: that membership is not going to buy anything, and offering
+ * a rate control on it invites the question of whether setting one revives the account.
+ * </p>
+ */
+function MemberClassCell({ member, busy, onChange }: { member: AdminMember; busy: boolean; onChange: (next: MemberClass) => void }) {
+  const current = member.member_class ?? "Regular";
+  if (member.status === "Rejected") {
+    return <span className="text-xs text-text-muted">{classLabel(current)}</span>;
+  }
+  return (
+    <select
+      value={current}
+      disabled={busy}
+      aria-label={`Member class for ${member.full_name}`}
+      onChange={(e) => onChange(e.target.value as MemberClass)}
+      className="h-9 px-2 rounded-lg border border-border bg-bg-surface text-text-primary text-xs disabled:opacity-60"
+    >
+      {MEMBER_CLASSES.map((c) => <option key={c} value={c}>{classLabel(c)}</option>)}
+    </select>
   );
 }
 

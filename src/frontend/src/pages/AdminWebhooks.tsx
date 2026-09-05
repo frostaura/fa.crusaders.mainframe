@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Plus, X } from "lucide-react";
-import { endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
+import { ApiError, endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -19,6 +19,24 @@ const ENVELOPE_VARS = [
   "occurred_at_unix",
 ] as const;
 
+/**
+ * Every `member.*` event carries the same payload, so a URL template written against one
+ * works against the others. `reason` is the only addition, on the two that have one.
+ */
+const MEMBER_VARS = ["membership_id", "user_id", "full_name", "membership_number", "status", "member_class"];
+
+/**
+ * The events the bus actually emits.
+ *
+ * <p>
+ * Keep this list matched to the backend's emitters, not to the spec's catalogue — an
+ * event offered here that nothing fires is a filter an admin can select and then wait on
+ * forever. Nine classes were missing from this picker at once, including the whole member
+ * lifecycle, which is why an admin could not get a webhook on the one thing they most
+ * wanted one for. `peripheral.unhealthy` is in the spec and deliberately absent here:
+ * nothing can currently put a device into the faulted state that would fire it.
+ * </p>
+ */
 const EVENTS: EventDef[] = [
   {
     name: "booking.created",
@@ -57,10 +75,88 @@ const EVENTS: EventDef[] = [
     vars: ["booking_id", "court_id", "court_number", "user_id", "penalty_credits", "refund_credits"],
   },
   {
+    name: "booking.completed",
+    label: "Booking completed",
+    description: "A slot ran to its end with the member actually there. Unlike \"lights off\", this does not fire for a no-show.",
+    vars: ["booking_id", "court_id", "court_number", "court_name", "user_id", "starts_at", "ends_at", "checked_in_at", "amount_charged_credits"],
+  },
+  {
+    name: "booking.no_show_reversed",
+    label: "No-show reversed",
+    description: "A late upload from a court box proved the member did attend, so a settled no-show was undone.",
+    vars: ["booking_id", "court_id", "court_number", "user_id", "attended_at", "refund_credits", "penalty_credits"],
+  },
+  {
+    name: "booking.displaced",
+    label: "Booking displaced",
+    description: "A booking sold into a released tail was cancelled and refunded when a no-show reversal reclaimed the slot.",
+    vars: ["booking_id", "court_id", "court_number", "user_id", "starts_at", "ends_at", "displaced_by_booking_id", "reason"],
+  },
+  {
+    name: "booking.displacement_reversed",
+    label: "Displacement reversed",
+    description: "A box's own release proved the earlier court went dark, so a displaced booking was reinstated and re-charged.",
+    vars: ["booking_id", "court_id", "court_number", "user_id", "starts_at", "ends_at"],
+  },
+  {
+    name: "booking.cancelled_lights_charged",
+    label: "Cancelled but lit",
+    description: "A cancelled booking was lit anyway from an offline box's cached roster, and charged pro rata for the minutes burned.",
+    vars: ["booking_id", "court_id", "court_number", "user_id", "lit_minutes", "amount_credits", "occurred_at"],
+  },
+  {
     name: "credit.topped_up",
     label: "Credit topped up",
     description: "A successful PayFast top-up cleared.",
     vars: ["topup_id", "zar_paid", "credits", "conversion_rate", "member_class", "external_reference"],
+  },
+  {
+    name: "credit.refunded",
+    label: "Credit refunded",
+    description: "A refund was written to a member's ledger — by a cancellation, a no-show reversal or a displacement.",
+    vars: ["entry_id", "user_id", "entry_type", "amount_credits", "booking_id", "reason"],
+  },
+  {
+    name: "credit.penalty_applied",
+    label: "Penalty charged",
+    description: "A no-show or late-cancellation penalty was taken off a member. Says how much moved, where the booking event only says what happened.",
+    vars: ["entry_id", "user_id", "entry_type", "amount_credits", "booking_id", "reason"],
+  },
+  {
+    name: "credit.adjusted",
+    label: "Credit adjusted by hand",
+    description: "An admin credited or debited a member from the console.",
+    vars: ["entry_id", "user_id", "entry_type", "amount_credits", "booking_id", "reason"],
+  },
+  {
+    name: "member.registered",
+    label: "Member registered",
+    description: "Somebody submitted a membership application.",
+    vars: MEMBER_VARS,
+  },
+  {
+    name: "member.approved",
+    label: "Member approved",
+    description: "An admin approved a pending application.",
+    vars: MEMBER_VARS,
+  },
+  {
+    name: "member.rejected",
+    label: "Member rejected",
+    description: "An admin rejected a pending application. Carries the reason the applicant was given.",
+    vars: [...MEMBER_VARS, "reason"],
+  },
+  {
+    name: "member.suspended",
+    label: "Member suspended",
+    description: "An admin suspended a member — access revoked, credit and bookings untouched.",
+    vars: [...MEMBER_VARS, "reason"],
+  },
+  {
+    name: "member.reactivated",
+    label: "Member reactivated",
+    description: "A suspension was lifted and the member has their access back.",
+    vars: MEMBER_VARS,
   },
 ];
 
@@ -88,9 +184,14 @@ export default function AdminWebhooksPage() {
   const toast = useToast();
   const [list, setList] = useState<WebhookEndpointDto[]>([]);
   const [creating, setCreating] = useState(false);
-  const [url, setUrl] = useState("http://arduino.local/court/{court_number}/turn/on");
+  // Seeded with a scoreboard, not the court box. The box is pull-only, has no inbound HTTP
+  // listener and can never be a webhook destination — `docs/specs/webhooks.md` names the old
+  // `http://arduino.local/court/{court_number}/turn/on` default as superseded and says in so
+  // many words that it must not be used as a templating example. It was this form's
+  // prefilled value, so the one example every admin started from was the forbidden one.
+  const [url, setUrl] = useState("https://scoreboard.example.com/court/{court_number}/lit");
   const [filterTokens, setFilterTokens] = useState<string[]>(["booking.lights_on"]);
-  const [description, setDescription] = useState("Lights on (Arduino)");
+  const [description, setDescription] = useState("Scoreboard — court lit");
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [openDeliveriesId, setOpenDeliveriesId] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDeliveryDto[]>([]);
@@ -111,8 +212,8 @@ export default function AdminWebhooksPage() {
       setCreating(false);
       await load();
       toast.push({ tone: "success", text: "Endpoint created." });
-    } catch {
-      toast.push({ tone: "danger", text: "Couldn't create endpoint." });
+    } catch (err) {
+      toast.push({ tone: "danger", text: createRefusal(err) });
     }
   };
 
@@ -498,6 +599,49 @@ function TemplateInput({
 }
 
 /* ============================================================================
+   Why a destination was refused.
+   ============================================================================ */
+
+/**
+ * The API's refusal codes, in the desk's words.
+ *
+ * <p>
+ * The API told these apart the whole time and the screen showed "Couldn't create
+ * endpoint." for all of them, so a typo'd scheme, an unparseable URL and a deliberate
+ * LAN address looked identical — three different mistakes with three different repairs
+ * and one four-word answer.
+ * </p>
+ *
+ * <p>
+ * <code>destination_not_permitted</code> is the one that matters most and the one it is
+ * most tempting to write badly. The guard is correct and must not be loosened: a webhook
+ * that can be pointed at a private address is an SSRF hole, and at the cloud metadata
+ * endpoint a credential leak. But a club pointing one at its own scoreboard is a
+ * <em>supported</em> case, reached by adding that address to the private-network
+ * allow-list, which is deployment configuration rather than anything this screen can do.
+ * So the copy says which of those two situations the admin is in and who can move it,
+ * instead of implying they typed something malformed.
+ * </p>
+ */
+const CREATE_REFUSAL: Record<string, string> = {
+  url_required: "Enter a URL for this endpoint.",
+  url_invalid: "That isn't a URL. It needs a scheme and a host — for example https://example.com/hook.",
+  scheme_must_be_http_or_https: "Webhook URLs have to be http:// or https://. Other schemes can't be delivered to.",
+  template_variable_not_allowed_in_host:
+    "A {variable} can't appear in the host — only in the path or query. Variables come from event data, so a host built from one would be a destination nobody chose.",
+  destination_not_permitted:
+    "That address is on a private or link-local network, which is blocked by default. If it's a device on the club's LAN, ask whoever runs the deployment to add it to the webhook allow-list; otherwise use a public address.",
+};
+
+function createRefusal(err: unknown): string {
+  const fallback = "Couldn't create endpoint. Check the URL and try again.";
+  if (!(err instanceof ApiError)) return fallback;
+  const payload = typeof err.payload === "object" && err.payload !== null ? (err.payload as Record<string, unknown>) : {};
+  const code = typeof payload.error === "string" ? payload.error : "";
+  return CREATE_REFUSAL[code] ?? fallback;
+}
+
+/* ============================================================================
    Deliveries — light DataTable.
    ============================================================================ */
 
@@ -505,28 +649,28 @@ function DeliveriesTable({ rows }: { rows: WebhookDeliveryDto[] }) {
   const cols: DataColumn<WebhookDeliveryDto>[] = [
     {
       key: "when", header: "When", width: 170,
-      cell: (r) => new Date(r.CreatedAt).toLocaleString(),
-      sortValue: (r) => new Date(r.CreatedAt).getTime(),
+      cell: (r) => new Date(r.created_at).toLocaleString(),
+      sortValue: (r) => new Date(r.created_at).getTime(),
     },
-    { key: "event", header: "Event", cell: (r) => <span className="font-mono text-xs">{r.EventType}</span>, sortValue: (r) => r.EventType },
+    { key: "event", header: "Event", cell: (r) => <span className="font-mono text-xs">{r.event_type}</span>, sortValue: (r) => r.event_type },
     {
       key: "status", header: "Status", width: 130,
       cell: (r) => {
-        const s = r.ResponseStatus;
-        const tone = s == null ? (r.FinalState === "delivered" ? "success" : r.FinalState === "failed" || r.FinalState === "abandoned" ? "danger" : "muted") : s >= 200 && s < 300 ? "success" : "danger";
-        return <Badge tone={tone}>{s ?? r.FinalState}</Badge>;
+        const s = r.response_status;
+        const tone = s == null ? (r.final_state === "delivered" ? "success" : r.final_state === "failed" || r.final_state === "abandoned" ? "danger" : "muted") : s >= 200 && s < 300 ? "success" : "danger";
+        return <Badge tone={tone}>{s ?? r.final_state}</Badge>;
       },
-      sortValue: (r) => r.ResponseStatus ?? -1,
+      sortValue: (r) => r.response_status ?? -1,
     },
-    { key: "attempt", header: "Try", width: 70, align: "right", cell: (r) => r.Attempt, sortValue: (r) => r.Attempt },
-    { key: "latency", header: "Latency", width: 100, align: "right", cell: (r) => `${r.LatencyMs}ms`, sortValue: (r) => r.LatencyMs },
+    { key: "attempt", header: "Try", width: 70, align: "right", cell: (r) => r.attempt, sortValue: (r) => r.attempt },
+    { key: "latency", header: "Latency", width: 100, align: "right", cell: (r) => `${r.latency_ms}ms`, sortValue: (r) => r.latency_ms },
   ];
   return (
     <div className="mt-3">
       <DataTable
         rows={rows}
         columns={cols}
-        rowKey={(r) => r.Id}
+        rowKey={(r) => r.id}
         defaultSort={{ key: "when", dir: "desc" }}
         emptyTitle="No deliveries yet"
         emptyHint="Once an event matches this endpoint, attempts will appear here."
