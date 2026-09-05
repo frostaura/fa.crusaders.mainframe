@@ -29,7 +29,13 @@ export type StubRoute = {
   method?: string;
   /** Matched against the request path with `startsWith`, so query strings are fine. */
   path: string;
-  status?: number;
+  /**
+   * A single status for every call, or one per call with the last repeating — the same
+   * indexing as `sequence`, so a route can answer 402 then 200. A screen whose whole job
+   * is to react to a refusal and retry cannot be driven by a stub that only has one
+   * status to give.
+   */
+  status?: number | number[];
   /** Response headers, keyed lower-case — `content-disposition` for a file download. */
   headers?: Record<string, string>;
   body: unknown;
@@ -121,7 +127,9 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
     // anonymous function. That is why `make complexity` used to measure this file as a
     // single 189-line function and could not see `stubFetch` at all — and why adding a
     // fixture to the end of the file tripped the length gate on a line nobody touched.
-    const status = route.status ?? 200;
+    const status = Array.isArray(route.status)
+      ? route.status[Math.min(nth, route.status.length - 1)]
+      : route.status ?? 200;
     const ok = status < 400;
     // `json()` and `blob()` as well as `text()`: the typed client reads text and parses it,
     // the multipart photo upload calls `res.json()` directly, and the wallet CSV must be

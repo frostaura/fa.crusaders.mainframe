@@ -45,10 +45,19 @@ public static class BookingEndpoints
         // Admin: book on behalf + cancel-with-waive
         var admin = app.MapGroup("/api/v1/admin/bookings").RequireAuthorization(p => p.RequireRole("admin"));
 
+        // §8: "Book on behalf of any member (charges that member's credit; if insufficient,
+        // admin can override and create a negative balance, logged)."
+        //
+        // `allowNegativeBalance` is the override, and it exists on THIS request record and
+        // not on the member's own — a member has no way to send it, and the service refuses
+        // it anyway unless the actor differs from the payer. The desk is expected to see the
+        // ordinary 402 first, with the member's balance and the price in it, and to come
+        // back having read them; nothing here makes the overdraft the default.
         admin.MapPost("/", async (AdminBookingRequest req, HttpContext ctx, BookingService svc, CancellationToken ct) =>
         {
             var actorId = ctx.User.Id() ?? Guid.Empty;
-            var result = await svc.CreateAsync(req.CourtId, req.UserId, actorId, req.StartsAt, req.SliceCount, ct);
+            var payer = new BookingPayer(req.UserId, actorId, req.AllowNegativeBalance);
+            var result = await svc.CreateAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct);
             return ToHttpResult(result, ctx);
         });
 
@@ -154,5 +163,13 @@ public static class BookingEndpoints
 
 public sealed record CreateBlockRequest(Guid CourtId, DateTimeOffset StartsAt, int SliceCount, string? Label);
 public sealed record CreateBookingRequest(Guid CourtId, DateTimeOffset StartsAt, int SliceCount);
-public sealed record AdminBookingRequest(Guid CourtId, Guid UserId, DateTimeOffset StartsAt, int SliceCount);
+/// <summary>
+/// <paramref name="AllowNegativeBalance"/> is §8's admin override, and it is deliberately
+/// absent from <see cref="CreateBookingRequest"/>: a member cannot ask to be overdrawn, and
+/// an admin booking for themselves gets no benefit from it either, because the service only
+/// honours it when the actor and the payer differ. Defaulted so an older client that does
+/// not send the field books exactly as it did before.
+/// </summary>
+public sealed record AdminBookingRequest(
+    Guid CourtId, Guid UserId, DateTimeOffset StartsAt, int SliceCount, bool AllowNegativeBalance = false);
 public sealed record AdminCancelRequest(bool WaivePenalty);

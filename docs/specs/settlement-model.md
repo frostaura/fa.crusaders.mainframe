@@ -237,7 +237,7 @@ booking, so it is paired by device, relay and time:
 
 | Event | Precondition | Effect |
 | --- | --- | --- |
-| Booking created | balance ≥ `P` under the payer's lock | row + `BookingCharge −P` in one save. `Owed = P`. |
+| Booking created | balance ≥ `P` under the payer's lock, **or** an admin on-behalf booking carrying `feature-spec.md` §8's explicit override (§6) | row + `BookingCharge −P` in one save. `Owed = P`. |
 | Cancel, no check-in, outside window | — | `CancellationRefund +P`. `Owed = 0`. |
 | Cancel, no check-in, inside window | — | `CancellationRefund +P` **and** `LateCancellationPenalty −penalty`, one save, never netted. `Owed = penalty`. |
 | Cancel after check-in | — | nothing posted. `Owed = P`. |
@@ -259,6 +259,16 @@ booking, so it is paired by device, relay and time:
   to another as a refund/charge pair; `Owed(b)` is unchanged, only `u` is.
 - **An admin adjustment that names no booking.** Goodwill, corrections of a mis-keyed top-up,
   anything the desk does that is not about one booking.
+- **The wallet going below zero.** `feature-spec.md` §8 lets an admin book on behalf of a
+  member who cannot cover the court, by asking for the override explicitly. That leaves the
+  member's **wallet** negative; it does not change `Owed(b)`, which is still `P`, posted as
+  the same single `BookingCharge` at the same quoted price. Nothing above bounds the sign of
+  the wallet, and I1's ceiling is per booking, not per member: a member overdrawn on two
+  courts owes `P₁ + P₂`, each still inside its own `[0, P]`. Cancelling one behaves exactly
+  as S2/S3 say, and an ordinary top-up nets against the rest, because the wallet is the sum
+  of the ledger and there is no separate debt record for it to disagree with. It was already
+  reachable before §8's override existed — a `release` correction landing on credit the
+  member had since spent does the same thing.
 
 ---
 
@@ -290,9 +300,11 @@ Recorded here rather than left for the next reviewer to rediscover.
 | S6, I3, I8, I9, I10, I12 | `Services/BookingService.cs` — `ReverseNoShowAsync`, `SettledLegsAsync`, `DisplacementAsync`, `RestoreEnd`, `ReinstateDisplacedAsync` |
 | S7, I1, I6 | `Services/BookingService.cs` — `ChargeLitCancelledBookingAsync`, `SettleReleaseAsync`; `Endpoints/DeviceEventEndpoints.cs` — `LitWindow` |
 | S8, I5 | `Services/BookingService.cs` — `ChargeLitCancelledBookingAsync` guard, `ExpireCodes`; `Endpoints/DeviceEventEndpoints.cs` — displaced-collision audit |
+| §6 overdraft override | `Services/BookingService.cs` — `CreateAsync` (`BookingPayer.AllowNegativeBalance`) and `CommitAsync`, which must lift the same guard under the payer's lock; `Endpoints/BookingEndpoints.cs` — the admin booking route |
 | I4 | `Endpoints/WalletEndpoints.cs` — the adjust handler |
 | I7 | `Endpoints/DeviceEventEndpoints.cs` — `SettleAsync`; `Services/CourtActivationService.cs` — `ActivateAsync` |
 | §4 pairing | `Endpoints/DeviceEventEndpoints.cs` — `ReleaseOutcomeAsync` |
 
 Pinning tests: `NoShowWorkerTests`, `PeripheralHealthTests`, `DeviceEventHttpTests`,
-`WalkUpBookingTests`, `ConcurrentDecisionTests`, `SettlementModelTests`.
+`WalkUpBookingTests`, `ConcurrentDecisionTests`, `SettlementModelTests`,
+`AdminOverdraftBookingTests`, `AdminOverdraftBookingHttpTests`.

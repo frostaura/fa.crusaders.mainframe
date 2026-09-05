@@ -6,8 +6,9 @@ import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
 import { formatCredits } from "../lib/utils";
-import { cancellationOutcome, describeBookingError } from "../lib/bookingErrors";
-import { BookingConfirmModal, type AdminOption, type BookingIntent } from "../components/BookingConfirmModal";
+import { cancellationOutcome, describeBookingError, MEMBER_SHORT_TEXT } from "../lib/bookingErrors";
+import { ApiError } from "../lib/api";
+import { BookingConfirmModal, type AdminOption, type BookingIntent, type BookingOutcome } from "../components/BookingConfirmModal";
 import { CancelBookingModal } from "../components/CancelBookingModal";
 import { ScheduleGrid } from "../components/ScheduleCells";
 import { buildTimeSlices, groupSlotsByCourt } from "../lib/scheduleGrid";
@@ -112,15 +113,23 @@ export default function SchedulePage() {
     whenLabel: formatTime(slot.startsAtUtc, timezone), mine: slot.isMine,
   }), [timezone]);
 
-  const confirmBooking = async (option: AdminOption) => {
-    if (!booking) return;
+  const confirmBooking = async (option: AdminOption): Promise<BookingOutcome> => {
+    if (!booking) return { kind: "done" };
     try {
-      await placeBooking(booking, option, (slot) => setDay((d) => withSlot(d, slot)), applyBalance);
-      toast.push({ tone: "success", text: bookedMessage(booking, option) });
+      const memberBalanceAfter = await placeBooking(
+        booking, option, (slot) => setDay((d) => withSlot(d, slot)), applyBalance);
+      toast.push({ tone: "success", text: bookedMessage(booking, option, memberBalanceAfter) });
       setBooking(null);
       reconcile();
+      return { kind: "done" };
     } catch (err) {
-      toast.push({ tone: "danger", text: describeBookingError(err, "Couldn't make that booking. Refresh the schedule and try again.") });
+      // A member who cannot cover the court is not an error to report and dismiss — it is
+      // §8's decision, and it goes back to the modal so the admin can take it with the
+      // figures in front of them.
+      const short = shortfallFrom(err, option);
+      if (short) return short;
+      toast.push({ tone: "danger", text: refusalText(err, option) });
+      return { kind: "done" };
     }
   };
 
@@ -231,7 +240,7 @@ export default function SchedulePage() {
 async function placeBooking(
   intent: BookingIntent, option: AdminOption,
   addSlot: (slot: ScheduleSlot) => void, applyBalance: (credits: number) => void,
-): Promise<void> {
+): Promise<number | null> {
   const base = {
     courtId: intent.courtId, courtNumber: 0,
     startsAtUtc: intent.startsAtUtc,
@@ -244,15 +253,19 @@ async function placeBooking(
       ...base, status: "adminblock", ownerUserId: null, ownerFirstName: null,
       isMine: false, bookingId: r.booking_id, blockLabel: option.label, amountChargedCredits: null,
     });
-    return;
+    return null;
   }
   if (option.kind === "member") {
-    const r = await endpoints.adminBook(intent.courtId, option.userId, intent.startsAtUtc, 1);
+    const r = await endpoints.adminBook(
+      intent.courtId, option.userId, intent.startsAtUtc, 1, option.allowNegativeBalance ?? false);
     addSlot({
       ...base, status: "booked", ownerUserId: option.userId, ownerFirstName: null,
       isMine: false, bookingId: r.booking_id, blockLabel: null, amountChargedCredits: intent.priceCredits,
     });
-    return;
+    // The MEMBER's balance, and deliberately not handed to applyBalance: the admin's own
+    // wallet did not move, and overwriting it with somebody else's figure is the same
+    // wrong-wallet mistake in the other direction.
+    return r.balance_after_credits;
   }
   const r = await endpoints.book(intent.courtId, intent.startsAtUtc, 1);
   addSlot({
@@ -260,11 +273,57 @@ async function placeBooking(
     isMine: true, bookingId: r.booking_id, blockLabel: null, amountChargedCredits: intent.priceCredits,
   });
   applyBalance(r.balance_after_credits);
+  return null;
 }
 
-function bookedMessage(intent: BookingIntent, option: AdminOption): string {
+/**
+ * §8's override opportunity: an on-behalf booking the MEMBER cannot cover.
+ *
+ * <p>
+ * Narrow on purpose. It fires only on the first attempt of a member-mode booking — an
+ * override that is itself refused must not offer another override — and only when the
+ * server sent both figures, because the whole value of the offer is that it states what
+ * the overdraft will cost the member. Anything else falls through to a toast.
+ * </p>
+ */
+function shortfallFrom(err: unknown, option: AdminOption): BookingOutcome | null {
+  if (option.kind !== "member" || option.allowNegativeBalance) return null;
+  if (!(err instanceof ApiError) || err.code !== "insufficient_balance") return null;
+  const current = err.detail("current_credits");
+  const required = err.detail("required_credits");
+  if (typeof current !== "number" || typeof required !== "number") return null;
+  return { kind: "short", currentCredits: current, requiredCredits: required };
+}
+
+/**
+ * The refusal sentence, addressed to the wallet that is actually short.
+ *
+ * <p>
+ * `insufficient_balance` reaches this screen for two different people. A member is told to
+ * top up, which is what they can do about it. An admin booking on somebody else's behalf
+ * was told to top up their own wallet — a desk account with a permanent balance of zero —
+ * about a refusal that had nothing to do with it.
+ * </p>
+ */
+function refusalText(err: unknown, option: AdminOption): string {
+  const fallback = "Couldn't make that booking. Refresh the schedule and try again.";
+  if (option.kind === "member" && err instanceof ApiError && err.code === "insufficient_balance") {
+    return MEMBER_SHORT_TEXT;
+  }
+  return describeBookingError(err, fallback);
+}
+
+function bookedMessage(intent: BookingIntent, option: AdminOption, memberBalanceAfter: number | null): string {
   if (option.kind === "block") return `${intent.courtName} held for "${option.label}" at ${intent.whenLabel}.`;
-  if (option.kind === "member") return `Booked ${intent.courtName} at ${intent.whenLabel} for that member.`;
+  if (option.kind === "member") {
+    // Naming the resulting balance is the point of the override being deliberate: the
+    // admin who has just put somebody in the red is told by how much, at the moment they
+    // did it, rather than by an audit report at month end.
+    const owing = memberBalanceAfter !== null && memberBalanceAfter < 0
+      ? ` Their balance is now ${formatCredits(memberBalanceAfter)} — they've been emailed about it.`
+      : "";
+    return `Booked ${intent.courtName} at ${intent.whenLabel} for that member.${owing}`;
+  }
   return `Booked ${intent.courtName} at ${intent.whenLabel}.`;
 }
 

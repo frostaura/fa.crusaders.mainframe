@@ -13,7 +13,7 @@
 # simple. Those are measurement artifacts rather than genuine complexity, and
 # they resolve naturally as endpoints are split out during the device work.
 #
-# THE NAMES HERE ARE LIZARD'S, NOT C#'s, and the two disagree. lizard's C#
+# THE NAMES HERE ARE LIZARD'S, NOT C#'s, and the two can disagree. lizard's C#
 # parser scopes a function under the most recently DECLARED type, not the type
 # that encloses it — so `TopUpEndpoints.MapTopUpEndpoints`, which sits directly
 # below the nested `FailureCodes` class, is reported as
@@ -31,6 +31,11 @@
 # method silently voids it in one direction or the other. Both names for the one
 # function are listed for that reason: whichever way the parser reads the file,
 # the ratchet holds and the function is still frozen at its current numbers.
+#
+# It bit twice in one day, from both sides at once: one round moved `FailureCodes`
+# below `MapTopUpEndpoints` while another, in parallel, renamed the entry to
+# `FailureCodes::`. Each was green alone and the merge of the two was red. Listing
+# both names is what makes the entry survive that.
 AdminConfigEndpoints::MapAdminConfigEndpoints
 AdminMemberEndpoints::MapAdminMemberEndpoints
 AdminMembersPage
@@ -51,7 +56,7 @@ ReportingEndpoints::MapReportingEndpoints
 SmtpEmailService::SendAsync
 SortHeader
 FailureCodes::MapTopUpEndpoints  # = TopUpEndpoints.MapTopUpEndpoints; see the naming note above
-TopUpEndpoints::MapTopUpEndpoints  # the SAME function under lizard's other scoping of it — see below
+TopUpEndpoints::MapTopUpEndpoints  # the SAME function under lizard's other scoping of it — see above
 WebAuthnEndpoints::MapWebAuthnEndpoints
 adjust
 load

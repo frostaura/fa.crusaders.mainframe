@@ -139,7 +139,29 @@ A tenant admin can:
 - Approve / reject / suspend members.
 - Generate a temporary password for any member.
 - **Run a biometric enrollment session for any member**, with the member physically present at a tenant machine that has a peripheral attached. Multiple finger / face templates per member supported. Re-enrollment replaces the previous template with full audit trail. See `biometric-abstraction.md` § Admin-led enrollment flow.
-- Book on behalf of any member (charges that member's credit; if insufficient, admin can override and create a negative balance, logged).
+- **Book on behalf of any member.** Charges that member's credit and never the admin's — a
+  desk account's balance is zero permanently, because it never plays. If the member cannot
+  cover the court the booking is **refused first**, with their balance and the price on the
+  refusal; the admin can then override that refusal and take the member below zero. The
+  override is deliberate, not a bypass admins get for being admins:
+  - It is asked for **by name** — `allowNegativeBalance` on `POST /api/v1/admin/bookings` —
+    on a second attempt, after the desk has read the two figures. The confirmation modal
+    shows the member's name, their balance, the price and the balance it will leave, and the
+    override button states that balance in its own label.
+  - It is honoured **only when the actor differs from the payer**, so an admin cannot
+    overdraw their own wallet with it and a member has no route to it at all: the field does
+    not exist on the member's own booking request, and the service would refuse it anyway.
+  - It is **logged** as `booking.created_on_behalf_overdrawn`, carrying the actor, the
+    member, and the balance before and after. An override the member turned out to be able
+    to afford is audited as an ordinary `booking.created_on_behalf` — the trail records the
+    outcome, not the request.
+  - Nothing else about the booking changes: one `BookingCharge` at the quoted price, so
+    `settlement-model.md` S1 still says `Owed(b) = P` and I1 still bounds it. What goes
+    negative is the **wallet**, which is a sum over the ledger and has never been constrained
+    to be non-negative; an ordinary top-up nets against it, because there is no separate debt
+    record to reconcile.
+  - The member's confirmation email states the negative balance and asks them to top up.
+    Being in the red is not a suspension and does not block anything by itself.
 - Cancel any booking on behalf of any member (penalty waiveable with reason).
 - Block a slot for an event (creates an `admin_block` entry; can be a single slot or a range). `POST /api/v1/admin/blocks` creates one, `DELETE /api/v1/admin/blocks/{id}` lifts it. A block reserves the court through the same overlap exclusion constraint a booking does, takes no money and writes no ledger row. It **cannot be laid over an existing booking** — a player who paid must be refunded deliberately, through a cancellation, rather than overwritten. Lifting a block cancels rather than deletes it, so the trail survives. *Recurring weekly blocks are out of scope for v1, alongside recurring bookings (§5); a range is created as one block per slot run.*
 - The three admin actions above — book on behalf, cancel any booking with an optional waived penalty, and block — are reachable **from the schedule grid**, on the slot they act on. The endpoints existing without a screen is the same defect as the screen existing without the endpoints.

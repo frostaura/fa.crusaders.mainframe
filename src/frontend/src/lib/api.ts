@@ -733,9 +733,19 @@ export const endpoints = {
   /** Read when the cancellation modal opens, never cached with the schedule — the answer moves with the clock and with a scan at the box. */
   cancellationQuote: (bookingId: string) => api.get<CancellationQuote>(`/api/v1/bookings/${bookingId}/cancellation-quote`),
 
-  /** Admin: book on behalf of a member. The member is charged; the admin is the actor on the audit row. */
-  adminBook: (courtId: string, userId: string, startsAt: string, sliceCount: number) =>
-    api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/admin/bookings/", { courtId, userId, startsAt, sliceCount }),
+  /**
+   * Admin: book on behalf of a member. The member is charged; the admin is the actor on the
+   * audit row, and `balance_after_credits` in the answer is the MEMBER's balance, not the
+   * caller's.
+   *
+   * `allowNegativeBalance` is spec §8's override — send it only after the server has
+   * refused with `insufficient_balance` and the admin has read the figures. The API
+   * honours it only when the payer differs from the actor, so it can never overdraw the
+   * caller's own wallet.
+   */
+  adminBook: (courtId: string, userId: string, startsAt: string, sliceCount: number, allowNegativeBalance = false) =>
+    api.post<{ booking_id: string; balance_after_credits: number }>(
+      "/api/v1/admin/bookings/", { courtId, userId, startsAt, sliceCount, allowNegativeBalance }),
   /** Admin: cancel anyone's booking, optionally waiving the late-cancellation penalty. */
   adminCancelBooking: (bookingId: string, waivePenalty: boolean) =>
     api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/admin/bookings/${bookingId}/cancel`, { waivePenalty }),

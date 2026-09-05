@@ -188,20 +188,27 @@ public sealed class TestHost : IAsyncDisposable
         // Step past the window rather than clamping to its edge: a slot starting at 15:59
         // can still END inside peak, and while the rule is evaluated on the start, the
         // intent here is to stay clear of it entirely.
+        while (slot.Hour is >= 15 and < 19) slot = slot.AddHours(1);
+
+        // And clear of the END of the club's day, for the same reason and by the same
+        // mistake made once already.
         //
-        // The late hours are stepped past for a second reason, and it is the same trap from
-        // the other end of the day: CheckOperatingHoursRule measures the END against the
-        // local day the booking STARTS on, so a slot at 23:50 ends at minute 1445 of a day
-        // that has 1440 and is refused OutOfHours — even by the fixture's 00:00-24:00 club.
-        // `now.AddHours(2)` therefore landed there for about fifteen minutes of every
-        // evening, and `A_booking_charges_comment_is_in_the_clubs_wall_clock` (which runs
-        // this helper in SAST) failed with an OutOfHours cast error in a test about ledger
-        // wording. Reproduced at fd5980d with nothing else changed, at 19:50 UTC.
+        // The operating-hours rule is evaluated on the slot's END:
+        // `endMinute = startMinute + duration` against `day_end_minute`, which is 1440 in
+        // this fixture. A 15-minute slot starting at 23:50 ends at 1445 and is refused
+        // `OutOfHours` — a club that is open all day still cannot sell a court that runs
+        // past midnight. So this helper's promise held for peak and quietly did not hold
+        // for closing time, and MoneySurfaceTests, which asks for a slot two hours out in
+        // the club's own clock, went red for roughly a quarter of an hour every night
+        // and green for the rest of the day. That is the same "passes all morning, fails
+        // after lunch" shape memory/gotchas.md already records, from the other end of the
+        // day.
         //
-        // The early hours go with them so the helper keeps returning a time a club could
-        // plausibly be open at: a test that wants 02:00 is a test about operating hours, and
-        // those construct their own times by design.
-        while (slot.Hour is >= 15 and < 19 or >= 22 or < 8) slot = slot.AddHours(1);
+        // Stepping out of hour 23 entirely, rather than trimming to fit, because callers
+        // book up to four slices (an hour) on one slot and the headroom has to cover the
+        // longest of them. One step is always enough: 23:xx + 1h is 00:xx, which is
+        // neither peak nor the end of a day.
+        if (slot.Hour == 23) slot = slot.AddHours(1);
         return slot;
     }
 
