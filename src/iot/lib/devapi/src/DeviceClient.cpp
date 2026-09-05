@@ -15,7 +15,7 @@ bool isDigit(char c) {
 
 } // namespace
 
-bool DeviceClient::sign(const Call& call, uint32_t uptimeMs, RequestBuffers& buffers,
+bool DeviceClient::sign(const Call& call, uint64_t uptimeMs, RequestBuffers& buffers,
                         SignedRequest& out) const {
   if (!clockKnown_) {
     // Refuse locally rather than sign with a timestamp of zero. A zero
@@ -83,25 +83,25 @@ bool DeviceClient::render(const Call& call, uint64_t unixSeconds, RequestBuffers
   return true;
 }
 
-uint64_t DeviceClient::unixNow(uint32_t uptimeMs) const {
+uint64_t DeviceClient::unixNow(uint64_t uptimeMs) const {
   if (!clockKnown_) {
     return 0U;
   }
-  const int64_t candidate = offset_ + static_cast<int64_t>(uptimeMs / 1000U);
+  const int64_t candidate = offset_ + static_cast<int64_t>(uptimeMs / 1000ULL);
   return candidate < 0 ? 0U : static_cast<uint64_t>(candidate);
 }
 
-void DeviceClient::adoptServerTime(uint64_t serverUnix, uint32_t uptimeMs) {
+void DeviceClient::adoptServerTime(uint64_t serverUnix, uint64_t uptimeMs) {
   if (serverUnix == 0U) {
     // Absent, not "the epoch". A response without the field teaches nothing and
     // must not reset a good offset.
     return;
   }
-  offset_ = static_cast<int64_t>(serverUnix) - static_cast<int64_t>(uptimeMs / 1000U);
+  offset_ = static_cast<int64_t>(serverUnix) - static_cast<int64_t>(uptimeMs / 1000ULL);
   clockKnown_ = true;
 }
 
-OfferClock DeviceClient::adoptOfferTime(uint64_t offerUnix, uint32_t uptimeMs) {
+OfferClock DeviceClient::adoptOfferTime(uint64_t offerUnix, uint64_t uptimeMs) {
   if (offerUnix == 0U) {
     return OfferClock::Absent;
   }
@@ -129,7 +129,7 @@ OfferClock DeviceClient::adoptOfferTime(uint64_t offerUnix, uint32_t uptimeMs) {
   return OfferClock::Adopted;
 }
 
-Reaction DeviceClient::react(const Response& response, uint32_t uptimeMs) {
+Reaction DeviceClient::react(const Response& response, uint64_t uptimeMs) {
   const bool hadClock = clockKnown_;
   const int64_t previousOffset = offset_;
   adoptServerTime(response.serverUnix, uptimeMs);

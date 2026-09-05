@@ -40,6 +40,8 @@
 #include "devapi/DeviceClient.h"
 #include "eventq/EventQueue.h"
 #include "fakes/FakeStore.h"
+#include "protocol/Codec.h"
+#include "protocol/Protocol.h"
 #include "roster/Roster.h"
 #include "support/CorpusJson.h"
 
@@ -750,25 +752,82 @@ void test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided
     const char* body;
     const char* line1;
     bool decided;
+    bool recognised;
   };
 
   const Case cases[] = {
-      {402U, "{\"error\":\"insufficient_balance\"}", "TOO FEW CREDITS", true},
-      {409U, "{\"error\":\"court_in_use\"}", "COURT NOT FREE", true},
-      {409U, "{\"error\":\"no_time_available\"}", "NO TIME BEFORE", true},
-      {400U, "{\"error\":\"not_recognised\"}", "SEE THE DESK", true},
-      {0U, "", "NO CONNECTION", false},
-      {503U, "", "SEE THE DESK", false},
-      {429U, "", "SEE THE DESK", false},
+      {402U, "{\"error\":\"insufficient_balance\"}", "TOO FEW CREDITS", true, true},
+      {409U, "{\"error\":\"court_in_use\"}", "COURT NOT FREE", true, true},
+      {409U, "{\"error\":\"no_time_available\"}", "NO TIME BEFORE", true, true},
+      {409U, "{\"error\":\"purchase_ended\"}", "PURCHASE ENDED", true, true},
+      {400U, "{\"error\":\"not_recognised\"}", "SEE THE DESK", true, false},
+      {400U, "{\"error\":\"court_not_on_device\"}", "SEE THE DESK", true, false},
+      {400U, "{\"error\":\"minutes_out_of_range\"}", "SEE THE DESK", true, false},
+      {0U, "", "NO CONNECTION", false, false},
+      {503U, "", "SEE THE DESK", false, false},
+      {429U, "", "SEE THE DESK", false, false},
   };
   for (const Case& c : cases) {
     const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(c.status, c.body, len(c.body), 0U, 30U);
     TEST_ASSERT_TRUE_MESSAGE(r.outcome.action == court::Action::Refuse, c.line1);
     TEST_ASSERT_EQUAL_STRING(c.line1, r.outcome.line1);
     TEST_ASSERT_EQUAL_MESSAGE(c.decided, r.decided, c.line1);
+    TEST_ASSERT_EQUAL_MESSAGE(c.recognised, r.outcome.recognised, c.body);
     TEST_ASSERT_TRUE(strlen(r.outcome.line1) <= court::kLineLen);
     TEST_ASSERT_TRUE(strlen(r.outcome.line2) <= court::kLineLen);
   }
+  // The one refusal with a second line a member acts on differently.
+  const char ended[] = "{\"error\":\"purchase_ended\",\"booking_id\":\"b1\"}";
+  TEST_ASSERT_EQUAL_STRING("SCAN TO START",
+                           bridgelogic::onWalkUpResponse(409U, ended, len(ended), 0U, 30U).outcome.line2);
+}
+
+void test_walkup_recognised_comes_from_the_body_never_from_the_status() {
+  // The bit that arms the button window. It was set on every 402 and 409 by
+  // status alone, so a 409 with no error in it — or one carrying
+  // not_recognised — armed thirty seconds of buttons for a token the API
+  // never identified. Only an error that is a verdict about a KNOWN member
+  // recognises; the status still decides what the screen says.
+  struct Case {
+    uint16_t status;
+    const char* body;
+    bool recognised;
+  };
+
+  const Case cases[] = {
+      {402U, "{\"error\":\"insufficient_balance\",\"current_credits\":2.0}", true},
+      {409U, "{\"error\":\"court_in_use\"}", true},
+      {409U, "{\"error\":\"no_time_available\"}", true},
+      {409U, "{\"error\":\"purchase_ended\"}", true},
+      {402U, "", false},
+      {409U, "", false},
+      {409U, "{}", false},
+      {409U, "{\"error\":\"not_recognised\"}", false},
+      {402U, "{\"error\":\"not_recognised\"}", false},
+      {400U, "{\"error\":\"not_recognised\"}", false},
+      {409U, "{\"error\":\"court_not_on_device\"}", false},
+      {409U, "{\"error\":\"something_newer\"}", false},
+      {409U, "{\"error\":\"court_in_use_x\"}", false},
+      {0U, "", false},
+      {503U, "{\"error\":\"court_in_use\"}", false},
+  };
+  for (const Case& c : cases) {
+    const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(c.status, c.body, len(c.body), 1U, 30U);
+    TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+    TEST_ASSERT_EQUAL_MESSAGE(c.recognised, r.outcome.recognised, c.body);
+  }
+  // A bare status keeps its screen and loses only the window.
+  TEST_ASSERT_EQUAL_STRING("TOO FEW CREDITS",
+                           bridgelogic::onWalkUpResponse(402U, "", 0U, 1U, 30U).outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("COURT NOT FREE",
+                           bridgelogic::onWalkUpResponse(409U, "", 0U, 1U, 30U).outcome.line1);
+  // What that bit does: an unrecognised refusal cannot arm, a recognised one can.
+  bridgelogic::AuthPolicy auth(30000UL);
+  TEST_ASSERT_TRUE(auth.afterScan(bridgelogic::onWalkUpResponse(409U, "", 0U, 1U, 30U).outcome, kBaseMid) ==
+                   bridgelogic::AuthCommand::Disarm);
+  const char priced[] = "{\"error\":\"insufficient_balance\"}";
+  TEST_ASSERT_TRUE(auth.afterScan(bridgelogic::onWalkUpResponse(402U, priced, len(priced), 1U, 30U).outcome,
+                                  kBaseMid) == bridgelogic::AuthCommand::Arm);
 }
 
 // ---------------------------------------------------------------------------
@@ -1073,12 +1132,117 @@ void test_corpus_walkup_replayed_is_a_sixty_minute_grant() {
   TEST_ASSERT_EQUAL_STRING("60 MIN", r.outcome.line2);
 }
 
+void test_corpus_activate_ended_is_a_refusal_the_roster_does_not_second_guess() {
+  loadHttpCorpus();
+  char body[512] = {};
+  const size_t n = bodyOf(responseVector("activate-response-ended"), body, sizeof(body));
+
+  const bridgelogic::ScanFlow flow;
+  const bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, body, n, kCorpusCourts, bridgelogic::kMaxCourts);
+
+  // A scan inside the grace window after the slot ended: stamped as attendance
+  // server-side, nothing left to light. A DECISION — a fallback here would
+  // hand the roster a booking it still holds, and light the court the API
+  // just said was over. The member is known, so the scan stays live and the
+  // window may arm; nothing was lit, so nothing is spent.
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+  TEST_ASSERT_FALSE(r.disarmAuth);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+  TEST_ASSERT_EQUAL_UINT8(eventq::Event::kNoCourt, r.outcome.court);
+  TEST_ASSERT_EQUAL_UINT32(0U, r.outcome.durationMs);
+  TEST_ASSERT_EQUAL_STRING("SLOT ENDED", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("SEE THE DESK", r.outcome.line2);
+  TEST_ASSERT_TRUE(r.outcome.recognised);
+}
+
+void test_corpus_walkup_replayed_remainder_is_what_is_left_not_what_was_bought() {
+  loadHttpCorpus();
+  const char* vector = responseVector("walkup-response-replayed-remainder");
+  char body[512] = {};
+  const size_t n = bodyOf(vector, body, sizeof(body));
+
+  // Sixty minutes bought on relay C, the same nonce forty minutes after the
+  // grant was lost: the API answers with what is LEFT — twenty-five in the
+  // vector — and that is what the court is lit for and what the screen says.
+  // Sixty here would hold the court over whoever booked the next slot.
+  const uint64_t remainder =
+      corpus::unsignedValue(corpus::member(corpus::member(vector, "expect"), "granted_minutes"));
+  TEST_ASSERT_EQUAL_UINT64(25ULL, remainder);
+
+  const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(200U, body, n, 2U, 60U);
+  TEST_ASSERT_TRUE(r.decided);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(2U, r.outcome.court);
+  TEST_ASSERT_EQUAL_UINT32(25U * 60000U, r.outcome.durationMs);
+  TEST_ASSERT_EQUAL_UINT32(25U * 60000U, r.outcome.bookingRemainingMs);
+  TEST_ASSERT_EQUAL_STRING("COURT C", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("25 MIN", r.outcome.line2);
+  TEST_ASSERT_TRUE(r.outcome.recognised);
+}
+
+void test_corpus_heartbeat_cadence_is_the_vectors_heartbeat_seconds() {
+  loadHttpCorpus();
+  // Every heartbeat vector that DECLARES a cadence in `expect` is adopted as
+  // exactly that, bounded. The expectation is the vector's own, so the
+  // backend can move the tenant default without this suite carrying a number
+  // that must agree with it. A vector that declares none is skipped, which
+  // is why the executed count is gated: a corpus with no such vector would
+  // otherwise pass by checking nothing.
+  const char* responses = corpus::member(g_httpCases.root(), "responses");
+  TEST_ASSERT_NOT_NULL(responses);
+
+  // Static: the roster-full heartbeat is allowed the box's whole 2048-byte
+  // response buffer, and that is too much for a Unity test frame on some hosts.
+  static uint8_t bytes[2048];
+  static char body[sizeof(bytes) + 1U];
+
+  corpus::ArrayIter it(responses);
+  const char* element = nullptr;
+  size_t executed = 0U;
+  while (it.next(&element)) {
+    char kind[16] = {};
+    const char* kindValue = corpus::member(element, "kind");
+    if (kindValue == nullptr || !corpus::stringValue(kindValue, kind, sizeof(kind), nullptr) ||
+        strcmp(kind, "heartbeat") != 0) {
+      continue;
+    }
+    const char* expect = corpus::member(element, "expect");
+    const char* declared = expect == nullptr ? nullptr : corpus::member(expect, "heartbeat_seconds");
+    if (declared == nullptr) {
+      continue;
+    }
+    char id[64] = {};
+    TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(element, "id"), id, sizeof(id), nullptr));
+
+    size_t n = 0U;
+    TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(element, "body_hex", bytes, sizeof(bytes), &n), id);
+    memcpy(body, bytes, n);
+    body[n] = '\0';
+
+    const uint64_t seconds = corpus::unsignedValue(declared);
+    const uint32_t wanted = static_cast<uint32_t>(seconds * 1000ULL);
+    const uint32_t bounded =
+        wanted > bridgelogic::kMaxHeartbeatMs
+            ? bridgelogic::kMaxHeartbeatMs
+            : (wanted < bridgelogic::kMinHeartbeatMs ? bridgelogic::kMinHeartbeatMs : wanted);
+    uint32_t ms = 0U;
+    TEST_ASSERT_TRUE_MESSAGE(bridgelogic::parseHeartbeatInterval(body, n, ms), id);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(bounded, ms, id);
+    ++executed;
+  }
+  TEST_ASSERT_TRUE_MESSAGE(executed >= 1U,
+                           "no heartbeat vector declares heartbeat_seconds — nothing was checked");
+}
+
 void test_corpus_every_bound_response_carries_the_clock_the_reader_finds() {
   loadHttpCorpus();
   // Every response body the box reads is also a clock source. The expectation
   // is the vector's own, so this hardcodes nothing the two sides must agree on.
-  const char* const ids[] = {"provision-response-server-unix", "device-401-body", "activate-response-ok",
-                             "activate-response-too-early", "walkup-response-replayed"};
+  const char* const ids[] = {
+      "provision-response-server-unix",    "device-401-body",         "activate-response-ok",
+      "activate-response-too-early",       "activate-response-ended", "walkup-response-replayed",
+      "walkup-response-replayed-remainder"};
   for (const char* id : ids) {
     const char* vector = responseVector(id);
     char body[512] = {};
@@ -1169,10 +1333,12 @@ void test_scan_flow_a_zero_second_grant_is_a_refusal_not_a_pulse() {
 
 void test_scan_flow_recognised_is_every_verdict_about_a_known_member() {
   const bridgelogic::ScanFlow flow;
+
   struct Case {
     const char* body;
     bool recognised;
   };
+
   const Case cases[] = {
       {"{\"activated\":true,\"reason\":\"ok\",\"court_number\":7,\"granted_seconds\":600}", true},
       {"{\"activated\":false,\"reason\":\"no_booking\"}", true},
@@ -1294,8 +1460,8 @@ void test_session_and_walkup_say_whether_the_scan_was_recognised() {
   Play play(cache, queue);
 
   // Never loaded: stale, nobody recognised.
-  TEST_ASSERT_FALSE(play.onScan("TOKALICE", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid)
-                        .recognised);
+  TEST_ASSERT_FALSE(
+      play.onScan("TOKALICE", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid).recognised);
 
   const roster::Entry entries[] = {booking("TOKALICE", 2U, 0U, 7200000UL),
                                    booking("TOKBOB", 1U, 600000UL, kHourMs)};
@@ -1307,8 +1473,8 @@ void test_session_and_walkup_say_whether_the_scan_was_recognised() {
   TEST_ASSERT_EQUAL_UINT32(7199999UL, grant.bookingRemainingMs); // uncapped, for the !EXT
   TEST_ASSERT_TRUE(play.onScan("TOKBOB", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid + 1U)
                        .recognised); // too early, but known
-  TEST_ASSERT_FALSE(play.onScan("NOBODY", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid + 1U)
-                        .recognised);
+  TEST_ASSERT_FALSE(
+      play.onScan("NOBODY", roster::CourtCount(kCourtCount), eventq::Method::Qr, kBaseMid + 1U).recognised);
 
   // Walk-up: a grant and a priced refusal are about a known member; no
   // connection is about nobody.
@@ -1317,8 +1483,13 @@ void test_session_and_walkup_say_whether_the_scan_was_recognised() {
   TEST_ASSERT_TRUE(granted.outcome.recognised);
   TEST_ASSERT_EQUAL_UINT32(5400000UL, granted.outcome.durationMs);
   TEST_ASSERT_EQUAL_UINT32(7200000UL, granted.outcome.bookingRemainingMs);
-  TEST_ASSERT_TRUE(bridgelogic::onWalkUpResponse(402U, "", 0U, 2U, 30U).outcome.recognised);
-  TEST_ASSERT_TRUE(bridgelogic::onWalkUpResponse(409U, "", 0U, 2U, 30U).outcome.recognised);
+  const char priced[] = "{\"error\":\"insufficient_balance\"}";
+  const char busy[] = "{\"error\":\"court_in_use\"}";
+  TEST_ASSERT_TRUE(bridgelogic::onWalkUpResponse(402U, priced, len(priced), 2U, 30U).outcome.recognised);
+  TEST_ASSERT_TRUE(bridgelogic::onWalkUpResponse(409U, busy, len(busy), 2U, 30U).outcome.recognised);
+  // The status alone says nothing about who scanned.
+  TEST_ASSERT_FALSE(bridgelogic::onWalkUpResponse(402U, "", 0U, 2U, 30U).outcome.recognised);
+  TEST_ASSERT_FALSE(bridgelogic::onWalkUpResponse(409U, "", 0U, 2U, 30U).outcome.recognised);
   TEST_ASSERT_FALSE(bridgelogic::onWalkUpResponse(0U, "", 0U, 2U, 30U).outcome.recognised);
   TEST_ASSERT_FALSE(bridgelogic::onWalkUpResponse(503U, "", 0U, 2U, 30U).outcome.recognised);
 }
@@ -1584,7 +1755,8 @@ void test_wifi_credential_is_persisted_on_first_join_and_read_back_by_a_ci_image
   // Nothing anywhere: the box says so rather than joining an empty SSID.
   fakes::FakeStore empty;
   bridgelogic::WifiCredential nothing;
-  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(none, nothing, joinsWith) == bridgelogic::WifiSource::None);
+  TEST_ASSERT_TRUE(bridgelogic::chooseWifiCredential(none, nothing, joinsWith) ==
+                   bridgelogic::WifiSource::None);
   TEST_ASSERT_FALSE(joinsWith.present());
   TEST_ASSERT_FALSE(bridgelogic::shouldPersistWifi(joinsWith, nothing));
   TEST_ASSERT_FALSE(bridgelogic::storeWifiCredential(empty, joinsWith));
@@ -1743,6 +1915,86 @@ void test_wifi_line_assembler_keeps_only_that_one_line() {
   TEST_ASSERT_FALSE(lines.feed('\n'));
 }
 
+/// Appends `frame` to `stream` as the Mega sends it, checksum and terminator
+/// included — from the real encoder, so the bytes are the wire's.
+void appendFrame(const proto::Frame& frame, char* stream, size_t cap, size_t& at) {
+  const size_t n = proto::encode(frame, stream + at, cap - at);
+  TEST_ASSERT_TRUE(n > 0U);
+  at += n;
+}
+
+void appendRaw(const char* text, char* stream, size_t cap, size_t& at) {
+  const size_t n = strlen(text);
+  TEST_ASSERT_TRUE(at + n < cap);
+  memcpy(stream + at, text, n);
+  at += n;
+}
+
+void test_wifi_line_is_taken_from_mega_traffic_and_no_mega_frame_is_ever_one() {
+  // pumpMegaLink feeds every byte of the one UART to BOTH the frame decoder
+  // and the line assembler, and this is the whole contract between them: the
+  // assembler keeps exactly the line that STARTS `!WIFI,` and the decoder
+  // keeps every frame around it. A technician types the line while the Mega
+  // is still talking — a scan, a button, a `!PONG` — so the two interleave,
+  // and every uplink verb the Mega can send is in the stream.
+  bridgelogic::WifiLineAssembler lines;
+  proto::Decoder uplink(proto::Link::Uplink);
+
+  char stream[512] = {};
+  size_t at = 0U;
+  appendFrame(proto::Frame::scan("4T8Y2K9QW3ZM"), stream, sizeof(stream), at);
+  appendFrame(proto::Frame::btn(proto::Key::CourtB), stream, sizeof(stream), at);
+  appendRaw("!WIFI,ClubWiFi,pw\r\n", stream, sizeof(stream), at);
+  appendFrame(proto::Frame::evt("AUTOOFF", "B"), stream, sizeof(stream), at);
+  // The prefix INSIDE a line, not at its start. The assembler is anchored to
+  // the line, so this is discarded to the terminator; the decoder drops it on
+  // its checksum. Neither side keeps it.
+  appendRaw("!SCAN,AB!WIFI,x,y*00\r\n", stream, sizeof(stream), at);
+  appendFrame(proto::Frame::pong("1.1.0", 42U), stream, sizeof(stream), at);
+  const uint16_t remaining[4] = {0U, 600U, 0U, 0U};
+  appendFrame(proto::Frame::state(2U, remaining), stream, sizeof(stream), at);
+  appendFrame(proto::Frame::err(proto::DecodeError::BadCrc), stream, sizeof(stream), at);
+  // A second WIFI line is a second line: not merged with the first.
+  appendRaw("!WIFI,Other,pw2\n", stream, sizeof(stream), at);
+  appendFrame(proto::Frame::scan("7Q3F9KM2XZ8B"), stream, sizeof(stream), at);
+
+  uint8_t wifiLines = 0U;
+  uint8_t frames = 0U;
+  uint8_t byVerb[proto::kVerbCount] = {};
+  for (size_t i = 0U; i < at; ++i) {
+    if (lines.feed(stream[i])) {
+      ++wifiLines;
+      TEST_ASSERT_EQUAL_STRING(wifiLines == 1U ? "!WIFI,ClubWiFi,pw" : "!WIFI,Other,pw2", lines.line());
+      // Handed out mid-stream: the byte that completed it was a terminator,
+      // never a byte of a Mega frame.
+      TEST_ASSERT_TRUE(stream[i] == '\r' || stream[i] == '\n');
+    }
+    if (!uplink.feed(stream[i])) {
+      continue;
+    }
+    proto::Decoder::Result result;
+    while (uplink.pop(result)) {
+      if (!result.isFrame()) {
+        // The WIFI lines and the mid-line garbage: counted by the decoder,
+        // never a frame. Whatever they were, they were not a Mega verb.
+        continue;
+      }
+      ++frames;
+      ++byVerb[static_cast<size_t>(result.frame.verb())];
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT8(2U, wifiLines);
+  TEST_ASSERT_EQUAL_UINT8(7U, frames);
+  TEST_ASSERT_EQUAL_UINT8(2U, byVerb[static_cast<size_t>(proto::Verb::Scan)]);
+  TEST_ASSERT_EQUAL_UINT8(1U, byVerb[static_cast<size_t>(proto::Verb::Btn)]);
+  TEST_ASSERT_EQUAL_UINT8(1U, byVerb[static_cast<size_t>(proto::Verb::Evt)]);
+  TEST_ASSERT_EQUAL_UINT8(1U, byVerb[static_cast<size_t>(proto::Verb::Pong)]);
+  TEST_ASSERT_EQUAL_UINT8(1U, byVerb[static_cast<size_t>(proto::Verb::State)]);
+  TEST_ASSERT_EQUAL_UINT8(1U, byVerb[static_cast<size_t>(proto::Verb::Err)]);
+  TEST_ASSERT_EQUAL_UINT8(0U, byVerb[static_cast<size_t>(proto::Verb::Unknown)]);
+  TEST_ASSERT_EQUAL_UINT16(0U, uplink.droppedResults());
+}
+
 } // namespace
 
 void setUp() {
@@ -1792,6 +2044,7 @@ int main(int, char**) {
   RUN_TEST(test_walkup_nonce_is_reused_only_for_the_same_undecided_purchase);
   RUN_TEST(test_walkup_a_grant_and_a_replayed_grant_light_the_court_identically);
   RUN_TEST(test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided);
+  RUN_TEST(test_walkup_recognised_comes_from_the_body_never_from_the_status);
 
   RUN_TEST(test_state_mask_parses_decimal_and_refuses_everything_else);
   RUN_TEST(test_reconcile_a_cleared_bit_on_a_held_court_is_the_lost_release);
@@ -1804,6 +2057,9 @@ int main(int, char**) {
   RUN_TEST(test_corpus_activate_ok_lights_the_relay_court_3_maps_to);
   RUN_TEST(test_corpus_activate_too_early_refuses_with_the_wait_line_and_no_fallback);
   RUN_TEST(test_corpus_walkup_replayed_is_a_sixty_minute_grant);
+  RUN_TEST(test_corpus_activate_ended_is_a_refusal_the_roster_does_not_second_guess);
+  RUN_TEST(test_corpus_walkup_replayed_remainder_is_what_is_left_not_what_was_bought);
+  RUN_TEST(test_corpus_heartbeat_cadence_is_the_vectors_heartbeat_seconds);
   RUN_TEST(test_corpus_every_bound_response_carries_the_clock_the_reader_finds);
   RUN_TEST(test_corpus_activate_body_is_byte_identical_to_the_signed_request);
   RUN_TEST(test_corpus_walkup_body_is_byte_identical_to_the_signed_request);
@@ -1830,6 +2086,7 @@ int main(int, char**) {
   RUN_TEST(test_api_url_holds_the_ota_length_and_refuses_longer_loudly);
   RUN_TEST(test_wifi_line_is_parsed_with_escapes_and_an_optional_checksum);
   RUN_TEST(test_wifi_line_assembler_keeps_only_that_one_line);
+  RUN_TEST(test_wifi_line_is_taken_from_mega_traffic_and_no_mega_frame_is_ever_one);
 
   return UNITY_END();
 }

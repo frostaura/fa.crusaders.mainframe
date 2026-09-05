@@ -30,8 +30,15 @@
 //
 // So the box learns the time from the `server_unix` field of any response,
 // including the 401 that rejected it, and holds an OFFSET rather than a clock:
-// unixNow = offset + millis()/1000. That survives the wrap, needs no RTC, and
-// re-converges on every call.
+// unixNow = offset + uptime/1000. That needs no RTC and re-converges on every
+// call.
+//
+// The uptime is the composition root's tb::Uptime64 — monotonic milliseconds
+// that pass 2^32 at 49.7 days — and every method here takes it as the 64-bit
+// value it is. It was a uint32_t once, cast at each call site, and at day 49.7
+// the cast wrapped: every signed timestamp jumped back 49.7 days, the server
+// refused it for skew, and the box "corrected" a clock that had never been
+// wrong. Self-healing, and still a raw wrap in the clock path.
 //
 // No Arduino headers, no heap, no String. Compiles for AVR, Xtensa and the host.
 
@@ -203,7 +210,10 @@ public:
   /// offset alone — which is the epoch seconds at BOOT. That works for the
   /// first few minutes of a board's life and then fails permanently, with a
   /// 401 that reads as a revoked key and sends the box off to re-provision.
-  bool sign(const Call& call, uint32_t uptimeMs, RequestBuffers& buffers, SignedRequest& out) const;
+  ///
+  /// 64-bit, like every uptime here: the value is tb::Uptime64's and a
+  /// narrower parameter is the 49.7-day wrap described at the top of this file.
+  bool sign(const Call& call, uint64_t uptimeMs, RequestBuffers& buffers, SignedRequest& out) const;
 
   /// Renders one clock-probe request: identical to sign() in every byte except
   /// that the signed timestamp is literally 0. The HMAC is real — signing needs
@@ -223,11 +233,11 @@ public:
   /// The box's best guess at Unix time. Zero until a response has been seen —
   /// and a zero timestamp is deliberately NOT signable, so an unsynchronised
   /// box fails locally rather than by 401.
-  uint64_t unixNow(uint32_t uptimeMs) const;
+  uint64_t unixNow(uint64_t uptimeMs) const;
 
   /// Learns the offset from a server response. Idempotent and safe to call for
   /// every response including failures.
-  void adoptServerTime(uint64_t serverUnix, uint32_t uptimeMs);
+  void adoptServerTime(uint64_t serverUnix, uint64_t uptimeMs);
 
   bool clockKnown() const { return clockKnown_; }
 
@@ -240,7 +250,7 @@ public:
   /// ignored and counted. Never touches the ClockCorrected strike counter:
   /// that counter is evidence about the CREDENTIAL, gathered from signed 401s,
   /// and a datagram must not be able to add to it.
-  OfferClock adoptOfferTime(uint64_t offerUnix, uint32_t uptimeMs);
+  OfferClock adoptOfferTime(uint64_t offerUnix, uint64_t uptimeMs);
 
   /// OFFERs whose clock was refused as behind or too far. Diagnostics.
   uint16_t offersIgnored() const { return offersIgnored_; }
@@ -261,7 +271,7 @@ public:
   /// counts, because a network blip says nothing about the credential. The
   /// policy lives here rather than at the call site so every caller of
   /// react() — heartbeat and event drain alike — shares one count.
-  Reaction react(const Response& response, uint32_t uptimeMs);
+  Reaction react(const Response& response, uint64_t uptimeMs);
 
   void setCredentials(const Credentials& credentials) { credentials_ = credentials; }
 

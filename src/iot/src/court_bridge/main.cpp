@@ -580,8 +580,7 @@ void handleOffer(const discovery::Packet& packet, uint32_t nowMs) {
     // clock forward, by less than the skew window; anything behind the clock
     // is a replay and is ignored. It never feeds the credential strike count.
     // An unclaimed box's offer is unsigned and never teaches the clock at all.
-    const devapi::OfferClock verdict =
-        gApi.adoptOfferTime(offer.unixSeconds(), static_cast<uint32_t>(gUptime.value()));
+    const devapi::OfferClock verdict = gApi.adoptOfferTime(offer.unixSeconds(), gUptime.value());
     if (verdict == devapi::OfferClock::Bootstrapped && gCourtCount == 0U) {
       // The clock just became known on a box that has no court list yet. The
       // heartbeat that fills it is due now, not at boot+30 s (review #12).
@@ -765,7 +764,8 @@ void handleReceiveError(const proto::Frame& frame, uint32_t nowMs) {
   // `!STATE` does not synthesise a Release for a session that never started,
   // and the member is told to try again.
   gHeld[court] = bridgelogic::HeldState{nowMs, false};
-  static_cast<void>(sendToMega(proto::Frame::lcd(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2)));
+  static_cast<void>(
+      sendToMega(proto::Frame::lcd(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2)));
 }
 
 void handleMegaEvent(const proto::Frame& frame, uint32_t nowMs) {
@@ -999,8 +999,8 @@ uint16_t callApi(const char* method, const char* path, const char* body, char* o
 
   devapi::RequestBuffers buffers;
   devapi::SignedRequest signed_;
-  const bool rendered = asProbe ? gApi.probe(call, buffers, signed_)
-                                : gApi.sign(call, static_cast<uint32_t>(gUptime.value()), buffers, signed_);
+  const bool rendered =
+      asProbe ? gApi.probe(call, buffers, signed_) : gApi.sign(call, gUptime.value(), buffers, signed_);
   if (!rendered) {
     // No credential, or no clock yet. Both are local refusals on purpose — a
     // request signed with a timestamp of zero comes back 401 and reads exactly
@@ -1067,7 +1067,7 @@ bool activateOnline(const char* token) {
   // reaction itself is not acted on here — THIS scan got no decision from a 401
   // and falls back to the roster below; the heartbeat carries the credential
   // consequence.
-  static_cast<void>(gApi.react(result, static_cast<uint32_t>(gUptime.value())));
+  static_cast<void>(gApi.react(result, gUptime.value()));
 
   const bridgelogic::ActivationResult decision =
       gScanFlow.onActivateResponse(result.status, response, strlen(response), gCourtNumbers, gCourtCount);
@@ -1223,8 +1223,7 @@ void tryProvision(uint32_t nowMs) {
   const String payload = http.getString();
   http.end();
 
-  gApi.adoptServerTime(devapi::findServerUnix(payload.c_str(), payload.length()),
-                       static_cast<uint32_t>(gUptime.value()));
+  gApi.adoptServerTime(devapi::findServerUnix(payload.c_str(), payload.length()), gUptime.value());
 
   if (!storeProvisioning(payload.c_str(), payload.length())) {
     return;
@@ -1265,7 +1264,6 @@ void handleWifiLine(const char* line, size_t len) {
   WiFi.disconnect();
   joinWifi(credential);
 }
-
 
 void pumpWifiLink(uint32_t nowMs) {
   const bool up = WiFi.status() == WL_CONNECTED;
@@ -1463,7 +1461,7 @@ void drainEvents(uint32_t nowMs) {
   result.status = callApi("POST", "/api/v1/device/events", body, response, sizeof(response));
   result.serverUnix = devapi::findServerUnix(response, strlen(response));
 
-  switch (gApi.react(result, static_cast<uint32_t>(gUptime.value()))) {
+  switch (gApi.react(result, gUptime.value())) {
   case devapi::Reaction::Accepted: {
     uint32_t through = 0U;
     if (devapi::json::unsignedField(response, strlen(response), "accepted_through", through)) {
@@ -1520,7 +1518,7 @@ void pumpHeartbeat(uint32_t nowMs) {
   const size_t responseLen = strlen(response);
   result.serverUnix = devapi::findServerUnix(response, responseLen);
 
-  switch (gApi.react(result, static_cast<uint32_t>(gUptime.value()))) {
+  switch (gApi.react(result, gUptime.value())) {
   case devapi::Reaction::Accepted: {
     // The evidence that clears a pending update. Not "it booted" — a firmware that
     // comes up and cannot authenticate looks alive and does nothing, which is worse

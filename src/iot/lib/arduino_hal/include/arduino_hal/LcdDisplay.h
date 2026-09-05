@@ -40,8 +40,9 @@
 
 #include <stdint.h>
 
-#include "courtlogic/DisplayHoldoff.h"
 #include "hal/Display.h"
+
+#include "courtlogic/DisplayHoldoff.h"
 
 namespace arduino_hal {
 

@@ -134,7 +134,10 @@ public:
   ///                            a relay pulse and a spent scan.
   ///   200 + activated:false  → Refuse with a line per `reason`; no fallback.
   ///                            `recognised` is set for every reason except
-  ///                            not_recognised (and a missing reason).
+  ///                            not_recognised (and a missing reason). `ended`
+  ///                            — stamped, nothing left to light — is the same
+  ///                            SLOT ENDED as a zero-second grant, and is a
+  ///                            decision: the roster would light it.
   ///   200 with no grant      → fallback (malformed).
   ///   anything else          → fallback. A 401 is included: DeviceClient::react
   ///                            has already handled the clock, and THIS scan

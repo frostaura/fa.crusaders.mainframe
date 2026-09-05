@@ -92,10 +92,19 @@ struct WalkUpResult {
 ///   402        → TOO FEW CREDITS
 ///   409        → COURT NOT FREE, or NO TIME BEFORE / NEXT BOOKING when the
 ///                body says `no_time_available` — the court is empty and the
-///                next player is imminent, which is a different sentence.
+///                next player is imminent, which is a different sentence — or
+///                PURCHASE ENDED when it says `purchase_ended`: a replayed
+///                nonce whose window is over (a replay is granted what is
+///                LEFT of the purchase, never the original length).
 ///   0          → NO CONNECTION (undecided)
 ///   5xx / 429  → SEE THE DESK (undecided)
 ///   other      → SEE THE DESK (decided)
+///
+/// `recognised` — the bit that arms the button window — comes from the body's
+/// `error`, never from the status. insufficient_balance, court_in_use,
+/// no_time_available and purchase_ended are verdicts about a member the API
+/// identified; not_recognised, court_not_on_device, an error this build does
+/// not know and a bare status are not, and arm nothing.
 WalkUpResult onWalkUpResponse(uint16_t status, const char* body, size_t len, uint8_t relay,
                               uint16_t requestedMinutes);
 

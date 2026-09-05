@@ -22,6 +22,13 @@ constexpr ReasonLines kReasons[] = {
     {"wrong_court", "WRONG COURT", "SEE THE DESK"},
     {"not_recognised", "NOT RECOGNISED", "SEE THE DESK"},
     {"not_chargeable", "SEE THE DESK", ""},
+    // A scan inside the grace window after the slot ended: stamped as
+    // attendance, nothing left to light. The same screen granted() paints for
+    // an older API's activated:true with zero seconds — one situation, one
+    // screen, whichever way the API says it. A decision, never a fallback: the
+    // roster still holds the booking and would light the court the API just
+    // said was over.
+    {"ended", "SLOT ENDED", "SEE THE DESK"},
 };
 
 /// The one reason that says the API did NOT identify anybody. Every other

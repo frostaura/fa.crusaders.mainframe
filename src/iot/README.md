@@ -191,6 +191,13 @@ with `now >= expiresAt` (false for 49.7 days after the wrap, so the relay was
 never released). `make lint-iot` greps for raw comparisons against any
 `*deadline` / `*expires` / `*AtMs` identifier outside `lib/timebase`.
 
+The same rule reaches the API clock. `devapi::DeviceClient` holds a Unix
+*offset* and adds the box's uptime to it, and it takes that uptime as the
+64-bit `tb::Uptime64` value the composition root keeps — a `uint32_t` there
+was the wrap re-entering through the clock path at day 49.7 (every signed
+timestamp jumped back 49.7 days, and a healthy box "corrected" a clock that
+was never wrong).
+
 ## The button window: who may press what
 
 The Mega only forwards a button press while its authorisation window is armed,
@@ -205,7 +212,11 @@ scan":
   court). An unknown token and a stale roster arm nothing and close whatever was
   open. Before this, any barcode bought thirty seconds of buttons, and with an
   admin-mapped OFF button that was a lit court going dark from a stranger's
-  receipt.
+  receipt. On the walk-up path the bit comes from the response body's `error`,
+  never from the status: `insufficient_balance`, `court_in_use`,
+  `no_time_available` and `purchase_ended` are verdicts about a member the API
+  identified; `not_recognised`, `court_not_on_device`, an unknown error and a
+  bare 402/409 arm nothing.
 - **A grant does not close the window; it binds it.** The court that just lit is
   remembered, the window stays armed for the same TTL, and an OFF press is
   honoured for **that court only** — so the member who lit court B can switch B
@@ -244,7 +255,9 @@ Three details of that flow that were each a review finding:
   was off with the AP up cost every scan two 4 s connect timeouts.
 - **`granted_seconds: 0` is a refusal** (`SLOT ENDED`), not a one-second relay
   pulse: a rescan inside the post-slot grace window answers `activated:true` with
-  nothing left to grant.
+  nothing left to grant. The API now says so itself — `activated:false,
+  reason:"ended"` — and that is the same `SLOT ENDED`: a decision, not a
+  fallback, because the roster still holds the booking and would light it.
 
 The tenant's **`heartbeat_seconds`** is adopted from every accepted heartbeat,
 bounded to 15–300 s (`lib/bridgelogic/Cadence`); the compiled-in 30 s is only
@@ -290,7 +303,10 @@ changing any of it:
 - **Walk-ups need the network.** A walk-up is truncated at the next booking and
   charged pro rata, and the box knows neither the tariff nor the next booking. That
   is the right way round: refusing to sell new time is a member at the desk, where
-  refusing a booking they already paid for is a member in the dark.
+  refusing a booking they already paid for is a member in the dark. A replayed
+  nonce is granted what is *left* of the purchase (`granted_minutes` is the
+  remainder, and the court is lit for that), and one whose window is over is
+  `409 purchase_ended` — `PURCHASE ENDED / SCAN TO START`.
 
 ### What the event queue does not survive
 

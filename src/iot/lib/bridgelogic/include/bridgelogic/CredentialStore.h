@@ -73,7 +73,8 @@ inline constexpr char kKeyApiBase[] = "api_base";
 /// The pre-trailer, 32-byte-capped URL record. Read, never written.
 inline constexpr char kKeyApiUrlLegacy[] = "api_url";
 
-static_assert(kMaxWifiPasswordLen + 1U <= hal::kStoreMaxValueLen, "a passphrase plus its trailer must fit a record");
+static_assert(kMaxWifiPasswordLen + 1U <= hal::kStoreMaxValueLen,
+              "a passphrase plus its trailer must fit a record");
 static_assert(kMaxApiUrlLen + 1U <= hal::kStoreMaxValueLen, "a URL plus its trailer must fit a record");
 
 // --- checked text records ------------------------------------------------

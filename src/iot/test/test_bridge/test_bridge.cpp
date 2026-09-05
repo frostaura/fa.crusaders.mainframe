@@ -1724,8 +1724,54 @@ void test_client_offers_never_feed_the_reprovision_strike() {
     accepted.serverUnix = 1750000121ULL;
     TEST_ASSERT_TRUE(client.react(accepted, kBases[i]) == devapi::Reaction::Accepted);
     rejected.serverUnix = 1750000242ULL;
-    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) == devapi::Reaction::ClockCorrected); // not Reprovision
+    TEST_ASSERT_TRUE(client.react(rejected, kBases[i]) ==
+                     devapi::Reaction::ClockCorrected); // not Reprovision
   }
+}
+
+void test_client_uptime_past_49_days_does_not_rewind_the_clock() {
+  // The uptime the composition root feeds this client is tb::Uptime64 —
+  // monotonic milliseconds that pass 2^32 at 49.7 days. Every method here used
+  // to take it as a uint32_t, cast at the call site, so at day 49.7 the cast
+  // wrapped and every signed timestamp jumped back 49.7 days: a 401 for skew
+  // on a healthy box, "corrected" from the 401's server_unix, and again at day
+  // 99.4. Self-healing — and still a raw wrap in the clock path, briefly
+  // desynchronising signing on a box that has done nothing wrong.
+  ScriptedEntropy entropy;
+  devapi::DeviceClient client(credentials(), entropy);
+  client.adoptServerTime(1750000000ULL, 1000ULL); // offset: 1749999999
+
+  constexpr uint64_t kWrapMs = 4294967296ULL; // 2^32 ms, 49.7 days
+  const uint64_t justBefore = kWrapMs - 1000ULL;
+  const uint64_t justAfter = kWrapMs + 1000ULL;
+  TEST_ASSERT_EQUAL_UINT64(1749999999ULL + (justBefore / 1000ULL), client.unixNow(justBefore));
+  TEST_ASSERT_EQUAL_UINT64(1749999999ULL + (justAfter / 1000ULL), client.unixNow(justAfter));
+  // Two seconds of uptime are two seconds on the clock, across the wrap.
+  TEST_ASSERT_EQUAL_UINT64(2ULL, client.unixNow(justAfter) - client.unixNow(justBefore));
+
+  // A day past the wrap, signed: the timestamp is the real time, not the boot
+  // time plus one day. 1749999999 + (2^32 + 86400000) / 1000.
+  devapi::RequestBuffers buffers;
+  devapi::SignedRequest request;
+  const uint64_t dayAfter = kWrapMs + 86400000ULL;
+  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), dayAfter, buffers, request));
+  TEST_ASSERT_EQUAL_STRING("1754381366", request.timestamp);
+
+  // A 401 that carries the server's real time, five seconds later, measures
+  // NO correction: the clock was never out, so this is about the key. Under
+  // the wrap it read as a 4,294,967-second skew and a ClockCorrected.
+  devapi::Response rejected;
+  rejected.status = 401U;
+  rejected.serverUnix = 1754381371ULL;
+  TEST_ASSERT_TRUE(client.react(rejected, dayAfter + 5000ULL) == devapi::Reaction::Reprovision);
+  TEST_ASSERT_EQUAL_INT64(1749999999LL, client.clockOffset());
+
+  // Learning the clock past the wrap, and an OFFER's drift past it, both
+  // reason about the same 64-bit uptime.
+  client.adoptServerTime(1760000000ULL, kWrapMs + 5000ULL);
+  TEST_ASSERT_EQUAL_UINT64(1760000010ULL, client.unixNow(kWrapMs + 15000ULL));
+  TEST_ASSERT_TRUE(client.adoptOfferTime(1760000040ULL, kWrapMs + 15000ULL) == devapi::OfferClock::Adopted);
+  TEST_ASSERT_EQUAL_UINT64(1760000040ULL, client.unixNow(kWrapMs + 15000ULL));
 }
 
 void setUp() {
@@ -1908,6 +1954,7 @@ int main(int, char**) {
   RUN_TEST(test_client_an_accepted_call_clears_the_clock_correction_strike);
   RUN_TEST(test_client_an_offer_seeds_a_box_with_no_clock_and_never_rewinds_a_known_one);
   RUN_TEST(test_client_offers_never_feed_the_reprovision_strike);
+  RUN_TEST(test_client_uptime_past_49_days_does_not_rewind_the_clock);
 
   return UNITY_END();
 }

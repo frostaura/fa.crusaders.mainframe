@@ -5,6 +5,7 @@
 #ifdef TARGET_COURT_MEGA
 
 #include <Arduino.h>
+
 #include <avr/wdt.h>
 
 namespace {
