@@ -282,7 +282,11 @@ export default function AdminWebhooksPage() {
 
           <div>
             <Label>Description</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Lights on (Arduino)" />
+            {/* Not "Lights on (Arduino)". docs/specs/webhooks.md is explicit that the court
+                box is pull-only, has no inbound HTTP listener and no arduino.local name —
+                so the placeholder cannot describe the one destination a webhook can never
+                have. */}
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Scoreboard — court lit" />
           </div>
 
           <div className="flex gap-2 justify-end">
