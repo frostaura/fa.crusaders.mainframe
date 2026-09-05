@@ -24,11 +24,17 @@ class FakeEventSource {
   static instances: FakeEventSource[] = [];
   onmessage: ((e: MessageEvent) => void) | null = null;
   onerror: ((e: Event) => void) | null = null;
+  onopen: ((e: Event) => void) | null = null;
   closed = false;
   constructor(public url: string) {
     FakeEventSource.opened.push(url);
     FakeEventSource.instances.push(this);
   }
+  // The provider listens for the server's named `ping` keep-alive to tell a live stream
+  // from one that has silently stopped delivering. A double without these throws where the
+  // real EventSource would not, which reads as a broken provider.
+  addEventListener() { /* nothing arrives in these tests */ }
+  removeEventListener() { /* nothing to remove */ }
   close() { this.closed = true; }
   /** Drop the connection the way a WiFi handover does. */
   fail() { this.onerror?.(new Event("error")); }

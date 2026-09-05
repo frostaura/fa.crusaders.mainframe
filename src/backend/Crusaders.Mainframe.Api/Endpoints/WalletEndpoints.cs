@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Threading.Channels;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
@@ -85,24 +86,12 @@ public static class WalletEndpoints
             var channel = broadcaster.Subscribe(userId);
             try
             {
-                using var keepAlive = new PeriodicTimer(TimeSpan.FromSeconds(25));
-                while (!ct.IsCancellationRequested)
-                {
-                    var readTask = channel.Reader.ReadAsync(ct).AsTask();
-                    var tickTask = keepAlive.WaitForNextTickAsync(ct).AsTask();
-                    var done = await Task.WhenAny(readTask, tickTask);
-                    if (done == readTask)
-                    {
-                        var balance = await readTask;
-                        await WriteEventAsync(ctx, balance, ct);
-                    }
-                    else
-                    {
-                        // SSE comment line — keeps the connection alive past proxy idle timeouts.
-                        await ctx.Response.WriteAsync(": ping\n\n", ct);
-                        await ctx.Response.Body.FlushAsync(ct);
-                    }
-                }
+                await PumpAsync(
+                    channel.Reader,
+                    KeepAliveInterval,
+                    (balance, token) => WriteEventAsync(ctx, balance, token),
+                    token => WriteKeepAliveAsync(ctx, token),
+                    ct);
             }
             catch (OperationCanceledException) { /* client disconnect */ }
             finally
@@ -330,6 +319,91 @@ public static class WalletEndpoints
         var payload = JsonSerializer.Serialize(new { balance_credits = balance });
         await ctx.Response.WriteAsync($"data: {payload}\n\n", ct);
         await ctx.Response.Body.FlushAsync(ct);
+    }
+
+    /// <summary>
+    /// How long the stream stays quiet before it writes a keep-alive.
+    ///
+    /// <para>
+    /// Settable so the loop can be exercised at millisecond speed. Production never
+    /// changes it: 25s sits under the 60s idle timeout nginx and every cloud load
+    /// balancer in front of this API default to.
+    /// </para>
+    /// </summary>
+    internal static TimeSpan KeepAliveInterval { get; set; } = TimeSpan.FromSeconds(25);
+
+    /// <summary>
+    /// The keep-alive, written as a NAMED event rather than an SSE comment.
+    ///
+    /// <para>
+    /// It was <c>": ping"</c>, a comment line. Comments keep proxies from timing the
+    /// connection out, which is all it was ever asked to do — but <c>EventSource</c> does
+    /// not surface them, so from the browser's side a stream delivering keep-alives and a
+    /// stream that has silently gone deaf look identical, and the client had no way to
+    /// notice the second. As a named event it does both jobs: the bytes still defeat proxy
+    /// buffering, and the client can arm a watchdog on it. Clients that do not listen for
+    /// <c>ping</c> ignore it, exactly as they ignored the comment.
+    /// </para>
+    /// </summary>
+    private static async Task WriteKeepAliveAsync(HttpContext ctx, CancellationToken ct)
+    {
+        await ctx.Response.WriteAsync("event: ping\ndata: {}\n\n", ct);
+        await ctx.Response.Body.FlushAsync(ct);
+    }
+
+    /// <summary>
+    /// Writes every published balance to one open SSE response, with a keep-alive
+    /// whenever the member's balance has been still for <paramref name="keepAlive"/>.
+    ///
+    /// <para>
+    /// This loop used to race a fresh <c>ReadAsync</c> against a fresh
+    /// <c>PeriodicTimer.WaitForNextTickAsync</c> on every turn and abandon the loser, which
+    /// broke the live balance twice over. An abandoned <c>ReadAsync</c> stays queued on the
+    /// channel as a reader, so the next published balance was handed to a task nobody was
+    /// awaiting and vanished — the member watched a stale figure until they reloaded. And
+    /// <c>PeriodicTimer</c> permits exactly one outstanding waiter, so the turn after a
+    /// balance <i>was</i> delivered threw <c>InvalidOperationException</c> out of the
+    /// handler, after the response had started: an unhandled 500 in the log and a torn
+    /// stream. Between them, a session was deaf from its first keep-alive onward.
+    /// </para>
+    ///
+    /// <para>
+    /// Nothing is abandoned here. <c>WaitToReadAsync</c> observes availability without
+    /// consuming anything, so the only way an item leaves the channel is
+    /// <c>TryRead</c> on the line that writes it; and the wait is ended by a linked
+    /// <c>CancellationTokenSource</c>, which deregisters the waiter rather than orphaning
+    /// it. The inner drain matters because the channel is bounded with
+    /// <c>DropOldest</c> — several movements can land while one write is in flight.
+    /// </para>
+    /// </summary>
+    internal static async Task PumpAsync(
+        ChannelReader<decimal> reader,
+        TimeSpan keepAlive,
+        Func<decimal, CancellationToken, Task> writeBalance,
+        Func<CancellationToken, Task> writeKeepAlive,
+        CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            bool more;
+            using (var quiet = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                quiet.CancelAfter(keepAlive);
+                try
+                {
+                    more = await reader.WaitToReadAsync(quiet.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    await writeKeepAlive(ct);
+                    continue;
+                }
+            }
+
+            // The broadcaster completed the channel — the subscription is over.
+            if (!more) return;
+            while (reader.TryRead(out var balance)) await writeBalance(balance, ct);
+        }
     }
 }
 

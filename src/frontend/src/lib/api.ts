@@ -80,6 +80,20 @@ export const REQUEST_TIMEOUT_MS = 20_000;
 export const UPLOAD_TIMEOUT_MS = 60_000;
 
 /**
+ * How long the wallet's SSE stream may say nothing at all before the client stops believing it.
+ *
+ * <p>
+ * The server writes a keep-alive every 25s, so silence past two of them is not a quiet wallet —
+ * it is a connection that is open and no longer carrying anything. That state is invisible from
+ * `EventSource.onerror`, which is exactly how three finders watched a member's balance freeze
+ * for the life of a tab with no reconnect ever attempted: the socket was healthy, the pushes
+ * were not. 70s is two keep-alives plus enough slack that a phone briefly off the network does
+ * not churn the connection.
+ * </p>
+ */
+export const STREAM_SILENCE_MS = 70_000;
+
+/**
  * `fetch` with a deadline. Rejects with a {@link NetworkError} rather than a bare
  * `DOMException`/`TypeError`, so callers have one type to catch and one place to ask
  * "was this the club refusing, or the club not answering?".
