@@ -29,6 +29,13 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </list>
 ///
 /// <para>
+/// <c>?kind=ident</c> asks for the second unconditionally. The member decides, because the
+/// server cannot: a member holding a booking code is by definition someone auto would
+/// answer, and they are also the member most likely to want a walk-up on a free court
+/// before their own slot. See <c>GenerateAsync</c>.
+/// </para>
+///
+/// <para>
 /// The courtside camera path (<c>POST /api/v1/court/{n}/qr/match</c>) is an ACTIVATION
 /// path, like the box's <c>/activate</c>: it resolves either kind of code through
 /// <see cref="IdentificationResolver.ResolveForActivationAsync"/>, and a booking code opens
@@ -90,14 +97,33 @@ public static class QrEndpoints
         return app;
     }
 
+    /// <summary>What the caller asked for. <c>?kind=</c> on <c>POST /me/qr/generate</c>.</summary>
+    private const string KindAuto = "auto";
+    private const string KindIdent = "ident";
+
     /// <summary>
     /// The code the member's screen should show right now.
     ///
     /// <para>
-    /// A booking is "in reach" when its activation window — from <c>cue</c> minutes before
-    /// it starts until it ends — overlaps the next <c>roster_window_minutes</c>, the same
-    /// horizon the box's cached roster looks ahead. Lazily minted: a booking made before
-    /// codes existed, or whose code has been purged, gets one here.
+    /// <c>?kind=auto</c> (the default, and what an omitted parameter means) picks for the
+    /// member: a booking is "in reach" when its activation window — from <c>cue</c> minutes
+    /// before it starts until it ends — overlaps the next <c>roster_window_minutes</c>, the
+    /// same horizon the box's cached roster looks ahead, and then the answer is that
+    /// booking's own code. Lazily minted: a booking made before codes existed, or whose
+    /// code has been purged, gets one here.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>?kind=ident</c> always answers with the member-ident code, booking or no booking.
+    /// It exists because auto locked members out of the very things ident codes are for. A
+    /// booking code stopped opening a wallet when the resolver was narrowed to MemberIdent
+    /// (closing re-review #15), and auto hands out the booking code for the whole
+    /// <c>roster_window + cue</c> ahead of a booking — over two hours by default. So a
+    /// member with a court at 19:00 who arrived at 17:00 and wanted a walk-up on a free
+    /// court, or to pay for a friend, had no path on their phone to a code the box would
+    /// accept: it answered <c>not_recognised</c> and the glass said SEE THE DESK
+    /// (round-3 finding 6). The two codes coexist — the booking's own is untouched and goes
+    /// on opening its court.
     /// </para>
     /// </summary>
     private static async Task<IResult> GenerateAsync(
@@ -111,6 +137,15 @@ public static class QrEndpoints
         var userId = ctx.User.Id() ?? Guid.Empty;
         if (userId == Guid.Empty) return Results.Unauthorized();
 
+        // Refused rather than silently treated as auto: a typo'd kind that quietly returned
+        // a booking code is exactly the lockout this parameter was added to end.
+        var requested = ctx.Request.Query["kind"].ToString();
+        var kind = string.IsNullOrWhiteSpace(requested) ? KindAuto : requested.Trim().ToLowerInvariant();
+        if (kind is not (KindAuto or KindIdent))
+        {
+            return Results.BadRequest(new { error = "kind_invalid", message = $"kind must be '{KindAuto}' or '{KindIdent}'." });
+        }
+
         var settings = await settingsAccessor.GetAsync(ct);
         var now = DateTimeOffset.UtcNow;
 
@@ -118,7 +153,7 @@ public static class QrEndpoints
         // StartsAt ≤ now + roster + cue  ∧  EndsAt ≥ now. Rearranged so the predicate is
         // a comparison against two constants the provider can translate.
         var latestStart = now.AddMinutes(settings.RosterWindowMinutes + settings.ActivationCueWindowMinutes);
-        var booking = await db.Bookings
+        var booking = kind == KindIdent ? null : await db.Bookings
             .Where(b => b.UserId == userId
                         && b.Status == BookingStatus.Booked
                         && b.StartsAt <= latestStart
