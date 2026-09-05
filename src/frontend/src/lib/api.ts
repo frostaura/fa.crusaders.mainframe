@@ -112,6 +112,10 @@ export type LedgerRow = {
 export type WalletResponse = {
   balance_credits: number;
   entries: LedgerRow[];
+  /** Every movement the member has ever had; `entries` is one page of them. */
+  total_entries: number;
+  offset: number;
+  limit: number;
 };
 export type ScheduleSlot = {
   courtId: string; courtNumber: number;
@@ -390,9 +394,98 @@ export type WebAuthnCredentialRow = {
   last_used_at: string | null;
 };
 
-export type WalletReport = { from: string; to: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; penalty_count: number; count: number };
+/**
+ * What the club will take for a top-up, and at what rate — read from `tenant_settings`
+ * rather than hardcoded on the screen.
+ *
+ * The screen carried `MIN_ZAR = 100`, `MAX_ZAR = 1000`, `BLOCK_ZAR = 100` and two literal
+ * conversion rates, so an admin who changed any of them left it quoting 60% more credits
+ * than the member would get, offering amounts the club had stopped accepting and refusing
+ * amounts it did accept — disagreeing with the server in both directions at once.
+ */
+export type TopUpOptions = {
+  block_zar: number;
+  min_zar: number;
+  max_zar: number;
+  presets_zar: number[];
+  conversion_rate: number;
+  member_class: "Regular" | "LeagueOrSenior";
+};
+
+/**
+ * One court's row in the utilisation report.
+ *
+ * `revenue_credits` is what the club KEPT, summed off the ledger rows naming each booking
+ * — the settlement model's `Owed`. It used to be the price quoted at booking, so a
+ * no-showed 50-credit court counted as 50 of revenue when the club's take was the 15
+ * penalty. `quoted_credits` keeps the old figure under a name that says what it is.
+ *
+ * `booked_minutes` exists because `slices` mixes units: a 60-minute walk-up is one slice,
+ * the same as a 15-minute booking.
+ */
+export type UtilisationRow = {
+  court_id: string; court_number: number; court_name: string;
+  slices: number;
+  booked_minutes: number;
+  bookings: number;
+  revenue_credits: number;
+  quoted_credits: number;
+};
+
+/** One form field of the signed PayFast checkout, in the order the signature covers. */
+export type PayFastFormField = { name: string; value: string };
+
+/**
+ * A registered top-up. `form_fields` **is** the payment: PayFast has no server-side
+ * checkout registration, so the browser POSTs this signed form to `redirect_url`.
+ * Following `redirect_url` as a GET — which is what the page used to do — reaches PayFast
+ * with no merchant id, no amount and no signature.
+ */
+export type TopUpStart = {
+  topup_id: string;
+  checkout_id: string;
+  redirect_url: string;
+  form_fields: PayFastFormField[];
+  quoted_credits: number;
+  conversion_rate: number;
+};
+
+/** A stable snake_case code, never an internal string — see `TOPUP_FAILURE_COPY`. */
+export type TopUpStatus = {
+  id: string;
+  status: "Pending" | "Completed" | "Failed" | "Cancelled";
+  amount_zar: number;
+  conversion_rate: number | null;
+  failure_code: string | null;
+};
+
+/**
+ * A member's own period summary.
+ *
+ * Every bucket a movement can land in, because the page has to reconcile: it reported
+ * top-ups, spend, refunds and a penalty COUNT and nothing else, so a member with 2,500
+ * credits of admin adjustments read "0 in, 950 out, 100 back" beside a header saying
+ * 1,635 and no way to see where the gap came from. `net_movement_credits` is the sum,
+ * and over a range covering the whole ledger it is the balance.
+ */
+export type WalletReport = {
+  from: string; to: string;
+  top_ups_credits: number;
+  spent_credits: number;
+  refunds_credits: number;
+  /** The penalty TOTAL `reporting.md` asks for, beside the count that was already here. */
+  penalties_credits: number;
+  adjustments_credits: number;
+  reversals_credits: number;
+  net_movement_credits: number;
+  penalty_count: number;
+  /** Attendance — `CheckedInAt`, the source of truth the settlement model hangs off. */
+  attended_bookings: number;
+  minutes_on_court: number;
+  count: number;
+};
 export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; bookings: number; no_shows: number };
-export type DailyMePoint = { date: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; bookings: number; balance_credits: number };
+export type DailyMePoint = { date: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; bookings: number; attended: number; minutes_on_court: number; balance_credits: number };
 /**
  * Club revenue over a window, in BOTH units, because they are not interchangeable.
  *
@@ -449,7 +542,7 @@ export const endpoints = {
   forgotPassword: (email: string) => api.post<{ ok: boolean }>("/api/v1/auth/forgot-password", { email }),
   resetPassword: (token: string, newPassword: string) => api.post<{ reset: boolean }>("/api/v1/auth/reset-password", { token, newPassword }),
 
-  wallet: () => api.get<WalletResponse>("/api/v1/wallet"),
+  wallet: (limit?: number, offset?: number) => api.get<WalletResponse>(`/api/v1/wallet${qs({ limit, offset })}`),
   schedule: (date: string) => api.get<ScheduleDay>(`/api/v1/schedule?date=${date}`),
   book: (courtId: string, startsAt: string, sliceCount: number) =>
     api.post<{ booking_id: string; balance_after_credits: number }>("/api/v1/bookings/", { courtId, startsAt, sliceCount }),
@@ -508,8 +601,20 @@ export const endpoints = {
     api.post<{ matched: boolean; user_id?: string; reason?: string }>(`/api/v1/court/${courtNumber}/qr/match`, { token }),
 
   // Top-up
-  topupStart: (amountCredits: number) => api.post<{ topup_id: string; checkout_id: string; redirect_url: string }>("/api/v1/credit/topup", { amountCredits }),
-  topupStatus: (topupId: string) => api.get<{ id: string; status: string; amount_zar: number; failure_reason: string | null }>(`/api/v1/credit/topup/${topupId}`),
+  /**
+   * What the club will take, and at what rate — every number the top-up screen used to
+   * hardcode. See `TopUpOptions`.
+   */
+  topupOptions: () => api.get<TopUpOptions>("/api/v1/credit/topup/options"),
+  /**
+   * Registers a top-up and returns the SIGNED FORM the browser must POST to PayFast.
+   *
+   * The argument is **rand**. This posted `amountCredits` against a server record of
+   * `AmountZar`, so the amount bound to 0, the positivity guard fired, and no member
+   * could top up at all — the screen told them their amount was a bad multiple of R100.
+   */
+  topupStart: (amountZar: number) => api.post<TopUpStart>("/api/v1/credit/topup", { amountZar }),
+  topupStatus: (topupId: string) => api.get<TopUpStatus>(`/api/v1/credit/topup/${topupId}`),
 
   // Webhooks (admin)
   adminWebhooksList: () => api.get<WebhookEndpointDto[]>("/api/v1/admin/webhooks/"),
@@ -532,10 +637,28 @@ export const endpoints = {
   reportWallet: (from?: string, to?: string) =>
     api.get<WalletReport>(`/api/v1/reports/me/wallet${qs({ from, to })}`),
   walletCsvUrl: (from?: string, to?: string) => `/api/v1/reports/me/wallet.csv${qs({ from, to })}`,
+  /**
+   * Fetches the wallet CSV **with the session's bearer token** and hands back a blob the
+   * page can save.
+   *
+   * The control was a plain `<a href download>`, so the browser navigated to the endpoint
+   * on its own with no Authorization header: the API could not even resolve a tenant and
+   * answered `400 tenant_unresolved` as JSON. The download started and cancelled itself —
+   * no file, no toast, no console error, the page identical before and after.
+   */
+  walletCsv: async (from?: string, to?: string): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(endpoints.walletCsvUrl(from, to), {
+      headers: { ...(tokenStore.get() ? { authorization: `Bearer ${tokenStore.get()}` } : {}) },
+    });
+    if (!res.ok) throw new ApiError(res.status, await res.text());
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const match = /filename="?([^"]+)"?/.exec(disposition);
+    return { blob: await res.blob(), filename: match?.[1] ?? "wallet.csv" };
+  },
   reportRevenue: (from?: string, to?: string) =>
     api.get<RevenueReport>(`/api/v1/admin/reports/revenue${qs({ from, to })}`),
   reportUtilisation: (from?: string, to?: string) =>
-    api.get<{ from: string; to: string; by_court: { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_credits: number }[] }>(`/api/v1/admin/reports/utilisation${qs({ from, to })}`),
+    api.get<{ from: string; to: string; by_court: UtilisationRow[] }>(`/api/v1/admin/reports/utilisation${qs({ from, to })}`),
   reportNoShows: (from?: string, to?: string) =>
     api.get<{ from: string; to: string; total: number; no_show: number; no_show_pct: number }>(`/api/v1/admin/reports/no-shows${qs({ from, to })}`),
   reportDailyAdmin: (from?: string, to?: string) =>
@@ -645,7 +768,7 @@ export const endpoints = {
     })}`),
 };
 
-function qs(o: Record<string, string | undefined>) {
-  const p = Object.entries(o).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`).join("&");
+function qs(o: Record<string, string | number | undefined>) {
+  const p = Object.entries(o).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
   return p ? `?${p}` : "";
 }
