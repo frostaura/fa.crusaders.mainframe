@@ -211,5 +211,17 @@ Required emails:
 
 ## 12. Mobile-first PWA expectations
 - Installable as a PWA on iOS and Android home screens.
-- Functional offline for read-only operations (view today's bookings, view balance from cache).
+- **The offline shell covers the app itself, not the member's data.** Opening the installed app
+  with no signal gets the interface — the shell, the build assets, the icons — rather than the
+  browser's offline page. Balances, bookings, the ledger and the profile all require the network.
+  This line previously read "functional offline for read-only operations (view today's bookings,
+  view balance from cache)", and that promise was withdrawn on 2026-09-05 because it cannot be
+  kept safely on a shared device: the browser's Cache API keys entries on the request URL and
+  ignores the `Authorization` header, and its storage belongs to the browser profile rather than
+  to a login. A club-desk tablet therefore served the second member to open the wallet the first
+  member's balance and ledger, and a cached session probe could boot the app under the first
+  member's identity and admin flag. Per-session cache keying was considered and rejected: it is
+  unobservable machinery guarding a privacy boundary in a money system, and not caching member
+  data has no failure mode. **No response carrying member data may be cached by the service
+  worker.** Revisit only with a design that survives two members sharing one device.
 - Push notifications: out of scope for v1 — emails carry the load. Revisit post-pilot.
