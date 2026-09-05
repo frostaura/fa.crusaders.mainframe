@@ -709,4 +709,44 @@ public sealed class AdminSettingsHttpTests
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Equal("court-box-2", (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("device_code").GetString());
     }
+
+    /// <summary>
+    /// The settings row's own audit timestamp advances when the settings change.
+    ///
+    /// <para>
+    /// <c>TenantSettings.UpdatedAt</c> was set once, at construction, and never written
+    /// again: a club could change its penalty policy every week and the column would still
+    /// read the seed date. Nothing reads it today, which is exactly why nobody noticed — the
+    /// first person to ask "when did this club last change the rules that take money off a
+    /// member" would have been answered confidently and wrongly.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task Saving_settings_advances_the_rows_updated_at()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        async Task<DateTimeOffset> StampAsync()
+        {
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.TenantSettings.AsNoTracking().IgnoreQueryFilters()
+                .FirstAsync(t => t.TenantId == seeded.TenantId);
+            return row.UpdatedAt;
+        }
+
+        var seeded_at = await StampAsync();
+
+        var body = Baseline();
+        body["graceWindowMinutes"] = 7;
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, body)).StatusCode);
+
+        var afterSave = await StampAsync();
+        Assert.True(afterSave > seeded_at,
+            $"UpdatedAt did not advance: still {afterSave:O} after a save (seeded {seeded_at:O}).");
+    }
 }

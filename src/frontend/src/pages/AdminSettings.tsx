@@ -1,5 +1,6 @@
 import { useEffect, useState, cloneElement, isValidElement, useId } from "react";
 import { endpoints, type AdminSettings, type AdminCourt, ApiError } from "../lib/api";
+import { OFFLINE_FLOOR_SECONDS, describeOfflineAfter, timezoneOptions } from "../lib/tenantSettings";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -215,7 +216,17 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
             cadence to 15-300, and the Devices page then reported the whole fleet
             offline for most of every interval (review finding 22). The field states
             the range the box will honour, and the API holds the same bound. */}
-        <Field label="Heartbeat interval (seconds)" hint="15–300. How often a box calls in for its roster and button map. A box clamps anything outside 15–300 to that range, so a larger number here is not what it would run — and the Devices page decides online or offline from three missed beats.">
+        {/* The "three missed beats" half of this hint was true only above 60 s. Below it the
+            180-second floor takes over, so an admin lowering the interval to detect an
+            outage faster got none of the improvement and no explanation — at 15 s the box
+            reported offline_after_seconds: 180, not 45. The floor is deliberate (a club on
+            the 15-second minimum must not be called offline after 45 seconds of ordinary
+            jitter), so the hint states it and the derived line below says what THIS value
+            actually buys, rather than making the admin work it out. */}
+        <Field
+          label="Heartbeat interval (seconds)"
+          hint={`15–300. How often a box calls in for its roster and button map. A box clamps anything outside 15–300 to that range, so a larger number here is not what it would run. The Devices page calls a box offline after three missed beats or ${OFFLINE_FLOOR_SECONDS / 60} minutes, whichever is longer — at ${settings.heartbeat_seconds}s that is ${describeOfflineAfter(settings.heartbeat_seconds)}.`}
+        >
           <Input type="number" min={15} max={300} value={settings.heartbeat_seconds}
             onChange={(e) => set({ heartbeat_seconds: Number(e.target.value) })} />
         </Field>
@@ -358,34 +369,3 @@ function CourtRow({ court, reload }: { court: AdminCourt; reload: () => Promise<
     </div>
   );
 }
-
-/**
- * The zones offered in the timezone picker.
- *
- * <p>
- * `Intl.supportedValuesOf("timeZone")` is the browser's own copy of the IANA tzdb, which
- * is exactly the free-tier dependency CLAUDE.md names — no hand-kept list to go stale
- * when a country moves its clocks. It is not in every runtime (jsdom does not carry it),
- * so a small fallback covers the zones a club in this product's markets would pick, and
- * the tenant's current value is always present whatever the runtime answered: a select
- * that silently drops the saved zone would show the club the wrong one and then save it.
- * </p>
- */
-export function timezoneOptions(current: string): string[] {
-  const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
-  let zones: string[] = [];
-  try {
-    zones = intl.supportedValuesOf?.("timeZone") ?? [];
-  } catch {
-    zones = [];
-  }
-  if (zones.length === 0) zones = [...FALLBACK_TIMEZONES];
-  return zones.includes(current) ? zones : [current, ...zones];
-}
-
-const FALLBACK_TIMEZONES = [
-  "Africa/Johannesburg", "Africa/Cairo", "Africa/Lagos", "Africa/Nairobi",
-  "Europe/London", "Europe/Amsterdam", "Europe/Monaco", "Europe/Lisbon",
-  "Asia/Dubai", "Asia/Singapore", "Australia/Sydney",
-  "America/New_York", "America/Chicago", "America/Los_Angeles", "UTC",
-] as const;

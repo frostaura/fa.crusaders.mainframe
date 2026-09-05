@@ -191,6 +191,12 @@ public static class AdminConfigEndpoints
             WriteOptionalEconomics(doc, req);
             WriteOptionalDeviceNumbers(doc, req);
             row.SettingsJson = JsonSerializer.Serialize(doc);
+            // The column was written once, at construction, and never again — a dead audit
+            // field on the one table that governs money and lights. Nothing reads it today,
+            // which is exactly why it was never noticed: the first person to need "when did
+            // this club last change its penalty policy" would have got the seed date and
+            // believed it.
+            row.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { saved = true });
         });

@@ -148,3 +148,74 @@ describe("AdminSettings", () => {
     expect(await screen.findByText(/topup max below block/)).toBeInTheDocument();
   });
 });
+
+/**
+ * The club's timezone, and the heartbeat hint that was true only above 60 seconds.
+ */
+describe("AdminSettings — timezone and the offline threshold", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const routes = (settings: Record<string, unknown> = {}) => [
+    { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...settings } },
+    { path: "/api/v1/admin/courts/", body: [] },
+    { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
+  ];
+
+  /**
+   * `tenant_settings.timezone` drives every wall-clock time on the booking grid and was
+   * readable but not writable: the GET served it, the PUT had no member for it, and a club
+   * outside South Africa read its whole schedule in Johannesburg time with no correction
+   * short of an UPDATE on a JSON column.
+   */
+  it("offers the club's timezone and sends a change", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const tz = await screen.findByLabelText("Timezone");
+    expect(tz).toHaveValue("Africa/Johannesburg");
+
+    fireEvent.change(tz, { target: { value: "Europe/London" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+
+    await waitFor(() => {
+      const save = stub.calls.find((c) => c.method === "PUT");
+      expect((save?.body as Record<string, unknown>).timezone).toBe("Europe/London");
+    });
+  });
+
+  /**
+   * A zone the runtime's tzdb does not list must still be selectable, or the picker shows
+   * the club a zone it is not on and then saves that.
+   */
+  it("keeps a saved zone the runtime does not know about", async () => {
+    stubFetch(routes({ timezone: "Mars/Olympus_Mons" }));
+    renderPage(<AdminSettingsPage />);
+
+    expect(await screen.findByLabelText("Timezone")).toHaveValue("Mars/Olympus_Mons");
+  });
+
+  /**
+   * D-F13. The hint promised "three missed beats", which is true only above 60 seconds —
+   * below that the 180-second floor takes over. An admin lowering the interval to detect an
+   * outage faster got none of the improvement and no explanation.
+   */
+  it("says what the chosen heartbeat actually buys, floor included", async () => {
+    stubFetch(routes({ heartbeat_seconds: 15 }));
+    renderPage(<AdminSettingsPage />);
+
+    const hint = (await screen.findByLabelText(/Heartbeat interval/)).getAttribute("aria-describedby");
+    const text = document.getElementById(hint!)!.textContent!;
+
+    // At 15s the box reports offline_after_seconds: 180, not 45.
+    expect(text).toMatch(/three missed beats or 3 minutes, whichever is longer/);
+    expect(text).toMatch(/at 15s that is 3 minutes/);
+  });
+
+  it("says the larger number when the interval is above the floor", async () => {
+    stubFetch(routes({ heartbeat_seconds: 120 }));
+    renderPage(<AdminSettingsPage />);
+
+    const hint = (await screen.findByLabelText(/Heartbeat interval/)).getAttribute("aria-describedby");
+    expect(document.getElementById(hint!)!.textContent).toMatch(/at 120s that is 6 minutes/);
+  });
+});
