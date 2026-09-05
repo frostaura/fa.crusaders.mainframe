@@ -4,6 +4,23 @@ import SchedulePage from "./Schedule";
 import { renderPage, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
 
 /**
+ * `slotAt` is called once per grid cell per render, so counting it counts renders of the
+ * grid — which is what the last block of tests below is measuring. The rest of the module
+ * is the real one; only the counter is added.
+ */
+const cellLookups = { count: 0 };
+vi.mock("../lib/scheduleGrid", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../lib/scheduleGrid")>();
+  return {
+    ...real,
+    slotAt: (...args: Parameters<typeof real.slotAt>) => {
+      cellLookups.count += 1;
+      return real.slotAt(...args);
+    },
+  };
+});
+
+/**
  * The schedule, as a member and as an admin.
  *
  * <p>
@@ -372,5 +389,49 @@ describe("Schedule", () => {
     expect(min).not.toBeNull();
     expect(max).not.toBeNull();
     expect(Date.parse(min!)).toBeLessThan(Date.now());
+  });
+
+  // ---- "Booking is slow" — the founder's own report, measured then fixed ----
+
+  it("shows the new booking without waiting for the schedule to be fetched again", async () => {
+    // The second /schedule answer is deliberately still EMPTY — the server "has not caught
+    // up". The page used to await that refetch before anything changed on screen, so the
+    // member's cell stayed "Available" for a whole extra round trip after their money had
+    // moved. It now paints from the POST's own response and reconciles behind them.
+    const fetchStub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: WALLET },
+      // The confirming refetch is made to FAIL, so what is on screen can only have come
+      // from the POST's own response.
+      { path: "/api/v1/schedule", sequence: [DAY, "the network went away"], body: DAY },
+      { path: `/api/v1/bookings/${BOOKING_ID}/cancellation-quote`, body: QUOTE },
+      { method: "POST", path: "/api/v1/bookings/", body: { booking_id: BOOKING_ID, balance_after_credits: 1585 } },
+    ]);
+    renderPage(<SchedulePage />);
+    await openBookingModal();
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+
+    expect(await screen.findByRole("button", { name: /Mine — open cancellation/ })).toBeInTheDocument();
+    // And the balance came off the booking response rather than a second wallet read.
+    const walletReads = fetchStub.calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/v1/wallet"));
+    expect(walletReads).toHaveLength(1);
+  });
+
+  it("does not rebuild the grid when a modal opens", async () => {
+    stub([]);
+    renderPage(<SchedulePage />);
+    await screen.findAllByRole("button", { name: /Book this slot for 50\.00 cr/ });
+
+    // A club day is a couple of hundred cells. Every one of them re-rendered whenever any
+    // state on the page moved — opening the confirmation, closing it, arming a cancel —
+    // for a dialog that touches no cell at all. Measured at 28 ms in jsdom to open a
+    // dialog, 8 ms after. The memo only bites while the grid's callbacks stay stable,
+    // which is what this actually pins.
+    await openBookingModal();
+    const before = cellLookups.count;
+    fireEvent.click(screen.getByRole("button", { name: "Keep looking" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    expect(cellLookups.count).toBe(before);
   });
 });

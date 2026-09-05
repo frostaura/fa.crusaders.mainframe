@@ -1,5 +1,85 @@
-import type { ScheduleSlot } from "../lib/api";
+import { memo } from "react";
+import type { ScheduleDay, ScheduleSlot } from "../lib/api";
 import { cn, formatCredits } from "../lib/utils";
+import { isSlotHead, slotAt, type TimeSlice } from "../lib/scheduleGrid";
+
+type GridProps = {
+  day: ScheduleDay;
+  slotsByCourt: Map<string, ScheduleSlot[]>;
+  timeSlices: TimeSlice[];
+  /** "Now", frozen when the schedule loaded, so past-slot styling is pure at render time. */
+  loadedAt: number;
+  isAdmin: boolean;
+  onBook: (courtId: string, courtName: string, startsAtUtc: string, priceCredits: number) => void;
+  onCancel: (slot: ScheduleSlot, courtName: string) => void;
+  onLiftBlock: (blockId: string) => void | Promise<void>;
+};
+
+/**
+ * The grid itself, memoised.
+ *
+ * <p>
+ * A club day is four courts by fifty-odd rows — a couple of hundred cells — and every one
+ * of them used to re-render whenever any state on the page moved. Opening the booking
+ * confirmation, closing it, arming a cancellation: each rebuilt the whole grid, for a
+ * modal that does not touch a single cell. Measured at 28 ms in jsdom just to open a
+ * dialog, which in a browser is the difference between a tap that lands and a tap that
+ * feels like it did not.
+ * </p>
+ *
+ * <p>
+ * The memo only bites because the callbacks are stable — they take the court and the
+ * instant as arguments rather than closing over them — so the page's modal state can
+ * change without giving the grid a new function on every render.
+ * </p>
+ */
+export const ScheduleGrid = memo(function ScheduleGrid(props: GridProps) {
+  const { day, slotsByCourt, timeSlices, loadedAt, isAdmin, onBook, onCancel, onLiftBlock } = props;
+  return (
+    <>
+      {timeSlices.map((t, rowIndex) => {
+        const cellStartMs = new Date(t.utc).getTime();
+        const isPast = cellStartMs < loadedAt;
+        return (
+          <RowFragment key={t.utc} t={t}>
+            {day.courts.map((c) => (
+              <SlotCell
+                key={c.id + t.utc}
+                slot={slotAt(slotsByCourt, c.id, cellStartMs, day.sliceMinutes)}
+                isHead={(s) => isSlotHead(s, cellStartMs, day.sliceMinutes, rowIndex === 0)}
+                isPast={isPast}
+                outOfHours={t.outOfHours}
+                isAdmin={isAdmin}
+                priceCredits={c.slicePriceCredits}
+                onBook={() => onBook(c.id, c.name, t.utc, c.slicePriceCredits)}
+                onCancel={(slot) => onCancel(slot, c.name)}
+                onLiftBlock={onLiftBlock}
+              />
+            ))}
+          </RowFragment>
+        );
+      })}
+    </>
+  );
+});
+
+function RowFragment({ t, children }: { t: TimeSlice; children: React.ReactNode }) {
+  // `cn`, not a template literal. lizard's .tsx parser reads a bare `<` inside an
+  // interpolation as the start of a JSX tag, never finds its close, and swallows the
+  // rest of the file into this one function — `make complexity` then reports it at
+  // enormous NLOC and CCN and points at a line nobody touched.
+  return (
+    <>
+      <div className={cn(
+        "sticky left-0 z-10 bg-bg-surface text-xs font-mono border-r border-border flex items-center justify-end pr-2",
+        t.outOfHours ? "text-text-muted/50" : "text-text-muted",
+      )}>
+        {t.label}
+      </div>
+      {children}
+    </>
+  );
+}
 
 
 /**
