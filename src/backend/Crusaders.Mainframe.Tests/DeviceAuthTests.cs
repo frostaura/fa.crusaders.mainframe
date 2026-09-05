@@ -131,7 +131,7 @@ public sealed class DeviceAuthHttpTests
         db.TenantSettings.Add(new TenantSettings
         {
             TenantId = tenant.Id,
-            SettingsJson = """{"slice_minutes":15,"grace_window_minutes":5,"timezone":"UTC","heartbeat_seconds":45}""",
+            SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","heartbeat_seconds":45}""",
         });
         db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m });
         await db.SaveChangesAsync();

@@ -73,7 +73,6 @@ public sealed class LightsCueWorker : BackgroundService
 
         foreach (var b in dueOff)
         {
-            await FireLightsAsync(db, tenant, b, on: false, ct);
             b.LightsOffCuedAt = now;
 
             // Only promote a booking that was actually attended. Flipping an
@@ -83,6 +82,28 @@ public sealed class LightsCueWorker : BackgroundService
             if (b.Status == BookingStatus.Booked && b.CheckedInAt is not null)
             {
                 b.Status = BookingStatus.Completed;
+            }
+
+            // Claim the row FIRST, then announce it — and one row per save.
+            //
+            // Both halves of that sentence are the fix for a crash this worker took on
+            // every fresh seed. `Booking` carries a concurrency token and NoShowWorker
+            // writes `Status` on rows matched by the same `Status == Booked`, so whichever
+            // loses the race throws DbUpdateConcurrencyException. The old shape emitted
+            // every lights-off onto the bus and then saved the whole batch in ONE
+            // SaveChanges, so a single lost row threw away the entire tick's work — every
+            // other booking's marker with it — while their `booking.lights_off` events had
+            // already gone out. The next tick then re-emitted all of them. One lost race
+            // therefore cost a dropped sweep AND duplicate events for unrelated courts.
+            //
+            // Saving before emitting makes the marker the idempotency guard it was always
+            // meant to be: at-most-once rather than at-least-once. A process that dies in
+            // between loses one lights-off cue, which the Mega's own auto-off timer already
+            // backstops by design — whereas a duplicate cue is noise a club's webhook
+            // consumer has no way to tell from a real one.
+            if (await SaveOneAsync(db, b, ct))
+            {
+                await FireLightsAsync(db, tenant, b, on: false, ct);
             }
         }
 
@@ -99,9 +120,45 @@ public sealed class LightsCueWorker : BackgroundService
                 && b.LightsOffCuedAt != null
                 && b.EndsAt <= now)
             .ToListAsync(ct);
-        foreach (var b in attendedAndOver) b.Status = BookingStatus.Completed;
+        foreach (var b in attendedAndOver)
+        {
+            b.Status = BookingStatus.Completed;
+            await SaveOneAsync(db, b, ct);
+        }
+    }
 
-        if (dueOff.Count > 0 || attendedAndOver.Count > 0) await db.SaveChangesAsync(ct);
+    /// <summary>
+    /// Persists one booking's change, on its own, and answers whether it stuck.
+    ///
+    /// <para>
+    /// A lost optimistic-concurrency race here is a normal outcome, not an error: it means
+    /// another writer — the no-show sweeper, a cancellation, a check-in at the pad —
+    /// decided this booking between our read and our write, and their decision is the one
+    /// that counts. It is logged at information and the sweep carries on with the next
+    /// row, which is the whole point of saving one at a time.
+    /// </para>
+    ///
+    /// <para>
+    /// The losing entry is detached so the next <c>SaveChanges</c> on this scope's context
+    /// does not re-submit the same stale row and fail identically for every remaining
+    /// booking in the tick.
+    /// </para>
+    /// </summary>
+    private async Task<bool> SaveOneAsync(MainframeDbContext db, Booking booking, CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            _logger.LogInformation(
+                "LightsCueWorker lost a concurrent write on booking {BookingId}; another writer decided it",
+                booking.Id);
+            db.Entry(booking).State = EntityState.Detached;
+            return false;
+        }
     }
 
     private async Task FireLightsAsync(MainframeDbContext db, ITenantContext tenant, Booking b, bool on, CancellationToken ct)

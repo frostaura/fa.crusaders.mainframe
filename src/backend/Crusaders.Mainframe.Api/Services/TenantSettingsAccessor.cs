@@ -51,6 +51,14 @@ public sealed class TenantSettingsAccessor
         // box in the club from working. See ButtonMap.
         var buttonMap = ButtonMap.FromSettings(root);
 
+        // The per-weekday opening hours the seeder has always written and NOTHING had
+        // ever read. `operating_hours` was referenced in exactly two places in the tree:
+        // the seeder that writes it and one validation string. So a Saturday club that
+        // shuts at 20:00 sold court time at 21:45, and a member could buy 03:00 on a
+        // Sunday through the API — a slot the grid cannot draw, so they could not see it,
+        // cancel it, or get it back.
+        var operatingHours = OperatingHours.FromSettings(root);
+
         return new TenantSettingsView(
             sliceMinutes, slicePrice, penaltyPct, graceMin, penaltyMin, advanceDays, tz,
             creditsPerZarRegular, creditsPerZarLeague,
@@ -72,6 +80,7 @@ public sealed class TenantSettingsAccessor
             ActivationCueWindowMinutes = TryInt(root, "activation_cue_window_minutes", TenantSettingsView.DefaultActivationCueWindowMinutes),
             QrLifetimeSeconds = TryInt(root, "qr_lifetime_seconds", TenantSettingsView.DefaultQrLifetimeSeconds),
             RosterWindowMinutes = TryInt(root, "roster_window_minutes", TenantSettingsView.DefaultRosterWindowMinutes),
+            OperatingHours = operatingHours,
         };
     }
 
@@ -137,6 +146,27 @@ public sealed record TenantSettingsView(
 
     /// <summary>How far ahead the heartbeat roster (and the QR screen's booking lookup) reaches, minutes.</summary>
     public int RosterWindowMinutes { get; init; } = DefaultRosterWindowMinutes;
+
+    /// <summary>
+    /// When the club is open, per weekday. Empty means "no per-weekday map configured",
+    /// in which case <see cref="HoursFor"/> falls back to the flat
+    /// <see cref="DayStartMinute"/>/<see cref="DayEndMinute"/> pair the Settings page edits.
+    /// </summary>
+    public OperatingHours OperatingHours { get; init; } = OperatingHours.Empty;
+
+    /// <summary>
+    /// The club's open and close for one local weekday, as minutes past local midnight.
+    ///
+    /// <para>
+    /// The per-weekday <c>operating_hours</c> map wins where it names the day; the flat
+    /// <c>day_start_minute</c>/<c>day_end_minute</c> pair is the default for every day it
+    /// does not. That ordering keeps the existing Settings page meaningful (it edits the
+    /// default) without letting it silently override a club that has set real weekend
+    /// hours — which is exactly the state the Crusaders seed is in.
+    /// </para>
+    /// </summary>
+    public (int OpenMinute, int CloseMinute) HoursFor(DayOfWeek day)
+        => OperatingHours.For(day) ?? (DayStartMinute, DayEndMinute);
 
     /// <summary>Returns credits-per-rand for a given member class. Defaults to <see cref="CreditsPerZarRegular"/> if unknown.</summary>
     public decimal ConversionRateFor(Crusaders.Mainframe.Api.Domain.MemberClass cls)

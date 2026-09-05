@@ -109,7 +109,14 @@ public sealed class TestHost : IAsyncDisposable
                 //  - block R100 cap R1000, per-day cap 60 min
                 //  - peak 16:00-19:00, regular-advance 1h
                 // Test fixture uses UTC for deterministic time-math.
-                SettingsJson = """{"slice_minutes":15,"slice_price_credits":8,"penalty_pct":30,"grace_window_minutes":5,"penalty_window_minutes":15,"advance_booking_days":14,"timezone":"UTC","credits_per_zar_regular":1.6,"credits_per_zar_league":2.4,"topup_block_zar":100,"topup_max_zar_per_member":1000,"member_per_day_max_minutes":60,"peak_hours":"16:00-19:00","peak_advance_hours_for_regular":1,"retention_years":2}""",
+                //
+                // …and it is open 00:00-24:00 ON PURPOSE. Operating hours are now enforced
+                // by BookingService, so a fixture that shut at 22:00 would make every test
+                // that books `UtcNow.AddHours(2)` fail whenever the suite ran after 20:00
+                // UTC — the same "passes all morning, fails after lunch" trap BookableSlot
+                // below exists to close, arriving from a second direction. Tests ABOUT
+                // operating hours set their own window; see OperatingHoursTests.
+                SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"penalty_pct":30,"grace_window_minutes":5,"penalty_window_minutes":15,"advance_booking_days":14,"timezone":"UTC","credits_per_zar_regular":1.6,"credits_per_zar_league":2.4,"topup_block_zar":100,"topup_max_zar_per_member":1000,"member_per_day_max_minutes":60,"peak_hours":"16:00-19:00","peak_advance_hours_for_regular":1,"retention_years":2}""",
             });
 
             var admin = new User { TenantId = tenant.Id, Email = $"admin-{slug}@test.local", PasswordHash = hasher.Hash("AdminPass!"), EmailVerified = true, IsAdmin = true };

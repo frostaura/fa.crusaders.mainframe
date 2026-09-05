@@ -70,7 +70,7 @@ public sealed class DeviceEventHttpTests
         db.TenantSettings.Add(new TenantSettings
         {
             TenantId = tenant.Id,
-            SettingsJson = """{"slice_minutes":15,"slice_price_credits":8,"grace_window_minutes":5,"timezone":"UTC","peak_hours":"16:00-19:00"}""",
+            SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"grace_window_minutes":5,"timezone":"UTC","peak_hours":"16:00-19:00"}""",
         });
 
         var courts = courtNumbers
