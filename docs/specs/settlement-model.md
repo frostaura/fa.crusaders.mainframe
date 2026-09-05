@@ -62,8 +62,26 @@ S5a is S5 with the penalty leg removed, not a separate path: the same sweep, the
 the same row count minus one. It composes with S6 without special-casing, because the reversal
 reads the penalty **actually posted** (I3, `penalised = −Σ NoShowPenalty rows`) rather than
 recomputing it from settings — a waived penalty is `penalised = 0`, `penaltyBack = 0`, and
-`Owed` returns cleanly to `P`. It does not weaken I2 either: a court that was lit holds an
-activation on the box, and that activation arriving is exactly what turns S5a into S6.
+`Owed` returns cleanly to `P`.
+
+**S5a is the one deliberate exception to I2, and this used to say the opposite.** The claim here
+was that a court that was lit holds an activation on the box and that activation arriving is
+what turns S5a into S6, so I2 could not be weakened. That is true only while the box stays
+powered. The queue is RAM (`src/iot/lib/eventq/include/eventq/EventQueue.h`), so a box that
+lights courts from its cached roster through an outage and then loses power never uploads those
+activations, S6 never happens, and `Owed(b)` stays `0` for a court that was played. Read I2 with
+its exception below.
+
+**Which instant "unreachable" is judged at, and by what threshold.** S5a asks whether a box
+driving the court had been silent for longer than `offline_after_seconds` **at the grace
+deadline** — the same threshold the alert and the Devices page use — answered from the last
+heartbeat preceding that deadline, whether that comes from a `DeviceOutage` row or from
+`Device.LastSeenAt`. It is deliberately *not* "an outage row exists that spans the deadline": a
+row is only written once `PeripheralHealthWorker` notices, so that version priced the same facts
+differently depending on how promptly the sweep ran. A box whose silence had not yet reached the
+threshold at the deadline is reachable for settlement purposes, exactly as it is on the Devices
+page and in the alert — and, being powered and inside its cached roster, it is a box that still
+lights the court and still queues the scan.
 
 ---
 
@@ -86,6 +104,24 @@ If a court was lit on a booking's identity, `Owed(b) > 0` unless an admin explic
 it with an adjustment. **Why:** the club's electricity ran and the slot was consumed.
 Finding 2 made a played court free because any positive adjustment naming the booking
 suppressed *both* money legs of the reversal.
+
+**The one exception, accepted deliberately: S5a plus a lost event queue.** The box lights
+courts from its cached roster while its uplink is down and queues the activations, but that
+queue is in RAM — `src/iot/lib/eventq/include/eventq/EventQueue.h` says so, and the go-live
+checklist accepts it. A court lit during an outage that ended in a power cut is therefore never
+reported, the sweep concludes nobody played, S5a refunds in full, and `Owed(b) = 0` for a court
+that ran. Nothing in the system can distinguish that case from the one S5a exists for, because
+the evidence that would distinguish them is exactly what was lost.
+
+It is stated here rather than denied because the alternative is worse and because the loss is
+now **silent**. Before S5a the same lost activation cost the *member* a penalty they had not
+earned: wrong, but visible on their own ledger and disputed by the member. Now it costs the
+*club*, and a full refund on a dark court is indistinguishable from a correct one, so nobody
+raises it. Two consequences are load-bearing and are enforced elsewhere: the outage alert must
+not tell an admin to power-cycle the box first (that is the action that destroys the evidence),
+and the recovery mail must not promise that everything recorded during the outage uploads. Both
+are in `EmailTemplates`. Making the loss positively detectable — a `(device, seq)` gap after a
+reconnect, which `DeviceEventReceipt` would support — is unbuilt.
 
 ### I3 — A manual adjustment is netted per leg, never used as a signal
 

@@ -223,9 +223,29 @@ version of it (a torn ring that replays a stale activation) charges a member twi
 - [ ] Somebody accepts this, or schedules the work.
 
 **If accepted:** a court lit during an offline window that ended in a power cut is never
-reported, so the sweep treats it as a no-show and refunds it less a penalty the member did
-not earn. It is visible in the ledger and an admin can reverse it — which is why this is a
-recorded limitation and not a blocker. Item 7 makes it rarer.
+reported, so the sweep concludes nobody played.
+
+**What that costs changed direction when §6a shipped, and the change is the reason to read this
+item again.** It used to cost the *member*: the sweep refunded the booking less a 30% penalty
+they had not earned. That was wrong, but it was wrong on the member's own ledger, and a member
+who is charged for a game they played complains. Under `settlement-model.md` S5a the same
+booking is refunded **in full** — `Owed(b) = 0` — and stamped `peripheral_outage`, so the cost
+falls on the *club*, silently: a court whose lights ran is free, the ledger shows a refund that
+looks correct, and nobody has a reason to raise it. It is the one I2 exception in the system and
+`settlement-model.md` I2 names it.
+
+Two things follow, and both are already true rather than planned:
+
+- The unhealthy-box alert no longer opens by telling an admin to check the box's power. A
+  power-cycle is precisely the action that discards the queued activations, so the alert that
+  reports the outage used to instruct the step that converts it into free courts.
+- The recovery mail no longer promises that everything recorded during the outage uploads. It
+  says what is true: it uploads if the box stayed powered.
+
+Making the loss positively detectable is the work this item is really asking for and it is not
+scheduled: the box persists its sequence number across reboots and the API already stores a
+`DeviceEventReceipt` per `(device, seq)`, so a gap after a reconnect is derivable. Nothing
+derives it. Item 7 makes the whole failure rarer.
 
 ---
 

@@ -36,10 +36,25 @@
 //
 // What it costs when it happens: a court that was lit during an offline window
 // that ended in a power cut is never reported, so the API still sees the
-// booking as un-attended and the no-show sweep refunds it less the penalty. The
-// member is charged a penalty for a game they played. That is wrong, it is
-// visible in the ledger, and an admin can reverse it — which is why this is a
-// recorded limitation rather than a blocker. It is in the go-live checklist.
+// booking as un-attended and the no-show sweep settles it as one.
+//
+// WHO PAYS FOR THAT CHANGED, AND THIS PARAGRAPH USED TO BE STALE. It used to
+// cost the member — refunded less a 30% penalty for a game they played. Wrong,
+// but wrong on their own ledger, and a member charged for a game they played
+// complains. Since feature-spec.md §6a / settlement-model.md S5a, a booking
+// whose box was unreachable at its grace deadline is refunded IN FULL with no
+// penalty, so the same lost activation now makes the court free and the loss is
+// the club's, silently: the ledger row looks correct and nobody raises it. That
+// is the one I2 exception in the system and settlement-model.md I2 names it.
+//
+// It is still a recorded limitation rather than a blocker, and it is on the
+// go-live checklist — but it is no longer self-correcting through a member
+// complaint, so do not reason about it as if an admin will hear about it.
+//
+// A consequence for anyone touching this file: the API-side alert deliberately
+// does NOT open by telling an admin to check the box's power. Power-cycling a
+// box that is lighting courts from its cached roster is exactly what discards
+// this ring.
 //
 // An earlier draft of this file carried a per-slot checksum and a header
 // claiming torn writes read back as absent. Nothing wrote to flash, so the

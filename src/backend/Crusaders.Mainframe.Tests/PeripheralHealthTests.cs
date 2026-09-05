@@ -163,6 +163,59 @@ public class PeripheralHealthTests
         Assert.DoesNotContain(host.PlayerUser.Email, host.EmailService.Sent.Select(m => m.To));
     }
 
+    /// <summary>
+    /// The alert must not open by sending an admin to the plug.
+    ///
+    /// <para>
+    /// A box that has lost only its uplink keeps lighting courts from its cached roster and holds
+    /// the scans in a RAM ring (<c>src/iot/lib/eventq/include/eventq/EventQueue.h</c>). Cutting
+    /// the power discards them, and every court it lit during the outage then settles under S5a
+    /// as a full refund the club carries — the one accepted I2 exception. The alert that reports
+    /// the outage used to say "Check its power and its WiFi", i.e. it led with the single action
+    /// that converts a recoverable outage into free courts.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_unhealthy_alert_does_not_send_the_admin_to_the_plug_first()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
+        host.EmailService.Sent.Clear();
+
+        await CreateWorker(host).TickAsync(default);
+
+        var alert = Assert.Single(host.EmailService.Sent);
+        Assert.Contains("do not power-cycle it yet", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Check its power", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// And the all-clear must not promise what the hardware cannot deliver. It used to state flatly
+    /// that "anything the box recorded while it was offline uploads on its next few calls" — true
+    /// only while the box stayed powered, and false in exactly the case that costs the club money.
+    /// </summary>
+    [Fact]
+    public async Task The_recovery_mail_qualifies_the_upload_promise_with_the_power_cut()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
+        var worker = CreateWorker(host);
+        await worker.TickAsync(default);
+        host.EmailService.Sent.Clear();
+
+        box.LastSeenAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        await worker.TickAsync(default);
+
+        var allClear = Assert.Single(host.EmailService.Sent);
+        Assert.Contains("if it stayed powered", allClear.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("those scans are gone", allClear.HtmlBody, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Recovery, so an admin sent to a cupboard knows to stop looking.</summary>
     [Fact]
     public async Task A_box_that_comes_back_closes_its_outage_and_says_so()

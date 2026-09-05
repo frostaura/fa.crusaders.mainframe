@@ -399,7 +399,8 @@ public static class EmailTemplates
                 <tr><td style="padding:4px 16px 4px 0;color:#64748B">Courts</td><td style="padding:4px 0">{Courts(alert.CourtNumbers)}</td></tr>
                 <tr><td style="padding:4px 16px 4px 0;color:#64748B">Silent for</td><td style="padding:4px 0">{alert.Minutes} minutes</td></tr>
               </table>
-              <p>Check its power and its WiFi. While it is dark, members on those courts cannot check in — bookings that pass their grace window are refunded in full with <strong>no no-show penalty</strong>, and the members are told why.</p>
+              <p><strong>Check its WiFi and its network first — do not power-cycle it yet.</strong> A box that has lost only its uplink keeps lighting courts from the roster it already holds, and it holds those scans in memory until it can upload them. Cutting the power discards them, and every court it lit during the outage then settles as if nobody played.</p>
+              <p>While it is dark, members on those courts may not be able to check in — bookings that pass their grace window are refunded in full with <strong>no no-show penalty</strong>, and the members are told why.</p>
               <p style="margin:24px 0">
                 <a href="{alert.ConsoleUrl}"
                    style="display:inline-block;background:#B91C1C;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
@@ -420,7 +421,7 @@ public static class EmailTemplates
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">The court box is reporting again</h2>
               <p><strong>{System.Net.WebUtility.HtmlEncode(alert.DeviceName)}</strong> ({System.Net.WebUtility.HtmlEncode(alert.DeviceCode)}) at {System.Net.WebUtility.HtmlEncode(alert.ClubName)} is back after {alert.Minutes} minutes.</p>
-              <p style="font-size:13px;color:#475569">Anything the box recorded while it was offline uploads on its next few calls, so a member who did play during the outage still settles as attended.</p>
+              <p style="font-size:13px;color:#475569">Anything the box recorded while it was offline uploads on its next few calls <strong>if it stayed powered</strong>, and a member who did play during the outage then settles as attended. If it lost power or was restarted, those scans are gone: courts it lit are refunded in full and the club carries them.</p>
               <p style="margin:24px 0">
                 <a href="{alert.ConsoleUrl}"
                    style="display:inline-block;background:#0369A1;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
