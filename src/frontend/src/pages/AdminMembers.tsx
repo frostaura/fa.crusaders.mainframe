@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Fingerprint, KeyRound, Plus, Search, Users, Wallet, X } from "lucide-react";
-import { endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type LedgerEntryType, type LedgerRow } from "../lib/api";
+import { ApiError, endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type LedgerEntryType, type LedgerRow } from "../lib/api";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -40,6 +40,9 @@ export default function AdminMembersPage() {
   const [creditAmount, setCreditAmount] = useState("");
   const [creditReason, setCreditReason] = useState("");
   const [creditBooking, setCreditBooking] = useState("");
+  // The server's verdict on the named booking, shown at the field rather than as a toast:
+  // it is the one input the admin has to change, and a toast that has faded says nothing.
+  const [creditBookingError, setCreditBookingError] = useState<string | null>(null);
   const [resetFor, setResetFor] = useState<AdminMember | null>(null);
   const [resetResult, setResetResult] = useState<{ tempPassword: string; emailSentTo: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -105,26 +108,30 @@ export default function AdminMembersPage() {
     finally { setBusyId(null); }
   };
 
-  const closeCredit = () => { setCreditFor(null); setCreditAmount(""); setCreditReason(""); setCreditBooking(""); };
+  const closeCredit = () => { setCreditFor(null); setCreditAmount(""); setCreditReason(""); setCreditBooking(""); setCreditBookingError(null); };
 
   const adjust = async () => {
     if (!creditFor) return;
-    const amount = parseFloat(creditAmount);
-    if (isNaN(amount) || amount === 0) { toast.push({ tone: "warning", text: "Enter a non-zero amount." }); return; }
-    if (!creditReason.trim()) { toast.push({ tone: "warning", text: "A reason is required." }); return; }
-    // The API binds relatedBookingId as a Guid?; anything else is a 400 with no message
-    // an admin can act on, so it is checked here where the field is.
     const bookingId = creditBooking.trim();
-    if (bookingId && !isGuid(bookingId)) { toast.push({ tone: "warning", text: "That booking ID is not one — it should look like 8-4-4-4-12 hex characters. Pick one from the list or leave it blank." }); return; }
+    const complaint = validateAdjustment(creditAmount, creditReason, bookingId);
+    if (complaint) { toast.push({ tone: "warning", text: complaint }); return; }
+    const amount = parseFloat(creditAmount);
     const targetUserId = creditFor.user_id;
     setBusyId(targetUserId);
+    setCreditBookingError(null);
     try {
       const r = await endpoints.adminAdjust(targetUserId, amount, creditReason, bookingId || undefined);
       // Reflect the new balance in this row immediately — no list refetch, no reload.
       setMembers((prev) => prev?.map((m) => m.user_id === targetUserId ? { ...m, balance_credits: r.balance_after_credits } : m) ?? prev);
       toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} ${formatCredits(Math.abs(amount))}${bookingId ? ` for booking ${bookingId.slice(0, 8)}` : ""}.` });
       closeCredit();
-    } catch { toast.push({ tone: "danger", text: "Credit adjustment failed." }); }
+    } catch (err) {
+      // A refused booking id keeps the form open with the reason at the field. Anything
+      // else is not about one input, so it stays a toast.
+      const refusal = relatedBookingRefusal(err);
+      if (refusal) setCreditBookingError(refusal);
+      else toast.push({ tone: "danger", text: "Credit adjustment failed." });
+    }
     finally { setBusyId(null); }
   };
 
@@ -306,7 +313,12 @@ export default function AdminMembersPage() {
           <Input id="credit-amount" value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)} placeholder="e.g. 100" inputMode="decimal" />
           <Label htmlFor="credit-reason" className="mt-3">Reason (audit-logged)</Label>
           <Input id="credit-reason" value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Goodwill — court 2 lights faulty on 2026-05-04" />
-          <RelatedBookingField userId={creditFor.user_id} value={creditBooking} onChange={setCreditBooking} />
+          <RelatedBookingField
+            userId={creditFor.user_id}
+            value={creditBooking}
+            error={creditBookingError}
+            onChange={(next) => { setCreditBooking(next); setCreditBookingError(null); }}
+          />
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="ghost" onClick={closeCredit}>Cancel</Button>
             <Button onClick={adjust}>Apply</Button>
@@ -376,6 +388,53 @@ function IconAction({ title, icon, onClick }: { title: string; icon: React.React
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isGuid(value: string) { return GUID.test(value); }
 
+/**
+ * What is wrong with the form, in the desk's words, or null when nothing is.
+ *
+ * <p>
+ * The GUID check is here rather than left to the server because the endpoint binds
+ * <code>RelatedBookingId</code> as a <code>Guid?</code> and answers a bare 400 with no
+ * body for anything that is not one — a refusal an admin cannot act on. The two refusals
+ * the endpoint <em>does</em> explain are handled after the round trip, in
+ * {@link relatedBookingRefusal}.
+ * </p>
+ */
+function validateAdjustment(amountText: string, reason: string, bookingId: string): string | null {
+  const amount = parseFloat(amountText);
+  if (isNaN(amount) || amount === 0) return "Enter a non-zero amount.";
+  if (!reason.trim()) return "A reason is required.";
+  if (bookingId && !isGuid(bookingId)) return "That booking ID is not one — it should look like 8-4-4-4-12 hex characters. Pick one from the list or leave it blank.";
+  return null;
+}
+
+/**
+ * The two ways the server refuses the booking a hand adjustment names (settlement-model
+ * I4), told apart.
+ *
+ * <p>
+ * They are different mistakes with different repairs, and a generic "adjustment failed"
+ * sends the admin back round the same loop. <code>booking_not_found</code> is a
+ * mis-keyed or foreign id — including another club's, which this tenant cannot see and
+ * so does not have. <code>booking_not_members</code> is a real booking of the wrong
+ * member's, which is the dangerous one: it is the mistake I4 exists to stop, because
+ * before the check it silently netted against a third party's settlement and left
+ * nothing on their ledger to explain it.
+ * </p>
+ */
+const RELATED_BOOKING_REFUSAL: Record<string, string> = {
+  booking_not_found:
+    "No booking with that ID exists at this club. Check it against the club's own records, or pick one from the list — the list is every booking this member's money has moved on.",
+  booking_not_members:
+    "That booking belongs to another member. Naming it here would net against THEIR reversal and change what they are owed, so the server refused it. Pick one of this member's own bookings.",
+};
+
+function relatedBookingRefusal(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 400) return null;
+  const payload = typeof err.payload === "object" && err.payload !== null ? (err.payload as Record<string, unknown>) : {};
+  const code = typeof payload.error === "string" ? payload.error : "";
+  return RELATED_BOOKING_REFUSAL[code] ?? null;
+}
+
 /** Sentinel option value: the admin will type a booking ID the ledger has not seen. */
 const OTHER_BOOKING = "other";
 
@@ -424,29 +483,47 @@ function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
  * The optional booking a credit adjustment is compensation for.
  *
  * <p>
- * Naming the booking is what turns a manual credit from plain money into evidence: the
- * no-show reversal reads the ledger for this booking and nets what it finds, so a
- * positive adjustment already sitting there is counted rather than paid twice.
+ * Naming the booking is what turns a manual credit from plain money into evidence. It
+ * does <b>not</b> stand in for the automatic reversal and does not cancel it: a no-show
+ * is reversed on its own the moment the box's attendance upload arrives, and both legs
+ * of that reversal are always attempted. What naming the booking does is make the hand
+ * adjustment part of the arithmetic — settlement-model I3 nets it against the reversal
+ * <em>one leg at a time</em>:
+ * </p>
+ *
+ * <pre>
+ * penaltyBack = max(0, penalised − Σ  positive adjustments naming b)
+ * refundBack  = max(0, refunded  − Σ |negative adjustments naming b|)
+ * </pre>
+ *
+ * <p>
+ * So a positive adjustment reduces the penalty the reversal gives back, and a negative
+ * one reduces the refund the reversal takes away. The sign is never read as a signal
+ * that the desk "already fixed it" — the model tried that, and because the honest
+ * outstanding after a sweep is always negative, a positive adjustment could never be
+ * the whole correction: it matched only wrong-direction repairs, skipped the refund
+ * reversal, and made a played court free (review finding 2).
  * </p>
  *
  * <p>
- * <b>This is not the repair for a wrongly-recorded no-show, and the copy here used to
- * read as if it were</b> (review finding 17). A no-show is reversed on its own the
- * moment the box's attendance upload arrives — that is what the reversal is for, and
- * the desk does not have to do anything. A positive adjustment naming the booking is
- * for genuine compensation the club decided to give on top: goodwill, an unusable
- * court, a mistake of the club's own. Steering the desk to credit the member first is
- * how a member ends up keeping both a full refund and the credit.
+ * Netting caps at each leg, so an adjustment larger than the leg is worth is a decision
+ * the model does not claw back; the excess stands on the ledger under the admin's name
+ * (settlement-model §7.1). The copy below says all of this, because the copy here used
+ * to say the reverse — first that a credit was the repair for a wrongly-recorded
+ * no-show, then that a credit on top left the member "holding both". Neither is true
+ * under I3, and both push the desk into paying the wrong amount.
  * </p>
  *
  * <p>
  * The booking must be this member's own. The picker only offers their bookings, and a
- * typed id is checked here for shape — the server checks ownership and refuses one that
- * belongs to somebody else, because naming another member's booking suppresses THEIR
- * reversal, on a ledger where nothing explains why.
+ * typed id is checked here for shape; ownership and existence are the server's, and its
+ * two refusals arrive back here as {@link RELATED_BOOKING_REFUSAL} text shown at this
+ * field rather than as a toast.
  * </p>
  */
-function RelatedBookingField({ userId, value, onChange }: { userId: string; value: string; onChange: (next: string) => void }) {
+function RelatedBookingField(
+  { userId, value, error, onChange }: { userId: string; value: string; error: string | null; onChange: (next: string) => void },
+) {
   const [recent, setRecent] = useState<RecentBooking[] | null>(null);
   const [choice, setChoice] = useState("");
 
@@ -494,10 +571,17 @@ function RelatedBookingField({ userId, value, onChange }: { userId: string; valu
           would change what that member is owed.
         </p>
       )}
+      {error && (
+        <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger-strong">
+          {error}
+        </p>
+      )}
       <p className="mt-1 text-xs text-text-muted">
-        Only for a credit that genuinely compensates this member for that booking. A wrongly-recorded no-show does not
-        need one: when the court box reports the member did attend, the refund and the penalty are reversed on their
-        own. Crediting them by hand as well leaves them holding both.
+        Only for a credit or debit that genuinely compensates this member for that booking. It does not stand in for
+        the automatic reversal: when the court box reports the member did attend, the refund and the penalty are
+        reversed on their own, and what you post here is netted against that reversal one leg at a time — a positive
+        adjustment reduces the penalty the reversal gives back, a negative one reduces the refund it takes away.
+        Netting stops at zero per leg, so anything beyond what a leg is worth stands as posted and is not clawed back.
       </p>
     </div>
   );

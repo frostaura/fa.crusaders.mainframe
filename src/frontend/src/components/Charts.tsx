@@ -1,6 +1,6 @@
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart,
-  ResponsiveContainer, Tooltip, XAxis, YAxis, Line, LineChart,
+  ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, Line, LineChart,
 } from "recharts";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 import { formatCredits } from "../lib/utils";
@@ -29,6 +29,41 @@ const fmtDate = (d: string) => {
   return dt.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
 };
 
+/**
+ * The y-axis floor for a chart plotting ledger movements: zero, or below it exactly as
+ * far as the data goes.
+ *
+ * <p>
+ * These series are <b>net</b>, and net means a day can be negative. Settlement-model
+ * I11 posts every correction as a new row of the same type with the opposite sign
+ * rather than editing the original, and a reversal routinely lands in a different day's
+ * bucket from the sweep it reverses — so a day whose only penalty row is a reversal
+ * reads as a negative penalty. The API is right; the chart has to be able to draw it.
+ * </p>
+ *
+ * <p>
+ * Recharts' default numeric domain is <code>[0, 'auto']</code>, which reads as a floor
+ * at zero. It survives a negative today only because <code>extendDomain</code> widens a
+ * user domain to the data rather than clipping to it — an implementation detail of the
+ * version in <code>package.json</code>, not a contract. Saying the floor out loud costs
+ * one prop and cannot regress quietly. <code>Math.floor</code> leaves the bar a little
+ * room instead of ending the axis exactly on the most negative value.
+ * </p>
+ */
+export const signedFloor = (dataMin: number) => (Number.isFinite(dataMin) ? Math.min(0, Math.floor(dataMin)) : 0);
+
+/** {@link signedFloor} as a recharts y-domain: signed floor, auto ceiling. */
+export const SIGNED_DOMAIN = [signedFloor, "auto"] as const;
+
+/**
+ * The zero line is drawn solid on the signed charts, so a bar hanging under it reads as
+ * a reversal rather than as a mis-drawn bar. The grid's own line at zero is dashed and
+ * the same weight as every other tick, which is exactly wrong on a chart where the sign
+ * is the information. Written inline at each call site rather than wrapped in a
+ * component: recharts discovers its own elements, and a wrapper is a needless bet on how.
+ */
+const ZERO_LINE_STROKE = TEXT_MUTED;
+
 export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
   return (
     <div style={{ height: CHART_HEIGHT }}>
@@ -51,6 +86,11 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
   );
 }
 
+/**
+ * The club's money by day. <b>Penalties are net</b> — see {@link signedFloor} — so the
+ * series is labelled as such in the legend and the tooltip, and the bar goes below the
+ * zero line on a day whose penalty rows are reversals of an earlier day's sweep.
+ */
 export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
   return (
     <div style={{ height: CHART_HEIGHT }}>
@@ -58,12 +98,13 @@ export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} domain={SIGNED_DOMAIN} />
+          <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend wrapperStyle={{ fontSize: 11 }} />
           <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
           <Bar dataKey="booking_charges_credits" name="Bookings" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="penalties_credits" name="Penalties" stackId="b" fill={WARNING} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="penalties_credits" name="Penalties (net)" stackId="b" fill={WARNING} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -147,6 +188,12 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
   );
 }
 
+/**
+ * A member's own money by day. <b>Refunds are net</b> — see {@link signedFloor}. A member
+ * whose no-show was reversed a day later sees the refund the sweep gave them taken back
+ * on the day the box's evidence landed, which is a negative refund on that day and is
+ * exactly what happened to them.
+ */
 export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
   return (
     <div style={{ height: CHART_HEIGHT }}>
@@ -154,11 +201,12 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} domain={SIGNED_DOMAIN} />
+          <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend wrapperStyle={{ fontSize: 11 }} />
           <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="refunds_credits" name="Refunds" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="refunds_credits" name="Refunds (net)" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />
           <Bar dataKey="spent_credits" name="Spent" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>

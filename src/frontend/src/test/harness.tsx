@@ -3,6 +3,8 @@ import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
 import { ToastProvider } from "../components/Toast";
+import { AuthProvider } from "../lib/auth";
+import { tokenStore } from "../lib/api";
 
 /**
  * The shared frontend test harness.
@@ -84,9 +86,17 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
     served.set(route, nth + 1);
     const answer = route.sequence ? route.sequence[Math.min(nth, route.sequence.length - 1)] : route.body;
 
+    // `status` and `ok` are computed out here rather than inline in the literal because
+    // lizard reads a bare `<` inside an object literal in a .tsx file as the start of a
+    // JSX tag, never finds its close, and swallows the whole rest of the file into one
+    // anonymous function. That is why `make complexity` used to measure this file as a
+    // single 189-line function and could not see `stubFetch` at all — and why adding a
+    // fixture to the end of the file tripped the length gate on a line nobody touched.
+    const status = route.status ?? 200;
+    const ok = status < 400;
     return Promise.resolve({
-      ok: (route.status ?? 200) < 400,
-      status: route.status ?? 200,
+      ok,
+      status,
       text: () => Promise.resolve(JSON.stringify(answer)),
     } as unknown as Response);
   }));
@@ -94,13 +104,41 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
   return { calls };
 }
 
+/**
+ * `AuthProvider` is here for every test, not only the ones that need a session.
+ *
+ * <p>
+ * A page that reads `useAuth` throws outright without it, which reads as a broken page
+ * rather than a missing wrapper. With no token in storage the provider resolves to
+ * anonymous synchronously and issues no request at all, so it costs the other tests
+ * nothing — {@link signIn} is what turns it on.
+ * </p>
+ */
 function Providers({ children }: { children: ReactNode }) {
   return (
     <MemoryRouter>
-      <ToastProvider>{children}</ToastProvider>
+      <AuthProvider>
+        <ToastProvider>{children}</ToastProvider>
+      </AuthProvider>
     </MemoryRouter>
   );
 }
+
+/**
+ * Puts a session in place for the render that follows: a token in storage, which is what
+ * makes `AuthProvider` ask `/api/v1/whoami`. Stub that route as well, and call this
+ * BEFORE `renderPage` — the provider reads storage on mount.
+ */
+export function signIn({ isAdmin }: { isAdmin: boolean }) {
+  tokenStore.set("test.token.value");
+  return {
+    tenant_slug: "crusaders", tenant_id: "00000000-0000-0000-0000-0000000000cc",
+    user_id: "44444444-4444-4444-4444-444444444444", is_authenticated: true, is_admin: isAdmin,
+  };
+}
+
+/** Drops any session left behind, so the next test starts anonymous. */
+export function signOut() { tokenStore.clear(); }
 
 export function renderPage(ui: ReactElement, options?: Omit<RenderOptions, "wrapper">) {
   return render(ui, { wrapper: Providers, ...options });

@@ -57,7 +57,7 @@ export default function ReportsPage() {
     : [
         { label: "Top-ups", value: wallet ? formatCredits(wallet.top_ups_credits) : "—", tone: "success" as const },
         { label: "Spent", value: wallet ? formatCredits(wallet.spent_credits) : "—", tone: "accent" as const },
-        { label: "Refunds", value: wallet ? formatCredits(wallet.refunds_credits) : "—", tone: "neutral" as const },
+        { label: "Refunds (net)", value: wallet ? formatCredits(wallet.refunds_credits) : "—", tone: "neutral" as const },
         { label: "Movements", value: wallet ? String(wallet.count) : "—", tone: "neutral" as const },
       ];
 
@@ -124,7 +124,7 @@ export default function ReportsPage() {
           <dl className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
             <Stat label="Top-ups" value={formatCredits(wallet.top_ups_credits)} />
             <Stat label="Spent" value={formatCredits(wallet.spent_credits)} />
-            <Stat label="Refunds" value={formatCredits(wallet.refunds_credits)} />
+            <Stat label="Refunds (net)" value={formatCredits(wallet.refunds_credits)} />
             <Stat label="Penalty count" value={String(wallet.penalty_count)} />
             <Stat label="Movements" value={String(wallet.count)} />
           </dl>
@@ -177,12 +177,13 @@ export default function ReportsPage() {
               { key: "date", header: "Date", cell: (r) => prettyDate(r.date), sortValue: (r) => r.date, width: 130 },
               { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => cr(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
               { key: "booking_charges_credits", header: "Charges", align: "right", cell: (r) => cr(r.booking_charges_credits), sortValue: (r) => r.booking_charges_credits },
-              { key: "refunds_credits", header: "Refunds", align: "right", cell: (r) => cr(r.refunds_credits), sortValue: (r) => r.refunds_credits },
-              { key: "penalties_credits", header: "Penalties", align: "right", cell: (r) => cr(r.penalties_credits), sortValue: (r) => r.penalties_credits },
+              { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
+              { key: "penalties_credits", header: "Penalties (net)", align: "right", cell: (r) => <NetCredits value={r.penalties_credits} />, sortValue: (r) => r.penalties_credits },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
               { key: "no_shows", header: "No-shows", align: "right", cell: (r) => r.no_shows, sortValue: (r) => r.no_shows },
             ] satisfies DataColumn<DailyAdminPoint>[]}
           />
+          <NetNote what="Refunds and penalties" />
         </Card>
       )}
 
@@ -202,11 +203,12 @@ export default function ReportsPage() {
               { key: "date", header: "Date", cell: (r) => prettyDate(r.date), sortValue: (r) => r.date, width: 130 },
               { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => cr(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
               { key: "spent_credits", header: "Spent", align: "right", cell: (r) => cr(r.spent_credits), sortValue: (r) => r.spent_credits },
-              { key: "refunds_credits", header: "Refunds", align: "right", cell: (r) => cr(r.refunds_credits), sortValue: (r) => r.refunds_credits },
+              { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
               { key: "balance_credits", header: "Balance", align: "right", cell: (r) => cr(r.balance_credits), sortValue: (r) => r.balance_credits },
             ] satisfies DataColumn<DailyMePoint>[]}
           />
+          <NetNote what="Refunds" />
         </Card>
       )}
 
@@ -221,6 +223,40 @@ export default function ReportsPage() {
  */
 const cr = (v: number) => formatCredits(v);
 const prettyDate = (s: string) => new Date(s + "T00:00:00Z").toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+
+/**
+ * A net credit figure, signed, with a negative one marked.
+ *
+ * <p>
+ * Settlement-model I11: a correction posts a new row of the same type with the opposite
+ * sign rather than editing the row it corrects, because a single netted row cannot
+ * answer "how much penalty did I pay?" — the question a disputed settlement asks. The
+ * accepted consequence is that a period bucket goes negative whenever a reversal lands
+ * in a different day's bucket from the sweep it reverses: a member who was swept as a
+ * no-show on Tuesday and whose attendance upload arrived on Wednesday has a positive
+ * penalty on Tuesday and a negative one on Wednesday.
+ * </p>
+ *
+ * <p>
+ * So a minus here is the netting working, and the number is shown as it is rather than
+ * as its magnitude. Marking it amber says "look at this day" without saying "error";
+ * printing <code>|x|</code> instead would make the two days indistinguishable and hide
+ * the only trace on this screen that a reversal happened at all.
+ * </p>
+ */
+function NetCredits({ value }: { value: number }) {
+  return <span className={value < 0 ? "text-warning-strong" : undefined}>{formatCredits(value)}</span>;
+}
+
+/** Says once, under the table, what the "(net)" in those column headers means. */
+function NetNote({ what }: { what: string }) {
+  return (
+    <p className="mt-2 text-xs text-text-muted">
+      {what} are net. A reversal is posted as an opposite-sign row on the day it lands, so a day reads negative when
+      more was reversed on it than posted — usually because the sweep and the reversal fell on different days.
+    </p>
+  );
+}
 
 function Tile({ label, value, tone }: { label: string; value: string; tone: "accent" | "success" | "warning" | "neutral" }) {
   const tones: Record<string, string> = {

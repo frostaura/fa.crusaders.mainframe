@@ -16,11 +16,20 @@ import { ledgerRowFixture, memberFixture, renderPage, stubFetch } from "../test/
  * </p>
  *
  * <p>
- * They also hold the <em>copy</em>, which is the part that went wrong (review finding
- * 17). The field used to read as though a credit were the repair for a wrongly-recorded
- * no-show. It is not: the reversal happens on its own when the box's attendance upload
- * arrives, and a credit on top leaves the member holding both. A wrong steer here costs
- * real money on every league night, so it is pinned like any other contract.
+ * They also hold the <em>copy</em>, which is the part that went wrong twice (review
+ * finding 17, then its own fix). The field first read as though a credit were the repair
+ * for a wrongly-recorded no-show; the repair for that then read as though a credit on
+ * top left the member "holding both". Both are wrong under settlement-model I3: the
+ * reversal always runs, and the hand adjustment is netted into it one leg at a time —
+ * a positive one reduces the penalty the reversal gives back, a negative one reduces the
+ * refund it takes away. A wrong steer here costs real money on every league night, so
+ * the copy is pinned like any other contract.
+ * </p>
+ *
+ * <p>
+ * And they hold the two refusals the endpoint answers when the named booking is not
+ * this member's to name (I4): they are different mistakes with different repairs, they
+ * are shown at the field rather than as a toast, and the form stays open on both.
  * </p>
  */
 describe("AdminMembers — adjust credit", () => {
@@ -94,20 +103,76 @@ describe("AdminMembers — adjust credit", () => {
     });
   });
 
-  it("does not steer the desk into crediting a wrongly-recorded no-show by hand", async () => {
+  it("says the adjustment is netted per leg against the reversal, not that it replaces it", async () => {
     stubFetch(routes());
     renderPage(<AdminMembersPage />);
 
     await openAdjustAndFill("24", "Goodwill");
     await screen.findByRole("option", { name: /No-show penalty/ });
 
-    // What the field is for, and what it is not for. The old copy said "name the
-    // booking when this makes up for a wrongly-recorded no-show", which is an
-    // instruction to pay twice.
+    // What the field is for, and what it is not for.
     expect(screen.getByText(/genuinely compensates this member/)).toBeInTheDocument();
+    expect(screen.getByText(/does not stand in for/)).toBeInTheDocument();
     expect(screen.getByText(/reversed on their own/)).toBeInTheDocument();
-    expect(screen.getByText(/leaves them holding both/)).toBeInTheDocument();
+
+    // I3, both directions and the cap. The direction is not a detail: the reversal has
+    // exactly one leg that gives money back and one that takes it, and the desk needs to
+    // know which of the two their sign lands on before they post it.
+    expect(screen.getByText(/netted against that reversal one leg at a time/)).toBeInTheDocument();
+    expect(screen.getByText(/positive adjustment reduces the penalty the reversal gives back/)).toBeInTheDocument();
+    expect(screen.getByText(/negative one reduces the refund it takes away/)).toBeInTheDocument();
+    expect(screen.getByText(/Netting stops at zero per leg/)).toBeInTheDocument();
+
+    // The two claims this copy has already been wrong with, in order.
     expect(screen.queryByText(/makes up for a wrongly-recorded no-show/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/leaves them holding both/)).not.toBeInTheDocument();
+  });
+
+  /** The same screen, with the adjust POST refused for the named reason. */
+  const refusedRoutes = (error: string) => [
+    ...routes().filter((r) => r.method !== "POST"),
+    { method: "POST", path: `/api/v1/admin/credit/${USER}/adjust`, status: 400, body: { error } },
+  ];
+
+  async function applyForBooking() {
+    await openAdjustAndFill("24", "Compensation");
+    fireEvent.change(await screen.findByLabelText("For booking (optional)"), { target: { value: BOOKING } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  }
+
+  it("shows booking_not_found at the field, keeping the form and the typed values", async () => {
+    const stub = stubFetch(refusedRoutes("booking_not_found"));
+    renderPage(<AdminMembersPage />);
+    await applyForBooking();
+
+    // At the field, not as a toast: the booking is the one input the admin has to change,
+    // and the message names what to do instead of saying the adjustment failed.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/No booking with that ID exists at this club/);
+    expect(alert).toHaveTextContent(/pick one from the list/);
+    expect(screen.queryByText("Credit adjustment failed.")).not.toBeInTheDocument();
+
+    // Form still open, amount and reason intact — nothing to re-type, and no second POST.
+    expect(screen.getByLabelText(/Amount \(credits/)).toHaveValue("24");
+    expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(1);
+
+    // Choosing a different booking clears the verdict; it was about the old one.
+    fireEvent.change(screen.getByLabelText("For booking (optional)"), { target: { value: "" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows booking_not_members as the different mistake it is", async () => {
+    stubFetch(refusedRoutes("booking_not_members"));
+    renderPage(<AdminMembersPage />);
+    await applyForBooking();
+
+    // The dangerous one (I4): a real booking, the wrong member. Before the server checked
+    // this, it silently netted against a third party's settlement with nothing on their
+    // ledger to explain it — so the message says whose money it would have moved.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/belongs to another member/);
+    expect(alert).toHaveTextContent(/change what they are owed/);
+    expect(alert).not.toHaveTextContent(/does not exist/);
   });
 
   it("says whose booking a typed ID has to be, because the server refuses another member's", async () => {
