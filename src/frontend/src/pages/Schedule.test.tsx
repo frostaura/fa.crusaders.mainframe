@@ -475,6 +475,22 @@ describe("Schedule", () => {
     expect(cellLookups.count).toBe(before);
   });
 
+  it("names a suspended membership instead of telling the member to refresh and try again", async () => {
+    // The desk suspended her while her tab was open, so the refusal arrives on a screen that
+    // still looks perfectly bookable, with the confirmation open and the button back at rest.
+    stub([{ method: "POST", path: "/api/v1/bookings/", status: 403, body: { error: "member_suspended" } }]);
+    renderPage(<SchedulePage />);
+    await openBookingModal();
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+
+    expect(await screen.findByText(/membership is suspended/i)).toBeInTheDocument();
+    // The fallback — "Couldn't make that booking. Refresh the schedule and try again." — was
+    // advice that could never work: refreshing changes nothing, so the member's obvious next
+    // move is to press Book again and be refused identically.
+    expect(screen.queryByText(/Refresh the schedule and try again/i)).not.toBeInTheDocument();
+  });
+
   // ---- §8: "if insufficient, admin can override and create a negative balance, logged" ----
 
   const THEM = "55555555-5555-5555-5555-555555555555";
