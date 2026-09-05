@@ -164,13 +164,16 @@ inline constexpr VerbSpec kVerbSpecs[kVerbCount] = {
 
 /// kVerbSpecs is indexed by the Verb value, so a row in the wrong place would
 /// silently give every verb someone else's grammar. Checked at compile time.
-constexpr bool verbSpecsAreInEnumOrder() {
-  for (size_t i = 0; i < kVerbCount; ++i) {
-    if (kVerbSpecs[i].verb != static_cast<Verb>(i)) {
-      return false;
-    }
-  }
-  return true;
+///
+/// Recursive, and one return statement, because a constexpr function with a
+/// loop in it is C++14. This header has to be valid C++11 as well: the Arduino
+/// AVR core hard-codes `-std=gnu++11` in its platform.txt and the Arduino IDE
+/// offers no way to override it, so the generated sketch in src/iot/arduino/ —
+/// the route the box is actually flashed by — compiles this file at C++11 while
+/// PlatformIO compiles it at C++17. Do not "simplify" it back to a loop; the
+/// PlatformIO build will stay green and `make arduino-check`'s compile will not.
+constexpr bool verbSpecsAreInEnumOrder(size_t i = 0) {
+  return i >= kVerbCount || (kVerbSpecs[i].verb == static_cast<Verb>(i) && verbSpecsAreInEnumOrder(i + 1));
 }
 
 static_assert(verbSpecsAreInEnumOrder(), "kVerbSpecs must be indexed by Verb");

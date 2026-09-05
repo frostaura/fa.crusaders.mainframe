@@ -13,24 +13,38 @@ adapts to the hardware, never the reverse.
 Both halves are flashed over USB. There is no over-the-air path, no discovery,
 no claim code and no provisioning call: one club, one box, and the person
 holding the screwdriver is the person who knows the WiFi password and holds the
-API key. Changing any of them is a reflash, and a reflash is the four commands
-below.
+API key. Changing any of them is a reflash.
 
-**Prerequisites, once per machine**
+**The route is the Arduino IDE 2: open the sketch, pick the board and the port,
+press Upload.** No terminal, no `make`, and nothing to install from the Library
+Manager — the two sketch folders under [`arduino/`](arduino/) carry every
+library either half needs. The full page, with the board settings, the DIP
+positions and the order, is [`arduino/README.md`](arduino/README.md); the short
+version is below. `make flash-mega` / `make flash-bridge` do the same two
+uploads from PlatformIO and are the **developer** alternative, further down.
 
-```bash
-brew install uv          # the toolchain installer make install-iot uses
-make install-iot         # creates src/iot/.venv (Python 3.12) with pio, lizard, gcovr
-```
+Those sketch folders are **generated** from the sources in `lib/` and `src/` and
+from the build flags in `platformio.ini`, by `make arduino-export`.
+`make arduino-check` regenerates and fails on a diff, so the folder a technician
+opens cannot drift from the build CI tests. Never hand-edit anything in there.
+
+**Once per machine**
+
+1. Install the **Arduino IDE 2** (2.3 or newer).
+2. *Preferences → Additional boards manager URLs*:
+   `https://arduino.esp8266.com/stable/package_esp8266com_index.json`
+3. *Boards Manager*: **Arduino AVR Boards 1.8.6** and **esp8266 3.1.2** — the
+   versions CI compiles the sketches against, matching the platforms
+   `platformio.ini` pins.
 
 No USB-serial driver is needed on current macOS — the CH340 on this board is
 handled by the system. Only if **no** `/dev/cu.*` port ever appears:
 `brew install --cask wch-ch34x-usb-serial-driver`, then replug.
 
-**Prerequisites, once per checkout**
+**Once per checkout**
 
 ```bash
-cp src/iot/src/common/secrets.h.example src/iot/src/common/secrets.h
+cp src/iot/arduino/court_bridge/secrets.h.example src/iot/arduino/court_bridge/secrets.h
 ```
 
 Fill in all four values. It is gitignored, and the bridge **refuses to compile
@@ -44,6 +58,24 @@ screwed to a wall.
 | `API_BASE_URL` | The backend's **LAN** address and port, no trailing slash — e.g. `http://192.168.1.10:8088`. |
 | `DEVICE_API_KEY` | The tenant's device API key, from the admin Devices page. It goes out as `Authorization: Bearer <key>` on every call. |
 
+The PlatformIO build reads its own copy at `src/common/secrets.h`, so a
+developer who uses `make flash-bridge` fills that one in instead. Same four
+values; two files, because the Arduino IDE can only see what is inside the
+sketch folder.
+
+**Upload — Mega first, then the bridge, then the run DIPs and a power cycle**
+
+| Step | Sketch | Board settings |
+|---|---|---|
+| 1 | `arduino/court_mega/court_mega.ino` | *Arduino Mega or Mega 2560*, Processor **ATmega2560** |
+| 2 | `arduino/court_bridge/court_bridge.ino` | *Generic ESP8266 Module*, Flash Size **4MB (FS:2MB OTA:~1019KB)**, CPU **80 MHz**, Upload Speed **115200** |
+
+Set the DIPs from the table below **before** each Upload, restore the run
+positions afterwards, and **power-cycle the box**. To watch the bridge boot, use
+the IDE's Serial Monitor **at 9600** — that UART *is* the Mega link and its baud
+is fixed by the wiring, so 115200 shows framing garbage that reads as a dead
+board.
+
 **Why there is a key at all when both ends are on the club LAN.** The box and
 the backend do sit on the same network, and the box never leaves it. But the
 backend's public surface is a Cloudflare tunnel — that is how members book and
@@ -55,33 +87,39 @@ is ever off the LAN, and nothing assumes the API is LAN-only.
 Regenerating the key on the Devices page invalidates the old one **immediately**,
 so a regeneration is a reflash and has to be planned as one.
 
-**Flash**
+**The DIP block, in order** — the same rows as the table under *DIP switches*
+below, which is the wiring sheet's and is hardware truth:
+
+| Step | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| Upload `court_mega` | OFF | OFF | **ON** | **ON** | OFF | OFF | OFF | OFF |
+| Upload `court_bridge` | OFF | OFF | OFF | OFF | **ON** | **ON** | **ON** | OFF |
+| Watch the bridge boot (Serial Monitor, 9600) | OFF | OFF | OFF | OFF | **ON** | **ON** | OFF | OFF |
+| **Run** — restore these before the box goes back on the wall | **ON** | **ON** | **ON** | **ON** | OFF | OFF | OFF | OFF |
+
+**The developer alternative — the same two uploads from PlatformIO**
 
 ```bash
+brew install uv          # the toolchain installer make install-iot uses
+make install-iot         # creates src/iot/.venv (Python 3.12) with pio, lizard, gcovr
+cp src/iot/src/common/secrets.h.example src/iot/src/common/secrets.h   # then fill it in
+
 make flash-mega          # the ATmega2560
 make flash-bridge        # the ESP8266, then drops into the serial monitor
 ```
 
 Each target prints the DIP positions it needs, waits for the USB port to
 appear, uploads, and reminds you what to set the switches back to. Pass
-`UPLOAD_PORT=/dev/cu.usbserial-XXXX` to name the port yourself.
-
-**The DIP block, in order** — the same rows as the table under *DIP switches*
-below, which is the wiring sheet's and is hardware truth:
-
-| Step | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
-|---|---|---|---|---|---|---|---|---|
-| `make flash-mega` | OFF | OFF | **ON** | **ON** | OFF | OFF | OFF | OFF |
-| `make flash-bridge` (upload) | OFF | OFF | OFF | OFF | **ON** | **ON** | **ON** | OFF |
-| `make monitor-bridge` (watch it boot) | OFF | OFF | OFF | OFF | **ON** | **ON** | OFF | OFF |
-| **Run** — restore these before the box goes back on the wall | **ON** | **ON** | **ON** | **ON** | OFF | OFF | OFF | OFF |
+`UPLOAD_PORT=/dev/cu.usbserial-XXXX` to name the port yourself. A technician
+never needs any of it; these targets and `make build-iot` / `make test-iot`
+exist for development and CI.
 
 **What the LCD shows, step by step**
 
 | When | Glass |
 |---|---|
-| After `make flash-mega`, run DIPs | `CRUSADERS COURTS / SCAN TO START` — the Mega's own idle text, and proof the Mega is alive |
-| During `make flash-bridge` and the monitor | **Nothing new.** DIP 1 and 2 are off, so the ESP's UART is on the USB socket and the Mega is not on the other end of it. Watch the monitor, not the glass. |
+| After the `court_mega` upload, run DIPs | `CRUSADERS COURTS / SCAN TO START` — the Mega's own idle text, and proof the Mega is alive |
+| During the `court_bridge` upload and the monitor | **Nothing new.** DIP 1 and 2 are off, so the ESP's UART is on the USB socket and the Mega is not on the other end of it. Watch the monitor, not the glass. |
 | Run DIPs restored, box on the WiFi | `CONNECTED / SCAN TO START` — and the box appears on the admin Devices page by itself within one heartbeat, with its court numbers against it |
 | Run DIPs restored, box **not** on the WiFi | `CRUSADERS COURTS / SCAN TO START` — the two halves are talking and the radio is not. Check the SSID and password. |
 
@@ -91,9 +129,9 @@ reachable after a DIP change. If it never appears, the two halves are not
 talking: check DIP 1 and 2.
 
 **Rotating the WiFi password, the API key or the base URL** — change
-`secrets.h`, `make flash-bridge`, restore the run DIPs. That is the whole of it
-for all three. No credential is stored on the box, so nothing can be left
-holding one nobody can see.
+`secrets.h`, upload `court_bridge` again, restore the run DIPs. That is the
+whole of it for all three. No credential is stored on the box, so nothing can be
+left holding one nobody can see.
 
 **Firmware version history** lives in the comment at the top of
 `platformio.ini`. The current image is **2.0.0**, a contract break: request
@@ -242,7 +280,9 @@ src/
   court_bridge/  ESP8266 firmware — composition root only
   simulator/     native device simulator — the same lib/ over posix_hal
 test/          Unity tests, run on the host
-tools/         strict compile gate, corpus generators
+tools/         strict compile gate, corpus generators, the Arduino sketch exporter
+arduino/       GENERATED Arduino IDE sketches — the flashing route. Never hand-edited;
+               `make arduino-export` writes it and `make arduino-check` fails on a diff.
 ```
 
 Everything under `lib/` except `arduino_hal/` and `posix_hal/` is free of
@@ -292,6 +332,8 @@ make test-iot-asan   # the same suite under ASAN + UBSAN
 make lint-iot        # clang-format, strict compile, purity + rollover gates
 make build-iot       # compile for every target board
 make complexity      # cyclomatic complexity, all three languages
+make arduino-export  # regenerate arduino/ from lib/, src/ and platformio.ini
+make arduino-check   # regenerate and fail if the committed sketches are stale
 make flash-mega      # USB-flash the ATmega2560 (prints the DIP positions)
 make flash-bridge    # USB-flash the ESP8266, then open its monitor
 make monitor-bridge  # watch the ESP's UART at 9600 (DIP 5 and 6 ON)

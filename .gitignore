@@ -108,7 +108,11 @@ src/iot/**/*.bin
 src/iot/**/*.elf
 src/iot/**/*.hex
 
-# Firmware secrets — a filled-in secrets.h was previously committable
+# Firmware secrets — a filled-in secrets.h was previously committable.
+# Two copies exist by design and both are covered by this one rule:
+#   src/iot/src/common/secrets.h                    the PlatformIO build's
+#   src/iot/arduino/court_bridge/secrets.h          the Arduino IDE sketch's
+# Their .example siblings ARE committed.
 **/secrets.h
 **/ota_privkey.pem
 

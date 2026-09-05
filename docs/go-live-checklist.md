@@ -96,27 +96,36 @@ indifferent to which end the debit is taken from.
 ## 5. Flash both halves and see the box come up
 
 Both halves are flashed over USB, by DIP switch. No adapter, no soldering, no pad access,
-and no network path — the whole procedure is `src/iot/README.md`'s *Flashing* section and
-two `make` targets that print the switch positions as they go.
+and no network path — the whole procedure is the **Arduino IDE 2**: open the sketch, pick
+the board and the port, press Upload. `src/iot/arduino/README.md` is the page, and it needs
+no terminal, no `make` and nothing from the Library Manager. The `make flash-*` targets do
+the same two uploads from PlatformIO and are the developer alternative.
 
-**Everything the box needs is compiled in — four values, all mandatory.**
-`src/iot/src/common/secrets.h` is gitignored and lives on the flashing machine only;
-`court_bridge` `#error`s on a missing value and `static_assert`s on an empty one, so there
-is no way to produce an image with a blank in it — and therefore no way to hand a box to
-the wall believing a credential landed when it did not. There is nothing to claim, nothing
-to discover and nothing to provision: a flashed box joins, heartbeats, and appears on the
-admin Devices screen by itself.
+**Everything the box needs is compiled in — four values, all mandatory.** `secrets.h` is
+gitignored and lives on the flashing machine only; `court_bridge` `#error`s on a missing
+value and `static_assert`s on an empty one, so there is no way to produce an image with a
+blank in it — and therefore no way to hand a box to the wall believing a credential landed
+when it did not. There is nothing to claim, nothing to discover and nothing to provision: a
+flashed box joins, heartbeats, and appears on the admin Devices screen by itself.
 
-- [ ] `cp src/iot/src/common/secrets.h.example src/iot/src/common/secrets.h` on the
-      flashing machine and fill in all four, then do not commit it:
+- [ ] Arduino IDE 2 installed, with `https://arduino.esp8266.com/stable/package_esp8266com_index.json`
+      added under *Preferences → Additional boards manager URLs*, and both cores installed
+      from Boards Manager: **Arduino AVR Boards 1.8.6** and **esp8266 3.1.2**. Those are the
+      versions CI compiles the sketches against and the ones `src/iot/platformio.ini` pins.
+- [ ] `cp src/iot/arduino/court_bridge/secrets.h.example src/iot/arduino/court_bridge/secrets.h`
+      on the flashing machine and fill in all four, then do not commit it:
       `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL` (the backend's **LAN** address and port,
       no trailing slash — the box and the backend are on the same club network), and
       `DEVICE_API_KEY` (copy it from the admin Devices page).
-- [ ] `make flash-mega` with DIP **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
-- [ ] `make flash-bridge` with DIP **1–4 OFF, 5 ON, 6 ON, 7 ON**, 8 OFF. It drops into the
-      serial monitor afterwards (DIP **5 ON, 6 ON, 7 OFF**) — **watch the monitor, not the
-      glass**: in that DIP position the ESP's UART is on the USB socket and the Mega is not
-      on the other end of it, so the LCD cannot change.
+- [ ] Open `src/iot/arduino/court_mega/court_mega.ino`, board **Arduino Mega or Mega 2560**,
+      processor **ATmega2560**, pick the port, **Upload** — with DIP
+      **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
+- [ ] Open `src/iot/arduino/court_bridge/court_bridge.ino`, board **Generic ESP8266 Module**,
+      flash size **4MB (FS:2MB OTA:~1019KB)**, CPU **80 MHz**, upload speed **115200**, pick
+      the port, **Upload** — with DIP **1–4 OFF, 5 ON, 6 ON, 7 ON**, 8 OFF. Then move DIP 7
+      OFF and open the **Serial Monitor at 9600** — **watch the monitor, not the glass**: in
+      that DIP position the ESP's UART is on the USB socket and the Mega is not on the other
+      end of it, so the LCD cannot change.
 - [ ] Restore the run positions (**1, 2, 3, 4 ON**, 5–8 OFF) and confirm the LCD now shows
       `CONNECTED / SCAN TO START`. That repaint is the proof the ESP and the Mega are
       talking again, and it is the only positive confirmation the box gives. If it reads
@@ -137,7 +146,8 @@ The password is in Carl's original sketch, in plain text, in a file that has bee
 than one machine.
 
 - [ ] Rotate it on the access point.
-- [ ] Edit `secrets.h` on the flashing machine and `make flash-bridge` (item 5). That is
+- [ ] Edit `secrets.h` on the flashing machine and upload `court_bridge` again from the
+      Arduino IDE (item 5; `make flash-bridge` does the same thing). That is
       the whole delivery mechanism: every credential is compiled into the image, so there is
       no store to go stale, no precedence rule between two credentials, and nothing to
       power-cycle to prove. The same is true of the device API key — pressing
