@@ -15,13 +15,23 @@
 #
 # THE NAMES HERE ARE LIZARD'S, NOT C#'s, and the two disagree. lizard's C#
 # parser scopes a function under the most recently DECLARED type, not the type
-# that encloses it — so `TopUpEndpoints.MapTopUpEndpoints`, which sits directly
-# below the nested `FailureCodes` class, is reported as
-# `FailureCodes::MapTopUpEndpoints`. An entry written from the source rather
-# than from lizard's own output matches nothing and the gate stays red while
-# looking whitelisted, which is what `TopUpEndpoints::MapTopUpEndpoints` did
-# here. Copy the name out of `make complexity`'s warning line; never type it
-# from the C#.
+# that encloses it — so `TopUpEndpoints.MapTopUpEndpoints` is reported as
+# `FailureCodes::MapTopUpEndpoints` when the nested `FailureCodes` class is
+# declared above it, and as `TopUpEndpoints::MapTopUpEndpoints` when it is
+# declared below. An entry written from the source rather than from lizard's
+# own output matches nothing and the gate stays red while looking whitelisted.
+# Copy the name out of `make complexity`'s warning line; never type it from
+# the C#.
+#
+# WHICH IS WHY THAT ONE FUNCTION IS LISTED UNDER BOTH NAMES. Two rounds fixed
+# the same red gate in opposite directions — one moved `FailureCodes` below the
+# map method so the reported name became `TopUpEndpoints::`, the other left the
+# class where it was and renamed the entry to `FailureCodes::` — and the merge
+# took the first branch's source with the second branch's entry, so neither
+# matched and the gate went red on a file nobody had edited. An entry that
+# depends on where a nested class is declared is a trap whichever way it is
+# pointed; naming both costs nothing (no other function in the tree is called
+# `MapTopUpEndpoints`) and survives the class being moved again.
 AdminConfigEndpoints::MapAdminConfigEndpoints
 AdminMemberEndpoints::MapAdminMemberEndpoints
 AdminMembersPage
@@ -42,6 +52,7 @@ ReportingEndpoints::MapReportingEndpoints
 SmtpEmailService::SendAsync
 SortHeader
 FailureCodes::MapTopUpEndpoints  # = TopUpEndpoints.MapTopUpEndpoints; see the naming note above
+TopUpEndpoints::MapTopUpEndpoints  # the same function, as lizard names it when FailureCodes is declared below it
 WebAuthnEndpoints::MapWebAuthnEndpoints
 adjust
 load
