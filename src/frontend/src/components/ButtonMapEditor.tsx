@@ -22,6 +22,21 @@ export const RELAYS = ["A", "B", "C", "D"] as const;
 
 export const BUTTON_COUNT = 8;
 
+/**
+ * The longest a single button may grant, minutes.
+ *
+ * <p>
+ * The relay bank's own timer opens the relay at ninety minutes whatever the grant said,
+ * so a button set to more sells darkness — paid for, with no refund and no re-light
+ * path. The number is the hardware's, shared by the API (`Services/RelayHardCap.cs`)
+ * and the firmware, and pinned between them as `relay_hard_cap_minutes` in
+ * `src/contracts/device-protocol/buttonmap/cases.json`. This field offered 240 while
+ * the API refused anything over 90, so the only thing the extra range bought an admin
+ * was a save that failed after the fact.
+ * </p>
+ */
+export const MAX_GRANT_MINUTES = 90;
+
 type ActionKind = "court" | "minutes" | "off" | "none";
 
 function parseAction(wire: string): { kind: ActionKind; value: string } {
@@ -36,6 +51,27 @@ function toWire(kind: ActionKind, value: string) {
   if (kind === "court") return `court:${value || "A"}`;
   if (kind === "minutes") return `minutes:${value || "15"}`;
   return kind;
+}
+
+/** Whether a grant is one the relay bank can actually deliver. Blank reads as the default 15. */
+function withinCap(detail: string): boolean {
+  const minutes = Number(detail || "15");
+  return Number.isFinite(minutes) && minutes >= 1 && minutes <= MAX_GRANT_MINUTES;
+}
+
+/**
+ * Whether every grant in a map is one the relay bank can deliver.
+ *
+ * <p>
+ * Exported so a save button can be held rather than a refusal explained after the
+ * round trip: the API applies the same bound, from the same shared constant.
+ * </p>
+ */
+export function buttonMapWithinCap(value: string[]): boolean {
+  return value.every((wire) => {
+    const { kind, value: detail } = parseAction(wire);
+    return kind !== "minutes" || withinCap(detail);
+  });
 }
 
 /** Pads or trims a map to exactly eight slots, so the editor never shows a ninth button or hides an eighth. */
@@ -98,16 +134,26 @@ export function ButtonMapEditor({
             )}
 
             {kind === "minutes" && (
-              <Input
-                aria-label={name(index, "minutes")}
-                type="number"
-                min={1}
-                max={240}
-                className="h-9 w-24"
-                value={detail || "15"}
-                disabled={disabled}
-                onChange={(e) => update(index, "minutes", e.target.value)}
-              />
+              <>
+                <Input
+                  aria-label={name(index, "minutes")}
+                  type="number"
+                  min={1}
+                  max={MAX_GRANT_MINUTES}
+                  className="h-9 w-24"
+                  value={detail || "15"}
+                  disabled={disabled}
+                  onChange={(e) => update(index, "minutes", e.target.value)}
+                />
+                {/* A number input's max does not stop a typed or pasted value, and the
+                    save is refused by the API rather than by the browser, so the reason
+                    is said here where the number is. */}
+                {!withinCap(detail) && (
+                  <span className="text-xs text-danger-strong">
+                    1–{MAX_GRANT_MINUTES} minutes — the relay cuts the lights at {MAX_GRANT_MINUTES}.
+                  </span>
+                )}
+              </>
             )}
           </div>
         );

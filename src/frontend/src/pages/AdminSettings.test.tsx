@@ -86,7 +86,11 @@ describe("AdminSettings", () => {
 
     // The API's bounds, on the inputs, so the form cannot offer a value the save refuses.
     expect(screen.getByLabelText(/Walk-up maximum/)).toHaveAttribute("max", "90");
-    expect(screen.getByLabelText(/Heartbeat interval/)).toHaveAttribute("min", "10");
+    // 15-300, not the API's old 10-3600: the box clamps its own cadence to 15-300, so
+    // anything outside it is a number no box runs, and the Devices page's offline
+    // threshold is three beats of it (review finding 22).
+    expect(screen.getByLabelText(/Heartbeat interval/)).toHaveAttribute("min", "15");
+    expect(screen.getByLabelText(/Heartbeat interval/)).toHaveAttribute("max", "300");
     expect(screen.getByLabelText(/Court code lifetime/)).toHaveAttribute("min", "15");
     // The cue must fit inside the forward window; the cap follows the window's value.
     expect(screen.getByLabelText(/Lights cue before a booking/)).toHaveAttribute("max", "120");

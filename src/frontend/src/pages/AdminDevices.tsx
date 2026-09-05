@@ -14,7 +14,7 @@ import {
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
-import { ButtonMapEditor, RELAYS } from "../components/ButtonMapEditor";
+import { ButtonMapEditor, buttonMapWithinCap, RELAYS } from "../components/ButtonMapEditor";
 import { IssuedKeyPanel, type IssuedKey } from "../components/IssuedKeyPanel";
 import { useToast } from "../components/Toast";
 import { cn } from "../lib/utils";
@@ -36,14 +36,48 @@ import { cn } from "../lib/utils";
  * component state only. It is never written to storage.
  */
 
-/** A device that has not called in for this long is shown as offline. Mirrors
- *  DeviceEndpoints.OfflineAfterSeconds on the server; a box heartbeats every 30s,
- *  so three missed beats is a real absence rather than one slow request. */
-const OFFLINE_AFTER_MS = 180_000;
+/**
+ * The heartbeat interval a box will actually run, whatever the tenant setting says.
+ *
+ * <p>
+ * The firmware clamps its cadence to this range (`Cadence.h`), so a club that sets 600
+ * has boxes calling in every 300 and a club that sets 5 has them calling in every 15.
+ * Reading the raw setting as if it were the interval is how "offline" gets decided
+ * against a number no box is using.
+ * </p>
+ */
+const HEARTBEAT_MIN_S = 15;
+const HEARTBEAT_MAX_S = 300;
 
-function isOnline(device: AdminDevice) {
+/** What a box runs when nothing says otherwise — the tenant default. */
+const HEARTBEAT_FALLBACK_S = 60;
+
+/**
+ * Missed beats before a box is called offline.
+ *
+ * <p>
+ * Three, so one slow request or one dropped datagram is not an outage. It used to be
+ * three beats of an assumed 30-second cadence, frozen as a literal 180 000 ms — and the
+ * settings page then grew an editable interval offering up to 3600 s, at which point a
+ * club that raised it to reduce chatter watched the whole fleet read offline for most
+ * of every interval and started power-cycling boxes mid-league-night (review finding 22).
+ * The threshold is derived from the cadence now, and the cadence from what the box runs.
+ * </p>
+ */
+const MISSED_BEATS_BEFORE_OFFLINE = 3;
+
+/**
+ * The interval this box is really calling in on: what the API says it runs, else the
+ * tenant setting put through the same clamp the firmware applies.
+ */
+function effectiveHeartbeatSeconds(device: AdminDevice, tenantSeconds: number | null): number {
+  const declared = device.heartbeat_seconds ?? tenantSeconds ?? HEARTBEAT_FALLBACK_S;
+  return Math.min(Math.max(declared, HEARTBEAT_MIN_S), HEARTBEAT_MAX_S);
+}
+
+function isOnline(device: AdminDevice, heartbeatSeconds: number) {
   if (!device.last_seen_at) return false;
-  return Date.now() - new Date(device.last_seen_at).getTime() < OFFLINE_AFTER_MS;
+  return Date.now() - new Date(device.last_seen_at).getTime() < heartbeatSeconds * MISSED_BEATS_BEFORE_OFFLINE * 1000;
 }
 
 function relative(iso: string | null) {
@@ -85,6 +119,10 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
   // courts, so this mostly means a court was deleted while the form was open.
   court_number_not_found: "One of those court numbers is not a court at this club. Refresh the page and pick the court again — if it is missing, add it under Admin settings.",
   device_code_taken: "That device code is already in use. Pick another.",
+  // ButtonMap.TryParse refused the map itself — an unknown token, or a grant past the
+  // relay's hard cap. The editor bounds the field, so this is a map that arrived from
+  // somewhere else, or a hand-edited one.
+  button_map_invalid: "One of the buttons is set to something a box cannot do. Court is A–D and a grant is 1–90 minutes.",
 };
 
 const MAP_MISMATCH_GENERIC =
@@ -532,7 +570,7 @@ function DeviceButtonMapPanel({
       </div>
       {own && <ButtonMapEditor value={draft} onChange={setDraft} disabled={saving} labelPrefix={device.name} />}
       <div className="flex gap-2">
-        <Button className="h-8 px-3 text-xs" onClick={() => void save()} disabled={saving}>
+        <Button className="h-8 px-3 text-xs" onClick={() => void save()} disabled={saving || (own && !buttonMapWithinCap(draft))}>
           {saving ? "Saving…" : "Save buttons"}
         </Button>
         <Button variant="ghost" className="h-8 px-3 text-xs" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -554,14 +592,16 @@ type DeviceActions = {
 };
 
 function DeviceRow({
-  device, courts, clubMap, actions,
+  device, courts, clubMap, actions, heartbeatSeconds,
 }: {
   device: AdminDevice;
   courts: AdminCourt[];
   clubMap: string[];
   actions: DeviceActions;
+  /** The cadence this box actually runs. See effectiveHeartbeatSeconds. */
+  heartbeatSeconds: number;
 }) {
-  const online = isOnline(device);
+  const online = isOnline(device, heartbeatSeconds);
   const [editing, setEditing] = useState<"courts" | "buttons" | null>(null);
   const [draft, setDraft] = useState<number[]>(device.court_numbers);
   const [saving, setSaving] = useState(false);
@@ -590,6 +630,7 @@ function DeviceRow({
           {online ? "online" : `last seen ${relative(device.last_seen_at)}`}
         </Badge>
         {revoked && <Badge tone="danger">revoked — refused until re-claimed</Badge>}
+        {revoked && !device.mac_address && <Badge tone="warning">no board address</Badge>}
         {hasOwnMapField && device.button_map != null && <Badge tone="info">own button map</Badge>}
         {device.failed_version && (
           // A build this box installed and could never work on. Loud, because a fleet
@@ -608,6 +649,21 @@ function DeviceRow({
         {device.mega_version ? ` · Mega ${device.mega_version}` : ""}
         {` · key v${device.key_version}`}
       </div>
+
+      {revoked && !device.mac_address && (
+        // Re-claiming matches a board by the MAC it announces against the MAC on the
+        // row, and a box registered by hand has never announced, so its row carries
+        // none. Nothing on this screen can clear `revoked_at` for it — rotating a key
+        // does not, and updating a device does not. Saying so is worth more than the
+        // old advice to "register it again by hand", which returns device_code_taken
+        // and leaves the row exactly as revoked as it was.
+        <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+          This box was registered by hand, so the club has no board address for it — and re-claiming matches boards by
+          address. Power the box on so it announces, then connect it under "Connect a board" above with a different
+          device code; that gives the club a working row with an address. This one stays revoked and can be left as
+          history.
+        </p>
+      )}
 
       {editing === "courts" && (
         <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3">
@@ -755,9 +811,14 @@ function useDeviceActions(reload: () => Promise<void>, onKeyIssued: (key: Issued
     },
     reclaim: () => {
       if (!device.mac_address) {
-        // Registered by hand, so discovery has never heard it. Nothing to select; the
-        // by-hand form is the path, and the admin is told so rather than left guessing.
-        toast.push({ tone: "warning", text: `${device.name} was registered by hand and has no board address. Register it again by hand to issue a new key.`, durationMs: 8000 });
+        // Registered by hand, so discovery has never heard it and the row has no MAC to
+        // match a claim against. The old advice here — register it again by hand — is
+        // refused with device_code_taken and would leave the row revoked either way.
+        toast.push({
+          tone: "warning",
+          text: `${device.name} has no board address, so it cannot be re-claimed. Power it on so it announces, then connect it under "Connect a board" with a different device code.`,
+          durationMs: 10000,
+        });
         return;
       }
       onReclaim({ mac: device.mac_address, name: device.name, deviceCode: device.device_code, courtNumbers: device.court_numbers });
@@ -803,10 +864,30 @@ export function AdminDevicesPage() {
     if (!settings) return;
     setSavingMap(true);
     try {
-      // Only the button map changes. Every other field is sent as it was read — the
-      // API reads absent as unchanged and present-as-read as a no-op — so this screen
-      // cannot revert a change made on the settings screen.
-      await endpoints.adminSettingsSave({ ...settings, button_map: buttonMap });
+      // The button map, and the eight booking fields the API requires on every PUT.
+      // Nothing else.
+      //
+      // This used to spread the whole settings document read at mount — and "present as
+      // read" is not a no-op, it is a write of a value that may be minutes stale. An
+      // admin raising the code lifetime in another tab had it reverted the moment this
+      // screen saved a remapped button, silently, and the comment here claimed the
+      // opposite (review finding 23). Re-GETting immediately before the PUT would only
+      // narrow that window, not close it — the race moves into the gap between the two
+      // calls — and it still writes twenty keys this screen does not own. Sending only
+      // what this screen owns cannot revert anything, because the API reads an absent
+      // key as unchanged. The eight below are not optional on the API and are the
+      // booking form's, not this one's; they are the price of there being no PATCH.
+      await endpoints.adminSettingsSave({
+        slice_minutes: settings.slice_minutes,
+        slice_price_credits: settings.slice_price_credits,
+        advance_booking_days: settings.advance_booking_days,
+        day_start_minute: settings.day_start_minute,
+        day_end_minute: settings.day_end_minute,
+        penalty_pct: settings.penalty_pct,
+        grace_window_minutes: settings.grace_window_minutes,
+        penalty_window_minutes: settings.penalty_window_minutes,
+        button_map: buttonMap,
+      });
       toast.push({ tone: "success", text: "Button map saved. Boxes pick it up on their next heartbeat." });
     } catch (e) {
       // The server checks the map against every box's court list and names the one
@@ -840,7 +921,14 @@ export function AdminDevicesPage() {
         ) : (
           <div className="space-y-3">
             {devices.map((device) => (
-              <DeviceRow key={device.id} device={device} courts={courts} clubMap={buttonMap} actions={actionsFor(device)} />
+              <DeviceRow
+                key={device.id}
+                device={device}
+                courts={courts}
+                clubMap={buttonMap}
+                actions={actionsFor(device)}
+                heartbeatSeconds={effectiveHeartbeatSeconds(device, settings?.heartbeat_seconds ?? null)}
+              />
             ))}
           </div>
         )}
@@ -861,7 +949,7 @@ export function AdminDevicesPage() {
         <ButtonMapEditor value={buttonMap} onChange={setButtonMap} disabled={savingMap || loading} />
 
         <div className="mt-4">
-          <Button onClick={() => void saveButtonMap()} disabled={savingMap || loading}>
+          <Button onClick={() => void saveButtonMap()} disabled={savingMap || loading || !buttonMapWithinCap(buttonMap)}>
             {savingMap ? "Saving…" : "Save button map"}
           </Button>
         </div>

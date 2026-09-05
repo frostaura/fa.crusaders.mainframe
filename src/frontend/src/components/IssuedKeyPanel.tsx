@@ -47,22 +47,40 @@ const ISSUED_AS: Record<IssuedKey["via"], string> = {
   rotate: "rotated",
 };
 
+/**
+ * What to do next, per route.
+ *
+ * <p>
+ * Every one of these ends at the same place, and the wording has to reach it without
+ * contradicting the form above: a board collects its key by presenting the claim code
+ * it is displaying, and a claim code is generated fresh on the board every time it
+ * comes up unclaimed. So "connect it again" is never a matter of pressing the button a
+ * second time — the form is cleared on success, the board has left the claimable list,
+ * and the code on the LCD is a different one. It is: wait for it to reappear, read the
+ * NEW code, type that. The earlier copy said "press Connect again", which is the one
+ * instruction that cannot work.
+ * </p>
+ */
 const FOLLOW_UP: Record<IssuedKey["via"], string> = {
   claim:
-    "The board collects this key by itself — it has ten minutes from Connect to do so. If it is still showing "
-    + "CLAIM CODE after that, the grant has lapsed: power-cycle the box and press Connect again, and a fresh key is issued. "
-    + "Keep this one only if you are flashing the board by hand: it goes in secrets.h as DEVICE_KEY.",
+    "The board collects this key by itself, within ten minutes of Connect. If it is still showing CLAIM CODE after "
+    + "that, the grant has lapsed: power-cycle the box, wait for it to reappear in the list above, and connect it again "
+    + "with the NEW code on its screen — a board generates a fresh claim code every time, so the one you just typed is "
+    + "spent. It is the same box, so it is re-keyed onto this same row rather than added twice. "
+    + "Keep this key only if you are flashing the board by hand: it goes in secrets.h as DEVICE_KEY.",
   reclaim:
     "This board already had a row here — revoked, reflashed, or its key lost — so that row was re-keyed and re-enabled "
     + "rather than registered a second time: same box, same history, key version bumped. The board collects this key by "
-    + "itself within ten minutes of Connect; if it still shows CLAIM CODE after that, power-cycle it and press Connect again. "
-    + "Keep this one only if you are flashing the board by hand: it goes in secrets.h as DEVICE_KEY.",
+    + "itself within ten minutes of Connect. If it still shows CLAIM CODE after that, power-cycle it, wait for it to "
+    + "reappear in the list above, and connect it again with the NEW code on its screen. "
+    + "Keep this key only if you are flashing the board by hand: it goes in secrets.h as DEVICE_KEY.",
   register:
     "Flash it into the board's secrets.h as DEVICE_KEY before leaving this page — a box registered by hand has no other "
-    + "way to get its key.",
+    + "way to get its key, and this club has no board address for it, so it cannot be re-claimed later either.",
   rotate:
     "The old key stopped working the moment this one was issued, so the box's next call is refused and it drops back to "
-    + "showing CLAIM CODE. Connect it again from the list above — that re-keys this same box and hands it the key. "
+    + "showing CLAIM CODE. Wait for it in the list above and connect it again with the code now on its screen — that "
+    + "re-keys this same box and hands it the key. "
     + "Flash the key into secrets.h as DEVICE_KEY only for a board provisioned by hand.",
 };
 

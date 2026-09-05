@@ -195,8 +195,12 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
           <Input type="number" min={1} max={90} value={settings.walk_up_max_minutes}
             onChange={(e) => set({ walk_up_max_minutes: Number(e.target.value) })} />
         </Field>
-        <Field label="Heartbeat interval (seconds)" hint="10–3600. How often a box calls in for its roster and button map.">
-          <Input type="number" min={10} max={3600} value={settings.heartbeat_seconds}
+        {/* 3600 was offered and 300 was what the box ran: the firmware clamps its own
+            cadence to 15-300, and the Devices page then reported the whole fleet
+            offline for most of every interval (review finding 22). The field states
+            the range the box will honour, and the API holds the same bound. */}
+        <Field label="Heartbeat interval (seconds)" hint="15–300. How often a box calls in for its roster and button map. A box clamps anything outside 15–300 to that range, so a larger number here is not what it would run — and the Devices page decides online or offline from three missed beats.">
+          <Input type="number" min={15} max={300} value={settings.heartbeat_seconds}
             onChange={(e) => set({ heartbeat_seconds: Number(e.target.value) })} />
         </Field>
         <Field label="Activation window before a booking (minutes)" hint="1–1440. How early a scan may switch a booking's lights on.">

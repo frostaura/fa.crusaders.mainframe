@@ -76,6 +76,74 @@ describe("AdminDevices", () => {
     expect(await screen.findByText(/last seen 10m ago/)).toBeInTheDocument();
   });
 
+  /**
+   * Review finding 22. "Offline" was a frozen 180 000 ms — three beats of a 30-second
+   * cadence nothing had run for a while — while the settings page had grown an editable
+   * interval offering up to 3600 s. An admin raising it to cut chatter watched every box
+   * report WifiOff for most of every interval and started power-cycling working hardware
+   * mid-league-night. The threshold is three beats of what the box actually runs.
+   */
+  it("decides offline from the club's heartbeat interval, not a fixed three minutes", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/" && r.path !== "/api/v1/admin/settings/"),
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, heartbeat_seconds: 300 } },
+      {
+        path: "/api/v1/admin/devices/",
+        // Six minutes since the last beat. Two beats of a 300 s cadence: not an outage,
+        // and the old fixed threshold called it one after three.
+        body: [deviceFixture({ last_seen_at: new Date(Date.now() - 6 * 60_000).toISOString() })],
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    expect(await screen.findByText("online")).toBeInTheDocument();
+    expect(screen.queryByText(/last seen 6m ago/)).not.toBeInTheDocument();
+  });
+
+  it("reads the interval the box reports over the club setting, because the box clamps its own", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/" && r.path !== "/api/v1/admin/settings/"),
+      // The club asked for 600. The firmware clamps to 300 and says so; believing the
+      // setting would give this box a twenty-minute grace it does not have.
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, heartbeat_seconds: 600 } },
+      {
+        path: "/api/v1/admin/devices/",
+        body: [deviceFixture({
+          heartbeat_seconds: 300,
+          last_seen_at: new Date(Date.now() - 16 * 60_000).toISOString(),
+        })],
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    expect(await screen.findByText(/last seen 16m ago/)).toBeInTheDocument();
+  });
+
+  /**
+   * The tenant setting is a club's wish; the box's clamp is what happens. A club that
+   * sets 600 has boxes calling in every 300, so the admin surface applies the same
+   * 15-300 clamp before deciding anything from it.
+   */
+  it("clamps an out-of-range club setting the way the box does", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/" && r.path !== "/api/v1/admin/settings/"),
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, heartbeat_seconds: 3600 } },
+      {
+        path: "/api/v1/admin/devices/",
+        // Twenty minutes. Under a believed 3600 s cadence this is barely a third of one
+        // beat and would read online for three hours; under the real 300 s clamp it is
+        // four missed beats and a box worth looking at.
+        body: [deviceFixture({ last_seen_at: new Date(Date.now() - 20 * 60_000).toISOString() })],
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    expect(await screen.findByText(/last seen 20m ago/)).toBeInTheDocument();
+  });
+
   it("says loudly when a board could not start its firmware", async () => {
     stubFetch([
       ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
@@ -309,7 +377,17 @@ describe("AdminDevices", () => {
     expect(screen.getByLabelText("Button 5 minutes")).toHaveValue(15);
   });
 
-  it("saves a remapped button without touching anything else in the settings", async () => {
+  /**
+   * Review finding 23. This screen used to PUT the whole settings document it read at
+   * mount, and this test asserted that as a feature — "everything else goes back
+   * exactly as it was read". Replaying a value read minutes ago is not a no-op, it is a
+   * write of a stale number: two admins on league night, one raising the code lifetime
+   * in another tab, the other remapping a button, and the first change is gone with no
+   * error anywhere. The API reads an ABSENT key as unchanged, so the fix is to send
+   * only what this screen owns — and the assertion has to be absence, because a wrong
+   * value and a stale-but-equal value look identical in a fixture.
+   */
+  it("sends only the button map and the required fields, so it cannot revert the settings screen", async () => {
     const stub = stubFetch([
       ...baseRoutes(),
       { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
@@ -326,14 +404,87 @@ describe("AdminDevices", () => {
       const body = save!.body as Record<string, unknown>;
 
       expect(body.buttonMap).toEqual(["court:D", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "minutes:60"]);
-      // Everything else goes back exactly as it was read. A save that dropped a field
-      // would have the API treat it as unchanged — which is fine — but a save that
-      // sent a WRONG value would silently reprice every court from the devices page.
+
+      // The eight the API refuses a PUT without. Not this screen's to change, but there
+      // is no PATCH, so they are round-tripped and nothing else is.
       expect(body.sliceMinutes).toBe(15);
       expect(body.slicePriceCredits).toBe(8);
-      expect(body.creditsPerZarLeague).toBe(2.4);
-      expect(body.peakHours).toBe("16:00-19:00");
+      expect(body.advanceBookingDays).toBe(14);
+      expect(body.dayStartMinute).toBe(360);
+      expect(body.dayEndMinute).toBe(1320);
+      expect(body.penaltyPct).toBe(30);
+      expect(body.graceWindowMinutes).toBe(5);
+      expect(body.penaltyWindowMinutes).toBe(15);
+
+      // The economics, and the six court-box numbers this screen grew a moment later:
+      // absent, so the API leaves each of them exactly as it is. Checked against the
+      // serialised body as well, because a key present as undefined and a key that was
+      // never there parse to the same thing.
+      for (const absent of [
+        "creditsPerZarRegular", "creditsPerZarLeague", "topupBlockZar", "topupMaxZarPerMember",
+        "memberPerDayMaxMinutes", "peakHours", "peakAdvanceHoursForRegular", "retentionYears",
+        "noShowLookbackDays", "walkUpMaxMinutes", "heartbeatSeconds",
+        "activationForwardWindowMinutes", "activationCueWindowMinutes", "qrLifetimeSeconds",
+        "rosterWindowMinutes",
+      ]) {
+        expect(body).not.toHaveProperty(absent);
+        expect(save!.raw).not.toContain(absent);
+      }
     });
+  });
+
+  /**
+   * A dropped lead from the round-3 review, verified: the editor's minutes field offered
+   * up to 240 while `ButtonMap.MaxGrantMinutes` is the relay bank's own 90, pinned as
+   * `relay_hard_cap_minutes` in the shared corpus and static-asserted on the firmware
+   * side. Everything the extra range bought an admin was a save refused after the fact
+   * — and, on a box that took the map, ninety minutes of light on a grant sold for more.
+   */
+  it("will not offer a button grant longer than the relay can deliver", async () => {
+    stubFetch(baseRoutes());
+    renderPage(<AdminDevicesPage />);
+
+    const minutes = await screen.findByLabelText("Button 5 minutes");
+    expect(minutes).toHaveAttribute("max", "90");
+    expect(minutes).toHaveAttribute("min", "1");
+
+    // A number input's max stops the spinner, not a typed or pasted value, so the
+    // reason is said at the field and the save is held rather than round-tripped into
+    // a refusal an admin has to decode.
+    fireEvent.change(minutes, { target: { value: "240" } });
+    expect(screen.getByText(/the relay cuts the lights at 90/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save button map/ })).toBeDisabled();
+
+    fireEvent.change(minutes, { target: { value: "90" } });
+    expect(screen.queryByText(/the relay cuts the lights at 90/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save button map/ })).toBeEnabled();
+  });
+
+  /**
+   * A dropped lead from the round-3 review, verified: `ReclaimAsync` is the only thing
+   * in the system that clears `RevokedAt`, and it is reachable only through the claim
+   * path, which matches a board by the MAC it announces against the MAC on the row. A
+   * box registered by hand has never announced, so its row has none. The screen used to
+   * tell the admin to register it again by hand — which returns device_code_taken and
+   * changes nothing. Saying what is actually true, and naming the path that does work,
+   * is the honest fix; un-revoking such a row needs an endpoint that does not exist.
+   */
+  it("does not send an admin down a dead end to recover a revoked box registered by hand", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+      {
+        path: "/api/v1/admin/devices/",
+        body: [deviceFixture({ mac_address: null, revoked_at: new Date().toISOString() })],
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    expect(await screen.findByText("no board address")).toBeInTheDocument();
+    expect(screen.getByText(/re-claiming matches boards by address/)).toBeInTheDocument();
+    expect(screen.getByText(/with a different device code/)).toBeInTheDocument();
+    // The instruction that does not work, gone.
+    expect(screen.queryByText(/Register it again by hand/)).not.toBeInTheDocument();
   });
 
   it("changes a box's update channel, as the integer the API binds", async () => {
@@ -379,8 +530,15 @@ describe("AdminDevices", () => {
     // ten-minute grant was then stranded with nothing an admin could act on.
     const key = await screen.findByLabelText("Device key");
     expect(key).toHaveTextContent("c0ffee1234");
-    expect(key.parentElement?.parentElement).toHaveTextContent(/ten minutes from Connect/);
-    expect(key.parentElement?.parentElement).toHaveTextContent(/secrets\.h as DEVICE_KEY/);
+    const panel = key.parentElement?.parentElement;
+    expect(panel).toHaveTextContent(/within ten minutes of Connect/);
+    expect(panel).toHaveTextContent(/secrets\.h as DEVICE_KEY/);
+    // And what to do when it lapses, without the instruction that cannot work. A board
+    // mints a NEW claim code every time it comes up unclaimed, and this form is cleared
+    // on success, so "press Connect again" named neither the code to type nor the fact
+    // that the board has to reappear in the list first.
+    expect(panel).toHaveTextContent(/NEW code on its screen/);
+    expect(panel).not.toHaveTextContent(/press Connect again/);
 
     fireEvent.click(screen.getByRole("button", { name: /Copy device key/ }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("c0ffee1234"));
