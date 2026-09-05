@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Text;
 using Crusaders.Mainframe.Api.Biometric;
@@ -41,8 +42,10 @@ builder.Services.AddCors(options =>
 
 // ---- JWT ----
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is required.");
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "crusaders.mainframe";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "crusaders.mainframe.app";
+// The same two constants the issuer uses. They were duplicated as literals here and absent
+// there, so an API with no Jwt:Issuer configured minted tokens this middleware then refused.
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? JwtIssuer.DefaultIssuer;
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? JwtIssuer.DefaultAudience;
 // Device authentication is a second scheme rather than a variant of the JWT one:
 // a board in a cupboard has no user, no refresh cycle and no browser, and giving it
 // an admin JWT was the alternative. It reads the club's one API key from the
@@ -63,15 +66,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ClockSkew = TimeSpan.FromSeconds(30),
         };
         // EventSource (SSE) clients cannot set custom request headers, so the wallet stream
-        // accepts the JWT via ?access_token=... query string in addition to Authorization.
+        // accepts a short-lived, stream-scoped ticket via ?ticket=... in addition to Authorization.
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = ctx =>
             {
                 if (string.IsNullOrEmpty(ctx.Token)
-                    && ctx.HttpContext.Request.Path.StartsWithSegments("/api/v1/wallet/stream"))
+                    && ctx.HttpContext.Request.Path.StartsWithSegments(TokenPurposes.WalletStreamPath))
                 {
-                    var qToken = ctx.Request.Query["access_token"].ToString();
+                    // A stream TICKET, never the session token. The query string is logged verbatim
+                    // by every proxy in front of this — nginx's `location /api/` records `$request`
+                    // — and is re-sent on every reconnect, so what travels here has to be worth
+                    // roughly nothing: one minute, one read-only stream. See TokenPurposes.
+                    var qToken = ctx.Request.Query["ticket"].ToString();
                     if (!string.IsNullOrEmpty(qToken)) ctx.Token = qToken;
                 }
                 return Task.CompletedTask;
@@ -93,9 +100,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnTokenValidated = ctx =>
             {
                 var purpose = ctx.Principal?.FindFirst("purpose")?.Value;
-                if (!string.Equals(purpose, "access", StringComparison.Ordinal))
+                if (!TokenPurposes.IsValidFor(purpose, ctx.HttpContext.Request.Path))
                 {
                     ctx.Fail($"Token purpose '{purpose ?? "(none)"}' is not valid for API access.");
+                    return Task.CompletedTask;
+                }
+
+                // Sign-out has to mean the credential stops working, not that one browser stopped
+                // presenting it. A revoked jti is refused here rather than per-endpoint, so a new
+                // endpoint inherits the check instead of having to remember it.
+                var jti = ctx.Principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value
+                       ?? ctx.Principal?.FindFirst("jti")?.Value;
+                var revoked = ctx.HttpContext.RequestServices.GetRequiredService<AccessTokenRevocationList>();
+                if (jti is not null && revoked.IsRevoked(jti))
+                {
+                    ctx.Fail("This session has been signed out.");
                 }
                 return Task.CompletedTask;
             },
@@ -241,6 +260,7 @@ builder.Services.AddScoped<DeviceKeyResolver>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddScoped<IPaymentProvider, Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
 builder.Services.AddSingleton<BalanceBroadcaster>();
+builder.Services.AddSingleton<AccessTokenRevocationList>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<BookingService>();
@@ -321,6 +341,31 @@ if (builder.Configuration.GetValue<bool>("Database:AutoMigrateOnStartup"))
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
     await db.Database.MigrateAsync();
+}
+
+// Bring back the sign-outs that are still inside their token's lifetime.
+//
+// The revocation list is in-process, so without this a restart — a redeploy, a crash — would
+// resurrect every credential a member had signed out, for the remainder of its fifteen minutes.
+// Cheap: the table only ever holds sign-outs from the last quarter of an hour.
+try
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+    var revocations = app.Services.GetRequiredService<AccessTokenRevocationList>();
+    var now = DateTimeOffset.UtcNow;
+    var live = await db.AuthTokens.IgnoreQueryFilters()
+        .Where(t => t.Kind == Crusaders.Mainframe.Api.Domain.TokenKind.RevokedAccess && t.ExpiresAt > now)
+        .Select(t => new { t.TokenHash, t.ExpiresAt })
+        .ToListAsync();
+    foreach (var row in live) revocations.SeedHashed(row.TokenHash, row.ExpiresAt);
+}
+catch (Exception ex)
+{
+    // A database that is not there yet is a startup-ordering problem, not a reason to refuse to
+    // boot; the list simply starts empty and re-fills from the next sign-out.
+    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Revocations")
+        .LogWarning(ex, "Could not rehydrate the access-token revocation list");
 }
 
 if (app.Environment.IsDevelopment())

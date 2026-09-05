@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -51,6 +53,16 @@ public static class WalletEndpoints
                 limit = take,
             });
         });
+
+        // Mints the credential the SSE stream is opened with.
+        //
+        // EventSource cannot set an Authorization header, so whatever authenticates the stream has
+        // to ride in the URL — and nginx's `location /api/` logs `$request`, query string included,
+        // on every connect and every reconnect. The full access token used to travel there: a
+        // fifteen-minute credential for the entire API, written to a log file that outlives it by
+        // months. This ticket is minted by a POST (never logged), lives one minute, and is refused
+        // on every path but the stream itself.
+        g.MapPost("/wallet/stream-ticket", MintStreamTicket);
 
         // Server-Sent Events stream of the current user's balance. Pushes the latest balance
         // whenever any ledger entry posts for this user. Used by the BalanceProvider on the
@@ -143,6 +155,25 @@ public static class WalletEndpoints
         });
 
         return app;
+    }
+
+    /// <summary>Mints the one-minute, stream-scoped credential the SSE connection is opened with.</summary>
+    /// <remarks>
+    /// Named rather than inline for the same reason as <c>SignOutAsync</c>: lizard scores the
+    /// whole <c>MapWalletEndpoints</c> registration as a single function, so a handler's branches
+    /// are charged to the registration.
+    /// </remarks>
+    private static IResult MintStreamTicket(HttpContext ctx, IJwtIssuer jwt, ITenantContext tenant)
+    {
+        var userId = ctx.User.Id();
+        if (userId is null) return Results.Unauthorized();
+        var ticket = jwt.IssueOneTime(userId.Value, tenant.TenantId, tenant.TenantSlug,
+            TokenPurposes.WalletStream, TokenPurposes.WalletStreamTicketTtl);
+        return Results.Ok(new
+        {
+            ticket,
+            expires_in_seconds = (int)TokenPurposes.WalletStreamTicketTtl.TotalSeconds,
+        });
     }
 
     /// <summary>

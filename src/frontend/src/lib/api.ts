@@ -593,6 +593,25 @@ export async function uploadPhoto(file: File): Promise<{ url: string }> {
 
 export const endpoints = {
   whoami: () => api.get<WhoAmI>("/api/v1/whoami"),
+  /**
+   * Ends the session on the server as well as in this browser.
+   *
+   * <p>
+   * Deleting the stored token is not a sign-out — a JWT is a bearer credential and keeps
+   * working wherever else it reached until it expires. This is what makes the credential stop.
+   * </p>
+   */
+  logout: () => api.post<void>("/api/v1/auth/logout"),
+  /**
+   * A one-minute, stream-only credential for the wallet SSE connection.
+   *
+   * <p>
+   * `EventSource` cannot send an Authorization header, so something has to travel in the URL,
+   * where every proxy logs it. The full access token used to; this is the thing that is worth
+   * nothing to whoever reads that log ten minutes later.
+   * </p>
+   */
+  walletStreamTicket: () => api.post<{ ticket: string; expires_in_seconds: number }>("/api/v1/wallet/stream-ticket"),
   register: (req: { email: string; password: string; fullName: string; membershipNumber: string; photoUrl?: string }) =>
     api.post<{ user_id: string; status: string }>("/api/v1/auth/register", {
       email: req.email,

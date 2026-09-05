@@ -14,6 +14,26 @@ public interface IJwtIssuer
 
 public sealed class JwtIssuer : IJwtIssuer
 {
+    /// <summary>
+    /// The issuer and audience a token carries when nothing configures them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// These have to be the same two strings the bearer middleware validates against, and they
+    /// were not: <c>Program.cs</c> fell back to these values while this class read the config key
+    /// and accepted <c>null</c>. An API booted without <c>appsettings.json</c> — which happens for
+    /// real, because a checkout under a dot-directory on macOS is excluded by
+    /// <c>PhysicalFileProvider</c>'s Sensitive filter — therefore minted tokens with no
+    /// <c>iss</c>/<c>aud</c> at all and then refused every one of them on the next request. The
+    /// symptom is a login that succeeds and a session that is anonymous a moment later, with
+    /// nothing logged anywhere. One pair of constants, used by both halves, is the fix.
+    /// </para>
+    /// </remarks>
+    public const string DefaultIssuer = "crusaders.mainframe";
+
+    /// <inheritdoc cref="DefaultIssuer"/>
+    public const string DefaultAudience = "crusaders.mainframe.app";
+
     private readonly IConfiguration _config;
     public JwtIssuer(IConfiguration config) => _config = config;
 
@@ -43,8 +63,8 @@ public sealed class JwtIssuer : IJwtIssuer
         foreach (var role in roles) claims.Add(new Claim(ClaimTypes.Role, role));
 
         var token = new JwtSecurityToken(
-            issuer: _config["Jwt:Issuer"],
-            audience: _config["Jwt:Audience"],
+            issuer: _config["Jwt:Issuer"] ?? DefaultIssuer,
+            audience: _config["Jwt:Audience"] ?? DefaultAudience,
             claims: claims,
             notBefore: DateTime.UtcNow,
             expires: DateTime.UtcNow.Add(ttl),

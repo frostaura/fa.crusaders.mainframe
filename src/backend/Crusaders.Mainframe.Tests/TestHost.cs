@@ -88,6 +88,9 @@ public sealed class TestHost : IAsyncDisposable
         // LightsCueTests constructs NullRelayClient directly to pin the interface's shape.
         services.AddMemoryCache();
         services.AddSingleton<BalanceBroadcaster>();
+        // Sign-out revocation. A singleton in the app too — a per-scope list would forget every
+        // sign-out the moment the request that made it ended.
+        services.AddSingleton<AccessTokenRevocationList>();
         services.AddScoped<TenantSettingsAccessor>();
         services.AddScoped<AccessCodeService>();
         services.AddScoped<IdentificationResolver>();

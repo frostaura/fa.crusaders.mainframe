@@ -16,12 +16,14 @@ public sealed class AuthService
     private readonly IEmailService _email;
     private readonly IConfiguration _config;
     private readonly ILogger<AuthService> _logger;
+    private readonly AccessTokenRevocationList _revocations;
 
     public AuthService(MainframeDbContext db, ITenantContext tenant, IPasswordHasher hasher,
-        IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger)
+        IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger,
+        AccessTokenRevocationList revocations)
     {
         _db = db; _tenant = tenant; _hasher = hasher; _jwt = jwt;
-        _email = email; _config = config; _logger = logger;
+        _email = email; _config = config; _logger = logger; _revocations = revocations;
     }
 
     /// <summary>
@@ -437,6 +439,42 @@ public sealed class AuthService
         user.MustChangePassword = false;
         await _db.SaveChangesAsync(ct);
         return await RefreshAsync(user.Id, ct);
+    }
+
+    /// <summary>
+    /// Signs one access token out, for real.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deleting the client's copy is not a sign-out — a JWT is a bearer credential and stays
+    /// valid wherever else it reached. The token is put on the in-process revocation list so
+    /// the next request carrying it is refused, and written to <c>auth_tokens</c> so a restart
+    /// inside its remaining lifetime does not bring it back.
+    /// </para>
+    /// <para>
+    /// Idempotent by design: signing out twice, or signing out a token already recorded, is a
+    /// no-op rather than an error. There is nothing a member gains by being told which.
+    /// </para>
+    /// </remarks>
+    public async Task RevokeAccessTokenAsync(Guid userId, string jti, DateTimeOffset expiresAt, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(jti)) return;
+        _revocations.Revoke(jti, expiresAt);
+
+        var hash = TokenHashing.Hash(jti);
+        var already = await _db.AuthTokens.IgnoreQueryFilters()
+            .AnyAsync(t => t.TokenHash == hash && t.Kind == TokenKind.RevokedAccess, ct);
+        if (already) return;
+
+        _db.AuthTokens.Add(new AuthToken
+        {
+            TenantId = _tenant.IsResolved ? _tenant.TenantId : Guid.Empty,
+            UserId = userId,
+            Kind = TokenKind.RevokedAccess,
+            TokenHash = hash,
+            ExpiresAt = expiresAt,
+        });
+        await _db.SaveChangesAsync(ct);
     }
 
     private string PublicBaseUrl() => _config["App:PublicBaseUrl"] ?? "http://localhost:8088";

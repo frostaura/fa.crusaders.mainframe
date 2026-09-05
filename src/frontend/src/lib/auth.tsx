@@ -38,7 +38,8 @@ type AuthCtx = AuthState & {
   loginWithPasskey: () => Promise<void>;
   loginAsSeededAdmin: () => Promise<void>;
   setSessionFromMagicLink: (token: string) => Promise<void>;
-  logout: () => void;
+  /** Resolves once the server has been told; the local session is gone before it resolves. */
+  logout: () => Promise<void>;
   /** The forced change is done — clears the flag without a whole re-bootstrap. */
   passwordChanged: () => void;
   /**
@@ -221,10 +222,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Tell the server first, while the token is still in storage for the client to send: the
+    // API puts that jti on its revocation list, so the credential stops working rather than
+    // merely stopping being presented. A failure here is not worth blocking the sign-out —
+    // the local half must happen either way — but it is worth attempting before the local half
+    // rather than after, because after, there is nothing left to authenticate the call with.
+    const ending = endpoints.logout().catch(() => undefined);
     tokenStore.clear();
     // Signing out on purpose is not losing a session; /login should not commiserate about it.
     setSessionExpired(false);
     setState({ status: "anonymous" });
+    return ending;
   }, []);
 
   // The refresh call answers with the flag too, so this is belt-and-braces — but a member who
