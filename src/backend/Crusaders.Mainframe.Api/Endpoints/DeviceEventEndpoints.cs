@@ -59,6 +59,33 @@ public static class DeviceEventEndpoints
     public const string ActivationKind = "activation";
 
     /// <summary>
+    /// The event kind a box queues when a relay opened again — <c>eventq::Kind::Release</c>.
+    ///
+    /// <para>
+    /// It names no member and no booking: it carries a relay index and <c>duration_ms</c> =
+    /// how long the relay was actually closed. That number is the <b>only</b> measurement in
+    /// the system of what the lights did, as against the <i>grant</i> the activation carries,
+    /// and the settlement model leans on it for the price of cancelled-then-lit time and for
+    /// the real end of a reversed no-show. See <c>docs/specs/settlement-model.md</c> §4.
+    /// </para>
+    /// </summary>
+    public const string ReleaseKind = "release";
+
+    /// <summary>
+    /// How far a release's implied lit end may sit from the release's own time before the
+    /// pairing is refused.
+    ///
+    /// <para>
+    /// Both times come off the same uptime accumulator on the same box, so they agree to
+    /// within the Mega's timer resolution; two minutes is generous. The check exists because
+    /// a release that cannot be paired must correct <b>nothing</b> rather than correct the
+    /// wrong session — a missed release on relay B followed by a later one would otherwise
+    /// re-price a session it has nothing to do with.
+    /// </para>
+    /// </summary>
+    public static readonly TimeSpan ReleasePairingTolerance = TimeSpan.FromMinutes(2);
+
+    /// <summary>
     /// Records a batch of events and reports the highest sequence number accepted.
     ///
     /// <para>
@@ -122,9 +149,12 @@ public static class DeviceEventEndpoints
                 var time = TimeOf(batch, e, now);
 
                 // Attendance BEFORE the receipt. See the summary for why this order.
-                var outcome = e.Kind == ActivationKind
-                    ? await ActivationOutcomeAsync(device, e, time.OccurredAt, services, ct)
-                    : null;
+                var outcome = e.Kind switch
+                {
+                    ActivationKind => await ActivationOutcomeAsync(device, e, time.OccurredAt, services, ct),
+                    ReleaseKind => await ReleaseOutcomeAsync(device, e, time.OccurredAt, services, ct),
+                    _ => null,
+                };
 
                 if (await RecordAsync(services, device, e, time, outcome, ct)) recorded++;
             }
@@ -202,9 +232,18 @@ public static class DeviceEventEndpoints
     /// stamped, and is written as its own <c>device.activation_{code}</c> audit row so the
     /// desk can answer "I scanned and it let me in — why am I a no-show?" from the record.
     /// </summary>
-    private sealed record ActivationOutcome(string Code, Guid? BookingId)
+    private sealed record ActivationOutcome(
+        string Code, Guid? BookingId, string Kind = ActivationKind, Guid? RelatedBookingId = null)
     {
         public const string Ok = "ok";
+
+        /// <summary>
+        /// The booking was cancelled by a displacement, not by its member, and the box lit
+        /// its court anyway from a roster that still carried it. Nothing is charged
+        /// (settlement model I5); the audit row names the booking that displaced it, because
+        /// two members reached one court and the desk needs to see which.
+        /// </summary>
+        public const string DisplacedCollision = "displaced_collision";
 
         /// <summary>
         /// Stamped, and a settled no-show undone to do it. Success as far as the box is
@@ -279,7 +318,53 @@ public static class DeviceEventEndpoints
         }
 
         var target = new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline", occurredAt, e.DurationMs);
-        return new ActivationOutcome(await SettleAsync(services, target, ct), booking.Id);
+        var settled = await SettleAsync(services, target, ct);
+        return new ActivationOutcome(settled.Code, booking.Id, ActivationKind, settled.RelatedBookingId);
+    }
+
+    /// <summary>
+    /// What a <c>release</c> event settles: the measurement of how long a relay was actually
+    /// closed, applied to whatever the matching activation left provisional.
+    ///
+    /// <para>
+    /// The release names nothing, so it is paired by <b>device, relay and time</b> against
+    /// the last activation receipt for the same relay — which is why the receipt now carries
+    /// the relay index and the booking the activation resolved to. A pairing that does not
+    /// reconcile within <see cref="ReleasePairingTolerance"/> is audited
+    /// <c>device.release_unpaired</c> and corrects nothing.
+    /// </para>
+    /// </summary>
+    private static async Task<ActivationOutcome> ReleaseOutcomeAsync(
+        Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
+    {
+        var (db, _, _, _, bookings, _) = services;
+        if (e.Court is not { } relay || relay < 0) return new ActivationOutcome("unpaired", null, ReleaseKind);
+
+        var session = await db.DeviceEventReceipts.AsNoTracking()
+            .Where(r => r.DeviceId == device.Id
+                        && r.Kind == ActivationKind
+                        && r.Court == relay
+                        && r.BookingId != null
+                        && r.OccurredAt <= occurredAt)
+            .OrderByDescending(r => r.OccurredAt)
+            .FirstOrDefaultAsync(ct);
+        if (session is null) return new ActivationOutcome("unpaired", null, ReleaseKind);
+
+        var impliedEnd = session.OccurredAt.AddMilliseconds(e.DurationMs);
+        if ((impliedEnd - occurredAt).Duration() > ReleasePairingTolerance)
+        {
+            return new ActivationOutcome("unpaired", session.BookingId, ReleaseKind);
+        }
+
+        var booking = await db.Bookings.FirstOrDefaultAsync(b => b.Id == session.BookingId, ct);
+        if (booking is null) return new ActivationOutcome("unpaired", session.BookingId, ReleaseKind);
+
+        // Grant zero: the release carries the measurement, and the sold window is the only
+        // other bound that applies to it.
+        var window = LitWindowOf(booking, session.OccurredAt, grantMs: 0, heldMs: e.DurationMs);
+        var settled = await bookings.SettleReleaseAsync(booking, window.Minutes, window.End, Guid.Empty, ct);
+        var code = settled.Code == ReleaseSettlement.NotApplicable.Code ? ActivationOutcome.Ok : settled.Code;
+        return new ActivationOutcome(code, booking.Id, ReleaseKind);
     }
 
     /// <summary>
@@ -287,9 +372,15 @@ public static class DeviceEventEndpoints
     /// the upload handler uses, public so a test can interleave a sweep between the read
     /// of <paramref name="booking"/> and its stamp without an HTTP client in the way.
     /// </summary>
-    public static Task<string> ActivateOrReverseAsync(DeviceEventServices services, LateActivation evidence, CancellationToken ct)
-        => SettleAsync(services,
+    public static async Task<string> ActivateOrReverseAsync(DeviceEventServices services, LateActivation evidence, CancellationToken ct)
+    {
+        var settled = await SettleAsync(services,
             new ActivationTarget(evidence.Court, evidence.Booking, evidence.UserId, evidence.Method, evidence.OccurredAt, evidence.DurationMs), ct);
+        return settled.Code;
+    }
+
+    /// <summary>One settlement's verdict, plus the other booking it implicates when there is one.</summary>
+    private sealed record SettleOutcome(string Code, Guid? RelatedBookingId = null);
 
     /// <summary>
     /// Turns the activation into attendance — undoing the sweep first if it got there
@@ -324,43 +415,48 @@ public static class DeviceEventEndpoints
     /// past charging.
     /// </para>
     /// </summary>
-    private static async Task<string> SettleAsync(DeviceEventServices services, ActivationTarget t, CancellationToken ct)
+    private static async Task<SettleOutcome> SettleAsync(DeviceEventServices services, ActivationTarget t, CancellationToken ct)
     {
         var (db, _, _, activation, bookings, settingsAccessor) = services;
         var settings = await settingsAccessor.GetAsync(ct);
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
+            // Settlement model I7. The cue gate is the rule on every settled branch, not
+            // just the no-show one. It was present above the reversal and absent one branch
+            // below it, which made the cancelled-then-lit charge the single path a box with
+            // a drifted clock could still spend a member's credits down.
+            if (t.Booking.Status is BookingStatus.NoShow or BookingStatus.Cancelled
+                && t.OccurredAt is { } scannedAt
+                && scannedAt < t.Booking.StartsAt.AddMinutes(-settings.ActivationCueWindowMinutes))
+            {
+                return new SettleOutcome("too_early");
+            }
+
             if (t.Booking.Status == BookingStatus.NoShow)
             {
-                var cueOpensAt = t.Booking.StartsAt.AddMinutes(-settings.ActivationCueWindowMinutes);
-                if (t.OccurredAt is { } scannedAt && scannedAt < cueOpensAt) return "too_early";
-
                 // The system actor, as the sweep's own rows are: the evidence came from a box,
                 // and Guid.Empty is how every device-originated row already names it.
-                var reversal = await bookings.ReverseNoShowAsync(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, Guid.Empty, ct);
-                if (reversal is NoShowReversalResult.Ok) return ActivationOutcome.ReversedNoShow;
+                var provisional = LitWindowOf(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, t.DurationMs, heldMs: null);
+                var reversal = await bookings.ReverseNoShowAsync(
+                    t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, Guid.Empty, ct, provisional.End);
+                if (reversal is NoShowReversalResult.Ok) return new SettleOutcome(ActivationOutcome.ReversedNoShow);
                 t = t with { Booking = await FreshAsync(db, t.Booking, ct) };
                 continue;
             }
 
-            if (t.Booking.Status == BookingStatus.Cancelled)
-            {
-                var lit = await bookings.ChargeLitCancelledBookingAsync(
-                    t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, LitMinutes(t), ct);
-                return lit is CancelledLightsResult.NotCharged ? "not_chargeable" : ActivationOutcome.AfterCancel;
-            }
+            if (t.Booking.Status == BookingStatus.Cancelled) return await CancelledOutcomeAsync(bookings, t, ct);
 
             var request = new ActivationRequest(t.Court, t.Booking, t.UserId, null, t.Method, t.OccurredAt);
             try
             {
-                return await activation.ActivateAsync(request, ct) switch
+                return new SettleOutcome(await activation.ActivateAsync(request, ct) switch
                 {
                     ActivationResult.Activated => ActivationOutcome.Ok,
                     ActivationResult.TooEarly => "too_early",
                     ActivationResult.InsufficientBalance => "unpaid",
                     _ => "not_chargeable",
-                };
+                });
             }
             catch (DbUpdateConcurrencyException)
             {
@@ -372,21 +468,66 @@ public static class DeviceEventEndpoints
             }
         }
 
-        return "not_chargeable";
+        return new SettleOutcome("not_chargeable");
     }
 
     /// <summary>
-    /// How long the box's relay ran for this scan, in whole minutes, from the event's own
-    /// <c>duration_ms</c> — bounded by the relay hard cap and by what was left of the slot
-    /// at the scan, and never less than a minute once the lights came on at all.
+    /// The lights ran on a row that is already cancelled. Either its member cancelled it and
+    /// owes the time that ran (bounded by the settlement model's ceiling), or the system
+    /// displaced it — in which case nothing is owed and the collision is what matters.
     /// </summary>
-    private static int LitMinutes(ActivationTarget t)
+    private static async Task<SettleOutcome> CancelledOutcomeAsync(
+        BookingService bookings, ActivationTarget t, CancellationToken ct)
     {
-        var fromEvent = (int)Math.Ceiling(t.DurationMs / 60_000.0);
-        var scannedAt = t.OccurredAt ?? DateTimeOffset.UtcNow;
-        var remainder = (int)Math.Ceiling((BookingService.OriginalEndsAt(t.Booking) - scannedAt).TotalMinutes);
-        var minutes = fromEvent > 0 ? Math.Min(fromEvent, Math.Max(remainder, 1)) : remainder;
-        return Math.Clamp(minutes, 1, RelayHardCap.Minutes);
+        var window = LitWindowOf(t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, t.DurationMs, heldMs: null);
+        var lit = await bookings.ChargeLitCancelledBookingAsync(
+            t.Booking, t.OccurredAt ?? DateTimeOffset.UtcNow, window.Minutes, ct);
+        return lit switch
+        {
+            CancelledLightsResult.Displaced d => new SettleOutcome(ActivationOutcome.DisplacedCollision, d.DisplacedByBookingId),
+            CancelledLightsResult.NotCharged => new SettleOutcome("not_chargeable"),
+            _ => new SettleOutcome(ActivationOutcome.AfterCancel),
+        };
+    }
+
+    /// <summary>The interval the relay is believed to have been closed for, and its whole minutes.</summary>
+    internal sealed record LitWindow(DateTimeOffset Start, DateTimeOffset End, int Minutes);
+
+    /// <summary>
+    /// The lit window, bounded every way the settlement model requires (I6).
+    ///
+    /// <para>
+    /// <paramref name="grantMs"/> is what the relay was <i>told</i> to run for and
+    /// <paramref name="heldMs"/> what it is measured to have run for; the measurement wins
+    /// when it exists and is otherwise absent by construction, because a release event
+    /// arrives at least one request after the activation it belongs to.
+    /// </para>
+    ///
+    /// <para>
+    /// Three bounds, and every one of them was missing. <b>Lower bound at
+    /// <c>StartsAt</c>:</b> the roster's window opens a cue window <i>before</i> the slot, so
+    /// a member scanning at 17:52 for an 18:00 court was granted — and billed — 68 minutes of
+    /// a 60-minute booking. <b>Upper bound at the sold window and the sold minutes:</b> the
+    /// same reason from the other end. <b>The relay hard cap:</b> the bank cuts the lights at
+    /// ninety minutes whatever it is told, so no honest charge can exceed it.
+    /// </para>
+    /// </summary>
+    internal static LitWindow LitWindowOf(Booking booking, DateTimeOffset scannedAt, long grantMs, long? heldMs)
+    {
+        var soldEnd = BookingService.OriginalEndsAt(booking);
+        var start = scannedAt > booking.StartsAt ? scannedAt : booking.StartsAt;
+
+        var end = grantMs > 0 ? scannedAt.AddMilliseconds(grantMs) : soldEnd;
+        if (heldMs is > 0 and { } held)
+        {
+            var measured = scannedAt.AddMilliseconds(held);
+            if (measured < end) end = measured;
+        }
+        if (end > soldEnd) end = soldEnd;
+
+        var soldMinutes = booking.SliceMinutes * booking.SliceCount;
+        var minutes = end <= start ? 0 : (int)Math.Ceiling((end - start).TotalMinutes);
+        return new LitWindow(start, end, Math.Clamp(minutes, 0, Math.Min(soldMinutes, RelayHardCap.Minutes)));
     }
 
     /// <summary>The row as the database has it now: reloaded in place if still tracked, else read fresh.</summary>
@@ -430,6 +571,12 @@ public static class DeviceEventEndpoints
             Seq = e.Seq,
             Kind = e.Kind.Length > 32 ? e.Kind[..32] : e.Kind,
             OccurredAt = time.OccurredAt,
+
+            // The relay and the booking are on the receipt so a later `release` — which
+            // names neither — can find the session it belongs to. See ReleaseOutcomeAsync
+            // and docs/specs/settlement-model.md §4. -1 is the wire's "no court".
+            Court = e.Court is >= 0 ? e.Court : null,
+            BookingId = outcome?.BookingId,
         };
         db.DeviceEventReceipts.Add(receipt);
 
@@ -447,6 +594,7 @@ public static class DeviceEventEndpoints
             occurred_at_clamped_from = time.ClampedFrom,
             outcome = outcome?.Code,
             booking_id = outcome?.BookingId,
+            related_booking_id = outcome?.RelatedBookingId,
         };
         var detailsJson = System.Text.Json.JsonSerializer.Serialize(details);
 
@@ -456,7 +604,7 @@ public static class DeviceEventEndpoints
         };
         if (outcome is not null && outcome.Code != ActivationOutcome.Ok)
         {
-            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = $"device.activation_{outcome.Code}", DetailsJson = detailsJson });
+            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = $"device.{outcome.Kind}_{outcome.Code}", DetailsJson = detailsJson });
         }
         if (time.ClampedFrom is not null)
         {

@@ -51,6 +51,7 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `booking.no_show_reversed` | Late attendance evidence from a box reversed a settled no-show |
 | `booking.displaced` | A booking sold into a released tail was cancelled and refunded by a no-show reversal (`ResoldTailRefunded`) |
 | `booking.cancelled_lights_charged` | A cancelled booking was lit from an offline box's roster and charged pro rata for the lit minutes |
+| `booking.displacement_reversed` | The box's own `release` proved the earlier court went dark before a displaced booking's slot, so it was reinstated and re-charged (settlement model I9) |
 | `booking.completed` | A booking's slice ends naturally |
 | `credit.topped_up` | PayFast confirms a top-up (ITN) |
 | `credit.refunded` | A cancellation/no-show ledger entry is written |

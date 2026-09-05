@@ -340,12 +340,19 @@ public class NoShowWorkerTests
     }
 
     /// <summary>
-    /// The desk got there first: an admin adjustment referencing the booking already put
-    /// the member right before the box's evidence arrived. The automatic reversal restores
-    /// attendance and audits the compensation instead of correcting the same no-show twice.
+    /// The desk got there first, in the direction the form invites: an admin adjustment
+    /// returning the <b>penalty</b> and naming the booking, posted before the box's evidence
+    /// arrived. The reversal nets it against the leg it repaired and posts the other one.
+    ///
+    /// <para>
+    /// This test previously asserted <b>100</b> — a played 8-credit court, free — because the
+    /// reversal read "a positive adjustment names this booking" as "the desk already fixed
+    /// this" and dropped both money legs (round-3 finding 2). The honest answer is 92: the
+    /// member played, so they owe the court's price, once. Settlement model I2, I3.
+    /// </para>
     /// </summary>
     [Fact]
-    public async Task A_member_the_desk_already_compensated_is_not_corrected_twice()
+    public async Task A_desk_penalty_refund_nets_the_penalty_leg_and_the_refund_still_reverses()
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -364,7 +371,7 @@ public class NoShowWorkerTests
         Assert.Equal(100m - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // The desk compensates by hand, naming the booking — the penalty back, say.
-        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, 2.40m, host.AdminUser.Id,
+        var adjustment = await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, 2.40m, host.AdminUser.Id,
             RelatedBookingId: booking.Id, Reason: "Sorry — the box was offline"), default);
         Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
@@ -372,19 +379,108 @@ public class NoShowWorkerTests
         var result = await bookings.ReverseNoShowAsync(booking, attendedAt, Guid.Empty, default);
         var ok = Assert.IsType<NoShowReversalResult.Ok>(result);
         Assert.True(ok.ManuallyCompensated);
-        Assert.Equal(0m, ok.RefundReversedCredits);
-        Assert.Equal(0m, ok.PenaltyReversedCredits);
+        Assert.Equal(8m, ok.RefundReversedCredits);     // the refund always comes back out
+        Assert.Equal(0m, ok.PenaltyReversedCredits);    // the desk already returned it
 
         await db.Entry(booking).ReloadAsync();
         Assert.Equal(BookingStatus.Booked, booking.Status);
         Assert.Equal(attendedAt, booking.CheckedInAt);
-        // No money moved: the admin's adjustment stands as the correction.
-        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
-        Assert.Single(db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.CancellationRefund));
+
+        // 100 seeded − 8 charged: the member played, and owes the court once.
+        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var refunds = db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.CancellationRefund).ToList();
+        Assert.Equal(2, refunds.Count);
+        Assert.Equal(0m, refunds.Sum(l => l.AmountCredits));
+        // One penalty row only — the sweep's. The desk's adjustment is what returned it.
         Assert.Single(db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.NoShowPenalty));
 
         var audit = Assert.Single(db.AuditLogs.Where(a => a.Action == "booking.no_show_reversed"));
         Assert.Contains("manual_compensation", audit.DetailsJson);
+        Assert.Contains(adjustment.Id.ToString(), audit.DetailsJson);   // the ids the netting used
+    }
+
+    /// <summary>
+    /// The desk got there first in the <b>other</b> direction: a single negative adjustment
+    /// undoing the whole settlement by hand. Matching compensation on sign alone never saw
+    /// this one, so the reversal ran on top of it and charged the member twice — their next
+    /// booking then refused on balance.
+    ///
+    /// <para>
+    /// Netted per leg it lands on the same 92 as every other route: the refund leg is
+    /// already 5.60 of the way back, so 2.40 comes out and 2.40 goes back in. Settlement
+    /// model I3.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_desk_correction_in_the_other_direction_is_netted_and_not_applied_twice()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddBookingAsync(host, db, charged: true, amount: 8m);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id,
+            RelatedBookingId: booking.Id), default);
+
+        await CreateWorker(host).TickAsync(default);
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(100m - 2.40m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+
+        // The desk undoes the whole settlement by hand: refund out, penalty back, net −5.60.
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.AdminAdjustment, -5.60m, host.AdminUser.Id,
+            RelatedBookingId: booking.Id, Reason: "Box was offline — putting the sweep back"), default);
+        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+
+        var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-50).ToUnixTimeSeconds());
+        var ok = Assert.IsType<NoShowReversalResult.Ok>(
+            await bookings.ReverseNoShowAsync(booking, attendedAt, Guid.Empty, default));
+        Assert.Equal(2.40m, ok.RefundReversedCredits);
+        Assert.Equal(2.40m, ok.PenaltyReversedCredits);
+
+        // Still 92. The member is not corrected twice.
+        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.Booked, booking.Status);
+    }
+
+    /// <summary>
+    /// An adjustment naming this booking but sitting on <b>somebody else's</b> wallet is not
+    /// compensation to this payer (round-3 finding 17). The reversal must run in full.
+    /// Settlement model I4 — the endpoint now refuses to create the row at all, and this
+    /// pins the service against rows that predate that validation.
+    /// </summary>
+    [Fact]
+    public async Task An_adjustment_on_another_members_wallet_does_not_net_this_payers_legs()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddBookingAsync(host, db, charged: true, amount: 8m);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id,
+            RelatedBookingId: booking.Id), default);
+
+        await CreateWorker(host).TickAsync(default);
+        await db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.NoShow, booking.Status);
+
+        // The desk credits the admin's own wallet while pasting this member's booking id.
+        await ledger.PostAsync(new LedgerPosting(host.AdminUser.Id, LedgerEntryType.AdminAdjustment, 2.40m, host.AdminUser.Id,
+            RelatedBookingId: booking.Id, Reason: "wrong wallet"), default);
+
+        var attendedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(-50).ToUnixTimeSeconds());
+        var ok = Assert.IsType<NoShowReversalResult.Ok>(
+            await bookings.ReverseNoShowAsync(booking, attendedAt, Guid.Empty, default));
+        Assert.False(ok.ManuallyCompensated);
+        Assert.Equal(8m, ok.RefundReversedCredits);
+        Assert.Equal(2.40m, ok.PenaltyReversedCredits);
+        Assert.Equal(92m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
 
     /// <summary>

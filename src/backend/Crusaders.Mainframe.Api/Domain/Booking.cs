@@ -96,5 +96,33 @@ public sealed class Booking : ITenantScoped
     /// <summary>Set when the booking_charge ledger entry has been posted. Prevents double-charge if the player taps the pad twice.</summary>
     public DateTimeOffset? ChargedAt { get; set; }
 
+    /// <summary>
+    /// When a settled no-show was undone by late attendance evidence
+    /// (<c>BookingService.ReverseNoShowAsync</c>). Null on every row the sweep never touched.
+    ///
+    /// <para>
+    /// It is not decoration. <see cref="EndsAt"/> on a reversed row is a <i>provisional</i>
+    /// lit end derived from the activation's grant, and the box's own <c>release</c> event
+    /// arrives at least one request later carrying the measurement that corrects it (see
+    /// <c>docs/specs/settlement-model.md</c> §4, I8). This flag is what tells the release
+    /// handler that this row's end is a provisional one it may narrow — an ordinary
+    /// booking's end is what the member bought and is never moved by a relay measurement.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? NoShowReversedAt { get; set; }
+
+    /// <summary>
+    /// The booking whose late attendance evidence displaced this one, when
+    /// <see cref="CancellationReason"/> is <c>ResoldTailRefunded</c>.
+    ///
+    /// <para>
+    /// Carried on the row rather than parsed back out of a ledger reference because two
+    /// rules need it at speed: a displaced booking is never charged for being lit and its
+    /// audit row must name what displaced it (settlement model I5), and the release that
+    /// disproves the displacement has to find every row it displaced to reinstate them (I9).
+    /// </para>
+    /// </summary>
+    public Guid? DisplacedByBookingId { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

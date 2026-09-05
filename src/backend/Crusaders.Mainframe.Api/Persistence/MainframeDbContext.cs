@@ -307,6 +307,11 @@ public class MainframeDbContext : DbContext
             // arriving together — both find nothing and both write. This makes the duplicate
             // impossible rather than unlikely.
             e.HasIndex(r => new { r.TenantId, r.DeviceId, r.Seq }).IsUnique();
+
+            // The lookup a `release` event makes: the last activation this box lit on this
+            // relay. Without it, pairing a release to its session is a table scan on every
+            // court switch-off. See docs/specs/settlement-model.md §4.
+            e.HasIndex(r => new { r.TenantId, r.DeviceId, r.Court, r.OccurredAt });
         });
     }
 

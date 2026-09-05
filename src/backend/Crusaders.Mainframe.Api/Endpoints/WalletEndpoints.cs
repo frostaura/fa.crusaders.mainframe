@@ -97,14 +97,16 @@ public static class WalletEndpoints
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
             var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
             if (user is null) return Results.NotFound();
+            if (await RefuseRelatedBooking(db, userId, req.RelatedBookingId, ct) is { } bad) return bad;
             var entry = await ledger.PostAsync(new LedgerPosting(
                 UserId: userId,
                 Type: LedgerEntryType.AdminAdjustment,
                 AmountCredits: req.AmountCredits,
                 ActorUserId: ctx.User.Id() ?? Guid.Empty,
-                // Naming the booking is what lets a late box upload recognise that the
-                // desk already compensated the member for a wrongly-swept no-show, and
-                // audit instead of correcting twice. See BookingService.ReverseNoShowAsync.
+                // Naming the booking is what nets this adjustment, per leg, against a late
+                // box upload's automatic reversal of the same no-show, instead of correcting
+                // the member twice. See BookingService.SettledLegsAsync and the settlement
+                // model's I3/I4.
                 RelatedBookingId: req.RelatedBookingId,
                 Reason: req.Reason), ct);
             var balanceAfter = await ledger.GetBalanceAsync(userId, ct);
@@ -112,6 +114,37 @@ public static class WalletEndpoints
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// Settlement model I4: an adjustment may only name a booking in this tenant whose payer
+    /// is the member being adjusted.
+    ///
+    /// <para>
+    /// The field was copied onto the ledger row with no check of any kind — any GUID, any
+    /// member. A desk crediting member U while pasting member V's booking id changed <b>V's</b>
+    /// settlement: V's later late-scan reversal netted a compensation that was never paid to
+    /// V, and nothing on V's ledger explained it. A nonexistent id was stored silently and
+    /// then surfaced in the member's recent-bookings list as a booking they never had.
+    /// </para>
+    ///
+    /// <para>
+    /// 400 rather than 404: the desk's request was well-formed and addressed a real member,
+    /// and the two error codes tell them which half they got wrong. Cross-tenant is already
+    /// impossible — the query filter makes another club's booking simply not exist here —
+    /// so it answers <c>booking_not_found</c>, which is what it is from this tenant's side.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult?> RefuseRelatedBooking(
+        MainframeDbContext db, Guid userId, Guid? relatedBookingId, CancellationToken ct)
+    {
+        if (relatedBookingId is not { } bookingId) return null;
+
+        var booking = await db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
+        if (booking is null) return Results.BadRequest(new { error = "booking_not_found" });
+
+        var payer = booking.PaidByUserId ?? booking.UserId;
+        return payer == userId ? null : Results.BadRequest(new { error = "booking_not_members" });
     }
 
     private static async Task WriteEventAsync(HttpContext ctx, decimal balance, CancellationToken ct)

@@ -159,7 +159,8 @@ public sealed class DeviceEventHttpTests
     /// carries it. Against <see cref="Batch"/>'s uptime the default puts the scan five
     /// minutes before the upload.
     /// </summary>
-    private static object Activation(long seq, string subject = "tok-alice", int court = 0, long uptimeMs = 300_000) => new
+    private static object Activation(
+        long seq, string subject = "tok-alice", int court = 0, long uptimeMs = 300_000, long durationMs = 2_700_000) => new
     {
         seq,
         uptime_ms = uptimeMs,
@@ -167,7 +168,23 @@ public sealed class DeviceEventHttpTests
         court,
         method = "qr",
         subject,
-        duration_ms = 2_700_000,
+        duration_ms = durationMs,
+    };
+
+    /// <summary>
+    /// The event a box queues when a relay opened again: a relay index and how long it was
+    /// actually closed, and nothing else — no member, no booking. Against
+    /// <see cref="Batch"/>'s uptime the defaults put the release at the upload instant.
+    /// </summary>
+    private static object Release(long seq, int court = 0, long heldMs = 2_700_000, long uptimeMs = 600_000) => new
+    {
+        seq,
+        uptime_ms = uptimeMs,
+        kind = "release",
+        court,
+        method = (string?)null,
+        subject = "",
+        duration_ms = heldMs,
     };
 
     // ---- uploading what happened ------------------------------------------
@@ -1207,7 +1224,8 @@ public sealed class DeviceEventHttpTests
     /// cannot lie about it. Written directly, at a start inside the tail the sweep released.
     /// </summary>
     private static async Task<Booked> BookOnTailAsync(
-        TestWebAppFactory factory, Box box, Guid userId, double startsInMinutes, int minutes, BookingStatus status = BookingStatus.Booked)
+        TestWebAppFactory factory, Box box, Guid userId, double startsInMinutes, int minutes,
+        BookingStatus status = BookingStatus.Booked, bool charged = true, bool mintCode = false)
     {
         using var scope = factory.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(box.TenantId, box.Slug);
@@ -1227,14 +1245,17 @@ public sealed class DeviceEventHttpTests
             SliceCount = Math.Max(1, minutes / 15),
             AmountChargedCredits = 8m * Math.Max(1, minutes / 15),
             Status = status,
-            ChargedAt = DateTimeOffset.UtcNow,
+            ChargedAt = charged ? DateTimeOffset.UtcNow : null,
         };
         db.Bookings.Add(booking);
-        db.LedgerEntries.Add(new LedgerEntry
+        if (charged)
         {
-            TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.BookingCharge,
-            AmountCredits = -booking.AmountChargedCredits, ActorUserId = userId, RelatedBookingId = booking.Id, Reason = "seed charge",
-        });
+            db.LedgerEntries.Add(new LedgerEntry
+            {
+                TenantId = box.TenantId, UserId = userId, Type = LedgerEntryType.BookingCharge,
+                AmountCredits = -booking.AmountChargedCredits, ActorUserId = userId, RelatedBookingId = booking.Id, Reason = "seed charge",
+            });
+        }
         if (status == BookingStatus.NoShow)
         {
             // As the sweep would have left it: refunded in full, penalised 30%.
@@ -1250,7 +1271,10 @@ public sealed class DeviceEventHttpTests
             });
         }
         await db.SaveChangesAsync();
-        return new Booked(booking.Id, "");
+        var code = mintCode
+            ? (await scope.ServiceProvider.GetRequiredService<AccessCodeService>().MintForBookingAsync(booking, TimeSpan.FromMinutes(5), default)).Code
+            : "";
+        return new Booked(booking.Id, code);
     }
 
     /// <summary>A second funded member of the box's club.</summary>
@@ -1372,13 +1396,14 @@ public sealed class DeviceEventHttpTests
 
     // ---- a cancelled booking lit from a stale roster (closing re-review #21) ---------
 
-    private static async Task CancelAsync(TestWebAppFactory factory, Box box, Guid bookingId)
+    private static async Task<CancellationResult.Ok> CancelAsync(
+        TestWebAppFactory factory, Box box, Guid bookingId, bool waivePenalty = true)
     {
         using var scope = factory.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(box.TenantId, box.Slug);
         var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
-        var result = await bookings.CancelAsync(bookingId, Guid.NewGuid(), actorIsAdmin: true, waivePenalty: true, default);
-        Assert.IsType<CancellationResult.Ok>(result);
+        var result = await bookings.CancelAsync(bookingId, Guid.NewGuid(), actorIsAdmin: true, waivePenalty, default);
+        return Assert.IsType<CancellationResult.Ok>(result);
     }
 
     /// <summary>
@@ -1387,6 +1412,15 @@ public sealed class DeviceEventHttpTests
     /// have been on" — the lit time is charged pro rata as a LightsPurchase, separate from
     /// the refund, audited as activation_after_cancel, once per booking, and the member
     /// is told. The refund itself is never edited.
+    ///
+    /// <para>
+    /// <b>The billed minutes are the sold window, not the grant</b> (settlement model I6,
+    /// round-3 finding 3). The member scanned three minutes before the slot — inside the cue
+    /// window, which is where the roster's own window opens — and the box granted sixty
+    /// minutes on a forty-five-minute booking. Forty-five is billed. The old arithmetic took
+    /// <c>min(grant, OriginalEndsAt − scan)</c> with no lower bound at <c>StartsAt</c> and no
+    /// cap at the sold minutes, and billed forty-eight.
+    /// </para>
     /// </summary>
     [SkippableFact]
     public async Task Activation_for_a_booking_cancelled_after_its_code_was_pushed_charges_the_lit_time()
@@ -1403,8 +1437,9 @@ public sealed class DeviceEventHttpTests
         await using var quiet = Quiet(factory, mail);
         var client = quiet.CreateClient();
 
-        // The box ran the relay for the 45-minute grant its roster carried.
-        var response = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
+        // The box granted sixty minutes from a window that opened before the slot did.
+        var response = await client.SendAsync(Signed(box, EventsPath,
+            Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 3_600_000))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(1, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
 
@@ -1414,7 +1449,7 @@ public sealed class DeviceEventHttpTests
 
         var ledger = await LedgerAsync(factory, booked.BookingId);
         var lit = Assert.Single(ledger, l => l.Type == LedgerEntryType.LightsPurchase);
-        Assert.Equal(-24m, lit.AmountCredits);                                     // 45 min at 8 credits / 15 min
+        Assert.Equal(-24m, lit.AmountCredits);                                     // 45 sold min at 8 credits / 15 min, not 48 granted
         Assert.Equal(BookingService.CancelledLightsReference(booked.BookingId), lit.ExternalReference);
         Assert.Single(ledger, l => l.Type == LedgerEntryType.CancellationRefund);   // the refund stands, un-netted
         Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
@@ -1425,7 +1460,8 @@ public sealed class DeviceEventHttpTests
         Assert.Contains(mail.Sent, m => m.Subject.StartsWith("Lights charged", StringComparison.Ordinal));
 
         // A rescan is another event, not another charge.
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath, Batch(Activation(2, subject: booked.Code, court: 0))))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+            Batch(Activation(2, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
         Assert.Single(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
         Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
     }
@@ -1451,7 +1487,7 @@ public sealed class DeviceEventHttpTests
 
         await using var quiet = Quiet(factory, new StubEmailService());
         Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
 
         Assert.Equal(4m - 24m, await BalanceAsync(factory, box.MemberId));
         Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_after_cancel"));
@@ -1766,5 +1802,370 @@ public sealed class DeviceEventHttpTests
         Assert.Single(await AuditAsync(factory, boxA.TenantId, "device.activation_unresolved"));
         Assert.Empty(await AuditAsync(factory, boxB.TenantId, "court.activated"));
         Assert.Empty(await AuditAsync(factory, boxA.TenantId, "court.activated"));
+    }
+
+    // ---- the settlement model (docs/specs/settlement-model.md) ----------------------
+
+    /// <summary>
+    /// Settlement model I1 and I7. A booking cancelled inside the penalty window has already
+    /// cost its member the penalty; the club keeps it. When the box then lights the court
+    /// from a stale roster, the lit time is charged <b>on top of</b> that — so it has to be
+    /// netted, or the booking costs more than it ever could have.
+    ///
+    /// <para>
+    /// Round-3 finding 3: 45 sold minutes at 24 credits, a 30% penalty of 7.20 retained, and
+    /// the full 24 charged again for the lights = 31.20 for a 24-credit court, with an email
+    /// telling the member so. The ceiling is the price: 7.20 + 16.80.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_retained_late_cancellation_penalty_is_netted_against_the_lit_charge()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        // Starts in two minutes — inside the default fifteen-minute penalty window, and late
+        // enough that a scan five minutes ago is still inside the cue window.
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 2);
+        var cancellation = await CancelAsync(factory, box, booked.BookingId, waivePenalty: false);
+        Assert.Equal(24m, cancellation.RefundedCredits);
+        Assert.Equal(7.20m, cancellation.PenaltyCredits);
+        Assert.Equal(200m - 7.20m, await BalanceAsync(factory, box.MemberId));
+
+        await using var quiet = Quiet(factory, new StubEmailService());
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(Signed(box, EventsPath,
+            Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
+
+        var lit = Assert.Single(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
+        Assert.Equal(-16.80m, lit.AmountCredits);                       // 24 gross, capped at 24 − 7.20
+        Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));   // the booking cost exactly its price
+    }
+
+    /// <summary>
+    /// Settlement model I7. The cue gate was applied on the no-show branch and not on the
+    /// cancelled one directly below it, which made the cancelled-then-lit charge the one
+    /// path a box with a drifted clock could still spend a member's credits down.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_cancelled_booking_scanned_before_the_cue_window_is_not_charged()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 60);
+        await CancelAsync(factory, box, booked.BookingId);
+        Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
+
+        // Scanned five minutes ago — sixty-five minutes before a cue window that opens ten
+        // minutes before the slot.
+        await using var quiet = Quiet(factory, new StubEmailService());
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(Signed(box, EventsPath,
+            Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+
+        Assert.Empty((await LedgerAsync(factory, booked.BookingId)).Where(l => l.Type == LedgerEntryType.LightsPurchase));
+        Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_too_early"));
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_charged"));
+    }
+
+    /// <summary>
+    /// Settlement model I5 — round-3 finding 16. B's booking was cancelled by the system so
+    /// that A's late attendance evidence could have the court, and B was refunded and emailed
+    /// to say so. B walks in anyway, the box's cached roster still carries B's code, the
+    /// court lights. B must not be billed pro rata for it: that is two members charged for
+    /// one court, and the second of them for a booking they never cancelled.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_displaced_bookings_own_late_scan_is_not_charged()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (booked, _) = await SweptNoShowAsync(factory, box);
+        var buyer = await AnotherMemberAsync(factory, box);
+        var b = await BookOnTailAsync(factory, box, buyer, startsInMinutes: 1, minutes: 15, mintCode: true);
+
+        await using var quiet = Quiet(factory, new StubEmailService());
+        var client = quiet.CreateClient();
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+
+        var displaced = await BookingAsync(factory, b.BookingId);
+        Assert.Equal(BookingStatus.Cancelled, displaced.Status);
+        Assert.Equal(BookingService.ResoldTailRefunded, displaced.CancellationReason);
+        Assert.Equal(booked.BookingId, displaced.DisplacedByBookingId);
+        var buyerAfterDisplacement = await BalanceAsync(factory, buyer);
+
+        // The code died with the displacement, so no box gets it on its next roster either.
+        Assert.False(await CodeIsLiveAsync(factory, b.Code));
+
+        // B's own queued scan arrives.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
+            Signed(box, EventsPath, Batch(Activation(2, subject: b.Code, court: 0))))).StatusCode);
+
+        Assert.Empty((await LedgerAsync(factory, b.BookingId)).Where(l => l.Type == LedgerEntryType.LightsPurchase));
+        Assert.Equal(buyerAfterDisplacement, await BalanceAsync(factory, buyer));
+        var collision = Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_displaced_collision"));
+        Assert.Contains(booked.BookingId.ToString(), collision.DetailsJson);   // names what displaced it
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_charged"));
+    }
+
+    /// <summary>
+    /// Settlement model I10. A booking nobody was ever charged for is displaced like any
+    /// other, but there is nothing to give back — and a zero-credit row is not a refund. It
+    /// moves no money, burns the idempotency reference the real posting would have needed,
+    /// and reads on a statement as a movement that did not happen.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_never_charged_displaced_booking_posts_no_zero_credit_row()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (booked, _) = await SweptNoShowAsync(factory, box);
+        var buyer = await AnotherMemberAsync(factory, box);
+        var b = await BookOnTailAsync(factory, box, buyer, startsInMinutes: 20, minutes: 15, charged: false);
+
+        await using var quiet = Quiet(factory, new StubEmailService());
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+
+        Assert.Equal(BookingStatus.Cancelled, (await BookingAsync(factory, b.BookingId)).Status);
+        Assert.Empty(await LedgerAsync(factory, b.BookingId));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "booking.displaced"));
+    }
+
+    /// <summary>
+    /// Settlement model I6 — the early OFF. The activation carries the <i>grant</i>; only the
+    /// release carries the measurement. A member who plays five minutes of a twenty-minute
+    /// grant and presses OFF is charged five, and the difference comes back.
+    ///
+    /// <para>
+    /// The two events go up in <b>separate requests</b>, because that is how the box works:
+    /// <c>drainEvents</c> uploads one event per pass, so a release is always at least one
+    /// request behind the activation it belongs to and can never be settled with it.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_release_reduces_a_cancelled_lit_charge_to_what_the_relay_measured()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -10);
+        await CancelAsync(factory, box, booked.BookingId);
+
+        await using var quiet = Quiet(factory, new StubEmailService());
+        var client = quiet.CreateClient();
+
+        // Scan five minutes ago, granted twenty minutes.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+            Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 1_200_000))))).StatusCode);
+        Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
+            l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
+
+        // The next request carries the release: the relay was closed for five minutes.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+            Batch(Release(2, court: 0, heldMs: 300_000))))).StatusCode);
+
+        var lights = (await LedgerAsync(factory, booked.BookingId)).Where(l => l.Type == LedgerEntryType.LightsPurchase).ToList();
+        Assert.Equal(2, lights.Count);
+        Assert.Equal(8.00m, Assert.Single(lights, l => l.AmountCredits > 0).AmountCredits);
+        Assert.Equal(-2.67m, lights.Sum(l => l.AmountCredits));          // 5 min at 8 credits / 15 min
+        Assert.Single(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_adjusted"));
+
+        // A second release does not pay it back twice.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+            Batch(Release(3, court: 0, heldMs: 300_000))))).StatusCode);
+        Assert.Equal(-2.67m, (await LedgerAsync(factory, booked.BookingId))
+            .Where(l => l.Type == LedgerEntryType.LightsPurchase).Sum(l => l.AmountCredits));
+    }
+
+    /// <summary>
+    /// Settlement model I8/I9 — round-3 finding 14. A played twenty minutes offline and
+    /// pressed OFF; the sweep had already released the tail and B bought part of it. The
+    /// reversal displaces B on the grant, because at that instant the court is believed lit
+    /// to the end of the slot and two members on one court is the worse error. The release
+    /// arrives one request later and proves otherwise: A's end is narrowed to what the relay
+    /// measured, and B — whose slot has not started — gets their booking back.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_release_narrows_the_reversed_window_and_reinstates_the_displaced_booking()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (booked, _) = await SweptNoShowAsync(factory, box);
+        var buyer = await AnotherMemberAsync(factory, box);
+        var buyerBefore = await BalanceAsync(factory, buyer);
+        var b = await BookOnTailAsync(factory, box, buyer, startsInMinutes: 20, minutes: 15);
+        Assert.Equal(buyerBefore - 8m, await BalanceAsync(factory, buyer));
+
+        var mail = new StubEmailService();
+        await using var quiet = Quiet(factory, mail);
+        var client = quiet.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
+            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+        Assert.Equal(BookingStatus.Cancelled, (await BookingAsync(factory, b.BookingId)).Status);
+        Assert.Equal(buyerBefore, await BalanceAsync(factory, buyer));      // refunded on the grant
+
+        // The relay was closed for five minutes, ending at the upload instant — well before
+        // B's slot. One request later, as the box sends it.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
+            Signed(box, EventsPath, Batch(Release(2, court: 0, heldMs: 300_000))))).StatusCode);
+
+        var a = await BookingAsync(factory, booked.BookingId);
+        var reinstated = await BookingAsync(factory, b.BookingId);
+        Assert.Equal(BookingStatus.Booked, reinstated.Status);
+        Assert.Null(reinstated.CancellationReason);
+        Assert.Null(reinstated.DisplacedByBookingId);
+        Assert.True(a.EndsAt <= reinstated.StartsAt, $"A's end {a.EndsAt} must clear B's start {reinstated.StartsAt}");
+
+        // Charged once for a booking they get to keep.
+        Assert.Equal(buyerBefore - 8m, await BalanceAsync(factory, buyer));
+        var refunds = (await LedgerAsync(factory, b.BookingId)).Where(l => l.Type == LedgerEntryType.CancellationRefund).ToList();
+        Assert.Equal(2, refunds.Count);
+        Assert.Equal(0m, refunds.Sum(l => l.AmountCredits));
+
+        Assert.Single(await AuditAsync(factory, box.TenantId, "booking.lit_window_narrowed"));
+        Assert.Single(await AuditAsync(factory, box.TenantId, "booking.displacement_reversed"));
+        Assert.Contains(mail.Sent, m => m.Subject.StartsWith("Booking reinstated", StringComparison.Ordinal));
+        Assert.True(await BookingHasLiveCodeAsync(factory, b.BookingId), "a reinstated booking gets a fresh access code");
+    }
+
+    /// <summary>
+    /// A release that names no session it can reconcile with corrects nothing. The pairing is
+    /// by device, relay and time, and a release arriving with no activation behind it — the
+    /// first event after a reboot, or one whose activation was dropped — must not be allowed
+    /// to re-price whatever happened to be lit on that relay last.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_release_with_no_activation_behind_it_settles_nothing()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -10);
+        await CancelAsync(factory, box, booked.BookingId);
+
+        await using var quiet = Quiet(factory, new StubEmailService());
+        var client = quiet.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+            Batch(Release(1, court: 0, heldMs: 300_000))))).StatusCode);
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.release_unpaired"));
+        Assert.Empty((await LedgerAsync(factory, booked.BookingId)).Where(l => l.Type == LedgerEntryType.LightsPurchase));
+
+        // And the ordinary order still works: the activation first, the release behind it.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+            Batch(Activation(2, subject: booked.Code, court: 0, durationMs: 1_200_000))))).StatusCode);
+        Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
+            l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+            Batch(Release(3, court: 0, heldMs: 300_000))))).StatusCode);
+        Assert.Equal(-2.67m, (await LedgerAsync(factory, booked.BookingId))
+            .Where(l => l.Type == LedgerEntryType.LightsPurchase).Sum(l => l.AmountCredits));
+    }
+
+    /// <summary>
+    /// Settlement model I8. The reversal displaces what the court could have reached, not the
+    /// whole slot. A box that granted fifteen minutes cannot have been lighting the court an
+    /// hour later, so a booking beyond the grant is nobody's collision — it used to be
+    /// cancelled, refunded and emailed anyway, and the slot then sat dark and unsellable
+    /// (round-3 finding 14).
+    /// </summary>
+    [SkippableFact]
+    public async Task A_reversal_displaces_only_what_the_grant_could_have_reached()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (booked, _) = await SweptNoShowAsync(factory, box);        // A: −10, 45 min, tail [now, +35)
+        var buyer = await AnotherMemberAsync(factory, box);
+        var buyerBefore = await BalanceAsync(factory, buyer);
+        var b = await BookOnTailAsync(factory, box, buyer, startsInMinutes: 20, minutes: 15);
+
+        // The box lit the court for fifteen minutes from a scan five minutes ago: it went
+        // dark around ten minutes from now, long before B's slot.
+        var mail = new StubEmailService();
+        await using var quiet = Quiet(factory, mail);
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(Signed(box, EventsPath,
+            Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 900_000))))).StatusCode);
+
+        var survivor = await BookingAsync(factory, b.BookingId);
+        Assert.Equal(BookingStatus.Booked, survivor.Status);
+        Assert.Null(survivor.CancellationReason);
+        Assert.Equal(buyerBefore - 8m, await BalanceAsync(factory, buyer));   // charged once, untouched
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.displaced"));
+        Assert.DoesNotContain(mail.Sent, m => m.Subject.StartsWith("Booking refunded", StringComparison.Ordinal));
+
+        // A's end is the window the grant reached, not the end of the slot it was sold.
+        var a = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(BookingStatus.Booked, a.Status);
+        Assert.True(a.EndsAt < BookingService.OriginalEndsAt(a),
+            $"the restored end {a.EndsAt} must stop short of the sold end {BookingService.OriginalEndsAt(a)}");
+        Assert.True(a.EndsAt <= survivor.StartsAt);
+    }
+
+    /// <summary>
+    /// A release names no session, so it is paired by device, relay and time — and a pairing
+    /// that does not reconcile corrects <b>nothing</b>. Without the check, a release whose
+    /// activation was dropped re-prices whatever was lit on that relay last, in the member's
+    /// favour or against them depending on an accident.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_release_that_does_not_reconcile_with_its_session_corrects_nothing()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -10);
+        await CancelAsync(factory, box, booked.BookingId);
+
+        await using var quiet = Quiet(factory, new StubEmailService());
+        var client = quiet.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+            Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 1_200_000))))).StatusCode);
+        Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
+            l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
+
+        // One held minute, uploaded five minutes after the scan: the implied end is four
+        // minutes adrift of the release's own time, so these two are not a pair.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+            Batch(Release(2, court: 0, heldMs: 60_000))))).StatusCode);
+
+        Assert.Single(await AuditAsync(factory, box.TenantId, "device.release_unpaired"));
+        Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
+            l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
+        Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_adjusted"));
+    }
+
+    private static async Task<bool> CodeIsLiveAsync(TestWebAppFactory factory, string code)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var row = await db.AccessCodes.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(c => c.Code == code);
+        return row is not null && row.IsLiveAt(DateTimeOffset.UtcNow);
+    }
+
+    private static async Task<bool> BookingHasLiveCodeAsync(TestWebAppFactory factory, Guid bookingId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        return await db.AccessCodes.IgnoreQueryFilters().AsNoTracking()
+            .AnyAsync(c => c.BookingId == bookingId && c.ExpiresAt > now);
     }
 }

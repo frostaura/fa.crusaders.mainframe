@@ -222,6 +222,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("DisplacedByBookingId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("EndsAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -229,6 +232,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("LightsOnCuedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("NoShowReversedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("PaidByUserId")
@@ -398,6 +404,12 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("BookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("Court")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -422,6 +434,8 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasIndex("TenantId", "DeviceId", "Seq")
                         .IsUnique();
+
+                    b.HasIndex("TenantId", "DeviceId", "Court", "OccurredAt");
 
                     b.ToTable("device_event_receipts", (string)null);
                 });

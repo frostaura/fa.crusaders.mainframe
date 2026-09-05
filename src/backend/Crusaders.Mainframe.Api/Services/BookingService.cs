@@ -694,7 +694,8 @@ public sealed class BookingService
     /// </para>
     /// </summary>
     public async Task<NoShowReversalResult> ReverseNoShowAsync(
-        Booking booking, DateTimeOffset attendedAt, Guid actorUserId, CancellationToken ct)
+        Booking booking, DateTimeOffset attendedAt, Guid actorUserId, CancellationToken ct,
+        DateTimeOffset? provisionalLitEnd = null)
     {
         if (booking.Status != BookingStatus.NoShow || booking.UserId is null) return new NoShowReversalResult.NotNoShow();
 
@@ -702,7 +703,7 @@ public sealed class BookingService
         var payerUserId = booking.PaidByUserId ?? booking.UserId.Value;
 
         var legs = await SettledLegsAsync(booking, payerUserId, actorUserId, ct);
-        var tail = await DisplacementAsync(booking, actorUserId, now, ct);
+        var tail = await DisplacementAsync(booking, actorUserId, now, provisionalLitEnd, ct);
         var postings = legs.Postings.Concat(tail.Postings).ToList();
 
         await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, ct);
@@ -718,7 +719,8 @@ public sealed class BookingService
             booking.Status = BookingStatus.Booked;
             booking.CheckedInAt = attendedAt;
             booking.LightsOnCuedAt ??= attendedAt;
-            RestoreEnd(booking, tail, now);
+            booking.NoShowReversedAt = now;
+            RestoreEnd(booking, tail);
 
             _db.AuditLogs.Add(ReversalAudit(booking, attendedAt, payerUserId, actorUserId, legs, tail));
             foreach (var other in tail.Displaced) _db.AuditLogs.Add(DisplacedAudit(booking, other, tail.Amounts[other.Id], actorUserId));
@@ -743,22 +745,70 @@ public sealed class BookingService
 
         await payerLock.CommitAsync(ct);
 
-        await NotifyNoShowReversedAsync(booking, legs.Refunded, legs.Penalised, attendedAt, ct);
+        await NotifyNoShowReversedAsync(booking, legs.RefundBack, legs.PenaltyBack, attendedAt, ct);
         foreach (var other in tail.Displaced) await NotifyDisplacedAsync(other, booking, ct);
-        return new NoShowReversalResult.Ok(legs.Refunded, legs.Penalised)
+        return new NoShowReversalResult.Ok(legs.RefundBack, legs.PenaltyBack)
         {
             DisplacedBookingIds = tail.Displaced.Select(b => b.Id).ToList(),
-            ManuallyCompensated = legs.CompensatedByHand,
+            ManuallyCompensated = legs.Compensation.Count > 0,
         };
     }
 
     /// <summary>
-    /// The two money legs of a reversal, read off the ledger: what the sweep refunded and
-    /// what it penalised, and whether an admin already put the member right by hand — in
-    /// which case both amounts are zero and no posting is made.
+    /// The two money legs of a reversal, read off the ledger.
+    ///
+    /// <para>
+    /// <see cref="Refunded"/> and <see cref="Penalised"/> are what the sweep posted;
+    /// <see cref="PenaltyBack"/> is what is actually returned once any money the desk
+    /// already moved by hand has been netted off it (settlement model I3).
+    /// </para>
     /// </summary>
-    private sealed record SettledLegs(decimal Refunded, decimal Penalised, bool CompensatedByHand, List<Guid> Compensation, List<LedgerPosting> Postings);
+    private sealed record SettledLegs(
+        decimal Refunded, decimal Penalised, decimal RefundBack, decimal PenaltyBack,
+        List<Guid> Compensation, decimal CompensatedCredits, List<LedgerPosting> Postings);
 
+    /// <summary>
+    /// Settles the reversal's two legs, netting any manual compensation <b>per leg</b>.
+    ///
+    /// <para>
+    /// This used to read "a positive <see cref="LedgerEntryType.AdminAdjustment"/> naming
+    /// this booking means the desk already fixed it" and drop <b>both</b> legs. That is the
+    /// round-3 finding 2 defect, and it is worth naming precisely because the shape recurs:
+    /// the sign of a hand adjustment says nothing about which leg it repaired. The honest
+    /// outstanding after a sweep is always negative — the member holds a full refund less a
+    /// penalty for a court they played — so a <i>positive</i> adjustment can never be the
+    /// whole correction, and matching on sign alone matched only the wrong-direction ones.
+    /// A desk that returned the 2.40 penalty made the whole 8-credit court free; a desk that
+    /// posted the correct −7.60 was not <c>&gt; 0</c>, so the reversal ran on top of it and
+    /// charged the member twice.
+    /// </para>
+    ///
+    /// <para>
+    /// So: <b>both legs are always attempted</b>, and each is netted against the adjustments
+    /// that move money in <i>its own</i> direction. There is exactly one leg that gives
+    /// money back (the penalty return) and exactly one that takes it (the refund reversal),
+    /// so the mapping is forced:
+    /// </para>
+    ///
+    /// <code>
+    /// penaltyBack = max(0, penalised − Σ  positive adjustments)
+    /// refundBack  = max(0, refunded  − Σ |negative adjustments|)
+    /// </code>
+    ///
+    /// <para>
+    /// A desk that returned the 2.40 penalty leaves <c>penaltyBack = 0</c> and the full
+    /// refund reversal, ending at 92 on an 8-credit court — the honest owed. A desk that
+    /// posted the whole correction by hand as −5.60 leaves 2.40 either way, which nets to
+    /// nothing and also ends at 92. Neither can be reached by matching on sign alone.
+    /// </para>
+    ///
+    /// <para>
+    /// The adjustment ids land on the audit row, so the desk can see which of their rows was
+    /// netted. <c>l.UserId == payerUserId</c> is not optional (finding 17): without it, an
+    /// adjustment on another member's wallet that happened to name this booking counted as
+    /// compensation to <i>this</i> payer.
+    /// </para>
+    /// </summary>
     private async Task<SettledLegs> SettledLegsAsync(Booking booking, Guid payerUserId, Guid actorUserId, CancellationToken ct)
     {
         // What the sweep actually posted. The sweep is the only producer that posts these
@@ -766,6 +816,7 @@ public sealed class BookingService
         // here — so this is "what is still outstanding", read off the record.
         var settled = await _db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId == booking.Id
+                        && l.UserId == payerUserId
                         && l.ActorUserId == Guid.Empty
                         && (l.Type == LedgerEntryType.CancellationRefund || l.Type == LedgerEntryType.NoShowPenalty))
             .ToListAsync(ct);
@@ -773,35 +824,46 @@ public sealed class BookingService
         var penalised = -settled.Where(l => l.Type == LedgerEntryType.NoShowPenalty).Sum(l => l.AmountCredits);
 
         var compensation = await _db.LedgerEntries.AsNoTracking()
-            .Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.AdminAdjustment && l.AmountCredits > 0)
-            .Select(l => l.Id)
+            .Where(l => l.RelatedBookingId == booking.Id
+                        && l.UserId == payerUserId
+                        && l.Type == LedgerEntryType.AdminAdjustment)
+            .Select(l => new { l.Id, l.AmountCredits })
             .ToListAsync(ct);
-        if (compensation.Count > 0) return new SettledLegs(0m, 0m, true, compensation, []);
+        var givenBack = compensation.Where(c => c.AmountCredits > 0).Sum(c => c.AmountCredits);
+        var takenBack = -compensation.Where(c => c.AmountCredits < 0).Sum(c => c.AmountCredits);
+        var penaltyBack = Math.Max(0m, penalised - givenBack);
+        var refundBack = Math.Max(0m, refunded - takenBack);
 
         var postings = new List<LedgerPosting>(2);
-        if (refunded > 0)
+        if (refundBack > 0)
         {
             postings.Add(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.CancellationRefund,
-                AmountCredits: -refunded,
+                AmountCredits: -refundBack,
                 ActorUserId: actorUserId,
                 RelatedBookingId: booking.Id,
-                Reason: "No-show refund reversed — attendance recorded after the sweep",
+                Reason: takenBack > 0
+                    ? "No-show refund reversed — attendance recorded after the sweep, net of the desk's own adjustment"
+                    : "No-show refund reversed — attendance recorded after the sweep",
                 ExternalReference: NoShowReversalReference(booking.Id, "refund")));
         }
-        if (penalised > 0)
+        if (penaltyBack > 0)
         {
             postings.Add(new LedgerPosting(
                 UserId: payerUserId,
                 Type: LedgerEntryType.NoShowPenalty,
-                AmountCredits: penalised,
+                AmountCredits: penaltyBack,
                 ActorUserId: actorUserId,
                 RelatedBookingId: booking.Id,
-                Reason: "No-show penalty reversed — attendance recorded after the sweep",
+                Reason: givenBack > 0
+                    ? "No-show penalty reversed — attendance recorded after the sweep, net of the desk's own adjustment"
+                    : "No-show penalty reversed — attendance recorded after the sweep",
                 ExternalReference: NoShowReversalReference(booking.Id, "penalty")));
         }
-        return new SettledLegs(refunded, penalised, false, compensation, postings);
+        return new SettledLegs(
+            refunded, penalised, refundBack, penaltyBack,
+            compensation.Select(c => c.Id).ToList(), givenBack - takenBack, postings);
     }
 
     /// <summary>
@@ -811,13 +873,36 @@ public sealed class BookingService
     /// gets back — captured before the flip.
     /// </summary>
     private sealed record Displacement(
-        DateTimeOffset OriginalEndsAt, List<Booking> Overlaps, List<Booking> Displaced, List<Booking> Survivors,
+        DateTimeOffset OriginalEndsAt, DateTimeOffset ProvisionalEnd,
+        List<Booking> Overlaps, List<Booking> Displaced, List<Booking> Survivors,
         Dictionary<Guid, decimal> Amounts, List<LedgerPosting> Postings);
 
-    private async Task<Displacement> DisplacementAsync(Booking booking, Guid actorUserId, DateTimeOffset now, CancellationToken ct)
+    /// <summary>
+    /// The tail the sweep released, reconciled against the window the lights are believed to
+    /// have run for.
+    ///
+    /// <para>
+    /// <paramref name="provisionalLitEnd"/> is the caller's best knowledge of when the court
+    /// went dark: the activation's own grant, bounded by the sold window (settlement model
+    /// I6/I8). It used to be the original end unconditionally, which displaced — refunded,
+    /// emailed, cancelled — every later booking in the whole slot even when the box's grant
+    /// could not have reached them.
+    /// </para>
+    ///
+    /// <para>
+    /// A displaced booking's access code is expired on the same tracked context, so it dies
+    /// in the same save as the cancellation. Leaving it live is finding 16: the member is
+    /// told their court was taken, walks in anyway, is admitted by the box's cached roster
+    /// onto the court that displaced them, and is then billed pro rata for it.
+    /// </para>
+    /// </summary>
+    private async Task<Displacement> DisplacementAsync(
+        Booking booking, Guid actorUserId, DateTimeOffset now, DateTimeOffset? provisionalLitEnd, CancellationToken ct)
     {
         var originalEndsAt = OriginalEndsAt(booking);
-        var overlaps = await TailOverlapsAsync(booking, originalEndsAt, ct);
+        var provisionalEnd = provisionalLitEnd is { } end && end < originalEndsAt ? end : originalEndsAt;
+        if (provisionalEnd < booking.EndsAt) provisionalEnd = booking.EndsAt;
+        var overlaps = await TailOverlapsAsync(booking, provisionalEnd, ct);
         var displaced = overlaps.Where(b => b.CheckedInAt is null && b.Status is BookingStatus.Booked or BookingStatus.NoShow).ToList();
         var survivors = overlaps.Except(displaced).ToList();
         var penaltiesTaken = await NoShowPenaltiesTakenAsync(displaced, ct);
@@ -827,28 +912,58 @@ public sealed class BookingService
         var postings = new List<LedgerPosting>(displaced.Count);
         foreach (var other in displaced)
         {
-            postings.Add(DisplacedPosting(booking, other, penaltiesTaken.GetValueOrDefault(other.Id), actorUserId));
+            // I10: nothing is posted for a booking that was never charged. A zero row moves
+            // no money, burns the reference the real posting would need, and reads on a
+            // statement as a movement that did not happen.
+            if (amounts[other.Id] > 0) postings.Add(DisplacedPosting(booking, other, penaltiesTaken.GetValueOrDefault(other.Id), actorUserId));
             other.Status = BookingStatus.Cancelled;
             other.CancelledAt = now;
             other.CancellationPenaltyWaived = true;
             other.CancellationReason = ResoldTailRefunded;
+            other.DisplacedByBookingId = booking.Id;
         }
+        await ExpireCodesAsync(displaced.Select(b => b.Id).ToList(), now, ct);
 
-        return new Displacement(originalEndsAt, overlaps, displaced, survivors, amounts, postings);
+        return new Displacement(originalEndsAt, provisionalEnd, overlaps, displaced, survivors, amounts, postings);
     }
 
     /// <summary>
-    /// Decision (2026-09-04): the truncated end is restored — to the end the member paid
-    /// for, or to the start of the earliest surviving overlap — because the lights ran
-    /// that long and a truncated end left the tail sellable at the box while the court was
-    /// lit. The cue-off marker is cleared when the restored end is still ahead, so the
-    /// normal lights-off sweep fires once at the real end and promotes the row.
+    /// Kills every live access code on these bookings, on the tracked context so it lands in
+    /// the caller's own save. Expiry is set to <paramref name="now"/> rather than the past:
+    /// a scan that genuinely happened <i>before</i> this instant must still resolve, so the
+    /// event can be recognised and refused for the right reason instead of vanishing as
+    /// <c>unresolved</c>.
     /// </summary>
-    private static void RestoreEnd(Booking booking, Displacement tail, DateTimeOffset now)
+    private async Task ExpireCodesAsync(List<Guid> bookingIds, DateTimeOffset now, CancellationToken ct)
     {
-        var restoreTo = tail.Survivors.Aggregate(tail.OriginalEndsAt, (end, s) => s.StartsAt < end ? s.StartsAt : end);
+        if (bookingIds.Count == 0) return;
+        var codes = await _db.AccessCodes
+            .Where(c => c.BookingId != null && bookingIds.Contains(c.BookingId.Value) && c.ExpiresAt > now)
+            .ToListAsync(ct);
+        foreach (var code in codes) code.ExpiresAt = now;
+    }
+
+    /// <summary>
+    /// The truncated end is restored to the window the lights are believed to have run for —
+    /// the provisional lit end, or the start of the earliest surviving overlap, whichever is
+    /// sooner (settlement model I8).
+    ///
+    /// <para>
+    /// Two changes from the 2026-09-04 decision, both from round 3. The end is the
+    /// <b>provisional lit end</b> rather than the original end, because the original end is
+    /// not evidence of anything; the box's <c>release</c> narrows it further when it lands.
+    /// And <c>LightsOffCuedAt</c> is <b>not</b> cleared: the sweep had already cued the
+    /// lights off at the truncated end, and clearing the marker made
+    /// <c>LightsCueWorker</c> fire a second <c>booking.lights_off</c> for the same booking
+    /// with a different <c>ends_at</c> (I12). Promotion to <c>Completed</c> does not need
+    /// it — the worker's attended-and-over pass promotes a reversed row whether or not the
+    /// cue already fired.
+    /// </para>
+    /// </summary>
+    private static void RestoreEnd(Booking booking, Displacement tail)
+    {
+        var restoreTo = tail.Survivors.Aggregate(tail.ProvisionalEnd, (end, s) => s.StartsAt < end ? s.StartsAt : end);
         if (restoreTo > booking.EndsAt) booking.EndsAt = restoreTo;
-        if (booking.EndsAt > now) booking.LightsOffCuedAt = null;
     }
 
     private AuditLog ReversalAudit(Booking booking, DateTimeOffset attendedAt, Guid payerUserId, Guid actorUserId, SettledLegs legs, Displacement tail)
@@ -863,12 +978,16 @@ public sealed class BookingService
             {
                 booking_id = booking.Id,
                 attended_at = attendedAt,
-                refund_reversed_credits = legs.Refunded,
-                penalty_reversed_credits = legs.Penalised,
+                refund_reversed_credits = legs.RefundBack,
+                penalty_reversed_credits = legs.PenaltyBack,
+                refund_settled_credits = legs.Refunded,
+                penalty_settled_credits = legs.Penalised,
                 payer_user_id = payerUserId,
-                manual_compensation = legs.CompensatedByHand ? legs.Compensation : null,
+                manual_compensation = legs.Compensation.Count > 0 ? legs.Compensation : null,
+                manual_compensation_credits = legs.CompensatedCredits,
                 ends_at = booking.EndsAt,
                 original_ends_at = tail.OriginalEndsAt,
+                provisional_lit_end = tail.ProvisionalEnd,
                 displaced_booking_ids = tail.Displaced.Select(b => b.Id).ToList(),
                 collision_booking_ids = tail.Survivors.Select(b => b.Id).ToList(),
             }),
@@ -895,19 +1014,19 @@ public sealed class BookingService
 
     /// <summary>
     /// Every later booking on the same court that overlaps the tail the sweep released:
-    /// <c>[EndsAt as truncated, original EndsAt)</c>. Nothing can have overlapped before
-    /// the sweep — the exclusion constraint saw to that — so every hit here was sold after
-    /// it. Tracked, because the displaced ones are cancelled in the same save.
+    /// <c>[EndsAt as truncated, the provisional lit end)</c>. Nothing can have overlapped
+    /// before the sweep — the exclusion constraint saw to that — so every hit here was sold
+    /// after it. Tracked, because the displaced ones are cancelled in the same save.
     /// </summary>
-    private async Task<List<Booking>> TailOverlapsAsync(Booking booking, DateTimeOffset originalEndsAt, CancellationToken ct)
+    private async Task<List<Booking>> TailOverlapsAsync(Booking booking, DateTimeOffset provisionalEnd, CancellationToken ct)
     {
-        if (originalEndsAt <= booking.EndsAt) return [];
+        if (provisionalEnd <= booking.EndsAt) return [];
         var truncatedEnd = booking.EndsAt;
         return await _db.Bookings
             .Where(b => b.CourtId == booking.CourtId
                         && b.Id != booking.Id
                         && b.Status != BookingStatus.Cancelled
-                        && b.StartsAt < originalEndsAt
+                        && b.StartsAt < provisionalEnd
                         && b.EndsAt > truncatedEnd)
             .OrderBy(b => b.StartsAt)
             .ToListAsync(ct);
@@ -1014,6 +1133,57 @@ public sealed class BookingService
     /// <summary>The ledger reference for the one pro-rata charge a cancelled-then-lit booking may carry.</summary>
     public static string CancelledLightsReference(Guid bookingId) => $"cancelled-lit:{bookingId:N}";
 
+    /// <summary>The reference for the one correction the box's own release may make to that charge.</summary>
+    public static string CancelledLightsReleaseReference(Guid bookingId) => $"cancelled-lit-release:{bookingId:N}";
+
+    /// <summary>
+    /// What lit time on a cancelled booking is worth, under the settlement model's ceiling.
+    ///
+    /// <para>
+    /// Three bounds, and each of them was missing (finding 3). <b>Sold minutes</b>, because
+    /// the box's grant runs from a roster window that opens a cue window before the slot —
+    /// a punctual member on a 60-minute court was billed 68 minutes. <b>The relay hard
+    /// cap</b>, which was already there. And <b>the price ceiling</b>: a booking cancelled
+    /// inside the penalty window has already cost its member the penalty, and charging the
+    /// full lit time on top of that billed 143 credits for a 100-credit court. What is left
+    /// to charge is <c>P − retained penalty</c>, and never more.
+    /// </para>
+    ///
+    /// <para>
+    /// Null when there is nothing to charge — no minutes, or the retained penalty already
+    /// accounts for the whole price.
+    /// </para>
+    /// </summary>
+    private async Task<(int Minutes, decimal Amount, Court Court)?> PriceLitTimeAsync(
+        Booking booking, Guid payerUserId, int litMinutes, CancellationToken ct)
+    {
+        var settings = await _settings.GetAsync(ct);
+        var court = await _db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
+
+        var soldMinutes = booking.SliceMinutes * booking.SliceCount;
+        var minutes = Math.Clamp(litMinutes, 0, Math.Min(soldMinutes, RelayHardCap.Minutes));
+        if (minutes <= 0) return null;
+
+        var gross = Math.Round(court.SlicePriceCredits * minutes / settings.SliceMinutes, 2, MidpointRounding.AwayFromZero);
+        var retained = await RetainedPenaltyAsync(booking, payerUserId, ct);
+        var amount = Math.Min(gross, booking.AmountChargedCredits - retained);
+        return amount <= 0 ? null : (minutes, amount, court);
+    }
+
+    /// <summary>
+    /// The late-cancellation penalty still standing against this booking for this payer, net
+    /// of anything that reversed it. Positive, because the rows themselves are debits.
+    /// </summary>
+    private async Task<decimal> RetainedPenaltyAsync(Booking booking, Guid payerUserId, CancellationToken ct)
+    {
+        var sum = await _db.LedgerEntries.AsNoTracking()
+            .Where(l => l.RelatedBookingId == booking.Id
+                        && l.UserId == payerUserId
+                        && l.Type == LedgerEntryType.LateCancellationPenalty)
+            .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
+        return Math.Max(0m, -sum);
+    }
+
     /// <summary>
     /// The lights ran on a booking that had already been cancelled and refunded — charge
     /// the time that was lit, pro rata, as a walk-up-style purchase (closing re-review #21).
@@ -1036,13 +1206,21 @@ public sealed class BookingService
         if (booking.Status != BookingStatus.Cancelled || booking.UserId is null) return new CancelledLightsResult.NotCharged();
         if (booking.CheckedInAt is not null) return new CancelledLightsResult.NotCharged();   // cancelled after check-in: no refund was ever paid
 
-        var settings = await _settings.GetAsync(ct);
-        var court = await _db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
-        var minutes = Math.Clamp(litMinutes, 1, RelayHardCap.Minutes);
-        var amount = Math.Round(court.SlicePriceCredits * minutes / settings.SliceMinutes, 2, MidpointRounding.AwayFromZero);
-        if (amount <= 0) return new CancelledLightsResult.NotCharged();
+        // Settlement model I5. This row was not cancelled by its member — the system took
+        // the court away from them so an earlier booking's late attendance evidence could
+        // have it, refunded them in full and emailed them to say so. Billing them pro rata
+        // for the collision charges two members for one court, which is the exact outcome
+        // the displacement exists to avoid (finding 16). Owed is zero, unconditionally.
+        if (string.Equals(booking.CancellationReason, ResoldTailRefunded, StringComparison.Ordinal))
+        {
+            return new CancelledLightsResult.Displaced(booking.DisplacedByBookingId);
+        }
 
         var payerUserId = booking.PaidByUserId ?? booking.UserId.Value;
+        var priced = await PriceLitTimeAsync(booking, payerUserId, litMinutes, ct);
+        if (priced is not { } charge) return new CancelledLightsResult.NotCharged();
+        var (minutes, amount, court) = charge;
+
         try
         {
             await _ledger.PostAsync(new LedgerPosting(
@@ -1073,6 +1251,8 @@ public sealed class BookingService
                 lit_minutes = minutes,
                 amount_credits = amount,
                 payer_user_id = payerUserId,
+                original_price_credits = booking.AmountChargedCredits,
+                sold_minutes = booking.SliceMinutes * booking.SliceCount,
             }),
         });
         await _db.SaveChangesAsync(ct);
@@ -1117,6 +1297,273 @@ public sealed class BookingService
                   <h2 style="margin:0 0 12px">Your cancelled booking was used</h2>
                   <p>The lights on {courtName} were switched on with the code of a booking you had cancelled and been refunded for.</p>
                   <p><strong>{minutes} minutes</strong> of court time has been charged at the usual rate: <strong>{amount:0.00} credits</strong>. Nothing is refunded once the lights have been on.</p>
+                </div>
+                """);
+    }
+
+    /// <summary>
+    /// The box's own <c>release</c> event, applied: the one measurement of how long a relay
+    /// was actually closed (settlement model §4, I6, I8, I9).
+    ///
+    /// <para>
+    /// Everything upstream of this works from the <i>grant</i> — what the relay was told to
+    /// run for. The grant is an upper bound and nothing more: a member who plays twenty
+    /// minutes of an hour and presses OFF produces a sixty-minute grant and a twenty-minute
+    /// hold. The release is the only place the difference is knowable, and it necessarily
+    /// arrives late — the box uploads one event per request in sequence order, so a release
+    /// is always at least one request behind the activation it belongs to.
+    /// </para>
+    ///
+    /// <para>
+    /// Two things are corrected, and both only ever move in the member's favour. A
+    /// cancelled-then-lit charge is <b>reduced</b> to the real lit time, never increased —
+    /// increasing it on late evidence would let a mis-paired release bill someone. And a
+    /// reversed no-show's provisional end is <b>narrowed</b> to the real one, freeing the
+    /// tail for resale, and any booking the reversal displaced that the court never
+    /// actually reached — and which has not yet started — is put back.
+    /// </para>
+    /// </summary>
+    public async Task<ReleaseSettlement> SettleReleaseAsync(
+        Booking booking, int litMinutes, DateTimeOffset litEnd, Guid actorUserId, CancellationToken ct)
+    {
+        if (booking.UserId is null) return ReleaseSettlement.NotApplicable;
+
+        if (booking.Status == BookingStatus.Cancelled
+            && booking.CheckedInAt is null
+            && !string.Equals(booking.CancellationReason, ResoldTailRefunded, StringComparison.Ordinal))
+        {
+            return await ReduceLitChargeAsync(booking, litMinutes, ct);
+        }
+
+        if (booking.NoShowReversedAt is not null
+            && booking.Status is BookingStatus.Booked or BookingStatus.Completed)
+        {
+            return await NarrowReversedWindowAsync(booking, litEnd, actorUserId, ct);
+        }
+
+        return ReleaseSettlement.NotApplicable;
+    }
+
+    /// <summary>
+    /// The cancelled-then-lit charge, re-priced against the measured window and refunded
+    /// down to it. Never up: a release that would <i>increase</i> the charge is ignored,
+    /// because the activation's grant already bounded what could honestly be billed and a
+    /// mis-paired release must not be able to invent a charge.
+    /// </summary>
+    private async Task<ReleaseSettlement> ReduceLitChargeAsync(Booking booking, int litMinutes, CancellationToken ct)
+    {
+        var payerUserId = booking.PaidByUserId ?? booking.UserId!.Value;
+        var posted = await _db.LedgerEntries.AsNoTracking()
+            .Where(l => l.RelatedBookingId == booking.Id
+                        && l.UserId == payerUserId
+                        && l.Type == LedgerEntryType.LightsPurchase)
+            .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
+        var charged = -posted;
+        if (charged <= 0) return ReleaseSettlement.NotApplicable;
+
+        var priced = await PriceLitTimeAsync(booking, payerUserId, litMinutes, ct);
+        var back = charged - (priced?.Amount ?? 0m);
+        if (back <= 0) return ReleaseSettlement.NotApplicable;
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = Guid.Empty,
+            SubjectUserId = booking.UserId,
+            Action = "booking.cancelled_lights_adjusted",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = booking.Id,
+                charged_credits = charged,
+                measured_credits = priced?.Amount ?? 0m,
+                returned_credits = back,
+                measured_minutes = litMinutes,
+                payer_user_id = payerUserId,
+            }),
+        });
+
+        try
+        {
+            await _ledger.PostAsync(new LedgerPosting(
+                UserId: payerUserId,
+                Type: LedgerEntryType.LightsPurchase,
+                AmountCredits: back,
+                ActorUserId: Guid.Empty,
+                RelatedBookingId: booking.Id,
+                Reason: $"Lights ran {litMinutes} min, not the granted window — {back:0.00} credits returned",
+                ExternalReference: CancelledLightsReleaseReference(booking.Id)), ct);
+        }
+        catch (DbUpdateException ex) when (IsDuplicateReference(ex))
+        {
+            DiscardPendingAdds();
+            return ReleaseSettlement.NotApplicable;
+        }
+
+        return new ReleaseSettlement("charge_reduced", back, []);
+    }
+
+    /// <summary>
+    /// The reversed no-show's provisional end, narrowed to what the relay measured — and
+    /// every booking the displacement took that the court never reached, put back.
+    ///
+    /// <para>
+    /// Reinstatement is bounded to bookings that have <b>not started yet</b>. A member who
+    /// was emailed that their court was gone and did not come cannot be un-told after the
+    /// fact, and the refund has already made them whole; putting the row back would only
+    /// re-charge them for a court they did not use. Before their start, putting it back is
+    /// exactly right — in the common shape the release lands seconds after the activation,
+    /// long before the displaced slot begins.
+    /// </para>
+    /// </summary>
+    private async Task<ReleaseSettlement> NarrowReversedWindowAsync(
+        Booking booking, DateTimeOffset litEnd, Guid actorUserId, CancellationToken ct)
+    {
+        var newEnd = litEnd < booking.StartsAt ? booking.StartsAt : litEnd;
+        if (newEnd >= booking.EndsAt) return ReleaseSettlement.NotApplicable;
+
+        var now = DateTimeOffset.UtcNow;
+        var displaced = await _db.Bookings
+            .Where(b => b.DisplacedByBookingId == booking.Id && b.Status == BookingStatus.Cancelled)
+            .ToListAsync(ct);
+        var candidates = displaced.Where(b => b.StartsAt >= newEnd && b.StartsAt > now).ToList();
+
+        var previousEnd = booking.EndsAt;
+        booking.EndsAt = newEnd;
+        _db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = Guid.Empty,
+            SubjectUserId = booking.UserId,
+            Action = "booking.lit_window_narrowed",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = booking.Id,
+                provisional_ends_at = previousEnd,
+                measured_ends_at = newEnd,
+                reinstatable_booking_ids = candidates.Select(b => b.Id).ToList(),
+            }),
+        });
+
+        // The range has to be freed before anything is put back into it: the slot exclusion
+        // constraint is checked per statement, not deferred.
+        await _db.SaveChangesAsync(ct);
+
+        var reinstated = new List<Guid>();
+        foreach (var other in candidates)
+        {
+            if (await ReinstateAsync(booking, other, actorUserId, ct)) reinstated.Add(other.Id);
+        }
+
+        return new ReleaseSettlement("window_narrowed", 0m, reinstated);
+    }
+
+    /// <summary>
+    /// Puts one displaced booking back: <c>Booked</c> again, the displacement refund
+    /// reversed, a fresh access code minted (the old one died with the displacement), the
+    /// member told. False when it could not be done — the slot was resold in the meantime,
+    /// or the row was a swept no-show whose slot is long past.
+    /// </summary>
+    private async Task<bool> ReinstateAsync(Booking reversed, Booking other, Guid actorUserId, CancellationToken ct)
+    {
+        var reference = DisplacedReference(reversed.Id, other.Id);
+        var refund = await _db.LedgerEntries.AsNoTracking()
+            .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
+        if (refund is not null && refund.Type != LedgerEntryType.CancellationRefund) return false;
+
+        var settings = await _settings.GetAsync(ct);
+        other.Status = BookingStatus.Booked;
+        other.CancelledAt = null;
+        other.CancellationReason = null;
+        other.CancellationPenaltyWaived = false;
+        other.DisplacedByBookingId = null;
+        await _codes.StageForBookingAsync(other, TimeSpan.FromMinutes(settings.GraceWindowMinutes), ct);
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = actorUserId,
+            SubjectUserId = other.UserId,
+            Action = "booking.displacement_reversed",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = other.Id,
+                displaced_by_booking_id = reversed.Id,
+                recharged_credits = refund?.AmountCredits ?? 0m,
+            }),
+        });
+
+        var postings = refund is null || refund.AmountCredits <= 0
+            ? new List<LedgerPosting>()
+            : [new LedgerPosting(
+                UserId: refund.UserId,
+                Type: LedgerEntryType.CancellationRefund,
+                AmountCredits: -refund.AmountCredits,
+                ActorUserId: actorUserId,
+                RelatedBookingId: other.Id,
+                Reason: "Booking reinstated — the earlier court went dark before your slot",
+                ExternalReference: reference + ":reinstated")];
+
+        try
+        {
+            await _ledger.PostManyAsync(postings, ct);
+        }
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException
+                                   || (ex is DbUpdateException due && (IsDuplicateReference(due) || IsOverlapViolation(due))))
+        {
+            _logger.LogInformation("Reinstatement of displaced booking {BookingId} was refused", other.Id);
+            DiscardPendingAdds();
+            _db.Entry(other).State = EntityState.Detached;
+            return false;
+        }
+
+        await NotifyReinstatedAsync(other, ct);
+        return true;
+    }
+
+    private async Task NotifyReinstatedAsync(Booking other, CancellationToken ct)
+    {
+        var user = other.UserId is null ? null : await _db.Users.FirstOrDefaultAsync(u => u.Id == other.UserId, ct);
+        var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == other.CourtId, ct);
+        var courtName = court?.Name ?? "a court";
+
+        if (user is not null)
+        {
+            try
+            {
+                await _email.SendAsync(ReinstatedEmail(user.Email, courtName, other.StartsAt), ct);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Reinstatement email failed for {BookingId}", other.Id); }
+        }
+
+        await _bus.EmitAsync(new DomainEvent(
+            Id: $"evt_{Guid.NewGuid():N}",
+            Type: "booking.displacement_reversed",
+            TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
+            OccurredAt: DateTimeOffset.UtcNow, ActorUserId: null, ActorIsAdmin: false, SubjectUserId: other.UserId,
+            Data: new()
+            {
+                ["booking_id"] = other.Id,
+                ["court_id"] = other.CourtId,
+                ["court_number"] = court?.CourtNumber,
+                ["user_id"] = other.UserId,
+                ["starts_at"] = other.StartsAt,
+                ["ends_at"] = other.EndsAt,
+            }), ct);
+    }
+
+    // Block body, not an expression body — lizard mis-scopes an expression-bodied member
+    // containing braces; see memory/gotchas.md.
+    private static Email.EmailMessage ReinstatedEmail(string to, string courtName, DateTimeOffset startsAt)
+    {
+        return new Email.EmailMessage(
+            To: to,
+            Subject: $"Booking reinstated — {courtName}",
+            HtmlBody:
+                $"""
+                <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+                  <h2 style="margin:0 0 12px">Your booking is back on</h2>
+                  <p>We refunded your booking on {courtName} at {startsAt:HH:mm} on {startsAt:ddd dd MMM} because an earlier booking looked as though it was still using the court.</p>
+                  <p>The court's own lights say otherwise — it went dark before your slot — so the booking has been reinstated and re-charged at the original price. Your access code is in the app.</p>
                 </div>
                 """);
     }
@@ -1527,6 +1974,16 @@ public abstract record NoShowReversalResult
     public sealed record Lost : NoShowReversalResult;
 }
 
+/// <summary>
+/// What a box's <c>release</c> event changed. See <c>BookingService.SettleReleaseAsync</c>.
+/// <c>Code</c> lands on the event's audit row so the desk can see the measurement arriving.
+/// </summary>
+public sealed record ReleaseSettlement(string Code, decimal AmountCredits, IReadOnlyList<Guid> ReinstatedBookingIds)
+{
+    /// <summary>Nothing to correct: an ordinary booking, or a measurement that agrees with the grant.</summary>
+    public static readonly ReleaseSettlement NotApplicable = new("not_applicable", 0m, []);
+}
+
 /// <summary>What became of the lit time on a cancelled booking. See <c>BookingService.ChargeLitCancelledBookingAsync</c>.</summary>
 public abstract record CancelledLightsResult
 {
@@ -1538,6 +1995,14 @@ public abstract record CancelledLightsResult
 
     /// <summary>Nothing to charge: not cancelled, cancelled after check-in (no refund was paid), or no tariff.</summary>
     public sealed record NotCharged : CancelledLightsResult;
+
+    /// <summary>
+    /// The booking was cancelled by a displacement, not by its member — settlement model I5.
+    /// Nothing is owed and nothing is posted; the caller audits the collision, naming
+    /// <paramref name="DisplacedByBookingId"/>, so the desk can see two members reached one
+    /// court.
+    /// </summary>
+    public sealed record Displaced(Guid? DisplacedByBookingId) : CancelledLightsResult;
 }
 
 public abstract record ChargeResult

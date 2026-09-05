@@ -468,4 +468,49 @@ public sealed class SecurityRegressionTests
         Assert.Contains("payer_not_recognised", await response.Content.ReadAsStringAsync());
         Assert.Equal(before, await BalanceAsync(factory, club.TenantId, club.VictimId));
     }
+
+    /// <summary>
+    /// <c>AdjustRequest.RelatedBookingId</c> was copied onto the ledger row unchecked — any
+    /// GUID, any member (round-3 finding 17). The id is not decoration: it is what nets a
+    /// desk adjustment against that booking's automatic reversal, so a mis-picked id changed
+    /// <b>somebody else's</b> settlement, and nothing on their ledger explained it. The UI
+    /// offers a free-text "another booking — enter its ID" field, so the mis-pick is the
+    /// expected accident, not an attack.
+    ///
+    /// <para>Settlement model I4: it must exist in this tenant and its payer must be the
+    /// member being adjusted.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task An_adjustment_cannot_name_another_members_booking()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        using var admin = ClientFor(factory, club, club.AdminId, role: "admin");
+
+        // The victim's booking id, pasted into an adjustment on the other member's wallet.
+        var crossed = await admin.PostAsJsonAsync(
+            $"/api/v1/admin/credit/{club.AttackerId}/adjust",
+            new { amountCredits = 10m, reason = "goodwill", relatedBookingId = club.BookingId });
+        Assert.Equal(HttpStatusCode.BadRequest, crossed.StatusCode);
+        Assert.Contains("booking_not_members", await crossed.Content.ReadAsStringAsync());
+
+        // A booking id that is not one at all.
+        var invented = await admin.PostAsJsonAsync(
+            $"/api/v1/admin/credit/{club.AttackerId}/adjust",
+            new { amountCredits = 10m, reason = "goodwill", relatedBookingId = Guid.NewGuid() });
+        Assert.Equal(HttpStatusCode.BadRequest, invented.StatusCode);
+        Assert.Contains("booking_not_found", await invented.Content.ReadAsStringAsync());
+
+        // Nothing was posted on either attempt.
+        Assert.Equal(0m, await BalanceAsync(factory, club.TenantId, club.AttackerId));
+
+        // The member's own booking is accepted, so the refusal is about ownership and not
+        // about the field.
+        var owned = await admin.PostAsJsonAsync(
+            $"/api/v1/admin/credit/{club.VictimId}/adjust",
+            new { amountCredits = 10m, reason = "goodwill", relatedBookingId = club.BookingId });
+        Assert.Equal(HttpStatusCode.OK, owned.StatusCode);
+    }
 }
