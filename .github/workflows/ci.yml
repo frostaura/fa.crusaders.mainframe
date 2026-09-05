@@ -231,8 +231,10 @@ jobs:
       - name: Formatting (clang-format)
         run: |
           # Must be the pinned pip build, not the OS one — versions format differently.
+          # src/iot/arduino/ is generated output plus two vendored libraries; the
+          # originals under lib/ and src/ are already in this list.
           clang-format --version
-          clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h')
+          clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h' ':(exclude)src/iot/arduino/**')
 
       - name: Strict compile — full pedantic set as errors
         run: src/iot/tools/strict_compile.sh
@@ -349,6 +351,38 @@ jobs:
 
       - name: Build court_mega, court_bridge and the simulator
         run: pio run -d src/iot -e court_mega -e court_bridge -e simulator
+
+      # The Arduino IDE is the DEPLOYMENT route and src/iot/arduino/ is generated,
+      # so a source or platformio.ini change that was not re-exported would leave a
+      # technician flashing last week's firmware from a folder that looks current.
+      - name: Arduino sketches are current
+        run: make arduino-check PIO=pio PY=python3
+
+      - name: Cache the Arduino cores
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino-cores-${{ runner.os }}-${{ hashFiles('src/iot/arduino/arduino-cli.yaml') }}
+
+      - name: Compile both sketches with the Arduino toolchain
+        run: |
+          set -euo pipefail
+          ESP_URL=https://arduino.esp8266.com/stable/package_esp8266com_index.json
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$RUNNER_TEMP/bin" sh
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          # Pinned to match the PlatformIO platforms above: framework-arduino-avr
+          # 5.2.0 is core 1.8.6, framework-arduinoespressif8266 3.30102.0 is 3.1.2.
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr@1.8.6
+          arduino-cli core update-index --additional-urls "$ESP_URL"
+          arduino-cli core install esp8266:esp8266@3.1.2 --additional-urls "$ESP_URL"
+          # The sketch reads its OWN secrets.h, beside the .ino. Same throwaway
+          # values written above; gitignored either way.
+          cp src/iot/src/common/secrets.h src/iot/arduino/court_bridge/secrets.h
+          arduino-cli compile --fqbn arduino:avr:mega:cpu=atmega2560 src/iot/arduino/court_mega
+          arduino-cli compile --fqbn esp8266:esp8266:generic:eesz=4M2M,xtal=80,baud=115200 src/iot/arduino/court_bridge
+          rm -f src/iot/arduino/court_bridge/secrets.h
 
       # The simulator is what the .NET integration tests talk to, so "it links"
       # is not enough — it has to come up and bind its socket. --port 0 asks the
