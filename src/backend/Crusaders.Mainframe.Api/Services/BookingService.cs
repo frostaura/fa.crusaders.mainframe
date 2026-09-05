@@ -641,7 +641,16 @@ public sealed class BookingService
             AlreadyStarted: !actorIsAdmin && booking.StartsAt <= now);
     }
 
-    public async Task<CancellationResult> CancelAsync(Guid bookingId, Guid actorId, bool actorIsAdmin, bool waivePenalty, CancellationToken ct)
+    /// <param name="waiveReason">
+    /// §7: the penalty is waiveable "<b>logged with reason</b>". The audit row used to carry
+    /// a bare <c>waived: true</c>, so a club reviewing waived penalties at month end could
+    /// not tell a genuine club decision from a desk quietly writing one off. Trailing and
+    /// optional rather than sitting beside <paramref name="waivePenalty"/> purely so that
+    /// the existing positional callers — which pass the cancellation token last — keep
+    /// binding their arguments to the parameters they meant.
+    /// </param>
+    public async Task<CancellationResult> CancelAsync(
+        Guid bookingId, Guid actorId, bool actorIsAdmin, bool waivePenalty, CancellationToken ct, string? waiveReason = null)
     {
         var booking = await _db.Bookings.FirstOrDefaultAsync(b => b.Id == bookingId, ct);
         if (booking is null || booking.Status != BookingStatus.Booked) return new CancellationResult.NotFound();
@@ -685,15 +694,27 @@ public sealed class BookingService
         // while the status was not, which is how one cancellation pays out twice.
         booking.Status = BookingStatus.Cancelled;
         booking.CancelledAt = DateTimeOffset.UtcNow;
-        booking.CancellationPenaltyWaived = waivePenalty && insidePenaltyWindow;
+        var waived = waivePenalty && insidePenaltyWindow;
+        booking.CancellationPenaltyWaived = waived;
 
+        // The reason is recorded only when a penalty was actually waived: a reason attached
+        // to a cancellation that waived nothing would be noise in the one report — waived
+        // penalties, month end — this field exists to answer.
         _db.AuditLogs.Add(new AuditLog
         {
             TenantId = _tenant.TenantId,
             ActorUserId = actorId,
             SubjectUserId = booking.UserId.Value,
             Action = "booking.cancelled",
-            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { booking_id = booking.Id, refund = refundAmount, penalty = penaltyAmount, waived = waivePenalty, was_charged = booking.ChargedAt is not null }),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = booking.Id,
+                refund = refundAmount,
+                penalty = penaltyAmount,
+                waived = waivePenalty,
+                waive_reason = waived ? waiveReason?.Trim() : null,
+                was_charged = booking.ChargedAt is not null,
+            }),
         });
 
         // Both movements and the status in ONE save.

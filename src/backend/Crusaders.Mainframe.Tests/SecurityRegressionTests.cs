@@ -204,8 +204,11 @@ public sealed class SecurityRegressionTests
         var club = await SeedAsync(factory);
 
         using var admin = ClientFor(factory, club, club.AdminId, role: "admin");
+        // The reason rides along because §7 requires one whenever a penalty is waived
+        // (`AdminWaiveReasonHttpTests`); this test is about the IDOR, not the waiver.
         var response = await admin.PostAsJsonAsync(
-            $"/api/v1/admin/bookings/{club.BookingId}/cancel", new { waivePenalty = true });
+            $"/api/v1/admin/bookings/{club.BookingId}/cancel",
+            new { waivePenalty = true, waiveReason = "Regression fixture" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
