@@ -1,14 +1,12 @@
 # The gateway, as an image the release chain actually delivers.
 #
 # It used to be stock `nginx:alpine` with ./nginx/nginx.conf bind-mounted from a checkout
-# on the host. Two of the closing re-review's fixes live in that file — the `/firmware/`
-# location and `X-Forwarded-Host: $http_host` — and nothing in the chain moved it: the
-# deploy job re-PUTs the existing Portainer stack with pullImage: true, and the only
-# artifacts that travel are images. A club that merged the fix would have got a new backend
-# behind the OLD gateway config: /firmware/ falling through to the SPA, so every box loops
-# UPDATING / UPDATE FAILED exactly as before the fix; api_base_url and OTA URLs pointing at
-# :80 where nothing listens; and every LAN member back in one rate-limit bucket. The
-# dashboard would say deployed (round-3 finding 18).
+# on the host. One of the closing re-review's fixes lives in that file —
+# `X-Forwarded-Host: $http_host` — and nothing in the chain moved it: the deploy job
+# re-PUTs the existing Portainer stack with pullImage: true, and the only artifacts that
+# travel are images. A club that merged the fix would have got a new backend behind the OLD
+# gateway config, with every LAN member back in one rate-limit bucket, while the dashboard
+# said deployed (round-3 finding 18).
 #
 # Baking the config makes the config a build artifact with the same delivery guarantee as
 # the code it belongs to, and makes the trap non-recurring: every future nginx.conf edit

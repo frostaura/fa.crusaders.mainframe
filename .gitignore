@@ -112,6 +112,3 @@ src/iot/**/*.hex
 **/secrets.h
 **/ota_privkey.pem
 
-# CI drops the signed firmware payload here before the API image build; only the placeholder is tracked.
-firmware-payload/*
-!firmware-payload/README.txt

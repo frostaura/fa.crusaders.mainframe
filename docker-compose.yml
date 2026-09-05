@@ -76,17 +76,6 @@ services:
       # dropped the deployment to loopback-only and stopped the gateway being believed.
       Gateway__TrustedProxies: ${GATEWAY_TRUSTED_PROXIES:-127.0.0.1,::1,172.29.83.0/24}
       Gateway__ForwardLimit: ${GATEWAY_FORWARD_LIMIT:-2}
-      RateLimits__FirmwarePerMinute: ${RATELIMITS_FIRMWARE_PER_MINUTE:-10}
-      Discovery__DowngradeHttpsAdvertisedBaseUrl: ${DISCOVERY_DOWNGRADE_HTTPS_ADVERTISED_BASE_URL:-false}
-      # The OTA override. All three keys of a section or none — a partial section is a
-      # startup refusal by design (OtaCatalogue), which is why they are forwarded as one
-      # block: forwarding some and not others would manufacture exactly that refusal.
-      Ota__Stable__Version: ${OTA_STABLE_VERSION:-}
-      Ota__Stable__Url: ${OTA_STABLE_URL:-}
-      Ota__Stable__SizeBytes: ${OTA_STABLE_SIZE_BYTES:-}
-      Ota__Canary__Version: ${OTA_CANARY_VERSION:-}
-      Ota__Canary__Url: ${OTA_CANARY_URL:-}
-      Ota__Canary__SizeBytes: ${OTA_CANARY_SIZE_BYTES:-}
     expose:
       - "5000"
     volumes:

@@ -5,25 +5,25 @@
 # ---------------------------------------------------------------------------
 # Why this file exists
 # ---------------------------------------------------------------------------
-# The base compose file puts the backend on a bridge network. Broadcast and
-# multicast frames from the club LAN do not cross a bridge, so the UDP discovery
-# listener inside that container receives nothing at all — not intermittently,
-# *never*. A court box announcing on 255.255.255.255:48653 is heard by every
-# device on the LAN except the one that needs to hear it.
+# It existed for UDP discovery. A court box used to announce itself on
+# 255.255.255.255:48653 and the API listened for it, and broadcast frames do not
+# cross a docker bridge — so the listener inside a bridged container received
+# nothing at all, not intermittently but never. Host networking was the only
+# workaround that did not bake a NIC name into a compose file.
 #
-# There is no bridge-network workaround. `ports: 48653:48653/udp` publishes a
-# port for *inbound unicast*; it does not put the container on the LAN's
-# broadcast domain. A macvlan network would work and was rejected: it needs the
-# host interface name baked into the compose file, breaks on any host with a
-# different NIC name, and is silently non-functional on WiFi, which is what the
-# clubhouse box is likely to be on.
+# **There is no discovery any more.** A box carries the club's API key, calls the
+# API by the URL compiled into its secrets.h, and registers itself on its first
+# heartbeat; nothing broadcasts and nothing listens. So this overlay is now a
+# CHOICE rather than a requirement: the base file is sufficient at a club, and a
+# club that runs it alone gets a backend on the bridge, reached through the
+# gateway on :8088, exactly as the boxes expect.
 #
-# So the backend runs with host networking here. Development is unaffected — the
-# base file is unchanged and still uses the bridge, where discovery reports
-# itself as "listening, nothing received" rather than pretending to work.
+# What it still buys, for a club that wants it: the database and MailHog bound to
+# the host loopback instead of published, and Kestrel bound to two addresses
+# rather than every interface. Both are hardening, not connectivity.
 #
 # ---------------------------------------------------------------------------
-# What this breaks, and what to set because of it
+# What host networking breaks, and what to set because of it
 # ---------------------------------------------------------------------------
 # 1. Service-name DNS. A host-networked container is not on the compose bridge,
 #    so `postgres`, `mailhog` and `frontend` no longer resolve from the backend.
@@ -34,8 +34,8 @@
 #    gateway gets an extra_hosts entry pointing that name at the docker host.
 #    nginx.conf is untouched.
 #
-# 3. Port conflicts are now real. 5000/tcp and 48653/udp must be free on the
-#    host. A second stack on the same machine will not start, which is correct.
+# 3. Port conflicts are now real. 5000/tcp must be free on the host. A second
+#    stack on the same machine will not start, which is correct.
 #
 # 4. **Kestrel is bound explicitly, not to every interface.** Host networking
 #    used to put the API on :5000 on every host interface — the club LAN
@@ -47,30 +47,10 @@
 #    ASPNETCORE_URLS below binds loopback plus the one address the gateway dials.
 #
 #    **The boxes are unaffected.** They reach the API through the gateway on
-#    :8088 — the port the discovery OFFER advertises (`Discovery__AdvertisedPort`)
-#    and the only one the topology in docs/specs/deployment.md gives them. Direct
-#    :5000 from the LAN was a side effect of host networking, never a path the
-#    system hands out.
+#    :8088, which is the address in their secrets.h and the only one the topology
+#    in docs/specs/deployment.md gives them. Direct :5000 from the LAN was a side
+#    effect of host networking, never a path the system hands out.
 #
-# ---------------------------------------------------------------------------
-# Checking it worked
-# ---------------------------------------------------------------------------
-#   curl -s http://localhost:8088/api/v1/admin/devices/discovery-status \
-#        -H "Authorization: Bearer $ADMIN_JWT" | jq
-#
-#   state              "Listening"        -> the socket is open
-#   bound_endpoint     "0.0.0.0:48653"    -> on the right port
-#   packets_received   > 0                -> boards are actually reaching it
-#
-# `Listening` with `packets_received: 0` means the API is fine and nothing is
-# arriving: check that the boards are powered and associated, then check the
-# access point for broadcast/multicast filtering, which consumer routers ship
-# switched on. `Failed` means the bind itself failed and `detail` says why.
-#
-#   sudo tcpdump -ni any udp port 48653
-#
-# confirms from outside the stack whether beacons are on the wire at all.
-
 services:
   postgres:
     # Reachable from the host-networked backend. Bound to loopback rather than
@@ -104,23 +84,6 @@ services:
       SMTP_HOST: 127.0.0.1
       SMTP_PORT: 11025
 
-      # The listener. 48653 is fixed by the wire protocol — the firmware
-      # hardcodes it — so it is here to be read, not to be changed.
-      Discovery__Enabled: "true"
-      Discovery__Port: "48653"
-      Discovery__BindAddress: "0.0.0.0"
-
-      # Left empty on purpose: the OFFER then carries the address of whichever
-      # local interface can actually reach the announcing board, which is the
-      # only value that is right on a multi-homed box. Set it explicitly only if
-      # the club reaches the API through a name or a reverse proxy the boards
-      # must use instead.
-      Discovery__AdvertisedBaseUrl: "${DISCOVERY_ADVERTISED_BASE_URL:-}"
-
-      # The port a board should call back on: the gateway's published port, not
-      # the backend's own 5000. Keep this in step with GATEWAY_PORT.
-      Discovery__AdvertisedPort: "${GATEWAY_PORT:-8088}"
-
       # LAN webhook consumers — see go-live checklist item 12. The court box is
       # pull-only and never a webhook destination; uncomment only for a genuine
       # LAN consumer, on a DHCP reservation.
@@ -135,8 +98,7 @@ services:
     # The gateway reaches the host-networked backend FROM the compose bridge, so
     # the backend sees it as a 172.29.83.0/24 peer — the ipam subnet pinned in
     # docker-compose.yml, which is the API's default Gateway:TrustedProxies — and
-    # believes its X-Forwarded-* headers: that is what gives every box a
-    # provisioning/OTA URL on :8088 rather than :80, and every member their own
+    # believes its X-Forwarded-* headers: that is what gives every member their own
     # rate-limit bucket rather than one shared club-wide one.
     #
     # cloudflared runs on this host and dials the published gateway port, so the
