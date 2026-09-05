@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { tokenStore } from "./api";
+import { api, ApiError, setUnauthorizedHandler, TOKEN_KEY, tokenStore } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 import { BalanceProvider } from "./balance";
 import { stubFetch, type StubCall } from "../test/harness";
@@ -92,6 +92,92 @@ describe("signing out revokes the credential, not just the copy in this browser"
     screen.getByRole("button", { name: "Sign out" }).click();
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
     expect(tokenStore.get()).toBeNull();
+  });
+});
+
+/** Both halves of what a member sees after a session ends: where they are, and whether they were told. */
+function SessionProbe() {
+  const auth = useAuth();
+  return (
+    <div>
+      <span data-testid="status">{auth.status}</span>
+      <span data-testid="expired">{auth.sessionExpired ? "told" : "silent"}</span>
+    </div>
+  );
+}
+
+/** What a sign-out in ANOTHER tab does to the `localStorage` this tab shares with it. */
+function signOutInAnotherTab(oldValue = "member.jwt.value") {
+  act(() => {
+    localStorage.removeItem(TOKEN_KEY);
+    window.dispatchEvent(new StorageEvent("storage", { key: TOKEN_KEY, oldValue, newValue: null }));
+  });
+}
+
+describe("a session that ended in another tab", () => {
+  it("ends here too, and says so", async () => {
+    tokenStore.set("member.jwt.value");
+    stubFetch([{ method: "GET", path: "/api/v1/whoami", body: WHOAMI }]);
+
+    render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    signOutInAnotherTab();
+
+    // Without the `storage` listener this tab kept the whole signed-in chrome and its
+    // last-rendered balance, and every request it made from then on came back refused.
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
+    expect(screen.getByTestId("expired")).toHaveTextContent("told");
+  });
+
+  it("keeps running when the other tab merely rotated the token", async () => {
+    tokenStore.set("member.jwt.value");
+    stubFetch([{ method: "GET", path: "/api/v1/whoami", body: WHOAMI }]);
+
+    render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    // A background refresh in whichever tab got there first. The credential changed; the
+    // session did not, and signing the member out over it would be a new bug for an old one.
+    act(() => {
+      localStorage.setItem(TOKEN_KEY, "member.jwt.rotated");
+      window.dispatchEvent(new StorageEvent("storage", {
+        key: TOKEN_KEY, oldValue: "member.jwt.value", newValue: "member.jwt.rotated",
+      }));
+    });
+
+    expect(screen.getByTestId("status")).toHaveTextContent("authenticated");
+    expect(screen.getByTestId("expired")).toHaveTextContent("silent");
+  });
+});
+
+describe("a request that goes out with no token, because another tab took it", () => {
+  afterEach(() => setUnauthorizedHandler(null));
+
+  it("is read as the end of the session, not as a connection fault", async () => {
+    const ended: string[] = [];
+    setUnauthorizedHandler(() => ended.push("ended"));
+    tokenStore.clear();
+    // What the API actually answers a credential-less request: it cannot resolve a tenant, so
+    // this is a 400, not a 401 — and a client branching on 401 alone reported it to the member
+    // as "Check your connection and press Refresh", forever.
+    stubFetch([{
+      method: "GET", path: "/api/v1/schedule", status: 400,
+      body: { error: "tenant_unresolved", message: "No tenant could be resolved from this request." },
+    }]);
+
+    await expect(api.get("/api/v1/schedule?date=2026-09-05")).rejects.toBeInstanceOf(ApiError);
+    expect(ended).toEqual(["ended"]);
+  });
+
+  it("leaves an ordinary 400 alone", async () => {
+    const ended: string[] = [];
+    setUnauthorizedHandler(() => ended.push("ended"));
+    tokenStore.clear();
+    stubFetch([{ method: "POST", path: "/api/v1/bookings", status: 400, body: { error: "past_time" } }]);
+
+    await expect(api.post("/api/v1/bookings", {})).rejects.toBeInstanceOf(ApiError);
+    expect(ended).toEqual([]);
   });
 });
 
