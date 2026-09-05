@@ -22,6 +22,15 @@
 # looking whitelisted, which is what `TopUpEndpoints::MapTopUpEndpoints` did
 # here. Copy the name out of `make complexity`'s warning line; never type it
 # from the C#.
+#
+# AND THE SCOPING IS NOT STABLE, so one name is not enough. Moving the nested
+# `FailureCodes` class below the map method — done to make the entry match —
+# flipped lizard's report the other way, to `TopUpEndpoints::MapTopUpEndpoints`,
+# and the gate went red on a file nobody had edited. A whitelizard entry keys on
+# lizard's reported name, so ANY refactor that changes how the parser scopes a
+# method silently voids it in one direction or the other. Both names for the one
+# function are listed for that reason: whichever way the parser reads the file,
+# the ratchet holds and the function is still frozen at its current numbers.
 AdminConfigEndpoints::MapAdminConfigEndpoints
 AdminMemberEndpoints::MapAdminMemberEndpoints
 AdminMembersPage
@@ -42,6 +51,7 @@ ReportingEndpoints::MapReportingEndpoints
 SmtpEmailService::SendAsync
 SortHeader
 FailureCodes::MapTopUpEndpoints  # = TopUpEndpoints.MapTopUpEndpoints; see the naming note above
+TopUpEndpoints::MapTopUpEndpoints  # the SAME function under lizard's other scoping of it — see below
 WebAuthnEndpoints::MapWebAuthnEndpoints
 adjust
 load
