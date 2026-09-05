@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import AdminWebhooksPage from "./AdminWebhooks";
-import { renderPage, stubFetch } from "../test/harness";
+import { renderPage, stubFetch, type StubRoute } from "../test/harness";
 
 /**
  * The webhooks console.
@@ -50,7 +50,7 @@ describe("AdminWebhooks", () => {
     response_body_excerpt: "exception:HttpRequestException:nodename nor servname provided",
   });
 
-  const routes = (extra: Record<string, unknown>[] = []) => [
+  const routes = (extra: StubRoute[] = []): StubRoute[] => [
     { path: LIST, body: [endpointFixture()] },
     ...extra,
   ];

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
-import { ledgerRowFixture, memberFixture, renderPage, stubFetch } from "../test/harness";
+import { ledgerRowFixture, memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
 
 /**
  * The members screen — the credit-adjustment form specifically.
@@ -243,7 +243,7 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
   const USER = "44444444-4444-4444-4444-444444444444";
   const ADJUST = `/api/v1/admin/credit/${USER}/adjust`;
 
-  const routes = (adjust: Record<string, unknown> = {}) => [
+  const routes = (adjust: Partial<StubRoute> = {}): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [memberFixture()] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
     { path: "/api/v1/admin/ledger/", body: [] },
@@ -337,7 +337,7 @@ describe("AdminMembers — member class", () => {
   const MEMBERSHIP = "33333333-3333-3333-3333-333333333333";
   const CLASS_PATH = `/api/v1/admin/members/${MEMBERSHIP}/class`;
 
-  const routes = (member: Record<string, unknown> = {}, classRoute: Record<string, unknown> = {}) => [
+  const routes = (member: Record<string, unknown> = {}, classRoute: Partial<StubRoute> = {}): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [memberFixture(member)] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
     { path: "/api/v1/admin/ledger/", body: [] },
@@ -387,7 +387,7 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
 
   const MEMBERSHIP = "33333333-3333-3333-3333-333333333333";
 
-  const routes = (member: Record<string, unknown> = {}, extra: Record<string, unknown>[] = []) => [
+  const routes = (member: Record<string, unknown> = {}, extra: StubRoute[] = []): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [memberFixture(member)] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
     { path: "/api/v1/admin/ledger/", body: [] },
