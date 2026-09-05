@@ -188,6 +188,47 @@ void test_display_holdoff_abandons_then_skips_then_tries_again(void) {
   TEST_ASSERT_TRUE(holdoff.allow());
 }
 
+void test_display_holdoff_asks_for_exactly_one_resync_per_abandoned_write(void) {
+  // REVIEW 3, FINDING 12. The bus timeout bounds the STALL; it does not recover
+  // the DISPLAY. An abandoned write can take an En edge with it, and the
+  // HD44780 then pairs every later nibble wrongly — from that write on, every
+  // screen is garbage on a bus that is now perfectly healthy, for the rest of
+  // the evening. Only the 4-bit reset sequence clears it, and it was reachable
+  // only through the library's init(), called once in setup().
+  courtlogic::DisplayHoldoff holdoff;
+  // Nothing has gone wrong: no re-sync is owed and none is invented.
+  TEST_ASSERT_FALSE(holdoff.resyncPending());
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+
+  holdoff.noteTimeout();
+  TEST_ASSERT_TRUE(holdoff.resyncPending());
+  // It survives the whole holdoff run — the driver cannot act on it until a
+  // write is allowed through again.
+  for (uint8_t i = 0U; i < courtlogic::kHoldoffWrites; ++i) {
+    TEST_ASSERT_FALSE(holdoff.allow());
+    TEST_ASSERT_TRUE(holdoff.resyncPending());
+  }
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_TRUE(holdoff.takeResync());
+  // Exactly once, however many writes follow: the controller is back in phase.
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+  TEST_ASSERT_FALSE(holdoff.resyncPending());
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+
+  // Two timeouts inside one holdoff still owe one re-sync, not two.
+  holdoff.noteTimeout();
+  holdoff.noteTimeout();
+  for (uint8_t i = 0U; i < courtlogic::kHoldoffWrites; ++i) {
+    TEST_ASSERT_FALSE(holdoff.allow());
+  }
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_TRUE(holdoff.takeResync());
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+}
+
 } // namespace
 
 // --- RelayGuard: the safety property ---------------------------------------
@@ -985,6 +1026,7 @@ int main(int, char**) {
   RUN_TEST(test_box_refuses_the_legacy_dialect_so_a_bare_a_lights_nothing);
   RUN_TEST(test_box_accepts_the_legacy_dialect_only_when_told_to);
   RUN_TEST(test_display_holdoff_abandons_then_skips_then_tries_again);
+  RUN_TEST(test_display_holdoff_asks_for_exactly_one_resync_per_abandoned_write);
 
   return UNITY_END();
 }

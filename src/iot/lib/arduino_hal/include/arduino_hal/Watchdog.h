@@ -26,6 +26,16 @@
 // go-live checklist carries the check. What can be pinned here is that the
 // firmware side never contributes to the loop.
 //
+// MAKING THAT BENCH CHECK FIREABLE
+// --------------------------------
+// The checklist's test was "short SDA to ground with a court lit; the wedge
+// must end in a reset". Once LcdDisplay armed the Wire timeout, it cannot: each
+// write gives up in 25 ms, the holdoff skips the next twenty, loop() returns
+// and the watchdog is kicked — correct behaviour, and a test that can no longer
+// fail (review 3, finding 11). So the SDA short now proves the timeout and the
+// holdoff, and the watchdog gets a test of its own: watchdogBenchStall(), built
+// only into the bench environment.
+//
 // Compiled only for the Mega. The ESP8266 core has its own watchdog, and it is
 // already on.
 
@@ -36,15 +46,40 @@
 
 namespace arduino_hal {
 
-/// Enable the watchdog with a two-second period. Call once, at the END of
-/// setup(): LCD init alone spends ~50 ms in delay() calls, and a period that
-/// has to survive setup() would be a period too long to protect loop().
+/// Enable the watchdog with an EIGHT-second period, at the TOP of setup().
+///
+/// setup() is not free: LcdDisplay::begin() alone is over a second of
+/// synchronous Wire traffic (the library's own 50 ms + 1 s power-on waits), and
+/// with a bus that is wedged rather than absent every one of those transactions
+/// spends its 25 ms timeout. Leaving setup() unwatched entirely — which is what
+/// arming only at the end meant — left the one path that can hang forever with
+/// nothing behind it (review 3, finding 10). Eight seconds is longer than any
+/// legitimate init and far shorter than "never".
+void watchdogBeginBoot();
+
+/// Re-arm the watchdog with a two-second period. Call once, at the END of
+/// setup(): a period that has to survive init is a period too long to protect
+/// loop(), where a pass is ~10 ms and a single bus timeout is 25 ms.
 void watchdogBegin();
 
 /// Restart the countdown. Called once per pass of loop(), from the composition
 /// root — never from inside a driver, where it would hide the stall it exists
-/// to end.
+/// to end. Also called between the init steps in setup(), which are sequential
+/// and bounded and so cannot hide anything.
 void watchdogKick();
+
+#ifdef WDT_BENCH_STALL
+/// Spins forever, so the bench can prove the watchdog and the bootloader.
+///
+/// Compiled ONLY into `env:court_mega_bench`, which exists for this and nothing
+/// else — there is no runtime flag, no serial verb and no way to reach this
+/// from a production image. The bench build stalls once, sixty seconds after
+/// boot, which gives the technician time to light a court first: the box must
+/// reset within two seconds and come back with every relay open. A board that
+/// stays dark or boot-loops has a bootloader that does not survive a WDT reset,
+/// which is a bootloader replacement and not a firmware fix.
+void watchdogBenchStall();
+#endif
 
 } // namespace arduino_hal
 

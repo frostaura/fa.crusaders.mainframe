@@ -22,7 +22,26 @@
 //     paint, and the relay tick behind those paints keeps its cadence;
 //   * after the holdoff the driver tries again, because a transient IS
 //     transient and a display that recovers should start rendering again
-//     without a power cycle.
+//     without a power cycle;
+//   * and that first write after a holdoff RE-SYNCHRONISES the controller
+//     before it paints anything, which is the part this type used to leave out.
+//
+// WHY A RE-SYNC IS NEEDED AND NOT JUST A RETRY
+// --------------------------------------------
+// The header and README used to describe the timeout as a recovery. It bounds
+// the STALL; it does not recover the DISPLAY (review 3, finding 12). Each
+// character is six Wire transactions and two of every three carry the En edge
+// that clocks a nibble in. An abandoned write that loses one of those removes a
+// falling edge, and the HD44780 pairs every later nibble with the wrong
+// partner: from that write on, every screen — NOT RECOGNISED, SEE THE DESK,
+// COURT C 30 MIN — is nonsense for the rest of the evening, on a box whose bus
+// is now perfectly healthy. Nothing but the 4-bit reset sequence clears it, and
+// that used to be reachable only through the library's init(), called once in
+// setup().
+//
+// So the decision — "the next allowed write must re-sync first" — is a bit
+// here, where the host suite pins it, and the eleven-transaction sequence it
+// asks for is arduino_hal::LcdDisplay's, where the bus is.
 //
 // No Arduino headers, no heap.
 
@@ -46,8 +65,20 @@ public:
   bool allow();
 
   /// The bus timed out during a write. The remainder of that write is the
-  /// caller's to abandon; this arms the holdoff for the writes that follow.
+  /// caller's to abandon; this arms the holdoff for the writes that follow AND
+  /// the re-sync the first write after it must do.
   void noteTimeout();
+
+  /// True exactly once per timeout, on the first write allowed after the
+  /// holdoff: that write must re-synchronise the controller before painting.
+  /// Consuming it here rather than in the driver is what lets the host suite
+  /// prove a re-sync is asked for exactly once per abandoned write, however
+  /// many paints the holdoff swallowed.
+  bool takeResync();
+
+  /// True while a re-sync is still owed. Diagnostics and tests; the driver
+  /// uses takeResync().
+  bool resyncPending() const { return resync_; }
 
   /// True while writes are being skipped. What the composition root would
   /// report if it had anywhere to report to.
@@ -59,6 +90,7 @@ public:
 
 private:
   uint8_t remaining_ = 0U;
+  bool resync_ = false;
   uint16_t timeouts_ = 0U;
 };
 

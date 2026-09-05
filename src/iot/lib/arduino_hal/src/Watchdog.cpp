@@ -26,6 +26,14 @@ void disableWatchdogEarly() {
 
 namespace arduino_hal {
 
+void watchdogBeginBoot() {
+  // Eight seconds, armed before anything in setup() can touch a peripheral. The
+  // longest legitimate init is LcdDisplay::begin()'s ~1.1 s of library delays;
+  // a wedged bus adds 25 ms per abandoned transaction on top. Eight bounds both
+  // without ever firing on a healthy board.
+  wdt_enable(WDTO_8S);
+}
+
 void watchdogBegin() {
   // Two seconds: an order of magnitude longer than the longest legitimate pass
   // (a full two-row paint with the bus healthy is ~10 ms; a single bus timeout
@@ -37,6 +45,16 @@ void watchdogBegin() {
 void watchdogKick() {
   wdt_reset();
 }
+
+#ifdef WDT_BENCH_STALL
+void watchdogBenchStall() {
+  // No wdt_reset() in here, deliberately. This is the only code in the tree
+  // that can stall a pass past the watchdog period, and it exists so the bench
+  // check has something real to observe.
+  for (;;) {
+  }
+}
+#endif
 
 } // namespace arduino_hal
 
