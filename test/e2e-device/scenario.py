@@ -3,11 +3,11 @@
 
 Real API from source + real Postgres + the firmware's native simulator (the Mega
 half, over TCP) + the PayFast mountebank imposter. The script plays every part the
-missing hardware would: the ESP8266 bridge (UDP discovery, HKDF key, signed HTTP),
+missing hardware would: the ESP8266 bridge (the club API key, its MAC, plain HTTP),
 the member's phone (login, QR code), the admin (settings, bookings), PayFast (a
 signed ITN) and, on the serial side, the bridge again against the simulated Mega.
 
-Stdlib only, by design: urllib / hashlib / hmac / socket / subprocess. See README.md
+Stdlib only, by design: urllib / hashlib / socket / subprocess. See README.md
 beside this file for what each step proves and which review finding it pins.
 
 Exit status is non-zero on any failed assertion. Every HTTP exchange is recorded and
@@ -17,9 +17,7 @@ the failing ones are printed compactly.
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
-import hmac
 import json
 import os
 import queue
@@ -63,7 +61,6 @@ SEEDED_MEMBER_M = "MEM-1001"  # Naledi Khoza, Regular — the scanning member
 SEEDED_MEMBER_N = "MEM-1003"  # Aisha Patel, Regular — the no-show member
 
 RELAY_HARD_CAP_SECONDS = 5400
-CLAIM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 # ---------------------------------------------------------------------------
@@ -179,23 +176,12 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def free_udp_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 def tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
     except OSError:
         return False
-
-
-def b64url_decode(text: str) -> bytes:
-    pad = "=" * (-len(text) % 4)
-    return base64.urlsafe_b64decode(text + pad)
 
 
 def dec(value: Any) -> float:
@@ -294,101 +280,68 @@ def expect_status(resp: Resp, status: int, what: str) -> Resp:
 
 
 # ---------------------------------------------------------------------------
-# Device-side crypto: the corpus algorithm from src/contracts/device-protocol/http
+# The device credential: one static club key, and the box's MAC in the body
 # ---------------------------------------------------------------------------
-
-
-def canonical_string(method: str, path_and_query: str, unix_seconds: int, nonce: str, body: bytes) -> str:
-    body_hash = hashlib.sha256(body).hexdigest()
-    return "\n".join([method.upper(), path_and_query, str(unix_seconds), nonce, body_hash])
-
-
-def sign(key: bytes, canonical: str) -> str:
-    return hmac.new(key, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def selftest_signing() -> None:
-    """Pin the local signer to the shared corpus before trusting it against the API."""
-    cases = json.loads((ROOT / "src" / "contracts" / "device-protocol" / "http" / "cases.json").read_text())
-    key = bytes.fromhex(cases["signing_key_hex"])
-    for case in cases["requests"]:
-        canonical = canonical_string(
-            case["method"], case["path_and_query"], case["unix_seconds"], case["nonce"], bytes.fromhex(case["body_hex"])
-        )
-        if canonical.encode("utf-8").hex() != case["canonical_hex"]:
-            raise StepFailed(f"corpus canonical mismatch for {case['path_and_query']}")
-        if sign(key, canonical) != case["signature"]:
-            raise StepFailed(f"corpus signature mismatch for {case['path_and_query']}")
 
 
 class DeviceClient:
-    """A provisioned box: signs like DeviceRequestSigner, over the real wire."""
+    """A box on the club LAN: bearer key in the header, MAC in every body."""
 
-    def __init__(self, http: Http, device_id: str, key: bytes) -> None:
+    def __init__(self, http: Http, api_key: str, mac: str) -> None:
         self.http = http
-        self.device_id = device_id
-        self.key = key
+        self.api_key = api_key
+        self.mac = mac
 
-    def signed(self, method: str, path: str, body: Any, unix_seconds: Optional[int] = None, key: Optional[bytes] = None) -> Resp:
-        payload = json.dumps(body).encode("utf-8") if body is not None else b""
-        ts = int(time.time()) if unix_seconds is None else unix_seconds
-        nonce = secrets.token_hex(16)
-        canonical = canonical_string(method, path, ts, nonce, payload)
-        headers = {
-            "X-Device-Id": self.device_id,
-            "X-Device-Timestamp": str(ts),
-            "X-Device-Nonce": nonce,
-            "X-Device-Signature": sign(key or self.key, canonical),
-        }
-        return self.http.call(method, path, raw=payload, content_type="application/json", headers=headers)
+    def call(self, method: str, path: str, body: Any, api_key: Optional[str] = None, mac: Optional[str] = None) -> Resp:
+        """A device request. `mac` is spliced in here rather than at every call site,
+        because every device request carries it and none of them is about it."""
+        payload = dict(body or {})
+        payload["mac"] = self.mac if mac is None else mac
+        headers = {"Authorization": "Bearer " + (self.api_key if api_key is None else api_key)}
+        return self.http.call(
+            method, path,
+            raw=json.dumps(payload).encode("utf-8"),
+            content_type="application/json",
+            headers=headers,
+        )
 
     def heartbeat(self, **extra: Any) -> Resp:
-        body = {"running_version": "1.1.0", "mega_version": "1.1.0", "uptime_seconds": 5, "wifi_rssi": -61}
+        body = {"firmware_version": "2.0.0", "mega_version": "2.0.0", "uptime_ms": 5000}
         body.update(extra)
-        return self.signed("POST", "/api/v1/device/heartbeat", body)
+        return self.call("POST", "/api/v1/device/heartbeat", body)
 
 
-# ---------------------------------------------------------------------------
-# UDP discovery: CRSDR1 <VERB> k=v ...*CC
-# ---------------------------------------------------------------------------
+def corpus_request_vectors() -> list[dict]:
+    """The shared corpus's device requests, as the firmware writes them."""
+    cases = json.loads((ROOT / "src" / "contracts" / "device-protocol" / "http" / "cases.json").read_text())
+    return cases.get("requests", [])
 
 
-def xor_checksum(body: bytes) -> str:
-    x = 0
-    for b in body:
-        x ^= b
-    return f"{x:02X}"
-
-
-def beacon_encode(verb: str, fields: list[tuple[str, str]]) -> bytes:
-    body = " ".join(f"{k}={v}" for k, v in fields).encode("utf-8")
-    return b"CRSDR1 " + verb.encode() + b" " + body + b"*" + xor_checksum(body).encode() + b"\n"
-
-
-def beacon_decode(packet: bytes) -> tuple[str, dict]:
-    text = packet.decode("utf-8").rstrip("\r\n")
-    if not text.startswith("CRSDR1 "):
-        raise StepFailed(f"bad beacon magic: {text!r}")
-    star = text.rfind("*")
-    rest = text[len("CRSDR1 "):star]
-    verb, body = rest.split(" ", 1)
-    if xor_checksum(body.encode()) != text[star + 1:]:
-        raise StepFailed(f"bad beacon checksum: {text!r}")
-    fields = dict(tok.split("=", 1) for tok in body.split(" "))
-    return verb, fields
-
-
-def claim_commitment(code: str, nonce_hex: str) -> str:
-    return hashlib.sha256(f"{code}:{nonce_hex}".encode("utf-8")).hexdigest()[:16]
-
-
-def announce(udp_port: int, fields: list[tuple[str, str]], timeout: float = 5.0) -> tuple[str, dict]:
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(("127.0.0.1", 0))
-        s.settimeout(timeout)
-        s.sendto(beacon_encode("ANNOUNCE", fields), ("127.0.0.1", udp_port))
-        data, _ = s.recvfrom(1024)
-    return beacon_decode(data)
+def selftest_device_contract() -> None:
+    """Pin this script's idea of a device request to the shared corpus before trusting
+    it against the API. There is no signing left to self-test — the whole of the
+    credential is a bearer header and a `mac` — so what is checked is that both are
+    where this script puts them."""
+    saw_bearer = False
+    saw_mac = False
+    for case in corpus_request_vectors():
+        for value in case.values():
+            if isinstance(value, str) and value.startswith("Bearer ") and len(value) > len("Bearer "):
+                saw_bearer = True
+        body_hex = case.get("body_hex") or ""
+        if not body_hex:
+            continue
+        body = json.loads(bytes.fromhex(body_hex))
+        mac = body.get("mac")
+        if mac is None:
+            continue
+        if mac != mac.lower() or len(mac) != 12:
+            raise StepFailed(f"corpus vector {case.get('id')} carries a mac the API would not normalise: {mac!r}")
+        saw_mac = True
+    if not saw_bearer:
+        raise StepFailed("no corpus request vector carries an Authorization: Bearer header")
+    if not saw_mac:
+        raise StepFailed("no corpus request vector carries a `mac` in its body")
 
 
 # ---------------------------------------------------------------------------
@@ -566,7 +519,6 @@ class ApiProcess:
         self.cfg = cfg
         self.connection_string = connection_string
         self.port = free_port()
-        self.udp_port = free_udp_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.proc: Optional[subprocess.Popen] = None
         self.log = cfg.workdir / "api.log"
@@ -613,14 +565,6 @@ class ApiProcess:
             "ASPNETCORE_URLS": self.base,
             "ConnectionStrings__DefaultConnection": self.connection_string,
             "Database__AutoMigrateOnStartup": "true",
-            "Discovery__Enabled": "true",
-            "Discovery__Port": str(self.udp_port),  # not 48653: another API on this host must not eat our beacons
-            "Discovery__BindAddress": "127.0.0.1",
-            # No AdvertisedBaseUrl, on purpose: the OFFER then carries the local interface
-            # plus AdvertisedPort (which is this run's port), and /provision ECHOES the
-            # request's scheme+host — the branch a club's on-prem deployment takes, and the
-            # one the closing re-review found the old scenario never exercised (#18/#22).
-            "Discovery__AdvertisedPort": str(self.port),
             "Media__StoragePath": str(media),
             "Biometric__TemplateStorePath": str(self.cfg.workdir / "biometric"),
             "RateLimits__AuthPerMinute": "1000",  # the scenario makes more auth calls per minute than a club does
@@ -645,7 +589,7 @@ class ApiProcess:
                 raise StepFailed(f"API exited with {self.proc.returncode} during startup; see {self.log}")
             try:
                 if http.get("/healthz", timeout=3).status == 200:
-                    print(f"  API up at {self.base} (discovery UDP :{self.udp_port}), log {self.log}")
+                    print(f"  API up at {self.base}, log {self.log}")
                     return
             except OSError:
                 pass
@@ -1015,80 +959,58 @@ def create_bookings(w: World) -> None:
     REPORT.check("setup", "four bookings created over the admin booking API (charged at booking)", all(b.get("id") for b in (w.b1, w.b3, w.b6, w.b7)))
 
 
-def provision_box(w: World, api: ApiProcess) -> None:
-    step("C1  Discover, claim and provision a simulated box; clock seed on provision and on 401")
-    def announce_and_claim(label: str) -> tuple[str, str, Resp]:
-        """A fresh board announces, the admin claims it. Returns (mac, claim_code, claim response)."""
-        mac = ("02e2e" + secrets.token_hex(4))[:12]  # 12 lowercase hex, locally administered
-        nonce = secrets.token_hex(8)
-        code = "".join(secrets.choice(CLAIM_ALPHABET) for _ in range(8))
-        fields = [("v", "1"), ("mac", mac), ("hw", "esp8266"), ("fw", "1.1.0"), ("st", "unclaimed"),
-                  ("n", nonce), ("cch", claim_commitment(code, nonce)), ("up", "5")]
-        verb, offer = announce(api.udp_port, fields)
-        REPORT.check("C1", f"{label}: ANNOUNCE over UDP is answered with an OFFER echoing the nonce and carrying the API URL",
-                     verb == "OFFER" and offer.get("n") == nonce and offer.get("url") == api.base and "t" in offer,
-                     f"offer={offer}")
-        discovered = expect_status(w.http.get("/api/v1/admin/devices/discovered", token=w.admin_token), 200, "discovered GET").json
-        mine = next((b for b in discovered if b["mac"] == mac), None)
-        REPORT.check("C1", f"{label}: admin sees the announcing board as claimable", bool(mine) and mine.get("claimable") is True)
-        claim = expect_status(w.http.post("/api/v1/admin/devices/claim", {
-            "claim_code": code, "device_code": "e2e-box-" + secrets.token_hex(2), "name": "E2E box", "court_numbers": [1, 2, 3, 4],
-        }, token=w.admin_token), 200, f"claim ({label})")
-        return mac, code, claim
+def provision_box(w: World) -> None:
+    step("C1  Read the club key, and let a box register itself on its first heartbeat")
 
-    # Board A proves the refusal path: a wrong guess burns the grant, so the right code
-    # no longer works either — a wrong guess costs the attacker the grant, not a turn.
-    mac_a, code_a, _ = announce_and_claim("board A")
-    wrong = w.http.post("/api/v1/device/provision", {"mac": mac_a, "claim_code": "AAAAAAAA"})
-    REPORT.check("C1", "board A: provision with a wrong claim code is refused uniformly (404 no_pending_claim)",
-                 wrong.status == 404 and wrong.get("error") == "no_pending_claim")
-    burned = w.http.post("/api/v1/device/provision", {"mac": mac_a, "claim_code": code_a})
-    REPORT.check("C1", "board A: the wrong guess burned the grant — the RIGHT code is now refused too", burned.status == 404)
+    # The key: readable, not shown-once, minted on the first read so the page is never
+    # empty. This is the whole of what an admin does before flashing a box.
+    key = expect_status(w.http.get("/api/v1/admin/devices/api-key", token=w.admin_token), 200, "device api-key GET")
+    api_key = key.get("api_key")
+    REPORT.check("C1", "GET /admin/devices/api-key mints and returns the club's device key with a regenerated_at",
+                 isinstance(api_key, str) and len(api_key) >= 32 and bool(key.get("regenerated_at")),
+                 f"len={len(api_key or '')}")
+    again = expect_status(w.http.get("/api/v1/admin/devices/api-key", token=w.admin_token), 200, "device api-key GET again")
+    REPORT.check("C1", "the key is readable rather than shown-once: a second read is the same key",
+                 again.get("api_key") == api_key)
 
-    # Board B is the box the rest of the scenario drives.
-    w.box_mac, claim_code, claim = announce_and_claim("board B")
-    w.box_device_id = claim["device"]["id"]
-    REPORT.check("C4", "claim registers the box on four courts in relay order [1,2,3,4]", claim["device"]["court_numbers"] == [1, 2, 3, 4])
+    # No key, and a key that is merely wrong, are both a plain 401 with nothing in the body.
+    w.box_mac = ("02e2e" + secrets.token_hex(4))[:12]  # 12 lowercase hex, locally administered
+    anonymous = w.http.call("POST", "/api/v1/device/heartbeat",
+                            raw=json.dumps({"mac": w.box_mac}).encode("utf-8"), content_type="application/json")
+    REPORT.check("C1", "a heartbeat with no key at all is 401", anonymous.status == 401, f"status={anonymous.status}")
 
-    before = int(time.time())
-    prov = expect_status(w.http.post("/api/v1/device/provision", {"mac": w.box_mac, "claim_code": claim_code}), 200, "provision")
-    server_unix = prov.get("server_unix")
-    REPORT.check("C1", "provision response carries server_unix (the first clock seed) within 5s of wall clock",
-                 isinstance(server_unix, int) and abs(server_unix - before) <= 5, f"server_unix={server_unix}")
-    REPORT.check("C1", "provision hands out the same derived key the admin was shown, plus the API base URL",
-                 prov["device_key"] == claim["device_key"] and prov["device_id"] == w.box_device_id and prov["api_base_url"] == api.base)
-    REPORT.check("R18", "with no AdvertisedBaseUrl the echoed api_base_url keeps the port the board actually used (not a port-less Host)",
-                 prov["api_base_url"] == api.base and api.base.rsplit(":", 1)[1].isdigit(), f"api_base_url={prov['api_base_url']}")
+    stranger = DeviceClient(w.http, "not-the-club-key-not-the-club-key", w.box_mac)
+    refused = stranger.heartbeat()
+    REPORT.check("C1", "a heartbeat with an unrecognised key is 401 with an empty body (no reason, no clock)",
+                 refused.status == 401 and not refused.text.strip(), f"status={refused.status} body={refused.text[:80]!r}")
 
-    # Board C provisions THROUGH the gateway: the request carries the X-Forwarded-* headers
-    # nginx sends, from a trusted proxy address (loopback is in the default list), and the
-    # base URL handed back is the gateway's host AND port — the shape a box behind :8088 needs.
-    mac_c, code_c, _ = announce_and_claim("board C")
-    via_gateway = w.http.post("/api/v1/device/provision", {"mac": mac_c, "claim_code": code_c}, headers={
-        "X-Forwarded-For": "192.0.2.50", "X-Forwarded-Proto": "http", "X-Forwarded-Host": "192.0.2.9:8088",
-    })
-    REPORT.check("R18", "board C: provisioning behind the gateway (X-Forwarded-Host 192.0.2.9:8088 from a trusted proxy) hands out http://192.0.2.9:8088",
-                 via_gateway.status == 200 and via_gateway.get("api_base_url") == "http://192.0.2.9:8088", f"resp={via_gateway.text[:160]}")
-    key = b64url_decode(prov["device_key"])
-    REPORT.check("C1", "device key decodes from base64url to 32 HKDF bytes", len(key) == 32)
-    w.box = DeviceClient(w.http, w.box_device_id, key)
+    # The box. It has never been registered, and registering it IS the first heartbeat.
+    w.box = DeviceClient(w.http, api_key, w.box_mac)
+    first = expect_status(w.box.heartbeat(), 200, "first heartbeat")
+    REPORT.check("C1", "an unknown MAC on a heartbeat registers itself: the response names the box",
+                 first.get("device_code") == f"box-{w.box_mac[-6:]}", f"device_code={first.get('device_code')}")
+    REPORT.check("C4", "the box it created drives the club's four courts in ascending relay order [1,2,3,4]",
+                 first.get("court_numbers") == [1, 2, 3, 4], f"court_numbers={first.get('court_numbers')}")
+    REPORT.check("C1", "nothing from the retired scheme survives on the wire: no server_unix, no ota",
+                 "server_unix" not in first.json and "ota" not in first.json, f"keys={sorted(first.json)}")
 
-    again = w.http.post("/api/v1/device/provision", {"mac": w.box_mac, "claim_code": claim_code})
-    REPORT.check("C1", "the provisioning grant is single-use: a second fetch is refused", again.status == 404)
+    devices = expect_status(w.http.get("/api/v1/admin/devices/", token=w.admin_token), 200, "admin devices GET").json
+    mine = next((d for d in devices if d.get("mac_address") == w.box_mac), None)
+    w.box_device_id = (mine or {}).get("id", "")
+    REPORT.check("C1", "the box appears on the admin Devices list by itself, flagged as unchecked",
+                 bool(mine) and mine.get("auto_registered") is True, f"device={mine}")
 
-    first_ok = w.box.heartbeat()
-    REPORT.check("C1", "a correctly signed heartbeat is accepted (200)", first_ok.status == 200)
-    bad_clock = w.box.signed("POST", "/api/v1/device/heartbeat", {"running_version": "1.1.0"}, unix_seconds=0)
-    REPORT.check("C1", "a heartbeat signed with unix_seconds=0 (no clock) is 401 whose body carries server_unix",
-                 bad_clock.status == 401 and isinstance(bad_clock.get("server_unix"), int)
-                 and abs(bad_clock["server_unix"] - int(time.time())) <= 5
-                 and bad_clock.headers.get("WWW-Authenticate", "").startswith("Device"),
-                 f"body={bad_clock.text[:80]}")
-    bad_key = w.box.signed("POST", "/api/v1/device/heartbeat", {"running_version": "1.1.0"}, key=b"\x00" * 32)
-    REPORT.check("C1", "a heartbeat signed with the wrong key is 401 with the same clock body and no reason",
-                 bad_key.status == 401 and isinstance(bad_key.get("server_unix"), int) and set(bad_key.json.keys()) == {"server_unix"})
-    ok = w.box.heartbeat()
-    REPORT.check("C1", "a correctly signed heartbeat after the 401s is 200 (the box recovered its clock)", ok.status == 200)
+    # A second heartbeat is the same board, not a second row.
+    expect_status(w.box.heartbeat(), 200, "second heartbeat")
+    devices = expect_status(w.http.get("/api/v1/admin/devices/", token=w.admin_token), 200, "admin devices GET 2").json
+    REPORT.check("C1", "a second heartbeat from the same MAC does not register a second row",
+                 len([d for d in devices if d.get("mac_address") == w.box_mac]) == 1)
+
+    # A body with no usable MAC cannot be answered, and must say so rather than 404 —
+    # which would read as "unknown board" to a box that simply wrote the field wrong.
+    no_mac = w.box.call("POST", "/api/v1/device/heartbeat", {}, mac="not-a-mac")
+    REPORT.check("C1", "a heartbeat whose mac is not twelve hex characters is 400 mac_required",
+                 no_mac.status == 400 and no_mac.get("error") == "mac_required", f"resp={no_mac.text[:120]}")
 
 
 def roster_entries(resp: Resp) -> dict[int, tuple[str, int, int]]:
@@ -1105,8 +1027,8 @@ def heartbeat_roster(w: World) -> None:
     assert w.box is not None
     hb = expect_status(w.box.heartbeat(), 200, "heartbeat")
     REPORT.check("C4", "heartbeat court_numbers == [1,2,3,4] (relay order)", hb.get("court_numbers") == [1, 2, 3, 4])
-    REPORT.check("C2", "heartbeat carries server_unix, heartbeat_seconds from settings and a config block",
-                 isinstance(hb.get("server_unix"), int) and hb.get("heartbeat_seconds") == 30 and hb.get("config", {}).get("grace_window_minutes") == 1)
+    REPORT.check("C2", "heartbeat carries heartbeat_seconds from settings and a config block, and no server_unix",
+                 "server_unix" not in hb.json and hb.get("heartbeat_seconds") == 30 and hb.get("config", {}).get("grace_window_minutes") == 1)
     entries = roster_entries(hb)
     pattern = re.compile(r"^[0-9A-Z]{1,20}\|[0-3]\|-?\d+\|-?\d+$")
     REPORT.check("C2", "every roster entry matches TOKEN|relay|opens_in|closes_in", all(pattern.match(e) for e in hb.get("roster", [])), f"roster={hb.get('roster')}")
@@ -1162,7 +1084,7 @@ def heartbeat_roster(w: World) -> None:
     devices = expect_status(w.http.get("/api/v1/admin/devices", token=w.admin_token), 200, "devices GET").json
     mine = next((d for d in devices if d["id"] == w.box_device_id), None)
     REPORT.check("C4", "admin device list shows the box with court_numbers [1,2,3,4], last_seen_at and running_version from the heartbeat",
-                 bool(mine) and mine["court_numbers"] == [1, 2, 3, 4] and mine.get("last_seen_at") and mine.get("running_version") == "1.1.0")
+                 bool(mine) and mine["court_numbers"] == [1, 2, 3, 4] and mine.get("last_seen_at") and mine.get("running_version") == "2.0.0")
     REPORT.check("R17", "the box carries no button-map override (button_map null) and the heartbeat sent the club's eight-entry map",
                  bool(mine) and "button_map" in mine and mine["button_map"] is None and len(hb.get("config", {}).get("button_map", [])) == 8)
 
@@ -1182,14 +1104,15 @@ def online_activation(w: World, sim: Optional[Simulator]) -> None:
                      scan.args == [token], str(scan))
         token = scan.args[0] if scan.args else token
     before = now_utc()
-    act = expect_status(w.box.signed("POST", "/api/v1/device/activate", {"method": "qr", "token": token, "court": 3}), 200, "activate B3")
+    act = expect_status(w.box.call("POST", "/api/v1/device/activate", {"method": "qr", "token": token, "court": 3}), 200, "activate B3")
     granted = act.get("granted_seconds", -1)
     expected = int((w.b3["ends_at"] - before).total_seconds())
     REPORT.check("C3", "POST /device/activate with B3's code -> activated, court_number 3, booking_id B3",
                  act.get("activated") is True and act.get("reason") == "ok" and act.get("court_number") == 3 and act.get("booking_id") == w.b3["id"], f"resp={act.json}")
     REPORT.check("C3", "granted_seconds is the remainder of the slot, <= the 5400s relay cap",
                  0 < granted <= RELAY_HARD_CAP_SECONDS and abs(granted - expected) <= 3, f"granted={granted} expected~{expected}")
-    REPORT.check("C3", "activate response carries server_unix", isinstance(act.get("server_unix"), int))
+    REPORT.check("C3", "the activate response no longer carries server_unix: the box has no clock to seed",
+                 "server_unix" not in act.json, f"keys={sorted(act.json)}")
 
     if sim is not None:
         # And the lights: the bridge's decision goes to the Mega as !ON on relay C.
@@ -1202,7 +1125,7 @@ def online_activation(w: World, sim: Optional[Simulator]) -> None:
         REPORT.check("M-serial", "the simulated relay driver reports court C ON", True)
 
     time.sleep(1.2)
-    again = expect_status(w.box.signed("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "re-activate B3")
+    again = expect_status(w.box.call("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "re-activate B3")
     REPORT.check("C3", "a repeat scan of the live session is idempotent: activated again with the remaining seconds, no second charge",
                  again.get("activated") is True and again.get("booking_id") == w.b3["id"] and 0 < again.get("granted_seconds", 0) < granted, f"resp={again.json}")
     hb = expect_status(w.box.heartbeat(), 200, "heartbeat after activation")
@@ -1229,18 +1152,18 @@ def offline_attendance(w: World) -> None:
     batch = {"uptime_ms": 600_000, "events": [
         {"seq": 1, "uptime_ms": 590_000, "kind": "activation", "court": 0, "method": "qr", "subject": token, "duration_ms": 2_700_000},
     ]}
-    up = expect_status(w.box.signed("POST", "/api/v1/device/events", batch), 200, "events upload")
-    REPORT.check("C6", "events upload acknowledges accepted_through=1, recorded=1 and carries server_unix",
-                 up.get("accepted_through") == 1 and up.get("recorded") == 1 and isinstance(up.get("server_unix"), int), f"resp={up.json}")
+    up = expect_status(w.box.call("POST", "/api/v1/device/events", batch), 200, "events upload")
+    REPORT.check("C6", "events upload acknowledges accepted_through=1, recorded=1, with no server_unix",
+                 up.get("accepted_through") == 1 and up.get("recorded") == 1 and "server_unix" not in up.json, f"resp={up.json}")
     hb = expect_status(w.box.heartbeat(), 200, "heartbeat after event")
     # Attendance is stamped server-side, but the entry STAYS: a checked-in booking still
     # inside its window is re-lightable offline (a slot longer than the 90-minute relay
     # cap needs its second half re-lit from the roster). It leaves when it ends.
     REPORT.check("C6", "B1 stays on the roster after the activation event (checked-in and still live: re-lightable offline)", 0 in roster_entries(hb))
-    live = expect_status(w.box.signed("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "activate B1 after event")
+    live = expect_status(w.box.call("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "activate B1 after event")
     REPORT.check("C6", "a scan of B1 now answers as a live session (activated, remaining seconds) rather than a fresh cue-window check",
                  live.get("activated") is True and live.get("booking_id") == w.b1["id"] and 0 < live.get("granted_seconds", 0) <= 2775)
-    replay = expect_status(w.box.signed("POST", "/api/v1/device/events", batch), 200, "events replay")
+    replay = expect_status(w.box.call("POST", "/api/v1/device/events", batch), 200, "events replay")
     REPORT.check("C6", "replaying the same seq is acknowledged (accepted_through=1) and not re-recorded (recorded=0)",
                  replay.get("accepted_through") == 1 and replay.get("recorded") == 0, f"resp={replay.json}")
     # A relay/court mismatch is receipted, never refused — the box cannot change it. B1's
@@ -1248,7 +1171,7 @@ def offline_attendance(w: World) -> None:
     wrong = {"uptime_ms": 601_000, "events": [
         {"seq": 2, "uptime_ms": 600_500, "kind": "activation", "court": 3, "method": "qr", "subject": token, "duration_ms": 1000},
     ]}
-    wr = expect_status(w.box.signed("POST", "/api/v1/device/events", wrong), 200, "events wrong relay")
+    wr = expect_status(w.box.call("POST", "/api/v1/device/events", wrong), 200, "events wrong relay")
     REPORT.check("C6", "an activation naming a relay not wired to the booking's court is still receipted (accepted_through=2), not 4xx",
                  wr.get("accepted_through") == 2 and wr.get("recorded") == 1)
 
@@ -1259,11 +1182,11 @@ def walk_up(w: World) -> None:
     wallet_before = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
     nonce = secrets.token_hex(8)
     req = {"minutes": 60, "method": "qr", "token": w.ident_code, "court": 2, "nonce": nonce}
-    first = expect_status(w.box.signed("POST", "/api/v1/device/walkup", req), 200, "walkup")
+    first = expect_status(w.box.call("POST", "/api/v1/device/walkup", req), 200, "walkup")
     REPORT.check("C5", "walk-up on court 2 (named in the request, on the box) is granted 60 minutes (<= 90) for 32 credits",
                  first.get("granted_minutes") == 60 and dec(first.get("amount_credits", 0)) == 32 and first.get("replayed") is False, f"resp={first.json}")
     REPORT.check("C5", "balance_after_credits == wallet before - 32", dec(first.get("balance_after_credits", -1)) == wallet_before - 32)
-    replay = expect_status(w.box.signed("POST", "/api/v1/device/walkup", req), 200, "walkup replay")
+    replay = expect_status(w.box.call("POST", "/api/v1/device/walkup", req), 200, "walkup replay")
     REPORT.check("H3", "resending the identical nonce answers replayed:true with the SAME booking_id and the remainder of the grant (60, seconds later)",
                  replay.get("replayed") is True and replay.get("booking_id") == first.get("booking_id") and 59 <= replay.get("granted_minutes", 0) <= 60, f"resp={replay.json}")
     wallet_after = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
@@ -1275,18 +1198,18 @@ def walk_up(w: World) -> None:
     slot = find_slot(w, first.get("booking_id", ""), now_utc())
     REPORT.check("C5", "the walk-up is a real booking on court 2 in M's name, visible on the schedule",
                  bool(slot) and slot["courtNumber"] == 2 and slot["ownerUserId"] == w.m_user_id and slot["status"] == "booked")
-    off_box = w.box.signed("POST", "/api/v1/device/walkup", {"minutes": 30, "method": "qr", "token": w.ident_code, "court": 5, "nonce": secrets.token_hex(8)})
+    off_box = w.box.call("POST", "/api/v1/device/walkup", {"minutes": 30, "method": "qr", "token": w.ident_code, "court": 5, "nonce": secrets.token_hex(8)})
     REPORT.check("C5", "court 5 (not on this box) -> 400 court_not_on_device", off_box.status == 400 and off_box.get("error") == "court_not_on_device", f"resp={off_box.text[:120]}")
-    no_nonce = w.box.signed("POST", "/api/v1/device/walkup", {"minutes": 30, "method": "qr", "token": w.ident_code, "court": 2})
+    no_nonce = w.box.call("POST", "/api/v1/device/walkup", {"minutes": 30, "method": "qr", "token": w.ident_code, "court": 2})
     REPORT.check("H3", "a walk-up without a nonce -> 400 nonce_required", no_nonce.status == 400 and no_nonce.get("error") == "nonce_required")
     booking_code = w.tokens.get(2)
     if booking_code:
         wallet_now = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
-        as_wallet = w.box.signed("POST", "/api/v1/device/walkup", {"minutes": 30, "method": "qr", "token": booking_code, "court": 2, "nonce": secrets.token_hex(8)})
+        as_wallet = w.box.call("POST", "/api/v1/device/walkup", {"minutes": 30, "method": "qr", "token": booking_code, "court": 2, "nonce": secrets.token_hex(8)})
         wallet_after_attempt = dec(expect_status(w.http.get("/api/v1/wallet", token=w.m_token), 200, "wallet")["balance_credits"])
         REPORT.check("R19", "B3's BOOKING code presented as a walk-up buyer -> 400 not_recognised and the wallet is untouched (a roster code is not a wallet)",
                      as_wallet.status == 400 and as_wallet.get("error") == "not_recognised" and wallet_after_attempt == wallet_now, f"resp={as_wallet.text[:120]}")
-    too_long = w.box.signed("POST", "/api/v1/device/walkup", {"minutes": 240, "method": "qr", "token": w.ident_code, "court": 2, "nonce": secrets.token_hex(8)})
+    too_long = w.box.call("POST", "/api/v1/device/walkup", {"minutes": 240, "method": "qr", "token": w.ident_code, "court": 2, "nonce": secrets.token_hex(8)})
     REPORT.check("M1", "240 minutes is refused with the effective cap (min(walk_up_max, relay cap 90))",
                  too_long.status == 400 and too_long.get("error") == "minutes_out_of_range" and too_long.get("max_minutes") == 90)
 
@@ -1297,13 +1220,13 @@ def early_scan(w: World) -> None:
     token = w.tokens.get(1)
     if not token:
         raise StepFailed("no token for B6 (relay 1)")
-    r = expect_status(w.box.signed("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "activate B6")
+    r = expect_status(w.box.call("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "activate B6")
     starts_in = r.get("starts_in_seconds", 0)
     expected = int((w.b6["starts_at"] - now_utc()).total_seconds())
     REPORT.check("A2-15", "activate B6 -> activated:false, reason too_early, granted_seconds 0, court_number 2",
                  r.get("activated") is False and r.get("reason") == "too_early" and r.get("granted_seconds") == 0 and r.get("court_number") == 2, f"resp={r.json}")
     REPORT.check("A2-15", "starts_in_seconds counts to the slot start (~3h)", abs(starts_in - expected) <= 3, f"starts_in={starts_in} expected~{expected}")
-    again = expect_status(w.box.signed("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "activate B6 again")
+    again = expect_status(w.box.call("POST", "/api/v1/device/activate", {"method": "qr", "token": token}), 200, "activate B6 again")
     REPORT.check("A2-15", "a second early scan is still too_early: nothing was stamped (a live session is never too early)",
                  again.get("reason") == "too_early")
     ledger = expect_status(w.http.get(f"/api/v1/admin/ledger?userId={w.m_user_id}&limit=200", token=w.admin_token), 200, "ledger M").json
@@ -1471,8 +1394,8 @@ def main() -> int:
     print(f"e2e-device: worktree {ROOT}\n  scratch {cfg.workdir}")
 
     step("Preflight")
-    selftest_signing()
-    REPORT.check("C1", "local signer reproduces every request signature in the shared corpus", True)
+    selftest_device_contract()
+    REPORT.check("C1", "this script's device request shape matches the shared corpus (bearer header + normalised mac)", True)
 
     pg = Postgres(cfg)
     db_name = "e2e_device_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(2)
@@ -1498,7 +1421,7 @@ def main() -> int:
         w = World(Http(api.base))
         admin_login(w)
         run_step(lambda: seed_and_tune(w), "setup")
-        run_step(lambda: provision_box(w, api), "C1")
+        run_step(lambda: provision_box(w), "C1")
         run_step(lambda: create_bookings(w), "setup")
         run_step(lambda: heartbeat_roster(w), "C2")
         run_step(lambda: online_activation(w, sim), "C3")

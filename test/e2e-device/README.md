@@ -19,7 +19,7 @@ exchanges plus the API log tail.
 | Postgres | **real** | whatever answers on `E2E_PG_HOST:E2E_PG_PORT` (default `localhost:5439`, the throwaway `crusaders-fixprog-pg` container; `docker start`/`docker run` if nothing is listening — in CI the `e2e-device` job points these at its Postgres service container, so no docker is needed there). A fresh `e2e_device_<stamp>` database per run — EF's `Migrate` creates it — so re-runs never see each other |
 | Mega half of the court box | **real firmware** | `src/iot/.pio/build/simulator/program`: the same `courtlogic::CourtBox`, `lib/protocol` codec and relay auto-off timer the ATmega runs, behind `posix_hal` and a TCP socket. Built by the target with `pio run -e simulator` |
 | PayFast | **imposter** | mountebank with `test/virtualization/payfast/imposter.json` — the same file `make virt-up` and `docker-compose.test.yml` use. Reused if one is already up on `:4545` |
-| ESP8266 bridge | **played** by the script | UDP `ANNOUNCE`/`OFFER`, the claim commitment, `POST /provision`, base64url HKDF key, the canonical-string HMAC signer (self-tested against `src/contracts/device-protocol/http/cases.json` before anything else), heartbeat, `/activate`, `/events`, `/walkup`, and the serial `!VERB,arg*CC` codec towards the simulated Mega |
+| ESP8266 bridge | **played** by the script | the club's device API key as a bearer header and the box's MAC in every body (both self-tested against `src/contracts/device-protocol/http/cases.json` before anything else), heartbeat, `/activate`, `/events`, `/walkup`, and the serial `!VERB,arg*CC` codec towards the simulated Mega |
 | Member's phone | **played** | admin password reset → member login → `POST /me/qr/generate` |
 | Admin | **played** | settings, court prices, credits, bookings on behalf, ledger reads |
 | PayFast's ITN | **played** | a `COMPLETE` notification signed with PHP-`urlencode` + MD5 in posted order, the seeded passphrase, then replayed and then tampered |
@@ -30,11 +30,11 @@ exchanges plus the API log tail.
 downlink side of the serial protocol and expects a bridge — or a test — on the socket."* It
 runs `courtlogic::CourtBox` (relays, LCD, buttons, scanner, auth window, auto-off timer) over
 `posix_hal` and listens on loopback TCP for one peer. It does **not** run `bridgelogic` or
-`devapi`; it has no WiFi, no UDP discovery, no HTTP client, and it cannot speak to the API.
+`devapi`; it has no WiFi, no HTTP client, and it cannot speak to the API.
 Its console (stdin) accepts `scan <code>`, `btn <A-D|1-4>` and `quit`; its stdout prints
 relay transitions (`[relay] court C ON`).
 
-So the script is the bridge. It drives the device API directly with a signed HTTP client and,
+So the script is the bridge. It drives the device API directly with a key-bearing HTTP client and,
 separately, drives the simulator's serial protocol to prove the Mega half — and it chains the
 two where the real bridge would: the scan code is fed to the simulated scanner, taken off the
 wire as `!SCAN,<code>`, sent to `POST /api/v1/device/activate`, and the grant is sent back
@@ -49,10 +49,10 @@ The finding ids are those of `docs/reviews/e2e-adversarial-review-2026-08-24.md`
 
 | Step | Finding | Assertion, in one line |
 |---|---|---|
-| Preflight | C1 | the local signer reproduces every request signature in the shared corpus |
+| Preflight | C1 | this script's device request shape matches the shared corpus: an `Authorization: Bearer` header, and a `mac` that is already twelve lowercase hex (a vector pinning `5C:CF:...` would be a firmware that registers a second row for a board that already has one) |
 | Seed | setup | settings tuned over the admin API (slice 15, grace 1, cue 10, roster 120, forward 240, walk-up cap 90, QR lifetime 900); courts priced at 8; member M logged in via admin reset; credits via admin adjustment |
-| 1 | **C1 / R18** | UDP `ANNOUNCE` → `OFFER` echoes the nonce and carries the API URL (built from the local interface + `AdvertisedPort` — no `AdvertisedBaseUrl` is set, so the echo branch a club deployment takes is the one exercised); board visible as claimable; claim registers a four-court box; a wrong claim code is a uniform 404 **and burns the grant** (the right code is refused afterwards); provision returns `server_unix` within 5 s of wall clock and the same key the admin was shown, and an `api_base_url` that keeps the port the board used; a third board provisioning with the gateway's `X-Forwarded-Host 192.0.2.9:8088` from a trusted proxy is told `http://192.0.2.9:8088`; the grant is single-use; a heartbeat signed with `unix_seconds=0` is a 401 whose body is exactly `{"server_unix"}` with `WWW-Authenticate: Device`; a wrong-key signature gets the same body and no reason; a correctly signed heartbeat is 200 |
-| 2 | **C2 / C4 / H2 / R17** | `court_numbers == [1,2,3,4]`; every roster entry matches `TOKEN\|relay\|opens_in\|closes_in`; M's bookings appear on relays 0 and 2 with signed relative seconds measured from the response instant (cue already open, `closes_in − opens_in = 45 min + cue`); the booking three hours out is absent at `roster_window 120`, present at 240, absent again at 120; tokens are 12-char access codes; the QR screen shows the same code the roster carries on relay 2; the admin device list shows the box's courts, `last_seen_at`, `running_version` and `button_map: null` (no per-box override), and the heartbeat carried the club's eight-entry map |
+| 1 | **C1 / C4** | `GET /admin/devices/api-key` mints and returns the club's key with a `regenerated_at`, and a second read returns the **same** key (readable, not shown-once — it has to be pasteable into a `secrets.h` weeks later); a heartbeat with no key at all is 401; one with an unrecognised key is 401 with an **empty** body (no reason, no clock); the first heartbeat from an unknown MAC **registers the box itself**, named `box-<last six of the mac>` and driving `[1,2,3,4]`, with no `server_unix` and no `ota` anywhere in the response; the admin Devices list shows it flagged `auto_registered`; a second heartbeat from the same MAC does not create a second row; a `mac` that is not twelve hex characters is `400 mac_required` rather than a 404 that would read as "unknown board" |
+| 2 | **C2 / C4 / H2 / R17** | `court_numbers == [1,2,3,4]`; the heartbeat carries no `server_unix`; every roster entry matches `TOKEN\|relay\|opens_in\|closes_in`; M's bookings appear on relays 0 and 2 with signed relative seconds measured from the response instant (cue already open, `closes_in − opens_in = 45 min + cue`); the booking three hours out is absent at `roster_window 120`, present at 240, absent again at 120; tokens are 12-char access codes; the QR screen shows the same code the roster carries on relay 2; the admin device list shows the box's courts, `last_seen_at`, `running_version` and `button_map: null` (no per-box override), and the heartbeat carried the club's eight-entry map |
 | 3 | **C3 / C4** | `!SCAN` from the simulated scanner → `/activate` → `activated`, `court_number 3`, the booking's id, `granted_seconds ≤ 5400` and equal to the slot remainder; `!ON,C,<granted>` closes relay C on the simulator (`!STATE` mask + remaining, `[relay] court C ON`); a repeat scan is idempotent with fewer seconds; the ledger holds only the booking-time charge; `!OFF,C` reports `!EVT,OFF,C` and clears the mask |
 | 4 | **C6** | an uploaded activation event (relay 0, the booking's code, uptime arithmetic) is `accepted_through 1, recorded 1`; the booking STAYS on the roster while live (checked in and re-lightable offline — a slot longer than the 90-minute relay cap needs its second half re-lit from the roster); a scan now answers as a live session; replaying the seq is acknowledged and not re-recorded; a relay/court mismatch is receipted, not refused |
 | 5 | **C5 / H3 / M1 / R19** | walk-up on court 2 (named, on the box) for 60 min → 32 credits, `replayed:false`, balance after == before − 32; the identical nonce → `replayed:true`, same `booking_id`, the REMAINDER of the grant (59–60 seconds later; a replay never re-grants the original length), wallet unchanged, one `LightsPurchase` row; the walk-up is a real booking on the schedule; court 5 → `400 court_not_on_device`; no nonce → `400 nonce_required`; B3's booking code as the buyer → `400 not_recognised` with the wallet untouched (a roster code is not a wallet); 240 min → `400 minutes_out_of_range` with `max_minutes 90` |
@@ -114,10 +114,9 @@ Not defects in the fix programme, but worth knowing before reading the output:
 | `DOTNET`, `PIO`, `PY` | `dotnet`, `src/iot/.venv/bin/pio`, `src/iot/.venv/bin/python` | toolchain overrides, as elsewhere in the Makefile |
 | `--no-simulator`, `--no-money` | | script flags to skip the Mega or PayFast legs |
 
-The API is started on an ephemeral port with its discovery listener on an ephemeral UDP port
-bound to loopback — not 48653 — so another API on the same host cannot swallow the beacons,
-and rate limits are raised far above a club's traffic so the scenario's burst of auth calls is
-not mistaken for password guessing.
+The API is started on an ephemeral port, so two runs on one host cannot collide, and rate
+limits are raised far above a club's traffic so the scenario's burst of auth calls is not
+mistaken for password guessing.
 
 ## Why not `make virt-up`
 

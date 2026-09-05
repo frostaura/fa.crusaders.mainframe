@@ -47,8 +47,9 @@ Portainer. It has never run, because the repository secrets are unset and
 - [ ] `PORTAINER_ENDPOINT_ID`
 
 There was a seventh, `OTA_PRIVATE_KEY`, read by an `iot-sign` firmware-signing job. The
-firmware no longer takes over-the-air updates, so neither the key nor the job is needed;
-wherever either still exists, it is residue to remove rather than a secret to set.
+firmware no longer takes over-the-air updates; the job and the workflow's reference to the
+key are both gone. If the secret is still set on the repository, **delete it** — a secret
+nothing reads is a credential nobody is watching.
 
 **If skipped:** the deploy job is skipped silently on every push and the club never gets a
 build. **The release chain stays unproven until these are set and one real push to `main`

@@ -84,13 +84,13 @@ Class is admin-assignable and editable, audit-logged on every change.
 
 ## 6. Court activation, lights-on, and the moment of charge
 
-> **Note on charge timing.** Per blueprint A.9, the credit debit happens at lights-on, NOT at booking creation. Booking is a hold (verifies balance, reserves slot, no ledger row written). The lights-on event posts the `booking_charge` debit. This means cancellations before lights-on produce no refund (because no charge ever happened), and the no-show penalty / late-cancellation penalty rows are independent of any "original charge".
+> **Note on charge timing.** **The debit happens at booking, not at lights-on.** `BookingService.CreateAsync` reserves the slot and posts the `BookingCharge` debit in the same unit of work, so a lost slot race cannot leave a member paying for a court they did not get. Cancelling before check-in refunds in full, less the late-cancellation penalty inside the penalty window; once someone has checked in there is nothing back. This **contradicts blueprint A.9**, which debits on lights-on; the deviation is the founder's decision, is recorded in `client-blueprint-deltas.md`, and needs committee sign-off before go-live. The normative statement of what a booking owes in every terminal state is `settlement-model.md` §2 — read that, not this note, when the answer has to be right.
 >
 > **At-court payer override** (blueprint B.2): after the booked player is identified at the touchpad, a *different* identified player can press "I'll pay" and that player's account is debited instead. The booking row records both `booked_by_user_id` and `paid_by_user_id`. Both are audit-logged and emailed.
 
 ## 6a. The biometric peripheral & no-show detection
 - Each court has a physical biometric peripheral attached to the on-site machine. The .NET app talks to it via `IBiometricDevice` (see `biometric-abstraction.md`).
-- The court lights are switched by the **court box** (ESP8266 bridge + Mega relay bank with an independent auto-off timer), which decides locally from an online activation or its cached heartbeat roster and pulls everything from the API; it is never a webhook destination. `lights-controller.md` (webhook-driven Arduino) is superseded — see `device-discovery.md` and `device-serial-protocol.md`.
+- The court lights are switched by the **court box** (ESP8266 bridge + Mega relay bank with an independent auto-off timer), which decides locally from an online activation or its cached heartbeat roster and pulls everything from the API; it is never a webhook destination. `lights-controller.md` (webhook-driven Arduino) is superseded — see `device-serial-protocol.md` and *the court box and its key* below.
 - When a player has a booking that becomes "live" (current time falls within the booked slice):
   1. The on-court UI awaits a biometric match.
   2. On a successful match against the booked player, the mainframe fires a `booking.lights_on` webhook to the Arduino, the relay flips, and a `LightsOn` event is recorded.
@@ -99,7 +99,7 @@ Class is admin-assignable and editable, audit-logged on every change.
      - `no_show_penalty` ledger entry written: `penalty_pct * slice_cost` (default 30%).
      - No-show email sent to player.
      - Webhook event fires.
-  4. If a match comes in *after* the no-show was finalized, it logs but does not retroactively reverse the penalty.
+  4. If attendance evidence arrives *after* the no-show was finalized — an `activation` event a box queued through an outage — the sweep is **reversed**: the booking returns to the attended state and `Owed(b)` returns to the full price, so the member is neither refunded nor penalised for a court they played. `settlement-model.md` §2, S6. (This is the C2/C6 pair: the earlier behaviour left a member who had played both refunded *and* penalised.)
 - **Stand-in / different player at the court:** if biometric-matches a player who does NOT have the booking, the system rejects the lights-on. UI on the courtside terminal shows "No active booking for this user." Admin can override at the tenant console.
 - **Lights stay on for the duration of the booked slice(s).** End-of-slice signals the lights to turn off; if the booking is back-to-back, lights stay on through the boundary.
 - **Peripheral failure mode:** if the device is unreachable, all bookings during the outage are auto-credited (no penalty); admin gets a high-priority alert; players in the affected window get an email explaining the situation.
@@ -137,9 +137,19 @@ A tenant admin can:
 A court box has eight physical buttons (`ButtonMap.ButtonCount`), wired A/B/C/D then 15/30/45/60. The Mega reports raw presses and the bridge decides, so any button can be mapped to any action: select a court (by position in the box's own court list, relays A–D) or grant a number of minutes (bounded by the relay hard cap, `ButtonMap.MaxGrantMinutes`).
 
 - **Club default:** `tenant_settings.buttons`, edited on the Settings page. The default map is the wiring's original meaning, so a club that never touches it gets exactly what the hand-built box did.
-- **Per-device override:** `button_map` on `POST /admin/devices` (register), on the claim command (`ClaimBoardCommand.ButtonMap`), and on `PATCH /admin/devices/{id}`, stored as `Device.ButtonMapJson` (migration `AddDeviceButtonMapOverride`). On PATCH it is three-valued: absent leaves the override alone, `null` clears it (the box runs the club default), a list of eight entries sets it. A re-claim carries the claim's override onto the existing row.
-- **Validated per box, not per club.** The *effective* map — the override if any, else the club default (`ButtonMap.EffectiveFor`) — is checked against that box's court list at register, claim and PATCH: a map whose court button reaches past the box's list is refused with `button_map_selects_court_beyond_device_courts` and the map named. A one-court annex box and a four-court main box can therefore both be valid under one club default, each with its own override where needed; the old single tenant-wide validation had no valid configuration for a mixed fleet.
+- **Per-device override:** `button_map` on `PATCH /admin/devices/{id}`, stored as `Device.ButtonMapJson`. It is three-valued: absent leaves the override alone, `null` clears it (the box runs the club default), a list of eight entries sets it.
+- **Validated per box, not per club.** The *effective* map — the override if any, else the club default (`ButtonMap.EffectiveFor`) — is checked against that box's court list on every edit: a map whose court button reaches past the box's list is refused with `button_map_selects_court_beyond_device_courts` and the map named. A one-court annex box and a four-court main box can therefore both be valid under one club default, each with its own override where needed; the old single tenant-wide validation had no valid configuration for a mixed fleet.
+- **A box that registers itself is given a map it can honour.** Auto-registration stores the club's map trimmed to the box's court count when the club's map reaches past it, rather than leaving buttons that select nothing — the same rule as shrinking a box's court list by hand.
 - **The heartbeat sends the effective map** (`button_map` in the heartbeat response, `ButtonMap.EffectiveFor(device.ButtonMapJson, settings.Buttons)`), so the box never has to know whether it is running an override. The Devices screen renders the override editor only when the API carries the field.
+
+### 8b. The court box and its key
+One club, one key, and a box that introduces itself.
+
+- **Authentication is one static key per club.** Every device request carries `Authorization: Bearer <device_api_key>`; the key resolves to a tenant and to nothing finer. An admin reads it from `GET /api/v1/admin/devices/api-key` (the Devices page) and pastes it into the box's `secrets.h`; `POST /api/v1/admin/devices/api-key/regenerate` replaces it, invalidating the old one on the very next request, so every box must be reflashed.
+- **Identity is the MAC in the request body.** `mac` (twelve lowercase hex, no separators) names the board on `heartbeat`, `activate`, `walkup` and `events`. It authenticates nothing — the key does that — it only says which row a request is about.
+- **Registration is a heartbeat.** An unknown MAC creates a `Device` for the key's tenant: `device_code` `box-<last six hex of the mac>`, the club's court numbers ascending up to the four the relay bank drives, the club's button map trimmed if it does not fit, audited as `device.auto_registered` and flagged `auto_registered: true` on the wire until an admin edits the row. The Devices page badges it so the guessed court numbers get checked.
+- **Admin can edit and delete, and nothing else.** Deleting is a reset rather than a revocation: the board still holds the club key, so it re-registers with default courts on its next heartbeat.
+- **Gone:** discovery, claim codes, per-device keys, key rotation, reclaim, revoke, manual registration, request signing, the clock window and over-the-air updates. All of it existed to deliver or repair a credential an admin could never read back, and each link could strand a board in a cupboard. See `deployment.md`.
 
 A platform admin can additionally:
 - Onboard a new tenant (creates the tenant, the first admin user, the default settings).
