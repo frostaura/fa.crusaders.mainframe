@@ -629,11 +629,16 @@ export const endpoints = {
    * desk already compensated the member for a wrongly-swept no-show, and audit instead of
    * refunding twice (`BookingService.ReverseNoShowAsync`). One without it is plain money.
    */
-  adminAdjust: (userId: string, amountCredits: number, reason: string, relatedBookingId?: string) =>
+  adminAdjust: (userId: string, amountCredits: number, reason: string, relatedBookingId?: string, idempotencyKey?: string) =>
     api.post<{ entry_id: string; amount_credits: number; balance_after_credits: number }>(`/api/v1/admin/credit/${userId}/adjust`, {
       amountCredits,
       reason,
       ...(relatedBookingId ? { relatedBookingId } : {}),
+      // Names THIS movement, so every retry of one intended adjustment is the same
+      // movement and a genuinely second one of the same amount is not. A double-click on
+      // Apply used to post twice and move the balance twice; a slow connection and four
+      // clicks granted 44 credits where 11 were typed.
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     }),
   adminResetMemberPassword: (memberId: string) =>
     api.post<{ temp_password: string; email_sent_to: string; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),

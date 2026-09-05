@@ -278,6 +278,9 @@ export function memberFixture(overrides: Record<string, unknown> = {}) {
     photo_url: null,
     status: "Active",
     member_class: "Regular",
+    // True by default: the unverified case is the interesting one, so a test that wants
+    // the badge and the resend action asks for it.
+    email_verified: true,
     created_at: new Date().toISOString(),
     rejection_reason: null,
     balance_credits: 120,

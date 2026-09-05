@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Ban, Fingerprint, KeyRound, MailWarning, Plus, RotateCcw, Search, Users, Wallet, X } from "lucide-react";
 import { ApiError, endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type LedgerEntryType, type LedgerRow, type MemberClass } from "../lib/api";
 import { Card } from "../components/Card";
@@ -48,6 +48,10 @@ export default function AdminMembersPage() {
   const [suspendFor, setSuspendFor] = useState<AdminMember | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** The key naming the adjustment currently being attempted; cleared once it lands. */
+  const adjustKey = useRef<string | null>(null);
+  /** Synchronous re-entry guard for Apply — see `adjust`. */
+  const adjustInFlight = useRef(false);
   const [enrollFor, setEnrollFor] = useState<AdminMember | null>(null);
   const [biometrics, setBiometrics] = useState<Record<string, BiometricEnrollmentRow>>({});
 
@@ -110,19 +114,39 @@ export default function AdminMembersPage() {
     finally { setBusyId(null); }
   };
 
-  const closeCredit = () => { setCreditFor(null); setCreditAmount(""); setCreditReason(""); setCreditBooking(""); setCreditBookingError(null); };
+  const closeCredit = () => {
+    setCreditFor(null); setCreditAmount(""); setCreditReason(""); setCreditBooking(""); setCreditBookingError(null);
+    adjustKey.current = null;
+    adjustInFlight.current = false;
+  };
 
   const adjust = async () => {
     if (!creditFor) return;
+    // Two guards, because they stop two different things.
+    //
+    // The ref stops the second click: `busyId` is React state, and a second click landing
+    // before the re-render commits reads the old value — which is exactly what a
+    // double-click is. The ref is written synchronously, so the second call returns here.
+    //
+    // The key stops everything the ref cannot see: a retry after a failed response, a
+    // second tab, a request the browser retried under the covers. It names THIS movement
+    // and survives until the movement succeeds, so the server answers a repeat with the
+    // row it already wrote instead of writing a second one. A double-click posted +7
+    // twice and moved a member 444 -> 458; four clicks on a slow connection granted 44
+    // credits where 11 were typed. Money is ledger-only, so a duplicated row IS the wrong
+    // balance and nothing on the ledger says which of the two was the mistake.
+    if (adjustInFlight.current) return;
     const bookingId = creditBooking.trim();
     const complaint = validateAdjustment(creditAmount, creditReason, bookingId);
     if (complaint) { toast.push({ tone: "warning", text: complaint }); return; }
     const amount = parseFloat(creditAmount);
     const targetUserId = creditFor.user_id;
+    adjustInFlight.current = true;
+    adjustKey.current ??= newIdempotencyKey();
     setBusyId(targetUserId);
     setCreditBookingError(null);
     try {
-      const r = await endpoints.adminAdjust(targetUserId, amount, creditReason, bookingId || undefined);
+      const r = await endpoints.adminAdjust(targetUserId, amount, creditReason, bookingId || undefined, adjustKey.current);
       // Reflect the new balance in this row immediately — no list refetch, no reload.
       setMembers((prev) => prev?.map((m) => m.user_id === targetUserId ? { ...m, balance_credits: r.balance_after_credits } : m) ?? prev);
       toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} ${formatCredits(Math.abs(amount))}${bookingId ? ` for booking ${bookingId.slice(0, 8)}` : ""}.` });
@@ -134,7 +158,7 @@ export default function AdminMembersPage() {
       if (refusal) setCreditBookingError(refusal);
       else toast.push({ tone: "danger", text: "Credit adjustment failed." });
     }
-    finally { setBusyId(null); }
+    finally { adjustInFlight.current = false; setBusyId(null); }
   };
 
   const resetPassword = async () => {
@@ -438,7 +462,9 @@ export default function AdminMembersPage() {
           />
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="ghost" onClick={closeCredit}>Cancel</Button>
-            <Button onClick={adjust}>Apply</Button>
+            <Button onClick={adjust} disabled={busyId === creditFor.user_id}>
+              {busyId === creditFor.user_id ? "Applying…" : "Apply"}
+            </Button>
           </div>
         </Modal>
       )}
@@ -535,6 +561,23 @@ function MemberClassCell({ member, busy, onChange }: { member: AdminMember; busy
       {MEMBER_CLASSES.map((c) => <option key={c} value={c}>{classLabel(c)}</option>)}
     </select>
   );
+}
+
+/**
+ * A name for one intended credit movement.
+ *
+ * <p>
+ * `crypto.randomUUID` needs a secure context and is absent under plain HTTP on a LAN
+ * address — which is exactly where a club's admin laptop sits — so a fallback is not
+ * theoretical here. It does not need to be unguessable: the server scopes the key to the
+ * tenant and it only ever suppresses a repeat of the desk's own adjustment, so
+ * "distinct with overwhelming probability" is the whole requirement.
+ * </p>
+ */
+function newIdempotencyKey(): string {
+  const c = globalThis.crypto as Crypto & { randomUUID?: () => string };
+  if (typeof c?.randomUUID === "function") return c.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 // --- "for booking" on a credit adjustment --------------------------------------
