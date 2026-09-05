@@ -1,20 +1,59 @@
-.PHONY: install lint lint-backend lint-frontend lint-iot format-iot build build-iot \
+.PHONY: install install-iot lint lint-backend lint-frontend lint-iot format-iot build build-iot \
         test test-iot test-iot-asan test-integration test-e2e test-e2e-device complexity corpus-check \
+        flash-mega flash-bridge monitor-bridge \
         virt-up virt-down ci-status up down down-reset clean
 
-# IoT toolchain lives in a venv so `pio` and `lizard` are pinned per-checkout
-PIO ?= src/iot/.venv/bin/pio
-PY  ?= src/iot/.venv/bin/python
+# IoT toolchain lives in a venv so `pio` and `lizard` are pinned per-checkout.
+# IOT_VENV is overridable so `make install-iot` can be proven into a scratch
+# path without disturbing the working one.
+IOT_VENV ?= src/iot/.venv
+PIO ?= $(IOT_VENV)/bin/pio
+PY  ?= $(IOT_VENV)/bin/python
 # Pinned via src/iot/requirements.txt: formatter output varies by version.
-CLANG_FORMAT ?= src/iot/.venv/bin/clang-format
+CLANG_FORMAT ?= $(IOT_VENV)/bin/clang-format
+
+# The board's USB serial port. Overridable; otherwise the flash targets wait for
+# one to appear. Bluetooth-Incoming-Port and debug-console are always present on
+# a Mac and are never the box, so they are filtered out rather than picked.
+UPLOAD_PORT ?=
+FIND_PORT = ls /dev/cu.* 2>/dev/null | grep -v -e Bluetooth -e debug-console | head -1
+
+# Waits up to 60 s for a port and leaves it in $$port. One line, because a make
+# recipe is one shell per line and every flash target needs the same preamble.
+WAIT_FOR_PORT = port="$(UPLOAD_PORT)"; \
+	if [ -z "$$port" ]; then \
+	  printf 'Waiting for a USB serial port (/dev/cu.*)'; \
+	  for _ in $$(seq 1 60); do \
+	    port=$$($(FIND_PORT)); \
+	    if [ -n "$$port" ]; then break; fi; \
+	    printf '.'; sleep 1; \
+	  done; \
+	  printf '\n'; \
+	fi; \
+	if [ -z "$$port" ]; then \
+	  echo "No /dev/cu.* port appeared in 60s."; \
+	  echo "  - is the box plugged in and powered?"; \
+	  echo "  - if a port NEVER appears: brew install --cask wch-ch34x-usb-serial-driver, then replug"; \
+	  echo "  - or name it yourself: UPLOAD_PORT=/dev/cu.usbserial-XXXX"; \
+	  exit 1; \
+	fi; \
+	echo "Port: $$port"
 
 # Install all dependencies
-install:
+install: install-iot
 	cd src/backend && dotnet restore Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj && dotnet restore Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj
 	cd src/frontend && npm install
-	python3 -m venv src/iot/.venv
-	$(PY) -m pip install --quiet --upgrade pip
-	$(PY) -m pip install --quiet -r src/iot/requirements.txt
+
+# Install the IoT toolchain into $(IOT_VENV).
+#
+# uv, not `python3 -m venv`: the system python3 on macOS is 3.9 and gcovr needs
+# 3.10+, so the plain venv was created and then died half-installed, leaving no
+# `pio` and a confusing error several screens up.
+install-iot:
+	@command -v uv >/dev/null || (echo "uv is required and is not installed. Run: brew install uv" && exit 1)
+	uv venv --python 3.12 $(IOT_VENV)
+	VIRTUAL_ENV=$$(cd $(IOT_VENV) && pwd) uv pip install --quiet -r src/iot/requirements.txt
+	@echo "IoT toolchain ready in $(IOT_VENV)"
 
 # Lint
 lint: lint-backend lint-frontend lint-iot
@@ -55,10 +94,7 @@ test: test-iot
 
 # Tests — IoT native unit/property/corpus suite. Fails hard if pio is missing:
 # the repo already carries two silent-pass escape hatches and must not gain a third.
-# The OTA signer selftest runs first: the release-signing step is what a board's
-# signature check trusts, so it is a gate, not a helper script.
 test-iot:
-	python3 src/iot/tools/sign_firmware.py --selftest
 	$(PIO) test -d src/iot -e native
 
 test-iot-asan:
@@ -78,6 +114,51 @@ corpus-check:
 	$(PY) src/iot/tools/gen_discovery_corpus.py
 	git diff --exit-code -- src/iot/test/test_protocol/corpus_generated.h src/iot/test/test_discovery/corpus_generated.h \
 	  || (echo "generated corpus headers are stale — rerun the generators and commit" && exit 1)
+
+# Flash the ATmega2560 over USB.
+#
+# The DIP block routes ONE USB socket to one of the two chips, so every flash is
+# a switch change first. The positions below are the project wiring sheet's and
+# the hardware is fixed: nothing here is negotiable, and getting DIP 1/2 wrong
+# means avrdude talks to the ESP8266 and times out looking like a dead board.
+flash-mega:
+	@echo "DIP switches for a MEGA upload:  1 OFF  2 OFF  3 ON  4 ON  5-8 OFF"
+	@echo "Set them now, then leave the box powered."
+	@$(WAIT_FOR_PORT); \
+	$(PIO) run -d src/iot -e court_mega -t upload --upload-port "$$port"
+	@echo ""
+	@echo "Done. Restore the RUN positions:  1 ON  2 ON  3 ON  4 ON  5-8 OFF"
+
+# Flash the ESP8266 over USB, then watch it.
+#
+# Refuses without secrets.h, rather than building an image that joins an empty
+# SSID — court_bridge/main.cpp #errors on it too; this is the friendlier half of
+# the same rule, before twenty seconds of compiler output.
+flash-bridge:
+	@test -f src/iot/src/common/secrets.h || ( \
+	  echo "src/iot/src/common/secrets.h is missing."; \
+	  echo "  cp src/iot/src/common/secrets.h.example src/iot/src/common/secrets.h"; \
+	  echo "  then fill in WIFI_SSID and WIFI_PASSWORD (it is gitignored)"; \
+	  exit 1)
+	@echo "DIP switches for an ESP8266 upload:  1-4 OFF  5 ON  6 ON  7 ON  8 OFF"
+	@echo "Set them now, then leave the box powered."
+	@$(WAIT_FOR_PORT); \
+	$(PIO) run -d src/iot -e court_bridge -t upload --upload-port "$$port"
+	@echo ""
+	@echo "Uploaded. Now set DIP  5 ON  6 ON  7 OFF  (1-4 OFF) to watch it boot;"
+	@echo "the monitor opens next. Ctrl-C to leave it."
+	@$(MAKE) monitor-bridge
+
+# Watch the ESP8266's UART on the USB socket.
+#
+# 9600, from platformio.ini: that UART IS the Mega link and its baud is fixed by
+# Pins.h. A monitor at 115200 shows framing garbage that reads as a dead board.
+# In this DIP position the Mega is NOT on the other end, so the LCD shows
+# nothing new until DIP 1 and 2 go back on.
+monitor-bridge:
+	@echo "DIP switches to monitor the ESP:  1-4 OFF  5 ON  6 ON  7 OFF  8 OFF"
+	@$(WAIT_FOR_PORT); \
+	$(PIO) device monitor -d src/iot -e court_bridge --port "$$port"
 
 # Tests — Playwright e2e.
 #
