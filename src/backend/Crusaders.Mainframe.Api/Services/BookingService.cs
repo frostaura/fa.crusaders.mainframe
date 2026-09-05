@@ -343,7 +343,7 @@ public sealed class BookingService
                 AmountCredits: -spec.TotalCost,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
-                Reason: $"Booking {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}",
+                Reason: $"Booking {court.Name} {SlotLabel(booking, settings)}",
                 ExternalReference: spec.ExternalReference), ct);
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
@@ -414,7 +414,11 @@ public sealed class BookingService
             user.Email, court.Name,
             TimeZoneInfo.ConvertTimeFromUtc(booking.StartsAt.UtcDateTime, ResolveTz(settings.Timezone)).ToString("ddd dd MMM HH:mm"),
             spec.DurationLabel,
-            spec.TotalCost, balance);
+            // Credits, not rand — the template printed a rand sign over both of these.
+            // The penalty policy travels with them for the same reason: it was hardcoded
+            // "15 minutes / 30%" and went on saying so after an admin moved the club.
+            spec.TotalCost, balance,
+            settings.PenaltyWindowMinutes, settings.PenaltyPct);
         SendEmailInBackground(confirmationMsg, $"booking confirmation for {booking.Id}");
 
         await _bus.EmitAsync(new DomainEvent(
@@ -645,7 +649,7 @@ public sealed class BookingService
                 AmountCredits: -penaltyAmount,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
-                Reason: $"Late-cancellation penalty {settings.PenaltyPct}%"));
+                Reason: $"Late-cancellation penalty {Email.EmailTemplates.Num(settings.PenaltyPct)}%"));
         }
 
         try
@@ -1310,7 +1314,7 @@ public sealed class BookingService
                 AmountCredits: -amount,
                 ActorUserId: Guid.Empty,
                 RelatedBookingId: booking.Id,
-                Reason: $"Lights ran {minutes} min on cancelled booking {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm} — charged pro rata",
+                Reason: $"Lights ran {minutes} min on cancelled booking {court.Name} {await SlotLabelAsync(booking, ct)} — charged pro rata",
                 ExternalReference: CancelledLightsReference(booking.Id)), ct);
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
@@ -1803,6 +1807,7 @@ public sealed class BookingService
             // One save closes both: the guard now reads committed state, and the concurrency
             // token on Booking means the second of two racing scans matches nothing and
             // throws rather than posting a second pair.
+            var slotLabel = await SlotLabelAsync(booking, ct);
             try
             {
                 await _ledger.PostManyAsync(
@@ -1813,14 +1818,14 @@ public sealed class BookingService
                         AmountCredits: booking.AmountChargedCredits,
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
-                        Reason: $"Payer changed at court — refunded, {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}"),
+                        Reason: $"Payer changed at court — refunded, {court.Name} {slotLabel}"),
                     new LedgerPosting(
                         UserId: reassignTo.Value,
                         Type: LedgerEntryType.BookingCharge,
                         AmountCredits: -booking.AmountChargedCredits,
                         ActorUserId: actorUserId,
                         RelatedBookingId: booking.Id,
-                        Reason: $"Paid at court on behalf of another member — {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}"),
+                        Reason: $"Paid at court on behalf of another member — {court.Name} {slotLabel}"),
                 ], ct);
             }
             catch (DbUpdateConcurrencyException)
@@ -1854,7 +1859,7 @@ public sealed class BookingService
             AmountCredits: -booking.AmountChargedCredits,
             ActorUserId: actorUserId,
             RelatedBookingId: booking.Id,
-            Reason: $"Booking {court.Name} {booking.StartsAt:yyyy-MM-dd HH:mm}"), ct);
+            Reason: $"Booking {court.Name} {await SlotLabelAsync(booking, ct)}"), ct);
 
         booking.PaidByUserId = payerUserId;
         booking.ChargedAt = DateTimeOffset.UtcNow;
@@ -2024,6 +2029,34 @@ public sealed class BookingService
         try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
         catch { return TimeZoneInfo.Utc; }
     }
+
+    /// <summary>
+    /// A booking's slot, in the club's own wall clock, for a ledger comment.
+    ///
+    /// <para>
+    /// Every ledger <c>Reason</c> formatted <c>booking.StartsAt</c> straight out of the
+    /// UTC <c>DateTimeOffset</c>, so the one line a member reads when disputing a charge
+    /// named a slot two hours away from the one they booked — "Booking Court 3 2026-09-16
+    /// 08:00" for a 10:00 court — while the confirmation email beside it, the grid and the
+    /// wallet's own Time column all said 10:00. The tenant's timezone was already being
+    /// resolved correctly four lines away for the email.
+    /// </para>
+    ///
+    /// <para>
+    /// Invariant culture with it: the comment column also carried the server process's
+    /// ambient separator, so one row could read "−15.00 cr" beside "penalty 30,0%".
+    /// </para>
+    /// </summary>
+    private static string SlotLabel(Booking booking, TenantSettingsView settings) =>
+        TimeZoneInfo.ConvertTimeFromUtc(booking.StartsAt.UtcDateTime, ResolveTz(settings.Timezone))
+            .ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// <see cref="SlotLabel"/> where the caller has no settings in hand. One extra read on
+    /// paths that are already doing several.
+    /// </summary>
+    private async Task<string> SlotLabelAsync(Booking booking, CancellationToken ct) =>
+        SlotLabel(booking, await _settings.GetAsync(ct));
 
     // Fire-and-forget email dispatch. IEmailService is registered as singleton so the captured
     // reference outlives the request scope safely. Errors are swallowed and logged.

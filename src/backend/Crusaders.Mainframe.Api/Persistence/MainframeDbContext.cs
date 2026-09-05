@@ -248,6 +248,10 @@ public class MainframeDbContext : DbContext
             e.HasIndex(p => p.IdempotencyKey).IsUnique();
             e.HasIndex(p => p.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
             e.Property(p => p.AmountZar).HasColumnType("numeric(10,2)");
+            // Same precision as ledger_entries.ConversionRate — the two hold the same number
+            // and a narrower column here would silently round the rate the ledger then quotes.
+            e.Property(p => p.ConversionRate).HasColumnType("numeric(8,4)");
+            e.Property(p => p.MemberClass).HasConversion<int?>();
             e.Property(p => p.IdempotencyKey).HasMaxLength(64).IsRequired();
             e.Property(p => p.GatewayCheckoutId).HasMaxLength(128);
             e.Property(p => p.ExternalReference).HasMaxLength(255);

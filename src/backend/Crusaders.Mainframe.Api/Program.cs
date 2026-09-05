@@ -371,18 +371,33 @@ app.UseRateLimiter();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthorization();
 
+// After authorization, so it is the last word: a session holding an admin-issued temporary
+// password reaches nothing but the call that replaces it. See PasswordChangeGate for why the
+// enforcement cannot live in the browser.
+app.UseMiddleware<PasswordChangeGate>();
+
 // ---- Anonymous endpoints ----
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok", service = "crusaders.mainframe", time = DateTimeOffset.UtcNow }))
    .AllowAnonymous();
 
-app.MapGet("/api/v1/whoami", (HttpContext ctx, ITenantContext tenant) => Results.Ok(new
+// The session-bootstrap probe. `must_change_password` is here and not only on the login response
+// because the browser reloads: without it a member who refreshes mid-forced-change renders the app
+// and then meets PasswordChangeGate's 403 on every screen instead of the one screen they need.
+app.MapGet("/api/v1/whoami", async (HttpContext ctx, ITenantContext tenant, MainframeDbContext db) =>
 {
-    tenant_slug = tenant.TenantSlug,
-    tenant_id = tenant.TenantId,
-    user_id = ctx.User.Id(),
-    is_authenticated = ctx.User.Identity?.IsAuthenticated ?? false,
-    is_admin = ctx.User.IsInRole("admin"),
-})).AllowAnonymous();
+    var userId = ctx.User.Id();
+    var mustChangePassword = userId is { } id
+        && await db.Users.IgnoreQueryFilters().Where(u => u.Id == id).Select(u => u.MustChangePassword).FirstOrDefaultAsync(ctx.RequestAborted);
+    return Results.Ok(new
+    {
+        tenant_slug = tenant.TenantSlug,
+        tenant_id = tenant.TenantId,
+        user_id = userId,
+        is_authenticated = ctx.User.Identity?.IsAuthenticated ?? false,
+        is_admin = ctx.User.IsInRole("admin"),
+        must_change_password = mustChangePassword,
+    });
+}).AllowAnonymous();
 
 // ---- Mounted endpoint groups ----
 app.MapAuthEndpoints();

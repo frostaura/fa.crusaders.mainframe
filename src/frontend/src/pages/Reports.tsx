@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { endpoints, type WalletReport, type RevenueReport, type DailyAdminPoint, type DailyMePoint } from "../lib/api";
+import { endpoints, type WalletReport, type RevenueReport, type DailyAdminPoint, type DailyMePoint, type UtilisationRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
+import { useToast } from "../components/Toast";
 import { Carousel, type CarouselSlide } from "../components/Carousel";
 import { DataTable, type DataColumn } from "../components/DataTable";
-import { formatCredits, formatZar } from "../lib/utils";
+import { formatCredits, formatMinutes, formatSignedCredits, formatZar } from "../lib/utils";
 import {
   RevenueAreaChart, DailyFlowBarChart, BookingsLineChart, CourtsRevenueBarChart,
   NoShowDonut, MyBalanceLineChart, MyFlowBarChart, MyBookingsBarChart,
@@ -13,20 +14,41 @@ import {
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
-type UtilRow = { court_id: string; court_number: number; court_name: string; slices: number; bookings: number; revenue_credits: number };
-
 export default function ReportsPage() {
   const auth = useAuth();
+  const toast = useToast();
   const isAdmin = auth.status === "authenticated" && auth.isAdmin;
   const [from, setFrom] = useState(() => ymd(new Date(Date.now() - 30 * 86400000)));
   const [to, setTo] = useState(() => ymd(new Date()));
 
   const [wallet, setWallet] = useState<WalletReport | null>(null);
   const [revenue, setRevenue] = useState<RevenueReport | null>(null);
-  const [util, setUtil] = useState<{ from: string; to: string; by_court: UtilRow[] } | null>(null);
+  const [util, setUtil] = useState<{ from: string; to: string; by_court: UtilisationRow[] } | null>(null);
   const [noShow, setNoShow] = useState<{ total: number; no_show: number; no_show_pct: number } | null>(null);
   const [dailyAdmin, setDailyAdmin] = useState<DailyAdminPoint[] | null>(null);
   const [dailyMe, setDailyMe] = useState<DailyMePoint[] | null>(null);
+
+  // Declared above `load` deliberately. lizard reads a bare `<` in a .tsx file as a JSX
+  // open tag and swallows everything after it into whichever nested function it was last
+  // inside, so ONE function per component absorbs the whole render body and scores in the
+  // hundreds. Here that function is `load`, which is on the complexity baseline for
+  // exactly that reason; a new function declared after it steals the attribution and trips
+  // the gate on a line nobody touched.
+  const downloadCsv = async () => {
+    try {
+      const { blob, filename } = await endpoints.walletCsv(`${from}T00:00:00Z`, `${to}T23:59:59Z`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.push({ tone: "danger", text: "Couldn't build that CSV. Try a shorter date range." });
+    }
+  };
 
   const load = async () => {
     const fIso = `${from}T00:00:00Z`;
@@ -58,7 +80,9 @@ export default function ReportsPage() {
         { label: "Top-ups", value: wallet ? formatCredits(wallet.top_ups_credits) : "—", tone: "success" as const },
         { label: "Spent", value: wallet ? formatCredits(wallet.spent_credits) : "—", tone: "accent" as const },
         { label: "Refunds (net)", value: wallet ? formatCredits(wallet.refunds_credits) : "—", tone: "neutral" as const },
-        { label: "Movements", value: wallet ? String(wallet.count) : "—", tone: "neutral" as const },
+        // Attendance, which nothing in the product showed anywhere — `reporting.md` has
+        // promised "Time on court" since it was written.
+        { label: "Time on court", value: wallet ? formatMinutes(wallet.minutes_on_court) : "—", tone: "neutral" as const },
       ];
 
   const slides: CarouselSlide[] = [];
@@ -107,9 +131,11 @@ export default function ReportsPage() {
             setTo(ymd(now));
           }}>Last 30 days</Button>
         </div>
-        <a href={endpoints.walletCsvUrl(`${from}T00:00:00Z`, `${to}T23:59:59Z`)} download className="ml-auto">
-          <Button variant="outline">Download wallet CSV</Button>
-        </a>
+        {/* Fetched with the session token and saved from the blob. A plain `<a download>`
+            made the browser navigate to the endpoint on its own with no Authorization
+            header: the API answered 400 tenant_unresolved as JSON, the download started
+            and cancelled itself, and the page looked identical before and after. */}
+        <Button variant="outline" type="button" className="ml-auto" onClick={downloadCsv}>Download wallet CSV</Button>
       </div>
 
       {/* Tiles */}
@@ -121,13 +147,27 @@ export default function ReportsPage() {
       {wallet && (
         <Card>
           <h2 className="font-semibold mb-3">My wallet — totals</h2>
-          <dl className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
-            <Stat label="Top-ups" value={formatCredits(wallet.top_ups_credits)} />
-            <Stat label="Spent" value={formatCredits(wallet.spent_credits)} />
-            <Stat label="Refunds (net)" value={formatCredits(wallet.refunds_credits)} />
+          {/*
+            Every bucket a movement can land in, because this has to reconcile. It showed
+            top-ups, spend, refunds and a penalty COUNT and nothing else, so a member with
+            2,500 credits of admin adjustments read "0 in, 950 out, 100 back" — reading as
+            −850 — beside a header that said 1,635, with nothing on the page accounting for
+            the difference. The net line at the bottom is the arithmetic, spelled out.
+          */}
+          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <Stat label="Top-ups" value={`+${formatCredits(wallet.top_ups_credits)}`} />
+            <Stat label="Spent" value={`−${formatCredits(wallet.spent_credits)}`} />
+            <Stat label="Refunds (net)" value={formatSignedCredits(wallet.refunds_credits)} />
+            <Stat label="Penalties" value={`−${formatCredits(wallet.penalties_credits)}`} />
+            <Stat label="Adjustments" value={formatSignedCredits(wallet.adjustments_credits)} />
             <Stat label="Penalty count" value={String(wallet.penalty_count)} />
+            <Stat label="Bookings played" value={`${wallet.attended_bookings} · ${formatMinutes(wallet.minutes_on_court)}`} />
             <Stat label="Movements" value={String(wallet.count)} />
           </dl>
+          <p className="mt-3 text-xs text-text-muted">
+            Net movement over this period: <strong className="font-mono">{formatSignedCredits(wallet.net_movement_credits)}</strong>.
+            That is top-ups − spend + refunds − penalties + adjustments, and it is exactly what your balance moved by.
+          </p>
         </Card>
       )}
 
@@ -154,10 +194,17 @@ export default function ReportsPage() {
             columns={[
               { key: "court_name", header: "Court", cell: (r) => r.court_name },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
-              { key: "slices", header: "Slices", align: "right", cell: (r) => r.slices, sortValue: (r) => r.slices },
-              { key: "revenue_credits", header: "Revenue", align: "right", cell: (r) => formatCredits(r.revenue_credits), sortValue: (r) => r.revenue_credits },
-            ] satisfies DataColumn<UtilRow>[]}
+              // Minutes, not slices. A 60-minute walk-up is SliceCount 1 and was counted
+              // the same as a 15-minute booking, so the column mixed units.
+              { key: "booked_minutes", header: "Booked", align: "right", cell: (r) => formatMinutes(r.booked_minutes), sortValue: (r) => r.booked_minutes },
+              { key: "quoted_credits", header: "Quoted", align: "right", cell: (r) => formatCredits(r.quoted_credits), sortValue: (r) => r.quoted_credits },
+              { key: "revenue_credits", header: "Kept", align: "right", cell: (r) => formatCredits(r.revenue_credits), sortValue: (r) => r.revenue_credits },
+            ] satisfies DataColumn<UtilisationRow>[]}
           />
+          <p className="mt-2 text-xs text-text-muted">
+            <strong>Quoted</strong> is the price at booking. <strong>Kept</strong> is what the club actually took once refunds,
+            penalties and any desk adjustments naming the booking are netted — for a no-show that is the penalty, not the price.
+          </p>
         </Card>
       )}
 

@@ -16,27 +16,32 @@ Class is admin-assignable and editable, audit-logged on every change.
 ## 2. Registration & identity verification
 1. Player visits the tenant's mobile web app and selects "Register".
 2. Required fields, all mandatory:
-   - Full name
+   - Full name (2–120 characters)
    - Email address
    - Membership number (tenant-issued)
+   - Password (at least 8 characters) — set here, not later; see §2.5
    - Photo upload (selfie, square, used as identification on the booking grid)
 3. On submit:
    - Account created in `pending_approval` status.
-   - Email verification link sent (24h expiry).
+   - Email verification link sent (24h expiry). The player can ask for it again from the sign-in screen — that request answers identically whether or not the address is registered, and spends any earlier unused link.
+   - A membership number already registered in this tenant is refused as a named conflict (`membership_number_in_use`), exactly as a duplicate email is. Typing a digit of somebody else's club number is an ordinary mistake and must never surface as a server error.
    - Player sees "We've emailed you to confirm your address. After confirmation, an admin will review and approve your membership."
    - All tenant admins notified (email + in-app).
-4. Admin reviews in their console:
-   - **Approve:** account becomes `active`. Welcome email goes out with a one-time magic-link sign-in (short-lived JWT in querystring, single-use, ≤15 min expiry). Webhook event fires.
+4. Admin reviews in their console. **Review is not gated on the applicant having confirmed their address** — an admin may reach a pending application first, and nothing about approval depends on the verification link having been clicked:
+   - **Approve:** account becomes `active`. Welcome email goes out with a one-time magic-link sign-in (short-lived JWT in querystring, single-use, ≤15 min expiry). Consuming that link **confirms the address**, because clicking a link delivered to a mailbox is proof of control of that mailbox; an approved member is therefore never left able to sign in one way and refused the other. Webhook event fires.
    - **Reject:** admin must enter a reason (free text). Account becomes `rejected`. Rejection email sent with the reason. Webhook event fires.
-5. Once `active`, the player can set a password and/or enroll a passkey (WebAuthn) for biometric/touch sign-in convenience.
+5. Once `active`, the player can **change** their password and/or enroll a passkey (WebAuthn) for biometric/touch sign-in convenience. (Earlier revisions of this section said "set a password" here, as though registration did not take one. It does — §2.2 — and the account-recovery paths in §3 are what set a password for an account that has none.)
 
 ## 3. Authentication
 - **Primary:** email + password.
 - **Convenience:** Passkey / WebAuthn (FaceID / TouchID / Windows Hello). Players may have multiple registered authenticators.
+- **Email confirmation is a precondition of password sign-in**, and of nothing else. An unconfirmed address is refused with its own error code (`email_not_verified`), never collapsed into the not-approved refusal — they are different problems with different repairs, and the sign-in screen offers the repair for each. The welcome magic link is the one ingress that does not require prior confirmation, because consuming it *is* the confirmation (§2.4).
 - **Magic link:** the welcome email link, plus the password-reset / account-recovery flow, is the only other ingress.
-- **Admin-issued temporary password:** admins can generate a single-use temporary password for any user in their tenant. Forces a password reset on first use.
-- **Forgot password:** standard email-link reset, same expiry rules as magic links.
+- **Admin-issued temporary password:** admins can generate a temporary password for any user in their tenant. It **forces a password reset on first use**, and that is enforced at the API rather than by routing the browser: a session authenticated with a temporary password is refused on every endpoint except the one that replaces the password (`403 password_change_required`). The temporary password stops working at the moment it is replaced, which is also the only way the forced state is cleared.
+  - Earlier revisions called it "single-use". It is not single-use in the literal sense — a member who abandons the change screen can sign in with it again — and it must not be, or a mistyped new password would lock the account out entirely. What "single use" is protecting is that the password an admin saw on their screen and emailed in plaintext never becomes the account's standing credential, and the API refusal above is what actually guarantees that.
+- **Forgot password:** standard email-link reset. The reset token is **valid for one hour and works once**. This is deliberately longer than the ≤15-minute magic link: a member clicks an approval link while they are waiting for it, and reads a reset email whenever they next open their inbox. (Earlier revisions said "same expiry rules as magic links", which the implementation has never matched.)
 - **Passkey reset:** a player can deregister an authenticator and enroll a new one any time, while signed in. Lost-device recovery uses the magic-link flow.
+- **Changing your own password:** available to any signed-in member with a password, requiring the current one. A wrong current password is refused as a bad field (`400`), never as an expired session — a `401` on an authenticated route is the client's sign-out signal, and answering one here would sign a member out for a typo. Every successful change emails the member, which is how they would learn that somebody else made it.
 
 ## 4. Credit (the wallet)
 - Each player has a credit balance denominated in **credits** (NOT rand). Two-decimal precision; backed by an immutable ledger.
@@ -187,8 +192,9 @@ See `reporting.md`. Both players and admins get filterable, exportable transacti
 Every player-affecting event sends an email — this is the contractual comms channel. Webhooks mirror these for programmatic consumers but never replace them. Templates live in `src/backend/EmailTemplates/` (when scaffolded). Each email must be testable against a snapshot.
 
 Required emails:
-- Email verification (registration)
-- Membership pending review (after admin notified)
+- Email verification (registration) — also re-sendable on request from the sign-in screen
+- Membership pending review (to the applicant)
+- **New membership application (to every tenant admin)** — the "admin notified" half of §2.3. It went unsent for a long time: both registration mails went to the applicant, so the only cue an admin ever had was a pending counter on a screen they had to think to open.
 - Membership approved + magic-link sign-in
 - Membership rejected with reason
 - Booking confirmation + receipt PDF attached
@@ -200,6 +206,7 @@ Required emails:
 - Password reset link
 - Magic-link sign-in
 - Admin-issued temporary password
+- **Password changed** — sent on every self-service change, including the member's own. It is the one signal a member has that somebody else changed it.
 - Peripheral failure auto-credit notice
 
 ## 12. Mobile-first PWA expectations

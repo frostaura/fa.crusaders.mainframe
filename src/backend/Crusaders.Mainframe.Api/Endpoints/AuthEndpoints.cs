@@ -28,8 +28,20 @@ public static class AuthEndpoints
             {
                 RegistrationResult.Created c => Results.Ok(new { user_id = c.UserId, status = "pending_email_verification" }),
                 RegistrationResult.AlreadyExists => Results.Conflict(new { error = "email_in_use" }),
+                RegistrationResult.MembershipNumberInUse => Results.Conflict(new { error = "membership_number_in_use" }),
                 _ => Results.Problem("Unexpected"),
             };
+        }).AllowAnonymous();
+
+        // Re-send the address-confirmation email. Anonymous by necessity — the member cannot sign
+        // in until it is done — and deliberately incurious: it answers 200 whether or not the
+        // address exists, so it is not an account-enumeration oracle. Rate-limited with the rest
+        // of the group.
+        g.MapPost("/resend-verification", async (ResendVerificationRequest req, AuthService auth, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Email)) return Results.BadRequest(new { error = "missing_fields" });
+            await auth.ResendVerificationAsync(req.Email, ct);
+            return Results.Ok(new { ok = true });
         }).AllowAnonymous();
 
         g.MapPost("/verify-email/{token}", async (string token, AuthService auth, CancellationToken ct) =>
@@ -43,9 +55,12 @@ public static class AuthEndpoints
             var result = await auth.LoginAsync(req.Email, req.Password, ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin }),
+                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
                 LoginResult.InvalidCredentials => Results.Unauthorized(),
-                LoginResult.EmailNotVerified => Results.StatusCode(403),
+                // Was a bare 403 with an empty body, indistinguishable from not_approved — so the
+                // screen said "Your account isn't approved yet" to members who were approved and
+                // had simply never clicked the verify link, and offered them nothing to do about it.
+                LoginResult.EmailNotVerified => Results.Json(new { error = "email_not_verified" }, statusCode: 403),
                 LoginResult.NotApproved na => Results.Json(new { error = "not_approved", status = na.Status.ToString() }, statusCode: 403),
                 _ => Results.Problem("Unexpected"),
             };
@@ -70,7 +85,7 @@ public static class AuthEndpoints
             var result = await auth.ConsumeMagicLinkAsync(token, ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin }),
+                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
                 _ => Results.BadRequest(new { error = "invalid_or_expired" }),
             };
         }).AllowAnonymous();
@@ -85,7 +100,7 @@ public static class AuthEndpoints
             var result = await auth.RefreshAsync(userId, ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin }),
+                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
                 _ => Results.Unauthorized(),
             };
         }).RequireAuthorization();
@@ -98,7 +113,7 @@ public static class AuthEndpoints
             var result = await auth.DevAdminLoginAsync(ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin }),
+                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
                 _ => Results.Problem("Seeded admin not found"),
             };
         }).AllowAnonymous();
@@ -110,6 +125,7 @@ public static class AuthEndpoints
 public sealed record RegisterRequest(string Email, string Password, string FullName, string MembershipNumber, string? PhotoUrl);
 public sealed record LoginRequest(string Email, string Password);
 public sealed record ForgotPasswordRequest(string Email);
+public sealed record ResendVerificationRequest(string Email);
 public sealed record ResetPasswordRequest(string Token, string NewPassword);
 
 public static class CurrentUser

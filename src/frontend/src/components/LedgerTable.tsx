@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpDown } from "lucide-react";
 import type { LedgerRow } from "../lib/api";
-import { cn } from "../lib/utils";
+import { cn, formatInstant, formatSignedCredits } from "../lib/utils";
 
 type Column = "time" | "from" | "to" | "amount" | "comment";
 type SortDir = "asc" | "desc";
@@ -54,8 +54,8 @@ export function LedgerTable({
         <thead className="text-xs uppercase tracking-wide text-text-muted bg-bg-muted sticky top-0 z-10 [&>tr>th]:border-b [&>tr>th]:border-border">
           <tr>
             {columns.includes("time") && <SortHeader label="Time" k="time" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />}
-            {columns.includes("from") && <SortHeader label="From" k="from" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />}
-            {columns.includes("to") && <SortHeader label="To" k="to" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />}
+            {columns.includes("from") && <SortHeader label="From" k="from" sortKey={sortKey} sortDir={sortDir} onSort={onSort} hideOnMobile />}
+            {columns.includes("to") && <SortHeader label="To" k="to" sortKey={sortKey} sortDir={sortDir} onSort={onSort} hideOnMobile />}
             {columns.includes("amount") && <SortHeader label="Amount" k="amount" sortKey={sortKey} sortDir={sortDir} onSort={onSort} align="right" />}
             {columns.includes("comment") && <SortHeader label="Comment" k="comment" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />}
           </tr>
@@ -64,15 +64,15 @@ export function LedgerTable({
           {sorted.map((r) => (
             <tr key={r.id} className="hover:bg-bg-muted/30">
               {columns.includes("time") && (
-                <td className="px-4 py-2 align-top whitespace-nowrap font-mono text-xs text-text-secondary">
-                  {new Date(r.at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
+                <td className="px-2 sm:px-4 py-2 align-top whitespace-nowrap font-mono text-xs text-text-secondary">
+                  {formatInstant(r.at)}
                 </td>
               )}
               {columns.includes("from") && (
-                <td className="px-4 py-2 align-top text-text-primary truncate max-w-[180px]" title={r.from}>{r.from}</td>
+                <td className="hidden sm:table-cell px-4 py-2 align-top text-text-primary truncate max-w-[180px]" title={r.from}>{r.from}</td>
               )}
               {columns.includes("to") && (
-                <td className="px-4 py-2 align-top">
+                <td className="hidden sm:table-cell px-4 py-2 align-top">
                   <span className="inline-flex items-center gap-1 text-text-primary truncate max-w-[180px]" title={r.to}>
                     <ArrowRight size={12} className="text-text-muted shrink-0" /> {r.to}
                   </span>
@@ -80,14 +80,19 @@ export function LedgerTable({
               )}
               {columns.includes("amount") && (
                 <td className={cn(
-                  "px-4 py-2 align-top text-right font-mono whitespace-nowrap",
+                  "px-2 sm:px-4 py-2 align-top text-right font-mono tabular-nums whitespace-nowrap",
                   r.signedAmountCredits >= 0 ? "text-success-strong" : "text-warning-strong",
                 )}>
-                  {r.signedAmountCredits >= 0 ? "+" : "−"}{r.amountCredits.toFixed(2)} cr
+                  {formatSignedCredits(r.signedAmountCredits)}
+                  {/* On a phone the From/To columns are hidden, so the counterparty rides
+                      under the amount rather than being lost. */}
+                  <span className="block sm:hidden text-[10px] font-normal text-text-muted">
+                    {r.signedAmountCredits >= 0 ? r.from : r.to}
+                  </span>
                 </td>
               )}
               {columns.includes("comment") && (
-                <td className="px-4 py-2 align-top text-xs text-text-secondary max-w-[280px] truncate" title={r.comment}>
+                <td className="px-2 sm:px-4 py-2 align-top text-xs text-text-secondary max-w-[140px] sm:max-w-[280px] truncate" title={r.comment}>
                   {r.comment}
                 </td>
               )}
@@ -100,14 +105,18 @@ export function LedgerTable({
 }
 
 function SortHeader({
-  label, k, sortKey, sortDir, onSort, align = "left",
+  label, k, sortKey, sortDir, onSort, align = "left", hideOnMobile = false,
 }: {
-  label: string; k: Column; sortKey: Column; sortDir: SortDir; onSort: (k: Column) => void; align?: "left" | "right";
+  label: string; k: Column; sortKey: Column; sortDir: SortDir; onSort: (k: Column) => void; align?: "left" | "right"; hideOnMobile?: boolean;
 }) {
   const active = sortKey === k;
   const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <th className={cn("font-medium px-4 py-2", align === "right" ? "text-right" : "text-left")}>
+    <th className={cn(
+      "font-medium px-2 sm:px-4 py-2",
+      align === "right" ? "text-right" : "text-left",
+      hideOnMobile && "hidden sm:table-cell",
+    )}>
       <button
         type="button"
         onClick={() => onSort(k)}
