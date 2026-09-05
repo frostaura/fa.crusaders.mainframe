@@ -12,35 +12,6 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 
 public static partial class TopUpEndpoints
 {
-    /// <summary>
-    /// Stable, snake_case reasons a top-up did not complete.
-    ///
-    /// <para>
-    /// These are stored on <c>pending_topups.FailureReason</c> and served to the client,
-    /// which maps them to sentences. The column used to hold whatever string was nearest —
-    /// <c>amount_mismatch:reported=100,00:expected=500,00</c> was rendered verbatim to a
-    /// member as the explanation for a failed R500 payment, en-ZA comma decimals and all.
-    /// The numbers behind a mismatch are in the log, where the person who needs them is.
-    /// </para>
-    /// </summary>
-    public static class FailureCodes
-    {
-        /// <summary>PayFast reported an amount other than the one the top-up was registered for.</summary>
-        public const string AmountMismatch = "amount_mismatch";
-
-        /// <summary>The member backed out at the gateway. Not a failure, and must not be shown as one.</summary>
-        public const string Cancelled = "cancelled";
-
-        /// <summary>The gateway declined the payment — card refused, insufficient funds, 3DS abandoned.</summary>
-        public const string Declined = "declined";
-
-        /// <summary>The gateway answered with something this application does not recognise.</summary>
-        public const string GatewayError = "gateway_error";
-
-        /// <summary>The checkout could not be registered at all — usually missing merchant credentials.</summary>
-        public const string ProviderRegisterFailed = "provider_register_failed";
-    }
-
     public static IEndpointRouteBuilder MapTopUpEndpoints(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/v1/credit").RequireAuthorization();
@@ -457,6 +428,42 @@ public static partial class TopUpEndpoints
         }
 
         return fields;
+    }
+
+    // Placed AFTER MapTopUpEndpoints, not before it, and the placement is load-bearing:
+    // lizard's C# parser scopes whatever follows a nested class into that class, so with
+    // FailureCodes at the top of the file the map method was reported as
+    // `FailureCodes::MapTopUpEndpoints`. whitelizard.txt names it
+    // `TopUpEndpoints::MapTopUpEndpoints`, so the ratchet entry silently stopped matching and
+    // `make complexity` was red on a file nobody had edited. Placement, not content — the same
+    // trap memory/gotchas.md records for expression-bodied members whose bodies carry braces.
+    /// <summary>
+    /// Stable, snake_case reasons a top-up did not complete.
+    ///
+    /// <para>
+    /// These are stored on <c>pending_topups.FailureReason</c> and served to the client,
+    /// which maps them to sentences. The column used to hold whatever string was nearest —
+    /// <c>amount_mismatch:reported=100,00:expected=500,00</c> was rendered verbatim to a
+    /// member as the explanation for a failed R500 payment, en-ZA comma decimals and all.
+    /// The numbers behind a mismatch are in the log, where the person who needs them is.
+    /// </para>
+    /// </summary>
+    public static class FailureCodes
+    {
+        /// <summary>PayFast reported an amount other than the one the top-up was registered for.</summary>
+        public const string AmountMismatch = "amount_mismatch";
+
+        /// <summary>The member backed out at the gateway. Not a failure, and must not be shown as one.</summary>
+        public const string Cancelled = "cancelled";
+
+        /// <summary>The gateway declined the payment — card refused, insufficient funds, 3DS abandoned.</summary>
+        public const string Declined = "declined";
+
+        /// <summary>The gateway answered with something this application does not recognise.</summary>
+        public const string GatewayError = "gateway_error";
+
+        /// <summary>The checkout could not be registered at all — usually missing merchant credentials.</summary>
+        public const string ProviderRegisterFailed = "provider_register_failed";
     }
 
 }

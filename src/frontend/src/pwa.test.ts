@@ -72,38 +72,27 @@ describe("installable", () => {
 describe("the offline shell", () => {
   const sw = read("public/sw.js");
 
-  it("falls back to the cached shell when a navigation cannot reach the network", () => {
-    expect(sw).toContain("networkFirstShell");
-    expect(sw).toMatch(/caches\.match\("\/index\.html"/);
-  });
-
-  it("caches the reads §12 names, and only reads", () => {
-    // "view today's bookings, view balance from cache" — the schedule and the wallet — plus the
-    // session probe, without which the app decides it is signed out and shows a sign-in form to
-    // somebody holding a phone with no signal.
-    expect(sw).toContain("/api/v1/schedule");
-    expect(sw).toContain("/api/v1/wallet");
-    expect(sw).toContain("/api/v1/whoami");
-    // Nothing but GET is ever cached. A booking or a top-up that is queued offline and lands
-    // minutes later against a slot somebody else took is a money bug wearing a feature's
-    // clothes, so writes must fail loudly instead.
-    expect(sw).toMatch(/request\.method\s*!==\s*"GET"[\s\S]{0,40}return/);
-  });
-
-  it("never caches the live balance stream", () => {
-    // A cached SSE response replays one stale balance and then hangs.
-    expect(sw).toContain("/api/v1/wallet/stream");
-  });
-
-  it("drops the member's cached reads on sign-out", () => {
-    expect(sw).toContain("CLEAR_API_CACHE");
-    expect(read("src/lib/pwa.ts")).toContain("CLEAR_API_CACHE");
-    expect(read("src/lib/auth.tsx")).toContain("clearOfflineCache()");
-  });
+  /**
+   * What the worker DOES is asserted in `src/serviceWorker.test.ts`, which evaluates this same
+   * file and drives real fetch, message and activate events through it. String matching cannot
+   * tell a caching rule from a comment about one — the version of these tests that shipped
+   * passed unchanged against a worker that cached three members' wallets in a shared cache.
+   * What is left here is the wiring between the app and the worker, which is genuinely a
+   * source-level fact.
+   */
 
   it("registers only in a production build", () => {
     // A service worker in front of the dev server serves a stale module graph after every edit,
     // and the symptom is indistinguishable from a broken build.
     expect(read("src/main.tsx")).toMatch(/import\.meta\.env\.PROD.*registerServiceWorker/);
+  });
+
+  it("clears the caches on every route by which a session ends, not only the sign-out button", () => {
+    const auth = read("src/lib/auth.tsx");
+    // endSession — an expiry, a revocation, an admin reset; the 401 handler; and the button.
+    // Three call sites, because on a shared club device the button is the rarest of the three.
+    expect(auth.match(/clearOfflineCache\(\)/g) ?? []).toHaveLength(3);
+    expect(read("src/lib/pwa.ts")).toContain("CLEAR_CACHES");
+    expect(sw).toContain("CLEAR_CACHES");
   });
 });

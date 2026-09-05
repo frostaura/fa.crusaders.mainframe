@@ -106,8 +106,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // A ref to the latest one keeps the recursion honest without re-creating the callback.
   const probeAgain = useRef<() => void>(() => {});
 
+  /**
+   * A session taken away rather than given up: an expiry, a revocation, an admin reset. It has
+   * to drop the offline caches for the same reason the sign-out button does — this is the way
+   * a session on a shared club device actually ends most of the time, because the member walks
+   * away rather than signing out.
+   */
   const endSession = useCallback(() => {
     tokenStore.clear();
+    void clearOfflineCache();
     setSessionExpired(true);
     setState({ status: "anonymous" });
   }, []);
@@ -155,6 +162,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // request flips the app back to anonymous and lets RequireAuth route the user to /login.
   useEffect(() => {
     setUnauthorizedHandler(() => {
+      // Same reasoning as endSession: the session is over, so nothing this browser cached
+      // while it was alive may survive it.
+      void clearOfflineCache();
       setSessionExpired(true);
       setState({ status: "anonymous" });
     });
@@ -230,9 +240,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // rather than after, because after, there is nothing left to authenticate the call with.
     const ending = endpoints.logout().catch(() => undefined);
     tokenStore.clear();
-    // The offline shell caches this member's schedule, wallet and profile. A club phone is a
-    // shared device; the next person to sign in must not find the last one's balance in it.
-    clearOfflineCache();
+    // A club phone is a shared device; the next person to sign in must inherit nothing this
+    // browser stored while the last session was alive.
+    void clearOfflineCache();
     // Signing out on purpose is not losing a session; /login should not commiserate about it.
     setSessionExpired(false);
     setState({ status: "anonymous" });

@@ -208,7 +208,7 @@ ul.tight li{margin:5px 0}
     <div class="tile hw"><div class="v">90 min</div><div class="k">Relay hard cap — one shared constant</div></div>
     <div class="tile sw"><div class="v">12</div><div class="k">Chars in an access code</div></div>
     <div class="tile sw"><div class="v">4</div><div class="k">Device routes, one club key</div></div>
-    <div class="tile ok"><div class="v">1027</div><div class="k">Tests green (668 + 276 + 83)</div></div>
+    <div class="tile ok"><div class="v">1348</div><div class="k">Tests green (800 + 276 + 272)</div></div>
   </div>
   <div class="legend">
     <span><i style="background:var(--amber-fill)"></i>Hardware / court box</span>
@@ -987,7 +987,7 @@ ul.tight li{margin:5px 0}
         <p style="font-size:13px">Implemented in <span class="mono">OutboundAddressGuard</span> inside the socket's <b>ConnectCallback</b>, against the address about to be dialled — registration-time checks can't survive DNS rebinding. Refused unless allow-listed: loopback, RFC1918, link-local <span class="mono">169.254/16</span> (the cloud-metadata range an RFC1918-only guard misses), CGNAT <span class="mono">100.64/10</span>, multicast/reserved, IPv6 equivalents, and IPv4-mapped IPv6 unwrapped before classification. <b>Every</b> resolved address must pass; redirects are never followed.</p>
         <div class="callout" style="margin:12px 0 0">
           <div class="t">The LAN carve-out — do not close it</div>
-          <p><span class="mono">Webhooks:PrivateNetworkAllowList</span> is CIDR-scoped — <span class="mono">10.0.40.7/32</span> admits one LAN consumer, not the private internet. <span class="mono">AllowPrivateNetworks</span> (guard off wholesale) defaults on in Development only.</p>
+          <p><span class="mono">Webhooks:PrivateNetworkAllowList</span> is CIDR-scoped — <span class="mono">10.0.40.7/32</span> admits one LAN consumer, not the private internet. <span class="mono">AllowPrivateNetworks</span> (guard off wholesale) defaults on in Development only. <b>It is configuration-file only, and empty by default.</b> There is no admin screen for it and no API that reads or writes it, so moving a club’s LAN consumer onto the list today means editing <span class="mono">appsettings.json</span> and restarting the API. The carve-out exists and works; operating it does not yet.</p>
         </div>
       </div>
       <div class="card pad" style="margin-top:16px">
@@ -1018,7 +1018,7 @@ ul.tight li{margin:5px 0}
 <section id="backend">
   <div class="eyebrow sw">Server side · API</div>
   <h2>Backend — .NET 10, one flat project</h2>
-  <p class="lede"><span class="mono">Crusaders.Mainframe.Api</span>: Minimal APIs + EF Core on PostgreSQL 16, folder-layered inside a single assembly. Auth is JWT HS256 plus WebAuthn passkeys (Fido2) for people, and the <b>Device bearer scheme</b> for boxes. <b>668 xUnit tests, 668 passed, zero skipped</b> — re-run in full against a real <span class="mono">postgres:16-alpine</span> on 2026-09-05 for this page, in-process <span class="mono">TestHost</span> tier and Postgres-backed HTTP tier alike; CI runs the same suite <em>unfiltered</em>, the old class-name filter having silently excluded that whole collection from CI forever. Cross-tenant injection tests are non-negotiable for every tenant-scoped table. <b>Authentication runs before the rate limiter</b>, and the auth partition is <span class="mono">user:{id}</span> when a token is present: behind the always-present gateway the whole club otherwise shared one 10/min bucket keyed on the proxy's address, and ten Court Code screens open in a minute took down login club-wide.</p>
+  <p class="lede"><span class="mono">Crusaders.Mainframe.Api</span>: Minimal APIs + EF Core on PostgreSQL 16, folder-layered inside a single assembly. Auth is JWT HS256 plus WebAuthn passkeys (Fido2) for people, and the <b>Device bearer scheme</b> for boxes. <b>800 xUnit tests, 800 passed, zero skipped</b> — re-run in full against a real <span class="mono">postgres:16-alpine</span> on 2026-09-05 for this page, in-process <span class="mono">TestHost</span> tier and Postgres-backed HTTP tier alike; CI runs the same suite <em>unfiltered</em>, the old class-name filter having silently excluded that whole collection from CI forever. Cross-tenant injection tests are non-negotiable for every tenant-scoped table. <b>Authentication runs before the rate limiter</b>, and the auth partition is <span class="mono">user:{id}</span> when a token is present: behind the always-present gateway the whole club otherwise shared one 10/min bucket keyed on the proxy's address, and ten Court Code screens open in a minute took down login club-wide.</p>
 
   <div class="grid2">
     <div class="card pad">
@@ -1307,7 +1307,7 @@ litMin   = clamp(ceil(litEnd − litStart), 0, min(M, 90))</pre>
   <div class="grid3">
     <div class="card pad kv">
       <span class="pill ok">Stack</span>
-      <p style="font-size:13.5px;margin:8px 0 0">React 19 + TypeScript + Vite 7 + Tailwind, installable PWA. Figtree type, Monday.com-style soft palette. State is React context (<span class="mono">lib/auth · lib/profile · lib/balance</span>) — a tracked deviation from the Redux Toolkit mandate, as is the fully hand-rolled primitive set (<span class="mono">Button, Card, Modal, Toast, DataTable, Carousel, ConfirmButton, LedgerTable, Charts</span>) in place of shadcn/Radix.</p>
+      <p style="font-size:13.5px;margin:8px 0 0">React 19 + TypeScript + Vite 7 + Tailwind, installable PWA — manifest, maskable icons and the iOS tags Safari reads instead of the manifest. <b>The offline shell covers the app, never the member.</b> The service worker caches the hashed build assets, the icons and the shell, so the installed app opens with no signal instead of showing the browser’s offline page; nothing under <span class="mono">/api/</span> is intercepted, cached or served from a cache. That is a deliberate retreat from feature-spec §12’s original “view balance from cache”, made on 2026-09-05: the browser’s Cache API keys on the request URL and ignores the <span class="mono">Authorization</span> header, and its storage belongs to the browser profile rather than to a login, so on a club-desk tablet the second member to open the wallet was served the first member’s balance and ledger. Figtree type, Monday.com-style soft palette. State is React context (<span class="mono">lib/auth · lib/profile · lib/balance</span>) — a tracked deviation from the Redux Toolkit mandate, as is the fully hand-rolled primitive set (<span class="mono">Button, Card, Modal, Toast, DataTable, Carousel, ConfirmButton, LedgerTable, Charts</span>) in place of shadcn/Radix.</p>
     </div>
     <div class="card pad kv">
       <span class="pill ok">Wallet UI</span>
@@ -1319,7 +1319,7 @@ litMin   = clamp(ceil(litEnd − litStart), 0, min(M, 90))</pre>
     </div>
     <div class="card pad kv">
       <span class="pill ok">Verified by</span>
-      <p style="font-size:13.5px;margin:8px 0 0"><b>83 vitest unit tests across 11 files, all green</b> — re-run for this page on 2026-09-05 — plus Playwright e2e, tsc clean, the lizard complexity gate (CCN ≤ 15) and a bundle-size gate in CI. Auth: JWT sessions with WebAuthn passkeys for step-up.</p>
+      <p style="font-size:13.5px;margin:8px 0 0"><b>272 vitest unit tests across 33 files, all green</b> — re-run for this page on 2026-09-05 — plus Playwright e2e, tsc clean, the lizard complexity gate (CCN ≤ 15) and a bundle-size gate in CI. Auth: JWT sessions with WebAuthn passkeys for step-up; sign-out revokes the credential server-side rather than only deleting this browser’s copy, and <b>every</b> route by which a session ends — the button, an expiry, a revocation, an admin reset, any 401 — also empties the offline caches, because on a shared device the button is the rarest of the five.</p>
     </div>
   </div>
 </section>
@@ -1470,11 +1470,11 @@ litMin   = clamp(ceil(litEnd − litStart), 0, min(M, 90))</pre>
       <div class="card pad">
         <h3 style="margin-top:0">Gates, re-run for this page on 2026-09-05</h3>
         <ul class="tight">
-          <li><b>Backend</b> — <span class="mono">668 / 668</span>, <b>zero skips</b>, against a real <span class="mono">postgres:16-alpine</span>: in-process <span class="mono">TestHost</span> tier and Postgres-backed HTTP tier together. Without a database the Postgres tier <em>skips silently</em> (184 of them), which is why the connection string is set rather than assumed.</li>
+          <li><b>Backend</b> — <span class="mono">800 / 800</span>, <b>zero skips</b>, against a real <span class="mono">postgres:16-alpine</span>: in-process <span class="mono">TestHost</span> tier and Postgres-backed HTTP tier together. Without a database the Postgres tier <em>skips silently</em> — measured at 233 of the 800 on 2026-09-05 — which is why the connection string is set rather than assumed.</li>
           <li><b>Firmware</b> — <span class="mono">276 / 276</span> Unity tests across seven native suites (<span class="mono">timebase · bridge · courtlogic · devcrypto · hal_fakes · bridgelogic · protocol</span>). CI also runs the same suite under ASAN + UBSAN.</li>
-          <li><b>Frontend</b> — <span class="mono">83 / 83</span> vitest across 11 files.</li>
+          <li><b>Frontend</b> — <span class="mono">272 / 272</span> vitest across 33 files, plus a Playwright suite that measures the wallet ledger at 375×812 and one that evaluates the real <span class="mono">sw.js</span>.</li>
         </ul>
-        <p style="font-size:13px;color:var(--muted);margin-top:10px"><b>1027 tests, all green.</b> Earlier revisions of this page carried counts of 686 / 303 / 44; none of the three was still true. A number on this page that has not been re-run should be deleted, not carried forward — three audits found sixteen defects in a suite of 495 passing tests, so a count is a fact about the suite and never evidence about the system.</p>
+        <p style="font-size:13px;color:var(--muted);margin-top:10px"><b>1348 tests, all green.</b> Earlier revisions of this page carried counts of 686 / 303 / 44 and then 668 / 276 / 83; not one of those six was still true when it was next measured. A number on this page that has not been re-run should be deleted, not carried forward — three audits found sixteen defects in a suite of 495 passing tests, so a count is a fact about the suite and never evidence about the system.</p>
       </div>
       <div class="callout danger" style="margin:16px 0 0">
         <div class="t">Round 3's ledger, and what this page does not claim</div>
