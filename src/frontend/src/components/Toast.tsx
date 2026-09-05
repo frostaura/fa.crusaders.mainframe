@@ -52,10 +52,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 }
 
 function ToastViewport({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
+  // `z-[200]`, above `Modal`'s `z-[100]` overlay and not below it. A toast raised while a
+  // dialog was open painted UNDER the dialog's 30% black scrim, so the only explanation a
+  // member got for a refusal read as greyed-out background chrome — and any dialog taller
+  // than the toast's own strip hid it outright. Booking refusals no longer travel this way
+  // at all (they render inside the dialog), but a toast raised over any other dialog has
+  // the same problem and this is the layer that fixes it.
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed left-1/2 top-[100px] z-50 -translate-x-1/2 flex flex-col items-center gap-2 w-[min(92vw,420px)]"
+      className="pointer-events-none fixed left-1/2 top-[100px] z-[200] -translate-x-1/2 flex flex-col items-center gap-2 w-[min(92vw,420px)]"
     >
       {toasts.map((t) => (
         <ToastView key={t.id} toast={t} onDismiss={onDismiss} />

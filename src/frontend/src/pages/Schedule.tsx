@@ -15,7 +15,14 @@ import { buildTimeSlices, groupSlotsByCourt } from "../lib/scheduleGrid";
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
-type CancelTarget = { bookingId: string; courtName: string; whenLabel: string; mine: boolean };
+type CancelTarget = {
+  bookingId: string; courtName: string; whenLabel: string; mine: boolean;
+  /** The booking's own player, for the dialog an ADMIN is deciding on. Null for one's own. */
+  memberName: string | null;
+};
+
+/** A member the desk can book for, with the credit the club last read for them. */
+type MemberOption = { userId: string; name: string; balanceCredits: number | null };
 
 export default function SchedulePage() {
   const auth = useAuth();
@@ -30,7 +37,7 @@ export default function SchedulePage() {
   const [loading, setLoading] = useState(false);
   const [booking, setBooking] = useState<BookingIntent | null>(null);
   const [cancelling, setCancelling] = useState<CancelTarget | null>(null);
-  const [members, setMembers] = useState<{ userId: string; name: string }[]>([]);
+  const [members, setMembers] = useState<MemberOption[]>([]);
   // Snapshot of "now", taken when the schedule loads, so past-slot styling is pure at render time.
   const [loadedAt, setLoadedAt] = useState(0);
 
@@ -66,16 +73,18 @@ export default function SchedulePage() {
       .catch(() => { /* the optimistic view stands until something asks for the day again */ });
   }, [date]);
 
-  // The member picker for "book on behalf". Admin-only and loaded once — a member never
-  // asks for it, and asking would be a 403 on every schedule visit.
   useEffect(() => {
     if (!isAdmin) return;
     let live = true;
-    endpoints.adminMembers("Active")
-      .then((rows) => { if (live) setMembers(rows.map((m) => ({ userId: m.user_id, name: m.full_name }))); })
-      .catch(() => { /* the picker is unavailable; booking for oneself still works */ });
+    void fetchMembers().then((rows) => { if (live && rows) setMembers(rows); });
     return () => { live = false; };
   }, [isAdmin]);
+
+  // A booking spends the credit the roster is quoting, so the quote moves with it —
+  // otherwise the session's second booking states the balance from before its first.
+  const refreshMembers = useCallback(() => {
+    void fetchMembers().then((rows) => { if (rows) setMembers(rows); });
+  }, []);
 
   const slotsByCourt = useMemo(() => groupSlotsByCourt(day), [day]);
   const timeSlices = useMemo(() => (day ? buildTimeSlices(day) : []), [day]);
@@ -111,6 +120,8 @@ export default function SchedulePage() {
   const openCancel = useCallback((slot: ScheduleSlot, courtName: string) => setCancelling({
     bookingId: slot.bookingId!, courtName,
     whenLabel: formatTime(slot.startsAtUtc, timezone), mine: slot.isMine,
+    // First name only — it is all the grid carries, and all it is allowed to.
+    memberName: slot.isMine ? null : slot.ownerFirstName,
   }), [timezone]);
 
   const confirmBooking = async (option: AdminOption): Promise<BookingOutcome> => {
@@ -118,9 +129,10 @@ export default function SchedulePage() {
     try {
       const memberBalanceAfter = await placeBooking(
         booking, option, (slot) => setDay((d) => withSlot(d, slot)), applyBalance);
-      toast.push({ tone: "success", text: bookedMessage(booking, option, memberBalanceAfter) });
+      toast.push({ tone: "success", text: bookedMessage(booking, option, memberBalanceAfter, nameOf(members, option)) });
       setBooking(null);
       reconcile();
+      if (option.kind === "member") refreshMembers();
       return { kind: "done" };
     } catch (err) {
       // A member who cannot cover the court is not an error to report and dismiss — it is
@@ -128,23 +140,28 @@ export default function SchedulePage() {
       // figures in front of them.
       const short = shortfallFrom(err, option);
       if (short) return short;
-      toast.push({ tone: "danger", text: refusalText(err, option) });
-      return { kind: "done" };
+      // Every other refusal goes back into the dialog too — see `BookingOutcome`.
+      return { kind: "refused", message: refusalText(err, option) };
     }
   };
 
-  const confirmCancel = async (waivePenalty: boolean) => {
+  const confirmCancel = async (waivePenalty: boolean, waiveReason: string) => {
     if (!cancelling) return;
     try {
       const result = cancelling.mine
         ? await endpoints.cancelBooking(cancelling.bookingId)
-        : await endpoints.adminCancelBooking(cancelling.bookingId, waivePenalty);
+        : await endpoints.adminCancelBooking(cancelling.bookingId, waivePenalty, waiveReason);
       // The freed slot leaves the grid at once; the read that confirms it follows behind.
       setDay((d) => withoutBooking(d, cancelling.bookingId));
       setCancelling(null);
-      // The figures the server actually moved, not "refund pending" — which was shown
-      // identically whether 50.00 came back, 35.00 came back, or nothing did.
-      toast.push({ tone: "success", text: cancellationOutcome(result.refunded_credits, result.penalty_credits) });
+      // The figures the server actually moved, not "refund pending", and named for whose
+      // credit moved: §7 refunds the booking's player, never the acting admin.
+      toast.push({
+        tone: "success",
+        text: cancellationOutcome(
+          result.refunded_credits, result.penalty_credits,
+          cancelling.mine ? null : cancelling.memberName ?? "the member"),
+      });
       reconcile();
       void refreshBalance();
     } catch (err) {
@@ -224,6 +241,7 @@ export default function SchedulePage() {
           courtName={cancelling.courtName}
           whenLabel={cancelling.whenLabel}
           asAdmin={isAdmin && !cancelling.mine}
+          memberName={cancelling.memberName}
           onClose={() => setCancelling(null)}
           onConfirm={confirmCancel}
         />
@@ -232,6 +250,26 @@ export default function SchedulePage() {
   );
 }
 
+/**
+ * The member picker for "book on behalf", carrying each member's balance so §8's four
+ * figures — name, balance, price, balance after — are on the dialog before the desk spends
+ * somebody else's credit.
+ *
+ * <p>
+ * Admin-only, and it swallows its own failure: a member never asks for it, asking would be
+ * a 403 on every schedule visit, and a desk whose roster did not load can still book for
+ * itself and cancel. Module-level because it closes over nothing.
+ * </p>
+ */
+async function fetchMembers(): Promise<MemberOption[] | null> {
+  try {
+    const rows = await endpoints.adminMembers("Active");
+    return rows.map((m) => ({
+      userId: m.user_id, name: m.full_name,
+      balanceCredits: typeof m.balance_credits === "number" ? m.balance_credits : null,
+    }));
+  } catch { return null; }
+}
 /**
  * Place the booking and hand back the slot it created, so the grid can show it before
  * the confirming read comes back. The balance comes from the same response — the wallet
@@ -313,16 +351,27 @@ function refusalText(err: unknown, option: AdminOption): string {
   return describeBookingError(err, fallback);
 }
 
-function bookedMessage(intent: BookingIntent, option: AdminOption, memberBalanceAfter: number | null): string {
+/** The name the desk picked from the dropdown, for the sentence that confirms what it did. */
+function nameOf(members: MemberOption[], option: AdminOption): string {
+  if (option.kind !== "member") return "";
+  return members.find((m) => m.userId === option.userId)?.name ?? "that member";
+}
+
+function bookedMessage(
+  intent: BookingIntent, option: AdminOption, memberBalanceAfter: number | null, memberName: string,
+): string {
   if (option.kind === "block") return `${intent.courtName} held for "${option.label}" at ${intent.whenLabel}.`;
   if (option.kind === "member") {
     // Naming the resulting balance is the point of the override being deliberate: the
     // admin who has just put somebody in the red is told by how much, at the moment they
     // did it, rather than by an audit report at month end.
     const owing = memberBalanceAfter !== null && memberBalanceAfter < 0
-      ? ` Their balance is now ${formatCredits(memberBalanceAfter)} — they've been emailed about it.`
+      ? ` ${memberName}'s balance is now ${formatCredits(memberBalanceAfter)} — they've been emailed about it.`
       : "";
-    return `Booked ${intent.courtName} at ${intent.whenLabel} for that member.${owing}`;
+    // Named, not "that member". The desk has just picked a name from a dropdown and
+    // spent that person's credit; repeating the name back is the one check that catches
+    // a mis-click, and it was the one thing the confirmation refused to do.
+    return `Booked ${intent.courtName} at ${intent.whenLabel} for ${memberName}.${owing}`;
   }
   return `Booked ${intent.courtName} at ${intent.whenLabel}.`;
 }

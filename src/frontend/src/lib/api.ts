@@ -747,8 +747,14 @@ export const endpoints = {
     api.post<{ booking_id: string; balance_after_credits: number }>(
       "/api/v1/admin/bookings/", { courtId, userId, startsAt, sliceCount, allowNegativeBalance }),
   /** Admin: cancel anyone's booking, optionally waiving the late-cancellation penalty. */
-  adminCancelBooking: (bookingId: string, waivePenalty: boolean) =>
-    api.post<{ refunded_credits: number; penalty_credits: number }>(`/api/v1/admin/bookings/${bookingId}/cancel`, { waivePenalty }),
+  /**
+   * §7 / §8: the penalty is waiveable **with reason**, and the reason travels with the
+   * waiver. It used to be a bare boolean on the wire, so a club auditing waived penalties
+   * at month end had a tick and no way to tell a club decision from a quiet favour.
+   */
+  adminCancelBooking: (bookingId: string, waivePenalty: boolean, waiveReason = "") =>
+    api.post<{ refunded_credits: number; penalty_credits: number }>(
+      `/api/v1/admin/bookings/${bookingId}/cancel`, { waivePenalty, waiveReason }),
   /** Admin: hold a court for an event. Takes no money and refuses to sit over a paid booking. */
   adminBlock: (courtId: string, startsAt: string, sliceCount: number, label: string) =>
     api.post<{ booking_id: string }>("/api/v1/admin/blocks/", { courtId, startsAt, sliceCount, label }),

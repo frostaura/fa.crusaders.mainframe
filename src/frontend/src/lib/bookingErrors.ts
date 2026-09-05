@@ -37,7 +37,21 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
   already_started: "That booking has already started, so it can't be cancelled.",
   booking_not_found: "That booking is no longer there. Refresh the schedule.",
   block_not_found: "That block has already been lifted.",
+  waive_reason_required: "Say why the penalty is being waived — the club's audit needs the reason, not just the tick.",
 };
+
+/**
+ * What a 5xx means to the person holding the phone.
+ *
+ * <p>
+ * Every server-side failure used to arrive as the booking fallback — "Refresh the schedule
+ * and try again" — which is advice for a stale grid and simply wrong for a gateway that is
+ * down: refreshing fails too, and the member is told to keep trying something that cannot
+ * work. A 5xx is never the member's doing and there is nothing on the schedule for them to
+ * fix.
+ * </p>
+ */
+const SERVER_DOWN_TEXT = "The club's system isn't answering right now. Nothing was booked and no credit was taken — try again in a minute.";
 
 /** The sign-out sentence. The 401 handler in `lib/api.ts` does the actual redirect. */
 export const SESSION_LOST_TEXT = "Your session has expired — sign in again to book.";
@@ -107,6 +121,7 @@ export function describeBookingError(e: unknown, fallback: string): string {
   // 400 `tenant_unresolved` from the tenancy middleware before authorization ever runs.
   // Both mean the same thing to the person holding the phone.
   if (e.status === 401 || e.code === "tenant_unresolved") return SESSION_LOST_TEXT;
+  if (e.status >= 500) return SERVER_DOWN_TEXT;
 
   switch (e.code) {
     case "peak_hours_league_only": return describePeakHours(e);
@@ -136,14 +151,25 @@ export function describeBookingError(e: unknown, fallback: string): string {
  * a checked-in member lost the whole price and nothing came back at all. Nothing in that
  * sentence was true in the third case, and the member had no other way to find out.
  * </p>
+ *
+ * <p>
+ * `member` is the first name of the person whose booking it was, and it is present exactly
+ * when an ADMIN cancelled on somebody else's behalf. §7 is explicit that "refunds always
+ * go to the booking's player", and the sentence said "back to your credit" to a desk
+ * account whose own balance never moved — first person about another person's money, with
+ * the member never named. An admin acting for someone should be told whose credit moved.
+ * </p>
  */
-export function cancellationOutcome(refunded: number, penalty: number): string {
+export function cancellationOutcome(refunded: number, penalty: number, member?: string | null): string {
+  const whose = member ? `${member}'s credit` : "your credit";
   if (refunded <= 0 && penalty <= 0) {
-    return "Booking cancelled. Nothing was refunded — the lights had already been on.";
+    return member
+      ? `Booking cancelled. Nothing was refunded — ${member} had already checked in and the lights had been on.`
+      : "Booking cancelled. Nothing was refunded — the lights had already been on.";
   }
   if (penalty > 0) {
-    return `Booking cancelled. ${formatCredits(refunded - penalty)} back to your credit, `
+    return `Booking cancelled. ${formatCredits(refunded - penalty)} back to ${whose}, `
       + `${formatCredits(penalty)} kept as the late-cancellation penalty.`;
   }
-  return `Booking cancelled. ${formatCredits(refunded)} back to your credit.`;
+  return `Booking cancelled. ${formatCredits(refunded)} back to ${whose}.`;
 }
