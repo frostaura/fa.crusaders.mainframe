@@ -207,14 +207,20 @@ export default function AdminWebhooksPage() {
   const toast = useToast();
   const [list, setList] = useState<WebhookEndpointDto[]>([]);
   const [creating, setCreating] = useState(false);
-  // Seeded with a scoreboard, not the court box. The box is pull-only, has no inbound HTTP
-  // listener and can never be a webhook destination — `docs/specs/webhooks.md` names the old
-  // `http://arduino.local/court/{court_number}/turn/on` default as superseded and says in so
-  // many words that it must not be used as a templating example. It was this form's
-  // prefilled value, so the one example every admin started from was the forbidden one.
-  const [url, setUrl] = useState("https://scoreboard.example.com/court/{court_number}/lit");
+  // Empty, and it has to stay empty. A destination is not a default.
+  //
+  // This form used to open with `http://arduino.local/court/{court_number}/turn/on` in the
+  // URL field, which is the one destination `docs/specs/webhooks.md` forbids as a templating
+  // example; that was replaced with a scoreboard host, which fixed the wrong half of the
+  // problem. The defect is not WHICH host is prefilled, it is that a host is prefilled at
+  // all: with a value rather than a placeholder in the field, an admin who opens the form and
+  // presses Create publishes `booking_id`, `court_id`, `user_id` and every member's slot times
+  // to a third-party domain the club does not own, in two clicks, having typed nothing. An
+  // example belongs in the `placeholder` — which both fields already carry — where it can be
+  // read and cannot be submitted.
+  const [url, setUrl] = useState("");
   const [filterTokens, setFilterTokens] = useState<string[]>(["booking.lights_on"]);
-  const [description, setDescription] = useState("Scoreboard — court lit");
+  const [description, setDescription] = useState("");
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [openDeliveriesId, setOpenDeliveriesId] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDeliveryDto[]>([]);
@@ -233,6 +239,10 @@ export default function AdminWebhooksPage() {
       });
       setCreatedSecret(created.secret);
       setCreating(false);
+      // Emptied on the way out, for the same reason it starts empty: a form that reopens
+      // holding the last destination is a second endpoint one click away from existing.
+      setUrl("");
+      setDescription("");
       await load();
       toast.push({ tone: "success", text: "Endpoint created." });
     } catch (err) {

@@ -58,6 +58,17 @@ describe("AdminWebhooks", () => {
   ];
 
   /**
+   * The URL field, found the way an admin finds it: by the example printed in it.
+   *
+   * The form no longer opens with a destination in it (see the prefill tests below), so
+   * every test that means to CREATE something has to type one — which is the point.
+   */
+  const URL_PLACEHOLDER = "https://example.com/webhook?court={court_number}";
+  function typeUrl(value = "https://scoreboard.example.com/court/{court_number}/lit") {
+    fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value } });
+  }
+
+  /**
    * D-F2. The five cells of the one row read
    * <code>["Invalid Date", "", "", "", "undefinedms"]</code> and React logged a duplicate-key
    * warning on every render, because <code>rowKey</code> resolved to <code>undefined</code>
@@ -186,6 +197,64 @@ describe("AdminWebhooks", () => {
   });
 
   /**
+   * R2 I-F1. The `arduino.local` default was replaced with a scoreboard host, which fixed
+   * the wrong half: the defect is that the field holds a VALUE at all.
+   *
+   * <p>
+   * Opened cold and pressed once, the form posted a live endpoint at
+   * <code>scoreboard.example.com</code> — a domain the club does not own — and every
+   * subsequent <code>booking.lights_on</code> then carried <code>booking_id</code>,
+   * <code>court_id</code>, <code>user_id</code> and the member's slot times to it, HMAC-signed
+   * so the receiver could trust them. Two clicks, nothing typed. The examples belong in the
+   * placeholders, which both fields already have.
+   * </p>
+   */
+  it("opens with no destination in it — a URL is typed, never inherited", async () => {
+    stubFetch(routes());
+    renderPage(<AdminWebhooksPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+
+    // Every field an admin could submit is empty. Placeholders may carry examples; values
+    // may not — that distinction is the whole finding.
+    for (const input of Array.from(document.querySelectorAll("input"))) {
+      expect(input.value, `"${input.placeholder}" opened pre-filled with "${input.value}"`).toBe("");
+    }
+    // And the example is still on screen, where it can be read and not submitted.
+    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toBeInTheDocument();
+  });
+
+  it("creates nothing when Create is pressed with an empty form, and says what is missing", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminWebhooksPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
+
+    expect(await screen.findByText(/URL template is required/)).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  /**
+   * The same defect one step later: a form that reopens holding the destination just
+   * created is a duplicate endpoint one click away from existing.
+   */
+  it("empties the form after a successful create", async () => {
+    stubFetch(routes([
+      { method: "POST", path: LIST, body: { ...endpointFixture(), secret: "whsec_abc123" } },
+    ]));
+    renderPage(<AdminWebhooksPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    typeUrl("https://scoreboard.example.test/lit");
+    fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
+    expect(await screen.findByText(/won't be shown again/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /New endpoint/ }));
+    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue("");
+  });
+
+  /**
    * D-F8. Five distinct refusals, one four-word toast.
    *
    * The <code>destination_not_permitted</code> case matters most: the guard is correct and
@@ -206,6 +275,7 @@ describe("AdminWebhooks", () => {
     renderPage(<AdminWebhooksPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    typeUrl();
     fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
 
     expect(await screen.findByText(expected)).toBeInTheDocument();
@@ -231,6 +301,7 @@ describe("AdminWebhooks", () => {
     renderPage(<AdminWebhooksPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    typeUrl("http://127.0.0.1:9445/hook");
     fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
 
     const said = await screen.findByText(/private or link-local network/);
@@ -260,6 +331,7 @@ describe("AdminWebhooks", () => {
     renderPage(<AdminWebhooksPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    typeUrl();
     fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
 
     expect(await screen.findByText(/Check the URL and try again/)).toBeInTheDocument();
@@ -272,6 +344,7 @@ describe("AdminWebhooks", () => {
     renderPage(<AdminWebhooksPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    typeUrl();
     fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
 
     await waitFor(() => expect(stub.calls.some((c) => c.method === "POST")).toBe(true));
