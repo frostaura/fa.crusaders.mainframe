@@ -56,33 +56,15 @@ public static class AdminDeviceEndpoints
         var invalid = Validate(req);
         if (invalid is not null) return Results.BadRequest(new { error = invalid });
 
-        ButtonMap? buttons = null;
-        if (req.ButtonMap is not null && !ButtonMap.TryParse(req.ButtonMap, out buttons, out var reason))
-        {
-            return Results.BadRequest(new { error = "button_map_invalid", message = reason });
-        }
+        if (ParseRegistrationButtonMap(req, out var buttons) is { } badMap) return badMap;
+        if (ParseRegistrationMac(req, out var mac) is { } badMac) return badMac;
 
-        // A MAC on a hand-registered box is what makes it recoverable later.
-        //
-        // Without one, a revoked hand-registered box had no way back at all: revoking sets
-        // RevokedAt for ever and nothing clears it, rotation issues no grant, and the
-        // discovery claim's un-revoke path finds its row BY MAC — which a hand-registered
-        // row does not have. The admin's only move was to register the same hardware again
-        // under a different device code, leaving a dead row and two identities for one box.
-        // Given a MAC, this endpoint reclaims that row exactly as the discovery claim does.
-        string? mac = null;
-        if (!string.IsNullOrWhiteSpace(req.MacAddress))
-        {
-            mac = DeviceRegistryService.NormaliseMacAddress(req.MacAddress);
-            if (mac is null) return Results.BadRequest(new { error = DeviceRegistryService.MacAddressInvalid });
-        }
-
+        // A MAC is what makes a hand-registered box recoverable later: given one, this
+        // endpoint reclaims the row that already owns it — re-keyed, un-revoked — exactly
+        // as the discovery claim does. See ParseRegistrationMac.
         var existing = mac is null ? null : await devices.FindByMacAddressAsync(mac, ct);
 
-        var codeTaken = existing is null
-            ? await devices.DeviceCodeTakenAsync(req.DeviceCode.Trim(), ct)
-            : await devices.DeviceCodeTakenAsync(req.DeviceCode.Trim(), existing.Id, ct);
-        if (codeTaken)
+        if (await IsDeviceCodeTakenAsync(devices, req.DeviceCode, existing, ct))
         {
             return Results.Conflict(new { error = "device_code_taken" });
         }
@@ -94,17 +76,15 @@ public static class AdminDeviceEndpoints
         // admin wrote it; otherwise the club's map is trimmed to fit this box and stored as
         // its override, because "your club map names four courts and this box drives two"
         // used to be a dead end from this screen. See ResolveCourtAssignmentAsync.
-        var trimmed = false;
-        if (req.Kind == DeviceKind.CourtBox)
-        {
-            // A registration either carries a map or does not; there is no "clear" on this
-            // path, so an absent one is no opinion at all and is the trim's to derive.
-            var assignment = await devices.ResolveCourtAssignmentAsync(
-                req.CourtNumbers!, buttons is null ? null : new Optional<ButtonMap?>(buttons), null, ct);
-            if (assignment.Error is { } mismatch) return Results.BadRequest(new { error = mismatch });
-            buttons = assignment.Override;
-            trimmed = assignment.Trimmed;
-        }
+        //
+        // A registration either carries a map or does not; there is no "clear" on this
+        // path, so an absent one is no opinion at all and is the trim's to derive.
+        var assignment = req.Kind == DeviceKind.CourtBox
+            ? await devices.ResolveCourtAssignmentAsync(
+                req.CourtNumbers!, buttons is null ? null : new Optional<ButtonMap?>(buttons), null, ct)
+            : new CourtAssignment(null, buttons, false);
+        if (assignment.Error is { } mismatch) return Results.BadRequest(new { error = mismatch });
+        buttons = assignment.Override;
 
         var command = new RegisterDeviceCommand(req.DeviceCode, req.Name, req.Kind, req.Hardware, req.CourtNumbers, req.GateKey)
         {
@@ -128,7 +108,7 @@ public static class AdminDeviceEndpoints
             // True when this box got a button map derived from the club's rather than the
             // club's own — its court buttons beyond its relay count are off. The map itself
             // is in device.button_map.
-            button_map_trimmed = trimmed,
+            button_map_trimmed = assignment.Trimmed,
             note = existing is null
                 ? "Store this key on the device now. It is derived, not stored, and cannot be shown again."
                 : "This board was already registered here; its row has been re-keyed and re-enabled. Store the new key on the device now — it cannot be shown again.",
@@ -186,6 +166,57 @@ public static class AdminDeviceEndpoints
     }
 
     /// <summary>
+    /// The override a registration carries, or the refusal. Absent is not an error — it
+    /// means "run the club's map", which <see cref="DeviceRegistryService.ResolveCourtAssignmentAsync"/>
+    /// then either honours or trims to fit.
+    /// </summary>
+    private static IResult? ParseRegistrationButtonMap(RegisterDeviceRequest req, out ButtonMap? buttons)
+    {
+        buttons = null;
+        if (req.ButtonMap is null) return null;
+
+        return ButtonMap.TryParse(req.ButtonMap, out buttons, out var reason)
+            ? null
+            : Results.BadRequest(new { error = "button_map_invalid", message = reason });
+    }
+
+    /// <summary>
+    /// The board's MAC in the form the boards announce, or the refusal. Absent is not an
+    /// error — a MAC is optional, and a box registered without one simply cannot be
+    /// recovered this way.
+    ///
+    /// <para>
+    /// Why it is worth typing: a revoked hand-registered box used to have no way back at
+    /// all. Revoking sets <c>RevokedAt</c> for ever and nothing clears it, rotation issues
+    /// no provisioning grant, and the discovery claim's un-revoke path finds its row BY MAC
+    /// — which a hand-registered row did not have, because this endpoint would not accept
+    /// one. The admin's only move was to register the same hardware again under a different
+    /// device code, leaving a dead row and two identities for one physical box.
+    /// </para>
+    /// </summary>
+    private static IResult? ParseRegistrationMac(RegisterDeviceRequest req, out string? mac)
+    {
+        mac = null;
+        if (string.IsNullOrWhiteSpace(req.MacAddress)) return null;
+
+        mac = DeviceRegistryService.NormaliseMacAddress(req.MacAddress);
+        return mac is null
+            ? Results.BadRequest(new { error = DeviceRegistryService.MacAddressInvalid })
+            : null;
+    }
+
+    /// <summary>
+    /// Whether this device code belongs to some OTHER row. The row being reclaimed is
+    /// excluded, or re-registering a revoked box under its own code would collide with
+    /// itself — which is precisely the dead end the MAC lookup exists to end.
+    /// </summary>
+    private static Task<bool> IsDeviceCodeTakenAsync(
+        DeviceRegistryService devices, string deviceCode, Device? existing, CancellationToken ct)
+        => existing is null
+            ? devices.DeviceCodeTakenAsync(deviceCode.Trim(), ct)
+            : devices.DeviceCodeTakenAsync(deviceCode.Trim(), existing.Id, ct);
+
+    /// <summary>
     /// button_map on a PATCH is three-valued: absent leaves the override alone, null clears
     /// it (back to the club's map), a list sets it. Bound as a JsonElement because a nullable
     /// list cannot tell the first two apart. Returns the refusal, or null when the value is
@@ -219,7 +250,7 @@ public static class AdminDeviceEndpoints
     /// changed — in which case the request's own button_map is left exactly as it arrived,
     /// including absent.
     /// </summary>
-    private static async Task<DeviceRegistryService.CourtAssignment?> AssignmentAsync(
+    private static async Task<CourtAssignment?> AssignmentAsync(
         DeviceRegistryService devices, Device device, IReadOnlyList<int>? newCourts, Optional<ButtonMap?>? buttons, CancellationToken ct)
     {
         if (device.Kind != DeviceKind.CourtBox || (newCourts is null && buttons is null)) return null;
@@ -227,7 +258,7 @@ public static class AdminDeviceEndpoints
         var courts = newCourts ?? device.CourtNumbers;
         if (newCourts is not null && DeviceRegistryService.ValidateCourtNumbers(courts) is { } bad)
         {
-            return DeviceRegistryService.CourtAssignment.Refused(bad);
+            return new CourtAssignment(bad, null, false);
         }
 
         // buttons is already the three-valued shape ResolveCourtAssignmentAsync wants:

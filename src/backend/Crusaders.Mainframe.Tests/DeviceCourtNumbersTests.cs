@@ -233,7 +233,7 @@ public sealed class DeviceCourtNumbersTests
         Assert.True(body.GetProperty("button_map_trimmed").GetBoolean());
         Assert.Equal(
             ["court:A", "court:B", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
-            body.GetProperty("device").GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
+            body.GetProperty("device").GetProperty("button_map").EnumerateArray().Select(e => e.GetString() ?? "").ToArray());
 
         // A four-court box under the same club map needs nothing derived and keeps none:
         // it runs the club's map, so a later edit to that map reaches it.
@@ -250,7 +250,7 @@ public sealed class DeviceCourtNumbersTests
         Assert.Equal(
             ["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
             JsonDocument.Parse(await shrink.Content.ReadAsStringAsync()).RootElement
-                .GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
+                .GetProperty("button_map").EnumerateArray().Select(e => e.GetString() ?? "").ToArray());
 
         // A reorder keeps the count and is fine: the relay mapping is the admin's to choose.
         var reorder = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1 } });

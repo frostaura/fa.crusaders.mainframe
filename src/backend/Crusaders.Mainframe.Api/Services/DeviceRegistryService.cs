@@ -97,17 +97,6 @@ public sealed class DeviceRegistryService
         => CourtAssignmentErrorAsync(courtNumbers, null, null, ct);
 
     /// <summary>
-    /// The outcome of reconciling a box's court list with the map it would run:
-    /// <paramref name="Error"/> to refuse, else the override to store on the row —
-    /// <c>null</c> meaning "run the club's map", and <paramref name="Trimmed"/> saying
-    /// whether it was derived here rather than asked for.
-    /// </summary>
-    public sealed record CourtAssignment(string? Error, ButtonMap? Override, bool Trimmed)
-    {
-        public static CourtAssignment Refused(string error) => new(error, null, false);
-    }
-
-    /// <summary>
     /// The court list and the map, reconciled: valid, refused, or made to fit.
     ///
     /// <para>
@@ -137,7 +126,7 @@ public sealed class DeviceRegistryService
             .Where(c => courtNumbers.Contains(c.CourtNumber))
             .Select(c => c.CourtNumber)
             .ToListAsync(ct);
-        if (courtNumbers.Any(n => !known.Contains(n))) return CourtAssignment.Refused(CourtNumberNotFound);
+        if (courtNumbers.Any(n => !known.Contains(n))) return new CourtAssignment(CourtNumberNotFound, null, false);
 
         var settings = await _settings.GetAsync(ct);
 
@@ -148,7 +137,7 @@ public sealed class DeviceRegistryService
             var map = asked.Value ?? settings.Buttons;
             return map.FirstSelectionBeyond(courtNumbers.Count) is null
                 ? new CourtAssignment(null, asked.Value, false)
-                : CourtAssignment.Refused(ButtonMap.SelectsCourtBeyondDeviceCourts);
+                : new CourtAssignment(ButtonMap.SelectsCourtBeyondDeviceCourts, null, false);
         }
 
         var stored = ButtonMap.FromJson(storedOverrideJson);
@@ -394,4 +383,20 @@ public sealed record UpdateDeviceCommand(
     Optional<ButtonMap?>? ButtonMap = null);
 
 /// <summary>A value that is explicitly present, so "absent" and "present but null" can be told apart on a PATCH.</summary>
+/// <summary>
+/// The outcome of reconciling a box's court list with the map it would run:
+/// <c>Error</c> to refuse, else the override to store on the row — <c>null</c> meaning
+/// "run the club's map" — and <c>Trimmed</c> saying whether it was derived rather than
+/// asked for. See <see cref="DeviceRegistryService.ResolveCourtAssignmentAsync"/>.
+///
+/// <para>
+/// Top-level rather than nested inside the service, and without a body, for the reason
+/// the <c>Audit</c> comment gives about expression bodies: lizard's C# parser loses scope
+/// at a nested record with a body and attributes every member after it to a *global*
+/// pseudo-function the length of the file, which then fails the length gate. A refusal is
+/// <c>new CourtAssignment(error, null, false)</c>.
+/// </para>
+/// </summary>
+public sealed record CourtAssignment(string? Error, ButtonMap? Override, bool Trimmed);
+
 public readonly record struct Optional<T>(T Value);
