@@ -6,7 +6,7 @@ import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
 import { formatCredits } from "../lib/utils";
-import { cancellationOutcome, describeBookingError, MEMBER_SHORT_TEXT } from "../lib/bookingErrors";
+import { ADMIN_SELF_SHORT_TEXT, cancellationOutcome, describeBookingError, MEMBER_SHORT_TEXT } from "../lib/bookingErrors";
 import { ApiError } from "../lib/api";
 import { BookingConfirmModal, type AdminOption, type BookingIntent, type BookingOutcome } from "../components/BookingConfirmModal";
 import { CancelBookingModal } from "../components/CancelBookingModal";
@@ -22,6 +22,10 @@ export default function SchedulePage() {
   const toast = useToast();
   const { balance, refresh: refreshBalance, apply: applyBalance } = useBalance();
   const isAdmin = auth.status === "authenticated" && auth.isAdmin;
+  // Who is acting. The member picker lists every active member INCLUDING the admin using
+  // it, and §8's override is refused by the server when the actor and the payer are the
+  // same person, so the screen has to know which row in that list is the actor's own.
+  const actorUserId = auth.status === "authenticated" ? auth.userId : null;
 
   const today = useMemo(() => ymd(new Date()), []);
   const [date, setDate] = useState(today);
@@ -126,9 +130,9 @@ export default function SchedulePage() {
       // A member who cannot cover the court is not an error to report and dismiss — it is
       // §8's decision, and it goes back to the modal so the admin can take it with the
       // figures in front of them.
-      const short = shortfallFrom(err, option);
+      const short = shortfallFrom(err, option, actorUserId);
       if (short) return short;
-      toast.push({ tone: "danger", text: refusalText(err, option) });
+      toast.push({ tone: "danger", text: refusalText(err, option, actorUserId) });
       return { kind: "done" };
     }
   };
@@ -286,8 +290,15 @@ async function placeBooking(
  * the overdraft will cost the member. Anything else falls through to a toast.
  * </p>
  */
-function shortfallFrom(err: unknown, option: AdminOption): BookingOutcome | null {
+function shortfallFrom(err: unknown, option: AdminOption, actorUserId: string | null): BookingOutcome | null {
   if (option.kind !== "member" || option.allowNegativeBalance) return null;
+  // An admin who picked THEMSELVES out of the member list. The server's override is
+  // `payer.AllowNegativeBalance && actorId != userId` (BookingService), so this one cannot
+  // be granted — an actor authorising their own overdraft is an unlimited credit line, not
+  // an override. Offering it here produced a loop with no exit: the modal showed the full
+  // §8 offer, the second press was refused, the figures were discarded and the toast said
+  // "try again to see what they're short by", which led straight back to the offer.
+  if (option.userId === actorUserId) return null;
   if (!(err instanceof ApiError) || err.code !== "insufficient_balance") return null;
   const current = err.detail("current_credits");
   const required = err.detail("required_credits");
@@ -305,10 +316,13 @@ function shortfallFrom(err: unknown, option: AdminOption): BookingOutcome | null
  * about a refusal that had nothing to do with it.
  * </p>
  */
-function refusalText(err: unknown, option: AdminOption): string {
+function refusalText(err: unknown, option: AdminOption, actorUserId: string | null): string {
   const fallback = "Couldn't make that booking. Refresh the schedule and try again.";
   if (option.kind === "member" && err instanceof ApiError && err.code === "insufficient_balance") {
-    return MEMBER_SHORT_TEXT;
+    // Three audiences, one error code. The admin who picked themselves gets the sentence
+    // that says the override does not apply to their own wallet, rather than advice to look
+    // again at figures no override can act on.
+    return option.userId === actorUserId ? ADMIN_SELF_SHORT_TEXT : MEMBER_SHORT_TEXT;
   }
   return describeBookingError(err, fallback);
 }

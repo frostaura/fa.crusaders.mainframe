@@ -479,6 +479,8 @@ describe("Schedule", () => {
 
   const THEM = "55555555-5555-5555-5555-555555555555";
   const OTHER = "66666666-6666-6666-6666-666666666666";
+  /** The signed-in admin's own id — `signIn` mints this one. The member picker lists them too. */
+  const SELF = "44444444-4444-4444-4444-444444444444";
 
   /**
    * A desk signed in as admin, looking at a free day, with one member on file who is
@@ -613,6 +615,41 @@ describe("Schedule", () => {
 
     expect(await screen.findByText(/That member doesn't have enough credit/)).toBeInTheDocument();
     expect(screen.queryByText(/top up your wallet/i)).not.toBeInTheDocument();
+  });
+
+  it("does not offer the override to an admin who picked themselves out of the member list", async () => {
+    // The picker is populated from /admin/members and lists the signed-in admin along with
+    // everybody else — in the running club it is the first name in the dropdown. The server's
+    // override is `payer.AllowNegativeBalance && actorId != userId`, so it can never be
+    // granted here, and offering it produced a loop with no exit: the modal showed the full §8
+    // offer, the second press was refused, `shortfallFrom` returned null so the figures were
+    // discarded, and the toast said "try again to see what they're short by" — which led back
+    // to the same offer. No money moved and no audit row was written; the defect was that the
+    // screen could not be got out of.
+    const fetchStub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+      { path: "/api/v1/admin/members/", body: [
+        { user_id: SELF, full_name: "Crusaders Admin" },
+        { user_id: THEM, full_name: "Naledi Khumalo" },
+      ] },
+      { path: "/api/v1/schedule", body: DAY },
+      { method: "POST", path: "/api/v1/admin/bookings/", status: 402, body: SHORT },
+    ]);
+    renderPage(<SchedulePage />);
+    await openBookingModal();
+    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
+    fireEvent.change(screen.getByLabelText("Member"), { target: { value: SELF } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+
+    // No offer, and a sentence that says why rather than sending them round again.
+    expect(await screen.findByText(/only works on another member's wallet/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Book anyway/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Try again to see what they're short by/)).not.toBeInTheDocument();
+
+    // And exactly one attempt: the refusal is final, not the first half of a loop.
+    expect(fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/")).toHaveLength(1);
   });
 
   it("still refuses a MEMBER booking their own slot, with no override on offer", async () => {
