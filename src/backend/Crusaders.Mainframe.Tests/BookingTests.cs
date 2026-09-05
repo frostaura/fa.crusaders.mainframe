@@ -179,17 +179,49 @@ public class BookingTests
     [Fact]
     public void A_bookable_slot_is_never_inside_peak_hours_whatever_time_it_is()
     {
-        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
-
-        for (var hour = 0; hour < 24; hour++)
+        foreach (var (from, ahead) in EveryStartingPoint())
         {
-            foreach (var ahead in new[] { 1.0, 2.0, 3.0, 5.0 })
-            {
-                var slot = TestHost.BookableSlotFrom(midnight.AddHours(hour), ahead);
+            var slot = TestHost.BookableSlotFrom(from, ahead);
+            var where = $"(from {from:HH:mm}, +{ahead}h)";
 
-                Assert.False(slot.Hour is >= 16 and < 19,
-                    $"slot at {slot:HH:mm} lands in peak (from {hour:00}:00, +{ahead}h)");
-                Assert.True(slot > midnight.AddHours(hour), "a bookable slot must be in the future");
+            Assert.False(slot.Hour is >= 16 and < 19, $"slot at {slot:HH:mm} lands in peak {where}");
+            Assert.True(slot > from, "a bookable slot must be in the future");
+
+            // ...and clear of CLOSING time, which is the same promise from the other end
+            // of the day and was not being kept. The hours rule is evaluated on the
+            // slot's END, `day_end_minute` is 1440 here, and callers book up to four
+            // slices on one slot — so an hour of headroom is what a bookable slot has to
+            // leave. A slot at 23:50 ends at 00:05 and is refused OutOfHours, which made
+            // MoneySurfaceTests red for about a quarter of an hour every night and green
+            // for the rest of the day.
+            var endsAtMinute = (slot.Hour * 60) + slot.Minute + 60;
+            Assert.True(endsAtMinute <= 24 * 60, $"an hour booked from {slot:HH:mm} runs past midnight {where}");
+        }
+    }
+
+    /// <summary>
+    /// Every clock this helper could be handed, crossed with every lead time its callers
+    /// use.
+    ///
+    /// <para>
+    /// MINUTES as well as hours, and that is not thoroughness for its own sake: sweeping
+    /// only on the hour is what let the closing-time hole above survive its first fix.
+    /// Every slot an on-the-hour sweep produces lands at :00, an hour booked from 23:00
+    /// ends at exactly midnight, and the new assertion passed — while a slot at 23:50,
+    /// which is what the real clock hands <c>MoneySurfaceTests</c>, did not.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<(DateTimeOffset From, double Ahead)> EveryStartingPoint()
+    {
+        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        foreach (var minute in new[] { 0, 1, 30, 45, 50, 59 })
+        {
+            for (var hour = 0; hour < 24; hour++)
+            {
+                foreach (var ahead in new[] { 1.0, 2.0, 3.0, 5.0 })
+                {
+                    yield return (midnight.AddHours(hour).AddMinutes(minute), ahead);
+                }
             }
         }
     }

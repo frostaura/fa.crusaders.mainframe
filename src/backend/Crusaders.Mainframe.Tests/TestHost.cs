@@ -189,6 +189,26 @@ public sealed class TestHost : IAsyncDisposable
         // can still END inside peak, and while the rule is evaluated on the start, the
         // intent here is to stay clear of it entirely.
         while (slot.Hour is >= 15 and < 19) slot = slot.AddHours(1);
+
+        // And clear of the END of the club's day, for the same reason and by the same
+        // mistake made once already.
+        //
+        // The operating-hours rule is evaluated on the slot's END:
+        // `endMinute = startMinute + duration` against `day_end_minute`, which is 1440 in
+        // this fixture. A 15-minute slot starting at 23:50 ends at 1445 and is refused
+        // `OutOfHours` — a club that is open all day still cannot sell a court that runs
+        // past midnight. So this helper's promise held for peak and quietly did not hold
+        // for closing time, and MoneySurfaceTests, which asks for a slot two hours out in
+        // the club's own clock, went red for roughly a quarter of an hour every night
+        // and green for the rest of the day. That is the same "passes all morning, fails
+        // after lunch" shape memory/gotchas.md already records, from the other end of the
+        // day.
+        //
+        // Stepping out of hour 23 entirely, rather than trimming to fit, because callers
+        // book up to four slices (an hour) on one slot and the headroom has to cover the
+        // longest of them. One step is always enough: 23:xx + 1h is 00:xx, which is
+        // neither peak nor the end of a day.
+        if (slot.Hour == 23) slot = slot.AddHours(1);
         return slot;
     }
 
