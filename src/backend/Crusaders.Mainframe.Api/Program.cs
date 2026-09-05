@@ -286,9 +286,12 @@ builder.Services.AddScoped<DeviceDiscoveryService>();
 // Phase 5 — biometric abstraction
 builder.Services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
 
-// Hardware abstractions ship before drivers, and CI must pass without touching a relay.
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Lights.IRelayClient,
-                              Crusaders.Mainframe.Api.Lights.NullRelayClient>();
+// IRelayClient is deliberately NOT registered. The court box is pull-only — it decides
+// scans against its cached roster and drives its own relays — so nothing in the container
+// resolves a relay client, and a registration with no injection site is a claim that the
+// API actuates lights when it does not (original review A2-16). The interface and its null
+// driver stay: they hold the shape any future API-driven actuation must take, which is why
+// LightsCueTests pins that every overload carries a duration.
 builder.Services.AddScoped<BiometricService>();
 
 // WebAuthn / passkeys
