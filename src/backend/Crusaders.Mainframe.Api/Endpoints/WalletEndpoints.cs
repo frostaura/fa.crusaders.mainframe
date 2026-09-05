@@ -102,14 +102,57 @@ public static class WalletEndpoints
         // Admin: manual credit adjustment
         var admin = app.MapGroup("/api/v1/admin/credit").RequireAuthorization(p => p.RequireRole("admin"));
 
-        admin.MapPost("/{userId:guid}/adjust", async (
-            Guid userId, AdjustRequest req, HttpContext ctx,
-            LedgerService ledger, MainframeDbContext db,
-            Crusaders.Mainframe.Api.Multitenancy.ITenantContext tenant,
-            Crusaders.Mainframe.Api.Email.IEmailService email,
-            ILoggerFactory loggerFactory,
-            CancellationToken ct) =>
-        {
+        // The handler is a named method rather than an inline lambda: it is the most
+        // consequential route in this file - it moves a member's balance by hand - and
+        // inline it pushed MapWalletEndpoints past the complexity gate, where the reported
+        // number belongs to no single decision anybody could reason about.
+        admin.MapPost("/{userId:guid}/adjust", AdjustAsync);
+
+        return app;
+    }
+
+    /// <summary>
+    /// The largest adjustment the column can hold, and the smallest unit it can express.
+    ///
+    /// <para>
+    /// <c>ledger_entries.AmountCredits</c> is <c>numeric(10,2)</c>. Neither bound was
+    /// checked, and both failed badly at opposite ends. A desk typing 999999999999 got a
+    /// <b>500</b> with an EF <c>DbUpdateException</c> and a Postgres 22003 numeric overflow
+    /// — an unhandled database exception is the wrong failure mode for a money endpoint
+    /// whatever the amount. At the other end 0.005 was accepted, stored as 0.01 because the
+    /// column rounded it, and echoed back as 0.005 by the in-memory entity: half a cent
+    /// created from nothing and an API response disagreeing with the ledger it had just
+    /// written. Credits are counted in cents; an amount that is not a whole number of them
+    /// is a typo, and rounding it silently is how the two figures diverge.
+    /// </para>
+    /// </summary>
+    internal const decimal MaxAdjustmentCredits = 99_999_999.99m;
+
+    internal static IResult? RefuseAmount(decimal amountCredits)
+    {
+        if (Math.Abs(amountCredits) > MaxAdjustmentCredits)
+            return Results.BadRequest(new { error = "amount_out_of_range", max_credits = MaxAdjustmentCredits });
+        if (decimal.Round(amountCredits, 2, MidpointRounding.AwayFromZero) != amountCredits)
+            return Results.BadRequest(new { error = "amount_not_whole_cents" });
+        return null;
+    }
+
+
+    /// <summary>
+    /// An admin moving a member's balance by hand.
+    ///
+    /// <para>
+    /// Idempotent when the caller names the movement. See <see cref="IdempotencyReference"/>
+    /// for why the reference carries the tenant, and <c>AdminCreditAdjustHttpTests</c> for
+    /// what a double-clicked Apply button used to do to the ledger.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> AdjustAsync(
+        Guid userId, AdjustRequest req, HttpContext ctx,
+        [AsParameters] AdjustServices services,
+        CancellationToken ct)
+    {
+        var (ledger, db, tenant, email, loggerFactory) = services;
             if (req.AmountCredits == 0) return Results.BadRequest(new { error = "amount_zero" });
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
             if (RefuseAmount(req.AmountCredits) is { } bad2) return bad2;
@@ -169,35 +212,6 @@ public static class WalletEndpoints
                 $"credit adjustment {entry.Id}");
 
             return AdjustmentResult(entry, balanceAfter);
-        });
-
-        return app;
-    }
-
-    /// <summary>
-    /// The largest adjustment the column can hold, and the smallest unit it can express.
-    ///
-    /// <para>
-    /// <c>ledger_entries.AmountCredits</c> is <c>numeric(10,2)</c>. Neither bound was
-    /// checked, and both failed badly at opposite ends. A desk typing 999999999999 got a
-    /// <b>500</b> with an EF <c>DbUpdateException</c> and a Postgres 22003 numeric overflow
-    /// — an unhandled database exception is the wrong failure mode for a money endpoint
-    /// whatever the amount. At the other end 0.005 was accepted, stored as 0.01 because the
-    /// column rounded it, and echoed back as 0.005 by the in-memory entity: half a cent
-    /// created from nothing and an API response disagreeing with the ledger it had just
-    /// written. Credits are counted in cents; an amount that is not a whole number of them
-    /// is a typo, and rounding it silently is how the two figures diverge.
-    /// </para>
-    /// </summary>
-    internal const decimal MaxAdjustmentCredits = 99_999_999.99m;
-
-    internal static IResult? RefuseAmount(decimal amountCredits)
-    {
-        if (Math.Abs(amountCredits) > MaxAdjustmentCredits)
-            return Results.BadRequest(new { error = "amount_out_of_range", max_credits = MaxAdjustmentCredits });
-        if (decimal.Round(amountCredits, 2, MidpointRounding.AwayFromZero) != amountCredits)
-            return Results.BadRequest(new { error = "amount_not_whole_cents" });
-        return null;
     }
 
     /// <summary>
@@ -289,6 +303,25 @@ public static class WalletEndpoints
 }
 
 /// <summary><paramref name="RelatedBookingId"/> is optional: set it when the adjustment compensates for a specific booking.</summary>
+/// <summary>
+/// The services the by-hand adjustment needs, bound as one parameter.
+///
+/// <para>
+/// A minimal-API handler's parameter list is its injection point, so listing five services
+/// individually put this method over the complexity gate's six-parameter bound on a count
+/// that says nothing about how hard the method is to reason about.
+/// <c>[AsParameters]</c> is the framework's own answer: each member is still resolved from
+/// DI exactly as before, and the signature says what the handler takes rather than what the
+/// container happens to hold.
+/// </para>
+/// </summary>
+public sealed record AdjustServices(
+    LedgerService Ledger,
+    MainframeDbContext Db,
+    Crusaders.Mainframe.Api.Multitenancy.ITenantContext Tenant,
+    Crusaders.Mainframe.Api.Email.IEmailService Email,
+    ILoggerFactory LoggerFactory);
+
 /// <summary>
 /// <paramref name="RelatedBookingId"/> is optional: set it when the adjustment compensates
 /// for a specific booking.
