@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.RateLimiting;
+using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Crusaders.Mainframe.Api.Security.Outbound;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
@@ -44,14 +45,10 @@ var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "crusaders.mainframe";
 var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "crusaders.mainframe.app";
 // Device authentication is a second scheme rather than a variant of the JWT one:
 // a board in a cupboard has no user, no refresh cycle and no browser, and giving it
-// an admin JWT was the alternative.
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.DeviceAuth.IDeviceKeyDeriver,
-                              Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyDeriver>();
-
+// an admin JWT was the alternative. It reads the club's one API key from the
+// Authorization header — see DeviceAuthenticationHandler.
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddScheme<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceAuthOptions,
-               Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceAuthenticationHandler>(
-        Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceAuthenticationHandler.SchemeName, _ => { })
+    .AddScheme<DeviceAuthOptions, DeviceAuthenticationHandler>(DeviceAuthenticationHandler.SchemeName, _ => { })
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -157,12 +154,14 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 // four policies rather than one global number:
 //   auth     — password and PIN guessing, which is an unbounded oracle without a limit
 //   device   — a court box calls on a schedule; anything faster is a fault or a flood
-//   firmware — an anonymous 400 KB download per box per release, and nothing else
 //   api      — a backstop so one client cannot saturate an on-prem box at the club
 //
 // Partitioned by the client address as the forwarded-headers middleware above resolved
 // it, falling back to a single shared partition when the address is unknown, so a proxy
-// that strips it cannot be used to escape the limit. The auth policy partitions by the
+// that strips it cannot be used to escape the limit. The DEVICE policy partitions by the
+// club instead: every box at a club shares one NATted address on the LAN, so an
+// address partition is a single bucket for the whole club however many boxes it has,
+// while the club is exactly the unit the key names. The auth policy partitions by the
 // authenticated user when there is one: the Court Code page refreshes its ident code on
 // a timer for every member who has it open, and "ten a minute" has to mean per member,
 // not per club. That is why authentication runs BEFORE the limiter — a request with no
@@ -194,8 +193,16 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0,
         }));
 
+    static string DeviceKey(HttpContext ctx)
+    {
+        // By club when the device scheme recognised the key, else by client address —
+        // which is what an unauthenticated flood at this surface gets.
+        var tenantId = ctx.User.DeviceTenantId();
+        return tenantId is { } id ? $"tenant:{id:N}" : $"ip:{ClientKey(ctx)}";
+    }
+
     options.AddPolicy(RateLimitPolicies.Device, ctx =>
-        RateLimitPartition.GetFixedWindowLimiter(ClientKey(ctx), _ => new FixedWindowRateLimiterOptions
+        RateLimitPartition.GetFixedWindowLimiter(DeviceKey(ctx), _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = builder.Configuration.GetValue("RateLimits:DevicePerMinute", 120),
             Window = TimeSpan.FromMinutes(1),
@@ -227,12 +234,10 @@ builder.Services.AddScoped<IJwtIssuer, JwtIssuer>();
 // off the request thread without scope-disposal hazards.
 builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<TenantSettingsAccessor>();
-builder.Services.AddSingleton<OtaCatalogue>();
 builder.Services.AddScoped<AccessCodeService>();
 builder.Services.AddScoped<IdentificationResolver>();
 builder.Services.AddScoped<DeviceRegistryService>();
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.ProvisioningGrants>();
-builder.Services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();
+builder.Services.AddScoped<DeviceKeyResolver>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddScoped<IPaymentProvider, Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
 builder.Services.AddSingleton<BalanceBroadcaster>();
@@ -266,22 +271,6 @@ builder.Services.AddHostedService<NoShowWorker>();
 
 // Phase 8.8 — retention worker (nightly anonymisation of records older than retention_years)
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.RetentionWorker>();
-
-// Device discovery — a UDP listener on the club LAN plus the bounded store behind it.
-//
-// The store is a singleton independent of the listener on purpose: the admin endpoints
-// have to answer "did the listener bind?" even — especially — when it did not, and a
-// store that only existed once a socket was open could not report its own absence.
-builder.Services.AddSingleton(sp =>
-    Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions.FromConfiguration(
-        sp.GetRequiredService<IConfiguration>()));
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryStore>(sp =>
-    new Crusaders.Mainframe.Api.Security.Discovery.DiscoveryStore(
-        sp.GetRequiredService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions>()));
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.IDiscoveryDeviceResolver,
-                              Crusaders.Mainframe.Api.Security.Discovery.DiscoveryDeviceResolver>();
-builder.Services.AddHostedService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryListener>();
-builder.Services.AddScoped<DeviceDiscoveryService>();
 
 // Phase 5 — biometric abstraction
 builder.Services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
@@ -319,9 +308,6 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddProblemDetails();
 builder.Services.AddRouting();
 
-// OtaCatalogue is a singleton that must hand a box an ABSOLUTE firmware URL, and the
-// only address known to work from where the box stands is the one its heartbeat just
-// arrived on. The accessor is how a singleton sees that request. See OtaCatalogue.
 builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
@@ -361,25 +347,6 @@ foreach (var warning in GatewayTrust.Warnings(
     app.Logger.LogWarning("Gateway trust: {Warning}", warning);
 }
 
-// A court box cannot speak TLS (plain WiFiClient, no heap for a TLS context), so an
-// https AdvertisedBaseUrl hands every box an OTA and provisioning URL it can never
-// open. DiscoveryOptions refuses it at startup unless the deployment has explicitly
-// opted into the downgrade; either way the operator hears about it here, once, loudly.
-{
-    var discovery = app.Services.GetRequiredService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions>();
-    if (discovery.AdvertisedBaseUrlDowngradedFromHttps)
-    {
-        app.Logger.LogWarning(
-            "Discovery:AdvertisedBaseUrl was configured as https and has been downgraded to {Url}: the court box cannot fetch over TLS. " +
-            "Set Discovery:AdvertisedBaseUrl to the http gateway address to silence this.", discovery.AdvertisedBaseUrl);
-    }
-}
-
-// Fail fast on a half-configured Ota:* override rather than serve the baked image in its
-// place: the override exists to halt a rollout, and silently ignoring it is the one thing
-// it must never do. Construction validates; see OtaCatalogue.
-app.Services.GetRequiredService<OtaCatalogue>();
-
 app.UseCors();
 
 // Serve uploaded media. The /uploads/ path is in the tenant-resolution anonymous prefix list
@@ -400,72 +367,6 @@ app.UseCors();
 // comes first of all: every later decision about "who is calling" reads what it wrote.
 app.UseAuthentication();
 app.UseRateLimiter();
-// Serve the court-box firmware baked into this image (Dockerfile: COPY firmware-payload/
-// /app/firmware/) at /firmware/. Anonymous and pull-only on purpose: the box fetches with
-// ESPhttpUpdate — a plain GET carrying x-ESP8266-* headers and no device signature — and
-// the image's RSA-2048 trailer, verified on the board against the compiled-in public key,
-// is the integrity anchor, not transport auth. Only .bin and .json are served, so an
-// unsigned (README-only) payload is a 404 rather than a document; no directory listing;
-// PhysicalFileProvider refuses '..'. The directory is decided in one place,
-// FirmwarePayload.ResolvePath, so OtaCatalogue reads the manifest from the directory
-// this serves. Nothing here touches /uploads.
-//
-// Mounted AFTER the rate limiter, behind its own modest per-address ceiling
-// (RateLimits:FirmwarePerMinute). A box fetches one image per release; an anonymous
-// 400 KB download nothing throttled was the one unmetered surface on a host-networked
-// on-prem box. The static-file middleware is not an endpoint, so the policy is applied
-// as a second limiter on this branch rather than as endpoint metadata.
-{
-    var firmwareRoot = FirmwarePayload.ResolvePath(builder.Configuration, builder.Environment.ContentRootPath);
-    if (Directory.Exists(firmwareRoot))
-    {
-        var firmwareTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider(
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                [".bin"] = "application/octet-stream",
-                [".json"] = "application/json",
-            });
-        var firmwarePerMinute = builder.Configuration.GetValue("RateLimits:FirmwarePerMinute", 10);
-        app.UseWhen(
-            ctx => ctx.Request.Path.StartsWithSegments(FirmwarePayload.RequestPath),
-            branch =>
-            {
-                branch.UseRateLimiter(new RateLimiterOptions
-                {
-                    RejectionStatusCode = StatusCodes.Status429TooManyRequests,
-                    GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
-                        RateLimitPartition.GetFixedWindowLimiter(
-                            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                            _ => new FixedWindowRateLimiterOptions
-                            {
-                                PermitLimit = firmwarePerMinute,
-                                Window = TimeSpan.FromMinutes(1),
-                                QueueLimit = 0,
-                            })),
-                    OnRejected = (ctx, _) =>
-                    {
-                        ctx.HttpContext.Response.Headers.RetryAfter = "60";
-                        return ValueTask.CompletedTask;
-                    },
-                });
-                branch.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
-                {
-                    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(firmwareRoot),
-                    RequestPath = FirmwarePayload.RequestPath,
-                    ContentTypeProvider = firmwareTypes,
-                    ServeUnknownFileTypes = false,
-                    // A box fetches an image once per update, so caching buys nothing and a proxy
-                    // holding a stale image across a redeploy would cost a release.
-                    OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "public, max-age=300",
-                });
-            });
-    }
-    else
-    {
-        app.Logger.LogWarning("Firmware payload directory {Path} does not exist; /firmware/ is not served.", firmwareRoot);
-    }
-}
-
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthorization();
 
@@ -490,7 +391,6 @@ app.MapScheduleEndpoints();
 app.MapBookingEndpoints();
 app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();
-app.MapAdminDeviceDiscoveryEndpoints();
 app.MapAdminLedgerEndpoints();
 app.MapMeProfileEndpoints();
 app.MapWebhookEndpoints();

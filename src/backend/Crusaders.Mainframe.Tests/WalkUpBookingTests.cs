@@ -406,6 +406,9 @@ public class WalkUpBookingTests
     // questions here are about money and courts and not about signatures. The signed wire
     // is covered in DeviceEventHttpTests.
 
+    /// <summary>The MAC every box in this suite announces. One box, so one MAC.</summary>
+    private const string BoxMac = "ff0000000001";
+
     private static async Task<Device> BoxOnAsync(Fixture f, params int[] courtNumbers)
     {
         var device = new Device
@@ -414,6 +417,7 @@ public class WalkUpBookingTests
             DeviceCode = "court-box-1",
             Name = "The box",
             Kind = DeviceKind.CourtBox,
+            MacAddress = BoxMac,
             CourtNumbers = [.. courtNumbers],
         };
         f.Db.Devices.Add(device);
@@ -434,7 +438,7 @@ public class WalkUpBookingTests
             .MintIdentAsync(f.Host.PlayerUser.Id, TimeSpan.FromSeconds(60), default)).Code;
 
     private static WalkUpRequest Request(string code, int court, int minutes = 30, string? nonce = null) =>
-        new(minutes, "qr", code, court, nonce ?? Guid.NewGuid().ToString("N")[..16]);
+        new(BoxMac, minutes, "qr", code, court, nonce ?? Guid.NewGuid().ToString("N")[..16]);
 
     private static (int Status, JsonElement Body) Unwrap(IResult result) => (
         (result as IStatusCodeHttpResult)?.StatusCode ?? StatusCodes.Status200OK,
@@ -648,7 +652,7 @@ public class WalkUpBookingTests
         var box = await BoxOnAsync(f, 1);
 
         var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
-            box, new WalkUpRequest(30, "qr", await CodeAsync(f), 1, nonce), ServicesOf(f), default));
+            box, new WalkUpRequest(BoxMac, 30, "qr", await CodeAsync(f), 1, nonce), ServicesOf(f), default));
 
         Assert.Equal(400, status);
         Assert.Equal(error, body.GetProperty("error").GetString());

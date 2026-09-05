@@ -93,6 +93,7 @@ public sealed class ConcurrentDecisionTests
             DeviceCode = "court-box-1",
             Name = "Race box",
             Kind = DeviceKind.CourtBox,
+            MacAddress = "ee0000000001",
             CourtNumbers = [1, 2],
         };
         db.Devices.Add(device);
@@ -802,7 +803,7 @@ public sealed class ConcurrentDecisionTests
             var services = WalkUpServicesOf(scope);
             await gate.WaitAsync();
             return Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
-                device, new WalkUpRequest(60, "qr", code, 2, nonce), services, default));
+                device, new WalkUpRequest(device.MacAddress, 60, "qr", code, 2, nonce), services, default));
         }
 
         var first = Attempt();

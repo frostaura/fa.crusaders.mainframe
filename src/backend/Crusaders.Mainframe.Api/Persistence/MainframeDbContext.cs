@@ -277,22 +277,19 @@ public class MainframeDbContext : DbContext
             e.Property(d => d.DeviceCode).HasMaxLength(64).IsRequired();
             e.Property(d => d.Name).HasMaxLength(128).IsRequired();
             e.Property(d => d.GateKey).HasMaxLength(64);
+            e.Property(d => d.MacAddress).HasMaxLength(12).IsRequired();
             e.Property(d => d.LastIpAddress).HasMaxLength(64);
             e.Property(d => d.RunningVersion).HasMaxLength(32);
             e.Property(d => d.MegaVersion).HasMaxLength(32);
-            e.Property(d => d.PinnedVersion).HasMaxLength(32);
             e.Property(d => d.Kind).HasConversion<int>();
             e.Property(d => d.Hardware).HasConversion<int>();
-            e.Property(d => d.OtaChannel).HasConversion<int>();
             e.HasQueryFilter(d => d.TenantId == _tenant.TenantId);
 
-            // Filtered unique: one row per physical board per tenant, while leaving
-            // hand-registered devices (which have no MAC) unconstrained. Without it the
-            // "already registered" check below is advisory — two concurrent claims for the
-            // same board would both pass it and both insert.
-            e.HasIndex(d => new { d.TenantId, d.MacAddress })
-                .IsUnique()
-                .HasFilter("\"MacAddress\" IS NOT NULL");
+            // One row per physical board per tenant. Without it the "have I seen this MAC
+            // before?" check in auto-registration is advisory — two heartbeats from a box
+            // that has just been switched on arrive together, both find nothing, and the
+            // club ends up with two rows for one board.
+            e.HasIndex(d => new { d.TenantId, d.MacAddress }).IsUnique();
         });
 
         modelBuilder.Entity<DeviceEventReceipt>(e =>

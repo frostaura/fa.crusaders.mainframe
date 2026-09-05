@@ -314,6 +314,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("AutoRegistered")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("ButtonMapJson")
                         .HasColumnType("text");
 
@@ -332,17 +335,11 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
-                    b.Property<string>("FailedVersion")
-                        .HasColumnType("text");
-
                     b.Property<string>("GateKey")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
                     b.Property<int>("Hardware")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("KeyVersion")
                         .HasColumnType("integer");
 
                     b.Property<int>("Kind")
@@ -356,7 +353,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("MacAddress")
-                        .HasColumnType("text");
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
 
                     b.Property<string>("MegaVersion")
                         .HasMaxLength(32)
@@ -366,16 +365,6 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
-
-                    b.Property<int>("OtaChannel")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("PinnedVersion")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<DateTimeOffset?>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("RunningVersion")
                         .HasMaxLength(32)
@@ -392,8 +381,7 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("TenantId", "Kind");
 
                     b.HasIndex("TenantId", "MacAddress")
-                        .IsUnique()
-                        .HasFilter("\"MacAddress\" IS NOT NULL");
+                        .IsUnique();
 
                     b.ToTable("devices", (string)null);
                 });
@@ -655,6 +643,12 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeviceApiKey")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("DeviceApiKeyRegeneratedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("DisplayName")

@@ -42,6 +42,9 @@ public class DeviceActivateTests
             new DeviceActivateServices(db, codes, scope.ServiceProvider.GetRequiredService<CourtActivationService>()));
     }
 
+    /// <summary>The MAC every box in this suite announces. One box, so one MAC.</summary>
+    private const string BoxMac = "ff0000000001";
+
     private static async Task<Device> BoxOnAsync(Fixture f, params int[] courtNumbers)
     {
         var device = new Device
@@ -50,6 +53,7 @@ public class DeviceActivateTests
             DeviceCode = "court-box-1",
             Name = "The box",
             Kind = DeviceKind.CourtBox,
+            MacAddress = BoxMac,
             CourtNumbers = [.. courtNumbers],
         };
         f.Db.Devices.Add(device);
@@ -102,7 +106,7 @@ public class DeviceActivateTests
         (await f.Codes.MintIdentAsync(f.Host.PlayerUser.Id, TimeSpan.FromSeconds(60), default)).Code;
 
     private static Task<DeviceActivateResponse> ActivateAsync(Fixture f, Device box, string code, int? court = null, string method = "qr") =>
-        DeviceActivateEndpoint.ActivateForDeviceAsync(box, new DeviceActivateRequest(method, code, court), f.Services, default);
+        DeviceActivateEndpoint.ActivateForDeviceAsync(box, new DeviceActivateRequest(BoxMac, method, code, court), f.Services, default);
 
     // ---- The happy path ---------------------------------------------------
 
@@ -130,7 +134,6 @@ public class DeviceActivateTests
         // 46 minutes of slot, give or take the test's own clock.
         Assert.InRange(response.GrantedSeconds, 45 * 60, 46 * 60 + 1);
         Assert.Null(response.StartsInSeconds);
-        Assert.InRange(response.ServerUnix, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 5, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
         var fresh = await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
         Assert.NotNull(fresh.CheckedInAt);

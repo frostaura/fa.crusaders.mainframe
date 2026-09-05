@@ -126,12 +126,12 @@ public static class AdminConfigEndpoints
             // A box with its own override is unaffected by the club's map and is not
             // consulted — that is what lets a four-court box and a one-court annex box
             // coexist (review #17). Refused with the box named so the admin knows which
-            // one to fix, give more courts, or give its own map. Revoked boxes are
-            // decommissioned and do not count.
+            // one to fix, give more courts, or give its own map. Disabled boxes do not
+            // count: a switched-off box runs no map.
             if (buttons is not null)
             {
                 var boxes = await db.Devices
-                    .Where(d => d.Kind == DeviceKind.CourtBox && d.RevokedAt == null)
+                    .Where(d => d.Kind == DeviceKind.CourtBox && d.Enabled)
                     .OrderBy(d => d.DeviceCode)
                     .ToListAsync(ct);
                 foreach (var box in boxes)

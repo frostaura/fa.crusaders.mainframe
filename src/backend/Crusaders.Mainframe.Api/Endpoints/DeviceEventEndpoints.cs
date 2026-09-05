@@ -119,14 +119,10 @@ public static class DeviceEventEndpoints
     private static async Task<IResult> UploadAsync(
         DeviceEventBatch batch,
         [AsParameters] DeviceEventServices services,
-        HttpContext ctx,
         CancellationToken ct)
     {
-        var deviceId = ctx.User.DeviceId();
-        if (deviceId is null) return Results.Unauthorized();
-
-        var device = await services.Db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId.Value, ct);
-        if (device is null) return Results.NotFound();
+        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, batch.Mac, ct);
+        if (refusal is not null) return refusal;
 
         var events = (batch.Events ?? []).Take(MaxBatch).ToList();
         if (events.Count == 0) return Results.Ok(new { accepted_through = 0L, recorded = 0 });
@@ -138,7 +134,7 @@ public static class DeviceEventEndpoints
         long acceptedThrough = 0;
         var recorded = 0;
 
-        var alreadyRecorded = await SeenAsync(services.Db, device, events, ct);
+        var alreadyRecorded = await SeenAsync(services.Db, device!, events, ct);
 
         foreach (var e in events.OrderBy(e => e.Seq))
         {
@@ -151,23 +147,22 @@ public static class DeviceEventEndpoints
                 // Attendance BEFORE the receipt. See the summary for why this order.
                 var outcome = e.Kind switch
                 {
-                    ActivationKind => await ActivationOutcomeAsync(device, e, time.OccurredAt, services, ct),
-                    ReleaseKind => await ReleaseOutcomeAsync(device, e, time.OccurredAt, services, ct),
+                    ActivationKind => await ActivationOutcomeAsync(device!, e, time.OccurredAt, services, ct),
+                    ReleaseKind => await ReleaseOutcomeAsync(device!, e, time.OccurredAt, services, ct),
                     _ => null,
                 };
 
-                if (await RecordAsync(services, device, e, time, outcome, ct)) recorded++;
+                if (await RecordAsync(services, device!, e, time, outcome, ct)) recorded++;
             }
 
             acceptedThrough = e.Seq;
         }
 
-        device.LastSeenAt = now;
+        device!.LastSeenAt = now;
         await services.Db.SaveChangesAsync(ct);
 
         return Results.Ok(new
         {
-            server_unix = now.ToUnixTimeSeconds(),
             accepted_through = acceptedThrough,
             recorded,
         });
@@ -674,16 +669,12 @@ public static class DeviceEventEndpoints
     private static async Task<IResult> WalkUpAsync(
         WalkUpRequest req,
         [AsParameters] WalkUpServices services,
-        HttpContext ctx,
         CancellationToken ct)
     {
-        var deviceId = ctx.User.DeviceId();
-        if (deviceId is null) return Results.Unauthorized();
+        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, req.Mac, ct);
+        if (refusal is not null) return refusal;
 
-        var device = await services.Db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId.Value, ct);
-        if (device is null) return Results.NotFound();
-
-        return await WalkUpForDeviceAsync(device, req, services, ct);
+        return await WalkUpForDeviceAsync(device!, req, services, ct);
     }
 
     /// <summary>Longest purchase nonce accepted. The firmware sends sixteen hex characters.</summary>
@@ -875,7 +866,6 @@ public static class DeviceEventEndpoints
             : sold;
         return new
         {
-            server_unix = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             booking_id = booking.Id,
             granted_minutes = granted,
             amount_credits = amountCredits,
@@ -964,6 +954,7 @@ public sealed record DeviceEventDto(
 /// event's own uptime into "this happened N seconds ago".
 /// </summary>
 public sealed record DeviceEventBatch(
+    [property: JsonPropertyName("mac")] string? Mac,
     [property: JsonPropertyName("uptime_ms")] long UptimeMs,
     [property: JsonPropertyName("events")] IReadOnlyList<DeviceEventDto>? Events);
 
@@ -973,6 +964,7 @@ public sealed record DeviceEventBatch(
 /// per-purchase token, the same on every retry of the same purchase.
 /// </summary>
 public sealed record WalkUpRequest(
+    [property: JsonPropertyName("mac")] string? Mac,
     [property: JsonPropertyName("minutes")] int Minutes,
     [property: JsonPropertyName("method")] string? Method,
     [property: JsonPropertyName("token")] string? Token,

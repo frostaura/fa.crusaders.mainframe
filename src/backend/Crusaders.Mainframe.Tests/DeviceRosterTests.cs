@@ -39,6 +39,7 @@ public class DeviceRosterTests
         DeviceCode = "court-box-1",
         Name = "The box",
         Kind = DeviceKind.CourtBox,
+        MacAddress = "ff0000000002",
         CourtNumbers = [.. courtNumbers],
     };
 

@@ -8,29 +8,34 @@ using Microsoft.EntityFrameworkCore;
 namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>
-/// Registration, rotation and revocation of physical devices.
+/// The device roster: what a box is allowed to drive, and the club key it presents.
 ///
 /// <para>
 /// The logic lives here rather than inside endpoint lambdas so it can be exercised
 /// without an HTTP client, and so each operation is a named method a reviewer can read
 /// in one screen. Every mutation writes an <see cref="AuditLog"/> row in the same
-/// <c>SaveChanges</c> as the change itself: a device that was registered, rotated or
-/// revoked without a matching audit row would break the
-/// <c>{actor, subject}</c> guarantee the rest of the system relies on.
+/// <c>SaveChanges</c> as the change itself: a device that appeared, or a key that was
+/// regenerated, without a matching audit row would break the <c>{actor, subject}</c>
+/// guarantee the rest of the system relies on.
+/// </para>
+///
+/// <para>
+/// There is no registration, rotation, reclaim or revoke here any more. A board creates
+/// its own row on its first heartbeat (<see cref="AutoRegisterAsync"/>) and an admin
+/// edits or deletes it; the credential is the club's, not the row's, so rotating it is
+/// <see cref="RegenerateApiKeyAsync"/> and it belongs to no device in particular.
 /// </para>
 /// </summary>
 public sealed class DeviceRegistryService
 {
     private readonly MainframeDbContext _db;
     private readonly ITenantContext _tenant;
-    private readonly IDeviceKeyDeriver _keys;
     private readonly TenantSettingsAccessor _settings;
 
-    public DeviceRegistryService(MainframeDbContext db, ITenantContext tenant, IDeviceKeyDeriver keys, TenantSettingsAccessor settings)
+    public DeviceRegistryService(MainframeDbContext db, ITenantContext tenant, TenantSettingsAccessor settings)
     {
         _db = db;
         _tenant = tenant;
-        _keys = keys;
         _settings = settings;
     }
 
@@ -158,127 +163,19 @@ public sealed class DeviceRegistryService
     public Task<Device?> FindAsync(Guid id, CancellationToken ct) =>
         _db.Devices.FirstOrDefaultAsync(d => d.Id == id, ct);
 
-    /// <summary>
-    /// Registers a device and returns it together with its key — the only time the key
-    /// is ever available, since nothing per-device is stored.
-    /// </summary>
-    public async Task<DeviceRegistration> RegisterAsync(RegisterDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
-    {
-        var device = new Device
-        {
-            TenantId = _tenant.TenantId,
-            DeviceCode = cmd.DeviceCode.Trim(),
-            Name = cmd.Name.Trim(),
-            Kind = cmd.Kind,
-            Hardware = cmd.Hardware,
-            CourtNumbers = cmd.CourtNumbers?.ToList() ?? [],
-            GateKey = cmd.GateKey?.Trim(),
-            MacAddress = cmd.MacAddress?.Trim().ToLowerInvariant(),
-            ButtonMapJson = cmd.ButtonMap?.ToJson(),
-        };
-
-        _db.Devices.Add(device);
-        Audit(actorUserId, "device.registered", new
-        {
-            device_id = device.Id,
-            device_code = device.DeviceCode,
-            kind = device.Kind.ToString(),
-        });
-        await _db.SaveChangesAsync(ct);
-
-        return new DeviceRegistration(device, KeyFor(device));
-    }
-
-    /// <summary>
-    /// Bumps the key version. The previous key stops verifying immediately, so the
-    /// device is offline until re-provisioned — deliberately, since a rotation that
-    /// left the old key working would not be a rotation.
-    ///
-    /// <para>
-    /// How the board gets the new key: it cannot be pushed (the API never dials a board)
-    /// and it cannot be granted here (a provisioning grant is redeemed with the claim code
-    /// the board shows, and a provisioned board shows none). So the board's own recovery
-    /// path is the delivery: its next signed call is a 401, it drops to CLAIM CODE, and the
-    /// admin connects it again — <see cref="ReclaimAsync"/> re-keys this same row and
-    /// issues the grant. The key is still returned here for the record and the panel.
-    /// </para>
-    /// </summary>
-    public async Task<DeviceRegistration> RotateKeyAsync(Device device, Guid actorUserId, CancellationToken ct)
-    {
-        device.KeyVersion++;
-        Audit(actorUserId, "device.key_rotated", new { device_id = device.Id, key_version = device.KeyVersion });
-        await _db.SaveChangesAsync(ct);
-
-        return new DeviceRegistration(device, KeyFor(device));
-    }
-
-    /// <summary>
-    /// The same physical board, claimed again: the row is re-keyed and un-revoked rather
-    /// than duplicated or refused.
-    ///
-    /// <para>
-    /// A board that was reflashed, revoked, or that lost its key announces
-    /// <c>st=unclaimed</c> with a fresh claim code, indistinguishable from a new board
-    /// except by its MAC. The old answer to a MAC match was a refusal ("rotate that
-    /// device's key") — and revoking left <c>RevokedAt</c> set for ever, nothing could
-    /// clear it, and rotation issued no grant, so a box an admin had revoked was
-    /// permanently unregistrable from any product surface (closing re-review #9/#10).
-    /// The honest design is that the board's claim code, read off its own LCD, is proof
-    /// of physical presence: whoever can present it could reflash the board anyway. So
-    /// a claim against a MAC this club already owns re-keys that row — a bumped
-    /// <see cref="Device.KeyVersion"/>, <see cref="Device.RevokedAt"/> cleared, enabled —
-    /// takes the claim's name, courts and override, keeps its id and history, and is
-    /// audited as <c>device.reclaimed</c>. One board, one row, always.
-    /// </para>
-    /// </summary>
-    public async Task<DeviceRegistration> ReclaimAsync(Device device, RegisterDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
-    {
-        var previousVersion = device.KeyVersion;
-        var wasRevoked = device.RevokedAt is not null;
-
-        device.KeyVersion++;
-        device.RevokedAt = null;
-        device.Enabled = true;
-        device.DeviceCode = cmd.DeviceCode.Trim();
-        device.Name = cmd.Name.Trim();
-        device.Hardware = cmd.Hardware;
-        device.CourtNumbers = cmd.CourtNumbers?.ToList() ?? [];
-        if (cmd.ButtonMap is not null) device.ButtonMapJson = cmd.ButtonMap.ToJson();
-
-        Audit(actorUserId, "device.reclaimed", new
-        {
-            device_id = device.Id,
-            device_code = device.DeviceCode,
-            was_revoked = wasRevoked,
-            previous_key_version = previousVersion,
-            key_version = device.KeyVersion,
-        });
-        await _db.SaveChangesAsync(ct);
-
-        return new DeviceRegistration(device, KeyFor(device));
-    }
-
     public async Task<Device> UpdateAsync(Device device, UpdateDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
     {
         if (cmd.Name is not null) device.Name = cmd.Name.Trim();
         if (cmd.Enabled is not null) device.Enabled = cmd.Enabled.Value;
         if (cmd.CourtNumbers is not null) device.CourtNumbers = cmd.CourtNumbers.ToList();
-        if (cmd.OtaChannel is not null) device.OtaChannel = cmd.OtaChannel.Value;
-        if (cmd.PinnedVersion is not null) device.PinnedVersion = cmd.PinnedVersion;
         if (cmd.ButtonMap is { } buttons) device.ButtonMapJson = buttons.Value?.ToJson();
 
+        // An admin has now looked at this row, so it stops reading as "appeared by itself,
+        // nobody has checked the courts it guessed". Deleting the row and letting the box
+        // register again is what sets it back.
+        device.AutoRegistered = false;
+
         Audit(actorUserId, "device.updated", new { device_id = device.Id });
-        await _db.SaveChangesAsync(ct);
-
-        return device;
-    }
-
-    public async Task<Device> RevokeAsync(Device device, Guid actorUserId, CancellationToken ct)
-    {
-        device.RevokedAt = DateTimeOffset.UtcNow;
-        device.Enabled = false;
-
-        Audit(actorUserId, "device.revoked", new { device_id = device.Id });
         await _db.SaveChangesAsync(ct);
 
         return device;
@@ -331,8 +228,137 @@ public sealed class DeviceRegistryService
             : null;
     }
 
-    private string KeyFor(Device device) =>
-        _keys.DeriveEncoded(device.TenantId, device.Id, device.KeyVersion);
+    /// <summary>
+    /// Creates the row for a board that has never called before, from nothing but its MAC.
+    ///
+    /// <para>
+    /// This is the whole of provisioning now. It replaces a UDP discovery beacon, a claim
+    /// code shown on the box's LCD, a commitment hash, a provisioning grant and a
+    /// key-delivery endpoint — a chain in which every link could strand a board in a
+    /// cupboard, and which existed only to hand out a per-device credential the club key
+    /// makes unnecessary.
+    /// </para>
+    ///
+    /// <para>
+    /// The guesses are deliberately the ones an admin would otherwise type: the courts the
+    /// club actually has, in ascending order, up to the four the relay bank can drive; the
+    /// club's button map, trimmed if it selects a court this box has not got (which is the
+    /// F13 rule — a box with fewer courts than the map names must not be left with inert
+    /// buttons or refused outright); and a name an admin will want to change. The row is
+    /// flagged <see cref="Device.AutoRegistered"/> so the Devices page says so.
+    /// </para>
+    /// </summary>
+    public async Task<Device> AutoRegisterAsync(string macAddress, CancellationToken ct)
+    {
+        var courtNumbers = await _db.Courts.AsNoTracking()
+            .Select(c => c.CourtNumber)
+            .OrderBy(n => n)
+            .Take(ButtonMap.MaxCourtsPerBox)
+            .ToListAsync(ct);
+
+        var settings = await _settings.GetAsync(ct);
+        var trimmed = settings.Buttons.FirstSelectionBeyond(courtNumbers.Count) is null
+            ? null
+            : settings.Buttons.TrimmedTo(courtNumbers.Count);
+
+        var device = new Device
+        {
+            TenantId = _tenant.TenantId,
+            MacAddress = macAddress,
+            DeviceCode = await AvailableDeviceCodeAsync(macAddress, ct),
+            Name = "Court box",
+            Kind = DeviceKind.CourtBox,
+            Hardware = DeviceHardware.Esp8266,
+            CourtNumbers = courtNumbers,
+            ButtonMapJson = trimmed?.ToJson(),
+            AutoRegistered = true,
+        };
+
+        _db.Devices.Add(device);
+
+        // ActorUserId is Guid.Empty: nobody did this. The audit row exists so a box that
+        // appeared is visible in the same trail as one an admin edited, not to name a person.
+        Audit(Guid.Empty, "device.auto_registered", new
+        {
+            device_id = device.Id,
+            device_code = device.DeviceCode,
+            mac_address = device.MacAddress,
+            court_numbers = device.CourtNumbers,
+            button_map_trimmed = trimmed is not null,
+        });
+        await _db.SaveChangesAsync(ct);
+
+        return device;
+    }
+
+    /// <summary>
+    /// <c>box-&lt;last six hex of the MAC&gt;</c>, or the full MAC when a row already holds
+    /// that code. The short form is what an admin reads off the board's label; the fallback
+    /// exists because <c>device_code</c> is uniquely indexed and a collision would otherwise
+    /// throw at the one moment nobody is watching — a box registering itself at 6am.
+    /// </summary>
+    private async Task<string> AvailableDeviceCodeAsync(string macAddress, CancellationToken ct)
+    {
+        var shortCode = $"box-{macAddress[^6..]}";
+        return await DeviceCodeTakenAsync(shortCode, ct) ? $"box-{macAddress}" : shortCode;
+    }
+
+    /// <summary>Removes a device. Its board re-registers, with default courts, on its next heartbeat.</summary>
+    public async Task DeleteAsync(Device device, Guid actorUserId, CancellationToken ct)
+    {
+        _db.Devices.Remove(device);
+        Audit(actorUserId, "device.deleted", new { device_id = device.Id, device_code = device.DeviceCode });
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// The club's device API key, minting one on first read.
+    ///
+    /// <para>
+    /// Readable, not shown-once. It is a value an admin has to paste into a
+    /// <c>secrets.h</c> at a workbench, possibly weeks after the club was created, and a
+    /// credential that can only be seen at the instant it is created is exactly what made
+    /// the old scheme need a recovery protocol. Minting on read rather than at tenant
+    /// creation means an existing club gets one the first time anybody opens the page.
+    /// </para>
+    /// </summary>
+    public async Task<Tenant> ApiKeyAsync(Guid actorUserId, CancellationToken ct)
+    {
+        var tenant = await CurrentTenantAsync(ct);
+        if (!string.IsNullOrEmpty(tenant.DeviceApiKey)) return tenant;
+
+        return await IssueApiKeyAsync(tenant, actorUserId, firstIssue: true, ct);
+    }
+
+    /// <summary>
+    /// Replaces the club's device API key. The old one stops working on the next request —
+    /// there is no cache and no grace window — so every box has to be reflashed. That is
+    /// the point: a regeneration that left the old key alive for a while would not be one.
+    /// </summary>
+    public async Task<Tenant> RegenerateApiKeyAsync(Guid actorUserId, CancellationToken ct)
+        => await IssueApiKeyAsync(await CurrentTenantAsync(ct), actorUserId, firstIssue: false, ct);
+
+    private async Task<Tenant> IssueApiKeyAsync(Tenant tenant, Guid actorUserId, bool firstIssue, CancellationToken ct)
+    {
+        tenant.DeviceApiKey = DeviceApiKey.Generate();
+        tenant.DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow;
+
+        // The key itself is never in the audit details. An audit trail an admin can read is
+        // not a place to put a live credential.
+        Audit(actorUserId, "device.api_key_regenerated", new { first_issue = firstIssue });
+        await _db.SaveChangesAsync(ct);
+
+        return tenant;
+    }
+
+    /// <summary>
+    /// The tenant row itself — tracked, so a key written to it is saved. <c>Tenant</c> is
+    /// not tenant-scoped and carries no query filter, so this is an explicit lookup by the
+    /// resolved tenant id rather than a filtered read.
+    /// </summary>
+    private async Task<Tenant> CurrentTenantAsync(CancellationToken ct)
+        => await _db.Tenants.FirstOrDefaultAsync(t => t.Id == _tenant.TenantId, ct)
+           ?? throw new InvalidOperationException("The resolved tenant no longer exists.");
 
     // Block body, not an expression body: lizard's C# parser mis-scopes an
     // expression-bodied member containing braces into a *global* pseudo-function the
@@ -350,25 +376,6 @@ public sealed class DeviceRegistryService
     }
 }
 
-/// <summary>A device and its key. The key is derived on demand and never persisted.</summary>
-public sealed record DeviceRegistration(Device Device, string DeviceKey);
-
-/// <summary><paramref name="CourtNumbers"/> is in relay order — see <see cref="Device.CourtNumbers"/>.</summary>
-public sealed record RegisterDeviceCommand(
-    string DeviceCode,
-    string Name,
-    DeviceKind Kind,
-    DeviceHardware Hardware,
-    IReadOnlyList<int>? CourtNumbers,
-    string? GateKey)
-{
-    /// <summary>Set when the device was discovered rather than typed in by hand.</summary>
-    public string? MacAddress { get; init; }
-
-    /// <summary>This box's own button map, or null to run the club's. See <see cref="Device.ButtonMapJson"/>.</summary>
-    public ButtonMap? ButtonMap { get; init; }
-}
-
 /// <summary>
 /// A null <paramref name="CourtNumbers"/> leaves the list alone; a list replaces it whole.
 /// <paramref name="ButtonMap"/> is three-valued: null leaves the override alone, a value
@@ -378,8 +385,6 @@ public sealed record UpdateDeviceCommand(
     string? Name,
     bool? Enabled,
     IReadOnlyList<int>? CourtNumbers,
-    OtaChannel? OtaChannel,
-    string? PinnedVersion,
     Optional<ButtonMap?>? ButtonMap = null);
 
 /// <summary>A value that is explicitly present, so "absent" and "present but null" can be told apart on a PATCH.</summary>

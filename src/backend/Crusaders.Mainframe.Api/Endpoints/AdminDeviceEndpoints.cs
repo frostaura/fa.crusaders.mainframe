@@ -6,13 +6,16 @@ using Crusaders.Mainframe.Api.Services;
 namespace Crusaders.Mainframe.Api.Endpoints;
 
 /// <summary>
-/// Admin management of the physical devices allowed to talk to this tenant.
+/// Admin management of the boxes that have called this club's API, and of the one key
+/// they all present.
 ///
 /// <para>
-/// The derived key is returned <b>once</b>, on registration and on rotation, and is
-/// never readable afterwards — it is not stored, so there is nothing to read back.
-/// That mirrors how <c>WebhookEndpoints</c> hands out an endpoint secret, and it is
-/// the reason rotation is a first-class operation rather than an afterthought.
+/// There is no register route. A board creates its own row on its first heartbeat, so
+/// this surface is list, edit, delete — plus the club key, which is <b>readable</b>
+/// rather than shown-once because an admin has to be able to paste it into a
+/// <c>secrets.h</c> at a workbench weeks after the club was created. Regenerating it
+/// invalidates the old key on the very next request, which is why the page warns that
+/// every box must be reflashed.
 /// </para>
 ///
 /// <para>
@@ -25,11 +28,14 @@ public static class AdminDeviceEndpoints
     {
         var g = app.MapGroup("/api/v1/admin/devices").RequireAuthorization(p => p.RequireRole("admin"));
 
+        // Declared before the "/{id:guid}" routes for readability only — the guid
+        // constraint already stops "api-key" matching them.
+        g.MapGet("/api-key", ApiKeyAsync);
+        g.MapPost("/api-key/regenerate", RegenerateApiKeyAsync);
+
         g.MapGet("/", ListAsync);
-        g.MapPost("/", RegisterAsync);
-        g.MapPost("/{id:guid}/rotate-key", RotateKeyAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);
-        g.MapPost("/{id:guid}/revoke", RevokeAsync);
+        g.MapDelete("/{id:guid}", DeleteAsync);
 
         return app;
     }
@@ -49,91 +55,32 @@ public static class AdminDeviceEndpoints
         return Results.Ok((await devices.ListAsync(ct)).Select(d => DeviceView.Of(d, heartbeat)).ToList());
     }
 
-    private static async Task<IResult> RegisterAsync(
-        RegisterDeviceRequest req, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
-        HttpContext ctx, CancellationToken ct)
+    /// <summary>
+    /// <c>GET /api/v1/admin/devices/api-key</c> — the club's device key, minted on the
+    /// first read so the page is never empty.
+    /// </summary>
+    private static async Task<IResult> ApiKeyAsync(
+        DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+        => Results.Ok(ApiKeyView(await devices.ApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
+
+    /// <summary>
+    /// <c>POST /api/v1/admin/devices/api-key/regenerate</c> — a new key, effective
+    /// immediately. Every box is offline until it is reflashed with it.
+    /// </summary>
+    private static async Task<IResult> RegenerateApiKeyAsync(
+        DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+        => Results.Ok(ApiKeyView(await devices.RegenerateApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
+
+    // Block body, not an expression body: lizard's C# parser mis-scopes an
+    // expression-bodied member containing braces into a *global* pseudo-function the
+    // length of the file — see memory/gotchas.md.
+    private static object ApiKeyView(Domain.Tenant tenant)
     {
-        var invalid = Validate(req);
-        if (invalid is not null) return Results.BadRequest(new { error = invalid });
-
-        if (ParseRegistrationButtonMap(req, out var buttons) is { } badMap) return badMap;
-        if (ParseRegistrationMac(req, out var mac) is { } badMac) return badMac;
-
-        // A MAC is what makes a hand-registered box recoverable later: given one, this
-        // endpoint reclaims the row that already owns it — re-keyed, un-revoked — exactly
-        // as the discovery claim does. See ParseRegistrationMac.
-        var existing = mac is null ? null : await devices.FindByMacAddressAsync(mac, ct);
-
-        if (await IsDeviceCodeTakenAsync(devices, req.DeviceCode, existing, ct))
+        return new
         {
-            return Results.Conflict(new { error = "device_code_taken" });
-        }
-
-        // The map this box will run — its own override when the request carries one, else
-        // the club's — must be able to address its court list, and the list must name real
-        // courts. A list naming a court the club does not have is refused here, where the
-        // admin can act on it. A map that reaches past the list is refused only when the
-        // admin wrote it; otherwise the club's map is trimmed to fit this box and stored as
-        // its override, because "your club map names four courts and this box drives two"
-        // used to be a dead end from this screen. See ResolveCourtAssignmentAsync.
-        //
-        // A registration either carries a map or does not; there is no "clear" on this
-        // path, so an absent one is no opinion at all and is the trim's to derive.
-        var assignment = req.Kind == DeviceKind.CourtBox
-            ? await devices.ResolveCourtAssignmentAsync(
-                req.CourtNumbers!, buttons is null ? null : new Optional<ButtonMap?>(buttons), null, ct)
-            : new CourtAssignment(null, buttons, false);
-        if (assignment.Error is { } mismatch) return Results.BadRequest(new { error = mismatch });
-        buttons = assignment.Override;
-
-        var command = new RegisterDeviceCommand(req.DeviceCode, req.Name, req.Kind, req.Hardware, req.CourtNumbers, req.GateKey)
-        {
-            ButtonMap = buttons,
-            MacAddress = mac,
+            api_key = tenant.DeviceApiKey,
+            regenerated_at = tenant.DeviceApiKeyRegeneratedAt,
         };
-
-        var registered = existing is null
-            ? await devices.RegisterAsync(command, ctx.User.Id() ?? Guid.Empty, ct)
-            : await devices.ReclaimAsync(existing, command, ctx.User.Id() ?? Guid.Empty, ct);
-
-        // Shown once. Flash it into the device's secrets.h and do not keep a copy here.
-        return Results.Ok(new
-        {
-            // True when this MAC already had a row here — revoked, reflashed, or key lost —
-            // and that row was re-keyed and re-enabled rather than duplicated.
-            reclaimed = existing is not null,
-            device = DeviceView.Of(registered.Device, await HeartbeatSecondsAsync(settingsAccessor, ct)),
-            device_key = registered.DeviceKey,
-            key_version = registered.Device.KeyVersion,
-            // True when this box got a button map derived from the club's rather than the
-            // club's own — its court buttons beyond its relay count are off. The map itself
-            // is in device.button_map.
-            button_map_trimmed = assignment.Trimmed,
-            note = existing is null
-                ? "Store this key on the device now. It is derived, not stored, and cannot be shown again."
-                : "This board was already registered here; its row has been re-keyed and re-enabled. Store the new key on the device now — it cannot be shown again.",
-        });
-    }
-
-    private static async Task<IResult> RotateKeyAsync(
-        Guid id, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
-        HttpContext ctx, CancellationToken ct)
-    {
-        var device = await devices.FindAsync(id, ct);
-        if (device is null) return Results.NotFound();
-
-        var rotated = await devices.RotateKeyAsync(device, ctx.User.Id() ?? Guid.Empty, ct);
-
-        return Results.Ok(new
-        {
-            device = DeviceView.Of(rotated.Device, await HeartbeatSecondsAsync(settingsAccessor, ct)),
-            device_key = rotated.DeviceKey,
-            key_version = rotated.Device.KeyVersion,
-            // The board cannot be handed this key: its next signed call is refused, it
-            // drops to CLAIM CODE, and connecting it again re-keys this same row and
-            // issues the grant it collects. See DeviceRegistryService.RotateKeyAsync.
-            note = "The board's old key stops working now. It will show a new claim code on its LCD; connect it again from the discovered boards list to deliver the new key.",
-        });
     }
 
     private static async Task<IResult> UpdateAsync(
@@ -147,9 +94,9 @@ public static class AdminDeviceEndpoints
 
         // The effective map after this PATCH — the override it sets, else the one the row
         // keeps, else the club's — must be able to address the effective court list, and a
-        // new list must be well-formed and name real courts. Same three rules as
-        // registration, including the trim: shrinking a box's court list turns off the
-        // court buttons it no longer has rather than refusing the edit.
+        // new list must be well-formed and name real courts. Including the trim: shrinking
+        // a box's court list turns off the court buttons it no longer has rather than
+        // refusing the edit.
         var resolved = await AssignmentAsync(devices, device, req.CourtNumbers, buttons, ct);
         if (resolved is { } outcome)
         {
@@ -159,62 +106,29 @@ public static class AdminDeviceEndpoints
 
         var updated = await devices.UpdateAsync(
             device,
-            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, req.OtaChannel, req.PinnedVersion, buttons),
+            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, buttons),
             ctx.User.Id() ?? Guid.Empty, ct);
 
         return Results.Ok(DeviceView.Of(updated, await HeartbeatSecondsAsync(settingsAccessor, ct)));
     }
 
     /// <summary>
-    /// The override a registration carries, or the refusal. Absent is not an error — it
-    /// means "run the club's map", which <see cref="DeviceRegistryService.ResolveCourtAssignmentAsync"/>
-    /// then either honours or trims to fit.
+    /// Removes a box's row. Not destructive and not a revocation: the board still holds the
+    /// club key, so it re-registers on its next heartbeat with default courts. That is the
+    /// intended way to reset a box whose configuration has been got into a mess.
     /// </summary>
-    private static IResult? ParseRegistrationButtonMap(RegisterDeviceRequest req, out ButtonMap? buttons)
+    private static async Task<IResult> DeleteAsync(
+        Guid id, DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
     {
-        buttons = null;
-        if (req.ButtonMap is null) return null;
+        var device = await devices.FindAsync(id, ct);
+        if (device is null) return Results.NotFound();
 
-        return ButtonMap.TryParse(req.ButtonMap, out buttons, out var reason)
-            ? null
-            : Results.BadRequest(new { error = "button_map_invalid", message = reason });
+        await devices.DeleteAsync(device, ctx.User.Id() ?? Guid.Empty, ct);
+
+        // A body rather than 204, because the Devices page types this route's answer and a
+        // 204 would leave it typing `undefined`.
+        return Results.Ok(new { deleted = true });
     }
-
-    /// <summary>
-    /// The board's MAC in the form the boards announce, or the refusal. Absent is not an
-    /// error — a MAC is optional, and a box registered without one simply cannot be
-    /// recovered this way.
-    ///
-    /// <para>
-    /// Why it is worth typing: a revoked hand-registered box used to have no way back at
-    /// all. Revoking sets <c>RevokedAt</c> for ever and nothing clears it, rotation issues
-    /// no provisioning grant, and the discovery claim's un-revoke path finds its row BY MAC
-    /// — which a hand-registered row did not have, because this endpoint would not accept
-    /// one. The admin's only move was to register the same hardware again under a different
-    /// device code, leaving a dead row and two identities for one physical box.
-    /// </para>
-    /// </summary>
-    private static IResult? ParseRegistrationMac(RegisterDeviceRequest req, out string? mac)
-    {
-        mac = null;
-        if (string.IsNullOrWhiteSpace(req.MacAddress)) return null;
-
-        mac = DeviceRegistryService.NormaliseMacAddress(req.MacAddress);
-        return mac is null
-            ? Results.BadRequest(new { error = DeviceRegistryService.MacAddressInvalid })
-            : null;
-    }
-
-    /// <summary>
-    /// Whether this device code belongs to some OTHER row. The row being reclaimed is
-    /// excluded, or re-registering a revoked box under its own code would collide with
-    /// itself — which is precisely the dead end the MAC lookup exists to end.
-    /// </summary>
-    private static Task<bool> IsDeviceCodeTakenAsync(
-        DeviceRegistryService devices, string deviceCode, Device? existing, CancellationToken ct)
-        => existing is null
-            ? devices.DeviceCodeTakenAsync(deviceCode.Trim(), ct)
-            : devices.DeviceCodeTakenAsync(deviceCode.Trim(), existing.Id, ct);
 
     /// <summary>
     /// button_map on a PATCH is three-valued: absent leaves the override alone, null clears
@@ -267,59 +181,7 @@ public static class AdminDeviceEndpoints
         // it does not fit; a list is theirs and is refused when it does not fit.
         return await devices.ResolveCourtAssignmentAsync(courts, buttons, device.ButtonMapJson, ct);
     }
-
-    private static async Task<IResult> RevokeAsync(
-        Guid id, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
-        HttpContext ctx, CancellationToken ct)
-    {
-        var device = await devices.FindAsync(id, ct);
-        if (device is null) return Results.NotFound();
-
-        return Results.Ok(DeviceView.Of(
-            await devices.RevokeAsync(device, ctx.User.Id() ?? Guid.Empty, ct),
-            await HeartbeatSecondsAsync(settingsAccessor, ct)));
-    }
-
-    private static string? Validate(RegisterDeviceRequest req)
-    {
-        if (string.IsNullOrWhiteSpace(req.DeviceCode)) return "device_code_required";
-        if (req.DeviceCode.Length > 64) return "device_code_too_long";
-        if (string.IsNullOrWhiteSpace(req.Name)) return "name_required";
-
-        // A court box drives a set of courts; a gate opens a specific gate. Mixing
-        // them means a heartbeat cannot be routed to anything.
-        if (req.Kind == DeviceKind.CourtBox && DeviceRegistryService.ValidateCourtNumbers(req.CourtNumbers) is { } courts)
-        {
-            return courts;
-        }
-        if (req.Kind == DeviceKind.Gate && string.IsNullOrWhiteSpace(req.GateKey)) return "gate_key_required_for_gate";
-
-        return null;
-    }
 }
-
-/// <summary>
-/// <c>court_numbers</c> is pinned to snake_case like the discovery claim's request,
-/// because the same admin screen builds both bodies; the remaining fields bind
-/// case-insensitively from the camelCase the screen already sends. The list is in
-/// relay order — see <c>Device.CourtNumbers</c>.
-/// </summary>
-public sealed record RegisterDeviceRequest(
-    string DeviceCode,
-    string Name,
-    DeviceKind Kind,
-    DeviceHardware Hardware,
-    [property: JsonPropertyName("court_numbers")] IReadOnlyList<int>? CourtNumbers,
-    string? GateKey,
-    /// <summary>This box's own eight-entry button map, or omitted to run the club's.</summary>
-    [property: JsonPropertyName("button_map")] IReadOnlyList<string>? ButtonMap = null,
-    /// <summary>
-    /// The board's MAC, however it is printed on the label — separators are stripped.
-    /// Optional, and worth typing: it is the only stable link between this row and the
-    /// physical board, so it is what lets a revoked or reflashed box be recovered later
-    /// instead of registered a second time under a different code.
-    /// </summary>
-    [property: JsonPropertyName("mac_address")] string? MacAddress = null);
 
 /// <summary>
 /// <c>button_map</c> is pinned snake_case like <c>court_numbers</c> and is three-valued:
@@ -331,6 +193,4 @@ public sealed record UpdateDeviceRequest(
     string? Name,
     bool? Enabled,
     [property: JsonPropertyName("court_numbers")] IReadOnlyList<int>? CourtNumbers,
-    OtaChannel? OtaChannel,
-    string? PinnedVersion,
     [property: JsonPropertyName("button_map")] JsonElement ButtonMap = default);

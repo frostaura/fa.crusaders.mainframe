@@ -559,10 +559,10 @@ public sealed class AdminSettingsHttpTests
         {
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.Devices.AddRange(
-                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-1", Name = "Four courts", CourtNumbers = [1, 2, 3, 4] },
-                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-2", Name = "Two courts", CourtNumbers = [5, 6] },
+                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-1", Name = "Four courts", CourtNumbers = [1, 2, 3, 4], MacAddress = "aa0000000001" },
+                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-2", Name = "Two courts", CourtNumbers = [5, 6], MacAddress = "aa0000000002" },
                 // Revoked: decommissioned, and must not veto a map it will never receive.
-                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-old", Name = "Gone", CourtNumbers = [7], RevokedAt = DateTimeOffset.UtcNow, Enabled = false });
+                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-old", Name = "Gone", CourtNumbers = [7], MacAddress = "aa0000000003", Enabled = false });
             await db.SaveChangesAsync();
         }
 
@@ -605,8 +605,8 @@ public sealed class AdminSettingsHttpTests
         {
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             db.Devices.AddRange(
-                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-1", Name = "Four courts", CourtNumbers = [1, 2, 3, 4] },
-                new Device { TenantId = seeded.TenantId, DeviceCode = "annex", Name = "One court, own map", CourtNumbers = [5], ButtonMapJson = annexMap!.ToJson() });
+                new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-1", Name = "Four courts", CourtNumbers = [1, 2, 3, 4], MacAddress = "bb0000000001" },
+                new Device { TenantId = seeded.TenantId, DeviceCode = "annex", Name = "One court, own map", CourtNumbers = [5], MacAddress = "bb0000000002", ButtonMapJson = annexMap!.ToJson() });
             await db.SaveChangesAsync();
         }
 
@@ -619,7 +619,7 @@ public sealed class AdminSettingsHttpTests
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            db.Devices.Add(new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-2", Name = "Two courts, club map", CourtNumbers = [6, 7] });
+            db.Devices.Add(new Device { TenantId = seeded.TenantId, DeviceCode = "court-box-2", Name = "Two courts, club map", CourtNumbers = [6, 7], MacAddress = "bb0000000003" });
             await db.SaveChangesAsync();
         }
         var refused = await client.PutAsJsonAsync(SettingsPath, body);

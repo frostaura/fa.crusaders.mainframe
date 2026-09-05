@@ -1,7 +1,6 @@
 using System.Text.Json.Serialization;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
-using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -39,16 +38,12 @@ public static class DeviceActivateEndpoint
     public static async Task<IResult> HandleAsync(
         DeviceActivateRequest req,
         [AsParameters] DeviceActivateServices services,
-        HttpContext ctx,
         CancellationToken ct)
     {
-        var deviceId = ctx.User.DeviceId();
-        if (deviceId is null) return Results.Unauthorized();
+        var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, req.Mac, ct);
+        if (refusal is not null) return refusal;
 
-        var device = await services.Db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId.Value, ct);
-        if (device is null) return Results.NotFound();
-
-        return Results.Ok(await ActivateForDeviceAsync(device, req, services, ct));
+        return Results.Ok(await ActivateForDeviceAsync(device!, req, services, ct));
     }
 
     /// <summary>
@@ -62,21 +57,21 @@ public static class DeviceActivateEndpoint
 
         // Same rule as the walk-up: only a method that identifies a member globally. A PIN
         // against the whole roll is an oracle, not an identification.
-        if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return Refused("not_recognised", now);
+        if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return Refused("not_recognised");
 
         // Tenant-filtered by the context's global query filter, so a code minted at another
         // club resolves to nothing here — the isolation is structural, not a claim compared.
         var resolved = await services.Codes.ResolveAsync(req.Token, ct);
-        if (resolved is null) return Refused("not_recognised", now);
+        if (resolved is null) return Refused("not_recognised");
 
         // A court named in the request narrows the search, and must be one of this box's.
-        if (req.Court is { } narrowed && !device.CourtNumbers.Contains(narrowed)) return Refused("wrong_court", now);
+        if (req.Court is { } narrowed && !device.CourtNumbers.Contains(narrowed)) return Refused("wrong_court");
 
         var found = resolved.Purpose == AccessCodePurpose.BookingActivation
             ? await ForBookingCodeAsync(device, req, resolved, services, now, ct)
             : await ForIdentCodeAsync(device, req, resolved, services, now, ct);
 
-        if (found.Reason is not null) return Refused(found.Reason, now, found.Court);
+        if (found.Reason is not null) return Refused(found.Reason, found.Court);
 
         var result = await services.Activation.ActivateAsync(
             found.Court!, found.Booking!, resolved.UserId, payerOverrideUserId: null, req.Method!, ct);
@@ -160,8 +155,7 @@ public static class DeviceActivateEndpoint
                 CourtNumber: court.CourtNumber,
                 BookingId: ended.Booking.Id,
                 GrantedSeconds: 0,
-                StartsInSeconds: null,
-                ServerUnix: now.ToUnixTimeSeconds()),
+                StartsInSeconds: null),
 
             // The remainder of the slot, clamped to what the relay bank will actually hold.
             // A repeat scan of a live session lands here too, with whatever is left — which
@@ -172,8 +166,7 @@ public static class DeviceActivateEndpoint
                 CourtNumber: court.CourtNumber,
                 BookingId: a.Booking.Id,
                 GrantedSeconds: Math.Clamp((int)Math.Floor((a.Booking.EndsAt - now).TotalSeconds), 1, RelayHardCap.Seconds),
-                StartsInSeconds: null,
-                ServerUnix: now.ToUnixTimeSeconds()),
+                StartsInSeconds: null),
 
             ActivationResult.TooEarly early => new DeviceActivateResponse(
                 Activated: false,
@@ -181,16 +174,15 @@ public static class DeviceActivateEndpoint
                 CourtNumber: court.CourtNumber,
                 BookingId: early.Booking.Id,
                 GrantedSeconds: 0,
-                StartsInSeconds: early.StartsInSeconds,
-                ServerUnix: now.ToUnixTimeSeconds()),
+                StartsInSeconds: early.StartsInSeconds),
 
-            ActivationResult.InsufficientBalance => Refused("insufficient_balance", now, court),
-            ActivationResult.NoBooking => Refused("no_booking", now, court),
-            _ => Refused("not_chargeable", now, court),
+            ActivationResult.InsufficientBalance => Refused("insufficient_balance", court),
+            ActivationResult.NoBooking => Refused("no_booking", court),
+            _ => Refused("not_chargeable", court),
         };
     }
 
-    private static DeviceActivateResponse Refused(string reason, DateTimeOffset now, Court? court = null)
+    private static DeviceActivateResponse Refused(string reason, Court? court = null)
     {
         return new DeviceActivateResponse(
             Activated: false,
@@ -198,8 +190,7 @@ public static class DeviceActivateEndpoint
             CourtNumber: court?.CourtNumber,
             BookingId: null,
             GrantedSeconds: 0,
-            StartsInSeconds: null,
-            ServerUnix: now.ToUnixTimeSeconds());
+            StartsInSeconds: null);
     }
 }
 
@@ -210,10 +201,12 @@ public sealed record DeviceActivateServices(
     CourtActivationService Activation);
 
 /// <summary>
-/// What a box sends when a scan needs the server. <c>court</c> is optional narrowing — the
-/// court NUMBER the member selected, if they selected one — and must be one of the box's.
+/// What a box sends when a scan needs the server. <c>mac</c> names the board;
+/// <c>court</c> is optional narrowing — the court NUMBER the member selected, if they
+/// selected one — and must be one of the box's.
 /// </summary>
 public sealed record DeviceActivateRequest(
+    [property: JsonPropertyName("mac")] string? Mac,
     [property: JsonPropertyName("method")] string? Method,
     [property: JsonPropertyName("token")] string? Token,
     [property: JsonPropertyName("court")] int? Court);
@@ -231,5 +224,4 @@ public sealed record DeviceActivateResponse(
     [property: JsonPropertyName("court_number")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? CourtNumber,
     [property: JsonPropertyName("booking_id")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? BookingId,
     [property: JsonPropertyName("granted_seconds")] int GrantedSeconds,
-    [property: JsonPropertyName("starts_in_seconds")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? StartsInSeconds,
-    [property: JsonPropertyName("server_unix")] long ServerUnix);
+    [property: JsonPropertyName("starts_in_seconds")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? StartsInSeconds);

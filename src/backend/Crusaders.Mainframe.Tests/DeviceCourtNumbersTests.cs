@@ -22,8 +22,9 @@ namespace Crusaders.Mainframe.Tests;
 /// has to translate on both providers, because "which box drives court 3?" is the
 /// question the activation and roster paths will ask, and a primitive collection that
 /// silently evaluates client-side on one provider is a full table scan nobody notices.
-/// The rest are the admin surface: the wire shape, and the two rules a court list is
-/// held to at write time.
+/// The rest are the admin surface. There is no registration endpoint any more — a box
+/// creates its own row on its first heartbeat — so every rule a court list is held to is
+/// now held on the PATCH an admin uses to correct what the box guessed.
 /// </para>
 /// </summary>
 [Collection(HttpTestCollection.Name)]
@@ -46,9 +47,9 @@ public sealed class DeviceCourtNumbersTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
         db.Devices.AddRange(
-            new Device { TenantId = host.Tenant.Id, DeviceCode = "box-a", Name = "A", CourtNumbers = [1, 2] },
-            new Device { TenantId = host.Tenant.Id, DeviceCode = "box-b", Name = "B", CourtNumbers = [3, 4] },
-            new Device { TenantId = host.Tenant.Id, DeviceCode = "gate", Name = "G", Kind = DeviceKind.Gate, GateKey = "front" });
+            new Device { TenantId = host.Tenant.Id, DeviceCode = "box-a", Name = "A", CourtNumbers = [1, 2], MacAddress = "cc0000000001" },
+            new Device { TenantId = host.Tenant.Id, DeviceCode = "box-b", Name = "B", CourtNumbers = [3, 4], MacAddress = "cc0000000002" },
+            new Device { TenantId = host.Tenant.Id, DeviceCode = "gate", Name = "G", Kind = DeviceKind.Gate, GateKey = "front", MacAddress = "cc0000000003" });
         await db.SaveChangesAsync();
 
         var drivesThree = await db.Devices.Where(d => d.CourtNumbers.Contains(3)).Select(d => d.DeviceCode).ToListAsync();
@@ -70,9 +71,9 @@ public sealed class DeviceCourtNumbersTests
 
         var tenantId = Guid.NewGuid();
         db.Devices.AddRange(
-            new Device { TenantId = tenantId, DeviceCode = "box-a", Name = "A", CourtNumbers = [1, 2] },
-            new Device { TenantId = tenantId, DeviceCode = "box-b", Name = "B", CourtNumbers = [4, 3] },
-            new Device { TenantId = tenantId, DeviceCode = "gate", Name = "G", Kind = DeviceKind.Gate, GateKey = "front" });
+            new Device { TenantId = tenantId, DeviceCode = "box-a", Name = "A", CourtNumbers = [1, 2], MacAddress = "dd0000000001" },
+            new Device { TenantId = tenantId, DeviceCode = "box-b", Name = "B", CourtNumbers = [4, 3], MacAddress = "dd0000000002" },
+            new Device { TenantId = tenantId, DeviceCode = "gate", Name = "G", Kind = DeviceKind.Gate, GateKey = "front", MacAddress = "dd0000000003" });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
@@ -91,16 +92,23 @@ public sealed class DeviceCourtNumbersTests
 
     // ---- The admin surface --------------------------------------------------
 
-    private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId);
+    private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId, string DeviceApiKey);
 
-    private static async Task<Seeded> SeedAsync(TestWebAppFactory factory, string settingsJson = """{"timezone":"UTC"}""")
+    private static async Task<Seeded> SeedAsync(
+        TestWebAppFactory factory, string settingsJson = """{"timezone":"UTC"}""", bool twoCourtsOnly = false)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await db.Database.MigrateAsync();
 
         var slug = $"dev-{Guid.NewGuid():N}"[..20];
-        var tenant = new Tenant { Slug = slug, DisplayName = "Device Club" };
+        var tenant = new Tenant
+        {
+            Slug = slug,
+            DisplayName = "Device Club",
+            DeviceApiKey = Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceApiKey.Generate(),
+            DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
+        };
         db.Tenants.Add(tenant);
         db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = settingsJson });
         var admin = new User { TenantId = tenant.Id, Email = $"{slug}@test.local", PasswordHash = "x", EmailVerified = true, IsAdmin = true };
@@ -116,12 +124,12 @@ public sealed class DeviceCourtNumbersTests
         });
         // The club's courts: a court list is checked against them on every save, so a
         // typo cannot register a relay that can never light.
-        for (var n = 1; n <= 4; n++)
+        for (var n = 1; n <= (twoCourtsOnly ? 2 : 4); n++)
         {
             db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = n, Name = $"Court {n}", SlicePriceCredits = 8m });
         }
         await db.SaveChangesAsync();
-        return new Seeded(tenant.Id, slug, admin.Id);
+        return new Seeded(tenant.Id, slug, admin.Id, tenant.DeviceApiKey!);
     }
 
     private static HttpClient AdminClient(TestWebAppFactory factory, Seeded s)
@@ -148,113 +156,141 @@ public sealed class DeviceCourtNumbersTests
         return client;
     }
 
-    // Enums bind as their integer values: the application configures no string-enum
-    // converter, and the admin screen sends numbers.
-    private static object Register(string deviceCode, int[]? courts) => new
+    /// <summary>
+    /// A box already on the roster, as a heartbeat would have left it. Registration is the
+    /// board's own doing now, so a test about the admin surface starts from a row rather
+    /// than creating one through it.
+    /// </summary>
+    private static async Task<Guid> BoxAsync(TestWebAppFactory factory, Seeded seeded, int[] courts, string? buttonMapJson = null)
     {
-        deviceCode,
-        name = "A box",
-        kind = (int)DeviceKind.CourtBox,
-        hardware = (int)DeviceHardware.Esp8266,
-        court_numbers = courts,
-    };
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var mac = Guid.NewGuid().ToString("N")[..12];
+        var device = new Device
+        {
+            TenantId = seeded.TenantId,
+            DeviceCode = $"box-{mac[^6..]}",
+            Name = "A box",
+            Kind = DeviceKind.CourtBox,
+            Hardware = DeviceHardware.Esp8266,
+            MacAddress = mac,
+            CourtNumbers = [.. courts],
+            ButtonMapJson = buttonMapJson,
+            AutoRegistered = true,
+        };
+        db.Devices.Add(device);
+        await db.SaveChangesAsync();
+        return device.Id;
+    }
+
+    private static async Task<JsonElement> BodyAsync(HttpResponseMessage response)
+        => JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
 
     /// <summary>The wire field is <c>court_numbers</c>, in both directions, in relay order.</summary>
     [SkippableFact]
-    public async Task A_registered_box_reads_back_its_courts_in_relay_order()
+    public async Task A_box_reads_back_its_courts_in_relay_order()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
         await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
         var seeded = await SeedAsync(factory);
+        await BoxAsync(factory, seeded, [4, 3, 2, 1]);
         var client = AdminClient(factory, seeded);
-
-        var response = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [4, 3, 2, 1]));
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
-
-        var courts = json.GetProperty("device").GetProperty("court_numbers").EnumerateArray().Select(e => e.GetInt32()).ToArray();
-        Assert.Equal([4, 3, 2, 1], courts);
 
         var listed = JsonDocument.Parse(await client.GetStringAsync(DevicesPath)).RootElement;
         var row = Assert.Single(listed.EnumerateArray());
         Assert.Equal([4, 3, 2, 1], row.GetProperty("court_numbers").EnumerateArray().Select(e => e.GetInt32()).ToArray());
-    }
 
-    [SkippableTheory]
-    [InlineData(null, "court_numbers_required_for_court_box")]
-    [InlineData(new int[0], "court_numbers_required_for_court_box")]
-    [InlineData(new[] { 1, 2, 3, 4, 5 }, "too_many_courts_for_relay_bank")]
-    [InlineData(new[] { 1, 1, 2, 3 }, "duplicate_court_numbers")]
-    public async Task An_unusable_court_list_is_refused_at_registration(int[]? courts, string expected)
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
-        var seeded = await SeedAsync(factory);
-        var client = AdminClient(factory, seeded);
-
-        var response = await client.PostAsJsonAsync(DevicesPath, Register("court-box-bad", courts));
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
-        Assert.Equal(expected, json.GetProperty("error").GetString());
+        // The row says nobody has confirmed it, because nobody has.
+        Assert.True(row.GetProperty("auto_registered").GetBoolean());
     }
 
     /// <summary>
-    /// The default button map selects courts A–D. A box that drives two of them is now
-    /// given the club's map with the two unreachable court buttons turned off, rather than
-    /// refused — closing re-review #13's residual.
-    ///
-    /// <para>
-    /// The refusal had no way forward from the screen the admin was on: their only options
-    /// were to edit the club's map, changing every other box, or to hand-compose an
-    /// override. A two-court box with C and D off is what they would have composed, and
-    /// what the discovery claim — which sends no <c>button_map</c> at all — needs, since
-    /// without this every two- or three-court box was unclaimable from the discovered list.
-    /// </para>
+    /// A box that registered itself under a club map naming more courts than it drives is
+    /// given the club's map with the unreachable buttons off — the F13 rule, applied at the
+    /// one moment nobody is watching. Read back through the admin list, because that is
+    /// where an admin discovers what the box decided.
     /// </summary>
     [SkippableFact]
-    public async Task A_box_with_fewer_courts_than_the_button_map_selects_is_trimmed_to_fit_rather_than_refused()
+    public async Task A_box_that_registered_itself_appears_with_a_map_it_can_honour()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        var seeded = await SeedAsync(factory, twoCourtsOnly: true);
+        var client = AdminClient(factory, seeded);
+
+        var mac = Guid.NewGuid().ToString("N")[..12];
+        var heartbeat = new HttpRequestMessage(HttpMethod.Post, "/api/v1/device/heartbeat")
+        {
+            Content = new StringContent($$"""{"mac":"{{mac}}"}""", Encoding.UTF8, "application/json"),
+        };
+        heartbeat.Headers.Authorization = new AuthenticationHeaderValue("Bearer", seeded.DeviceApiKey);
+        Assert.Equal(HttpStatusCode.OK, (await factory.CreateClient().SendAsync(heartbeat)).StatusCode);
+
+        var row = Assert.Single(JsonDocument.Parse(await client.GetStringAsync(DevicesPath)).RootElement.EnumerateArray());
+        Assert.Equal([1, 2], row.GetProperty("court_numbers").EnumerateArray().Select(e => e.GetInt32()).ToArray());
+        Assert.Equal(AnnexTwoCourtMap, row.GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
+    }
+
+    /// <summary>
+    /// A court list must be one to four entries with no repeats. Four because the relay
+    /// bank has four relays; no repeats because two relays wired to one court is a wiring
+    /// fault, not a configuration.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(new int[0], "court_numbers_required_for_court_box")]
+    [InlineData(new[] { 1, 2, 3, 4, 5 }, "too_many_courts_for_relay_bank")]
+    [InlineData(new[] { 1, 1, 2, 3 }, "duplicate_court_numbers")]
+    public async Task An_unusable_court_list_is_refused_on_edit(int[] courts, string expected)
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
         await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
         var seeded = await SeedAsync(factory);
+        var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
 
-        var response = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [1, 2]));
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        var response = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = courts });
 
-        // The admin is told it happened, and the map they got is the club's with the two
-        // buttons this box has no relay for turned off. Nothing else moves: the minute
-        // buttons mean the same thing on a box of any size.
-        Assert.True(body.GetProperty("button_map_trimmed").GetBoolean());
-        Assert.Equal(
-            ["court:A", "court:B", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
-            body.GetProperty("device").GetProperty("button_map").EnumerateArray().Select(e => e.GetString() ?? "").ToArray());
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(expected, (await BodyAsync(response)).GetProperty("error").GetString());
+    }
 
-        // A four-court box under the same club map needs nothing derived and keeps none:
-        // it runs the club's map, so a later edit to that map reaches it.
-        var full = await client.PostAsJsonAsync(DevicesPath, Register("court-box-2", [1, 2, 3, 4]));
-        Assert.Equal(HttpStatusCode.OK, full.StatusCode);
-        var fullBody = JsonDocument.Parse(await full.Content.ReadAsStringAsync()).RootElement;
-        Assert.False(fullBody.GetProperty("button_map_trimmed").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, fullBody.GetProperty("device").GetProperty("button_map").ValueKind);
+    /// <summary>An absent list is not an empty one: a PATCH that says nothing about the courts leaves them alone.</summary>
+    [Fact]
+    public void An_absent_court_list_is_not_a_refusal_but_an_empty_one_is()
+    {
+        Assert.Equal("court_numbers_required_for_court_box", DeviceRegistryService.ValidateCourtNumbers(null));
+        Assert.Equal("court_numbers_required_for_court_box", DeviceRegistryService.ValidateCourtNumbers([]));
+        Assert.Null(DeviceRegistryService.ValidateCourtNumbers([1, 2]));
+    }
 
-        // Shrinking that box's list turns off the buttons it no longer has, same rule.
-        var id = fullBody.GetProperty("device").GetProperty("id").GetGuid();
+    /// <summary>
+    /// Shrinking a box's court list turns off the court buttons it no longer has rather
+    /// than refusing the edit — closing re-review #13's residual. The refusal had no way
+    /// forward from the screen the admin was on: their only options were to edit the club's
+    /// map, changing every other box, or to hand-compose an override.
+    /// </summary>
+    [SkippableFact]
+    public async Task Shrinking_a_boxs_courts_trims_its_map_rather_than_refusing_the_edit()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        var seeded = await SeedAsync(factory);
+        var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
+        var client = AdminClient(factory, seeded);
+
         var shrink = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1 } });
         Assert.Equal(HttpStatusCode.OK, shrink.StatusCode);
         Assert.Equal(
             ["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
-            JsonDocument.Parse(await shrink.Content.ReadAsStringAsync()).RootElement
-                .GetProperty("button_map").EnumerateArray().Select(e => e.GetString() ?? "").ToArray());
+            (await BodyAsync(shrink)).GetProperty("button_map").EnumerateArray().Select(e => e.GetString() ?? "").ToArray());
 
-        // A reorder keeps the count and is fine: the relay mapping is the admin's to choose.
-        var reorder = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1 } });
-        Assert.Equal(HttpStatusCode.OK, reorder.StatusCode);
+        // And the edit is what says a human has now looked at this row.
+        Assert.False((await BodyAsync(shrink)).GetProperty("auto_registered").GetBoolean());
     }
 
     /// <summary>
@@ -269,30 +305,14 @@ public sealed class DeviceCourtNumbersTests
 
         await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
         var seeded = await SeedAsync(factory);
+        var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
 
         string[] reachesTooFar = ["court:A", "court:C", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"];
 
-        var refused = await client.PostAsJsonAsync(DevicesPath, new
-        {
-            deviceCode = "court-box-1",
-            name = "A box",
-            kind = (int)DeviceKind.CourtBox,
-            hardware = (int)DeviceHardware.Esp8266,
-            court_numbers = new[] { 1, 2 },
-            button_map = reachesTooFar,
-        });
-        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        Assert.Equal(ButtonMap.SelectsCourtBeyondDeviceCourts,
-            JsonDocument.Parse(await refused.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString());
-
-        var ok = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [1, 2, 3, 4]));
-        var id = JsonDocument.Parse(await ok.Content.ReadAsStringAsync()).RootElement.GetProperty("device").GetProperty("id").GetGuid();
-
         var patched = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1, 2 }, button_map = reachesTooFar });
         Assert.Equal(HttpStatusCode.BadRequest, patched.StatusCode);
-        Assert.Equal(ButtonMap.SelectsCourtBeyondDeviceCourts,
-            JsonDocument.Parse(await patched.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString());
+        Assert.Equal(ButtonMap.SelectsCourtBeyondDeviceCourts, (await BodyAsync(patched)).GetProperty("error").GetString());
     }
 
     /// <summary>
@@ -307,51 +327,17 @@ public sealed class DeviceCourtNumbersTests
         await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
         var seeded = await SeedAsync(factory,
             """{"timezone":"UTC","button_map":["court:A","none","none","none","minutes:15","minutes:30","minutes:45","minutes:60"]}""");
+        var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
 
-        var response = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [3]));
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 3 } })).StatusCode);
     }
 
     // ---- the per-box button map (closing re-review #17) ----------------------------------
 
     private static readonly string[] AnnexMap = ["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"];
-
-    /// <summary>
-    /// Under the club's four-court map a one-court annex box registers with the map the
-    /// annex will run, whether the admin supplies it or lets it be derived — and the two
-    /// come out the same, which is the point of deriving it at all.
-    /// </summary>
-    [SkippableFact]
-    public async Task A_one_court_box_registers_with_its_own_button_map_under_a_four_court_club_map()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
-        var seeded = await SeedAsync(factory);
-        var client = AdminClient(factory, seeded);
-
-        // Supplying no map is no longer a refusal: the club's is trimmed to this box's one
-        // relay, which is exactly AnnexMap.
-        var derived = await client.PostAsJsonAsync(DevicesPath, Register("annex-derived", [3]));
-        Assert.Equal(HttpStatusCode.OK, derived.StatusCode);
-        Assert.Equal(AnnexMap, JsonDocument.Parse(await derived.Content.ReadAsStringAsync()).RootElement
-            .GetProperty("device").GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
-
-        var ok = await client.PostAsJsonAsync(DevicesPath, new
-        {
-            deviceCode = "annex", name = "Annex", kind = (int)DeviceKind.CourtBox, hardware = (int)DeviceHardware.Esp8266,
-            court_numbers = new[] { 3 }, button_map = AnnexMap,
-        });
-        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
-        var device = JsonDocument.Parse(await ok.Content.ReadAsStringAsync()).RootElement.GetProperty("device");
-        Assert.Equal(AnnexMap, device.GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
-
-        // And the list shows it, while a box on the club's map shows null.
-        var list = await client.GetFromJsonAsync<JsonElement>(DevicesPath);
-        var annex = list.EnumerateArray().Single(d => d.GetProperty("device_code").GetString() == "annex");
-        Assert.Equal(JsonValueKind.Array, annex.GetProperty("button_map").ValueKind);
-    }
+    private static readonly string[] AnnexTwoCourtMap = ["court:A", "court:B", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"];
 
     /// <summary>
     /// PATCH button_map is three-valued: a list sets the override (checked against the
@@ -364,25 +350,23 @@ public sealed class DeviceCourtNumbersTests
 
         await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
         var seeded = await SeedAsync(factory);
+        var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
-
-        var ok = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [1, 2, 3, 4]));
-        var id = JsonDocument.Parse(await ok.Content.ReadAsStringAsync()).RootElement.GetProperty("device").GetProperty("id").GetGuid();
 
         // Set an override that only needs one court, then shrink the box to one court: allowed.
         var set = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { button_map = AnnexMap });
         Assert.Equal(HttpStatusCode.OK, set.StatusCode);
-        Assert.Equal(AnnexMap, JsonDocument.Parse(await set.Content.ReadAsStringAsync()).RootElement.GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(AnnexMap, (await BodyAsync(set)).GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
         Assert.Equal(HttpStatusCode.OK, (await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1 } })).StatusCode);
 
         // An override that reaches past the box's courts is refused.
         var tooWide = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { button_map = new[] { "court:A", "court:B", "none", "none", "minutes:15", "none", "none", "none" } });
         Assert.Equal(HttpStatusCode.BadRequest, tooWide.StatusCode);
-        Assert.Equal(ButtonMap.SelectsCourtBeyondDeviceCourts, JsonDocument.Parse(await tooWide.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString());
+        Assert.Equal(ButtonMap.SelectsCourtBeyondDeviceCourts, (await BodyAsync(tooWide)).GetProperty("error").GetString());
 
         // A rename leaves the override alone.
         var rename = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { name = "Renamed" });
-        Assert.Equal(JsonValueKind.Array, JsonDocument.Parse(await rename.Content.ReadAsStringAsync()).RootElement.GetProperty("button_map").ValueKind);
+        Assert.Equal(JsonValueKind.Array, (await BodyAsync(rename)).GetProperty("button_map").ValueKind);
 
         // Clearing it puts the box back on the club's map — which a one-court box cannot honour.
         var clear = await client.SendAsync(new HttpRequestMessage(HttpMethod.Patch, $"{DevicesPath}{id}")
@@ -398,10 +382,10 @@ public sealed class DeviceCourtNumbersTests
             Content = new StringContent("""{"button_map":null}""", Encoding.UTF8, "application/json"),
         });
         Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
-        Assert.Equal(JsonValueKind.Null, JsonDocument.Parse(await cleared.Content.ReadAsStringAsync()).RootElement.GetProperty("button_map").ValueKind);
+        Assert.Equal(JsonValueKind.Null, (await BodyAsync(cleared)).GetProperty("button_map").ValueKind);
     }
 
-    /// <summary>A court list naming a court the club does not have never made it into a row it could not light; now it is refused, on register and on update.</summary>
+    /// <summary>A court list naming a court the club does not have never made it into a row it could not light; it is refused on edit.</summary>
     [SkippableFact]
     public async Task A_court_number_the_club_does_not_have_is_refused()
     {
@@ -409,16 +393,51 @@ public sealed class DeviceCourtNumbersTests
 
         await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
         var seeded = await SeedAsync(factory);
+        var id = await BoxAsync(factory, seeded, [1, 2, 3, 4]);
         var client = AdminClient(factory, seeded);
 
-        var refused = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [1, 2, 3, 9]));
-        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        Assert.Equal(DeviceRegistryService.CourtNumberNotFound, JsonDocument.Parse(await refused.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString());
-
-        var ok = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [1, 2, 3, 4]));
-        var id = JsonDocument.Parse(await ok.Content.ReadAsStringAsync()).RootElement.GetProperty("device").GetProperty("id").GetGuid();
         var typo = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1, 2, 3, 44 } });
         Assert.Equal(HttpStatusCode.BadRequest, typo.StatusCode);
-        Assert.Equal(DeviceRegistryService.CourtNumberNotFound, JsonDocument.Parse(await typo.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString());
+        Assert.Equal(DeviceRegistryService.CourtNumberNotFound, (await BodyAsync(typo)).GetProperty("error").GetString());
+    }
+
+    /// <summary>
+    /// Deleting a box is not a revocation and is not destructive: the board still holds the
+    /// club key, so it comes back on its next heartbeat with default courts. That is the
+    /// intended way to reset a box whose configuration has been got into a mess.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_deleted_box_comes_back_on_its_next_heartbeat()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var mac = Guid.NewGuid().ToString("N")[..12];
+        HttpRequestMessage Heartbeat()
+        {
+            var req = new HttpRequestMessage(HttpMethod.Post, "/api/v1/device/heartbeat")
+            {
+                Content = new StringContent($$"""{"mac":"{{mac}}"}""", Encoding.UTF8, "application/json"),
+            };
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", seeded.DeviceApiKey);
+            return req;
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await factory.CreateClient().SendAsync(Heartbeat())).StatusCode);
+        var id = Assert.Single(JsonDocument.Parse(await client.GetStringAsync(DevicesPath)).RootElement.EnumerateArray())
+            .GetProperty("id").GetGuid();
+
+        var deleted = await client.DeleteAsync($"{DevicesPath}{id}");
+        Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+        Assert.True((await BodyAsync(deleted)).GetProperty("deleted").GetBoolean());
+        Assert.Empty(JsonDocument.Parse(await client.GetStringAsync(DevicesPath)).RootElement.EnumerateArray());
+
+        Assert.Equal(HttpStatusCode.OK, (await factory.CreateClient().SendAsync(Heartbeat())).StatusCode);
+        var reborn = Assert.Single(JsonDocument.Parse(await client.GetStringAsync(DevicesPath)).RootElement.EnumerateArray());
+        Assert.NotEqual(id, reborn.GetProperty("id").GetGuid());
+        Assert.Equal(mac, reborn.GetProperty("mac_address").GetString());
     }
 }

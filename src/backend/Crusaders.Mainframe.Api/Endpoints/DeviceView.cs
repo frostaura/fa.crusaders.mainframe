@@ -9,8 +9,9 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// <para>
 /// A projection rather than the entity, so that adding a field to the entity is never
 /// accidentally an API change — and, more to the point, so a credential can never leak
-/// by being added to the domain type. There is no key here because there is no key
-/// stored; it is derived and shown once at registration.
+/// by being added to the domain type. There is no key here because a device does not
+/// have one: the credential is the club's, read from
+/// <c>GET /api/v1/admin/devices/api-key</c>.
 /// </para>
 /// </summary>
 public static class DeviceView
@@ -33,19 +34,16 @@ public static class DeviceView
         button_map = ButtonMap.FromJson(d.ButtonMapJson)?.ToWire(),
         gate_key = d.GateKey,
         mac_address = d.MacAddress,
-        key_version = d.KeyVersion,
         enabled = d.Enabled,
-        revoked_at = d.RevokedAt,
         last_seen_at = d.LastSeenAt,
         last_ip_address = d.LastIpAddress,
         running_version = d.RunningVersion,
         mega_version = d.MegaVersion,
-        ota_channel = d.OtaChannel.ToString(),
-        pinned_version = d.PinnedVersion,
-        // A build this box installed and could never make a working call on. Surfaced
-        // because a fleet quietly declining an update is the kind of silence noticed a
-        // week after the release was promoted everywhere.
-        failed_version = d.FailedVersion,
+        // True while nothing but the box itself has touched this row. The page shows it as
+        // "registered itself — check the courts", because the courts were a guess: the
+        // club's, ascending, up to the four the relay bank drives. The first admin edit
+        // clears it.
+        auto_registered = d.AutoRegistered,
         created_at = d.CreatedAt,
 
         // What this box will ACTUALLY heartbeat at, and how long silence has to last

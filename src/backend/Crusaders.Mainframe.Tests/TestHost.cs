@@ -72,34 +72,15 @@ public sealed class TestHost : IAsyncDisposable
         // court box is pull-only, nothing resolves one, and a test host that registered a
         // service the app does not would be the divergence this comment exists to prevent.
         // LightsCueTests constructs NullRelayClient directly to pin the interface's shape.
-        //
-        // Mirrors Program.cs — the hardware abstraction and its key deriver must be
-        // registered in both, or a test host diverges from the app it stands in for.
-        services.AddSingleton<Crusaders.Mainframe.Api.Security.DeviceAuth.IDeviceKeyDeriver>(
-            _ => new Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyDeriver(
-                new Microsoft.Extensions.Configuration.ConfigurationBuilder()
-                    .AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        ["Devices:MasterKey"] = "test-only-device-master-key-thirty-two-plus-bytes",
-                    }).Build()));
         services.AddMemoryCache();
-        // Discovery: the bounded LAN store and the claim service that reads it. Registered
-        // here for the same reason the key deriver is — a test host that lacks something
-        // Program.cs registers is a host that diverges from the app it stands in for. The
-        // listener itself is not registered: it opens a UDP socket, which belongs to the
-        // tests that drive one deliberately.
-        services.AddSingleton(_ => new Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions());
-        services.AddSingleton(sp => new Crusaders.Mainframe.Api.Security.Discovery.DiscoveryStore(
-            sp.GetRequiredService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions>()));
-        services.AddScoped<DeviceDiscoveryService>();
         services.AddSingleton<BalanceBroadcaster>();
         services.AddScoped<TenantSettingsAccessor>();
-        services.AddSingleton<OtaCatalogue>();
         services.AddScoped<AccessCodeService>();
         services.AddScoped<IdentificationResolver>();
         services.AddScoped<DeviceRegistryService>();
-        services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.ProvisioningGrants>();
-        services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();
+        // Mirrors Program.cs. A test host that lacks something the application registers is
+        // a host that diverges from the app it stands in for.
+        services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyResolver>();
         services.AddScoped<LedgerService>();
         services.AddScoped<ScheduleService>();
         services.AddScoped<BookingService>();

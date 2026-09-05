@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security.DeviceAuth;
@@ -26,8 +27,9 @@ namespace Crusaders.Mainframe.Tests;
 /// <para>
 /// The box decides scans locally and queues what it decided; these two endpoints are where
 /// that queue drains and where the one operation that genuinely needs the network — a
-/// walk-up — happens. Over real HTTP with real signing, because a signature the firmware
-/// builds one byte differently is a 401 with no diagnostic and a trip to the club.
+/// walk-up — happens. Over real HTTP with the club's API key and the box's MAC, because a
+/// body the firmware writes one field differently is a 401 or a 404 with no diagnostic and
+/// a trip to the club.
 /// </para>
 /// </summary>
 [Collection(HttpTestCollection.Name)]
@@ -42,7 +44,9 @@ public sealed class DeviceEventHttpTests
     private const string ActivatePath = "/api/v1/device/activate";
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
 
-    private sealed record Box(Guid DeviceId, byte[] Key, Guid TenantId, string Slug, Guid CourtId, Guid MemberId, IReadOnlyDictionary<int, Guid> CourtIds);
+    private sealed record Box(
+        Guid DeviceId, string Mac, string ApiKey, Guid TenantId, string Slug, Guid CourtId, Guid MemberId,
+        IReadOnlyDictionary<int, Guid> CourtIds);
 
     private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
 
@@ -55,7 +59,13 @@ public sealed class DeviceEventHttpTests
         await db.Database.MigrateAsync();
 
         var slug = $"box-{Guid.NewGuid():N}"[..20];
-        var tenant = new Tenant { Slug = slug, DisplayName = "Box Club" };
+        var tenant = new Tenant
+        {
+            Slug = slug,
+            DisplayName = "Box Club",
+            DeviceApiKey = DeviceApiKey.Generate(),
+            DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
+        };
         db.Tenants.Add(tenant);
         db.TenantSettings.Add(new TenantSettings
         {
@@ -80,13 +90,15 @@ public sealed class DeviceEventHttpTests
             MemberClass = MemberClass.Regular,
         });
 
+        var mac = Guid.NewGuid().ToString("N")[..12];
         var device = new Device
         {
             TenantId = tenant.Id,
-            DeviceCode = "court-box-1",
+            DeviceCode = $"box-{mac[^6..]}",
             Name = "Court 1 box",
             Kind = DeviceKind.CourtBox,
             Hardware = DeviceHardware.Esp8266,
+            MacAddress = mac,
             CourtNumbers = [.. courtNumbers],
         };
         db.Devices.Add(device);
@@ -106,25 +118,30 @@ public sealed class DeviceEventHttpTests
 
         await db.SaveChangesAsync();
 
-        var keys = scope.ServiceProvider.GetRequiredService<IDeviceKeyDeriver>();
-        return new Box(device.Id, keys.Derive(tenant.Id, device.Id, device.KeyVersion), tenant.Id, slug, courts[0].Id, member.Id,
+        return new Box(device.Id, mac, tenant.DeviceApiKey!, tenant.Id, slug, courts[0].Id, member.Id,
             courts.ToDictionary(c => c.CourtNumber, c => c.Id));
     }
 
-    private static HttpRequestMessage Signed(Box box, string path, object payload)
+    /// <summary>
+    /// The request a correctly-implemented firmware sends: the club's key in the
+    /// Authorization header and the board's MAC in the body.
+    ///
+    /// <para>
+    /// The MAC is spliced into the payload here rather than written at each of the sixty-odd
+    /// call sites, because it is not what any of them is about — every device request
+    /// carries it, exactly the way every one used to carry a signature.
+    /// </para>
+    /// </summary>
+    private static HttpRequestMessage FromBox(Box box, string path, object payload)
     {
-        var body = JsonSerializer.Serialize(payload);
-        var bytes = Encoding.UTF8.GetBytes(body);
-        var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var nonce = Guid.NewGuid().ToString("N");
+        var body = JsonSerializer.SerializeToNode(payload)!.AsObject();
+        body["mac"] = box.Mac;
 
-        var canonical = DeviceRequestSigner.CanonicalString("POST", path, ts, nonce, bytes);
-        var req = new HttpRequestMessage(HttpMethod.Post, path) { Content = new ByteArrayContent(bytes) };
-        req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        req.Headers.Add(DeviceRequestSigner.DeviceIdHeader, box.DeviceId.ToString());
-        req.Headers.Add(DeviceRequestSigner.TimestampHeader, ts.ToString());
-        req.Headers.Add(DeviceRequestSigner.NonceHeader, nonce);
-        req.Headers.Add(DeviceRequestSigner.SignatureHeader, DeviceRequestSigner.Sign(box.Key, canonical));
+        var req = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
+        };
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", box.ApiKey);
         return req;
     }
 
@@ -198,7 +215,7 @@ public sealed class DeviceEventHttpTests
         var box = await SeedAsync(factory);
         var client = factory.CreateClient();
 
-        var response = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(1), Activation(2), Activation(3))));
+        var response = await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(1), Activation(2), Activation(3))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -221,12 +238,12 @@ public sealed class DeviceEventHttpTests
         var box = await SeedAsync(factory);
         var client = factory.CreateClient();
 
-        await client.SendAsync(Signed(box, EventsPath, Batch(Activation(1), Activation(2))));
+        await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(1), Activation(2))));
 
         // The box uploaded, lost the link before reading the response, and tried again.
         // That is normal traffic on an unreliable network, not an error — so it must be
         // acknowledged, and it must not double-record.
-        var again = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(1), Activation(2))));
+        var again = await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(1), Activation(2))));
         Assert.Equal(HttpStatusCode.OK, again.StatusCode);
 
         var body = await again.Content.ReadFromJsonAsync<JsonElement>();
@@ -247,12 +264,12 @@ public sealed class DeviceEventHttpTests
         var box = await SeedAsync(factory);
         var client = factory.CreateClient();
 
-        await client.SendAsync(Signed(box, EventsPath, Batch(Activation(1), Activation(2))));
+        await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(1), Activation(2))));
 
         // The realistic retry: the box never saw the acknowledgement, so it re-offers what it
         // still holds — which by then includes newer events too.
         var overlapping = await client.SendAsync(
-            Signed(box, EventsPath, Batch(Activation(2), Activation(3), Activation(4))));
+            FromBox(box, EventsPath, Batch(Activation(2), Activation(3), Activation(4))));
 
         var body = await overlapping.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(4, body.GetProperty("accepted_through").GetInt64());
@@ -269,7 +286,7 @@ public sealed class DeviceEventHttpTests
         var client = factory.CreateClient();
 
         var many = Enumerable.Range(1, 100).Select(i => Activation(i)).ToArray();
-        var response = await client.SendAsync(Signed(box, EventsPath, Batch(many)));
+        var response = await client.SendAsync(FromBox(box, EventsPath, Batch(many)));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -304,7 +321,7 @@ public sealed class DeviceEventHttpTests
         var box = await SeedAsync(factory);
         var client = factory.CreateClient();
 
-        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 30)));
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 30)));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -353,7 +370,7 @@ public sealed class DeviceEventHttpTests
         }
 
         var client = factory.CreateClient();
-        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 60)));
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 60)));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -408,7 +425,7 @@ public sealed class DeviceEventHttpTests
         // which is what makes four digits usable. A walk-up has no booking, so the same
         // check against the whole roll would be a 10,000-space oracle over a club with far
         // fewer than 10,000 members — a random four digits would frequently match somebody.
-        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp("1234", method: method)));
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp("1234", method: method)));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -445,7 +462,7 @@ public sealed class DeviceEventHttpTests
                     new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Secret)), SecurityAlgorithms.HmacSha256))),
         };
 
-        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(token)));
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(token)));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("not_recognised", body.GetProperty("error").GetString());
@@ -467,7 +484,7 @@ public sealed class DeviceEventHttpTests
         var box = await SeedAsync(factory, topUpCredits: 5m);
         var client = factory.CreateClient();
 
-        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box))));
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box))));
 
         Assert.Equal(HttpStatusCode.PaymentRequired, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -505,7 +522,7 @@ public sealed class DeviceEventHttpTests
         }
 
         var client = factory.CreateClient();
-        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box))));
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box))));
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -534,7 +551,7 @@ public sealed class DeviceEventHttpTests
         }
 
         var client = factory.CreateClient();
-        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), court: 2)));
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), court: 2)));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -555,7 +572,7 @@ public sealed class DeviceEventHttpTests
         var box = await SeedAsync(factory, courtNumbers: [1, 2]);
         var client = factory.CreateClient();
 
-        var response = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), court: 2)));
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), court: 2)));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using var check = factory.Services.CreateScope();
@@ -582,11 +599,11 @@ public sealed class DeviceEventHttpTests
         var code = await QrCodeAsync(factory, box);
         const string nonce = "0a1b2c3d4e5f6071";
 
-        var first = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(code, nonce: nonce)));
+        var first = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(code, nonce: nonce)));
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
 
-        var again = await client.SendAsync(Signed(box, WalkUpPath, WalkUp(code, nonce: nonce)));
+        var again = await client.SendAsync(FromBox(box, WalkUpPath, WalkUp(code, nonce: nonce)));
         Assert.Equal(HttpStatusCode.OK, again.StatusCode);
         var againBody = await again.Content.ReadFromJsonAsync<JsonElement>();
 
@@ -611,7 +628,7 @@ public sealed class DeviceEventHttpTests
         var client = factory.CreateClient();
 
         // The old three-field body, exactly as pre-C5 firmware would send it.
-        var response = await client.SendAsync(Signed(box, WalkUpPath, new { minutes = 30, method = "qr", token = await QrCodeAsync(factory, box) }));
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, new { minutes = 30, method = "qr", token = await QrCodeAsync(factory, box) }));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -625,7 +642,7 @@ public sealed class DeviceEventHttpTests
     /// code on the signed device group answers the seconds the box puts on its relay timer.
     /// </summary>
     [SkippableFact]
-    public async Task Activate_over_signed_http()
+    public async Task Activate_over_authenticated_http()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -663,7 +680,7 @@ public sealed class DeviceEventHttpTests
         }
 
         var client = factory.CreateClient();
-        var response = await client.SendAsync(Signed(box, ActivatePath, new { method = "qr", token = code }));
+        var response = await client.SendAsync(FromBox(box, ActivatePath, new { method = "qr", token = code }));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -673,7 +690,8 @@ public sealed class DeviceEventHttpTests
         Assert.Equal(bookingId, body.GetProperty("booking_id").GetGuid());
         Assert.InRange(body.GetProperty("granted_seconds").GetInt32(), 45 * 60, 46 * 60 + 1);
         Assert.False(body.TryGetProperty("starts_in_seconds", out _));
-        Assert.True(body.GetProperty("server_unix").GetInt64() > 0);
+        // server_unix went with the clock the device scheme no longer keeps.
+        Assert.False(body.TryGetProperty("server_unix", out _));
 
         using var check = factory.Services.CreateScope();
         var db2 = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -681,7 +699,7 @@ public sealed class DeviceEventHttpTests
     }
 
     [SkippableFact]
-    public async Task An_unsigned_activation_is_refused()
+    public async Task An_unauthenticated_activation_is_refused()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -769,7 +787,7 @@ public sealed class DeviceEventHttpTests
 
     private static async Task<JsonElement> HeartbeatAsync(TestWebAppFactory factory, Box box)
     {
-        var response = await factory.CreateClient().SendAsync(Signed(box, HeartbeatPath, new { running_version = "1.0.0" }));
+        var response = await factory.CreateClient().SendAsync(FromBox(box, HeartbeatPath, new { running_version = "1.0.0" }));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
@@ -829,7 +847,7 @@ public sealed class DeviceEventHttpTests
             await BookAsync(factory, box, courtNumber: 1 + (i % 4), startsInMinutes: 1 + i * 5, minutes: 5);
         }
 
-        var response = await factory.CreateClient().SendAsync(Signed(box, HeartbeatPath, new { running_version = "1.0.0" }));
+        var response = await factory.CreateClient().SendAsync(FromBox(box, HeartbeatPath, new { running_version = "1.0.0" }));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var bytes = await response.Content.ReadAsByteArrayAsync();
         Assert.True(bytes.Length <= 2048, $"heartbeat response is {bytes.Length} bytes; the box holds 2048");
@@ -861,7 +879,7 @@ public sealed class DeviceEventHttpTests
         var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: -10);
 
         var response = await factory.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 1))));
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 1))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(1, body.GetProperty("accepted_through").GetInt64());
@@ -983,7 +1001,7 @@ public sealed class DeviceEventHttpTests
         // server now.
         var before = DateTimeOffset.UtcNow;
         var response = await quiet.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
         var after = DateTimeOffset.UtcNow;
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(1, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
@@ -1023,11 +1041,11 @@ public sealed class DeviceEventHttpTests
         var client = quiet.CreateClient();
 
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
         var stampedAt = (await BookingAsync(factory, booked.BookingId)).CheckedInAt;
         Assert.NotNull(stampedAt);
 
-        var again = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(2, subject: booked.Code, court: 0))));
+        var again = await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(2, subject: booked.Code, court: 0))));
         Assert.Equal(HttpStatusCode.OK, again.StatusCode);
         var body = await again.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, body.GetProperty("accepted_through").GetInt64());
@@ -1063,7 +1081,7 @@ public sealed class DeviceEventHttpTests
         const long batchUptime = 4_000_000;
         const long scannedMinutesAgo = 55;
         var before = DateTimeOffset.UtcNow;
-        var response = await factory.CreateClient().SendAsync(Signed(box, EventsPath,
+        var response = await factory.CreateClient().SendAsync(FromBox(box, EventsPath,
             BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: batchUptime - scannedMinutesAgo * 60_000))));
         var after = DateTimeOffset.UtcNow;
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1092,7 +1110,7 @@ public sealed class DeviceEventHttpTests
         var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 5);
 
         const long batchUptime = 4_000_000;
-        var response = await factory.CreateClient().SendAsync(Signed(box, EventsPath,
+        var response = await factory.CreateClient().SendAsync(FromBox(box, EventsPath,
             BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: batchUptime - 30 * 60_000))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -1123,7 +1141,7 @@ public sealed class DeviceEventHttpTests
         var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);
 
         var before = DateTimeOffset.UtcNow;
-        var response = await factory.CreateClient().SendAsync(Signed(box, EventsPath,
+        var response = await factory.CreateClient().SendAsync(FromBox(box, EventsPath,
             BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: eventUptime))));
         var after = DateTimeOffset.UtcNow;
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1171,7 +1189,7 @@ public sealed class DeviceEventHttpTests
         const long batchUptime = 22L * 3600 * 1000;
         const long scannedAgoMs = 20L * 3600 * 1000;
         var before = DateTimeOffset.UtcNow;
-        var response = await quiet.CreateClient().SendAsync(Signed(box, EventsPath,
+        var response = await quiet.CreateClient().SendAsync(FromBox(box, EventsPath,
             BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: batchUptime - scannedAgoMs))));
         var after = DateTimeOffset.UtcNow;
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -1206,7 +1224,7 @@ public sealed class DeviceEventHttpTests
 
         // Scanned 100 minutes ago: forty minutes before a slot that started sixty ago.
         const long batchUptime = 4_000_000;
-        var response = await factory.CreateClient().SendAsync(Signed(box, EventsPath,
+        var response = await factory.CreateClient().SendAsync(FromBox(box, EventsPath,
             BatchAt(batchUptime, Activation(1, subject: booked.Code, court: 0, uptimeMs: batchUptime - 100 * 60_000))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -1321,7 +1339,7 @@ public sealed class DeviceEventHttpTests
         var mail = new StubEmailService();
         await using var quiet = Quiet(factory, mail);
         var response = await quiet.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var a = await BookingAsync(factory, booked.BookingId);
@@ -1383,7 +1401,7 @@ public sealed class DeviceEventHttpTests
 
         await using var quiet = Quiet(factory, new StubEmailService());
         Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
 
         var a = await BookingAsync(factory, booked.BookingId);
         var survivor = await BookingAsync(factory, d.BookingId);
@@ -1438,7 +1456,7 @@ public sealed class DeviceEventHttpTests
         var client = quiet.CreateClient();
 
         // The box granted sixty minutes from a window that opened before the slot did.
-        var response = await client.SendAsync(Signed(box, EventsPath,
+        var response = await client.SendAsync(FromBox(box, EventsPath,
             Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 3_600_000))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(1, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
@@ -1460,7 +1478,7 @@ public sealed class DeviceEventHttpTests
         Assert.Contains(mail.Sent, m => m.Subject.StartsWith("Lights charged", StringComparison.Ordinal));
 
         // A rescan is another event, not another charge.
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
             Batch(Activation(2, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
         Assert.Single(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
         Assert.Equal(200m - 24m, await BalanceAsync(factory, box.MemberId));
@@ -1487,7 +1505,7 @@ public sealed class DeviceEventHttpTests
 
         await using var quiet = Quiet(factory, new StubEmailService());
         Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
 
         Assert.Equal(4m - 24m, await BalanceAsync(factory, box.MemberId));
         Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_after_cancel"));
@@ -1512,7 +1530,7 @@ public sealed class DeviceEventHttpTests
         var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 60);   // a live roster code for court 1
         var before = await BalanceAsync(factory, box.MemberId);
 
-        var response = await factory.CreateClient().SendAsync(Signed(box, WalkUpPath, WalkUp(booked.Code, minutes: 60, court: 2)));
+        var response = await factory.CreateClient().SendAsync(FromBox(box, WalkUpPath, WalkUp(booked.Code, minutes: 60, court: 2)));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("not_recognised", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
@@ -1520,7 +1538,7 @@ public sealed class DeviceEventHttpTests
         Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.walk_up_created"));
 
         // ...while the same code still opens its own booking on the activation path.
-        var activate = await factory.CreateClient().SendAsync(Signed(box, ActivatePath, new { method = "qr", token = booked.Code }));
+        var activate = await factory.CreateClient().SendAsync(FromBox(box, ActivatePath, new { method = "qr", token = booked.Code }));
         Assert.Equal(HttpStatusCode.OK, activate.StatusCode);
         Assert.Equal("too_early", (await activate.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("reason").GetString());
     }
@@ -1537,7 +1555,7 @@ public sealed class DeviceEventHttpTests
         var bookedB = await BookAsync(factory, boxB, courtNumber: 1, startsInMinutes: 60);
         var before = await BalanceAsync(factory, boxB.MemberId);
 
-        var response = await factory.CreateClient().SendAsync(Signed(boxA, WalkUpPath, WalkUp(bookedB.Code)));
+        var response = await factory.CreateClient().SendAsync(FromBox(boxA, WalkUpPath, WalkUp(bookedB.Code)));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("not_recognised", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
@@ -1574,7 +1592,7 @@ public sealed class DeviceEventHttpTests
         var nonce = Guid.NewGuid().ToString("N")[..16];
         var request = WalkUp(await QrCodeAsync(factory, box), minutes: 60, court: 1, nonce: nonce);
 
-        var first = await client.SendAsync(Signed(box, WalkUpPath, request));
+        var first = await client.SendAsync(FromBox(box, WalkUpPath, request));
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(60, firstBody.GetProperty("granted_minutes").GetInt32());
@@ -1582,7 +1600,7 @@ public sealed class DeviceEventHttpTests
 
         // Forty minutes later.
         await ShiftWalkUpAsync(factory, bookingId, startsInMinutes: -40, endsInMinutes: 20);
-        var mid = await client.SendAsync(Signed(box, WalkUpPath, request));
+        var mid = await client.SendAsync(FromBox(box, WalkUpPath, request));
         Assert.Equal(HttpStatusCode.OK, mid.StatusCode);
         var midBody = await mid.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(midBody.GetProperty("replayed").GetBoolean());
@@ -1590,13 +1608,13 @@ public sealed class DeviceEventHttpTests
 
         // After the window.
         await ShiftWalkUpAsync(factory, bookingId, startsInMinutes: -70, endsInMinutes: -10);
-        var over = await client.SendAsync(Signed(box, WalkUpPath, request));
+        var over = await client.SendAsync(FromBox(box, WalkUpPath, request));
         Assert.Equal(HttpStatusCode.Conflict, over.StatusCode);
         Assert.Equal("purchase_ended", (await over.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
 
         // Promoted to Completed with time nominally left: still over as a purchase.
         await ShiftWalkUpAsync(factory, bookingId, startsInMinutes: -40, endsInMinutes: 20, status: BookingStatus.Completed);
-        var completed = await client.SendAsync(Signed(box, WalkUpPath, request));
+        var completed = await client.SendAsync(FromBox(box, WalkUpPath, request));
         Assert.Equal(HttpStatusCode.Conflict, completed.StatusCode);
         Assert.Equal("purchase_ended", (await completed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
 
@@ -1647,12 +1665,12 @@ public sealed class DeviceEventHttpTests
         var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);
         var client = factory.CreateClient();
 
-        var first = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(7, subject: booked.Code, court: 0))));
+        var first = await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(7, subject: booked.Code, court: 0))));
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         var stampedAt = (await BookingAsync(factory, booked.BookingId)).CheckedInAt;
         Assert.NotNull(stampedAt);
 
-        var again = await client.SendAsync(Signed(box, EventsPath, Batch(Activation(7, subject: booked.Code, court: 0))));
+        var again = await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(7, subject: booked.Code, court: 0))));
         Assert.Equal(HttpStatusCode.OK, again.StatusCode);
         var body = await again.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(7, body.GetProperty("accepted_through").GetInt64());
@@ -1682,7 +1700,7 @@ public sealed class DeviceEventHttpTests
         var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: -2);
 
         var response = await factory.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: "ZZZZZZZZZZZZ", court: 0))));
+            FromBox(box, EventsPath, Batch(Activation(1, subject: "ZZZZZZZZZZZZ", court: 0))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(1, body.GetProperty("accepted_through").GetInt64());
@@ -1710,7 +1728,7 @@ public sealed class DeviceEventHttpTests
         var booked = await BookAsync(factory, box, courtNumber: 1, startsInMinutes: 60);
 
         var response = await factory.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(1, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
 
@@ -1736,7 +1754,7 @@ public sealed class DeviceEventHttpTests
         var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: -2);
 
         var response = await factory.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));   // relay A is court 1
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))));   // relay A is court 1
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         Assert.Null((await BookingAsync(factory, booked.BookingId)).CheckedInAt);
@@ -1760,7 +1778,7 @@ public sealed class DeviceEventHttpTests
         var client = factory.CreateClient();
 
         var responses = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ =>
-            client.SendAsync(Signed(box, EventsPath, Batch(Activation(3, subject: booked.Code, court: 0))))));
+            client.SendAsync(FromBox(box, EventsPath, Batch(Activation(3, subject: booked.Code, court: 0))))));
 
         Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
         foreach (var r in responses)
@@ -1794,7 +1812,7 @@ public sealed class DeviceEventHttpTests
         var bookedB = await BookAsync(factory, boxB, courtNumber: 1, startsInMinutes: -2);
 
         var response = await factory.CreateClient().SendAsync(
-            Signed(boxA, EventsPath, Batch(Activation(1, subject: bookedB.Code, court: 0))));
+            FromBox(boxA, EventsPath, Batch(Activation(1, subject: bookedB.Code, court: 0))));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(1, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accepted_through").GetInt64());
 
@@ -1834,7 +1852,7 @@ public sealed class DeviceEventHttpTests
         Assert.Equal(200m - 7.20m, await BalanceAsync(factory, box.MemberId));
 
         await using var quiet = Quiet(factory, new StubEmailService());
-        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(FromBox(box, EventsPath,
             Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 3_600_000))))).StatusCode);
 
         var lit = Assert.Single(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
@@ -1861,10 +1879,10 @@ public sealed class DeviceEventHttpTests
         // Scanned five minutes ago — sixty-five minutes before a cue window that opens ten
         // minutes before the slot.
         await using var quiet = Quiet(factory, new StubEmailService());
-        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(FromBox(box, EventsPath,
             Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
 
-        Assert.Empty((await LedgerAsync(factory, booked.BookingId)).Where(l => l.Type == LedgerEntryType.LightsPurchase));
+        Assert.DoesNotContain(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
         Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
         Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_too_early"));
         Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_charged"));
@@ -1891,7 +1909,7 @@ public sealed class DeviceEventHttpTests
         await using var quiet = Quiet(factory, new StubEmailService());
         var client = quiet.CreateClient();
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
 
         var displaced = await BookingAsync(factory, b.BookingId);
         Assert.Equal(BookingStatus.Cancelled, displaced.Status);
@@ -1904,9 +1922,9 @@ public sealed class DeviceEventHttpTests
 
         // B's own queued scan arrives.
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
-            Signed(box, EventsPath, Batch(Activation(2, subject: b.Code, court: 0))))).StatusCode);
+            FromBox(box, EventsPath, Batch(Activation(2, subject: b.Code, court: 0))))).StatusCode);
 
-        Assert.Empty((await LedgerAsync(factory, b.BookingId)).Where(l => l.Type == LedgerEntryType.LightsPurchase));
+        Assert.DoesNotContain(await LedgerAsync(factory, b.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
         Assert.Equal(buyerAfterDisplacement, await BalanceAsync(factory, buyer));
         var collision = Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_displaced_collision"));
         Assert.Contains(booked.BookingId.ToString(), collision.DetailsJson);   // names what displaced it
@@ -1932,7 +1950,7 @@ public sealed class DeviceEventHttpTests
 
         await using var quiet = Quiet(factory, new StubEmailService());
         Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
 
         Assert.Equal(BookingStatus.Cancelled, (await BookingAsync(factory, b.BookingId)).Status);
         Assert.Empty(await LedgerAsync(factory, b.BookingId));
@@ -1964,13 +1982,13 @@ public sealed class DeviceEventHttpTests
         var client = quiet.CreateClient();
 
         // Scan five minutes ago, granted twenty minutes.
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
             Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 1_200_000))))).StatusCode);
         Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
             l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
 
         // The next request carries the release: the relay was closed for five minutes.
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
             Batch(Release(2, court: 0, heldMs: 300_000))))).StatusCode);
 
         var lights = (await LedgerAsync(factory, booked.BookingId)).Where(l => l.Type == LedgerEntryType.LightsPurchase).ToList();
@@ -1980,7 +1998,7 @@ public sealed class DeviceEventHttpTests
         Assert.Single(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_adjusted"));
 
         // A second release does not pay it back twice.
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
             Batch(Release(3, court: 0, heldMs: 300_000))))).StatusCode);
         Assert.Equal(-2.67m, (await LedgerAsync(factory, booked.BookingId))
             .Where(l => l.Type == LedgerEntryType.LightsPurchase).Sum(l => l.AmountCredits));
@@ -2012,14 +2030,14 @@ public sealed class DeviceEventHttpTests
         var client = quiet.CreateClient();
 
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
-            Signed(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 0))))).StatusCode);
         Assert.Equal(BookingStatus.Cancelled, (await BookingAsync(factory, b.BookingId)).Status);
         Assert.Equal(buyerBefore, await BalanceAsync(factory, buyer));      // refunded on the grant
 
         // The relay was closed for five minutes, ending at the upload instant — well before
         // B's slot. One request later, as the box sends it.
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(
-            Signed(box, EventsPath, Batch(Release(2, court: 0, heldMs: 300_000))))).StatusCode);
+            FromBox(box, EventsPath, Batch(Release(2, court: 0, heldMs: 300_000))))).StatusCode);
 
         var a = await BookingAsync(factory, booked.BookingId);
         var reinstated = await BookingAsync(factory, b.BookingId);
@@ -2059,18 +2077,18 @@ public sealed class DeviceEventHttpTests
         await using var quiet = Quiet(factory, new StubEmailService());
         var client = quiet.CreateClient();
 
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
             Batch(Release(1, court: 0, heldMs: 300_000))))).StatusCode);
         Assert.Single(await AuditAsync(factory, box.TenantId, "device.release_unpaired"));
-        Assert.Empty((await LedgerAsync(factory, booked.BookingId)).Where(l => l.Type == LedgerEntryType.LightsPurchase));
+        Assert.DoesNotContain(await LedgerAsync(factory, booked.BookingId), l => l.Type == LedgerEntryType.LightsPurchase);
 
         // And the ordinary order still works: the activation first, the release behind it.
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
             Batch(Activation(2, subject: booked.Code, court: 0, durationMs: 1_200_000))))).StatusCode);
         Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
             l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
 
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
             Batch(Release(3, court: 0, heldMs: 300_000))))).StatusCode);
         Assert.Equal(-2.67m, (await LedgerAsync(factory, booked.BookingId))
             .Where(l => l.Type == LedgerEntryType.LightsPurchase).Sum(l => l.AmountCredits));
@@ -2099,7 +2117,7 @@ public sealed class DeviceEventHttpTests
         // dark around ten minutes from now, long before B's slot.
         var mail = new StubEmailService();
         await using var quiet = Quiet(factory, mail);
-        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await quiet.CreateClient().SendAsync(FromBox(box, EventsPath,
             Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 900_000))))).StatusCode);
 
         var survivor = await BookingAsync(factory, b.BookingId);
@@ -2136,14 +2154,14 @@ public sealed class DeviceEventHttpTests
         await using var quiet = Quiet(factory, new StubEmailService());
         var client = quiet.CreateClient();
 
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
             Batch(Activation(1, subject: booked.Code, court: 0, durationMs: 1_200_000))))).StatusCode);
         Assert.Equal(-10.67m, Assert.Single(await LedgerAsync(factory, booked.BookingId),
             l => l.Type == LedgerEntryType.LightsPurchase).AmountCredits);
 
         // One held minute, uploaded five minutes after the scan: the implied end is four
         // minutes adrift of the release's own time, so these two are not a pair.
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(box, EventsPath,
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(FromBox(box, EventsPath,
             Batch(Release(2, court: 0, heldMs: 60_000))))).StatusCode);
 
         Assert.Single(await AuditAsync(factory, box.TenantId, "device.release_unpaired"));
