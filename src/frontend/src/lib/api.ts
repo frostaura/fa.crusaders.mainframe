@@ -125,9 +125,33 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (res.status === 204) return undefined as T;
   const text = await res.text();
-  const payload = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(res.status, payload);
-  return payload as T;
+  if (!res.ok) throw new ApiError(res.status, parseFailureBody(text));
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+/**
+ * The body of a response that already failed, as far as it can be read.
+ *
+ * <p>
+ * This used to be the same `JSON.parse` the success path uses, running BEFORE the
+ * `ApiError` was constructed — so a failure whose body is not JSON never became an
+ * `ApiError` at all. It reached the screen as a bare `SyntaxError`, every `instanceof
+ * ApiError` branch missed it, and the member got whichever generic fallback the caller
+ * passed. That is not an edge case: an HTML error page is exactly what a wedged gateway,
+ * a proxy, a load balancer or a WiFi captive portal answers with, which is precisely when
+ * a member most needs to be told the club's system is not answering rather than to refresh
+ * the schedule and try again. Found in a browser against a real 502; a stub returning JSON
+ * with a 502 status could never have shown it.
+ * </p>
+ *
+ * <p>
+ * The success path still parses strictly: a 200 whose body is not the JSON the caller
+ * expects is a defect, and swallowing it would hide one.
+ * </p>
+ */
+function parseFailureBody(text: string): unknown {
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return null; }
 }
 
 export const api = {

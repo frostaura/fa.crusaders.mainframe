@@ -659,7 +659,12 @@ describe("Schedule", () => {
   });
 
   it("does not tell a member to refresh the schedule when the club's own system is down", async () => {
-    stub([{ method: "POST", path: "/api/v1/bookings/", status: 502, body: { error: "bad_gateway" } }]);
+    // An HTML body, because that is what a wedged gateway actually answers with — and
+    // because the client used to JSON.parse it BEFORE constructing the ApiError, so a real
+    // 502 reached the screen as a bare SyntaxError and no status-based branch could fire.
+    // A stub returning JSON with a 502 status passes either way and proves nothing; this
+    // one was found in a browser.
+    stub([{ method: "POST", path: "/api/v1/bookings/", status: 502, body: "<html><body>502 Bad Gateway</body></html>" }]);
     renderPage(<SchedulePage />);
     const modal = await openBookingModal();
     fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
