@@ -622,9 +622,21 @@ function TemplateInput({
  * that can be pointed at a private address is an SSRF hole, and at the cloud metadata
  * endpoint a credential leak. But a club pointing one at its own scoreboard is a
  * <em>supported</em> case, reached by adding that address to the private-network
- * allow-list, which is deployment configuration rather than anything this screen can do.
- * So the copy says which of those two situations the admin is in and who can move it,
- * instead of implying they typed something malformed.
+ * allow-list. So the copy says which of those two situations the admin is in, instead of
+ * implying they typed something malformed.
+ * </p>
+ *
+ * <p>
+ * <b>And it says, outright, that the allow-list is not a screen anyone forgot to
+ * build.</b> The earlier wording ("ask whoever runs the deployment to add it to the
+ * webhook allow-list") read like a pointer at a missing admin surface, and the obvious
+ * next move — building one — would be a defect, not the fix.
+ * <code>Webhooks:PrivateNetworkAllowList</code> is read once at startup by a singleton
+ * <code>OutboundAddressGuard</code> that has no tenant in scope, so a club admin editing it
+ * would move an SSRF boundary for <em>every</em> club on the deployment: a cross-tenant
+ * escalation dressed as a settings field. It stays deployment configuration, the
+ * reasoning is written down in <code>docs/specs/webhooks.md</code>, and the sentence below
+ * names the setting so the admin's request to their operator is actionable.
  * </p>
  */
 const CREATE_REFUSAL: Record<string, string> = {
@@ -634,7 +646,7 @@ const CREATE_REFUSAL: Record<string, string> = {
   template_variable_not_allowed_in_host:
     "A {variable} can't appear in the host — only in the path or query. Variables come from event data, so a host built from one would be a destination nobody chose.",
   destination_not_permitted:
-    "That address is on a private or link-local network, which is blocked by default. If it's a device on the club's LAN, ask whoever runs the deployment to add it to the webhook allow-list; otherwise use a public address.",
+    "That address is on a private or link-local network, which is blocked by default. No admin screen can open one up \u2014 the allow-list is a server setting, Webhooks:PrivateNetworkAllowList, shared by every club on this deployment. If it's a device on the club's LAN, send that address to whoever runs the deployment and ask for it to be allow-listed; otherwise use a public address.",
 };
 
 function createRefusal(err: unknown): string {

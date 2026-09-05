@@ -183,7 +183,14 @@ See `webhooks.md` for delivery mechanics. Player- or admin-configurable per tena
 - `credit.refunded`
 - `credit.penalty_applied`
 - `credit.adjusted`
-- `peripheral.unhealthy`
+- `peripheral.unhealthy` — **specified, not emitted in v1.** Nothing can put a device into the `Faulted` state that would fire it. `BiometricDeviceState.Faulted` exists on the abstraction and no driver ever sets it: the only implementation is `NullBiometricDevice`, and the shipped court box is pull-only with no `/health` endpoint to poll — the polling design in `lights-controller.md` is marked Superseded for that reason. So the class is kept as a reserved name and the event picker deliberately does not offer it, because a filter an admin can select and then wait on forever is worse than one that is absent. Reinstating it needs a real peripheral driver, or a device-side liveness signal, first. `GET /admin/reports/peripheral-health` is not a substitute and does not fill the gap: it reports 24-hour webhook-delivery and biometric-match counts, never a device state.
+
+The destination of an endpoint is guarded against SSRF (`webhooks.md`), with a carve-out
+for LAN consumers. **That carve-out is deployment configuration and has no admin screen,
+deliberately** — the allow-list is process-wide, so one club editing it would move the
+boundary for every other club on the deployment. The refusal an admin sees says exactly
+that, and names the setting so they can ask their operator for it. Reasoning:
+`webhooks.md` § *The LAN carve-out*.
 
 ## 10. Reporting
 See `reporting.md`. Both players and admins get filterable, exportable transaction & activity reports. Charts where useful, never as decoration.

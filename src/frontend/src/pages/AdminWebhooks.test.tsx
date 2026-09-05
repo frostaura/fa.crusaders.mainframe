@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import AdminWebhooksPage from "./AdminWebhooks";
@@ -106,6 +108,50 @@ describe("AdminWebhooks", () => {
   });
 
   /**
+   * D-F7's residue: the spec and the picker have to agree, and nothing was checking.
+   *
+   * <p>
+   * The list above is hand-maintained, so it can only ever say that today's picker
+   * matches today's opinion of what the bus emits. <code>peripheral.unhealthy</code> sat
+   * in <code>feature-spec.md</code> §9 as a flat promise with no emitter anywhere in the
+   * backend and no offer here, and the divergence survived a fix round because the two
+   * halves are in different languages and no gate reads both. This one does: every class
+   * §9 states plainly is a class this picker must offer, and a class §9 does not intend
+   * to fire has to say so <em>in §9</em> before it may be missing from here.
+   * </p>
+   */
+  it("offers every event class the spec states plainly, and the spec marks the ones it does not", async () => {
+    const spec = readFileSync(resolve(__dirname, "../../../../docs/specs/feature-spec.md"), "utf8");
+    const section = spec.split(/^## 9\. Webhooks$/m)[1]?.split(/^## /m)[0];
+    expect(section, "feature-spec.md has no §9. Webhooks").toBeTruthy();
+
+    const bullets = Array.from(section!.matchAll(/^- `([a-z]+\.[a-z_]+)`(.*)$/gm));
+    // Guard against the regex quietly matching nothing and the test passing on an empty set.
+    expect(bullets.length).toBeGreaterThan(10);
+
+    const promised = bullets.filter(([, , rest]) => !/not emitted/i.test(rest)).map(([, name]) => name);
+    const reserved = bullets.filter(([, , rest]) => /not emitted/i.test(rest)).map(([, name]) => name);
+    expect(promised.length + reserved.length).toBe(bullets.length);
+
+    stubFetch(routes());
+    renderPage(<AdminWebhooksPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+
+    for (const name of promised) {
+      expect(
+        await screen.findByRole("button", { name: new RegExp(`^${name.replace(".", "\\.")}$`) }),
+        `${name} is stated in feature-spec.md §9 but the picker does not offer it`,
+      ).toBeInTheDocument();
+    }
+    for (const name of reserved) {
+      expect(
+        screen.queryByRole("button", { name: new RegExp(`^${name.replace(".", "\\.")}$`) }),
+        `${name} is marked not-emitted in feature-spec.md §9 but the picker offers it anyway`,
+      ).toBeNull();
+    }
+  });
+
+  /**
    * The court box is pull-only, has no inbound HTTP listener and no <code>arduino.local</code>
    * name; <code>docs/specs/webhooks.md</code> says the superseded lights-controller URL "must
    * not be used as a templating example". It was this form's prefilled value, so the one
@@ -147,6 +193,49 @@ describe("AdminWebhooks", () => {
 
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.queryByText("Couldn't create endpoint.")).not.toBeInTheDocument();
+  });
+
+  /**
+   * D-F8's residue. The refusal named the reason but still read like a pointer at a
+   * screen somebody had forgotten to build.
+   *
+   * <p>
+   * There is no such screen and there is deliberately not going to be one.
+   * <code>Webhooks:PrivateNetworkAllowList</code> is read once, at startup, by a
+   * singleton <code>OutboundAddressGuard</code> that has no tenant in scope — so a
+   * club admin editing it would be moving an SSRF boundary for every other club on the
+   * deployment. That is the cross-tenant escalation this codebase calls a P0, dressed
+   * as a settings field. The decision is recorded in <code>docs/specs/webhooks.md</code>
+   * and the copy now states it outright instead of hinting at it.
+   * </p>
+   */
+  it("says the LAN carve-out is deployment configuration, not a screen that is missing", async () => {
+    stubFetch(routes([{ method: "POST", path: LIST, status: 400, body: { error: "destination_not_permitted" } }]));
+    renderPage(<AdminWebhooksPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }));
+
+    const said = await screen.findByText(/private or link-local network/);
+    // Says it outright: no screen here can do it, and who can.
+    expect(said).toHaveTextContent(/No admin screen can open one up/);
+    expect(said).toHaveTextContent(/whoever runs the deployment/);
+    // And names the setting, so the admin's request to that operator is actionable
+    // rather than a description of a thing they have to go and find.
+    expect(said).toHaveTextContent(/Webhooks:PrivateNetworkAllowList/);
+  });
+
+  /**
+   * The copy above tells an admin to quote a configuration key to whoever runs the
+   * deployment. A key that has been renamed since makes that sentence a wild goose
+   * chase, and nothing else in the tree crosses the language boundary to notice.
+   */
+  it("names a setting the API actually reads", () => {
+    const appsettings = JSON.parse(
+      readFileSync(resolve(__dirname, "../../../backend/Crusaders.Mainframe.Api/appsettings.json"), "utf8"),
+    ) as { Webhooks?: Record<string, unknown> };
+    expect(appsettings.Webhooks).toBeDefined();
+    expect(Object.keys(appsettings.Webhooks!)).toContain("PrivateNetworkAllowList");
   });
 
   it("still says something useful for a refusal it has no sentence for", async () => {
