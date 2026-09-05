@@ -33,11 +33,25 @@ public sealed class LedgerService
         return sum ?? 0m;
     }
 
-    public Task<List<LedgerEntry>> GetEntriesAsync(Guid userId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
-        => _db.LedgerEntries
+    /// <summary>
+    /// A page of a member's movements, newest first.
+    ///
+    /// <para>
+    /// <paramref name="skip"/> / <paramref name="take"/> default to "everything" so every
+    /// existing caller is unchanged, but the wallet endpoint passes them: it used to return
+    /// a member's entire ledger history on every load.
+    /// </para>
+    /// </summary>
+    public Task<List<LedgerEntry>> GetEntriesAsync(
+        Guid userId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct, int skip = 0, int? take = null)
+    {
+        var q = _db.LedgerEntries
               .Where(l => l.UserId == userId && l.CreatedAt >= from && l.CreatedAt < to)
               .OrderByDescending(l => l.CreatedAt)
-              .ToListAsync(ct);
+              .Skip(skip);
+        if (take is { } n) q = q.Take(n);
+        return q.ToListAsync(ct);
+    }
 
     /// <summary>
     /// Posts several movements as one unit of work.

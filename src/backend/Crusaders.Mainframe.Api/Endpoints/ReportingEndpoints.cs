@@ -18,7 +18,14 @@ public static class ReportingEndpoints
             var userId = ctx.User.Id() ?? Guid.Empty;
             var (f, t) = ResolveRange(from, to);
             var entries = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
-            return Results.Ok(BuildWalletReport(entries, f, t));
+            var attended = await db.Bookings
+                .Where(b => b.UserId == userId && b.StartsAt >= f && b.StartsAt < t && b.CheckedInAt != null)
+                .Select(b => new { b.SliceMinutes, b.SliceCount })
+                .ToListAsync(ct);
+            return Results.Ok(BuildWalletReport(
+                entries, f, t,
+                attendedBookings: attended.Count,
+                minutesOnCourt: attended.Sum(b => b.SliceMinutes * b.SliceCount)));
         });
 
         me.MapGet("/wallet.csv", async (DateTimeOffset? from, DateTimeOffset? to, HttpContext ctx, MainframeDbContext db, CancellationToken ct) =>
@@ -26,6 +33,13 @@ public static class ReportingEndpoints
             var userId = ctx.User.Id() ?? Guid.Empty;
             var (f, t) = ResolveRange(from, to);
             var entries = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt >= f && l.CreatedAt < t).OrderBy(l => l.CreatedAt).ToListAsync(ct);
+
+            // Named, per reporting.md's filename pattern. The browser cannot follow this URL
+            // on its own — the endpoint needs an Authorization header, which is why the
+            // "Download wallet CSV" link silently downloaded nothing — so the client fetches
+            // it and saves the body; the header is what tells it what to call the file.
+            var name = $"crusaders-mainframe_wallet_{f:yyyy-MM-dd}-{t:yyyy-MM-dd}.csv";
+            ctx.Response.Headers.ContentDisposition = $"attachment; filename=\"{name}\"";
             return Results.Text(LedgerCsv(entries), "text/csv", Encoding.UTF8);
         });
 
@@ -67,6 +81,21 @@ public static class ReportingEndpoints
             var bookings = await db.Bookings.Where(b => b.StartsAt >= f && b.StartsAt < t && b.Status != BookingStatus.Cancelled).ToListAsync(ct);
             var courts = await db.Courts.IgnoreQueryFilters().AsNoTracking()
                 .ToDictionaryAsync(c => c.Id, c => new { c.CourtNumber, c.Name }, ct);
+
+            // Revenue is what the club KEPT, read off the ledger — not the price quoted at
+            // booking. This summed AmountChargedCredits, so a booking that was swept as a
+            // no-show (charged −50, refunded +50, penalised −15, then credited +5 by the
+            // desk) counted as 50 of revenue when settlement-model S5 says the club's take
+            // is the penalty, netted per I3, and the ledger says 10. Court 4 read 100 on a
+            // real take of 60. Summing the rows that name each booking is the definition of
+            // Owed in §2, so the report and the normative model cannot disagree again.
+            var bookingIds = bookings.Select(b => b.Id).ToList();
+            var settled = await db.LedgerEntries
+                .Where(l => l.RelatedBookingId != null && bookingIds.Contains(l.RelatedBookingId!.Value))
+                .GroupBy(l => l.RelatedBookingId!.Value)
+                .Select(g => new { BookingId = g.Key, Credits = g.Sum(x => x.AmountCredits) })
+                .ToDictionaryAsync(x => x.BookingId, x => x.Credits, ct);
+
             var byCourt = bookings.GroupBy(b => b.CourtId)
                 .Select(g =>
                 {
@@ -77,8 +106,13 @@ public static class ReportingEndpoints
                         court_number = meta.CourtNumber,
                         court_name = meta.Name,
                         slices = g.Sum(b => b.SliceCount),
+                        // Slices mixed units: a 60-minute walk-up is SliceCount 1 and counted
+                        // the same as a 15-minute booking. Minutes are the comparable figure
+                        // and are what a utilisation percentage would have to be built from.
+                        booked_minutes = g.Sum(b => b.SliceMinutes * b.SliceCount),
                         bookings = g.Count(),
-                        revenue_credits = g.Sum(b => b.AmountChargedCredits),
+                        revenue_credits = g.Sum(b => -settled.GetValueOrDefault(b.Id, 0m)),
+                        quoted_credits = g.Sum(b => b.AmountChargedCredits),
                     };
                 })
                 .OrderBy(r => r.court_number)
@@ -89,7 +123,18 @@ public static class ReportingEndpoints
         admin.MapGet("/no-shows", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, CancellationToken ct) =>
         {
             var (f, t) = ResolveRange(from, to);
-            var bookings = await db.Bookings.Where(b => b.StartsAt >= f && b.StartsAt < t).ToListAsync(ct);
+
+            // The denominator is bookings that could have been shown up for: not
+            // cancellations (a cancellation is not a no-show, per reporting.md's "% of
+            // bookings that no-showed"), and not slots that have not started yet. It counted
+            // every booking in the window, so this KPI divided by 10 while the daily table
+            // beside it divided by 8 — one dashboard showing 40% and 50% for the same day.
+            var now = DateTimeOffset.UtcNow;
+            var bookings = await db.Bookings
+                .Where(b => b.StartsAt >= f && b.StartsAt < t
+                         && b.Status != BookingStatus.Cancelled
+                         && b.StartsAt <= now)
+                .ToListAsync(ct);
             var total = bookings.Count;
             var noShow = bookings.Count(b => b.Status == BookingStatus.NoShow);
             return Results.Ok(new { from = f, to = t, total, no_show = noShow, no_show_pct = total == 0 ? 0 : Math.Round(100.0 * noShow / total, 2) });
@@ -176,6 +221,12 @@ public static class ReportingEndpoints
                     spent_credits = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountCredits),
                     refunds_credits = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountCredits),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
+                    // Attendance, which nothing in the product showed anywhere. CheckedInAt
+                    // is the source of truth for it — the settlement model hangs the refund
+                    // and the no-show penalty off this field — and a member could not see
+                    // whether the club believed they had turned up.
+                    attended = bk.Count(b => b.CheckedInAt is not null),
+                    minutes_on_court = bk.Where(b => b.CheckedInAt is not null).Sum(b => b.SliceMinutes * b.SliceCount),
                     balance_credits = running,
                 };
             }).ToList();
@@ -217,15 +268,49 @@ public static class ReportingEndpoints
         return (f, t);
     }
 
-    internal static object BuildWalletReport(List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to)
+    /// <summary>
+    /// The member's own period summary.
+    ///
+    /// <para>
+    /// <b>It must reconcile.</b> It reported top-ups, spend, refunds and a penalty count and
+    /// nothing else, so a member whose ledger held 2,500 credits of admin adjustments read
+    /// "0 in, 950 out, 100 back" on a page whose header said 1,635 — the two screens
+    /// disagreeing with no way to see why. Every bucket a movement can land in is now here,
+    /// and <c>net_movement_credits</c> is their sum: for a range covering the whole ledger
+    /// it equals the balance, and for any other range it is exactly what the balance moved
+    /// by. <c>penalties_credits</c> is the total <c>reporting.md</c> asks for beside the
+    /// count it already had.
+    /// </para>
+    /// </summary>
+    internal static object BuildWalletReport(
+        List<LedgerEntry> entries, DateTimeOffset from, DateTimeOffset to,
+        int attendedBookings = 0, int minutesOnCourt = 0)
     {
         var topUps = entries.Where(e => LedgerEntryTypes.Funding.Contains(e.Type)).Sum(e => e.AmountCredits);
         var spent = -entries.Where(e => LedgerEntryTypes.Spend.Contains(e.Type)).Sum(e => e.AmountCredits);
         var refunds = entries.Where(e => LedgerEntryTypes.Refund.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var penaltiesTotal = -entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var adjustments = entries.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountCredits);
+        var reversals = entries.Where(e => LedgerEntryTypes.Reversal.Contains(e.Type)).Sum(e => e.AmountCredits);
         // A penalty is a debit. A reversed no-show posts a positive row of the same type
         // to give the money back, and that row is not a second penalty.
         var penalties = entries.Count(e => LedgerEntryTypes.Penalty.Contains(e.Type) && e.AmountCredits < 0);
-        return new { from, to, top_ups_credits = topUps, spent_credits = spent, refunds_credits = refunds, penalty_count = penalties, count = entries.Count };
+        return new
+        {
+            from,
+            to,
+            top_ups_credits = topUps,
+            spent_credits = spent,
+            refunds_credits = refunds,
+            penalties_credits = penaltiesTotal,
+            adjustments_credits = adjustments,
+            reversals_credits = reversals,
+            net_movement_credits = entries.Sum(e => e.AmountCredits),
+            penalty_count = penalties,
+            attended_bookings = attendedBookings,
+            minutes_on_court = minutesOnCourt,
+            count = entries.Count,
+        };
     }
 
     private static string LedgerCsv(IEnumerable<LedgerEntry> entries)

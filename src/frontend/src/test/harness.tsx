@@ -29,6 +29,8 @@ export type StubRoute = {
   /** Matched against the request path with `startsWith`, so query strings are fine. */
   path: string;
   status?: number;
+  /** Response headers, keyed lower-case — `content-disposition` for a file download. */
+  headers?: Record<string, string>;
   body: unknown;
   /**
    * Answers the nth matching call with the nth entry, the last one repeating — for a
@@ -48,12 +50,34 @@ export type StubCall = {
    * present-as-undefined) is only provably absent in the serialised text.
    */
   raw: string | undefined;
+  /**
+   * The request headers, lower-cased. The wallet CSV's whole defect was a MISSING
+   * Authorization header on a request the browser made by itself, so a test of that fix
+   * has to be able to look at what went out, not only at what came back.
+   */
+  headers: Record<string, string>;
 };
 
 export type FetchStub = {
   /** Every call the component made, in order — for asserting what a save actually sent. */
   calls: StubCall[];
 };
+
+function parseIfJson(raw: string): unknown {
+  try { return JSON.parse(raw); } catch { return raw; }
+}
+
+/** Request headers as a plain lower-cased map, whatever shape `fetch` was handed. */
+function lowerCased(headers: HeadersInit | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries((headers ?? {}) as Record<string, string>)) out[k.toLowerCase()] = v;
+  return out;
+}
+
+/** A stubbed body on the wire: a string route answers as itself, anything else as JSON. */
+function serialise(answer: unknown): string {
+  return typeof answer === "string" ? answer : JSON.stringify(answer);
+}
 
 export function stubFetch(routes: StubRoute[]): FetchStub {
   const calls: StubCall[] = [];
@@ -63,8 +87,12 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
     const path = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
     const raw = init?.body ? String(init.body) : undefined;
-    const body = raw ? JSON.parse(raw) : undefined;
-    calls.push({ method, path, body, raw });
+    // Not every request body is JSON — the photo upload posts FormData, which stringifies to
+    // "[object FormData]" and used to throw a SyntaxError out of the fetch mock itself. The page
+    // then reported a generic network failure, and a test asserting the real error message failed
+    // with no hint that the stub, not the page, was the problem.
+    const body = raw ? parseIfJson(raw) : undefined;
+    calls.push({ method, path, body, raw, headers: lowerCased(init?.headers) });
 
     // Longest prefix wins, not first-declared.
     //
@@ -94,10 +122,21 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
     // fixture to the end of the file tripped the length gate on a line nobody touched.
     const status = route.status ?? 200;
     const ok = status < 400;
+    // `json()` and `blob()` as well as `text()`: the typed client reads text and parses it,
+    // the multipart photo upload calls `res.json()` directly, and the wallet CSV must be
+    // FETCHED with the session's bearer token and saved from a blob, because a plain
+    // `<a download>` navigates with no Authorization header at all. A stub with only one
+    // of the three turns a working page into a TypeError the page reports as a generic
+    // failure — indistinguishable, from the test's side, from the page being broken.
+    const headers = lowerCased(route.headers);
+    const wire = serialise(answer);
     return Promise.resolve({
       ok,
       status,
-      text: () => Promise.resolve(JSON.stringify(answer)),
+      headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
+      text: () => Promise.resolve(wire),
+      json: () => Promise.resolve(answer),
+      blob: () => Promise.resolve(new Blob([wire])),
     } as unknown as Response);
   }));
 
@@ -114,9 +153,9 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
  * nothing — {@link signIn} is what turns it on.
  * </p>
  */
-function Providers({ children }: { children: ReactNode }) {
+function Providers({ children, entries }: { children: ReactNode; entries?: string[] }) {
   return (
-    <MemoryRouter>
+    <MemoryRouter initialEntries={entries}>
       <AuthProvider>
         <ToastProvider>{children}</ToastProvider>
       </AuthProvider>
@@ -140,8 +179,24 @@ export function signIn({ isAdmin }: { isAdmin: boolean }) {
 /** Drops any session left behind, so the next test starts anonymous. */
 export function signOut() { tokenStore.clear(); }
 
-export function renderPage(ui: ReactElement, options?: Omit<RenderOptions, "wrapper">) {
-  return render(ui, { wrapper: Providers, ...options });
+/**
+ * Renders a page inside the house providers.
+ *
+ * <p>
+ * <code>initialEntries</code> is for the pages that read a route param —
+ * <code>/wallet/topup/:topupId</code> and friends. Without it the router starts at
+ * <code>/</code>, <code>useParams</code> hands the page <code>undefined</code>, and the
+ * page sits on its loading state forever: a test that reads as "the screen never
+ * rendered" when in fact it was never given the id it needs.
+ * </p>
+ */
+export function renderPage(
+  ui: ReactElement,
+  options?: Omit<RenderOptions, "wrapper"> & { initialEntries?: string[] },
+) {
+  const { initialEntries, ...rest } = options ?? {};
+  const wrapper = ({ children }: { children: ReactNode }) => <Providers entries={initialEntries}>{children}</Providers>;
+  return render(ui, { wrapper, ...rest });
 }
 
 /** The settings document the API returns, with every field the screens read. */

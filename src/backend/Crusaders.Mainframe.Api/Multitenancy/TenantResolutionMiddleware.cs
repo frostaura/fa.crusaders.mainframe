@@ -95,6 +95,13 @@ public sealed class TenantResolutionMiddleware
         var resolvedSlug = jwtSlug ?? hostSlug ?? defaultSlug;
         if (string.IsNullOrWhiteSpace(resolvedSlug))
         {
+            if (HasRejectedBearerToken(context))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new { error = "invalid_token", message = "Your session has expired. Sign in again." });
+                return;
+            }
+
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsJsonAsync(new { error = "tenant_unresolved", message = "No tenant could be resolved from this request." });
             return;
@@ -118,6 +125,32 @@ public sealed class TenantResolutionMiddleware
 
         tenantContext.Set(tenant.Id, tenant.Slug);
         await _next(context);
+    }
+
+    /// <summary>
+    /// True when the caller presented a bearer token and authentication did not accept it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On a host that carries no tenant subdomain — an IP literal or bare <c>localhost</c>, which
+    /// per <see cref="ExtractHostSubdomain"/> is exactly how the club's own LAN addresses this API
+    /// — the JWT is the only place a tenant can come from. So an expired or revoked token failed
+    /// resolution rather than authentication, and every endpoint answered
+    /// <c>400 tenant_unresolved</c>. A 400 is not a session signal: the browser kept the
+    /// signed-in chrome up, every screen failed on its own terms, and the member was told to
+    /// check their connection while their session was simply gone.
+    /// </para>
+    /// <para>
+    /// The API should say what actually happened, rather than the client learning to read a 400
+    /// on an authenticated route as a session loss. A request carrying no token at all still gets
+    /// <c>tenant_unresolved</c>, because for that caller it is the truth.
+    /// </para>
+    /// </remarks>
+    private static bool HasRejectedBearerToken(HttpContext context)
+    {
+        if (context.User?.Identity?.IsAuthenticated == true) return false;
+        var header = context.Request.Headers.Authorization.ToString();
+        return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && header.Length > "Bearer ".Length;
     }
 
     /// <summary>

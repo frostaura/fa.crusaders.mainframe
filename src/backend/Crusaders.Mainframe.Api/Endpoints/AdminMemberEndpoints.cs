@@ -118,6 +118,9 @@ public static class AdminMemberEndpoints
 
             var tempPassword = GenerateTempPassword();
             user.PasswordHash = hasher.Hash(tempPassword);
+            // Arms the forced change. Without it the "temporary" password was simply the account's
+            // password, forever — see PasswordChangeGate and User.MustChangePassword.
+            user.MustChangePassword = true;
 
             db.AuditLogs.Add(new AuditLog
             {
@@ -136,7 +139,7 @@ public static class AdminMemberEndpoints
             {
                 temp_password = tempPassword,
                 email_sent_to = user.Email,
-                advice = "Share this with the member out-of-band if email delivery is uncertain. They should change it on first login.",
+                advice = "Share this with the member out-of-band if email delivery is uncertain. It only unlocks the change-password screen — they must choose a new password before they can do anything else.",
             });
         });
 

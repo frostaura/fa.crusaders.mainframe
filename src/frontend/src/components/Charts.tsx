@@ -214,6 +214,19 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
   );
 }
 
+/**
+ * Bookings against attendance, per day.
+ *
+ * <p>
+ * The second bar is <code>attended</code>, counted off <code>CheckedInAt</code> — the
+ * at-court identification event, which `CLAUDE.md` makes the source of truth for
+ * attendance and which settlement-model S4/S5 hang the refund and the no-show penalty
+ * on. Nothing in the product rendered it anywhere: a slot a member turned up and played
+ * drew character-for-character the same as one she was swept as a no-show for and
+ * charged a penalty over, and this was the only screen with the data on hand to tell
+ * them apart. A gap between the bars is the days that cost her a penalty.
+ * </p>
+ */
 export function MyBookingsBarChart({ data }: { data: DailyMePoint[] }) {
   return (
     <div style={{ height: CHART_HEIGHT }}>
@@ -223,7 +236,9 @@ export function MyBookingsBarChart({ data }: { data: DailyMePoint[] }) {
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
           <YAxis allowDecimals={false} fontSize={11} stroke={TEXT_MUTED} width={32} />
           <Tooltip {...tooltipStyle} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Bar dataKey="bookings" name="Bookings" fill={ACCENT} radius={[3, 3, 0, 0]} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Bar dataKey="bookings" name="Booked" fill={ACCENT_SOFT} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="attended" name="Played" fill={ACCENT} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

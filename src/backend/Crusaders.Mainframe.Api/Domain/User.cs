@@ -13,6 +13,28 @@ public sealed class User : ITenantScoped
     public string? PasswordHash { get; set; }
     public string? PinHash { get; set; }
     public bool EmailVerified { get; set; }
+
+    /// <summary>
+    /// True while the account's current password was issued by somebody other than its owner —
+    /// today that means an admin-generated temporary password.
+    ///
+    /// <para>
+    /// The spec calls the temporary password "single-use" and says it "forces a password reset on
+    /// first use". Before this flag existed neither was true: the temporary password was simply the
+    /// account's password, indefinitely, and it had been emailed in plaintext and shown on an
+    /// admin's screen. Advice — the reset response literally returned <c>"They should change it on
+    /// first login."</c> — is not enforcement.
+    /// </para>
+    ///
+    /// <para>
+    /// While this is set, <c>PasswordChangeGate</c> refuses every authenticated request except the
+    /// handful needed to change the password, so the session is genuinely good for nothing else.
+    /// <c>POST /api/v1/me/password</c> clears it, which is also the moment the temporary password
+    /// stops working — it has been replaced.
+    /// </para>
+    /// </summary>
+    public bool MustChangePassword { get; set; }
+
     public bool IsAdmin { get; set; }
     public bool IsPlatformAdmin { get; set; }
     public string Status { get; set; } = "active"; // active | suspended

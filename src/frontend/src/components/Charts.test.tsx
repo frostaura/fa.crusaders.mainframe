@@ -32,9 +32,12 @@ describe("Charts — net series and the sign of a day", () => {
     { date: "2026-09-02", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: -8, penalties_credits: -2.4, bookings: 0, no_shows: 0 },
   ];
 
+  // `attended` and `minutes_on_court` come off `CheckedInAt`, the attendance source of
+  // truth: Tuesday she booked three quarter-hours and turned up; Wednesday she booked
+  // nothing. A booked-but-not-attended day is what the second bar exists to show.
   const ME_DAYS: DailyMePoint[] = [
-    { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, balance_credits: 136 },
-    { date: "2026-09-02", top_ups_credits: 0, spent_credits: 0, refunds_credits: -8, bookings: 0, balance_credits: 128 },
+    { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 136 },
+    { date: "2026-09-02", top_ups_credits: 0, spent_credits: 0, refunds_credits: -8, bookings: 0, attended: 0, minutes_on_court: 0, balance_credits: 128 },
   ];
 
   /** Every element in a chart's tree, depth first. */
