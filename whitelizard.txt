@@ -13,15 +13,23 @@
 # simple. Those are measurement artifacts rather than genuine complexity, and
 # they resolve naturally as endpoints are split out during the device work.
 #
-# THE NAMES HERE ARE LIZARD'S, NOT C#'s, and the two disagree. lizard's C#
+# THE NAMES HERE ARE LIZARD'S, NOT C#'s, and the two can disagree. lizard's C#
 # parser scopes a function under the most recently DECLARED type, not the type
-# that encloses it — so `TopUpEndpoints.MapTopUpEndpoints`, which sits directly
-# below the nested `FailureCodes` class, is reported as
-# `FailureCodes::MapTopUpEndpoints`. An entry written from the source rather
-# than from lizard's own output matches nothing and the gate stays red while
-# looking whitelisted, which is what `TopUpEndpoints::MapTopUpEndpoints` did
-# here. Copy the name out of `make complexity`'s warning line; never type it
-# from the C#.
+# that encloses it: a method sitting below a nested class is reported under the
+# NESTED class's name. So an entry is only ever correct relative to where the
+# nested types in that file happen to sit, and MOVING a nested class silently
+# voids the entry — the gate goes red on a file nobody edited, or a whitelisted
+# function quietly stops being ratcheted. Copy the name out of
+# `make complexity`'s warning line; never type it from the C#, and re-run the
+# gate after moving any nested type.
+#
+# This bit twice in one day, from both sides at once: one round moved
+# `FailureCodes` below `MapTopUpEndpoints` (restoring the `TopUpEndpoints::`
+# name the entry below has carried since the gate was introduced) while another
+# round, in parallel, renamed the entry to `FailureCodes::`. Each was green
+# alone; merged together neither name matched and the gate was red. If this
+# entry stops matching again, read TopUpEndpoints.cs for where the nested class
+# now sits before renaming anything.
 AdminConfigEndpoints::MapAdminConfigEndpoints
 AdminMemberEndpoints::MapAdminMemberEndpoints
 AdminMembersPage
@@ -41,7 +49,7 @@ QrEndpoints::MapQrEndpoints
 ReportingEndpoints::MapReportingEndpoints
 SmtpEmailService::SendAsync
 SortHeader
-FailureCodes::MapTopUpEndpoints  # = TopUpEndpoints.MapTopUpEndpoints; see the naming note above
+TopUpEndpoints::MapTopUpEndpoints  # nested FailureCodes sits BELOW it; see the naming note above
 WebAuthnEndpoints::MapWebAuthnEndpoints
 adjust
 load
