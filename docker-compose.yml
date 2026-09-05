@@ -1,3 +1,16 @@
+# The compose bridge is PINNED rather than left to docker's default pool, and the API's
+# Gateway:TrustedProxies default names exactly this /24. Left to the pool, the only honest
+# default was "trust 172.16.0.0/12" — a million addresses, and on a club whose LAN happens to
+# sit in that range every laptop became a trusted proxy able to forge X-Forwarded-For and
+# escape every rate limit (round-3 finding 15). Change this subnet and you must change
+# `Gateway.TrustedProxies` in src/backend/Crusaders.Mainframe.Api/appsettings.json,
+# GatewayTrust.ComposeBridgeNetwork, and the note in .env.example — all four together.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.83.0/24
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -52,6 +65,28 @@ services:
       MEDIA_STORAGE_PATH: ${MEDIA_STORAGE_PATH:-/app/media}
       BIOMETRIC_DRIVER: ${BIOMETRIC_DRIVER:-Null}
       BIOMETRIC_TEMPLATE_STORE_PATH: ${BIOMETRIC_TEMPLATE_STORE_PATH:-/app/biometric/templates}
+      # Everything below was documented in .env.example and deployment.md as settable in
+      # .env and was reaching nothing: this list is an allow-list, and a name absent from
+      # it is silently dropped. A comma-delimited TrustedProxies (not the indexed form)
+      # because indexed configuration merges by index and so cannot narrow a default —
+      # see GatewayTrust.
+      # Each carries the appsettings.json default explicitly rather than an empty string:
+      # an empty environment variable does not mean "absent" to .NET configuration, it
+      # SHADOWS the file value with "", which for TrustedProxies would have silently
+      # dropped the deployment to loopback-only and stopped the gateway being believed.
+      Gateway__TrustedProxies: ${GATEWAY_TRUSTED_PROXIES:-127.0.0.1,::1,172.29.83.0/24}
+      Gateway__ForwardLimit: ${GATEWAY_FORWARD_LIMIT:-2}
+      RateLimits__FirmwarePerMinute: ${RATELIMITS_FIRMWARE_PER_MINUTE:-10}
+      Discovery__DowngradeHttpsAdvertisedBaseUrl: ${DISCOVERY_DOWNGRADE_HTTPS_ADVERTISED_BASE_URL:-false}
+      # The OTA override. All three keys of a section or none — a partial section is a
+      # startup refusal by design (OtaCatalogue), which is why they are forwarded as one
+      # block: forwarding some and not others would manufacture exactly that refusal.
+      Ota__Stable__Version: ${OTA_STABLE_VERSION:-}
+      Ota__Stable__Url: ${OTA_STABLE_URL:-}
+      Ota__Stable__SizeBytes: ${OTA_STABLE_SIZE_BYTES:-}
+      Ota__Canary__Version: ${OTA_CANARY_VERSION:-}
+      Ota__Canary__Url: ${OTA_CANARY_URL:-}
+      Ota__Canary__SizeBytes: ${OTA_CANARY_SIZE_BYTES:-}
     expose:
       - "5000"
     volumes:

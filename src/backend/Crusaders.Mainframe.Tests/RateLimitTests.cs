@@ -205,6 +205,182 @@ public sealed class RateLimitTests
         Assert.Contains(HttpStatusCode.TooManyRequests, statuses.Skip(2));
     }
 
+    // ---- two hops: cloudflared in front of the gateway (round-3 finding 4) ----------------
+
+    /// <summary>
+    /// The documented internet path is Cloudflare → cloudflared on the club's own host →
+    /// the published gateway port, so a remote member's request reaches nginx already
+    /// carrying <c>X-Forwarded-For: &lt;visitor&gt;</c> and leaves it as
+    /// <c>&lt;visitor&gt;, &lt;cloudflared&gt;</c>. At <c>ForwardLimit = 1</c> the API
+    /// stopped at cloudflared's address, so the whole remote membership shared one
+    /// ten-a-minute auth bucket and any one outsider could lock every remote member out of
+    /// login with ten POSTs. Two entries, two partitions.
+    /// </summary>
+    [Fact]
+    public async Task Two_forwarded_hops_through_cloudflared_are_distinct_partitions()
+    {
+        await using var factory = new TestWebAppFactory
+        {
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 1 },
+            // The gateway. Its own peer — cloudflared, the first XFF entry from the right —
+            // is loopback too, which is what lets the second hop be walked back.
+            RemoteIpAddress = System.Net.IPAddress.Loopback,
+            TrustedProxies = "127.0.0.1,::1",
+        };
+        var client = factory.CreateClient();
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 5; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+            request.Headers.Add("X-Forwarded-For", $"203.0.113.{10 + i}, 127.0.0.1");
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+
+        // Five remote members, one call each. Under the old single-hop default all five
+        // resolved to 127.0.0.1 and four of them were 429.
+        Assert.DoesNotContain(HttpStatusCode.TooManyRequests, statuses);
+
+        // And the partition really is the visitor, not the tunnel: the same visitor twice
+        // is limited, a different one is not.
+        using var again = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+        again.Headers.Add("X-Forwarded-For", "203.0.113.10, 127.0.0.1");
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await client.SendAsync(again)).StatusCode);
+
+        using var other = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+        other.Headers.Add("X-Forwarded-For", "203.0.113.99, 127.0.0.1");
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, (await client.SendAsync(other)).StatusCode);
+    }
+
+    /// <summary>
+    /// Raising the limit to two hops is only safe because trust is re-checked at every hop.
+    /// A LAN client reaching the gateway directly is nginx's own peer, so the first entry
+    /// the middleware consumes is that client's real address — untrusted — and the forged
+    /// entry in front of it is never taken. Without this the two-hop fix would have been a
+    /// free pass out of the limiter for anyone on the club LAN.
+    /// </summary>
+    [Fact]
+    public async Task A_second_hop_is_not_walked_back_past_an_untrusted_address()
+    {
+        await using var factory = new TestWebAppFactory
+        {
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 2 },
+            RemoteIpAddress = System.Net.IPAddress.Loopback,   // the gateway
+            TrustedProxies = "127.0.0.1,::1",
+        };
+        var client = factory.CreateClient();
+
+        // "<forged>, <the LAN client nginx actually saw>". The second entry is consumed
+        // (the gateway is trusted); the first is not (192.168.68.50 is not).
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 6; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+            request.Headers.Add("X-Forwarded-For", $"198.51.100.{i}, 192.168.68.50");
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+
+        Assert.DoesNotContain(HttpStatusCode.TooManyRequests, statuses.Take(2));
+        Assert.Contains(HttpStatusCode.TooManyRequests, statuses.Skip(2));
+    }
+
+    // ---- the trusted range itself (round-3 finding 15) -----------------------------------
+
+    /// <summary>
+    /// The trusted default used to be <c>172.16.0.0/12</c> — a million addresses — and the
+    /// on-prem overlay put Kestrel on every host interface at <c>:5000</c>. On a club whose
+    /// LAN sits in that range, any laptop could POST straight to the API with a rotating
+    /// <c>X-Forwarded-For</c> and guess passwords past every limit. The default is now the
+    /// pinned compose bridge, so a peer inside the old /12 is a stranger like any other and
+    /// its forged header is disbelieved.
+    /// </summary>
+    [Fact]
+    public async Task A_peer_inside_the_old_slash_twelve_cannot_forge_a_client_address()
+    {
+        await using var factory = new TestWebAppFactory
+        {
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 2 },
+            // Squarely inside 172.16.0.0/12 and squarely outside 172.29.83.0/24.
+            RemoteIpAddress = System.Net.IPAddress.Parse("172.16.40.7"),
+        };
+        var client = factory.CreateClient();
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 6; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+            request.Headers.Add("X-Forwarded-For", $"10.9.9.{i}");
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+
+        // All six shared one partition — the forger's own address — so the ceiling bit.
+        Assert.DoesNotContain(HttpStatusCode.TooManyRequests, statuses.Take(2));
+        Assert.Contains(HttpStatusCode.TooManyRequests, statuses.Skip(2));
+    }
+
+    /// <summary>
+    /// And the gateway inside the pinned bridge still is believed — the control for the
+    /// test above, so a green result there cannot mean "nothing is trusted at all".
+    /// </summary>
+    [Fact]
+    public async Task The_pinned_compose_bridge_is_still_trusted()
+    {
+        await using var factory = new TestWebAppFactory
+        {
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 1 },
+            RemoteIpAddress = System.Net.IPAddress.Parse("172.29.83.2"),
+        };
+        var client = factory.CreateClient();
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 5; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+            request.Headers.Add("X-Forwarded-For", $"192.168.68.{100 + i}");
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+
+        Assert.DoesNotContain(HttpStatusCode.TooManyRequests, statuses);
+    }
+
+    /// <summary>
+    /// A deployment must be able to NARROW the trusted set, not only add to it.
+    ///
+    /// <para>
+    /// This is the dropped lead that turned out to be real: the default lived in
+    /// <c>appsettings.json</c> as a three-entry JSON array, and .NET configuration merges
+    /// arrays BY INDEX — so a club setting <c>Gateway__TrustedProxies__0</c> to its own load
+    /// balancer replaced entry 0 and went on trusting <c>::1</c> and <c>172.16.0.0/12</c>
+    /// underneath. The default is a delimited string now, which an environment variable
+    /// replaces whole. Pinned by taking the compose bridge OUT and proving it is gone.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Configuration_can_narrow_the_trusted_default_rather_than_only_extend_it()
+    {
+        await using var factory = new TestWebAppFactory
+        {
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 2 },
+            // The address the shipped default trusts …
+            RemoteIpAddress = System.Net.IPAddress.Parse("172.29.83.2"),
+            // … and a deployment that names only loopback. If the entries merged, the
+            // bridge would survive and every request below would be its own partition.
+            TrustedProxies = "127.0.0.1",
+        };
+        var client = factory.CreateClient();
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 6; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, AuthPolicyPath);
+            request.Headers.Add("X-Forwarded-For", $"192.168.68.{100 + i}");
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+
+        Assert.DoesNotContain(HttpStatusCode.TooManyRequests, statuses.Take(2));
+        Assert.Contains(HttpStatusCode.TooManyRequests, statuses.Skip(2));
+    }
+
     /// <summary>
     /// "Ten a minute per member" means per member: an authenticated call is partitioned on
     /// the member, so two members behind one address — a shared clubhouse tablet, or the

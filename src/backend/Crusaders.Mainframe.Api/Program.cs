@@ -121,29 +121,32 @@ builder.Services.AddAuthorization();
 // address and escape the limiter, or forge a Host and be handed a URL that points a
 // court box at an attacker.
 //
-// Gateway:TrustedProxies is a list of addresses or CIDR networks. The default is loopback
-// plus the docker bridge pools (172.16.0.0/12), which is where the gateway container
-// stands in both compose files; a club that fronts the API with something else sets it.
-var trustedProxies = builder.Configuration.GetSection("Gateway:TrustedProxies").Get<string[]>()
-    ?? ["127.0.0.1", "::1", "172.16.0.0/12"];
+// Gateway:TrustedProxies is a list of addresses or CIDR networks, read by GatewayTrust —
+// see that type for why the default is a single delimited STRING rather than a JSON array
+// (indexed configuration merges by index, so an array default cannot be narrowed) and for
+// why ForwardLimit is 2 rather than 1 (the cloudflared hop). The default names the compose
+// bridge the gateway container actually stands on; it used to name 172.16.0.0/12, which on
+// a club LAN in that range made every laptop a trusted proxy.
+var trustedProxies = GatewayTrust.Parse(builder.Configuration);
+var forwardLimit = builder.Configuration.GetValue("Gateway:ForwardLimit", GatewayTrust.DefaultForwardLimit);
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+    options.ForwardLimit = forwardLimit;
     options.KnownProxies.Clear();
-    options.KnownNetworks.Clear();
+    options.KnownIPNetworks.Clear();
     foreach (var entry in trustedProxies)
     {
-        var text = entry.Trim();
-        if (text.Length == 0) continue;
-        var slash = text.IndexOf('/');
-        if (slash < 0)
+        // A malformed entry is skipped rather than thrown on, and the startup audit below
+        // names it. A typo in one proxy address must not stop a club's API from booting.
+        if (GatewayTrust.TryParseEntry(entry) is not { } parsed) continue;
+        if (parsed.IsNetwork)
         {
-            options.KnownProxies.Add(IPAddress.Parse(text));
+            options.KnownIPNetworks.Add(new System.Net.IPNetwork(parsed.Address, parsed.PrefixLength));
         }
         else
         {
-            options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(
-                IPAddress.Parse(text[..slash]), int.Parse(text[(slash + 1)..], CultureInfo.InvariantCulture)));
+            options.KnownProxies.Add(parsed.Address);
         }
     }
 });
@@ -339,6 +342,21 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseForwardedHeaders();
+
+// Trusting a proxy network is only safe while nothing else can reach Kestrel directly, and
+// the on-prem overlay puts the backend on host networking where that stops being true by
+// default. Said out loud at boot rather than left to an audit: an over-broad range, an entry
+// that is not an address at all, and — the combination behind review finding 15 — a trusted
+// network that contains this host's own address while the server is bound to every interface.
+// Skipped in Development, where the bind is a laptop and the overlap is noise.
+foreach (var warning in GatewayTrust.Warnings(
+             trustedProxies,
+             [builder.Configuration["Urls"] ?? "", builder.Configuration["ASPNETCORE_URLS"] ?? ""],
+             GatewayTrust.HostAddresses(),
+             auditBinding: !app.Environment.IsDevelopment()))
+{
+    app.Logger.LogWarning("Gateway trust: {Warning}", warning);
+}
 
 // A court box cannot speak TLS (plain WiFiClient, no heap for a TLS context), so an
 // https AdvertisedBaseUrl hands every box an OTA and provisioning URL it can never
