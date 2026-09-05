@@ -274,6 +274,19 @@ export type AdminSettings = {
   /** What each of a court box's eight buttons does, by physical position. */
   button_map: string[];
 
+  /**
+   * When the club is open, per weekday: `{"mon": "06:00-22:00", "sat": "07:00-20:00"}`.
+   *
+   * <p>
+   * This is the setting `BookingService` actually enforces. `day_start_minute` /
+   * `day_end_minute` above are only the default for a weekday this map does not name — and
+   * because the seed names all seven, the flat pair governed nothing at all while it was the
+   * only thing the settings screen could edit. Optional here so an older API that does not
+   * send it simply shows no weekly table rather than an empty one.
+   * </p>
+   */
+  operating_hours?: Record<string, string>;
+
   // The nine keys the engine has always read and this API never showed. Until they
   // were surfaced the only way to change one was to hand-edit a JSON column on a
   // live money system.
@@ -910,6 +923,9 @@ export const endpoints = {
     graceWindowMinutes: req.grace_window_minutes,
     penaltyWindowMinutes: req.penalty_window_minutes,
     ...(req.timezone !== undefined ? { timezone: req.timezone } : {}),
+    // Omitted-means-unchanged applies here too, and an EMPTY map is not the same as an
+    // omitted one: it is how a club puts every weekday back on the flat default.
+    ...(req.operating_hours !== undefined ? { operatingHours: req.operating_hours } : {}),
     ...(req.button_map !== undefined ? { buttonMap: req.button_map } : {}),
     ...(req.credits_per_zar_regular !== undefined ? { creditsPerZarRegular: req.credits_per_zar_regular } : {}),
     ...(req.credits_per_zar_league !== undefined ? { creditsPerZarLeague: req.credits_per_zar_league } : {}),

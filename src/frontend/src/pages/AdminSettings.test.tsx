@@ -219,3 +219,98 @@ describe("AdminSettings — timezone and the offline threshold", () => {
     expect(document.getElementById(hint!)!.textContent).toMatch(/at 120s that is 6 minutes/);
   });
 });
+
+/**
+ * R2 G-F2 — a club could not change its opening hours.
+ *
+ * <p>
+ * The screen offered one flat "Day starts / Day ends" pair. The engine reads
+ * `operating_hours`, a per-weekday map, and the seed names all seven days — so the pair the
+ * console could edit governed nothing at all. Saving `Day starts 00:00` / `Day ends 23:45`
+ * answered `200 {"saved":true}` and left Saturday running 07:00–19:45 and Monday
+ * 06:00–21:45, which is exactly what a finder watched happen twice with different values.
+ * </p>
+ */
+describe("AdminSettings — opening hours per weekday", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const routes = (settings: Record<string, unknown> = {}) => [
+    { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...settings } },
+    { path: "/api/v1/admin/courts/", body: [] },
+    { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
+  ];
+
+  it("shows the hours the booking rule actually enforces, weekday by weekday", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    expect(await screen.findByLabelText("Saturday opens")).toHaveValue("07:00");
+    expect(screen.getByLabelText("Saturday closes")).toHaveValue("20:00");
+    expect(screen.getByLabelText("Monday opens")).toHaveValue("06:00");
+
+    // Sunday is not in the map, so it follows the flat pair — and the row says so rather
+    // than showing hours nobody set.
+    expect(screen.getByLabelText("Sunday has its own hours")).not.toBeChecked();
+    expect(screen.getByText(/Club default — 06:00 to 22:00/)).toBeInTheDocument();
+  });
+
+  it("saves an edited weekday, and the save carries the whole map", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText("Saturday closes"), { target: { value: "13:00" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+
+    await waitFor(() => {
+      const save = stub.calls.find((c) => c.method === "PUT");
+      expect(save).toBeTruthy();
+      const hours = (save!.body as { operatingHours: Record<string, string> }).operatingHours;
+      expect(hours.sat).toBe("07:00-13:00");
+      // The other days go as they were: the API replaces the map wholesale, so sending
+      // only the edited day would silently delete the rest of the week.
+      expect(hours.mon).toBe("06:00-22:00");
+      expect(hours.sun).toBeUndefined();
+    });
+  });
+
+  it("puts a day back on the club default when its own hours are switched off", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.click(await screen.findByLabelText("Saturday has its own hours"));
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+
+    await waitFor(() => {
+      const save = stub.calls.find((c) => c.method === "PUT");
+      const hours = (save!.body as { operatingHours: Record<string, string> }).operatingHours;
+      expect(hours.sat).toBeUndefined();
+      expect(hours.mon).toBe("06:00-22:00");
+    });
+  });
+
+  it("starts a newly-custom day at the club default rather than at midnight", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.click(await screen.findByLabelText("Sunday has its own hours"));
+
+    expect(screen.getByLabelText("Sunday opens")).toHaveValue("06:00");
+    expect(screen.getByLabelText("Sunday closes")).toHaveValue("22:00");
+  });
+
+  it("refuses a close that is not after the open, at the row, before anything is sent", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText("Saturday closes"), { target: { value: "06:00" } });
+
+    // Said where the mistake is. A club that means "shut on Saturday" has to say so by
+    // some other means — the engine has no closed-all-day, and reading 20:00–07:00 as an
+    // overnight club would sell the small hours.
+    expect(screen.getByText(/Closing time has to be after opening time/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
+  });
+});

@@ -298,4 +298,75 @@ public class OperatingHoursTests
         var minutes = (ok.Booking.EndsAt - ok.Booking.StartsAt).TotalMinutes;
         Assert.InRange(minutes, 1, 11);
     }
+    // ---- what the admin console writes is what the rule reads (R2 G-F2) ----
+
+    /// <summary>
+    /// The loop the settings screen depends on: the exact document
+    /// <see cref="OperatingHours.TryParseWire"/> produces for the admin API is the document
+    /// <see cref="OperatingHours.FromSettings"/> reads back, and <see cref="BookingService"/>
+    /// then enforces it.
+    ///
+    /// <para>
+    /// This is the half of G-F2 that a settings test cannot reach. A club could not change
+    /// its opening hours at all — the console offered only the flat pair, the engine read the
+    /// per-weekday map, and the two never met — so an editor for the map is only worth having
+    /// if what it writes is refused and allowed at exactly the hours it names. Hours are given
+    /// here in the loose form a person types (a missing leading zero) to prove the
+    /// normalisation is the thing that closes the loop rather than a coincidence of format.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Hours_written_the_way_the_admin_API_writes_them_are_the_hours_enforced()
+    {
+        Assert.True(OperatingHours.TryParseWire(
+            new Dictionary<string, string> { ["sat"] = "8:00-13:00" }, out var normalised, out var badDay));
+        Assert.Null(badDay);
+        Assert.Equal("08:00-13:00", normalised["sat"]);
+
+        await using var host = await TestHost.CreateAsync();
+        using (var seed = host.NewScope())
+        {
+            var db = seed.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.TenantSettings.FirstAsync(s => s.TenantId == host.Tenant.Id);
+            var map = JsonSerializer.Serialize(normalised);
+            row.SettingsJson = $$"""
+                {"slice_minutes":15,"slice_price_credits":8,"penalty_pct":30,"grace_window_minutes":5,
+                 "penalty_window_minutes":15,"advance_booking_days":3650,"timezone":"UTC",
+                 "member_per_day_max_minutes":0,"peak_hours":"","day_start_minute":360,"day_end_minute":1320,
+                 "operating_hours":{{map}}}
+                """;
+            await db.SaveChangesAsync();
+        }
+
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+
+        // 13:00 is the new close, so the 13:00 slice is the first one that no longer exists.
+        var refused = Assert.IsType<BookingResult.OutOfHours>(await booking.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, At(Saturday, 13, 0), sliceCount: 1, default));
+        Assert.Equal("08:00", refused.OpensAt);
+        Assert.Equal("13:00", refused.ClosesAt);
+
+        // 08:00 is the new open, and the club's old 07:00 Saturday is now shut.
+        Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, At(Saturday, 8, 0), sliceCount: 1, default));
+        Assert.IsType<BookingResult.OutOfHours>(await booking.CreateAsync(
+            host.Courts[1].Id, host.PlayerUser.Id, host.PlayerUser.Id, At(Saturday, 7, 0), sliceCount: 1, default));
+    }
+
+    [Fact]
+    public void The_wire_form_of_a_map_is_what_the_settings_screen_shows()
+    {
+        using var doc = JsonDocument.Parse(
+            """{"operating_hours":{"sat":"07:00-20:00","mon":"06:00-22:00","nonsense":"x"}}""");
+        var wire = OperatingHours.FromSettings(doc.RootElement).ToWire();
+
+        // Weekday order, whatever order the document was written in, and a key the engine
+        // could not read is not shown as if it were in force.
+        Assert.Equal(["mon", "sat"], wire.Keys.ToArray());
+        Assert.Equal("06:00-22:00", wire["mon"]);
+        Assert.Equal("07:00-20:00", wire["sat"]);
+    }
 }
