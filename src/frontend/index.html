@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#F8FAFC" />
+    <!--
+      Installable, per docs/specs/feature-spec.md §12. The manifest is what Android and desktop
+      Chrome read; the apple-* tags are what iOS reads instead, because Safari still ignores the
+      manifest's display and icon fields when a member taps "Add to Home Screen".
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Crusaders" />
+    <meta name="description" content="Book a court, check your credits, and open the lights." />
     <title>Crusaders Mainframe</title>
   </head>
   <body class="bg-bg-app text-text-primary font-sans antialiased">

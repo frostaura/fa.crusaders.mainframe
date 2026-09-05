@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, endpoints, setUnauthorizedHandler, tokenStore } from "./api";
 import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
+import { clearOfflineCache } from "./pwa";
 
 type AuthState =
   | { status: "loading" }
@@ -229,6 +230,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // rather than after, because after, there is nothing left to authenticate the call with.
     const ending = endpoints.logout().catch(() => undefined);
     tokenStore.clear();
+    // The offline shell caches this member's schedule, wallet and profile. A club phone is a
+    // shared device; the next person to sign in must not find the last one's balance in it.
+    clearOfflineCache();
     // Signing out on purpose is not losing a session; /login should not commiserate about it.
     setSessionExpired(false);
     setState({ status: "anonymous" });
