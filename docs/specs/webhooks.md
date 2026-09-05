@@ -59,7 +59,7 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `credit.refunded` | A cancellation/no-show ledger entry is written |
 | `credit.penalty_applied` | A penalty ledger entry is written |
 | `credit.adjusted` | An admin issues a manual adjustment |
-| `peripheral.unhealthy` | A biometric device's `State` becomes `Faulted` |
+| `peripheral.unhealthy` | **Reserved — nothing emits this in v1.** No driver ever sets `BiometricDeviceState.Faulted` (`NullBiometricDevice` is the only implementation and reports `Connected` unconditionally), and the shipped court box is pull-only with no `/health` endpoint to poll — the polling design that would have fired it is in `lights-controller.md`, which is Superseded. The event picker deliberately does not offer it. See `feature-spec.md` §9. |
 | `webhook.test` | The "send test ping" button is clicked |
 
 ## Payload shape
@@ -160,6 +160,28 @@ localhost.
 consumers a club points a webhook at — reached by DHCP reservation, since the network is
 DHCP everywhere. The court box is **not** one of them: it is pull-only, has no inbound
 HTTP listener, and can never be a webhook destination.
+
+**The allow-list is deployment configuration and there is no admin surface for it — by
+decision, not by omission.** `OutboundAddressGuard` is a singleton that parses
+`Webhooks:PrivateNetworkAllowList` once, at construction, from `IConfiguration`; it has
+no tenant in scope, and the address it judges is the one being dialled inside a socket's
+`ConnectCallback`, long after any request context. So the list is **process-wide**: one
+entry admits that address for every tenant the deployment serves. A club admin who could
+add to it would be moving an SSRF boundary for every *other* club on the same host, which
+is the cross-tenant escalation this repo classes as a P0 — an admin-only, validated,
+audited screen would not change that, because the blast radius is the problem, not the
+authorisation.
+
+Making it tenant-scoped instead is a larger change than it looks and is **not** in v1: the
+guard would have to carry the owning tenant from registration through to the connect
+callback of a delivery attempt that runs on a background queue.
+
+What an admin gets instead is a refusal that says so. `destination_not_permitted` names
+the setting and says plainly that no screen can change it and who can, so the request to
+whoever runs the deployment is actionable — see `CREATE_REFUSAL` in
+`src/frontend/src/pages/AdminWebhooks.tsx`, pinned by `AdminWebhooks.test.tsx` ("says the
+LAN carve-out is deployment configuration, not a screen that is missing"). Operator
+instructions, including the DHCP reservation, are in `docs/go-live-checklist.md`.
 
 ### Other
 
