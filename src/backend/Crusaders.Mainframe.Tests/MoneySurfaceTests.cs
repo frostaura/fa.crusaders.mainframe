@@ -284,7 +284,17 @@ public class MoneySurfaceTests
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
 
-        var startsAt = TestHost.BookableSlot();
+        // The slot is chosen in the CLUB's clock, not in UTC.
+        //
+        // `BookableSlot()` steps clear of 15:00-19:00 in whatever offset it is handed, and
+        // its default is UTC — which is right for every other test, because the fixture's
+        // club runs at UTC. This test has just moved the club to Africa/Johannesburg, and
+        // `peak_hours` is evaluated in the club's local time: 16:00-19:00 SAST is
+        // 14:00-17:00 UTC, so a UTC-chosen 14:30 slot is peak here and a Regular member is
+        // refused it. That made this test fail for roughly two hours of every day and pass
+        // for the other twenty-two, which is worse than failing outright.
+        var clubTz = TimeZoneInfo.FindSystemTimeZoneById("Africa/Johannesburg");
+        var startsAt = TestHost.BookableSlotFrom(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, clubTz), 2);
         var result = await bookings.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, sliceCount: 1, default);
         Assert.IsType<BookingResult.Ok>(result);
@@ -293,6 +303,7 @@ public class MoneySurfaceTests
 
         var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
         var tz = TimeZoneInfo.FindSystemTimeZoneById(settings.Timezone);
+        Assert.Equal(clubTz.Id, tz.Id);
         var expected = TimeZoneInfo.ConvertTimeFromUtc(startsAt.UtcDateTime, tz)
             .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 
