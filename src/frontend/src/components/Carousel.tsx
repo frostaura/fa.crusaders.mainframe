@@ -71,19 +71,39 @@ export function Carousel({ slides, className }: { slides: CarouselSlide[]; class
             <ChevronRight size={18} />
           </button>
 
-          {/* Dots */}
-          <div className="flex justify-center gap-1.5 mt-3">
+          {/*
+            Dots.
+
+            The pill a reader sees is 6px tall, and the button around it is 24×24 — the two are
+            not the same thing. They were: each inactive dot was a 6 × 6 px hit target, 6px from
+            its neighbour, which is a quarter of the 24 × 24 WCAG 2.2 SC 2.5.8 asks for and well
+            under the design system's own touch guidance. At 375px these dots are the primary way
+            to move between chart slides, so the control a thumb has to hit was the smallest thing
+            on the screen. Keyboard users were already fine — the labels and the focus ring were
+            correct — which is exactly why this was invisible to anything but a thumb.
+
+            `no-lift` because a dot that jumps a pixel under the finger reads as a mis-tap; the
+            pill's own width change is the feedback.
+          */}
+          <div className="flex justify-center mt-1">
             {slides.map((s, i) => (
               <button
                 key={s.key}
                 type="button"
                 onClick={() => goTo(i)}
                 aria-label={`Go to slide ${i + 1}`}
-                className={cn(
-                  "h-1.5 rounded-full transition-all",
-                  i === active ? "w-6 bg-info-strong" : "w-1.5 bg-border hover:bg-text-muted",
-                )}
-              />
+                aria-current={i === active ? "true" : undefined}
+                data-testid="carousel-dot"
+                className="no-lift group w-6 h-6 flex items-center justify-center"
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "block h-1.5 rounded-full transition-all",
+                    i === active ? "w-4 bg-info-strong" : "w-1.5 bg-border group-hover:bg-text-muted",
+                  )}
+                />
+              </button>
             ))}
           </div>
         </>

@@ -140,7 +140,13 @@ export default function ProfilePage() {
             )}
             <span className={cn(
               "absolute inset-0 flex flex-col items-center justify-center gap-1 text-white text-xs font-medium",
-              "bg-black/40 transition-opacity",
+              // 40% was not enough scrim. White 12px text over it composited to rgb(153,153,153)
+              // on a mid-tone photo — 2.85:1, against the 4.5:1 floor. The photo underneath is a
+              // member's own upload and can be anything, so the alpha has to hold against the
+              // worst case: white text needs the composite at or below rgb(119,119,119), which
+              // over a pure-white photo means at least 53% black. 60% leaves margin (5.9:1) and
+              // still shows the face through it.
+              "bg-black/60 transition-opacity",
               uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100",
             )}>
               {uploading ? (

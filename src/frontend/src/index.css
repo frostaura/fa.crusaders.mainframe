@@ -84,13 +84,40 @@
     border-radius: inherit;
   }
 
+  /*
+   * Reduced motion, with the specificity to actually win.
+   *
+   * This block used to say `button:hover` — (0,1,1) — against a base rule of
+   * `button:not(:disabled):not([aria-disabled="true"]):hover`, which is (0,3,1). A media query
+   * adds no specificity, so the base rule won and the override did nothing: measured on a live
+   * page under `prefers-reduced-motion: reduce`, a hovered grid cell still reported
+   * `transform: matrix(1, 0, 0, 1, 0, -1)`. All the block achieved was dropping the transition to
+   * 1ms, so instead of easing 1px the element SNAPPED 1px — which is worse than the motion it was
+   * meant to remove.
+   *
+   * The selectors below are therefore the base rules' selectors, character for character. Equal
+   * specificity, later in the source, so this one wins. If a selector above changes, this has to
+   * change with it — which is why they sit next to each other rather than in separate files.
+   *
+   * The shadow goes too. It is not motion, but it is the other half of the lift, and half a lift
+   * reads as a rendering fault rather than as a hover state; the cursor, the background change
+   * and the focus ring are what still say "this can be pressed".
+   */
   @media (prefers-reduced-motion: reduce) {
     button, [role="button"], a[href], summary, label[for], select, [data-interactive] {
       transition-duration: 1ms;
     }
-    button:hover, [role="button"]:hover, a[href]:hover, summary:hover, [data-interactive]:hover,
-    button:active, [role="button"]:active, a[href]:active, [data-interactive]:active {
+    button:not(:disabled):not([aria-disabled="true"]):hover,
+    [role="button"]:not([aria-disabled="true"]):hover,
+    a[href]:hover,
+    summary:hover,
+    [data-interactive]:not([aria-disabled="true"]):hover,
+    button:not(:disabled):not([aria-disabled="true"]):active,
+    [role="button"]:not([aria-disabled="true"]):active,
+    a[href]:active,
+    [data-interactive]:not([aria-disabled="true"]):active {
       transform: none;
+      box-shadow: none;
     }
   }
 }

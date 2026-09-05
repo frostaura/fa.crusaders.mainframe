@@ -9,6 +9,7 @@ import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { Modal } from "../components/Modal";
+import { ScrollArea } from "../components/ScrollArea";
 import { useToast } from "../components/Toast";
 import { cn, formatCredits } from "../lib/utils";
 
@@ -296,25 +297,31 @@ export default function AdminMembersPage() {
         {filtered.length === 0 ? (
           <EmptyState loading={loading} hasFilters={search.trim().length > 0 || status !== "all"} />
         ) : (
-          <div className="overflow-x-auto">
+          // A ScrollArea, not a bare `overflow-x-auto`. At 375px this table shows Name and a
+          // truncated Email and nothing else — every other column, including all four actions, is
+          // off-screen behind a horizontal scroll whose scrollbar the app hides. A container that
+          // hides content without saying so is worse than one that does not hide it; this one
+          // fades at the edge, is focusable so the arrow keys can reach the rest, and tells a
+          // screen reader there is more.
+          <ScrollArea label="Members table">
             <table className="w-full text-sm">
               <thead className="bg-bg-muted/40 text-xs uppercase tracking-wide text-text-muted">
                 <tr>
-                  <th className="text-left px-4 py-3" style={{ width: 60 }}></th>
+                  <th className="text-left px-3 py-2.5" style={{ width: 60 }}></th>
                   <SortHeader label="Name" k="full_name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="text-left px-4 py-3">Class</th>
-                  <th className="text-right px-4 py-3">Balance</th>
+                  <th className="text-left px-3 py-2.5">Class</th>
+                  <th className="text-right px-3 py-2.5">Balance</th>
                   <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="text-right px-4 py-3">Actions</th>
+                  <th className="text-right px-3 py-2.5 whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {filtered.map((m) => (
                   <tr key={m.membership_id} className="hover:bg-bg-muted/30">
-                    <td className="px-4 py-3 align-middle">
+                    <td className="px-3 py-2.5 align-middle">
                       {m.photo_url ? (
                         <img
                           src={m.photo_url}
@@ -333,7 +340,7 @@ export default function AdminMembersPage() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
                         <p className="font-medium text-text-primary truncate max-w-[180px]" title={m.full_name}>{m.full_name}</p>
                         {biometrics[m.user_id]?.templates.length ? (
@@ -347,7 +354,7 @@ export default function AdminMembersPage() {
                       </div>
                       {m.rejection_reason && <p className="text-xs text-danger-strong truncate max-w-[260px]" title={m.rejection_reason}>{m.rejection_reason}</p>}
                     </td>
-                    <td className="px-4 py-3 text-text-secondary max-w-[200px]" title={m.email}>
+                    <td className="px-3 py-2.5 text-text-secondary max-w-[200px]" title={m.email}>
                       <p className="truncate">{m.email}</p>
                       {m.email_verified === false && (
                         <span
@@ -358,21 +365,30 @@ export default function AdminMembersPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-text-secondary">{m.membership_number}</td>
-                    <td className="px-4 py-3"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2.5 font-mono text-xs text-text-secondary">{m.membership_number}</td>
+                    <td className="px-3 py-2.5"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></td>
+                    <td className="px-3 py-2.5">
                       <MemberClassCell member={m} busy={busyId === m.membership_id} onChange={(next) => setMemberClass(m, next)} />
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                    <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
                       <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
                         {formatCredits(m.balance_credits)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-text-secondary whitespace-nowrap text-xs">
+                    <td className="px-3 py-2.5 text-text-secondary whitespace-nowrap text-xs">
                       {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col items-end gap-1">
+                    <td className="px-3 py-2.5">
+                      {/*
+                        The four row actions run ALONG the row, not down it.
+
+                        `flex-col` made each row 164.5px tall — six members filled roughly a
+                        thousand pixels of screen for four 32px buttons — and squeezed the column
+                        to the width of one icon, so the "Actions" header was the widest thing in
+                        it and hung past the edge of the scroll container. Sideways is both the
+                        shorter row and the honest column width.
+                      */}
+                      <div className="flex flex-row flex-wrap items-center justify-end gap-0.5">
                         {m.status === "PendingApproval" && (
                           <div className="flex gap-1.5">
                             <Button onClick={() => approve(m)} disabled={busyId === m.membership_id} className="h-9 px-3 text-xs">Approve</Button>
@@ -416,7 +432,7 @@ export default function AdminMembersPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollArea>
         )}
       </Card>
 
@@ -503,7 +519,7 @@ export default function AdminMembersPage() {
       {resetFor && resetResult && (
         <Modal onClose={() => { setResetFor(null); setResetResult(null); }} title="Temporary password generated">
           <p className="text-sm text-text-secondary">Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. The member should change it after signing in.</p>
-          <div className="my-4 px-4 py-3 rounded-lg border border-border bg-bg-muted font-mono text-base tracking-wider text-center select-all">
+          <div className="my-4 px-3 py-2.5 rounded-lg border border-border bg-bg-muted font-mono text-base tracking-wider text-center select-all">
             {resetResult.tempPassword}
           </div>
           <div className="flex justify-end gap-2">
@@ -709,7 +725,7 @@ function SortHeader({ label, k, sortKey, sortDir, onSort }: { label: string; k: 
   const active = sortKey === k;
   const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <th className="text-left px-4 py-3">
+    <th className="text-left px-3 py-2.5">
       <button type="button" onClick={() => onSort(k)} className={cn("inline-flex items-center gap-1 hover:text-text-primary", active && "text-text-primary")}>
         <span>{label}</span>
         <Icon size={12} className={cn(active ? "opacity-100" : "opacity-40")} />

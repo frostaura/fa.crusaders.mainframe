@@ -90,10 +90,33 @@ describe("the affordance every clickable surface shares", () => {
     expect(css).toMatch(/button:disabled[\s\S]{0,80}cursor:\s*not-allowed/);
   });
 
-  it("stands down for anyone who asked for less motion", () => {
-    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+  it("stands down for anyone who asked for less motion, and wins the specificity fight", () => {
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const reduced = bare.slice(bare.indexOf("@media (prefers-reduced-motion: reduce)"));
     expect(reduced).not.toBe("");
     expect(reduced).toMatch(/transform:\s*none/);
+    // The shadow is the other half of the lift. Removing one and leaving the other reads as a
+    // rendering fault rather than as a hover state.
+    expect(reduced).toMatch(/box-shadow:\s*none/);
+
+    // The assertion above used to be the whole test, and it passed while the override did
+    // nothing at all. It read `button:hover` — specificity (0,1,1) — against a base rule of
+    // `button:not(:disabled):not([aria-disabled="true"]):hover` — (0,3,1). A media query adds no
+    // specificity, so the base rule won every time: measured on a live page under
+    // `prefers-reduced-motion: reduce`, a hovered grid cell still reported
+    // `transform: matrix(1, 0, 0, 1, 0, -1)`, and because the transition had dropped to 1ms it
+    // now SNAPPED the pixel instead of easing it — worse than the motion being overridden.
+    //
+    // Parity is the fix, so parity is what is checked: every selector the lift rule uses has to
+    // appear, character for character, inside the reduced-motion block.
+    const lift = bare.match(/([^{}]*)\{\s*transform:\s*translateY\(-1px\)/);
+    expect(lift).not.toBeNull();
+    const liftSelectors = lift![1].split(",").map((s) => s.trim()).filter((s) => s.endsWith(":hover"));
+    expect(liftSelectors.length).toBeGreaterThan(1);
+    for (const selector of liftSelectors) {
+      expect(reduced, `reduced motion does not override "${selector}" at equal specificity`)
+        .toContain(selector);
+    }
   });
 
   it("reaches everything clickable, because nothing clickable is a bare div", () => {
@@ -125,6 +148,20 @@ describe("the affordance every clickable surface shares", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps white-on-scrim overlays legible over whatever photo is underneath", () => {
+    // The profile photo's hover overlay is white 12px text on `bg-black/40`. Over a mid-tone
+    // upload that composites to rgb(153,153,153) — 2.85:1, measured, against the 4.5:1 floor —
+    // and the image underneath is a member's own file, so it can be anything including white.
+    //
+    // The worst case is what the alpha has to survive. White text needs the composite at or
+    // below rgb(119,119,119); over a pure-white photo, `255 × (1 − a) ≤ 119` gives `a ≥ 0.53`.
+    // Hence the floor below, rather than a number chosen because it looked right on one avatar.
+    const profile = readFileSync(join(SRC, "pages", "Profile.tsx"), "utf8");
+    const scrims = [...profile.matchAll(/bg-black\/(\d+)/g)].map((m) => Number(m[1]));
+    expect(scrims.length).toBeGreaterThan(0);
+    for (const alpha of scrims) expect(alpha).toBeGreaterThanOrEqual(53);
   });
 
   it("does not buy the affordance back with contrast", () => {
