@@ -40,6 +40,8 @@ public sealed class SmtpEmailService : IEmailService
             Subject = message.Subject,
             Body = message.HtmlBody,
             IsBodyHtml = true,
+            // A real header, not a loud subject. See EmailMessage.HighPriority.
+            Priority = message.HighPriority ? MailPriority.High : MailPriority.Normal,
         };
         mail.To.Add(message.To);
         if (!string.IsNullOrWhiteSpace(message.PlainBody))

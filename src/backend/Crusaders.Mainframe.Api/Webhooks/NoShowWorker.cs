@@ -49,7 +49,53 @@ public sealed class NoShowWorker : BackgroundService
         IEmailService Email,
         Tenant Tenant,
         TenantSettingsView Settings,
-        DateTimeOffset Now);
+        DateTimeOffset Now)
+    {
+        /// <summary>
+        /// Which courts had no reachable box at which instant, for this tenant and this tick.
+        ///
+        /// <para>
+        /// An init property rather than a seventh constructor parameter: six is the gate, and
+        /// the reason above still holds — a method that wants eight arguments is doing two
+        /// things. Defaulted to <see cref="DeviceOutageIndex.Empty"/> so a caller that forgets
+        /// it charges penalties as before rather than waiving them all.
+        /// </para>
+        /// </summary>
+        public DeviceOutageIndex Outages { get; init; } = DeviceOutageIndex.Empty;
+    }
+
+    /// <summary>
+    /// What this sweep costs the member, in penalty.
+    ///
+    /// <para>
+    /// Zero rather than uncollected on an uncharged booking, so the email and the event quote
+    /// it as zero too — a penalty nobody was charged is not a penalty. Zero also when the
+    /// court's own box was unreachable: <c>feature-spec.md</c> §6a, <c>settlement-model.md</c>
+    /// S5a. Its own method because it is the one line of this worker a reviewer checking the
+    /// economics has to read, and because inlining it put <see cref="SweepOneAsync"/> past the
+    /// complexity gate.
+    /// </para>
+    /// </summary>
+    private static decimal PenaltyFor(Booking b, TenantSettingsView settings, bool wasCharged, bool courtWasDark)
+        => wasCharged && !courtWasDark
+            ? Math.Round(b.AmountChargedCredits * settings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero)
+            : 0m;
+
+    /// <summary>
+    /// What the member is told — §6a's "players in the affected window get an email explaining
+    /// the situation".
+    ///
+    /// <para>
+    /// The no-show notice says the member did not turn up and quotes a penalty. A member whose
+    /// court had no reachable box may have been standing in front of it, so they get the reason
+    /// instead of the accusation.
+    /// </para>
+    /// </summary>
+    private static EmailMessage Notice(
+        string to, string courtName, string clubName, decimal netRefund, decimal penalty, bool courtWasDark)
+        => courtWasDark
+            ? EmailTemplates.BookingRefundedForOutage(to, courtName, netRefund, clubName)
+            : EmailTemplates.BookingCancellation(to, courtName + " (no-show)", netRefund, penalty);
 
     /// <summary>
     /// Reverses one no-show: refund, penalty, status, notification, event.
@@ -90,11 +136,22 @@ public sealed class NoShowWorker : BackgroundService
         // paid out 70% of the booking value.
         var wasCharged = b.ChargedAt is not null;
 
-        // Zero rather than uncollected, so the email and the event quote it as zero
-        // too — a penalty nobody was charged is not a penalty.
-        var penalty = wasCharged
-            ? Math.Round(b.AmountChargedCredits * tSettings.PenaltyPct / 100m, 2, MidpointRounding.AwayFromZero)
-            : 0m;
+        // feature-spec.md §6a / settlement-model.md S5a: a booking whose court had no reachable
+        // box when its grace window closed is refunded in full with NO penalty. Owed(b) = 0.
+        //
+        // The instant asked about is the grace DEADLINE, not the slot start, and that is the
+        // whole of the rule: a box that reconnected before the deadline uploads the events it
+        // queued through the outage, so if the member did play we already know it and this
+        // booking is not due at all. A box still dark at the deadline is one whose evidence had
+        // no path home — the member may have been standing at an unlit court, and charging them
+        // 30% for the club's own hardware is the club billing a member for its outage.
+        //
+        // This does not make a played court free (invariant I2): if the court WAS lit, the box
+        // holds an activation, and when it reconnects that reverses the sweep to S6 and Owed
+        // returns to the full price. The waiver only ever removes the penalty leg.
+        var courtWasDark = sweep.Outages.CourtWasDark(b.CourtId, b.StartsAt.AddMinutes(tSettings.GraceWindowMinutes));
+
+        var penalty = PenaltyFor(b, tSettings, wasCharged, courtWasDark);
 
         var postings = new List<LedgerPosting>(2);
         if (wasCharged && b.AmountChargedCredits > 0)
@@ -199,7 +256,8 @@ public sealed class NoShowWorker : BackgroundService
         {
             try
             {
-                await email.SendAsync(EmailTemplates.BookingCancellation(user.Email, courtName + " (no-show)", netRefund, penalty), ct);
+                await email.SendAsync(
+                    Notice(user.Email, courtName, tenant.DisplayName, netRefund, penalty, courtWasDark), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show email failed for {BookingId}", b.Id); }
         }
@@ -217,6 +275,9 @@ public sealed class NoShowWorker : BackgroundService
                 ["user_id"] = b.UserId,
                 ["penalty_credits"] = penalty,
                 ["refund_credits"] = netRefund,
+                // True when the penalty was waived because the court's box was unreachable
+                // (§6a). A club reconciling its no-show revenue needs to tell the two apart.
+                ["peripheral_outage"] = courtWasDark,
             }), ct);
     }
 
@@ -251,6 +312,10 @@ public sealed class NoShowWorker : BackgroundService
             // (and, before the refund guard below, mass-refund them) on the first tick.
             var lookbackFloor = now.AddDays(-tSettings.NoShowLookbackDays);
 
+            // Once per tenant, not once per booking. Covers exactly the span the sweep can
+            // still reach, so a long-closed outage costs nothing to carry.
+            var outages = await DeviceOutageIndex.BuildAsync(db, lookbackFloor, ct);
+
             var dueNoShow = await db.Bookings
                 .Where(b => b.Status == BookingStatus.Booked
                     && b.CheckedInAt == null
@@ -261,7 +326,7 @@ public sealed class NoShowWorker : BackgroundService
 
             foreach (var b in dueNoShow)
             {
-                await SweepOneAsync(new Sweep(db, ledger, email, tenant, tSettings, now), b, ct);
+                await SweepOneAsync(new Sweep(db, ledger, email, tenant, tSettings, now) { Outages = outages }, b, ct);
             }
 
             // The postings above already saved each booking's status. This catches anything

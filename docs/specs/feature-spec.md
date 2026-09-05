@@ -109,7 +109,12 @@ Class is admin-assignable and editable, audit-logged on every change.
   4. If attendance evidence arrives *after* the no-show was finalized — an `activation` event a box queued through an outage — the sweep is **reversed**: the booking returns to the attended state and `Owed(b)` returns to the full price, so the member is neither refunded nor penalised for a court they played. `settlement-model.md` §2, S6. (This is the C2/C6 pair: the earlier behaviour left a member who had played both refunded *and* penalised.)
 - **Stand-in / different player at the court:** if biometric-matches a player who does NOT have the booking, the system rejects the lights-on. UI on the courtside terminal shows "No active booking for this user." Admin can override at the tenant console.
 - **Lights stay on for the duration of the booked slice(s).** End-of-slice signals the lights to turn off; if the booking is back-to-back, lights stay on through the boundary.
-- **Peripheral failure mode:** if the device is unreachable, all bookings during the outage are auto-credited (no penalty); admin gets a high-priority alert; players in the affected window get an email explaining the situation.
+- **Peripheral failure mode.** A box is *unreachable* when it has not heart-beaten for longer than `offline_after_seconds` — the same threshold the Devices page reads, derived from the club's own `heartbeat_seconds`. `PeripheralHealthWorker` sweeps for it, and three things follow:
+  1. **The club's admins get a high-priority alert** — a real `X-Priority: 1` mail naming the box and the courts it drives, plus a `peripheral.unhealthy` webhook. Once per outage, and a `peripheral.recovered` when it comes back.
+  2. **No penalty is charged for a booking the outage covered.** A booking whose court had no reachable box *at the moment its grace window closed* is refunded in full and charged nothing: `Owed(b) = 0`, `settlement-model.md` S5a. That is this clause's "auto-credited (no penalty)".
+  3. **The affected players are told why** — a distinct email that explains the controller was offline, states the full refund and says no penalty was taken. Not the no-show notice: a member standing at a dark court has not failed to turn up.
+- **What §6a does *not* mean, and why.** It does **not** mean every booking in the outage window is cancelled and refunded on sight. The box is built to survive losing its uplink — it lights courts from its cached roster and queues the activations (see 4 above) — so "unreachable from the API" is not "the member was locked out". Refunding a court that was played would break `settlement-model.md` I2 and pay out for electricity the club burned. The refund therefore rides the no-show sweep, which is the only point at which the system concludes that nobody played; and if the box was in fact lighting courts, its queued activations arrive on reconnect, reverse the sweep, and `Owed(b)` returns to the full price with no penalty either way (S6).
+- **Why the grace deadline is the instant that decides it.** A box that reconnected before the deadline has already uploaded whatever it queued through the outage — so if the member played, we know, and the booking never reaches the sweep. A box still dark at the deadline is one whose evidence had no path home.
 
 ## 7. Cancellations
 - A player can cancel any of their own bookings from the app.
@@ -173,17 +178,38 @@ See `webhooks.md` for delivery mechanics. Player- or admin-configurable per tena
 - `member.approved`
 - `member.rejected`
 - `member.suspended`
+- `member.reactivated`
 - `booking.created`
 - `booking.cancelled`
 - `booking.no_show`
+- `booking.no_show_reversed`
 - `booking.late_cancellation`
 - `booking.lights_on`
+- `booking.lights_off`
 - `booking.completed`
+- `booking.displaced`
+- `booking.displacement_reversed`
+- `booking.cancelled_lights_charged`
 - `credit.topped_up`
 - `credit.refunded`
 - `credit.penalty_applied`
 - `credit.adjusted`
-- `peripheral.unhealthy` — **specified, not emitted in v1.** Nothing can put a device into the `Faulted` state that would fire it. `BiometricDeviceState.Faulted` exists on the abstraction and no driver ever sets it: the only implementation is `NullBiometricDevice`, and the shipped court box is pull-only with no `/health` endpoint to poll — the polling design in `lights-controller.md` is marked Superseded for that reason. So the class is kept as a reserved name and the event picker deliberately does not offer it, because a filter an admin can select and then wait on forever is worse than one that is absent. Reinstating it needs a real peripheral driver, or a device-side liveness signal, first. `GET /admin/reports/peripheral-health` is not a substitute and does not fill the gap: it reports 24-hour webhook-delivery and biometric-match counts, never a device state.
+- `peripheral.unhealthy` — a court box has stopped heart-beating for longer than `offline_after_seconds` (`HeartbeatCadence`, derived from the club's own `heartbeat_seconds`). Fires **once per outage**, not once per sweep, and carries the box, its MAC, the courts it drives and how long it has been silent. `PeripheralHealthWorker`.
+- `peripheral.recovered` — the same box called in again. Carries the outage's length.
+
+**On `peripheral.unhealthy`, and a correction.** This class was previously marked "specified,
+not emitted in v1", on the grounds that reinstating it "needs a real peripheral driver, or a
+device-side liveness signal, first". **The second half of that was false**, and it was believed
+for a round. The liveness signal exists and the product already used it: the court box PUSHES
+`POST /api/v1/device/heartbeat`, which writes `Device.LastSeenAt`; `HeartbeatCadence` already
+computed the threshold; `DeviceView` already shipped it as `offline_after_seconds`; and the
+admin Devices page already rendered "offline" from it. The only missing piece was a sweep. The
+*first* half remains true and is a different thing: `BiometricDeviceState.Faulted` is still set
+by no driver, because `NullBiometricDevice` is the only implementation — so this event means
+"the box is not reporting", never "the reader is faulty". A fingerprint reader that fails while
+its box keeps heart-beating is still invisible, and will be until a driver exists. `GET
+/admin/reports/peripheral-health` remains a counts report (24-hour webhook-delivery and
+biometric-match totals), not a device state.
 
 The destination of an endpoint is guarded against SSRF (`webhooks.md`), with a carve-out
 for LAN consumers. **That carve-out is deployment configuration and has no admin screen,

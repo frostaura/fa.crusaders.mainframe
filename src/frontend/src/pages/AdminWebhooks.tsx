@@ -26,6 +26,16 @@ const ENVELOPE_VARS = [
 const MEMBER_VARS = ["membership_id", "user_id", "full_name", "membership_number", "status", "member_class"];
 
 /**
+ * Both `peripheral.*` events carry the same box, so one URL template works for either. The
+ * court numbers are on it because that is what an admin acts on: a dark box on courts 1 and 2
+ * means two courts nobody can light.
+ */
+const PERIPHERAL_VARS = [
+  "device_id", "device_code", "device_name", "mac_address", "court_numbers",
+  "last_seen_at", "unreachable_since", "silent_minutes", "offline_after_seconds",
+];
+
+/**
  * The events the bus actually emits.
  *
  * <p>
@@ -33,8 +43,9 @@ const MEMBER_VARS = ["membership_id", "user_id", "full_name", "membership_number
  * event offered here that nothing fires is a filter an admin can select and then wait on
  * forever. Nine classes were missing from this picker at once, including the whole member
  * lifecycle, which is why an admin could not get a webhook on the one thing they most
- * wanted one for. `peripheral.unhealthy` is in the spec and deliberately absent here:
- * nothing can currently put a device into the faulted state that would fire it.
+ * wanted one for. `peripheral.unhealthy` was the last of the nine, absent on the stated
+ * grounds that nothing could detect an unreachable box. That was false — the box PUSHES a
+ * heartbeat and `PeripheralHealthWorker` sweeps it — so both peripheral classes are here.
  * </p>
  */
 const EVENTS: EventDef[] = [
@@ -151,6 +162,18 @@ const EVENTS: EventDef[] = [
     label: "Member suspended",
     description: "An admin suspended a member — access revoked, credit and bookings untouched.",
     vars: [...MEMBER_VARS, "reason"],
+  },
+  {
+    name: "peripheral.unhealthy",
+    label: "Court box unreachable",
+    description: "A court box stopped sending its heartbeat for longer than the club's offline threshold. Fires once per outage, not once per check.",
+    vars: PERIPHERAL_VARS,
+  },
+  {
+    name: "peripheral.recovered",
+    label: "Court box back online",
+    description: "A court box that had gone quiet started heart-beating again. Says how long the outage lasted.",
+    vars: [...PERIPHERAL_VARS, "recovered_at", "outage_minutes"],
   },
   {
     name: "member.reactivated",

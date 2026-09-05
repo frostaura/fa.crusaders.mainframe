@@ -98,13 +98,16 @@ describe("AdminWebhooks", () => {
       "credit.topped_up", "credit.refunded", "credit.penalty_applied", "credit.adjusted",
       "member.registered", "member.approved", "member.rejected",
       "member.suspended", "member.reactivated",
+      // The last of the nine, reinstated. It was absent because §9 asserted no liveness
+      // signal existed; the box pushes a heartbeat and PeripheralHealthWorker sweeps it.
+      "peripheral.unhealthy", "peripheral.recovered",
     ]) {
       expect(await screen.findByRole("button", { name: new RegExp(`^${name.replace(".", "\\.")}$`) })).toBeInTheDocument();
     }
 
     // And nothing the bus cannot fire: an event offered here that nothing emits is a filter
     // an admin can select and then wait on forever.
-    expect(screen.queryByRole("button", { name: /peripheral\.unhealthy/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /peripheral\.faulted/ })).not.toBeInTheDocument();
   });
 
   /**
@@ -148,6 +151,20 @@ describe("AdminWebhooks", () => {
         screen.queryByRole("button", { name: new RegExp(`^${name.replace(".", "\\.")}$`) }),
         `${name} is marked not-emitted in feature-spec.md §9 but the picker offers it anyway`,
       ).toBeNull();
+    }
+
+    // The direction the first version of this test could not see, and the one that had six
+    // real classes hiding in it: booking.lights_off, booking.no_show_reversed,
+    // booking.displaced, booking.displacement_reversed, booking.cancelled_lights_charged and
+    // member.reactivated were all offered here and absent from §9, so the catalogue a club
+    // integrates against was six events short while the gate stayed green.
+    const stated = new Set([...promised, ...reserved]);
+    const offered = Array.from(document.querySelectorAll("button"))
+      .map((b) => b.textContent?.trim() ?? "")
+      .filter((t) => /^[a-z]+\.[a-z_]+$/.test(t));
+    expect(offered.length).toBeGreaterThan(10);
+    for (const name of offered) {
+      expect(stated.has(name), `${name} is offered by the picker but feature-spec.md §9 never names it`).toBe(true);
     }
   });
 

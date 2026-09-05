@@ -27,6 +27,7 @@ public class MainframeDbContext : DbContext
     public DbSet<Court> Courts => Set<Court>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<DeviceEventReceipt> DeviceEventReceipts => Set<DeviceEventReceipt>();
+    public DbSet<DeviceOutage> DeviceOutages => Set<DeviceOutage>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<LedgerEntry> LedgerEntries => Set<LedgerEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -294,6 +295,27 @@ public class MainframeDbContext : DbContext
             // that has just been switched on arrive together, both find nothing, and the
             // club ends up with two rows for one board.
             e.HasIndex(d => new { d.TenantId, d.MacAddress }).IsUnique();
+        });
+
+        modelBuilder.Entity<DeviceOutage>(e =>
+        {
+            e.ToTable("device_outages");
+            e.HasKey(o => o.Id);
+            e.HasQueryFilter(o => o.TenantId == _tenant.TenantId);
+
+            // At most one OPEN outage per box. The health sweep's "have I already alerted for
+            // this outage?" check is a read followed by a write, and two ticks overlapping —
+            // a slow one and its successor — would otherwise both find nothing and both open a
+            // row, alerting the club twice and leaving two windows for the no-show waiver to
+            // read. The filter is what makes it a uniqueness rule about the PRESENT: closed
+            // outages accumulate freely, which is the history the waiver needs.
+            e.HasIndex(o => new { o.TenantId, o.DeviceId })
+                .IsUnique()
+                .HasFilter("\"EndedAt\" IS NULL");
+
+            // The no-show waiver's lookup: this tenant's outages overlapping a booking's grace
+            // window. Without it every swept booking table-scans the outage history.
+            e.HasIndex(o => new { o.TenantId, o.StartedAt });
         });
 
         modelBuilder.Entity<DeviceEventReceipt>(e =>

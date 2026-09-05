@@ -44,6 +44,7 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `member.approved` | Admin approves a pending member |
 | `member.rejected` | Admin rejects a pending member |
 | `member.suspended` | Admin suspends a member |
+| `member.reactivated` | Admin lifts a suspension |
 | `booking.created` | A booking is committed |
 | `booking.cancelled` | A booking is cancelled (free) |
 | `booking.late_cancellation` | A booking is cancelled inside the penalty window |
@@ -59,7 +60,8 @@ The court lights are switched by the court box itself — an ESP8266 bridge and 
 | `credit.refunded` | A cancellation/no-show ledger entry is written |
 | `credit.penalty_applied` | A penalty ledger entry is written |
 | `credit.adjusted` | An admin issues a manual adjustment |
-| `peripheral.unhealthy` | **Reserved — nothing emits this in v1.** No driver ever sets `BiometricDeviceState.Faulted` (`NullBiometricDevice` is the only implementation and reports `Connected` unconditionally), and the shipped court box is pull-only with no `/health` endpoint to poll — the polling design that would have fired it is in `lights-controller.md`, which is Superseded. The event picker deliberately does not offer it. See `feature-spec.md` §9. |
+| `peripheral.unhealthy` | A court box has not heart-beaten for longer than `offline_after_seconds`. Fires **once per outage**, from `PeripheralHealthWorker`. It means "the box is not reporting" — never "the reader is faulty": `BiometricDeviceState.Faulted` is still set by no driver, so a fingerprint reader failing behind a healthy box remains invisible. See `feature-spec.md` §6a and §9. |
+| `peripheral.recovered` | The same box called in again; carries how long the outage lasted |
 | `webhook.test` | The "send test ping" button is clicked |
 
 ## Payload shape

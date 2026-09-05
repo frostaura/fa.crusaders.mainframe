@@ -48,6 +48,7 @@ inside that sum, not outside it (§6).
 | S3 | `Cancelled` before check-in, **inside** the penalty window | `penalty = round(P × PenaltyPct/100, 2)` |
 | S4 | `Cancelled` after check-in | `P` — nothing back once the lights have been on |
 | S5 | `NoShow` — swept, no attendance evidence | `noShowPenalty = round(P × PenaltyPct/100, 2)` |
+| S5a | `NoShow` — swept while the court's own box was unreachable | `0` — refunded in full, no penalty (`feature-spec.md` §6a) |
 | S6 | `NoShow` reversed by late attendance evidence | `P` (returns to S1) |
 | S7 | S2/S3 **and** the court was later lit on this booking's own code | `min(P, priorOwed + proRata(litMinutes))` |
 | S8 | **Displaced** (`ResoldTailRefunded`) | `0`, unconditionally |
@@ -56,6 +57,13 @@ inside that sum, not outside it (§6).
 S7 is the only state that composes: the retained late-cancellation penalty of S3 is *part of*
 what the member has already been billed, so the lit-time charge is netted against it and the
 total is capped at `P`.
+
+S5a is S5 with the penalty leg removed, not a separate path: the same sweep, the same refund,
+the same row count minus one. It composes with S6 without special-casing, because the reversal
+reads the penalty **actually posted** (I3, `penalised = −Σ NoShowPenalty rows`) rather than
+recomputing it from settings — a waived penalty is `penalised = 0`, `penaltyBack = 0`, and
+`Owed` returns cleanly to `P`. It does not weaken I2 either: a court that was lit holds an
+activation on the box, and that activation arriving is exactly what turns S5a into S6.
 
 ---
 
@@ -234,6 +242,7 @@ booking, so it is paired by device, relay and time:
 | Cancel, no check-in, inside window | — | `CancellationRefund +P` **and** `LateCancellationPenalty −penalty`, one save, never netted. `Owed = penalty`. |
 | Cancel after check-in | — | nothing posted. `Owed = P`. |
 | No-show sweep | `Booked`, no `CheckedInAt`, past grace | `CancellationRefund +P`, `NoShowPenalty −penalty`, `EndsAt := now`, `Status := NoShow`. `Owed = penalty`. |
+| No-show sweep, court's box unreachable at the grace deadline | as above **and** an open or closed `DeviceOutage` covering that instant for a box driving the court | `CancellationRefund +P` only — no penalty leg (I10 forbids the zero row). `EndsAt := now`, `Status := NoShow`. `Owed = 0`. |
 | Late activation on a `NoShow` | scan ≥ cue open (I7) | `CancellationRefund −refundBack`, `NoShowPenalty +penaltyBack` (I3), `Status := Booked`, `CheckedInAt := scan`, `NoShowReversedAt := now`, `EndsAt := provisional litEnd` (I8), displacement (I9). `Owed = P`. |
 | Late activation on a `Cancelled` row | scan ≥ cue open (I7); **not** displaced (I5); no `CheckedInAt` | `LightsPurchase −min(proRata(litMinutes), P − retainedPenalty)` (I1, I6). `Owed ≤ P`. |
 | Late activation on a **displaced** row | — | nothing posted; audit `device.activation_displaced_collision`. `Owed = 0`. |
@@ -277,6 +286,7 @@ Recorded here rather than left for the next reviewer to rediscover.
 | Rule | Code |
 | --- | --- |
 | S1–S5, I11 | `Services/BookingService.cs` — `CreateAsync`, `CommitAsync`, `SettleCancellation`, `CancelAsync`; `Webhooks/NoShowWorker.cs` — `SweepOneAsync` |
+| S5a | `Webhooks/NoShowWorker.cs` — `SweepOneAsync` (`courtWasDark`); `Services/DeviceOutageIndex.cs`; `Webhooks/PeripheralHealthWorker.cs` writes the evidence |
 | S6, I3, I8, I9, I10, I12 | `Services/BookingService.cs` — `ReverseNoShowAsync`, `SettledLegsAsync`, `DisplacementAsync`, `RestoreEnd`, `ReinstateDisplacedAsync` |
 | S7, I1, I6 | `Services/BookingService.cs` — `ChargeLitCancelledBookingAsync`, `SettleReleaseAsync`; `Endpoints/DeviceEventEndpoints.cs` — `LitWindow` |
 | S8, I5 | `Services/BookingService.cs` — `ChargeLitCancelledBookingAsync` guard, `ExpireCodes`; `Endpoints/DeviceEventEndpoints.cs` — displaced-collision audit |
@@ -284,5 +294,5 @@ Recorded here rather than left for the next reviewer to rediscover.
 | I7 | `Endpoints/DeviceEventEndpoints.cs` — `SettleAsync`; `Services/CourtActivationService.cs` — `ActivateAsync` |
 | §4 pairing | `Endpoints/DeviceEventEndpoints.cs` — `ReleaseOutcomeAsync` |
 
-Pinning tests: `NoShowWorkerTests`, `DeviceEventHttpTests`, `WalkUpBookingTests`,
-`ConcurrentDecisionTests`, `SettlementModelTests`.
+Pinning tests: `NoShowWorkerTests`, `PeripheralHealthTests`, `DeviceEventHttpTests`,
+`WalkUpBookingTests`, `ConcurrentDecisionTests`, `SettlementModelTests`.

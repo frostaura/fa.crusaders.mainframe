@@ -428,6 +428,38 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("device_event_receipts", (string)null);
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.DeviceOutage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("DetectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DeviceId")
+                        .IsUnique()
+                        .HasFilter("\"EndedAt\" IS NULL");
+
+                    b.HasIndex("TenantId", "StartedAt");
+
+                    b.ToTable("device_outages", (string)null);
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.EnrolledTemplate", b =>
                 {
                     b.Property<Guid>("Id")
