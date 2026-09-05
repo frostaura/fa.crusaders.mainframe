@@ -10,9 +10,10 @@ adapts to the hardware, never the reverse.
 
 ## Flashing — the whole procedure
 
-Both halves are flashed over USB. There is no over-the-air path: one club, one
-box, and the person holding the screwdriver is the person who knows the WiFi
-password. A password change is a reflash, and a reflash is the four commands
+Both halves are flashed over USB. There is no over-the-air path, no discovery,
+no claim code and no provisioning call: one club, one box, and the person
+holding the screwdriver is the person who knows the WiFi password and holds the
+API key. Changing any of them is a reflash, and a reflash is the four commands
 below.
 
 **Prerequisites, once per machine**
@@ -32,9 +33,27 @@ handled by the system. Only if **no** `/dev/cu.*` port ever appears:
 cp src/iot/src/common/secrets.h.example src/iot/src/common/secrets.h
 ```
 
-Fill in `WIFI_SSID` and `WIFI_PASSWORD`. It is gitignored, and the bridge
-**refuses to compile without it** — an image that joins an empty SSID looks
-identical to a working one until it is screwed to a wall.
+Fill in all four values. It is gitignored, and the bridge **refuses to compile
+without it** — `#error` on a missing value, `static_assert` on an empty one,
+because an image with a blank in it looks identical to a working one until it is
+screwed to a wall.
+
+| Value | What it is |
+|---|---|
+| `WIFI_SSID` / `WIFI_PASSWORD` | The club WiFi. The box takes a DHCP lease; there is no static-IP option and there must not be one. |
+| `API_BASE_URL` | The backend's **LAN** address and port, no trailing slash — e.g. `http://192.168.1.10:8088`. |
+| `DEVICE_API_KEY` | The tenant's device API key, from the admin Devices page. It goes out as `Authorization: Bearer <key>` on every call. |
+
+**Why there is a key at all when both ends are on the club LAN.** The box and
+the backend do sit on the same network, and the box never leaves it. But the
+backend's public surface is a Cloudflare tunnel — that is how members book and
+how the admin controls and monitors the club remotely, and the SPA reaches the
+same API through it. So `/api/v1/device/*` is reachable from the internet, and
+the key is what stands in front of it. Nothing in this firmware assumes the box
+is ever off the LAN, and nothing assumes the API is LAN-only.
+
+Regenerating the key on the Devices page invalidates the old one **immediately**,
+so a regeneration is a reflash and has to be planned as one.
 
 **Flash**
 
@@ -63,22 +82,29 @@ below, which is the wiring sheet's and is hardware truth:
 |---|---|
 | After `make flash-mega`, run DIPs | `CRUSADERS COURTS / SCAN TO START` — the Mega's own idle text, and proof the Mega is alive |
 | During `make flash-bridge` and the monitor | **Nothing new.** DIP 1 and 2 are off, so the ESP's UART is on the USB socket and the Mega is not on the other end of it. Watch the monitor, not the glass. |
-| Run DIPs restored, box not yet claimed | `CLAIM CODE <8 hex>` — type it into the admin Devices screen to connect the board |
-| Run DIPs restored, box already claimed | `CONNECTED / SCAN TO START` |
+| Run DIPs restored, box on the WiFi | `CONNECTED / SCAN TO START` — and the box appears on the admin Devices page by itself within one heartbeat, with its court numbers against it |
+| Run DIPs restored, box **not** on the WiFi | `CRUSADERS COURTS / SCAN TO START` — the two halves are talking and the radio is not. Check the SSID and password. |
 
 The identity screen is painted at the end of `setup()` and again on the first
 `!PONG` the bridge gets from the Mega, which is the first moment the glass is
 reachable after a DIP change. If it never appears, the two halves are not
 talking: check DIP 1 and 2.
 
-**Rotating the club WiFi password** — change `secrets.h`, `make flash-bridge`,
-restore the run DIPs. That is the whole of it. Nothing is stored on the box, so
-nothing can be left holding a credential nobody can see.
+**Rotating the WiFi password, the API key or the base URL** — change
+`secrets.h`, `make flash-bridge`, restore the run DIPs. That is the whole of it
+for all three. No credential is stored on the box, so nothing can be left
+holding one nobody can see.
+
+**Firmware version history** lives in the comment at the top of
+`platformio.ini`. The current image is **2.0.0**, a contract break: request
+signing, the discovery beacon, claim codes, provisioning, the device clock and
+the flash credential store are all gone, replaced by the bearer key above and
+the box's MAC in each request body.
 
 ## Why the logic lives on the ESP8266
 
-The ESP8266 is the half with a network stack, a clock and enough RAM to hold a
-roster. The Mega is 8 KB of SRAM driving relays. So the split is deliberate:
+The ESP8266 is the half with a network stack and enough RAM to hold a roster.
+The Mega is 8 KB of SRAM driving relays. So the split is deliberate:
 
 | | ATmega2560 | ESP8266 |
 |---|---|---|
@@ -91,8 +117,10 @@ and no GPIO reaches the Mega's RESET pin. Adding one would be a wiring change.
 The ESP *could* have taken over-the-air updates and did until firmware 1.2.0;
 that was removed along with image signing and the runtime credential store,
 because a fleet update mechanism for one box is a way for the box to break
-itself and nothing else. The Mega's firmware is designed to almost never need
-reflashing, and the ESP's now needs it about as rarely.
+itself and nothing else. Firmware 2.0.0 finished the job — request signing, the
+discovery beacon, claim codes and the device clock went the same way, for the
+same reason. The Mega's firmware is designed to almost never need reflashing,
+and the ESP's now needs it about as rarely.
 
 The Mega's auto-off timer is independent on purpose: if the ESP hangs, the WiFi
 drops and the backend dies, **the lights still go off**. In the system this
@@ -196,8 +224,7 @@ lib/           shared modules — PURE, no Arduino headers, host-compilable
   courtlogic/  the Mega's behaviour: auto-off timer, debounce, scan framing,
                auth window, frame dispatch — everything main.cpp does NOT do
   protocol/    Mega <-> ESP serial codec
-  discovery/   UDP beacon, claim commitment, announce schedule
-  devcrypto/   SHA-256 / HMAC / HKDF / request signer
+  devcrypto/   lowercase hex encode/decode
   roster/      who may open which court, cached and age-limited
   eventq/      what the box DID, queued until the API can hear about it
   court/       what a scan means; the button map; the walk-up pad
@@ -205,7 +232,8 @@ lib/           shared modules — PURE, no Arduino headers, host-compilable
                online-then-roster scan flow, walk-up request + nonce,
                `!STATE` reconciliation — everything court_bridge/main.cpp
                does NOT do
-  devapi/      signed requests, response policy, and a heapless JSON scanner
+  devapi/      the bearer header, the response-status policy, and a heapless
+               JSON scanner
   fwversion/   the FW_VERSION_* string, alone so either half can carry it
   arduino_hal/ real drivers (AVR / ESP)   ← the ONLY place Arduino headers live
   posix_hal/   host drivers, for the simulator
@@ -284,12 +312,14 @@ with `now >= expiresAt` (false for 49.7 days after the wrap, so the relay was
 never released). `make lint-iot` greps for raw comparisons against any
 `*deadline` / `*expires` / `*AtMs` identifier outside `lib/timebase`.
 
-The same rule reaches the API clock. `devapi::DeviceClient` holds a Unix
-*offset* and adds the box's uptime to it, and it takes that uptime as the
-64-bit `tb::Uptime64` value the composition root keeps — a `uint32_t` there
-was the wrap re-entering through the clock path at day 49.7 (every signed
-timestamp jumped back 49.7 days, and a healthy box "corrected" a clock that
-was never wrong).
+The same rule reaches the wire. The heartbeat's `uptime_ms` and both `uptime_ms`
+fields on an events batch are rendered from the 64-bit `tb::Uptime64` value the
+composition root keeps (`bridgelogic::renderHeartbeatBody`,
+`bridgelogic::renderEventBody`) — a `uint32_t` anywhere on that path is the wrap
+re-entering through the API at day 49.7, and it used to be: an activation queued
+before the wrap and uploaded after it went up stamped 49.7 days ahead of its own
+batch. The box carries **no clock at all** any more; the server dates an event
+from the difference between those two uptimes.
 
 ## The button window: who may press what
 
@@ -325,22 +355,21 @@ A scan on a box that can reach the API **asks the API first**
 (`POST /api/v1/device/activate`), because only the API knows about a booking made
 thirty seconds ago, a walk-up member with no booking, or a balance too low to admit.
 Its answer — a grant or a refusal — is final; the roster is never asked for a
-second opinion. When the API cannot be asked (no link, no clock, **no court list
-yet**, the circuit breaker open, a transport failure, a 5xx, a malformed 200) the
+second opinion. When the API cannot be asked (no link, **no court list yet**,
+the circuit breaker open, a transport failure, a 5xx, a malformed 200) the
 scan is decided **on the box**, from the roster cache the heartbeat fills, in
 microseconds — so a router reboot is a slower scan, not a dark court. The flow is
 `lib/bridgelogic/ScanFlow`.
 
 Three details of that flow that were each a review finding:
 
-- **The first heartbeat goes out the moment the WiFi link comes up** (and again
-  the moment a signed OFFER seeds the clock on a box with no court list), not
-  30 s after boot. Until it has answered, `court_numbers` is empty and the box is
+- **The first heartbeat goes out the moment the WiFi link comes up**, not 30 s
+  after boot. Until it has answered, `court_numbers` is empty and the box is
   *not* online: a scan is refused locally from the roster rather than recorded as
   attendance server-side and then refused at the box because the granted court
   maps to nothing.
 - **A circuit breaker** (`lib/bridgelogic/ApiBreaker`) sits in front of every
-  signed call. Two consecutive transport failures — the request never completed,
+  API call. Two consecutive transport failures — the request never completed,
   or a 5xx — and the API is judged down for a backoff window of 15 s, doubling to
   a cap of 120 s while it stays down. While open, scans go straight to the roster
   and the event drain waits; the heartbeat keeps its cadence and is the probe.
@@ -418,39 +447,25 @@ the member did not earn. Visible in the ledger, reversible by an admin, and in t
 go-live checklist. The **sequence number** does persist, in blocks of 64 — that is
 what the API's deduplication rests on, and reusing one loses a real event.
 
-## The discovery OFFER and the clock
-
-A provisioned box adopts the API's clock from a *signed* discovery OFFER — that
-is how a power-cycled board recovers its clock without a call. But the OFFER is
-bound to a per-**boot** nonce, so one captured today verifies all week, and a
-replayed one used to set the clock *back* to the capture instant; two 401s
-later the box read its own rewound clock as a dead credential. The rule is now
-`devapi::DeviceClient::adoptOfferTime`: an OFFER **seeds** a box with no clock,
-**moves a known clock forward** by up to the skew window (90 s), and is
-**ignored and counted** when its time is behind the clock or further ahead than
-that. OFFERs never touch the two-strike reprovision counter; that counter is
-evidence about the credential, gathered from signed 401s only.
-
 ## What the box keeps in flash
 
-Two things, and only because losing either would make the box re-provision
-itself every time the breaker trips:
+**One record: the event queue's sequence high-water mark.** Everything else that
+used to live there — the device id, the device key, the tenant slug, the API
+base URL, the WiFi credential — is compiled into the image from `secrets.h`, so
+a change to any of them is a reflash and there is nothing on the box that can go
+stale, be left holding a credential nobody can see, or disagree with the image.
 
-- **The device credential** — the id and key the claim flow returns, stored as
-  two records because a 32-byte key is 64 hex characters and the store's value
-  cap was 32 when it was written. Both halves and the id must load or the box
-  treats itself as unclaimed; half a key signs every request wrongly and reads
-  back as a revoked credential.
-- **The API base URL** (`api_base`, up to 120 characters), learned from the
-  discovery OFFER or from provisioning. The old `api_url` record was silently
-  capped at 32, which is why a DNS-named advertised base used to fail discovery
-  with nothing on the glass. A box that only holds the old record still boots
-  off it; a URL that will not fit paints `API URL TOO LONG` rather than being
-  truncated, because half a URL is a request to somewhere else.
+The sequence mark earns its place because the API deduplicates events on
+`(tenant, device, seq)` with a **permanent** unique index. A box that restarted
+its numbering at 1 after a power cut would have every event up to its old
+high-water silently receipted as a duplicate — and under charge-at-booking a
+lost activation is the no-show sweep refunding-and-penalising a member who
+played. It is written in blocks of 64 (`eventq::kSeqCheckpointStride`) rather
+than per event, so the flash sees roughly one write per busy evening: skipping
+sequence numbers after an unclean reboot is free, reusing one is a lost event.
 
-Both carry a CRC-8 trailer (`bridgelogic::CredentialStore`), because
-`hal::IStore` hands a torn write back as a value with `kOk` and a half-written
-record has to read as *absent* rather than as something plausible.
-
-**The WiFi credential is not in there.** It is compiled in from `secrets.h` —
-see *Flashing*.
+`hal::IStore` still hands a torn write back as a value with `kOk`, so the record
+carries its own check digits and a damaged one reads as *absent* — which
+restarts numbering from 1, the one case where a number can be reissued, and is
+survivable because the operator sees a Boot event immediately before the
+repeat.

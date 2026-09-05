@@ -137,14 +137,16 @@ spec is where their meaning is pinned:
 | `NOT YOUR COURT / SCAN TO START` | An `OFF` press named a court the current button window does not own (safety rule 2). |
 | `SLOT ENDED / SEE THE DESK` | The API activated with `granted_seconds` 0 — a rescan inside the post-slot grace window. Treated as a refusal rather than a one-second relay pulse. |
 | `TRY AGAIN / SCAN TO START` | The grant was painted but the `!ON` could not be sent (full TX ring, dead cable); the court is left dark in the bridge's books so the next `!STATE` does not synthesise a Release for a session that never started. |
-| `API URL TOO LONG / SEE THE DESK` | A discovered or provisioned API base URL is longer than `bridgelogic::kMaxApiUrlLen` (120). Refused rather than truncated — half a URL is a request to somewhere else. |
-| `CLAIM CODE <8 hex>` | The box is not claimed yet. Painted once at the end of `setup()` and again on the first `!PONG` of the boot, so it appears in the **run** DIP position — including after a USB flash of the ESP, where the Mega was not on the other end of the UART to receive it. |
-| `CONNECTED / SCAN TO START` | The box holds a device credential. Same two paint points as the claim code. |
+| `CONNECTED / SCAN TO START` | The box is on the club WiFi. Painted once at the end of `setup()` and again on the first `!PONG` of the boot, so it appears in the **run** DIP position — including after a USB flash of the ESP, where the Mega was not on the other end of the UART to receive it. |
+| `CRUSADERS COURTS / SCAN TO START` | The box is **not** on the WiFi. Deliberately the same words the Mega paints when it is idle: the court still works offline from the roster cache, so the glass does not shout an error at a member who can simply scan. Same two paint points as the line above. |
 
-There is no WiFi-provisioning screen. The credential is compiled in from
-`secrets.h` and there is no runtime way to set one, so there is no state the
-glass could report and no line for a technician to type. `!WIFI` was a verb of
-this protocol until firmware 1.2.0 and is not one now.
+Those are the only two identity screens, and there are no others to add. There
+is no claim-code screen, because there is nothing to claim: the API base URL and
+the device API key are compiled into the image alongside the WiFi credential
+(`secrets.h`, four values, all mandatory) and a change to any of them is a
+reflash. There is no WiFi-provisioning screen either, so there is no line for a
+technician to type — `!WIFI` was a verb of this protocol until firmware 1.2.0
+and is not one now.
 
 ## Points the first draft left open
 

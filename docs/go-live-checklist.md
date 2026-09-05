@@ -98,25 +98,35 @@ Both halves are flashed over USB, by DIP switch. No adapter, no soldering, no pa
 and no network path — the whole procedure is `src/iot/README.md`'s *Flashing* section and
 two `make` targets that print the switch positions as they go.
 
-The WiFi credential is **compiled in**. `src/iot/src/common/secrets.h` is gitignored and
-lives on the flashing machine only; `court_bridge` refuses to compile without it, so there
-is no way to produce an image that comes up on no network — and therefore no way to hand a
-box to the wall believing a credential landed when it did not.
+**Everything the box needs is compiled in — four values, all mandatory.**
+`src/iot/src/common/secrets.h` is gitignored and lives on the flashing machine only;
+`court_bridge` `#error`s on a missing value and `static_assert`s on an empty one, so there
+is no way to produce an image with a blank in it — and therefore no way to hand a box to
+the wall believing a credential landed when it did not. There is nothing to claim, nothing
+to discover and nothing to provision: a flashed box joins, heartbeats, and appears on the
+admin Devices screen by itself.
 
 - [ ] `cp src/iot/src/common/secrets.h.example src/iot/src/common/secrets.h` on the
-      flashing machine, fill in `WIFI_SSID` and `WIFI_PASSWORD`, and do not commit it.
+      flashing machine and fill in all four, then do not commit it:
+      `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL` (the backend's **LAN** address and port,
+      no trailing slash — the box and the backend are on the same club network), and
+      `DEVICE_API_KEY` (copy it from the admin Devices page).
 - [ ] `make flash-mega` with DIP **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
 - [ ] `make flash-bridge` with DIP **1–4 OFF, 5 ON, 6 ON, 7 ON**, 8 OFF. It drops into the
       serial monitor afterwards (DIP **5 ON, 6 ON, 7 OFF**) — **watch the monitor, not the
       glass**: in that DIP position the ESP's UART is on the USB socket and the Mega is not
       on the other end of it, so the LCD cannot change.
 - [ ] Restore the run positions (**1, 2, 3, 4 ON**, 5–8 OFF) and confirm the LCD now shows
-      `CLAIM CODE ...` or `CONNECTED / SCAN TO START`. That repaint is the proof the ESP and
-      the Mega are talking again, and it is the only positive confirmation the box gives.
+      `CONNECTED / SCAN TO START`. That repaint is the proof the ESP and the Mega are
+      talking again, and it is the only positive confirmation the box gives. If it reads
+      `CRUSADERS COURTS / SCAN TO START` instead, the two halves are talking and the box is
+      **not** on the WiFi — check the SSID and password in `secrets.h`.
+- [ ] Confirm the box appears on the admin Devices page within one heartbeat (30 s by
+      default) with four court numbers against it. That is the whole of registration.
 
-**If skipped:** the box has no firmware. Nothing here needs a second visit: the credential
-is in the image, so a box that flashed and painted its identity screen is a box that will
-join the network.
+**If skipped:** the box has no firmware. Nothing here needs a second visit: everything is
+in the image, so a box that flashed and painted `CONNECTED` is a box that will join the
+network and register itself.
 
 ---
 
@@ -127,9 +137,11 @@ than one machine.
 
 - [ ] Rotate it on the access point.
 - [ ] Edit `secrets.h` on the flashing machine and `make flash-bridge` (item 5). That is
-      the whole delivery mechanism: the credential is compiled into the image, so there is
+      the whole delivery mechanism: every credential is compiled into the image, so there is
       no store to go stale, no precedence rule between two credentials, and nothing to
-      power-cycle to prove.
+      power-cycle to prove. The same is true of the device API key — pressing
+      "Regenerate" on the admin Devices page invalidates the old one immediately, so a
+      regeneration is a reflash and must be planned as one.
 - [ ] Confirm the box rejoins — the LCD returns to `CONNECTED / SCAN TO START` once the run
       DIPs are restored, and the box shows as heartbeating on the admin Devices screen.
 
@@ -235,7 +247,7 @@ first test of the exact regression the local-decision design was built to avoid.
 Everything below the API is proven on the host with no board attached, which is what makes
 CI meaningful. It is not the same as having been run.
 
-- [ ] One board flashed, claimed through the Devices screen, and seen to heartbeat.
+- [ ] One board flashed, seen to register itself on the Devices screen, and seen to heartbeat.
 - [ ] One member scanned at a real court, lights confirmed on, ledger checked.
 - [ ] The Mega's auto-off timer confirmed with the ESP **unplugged** — that is the whole
       point of it being independent.
