@@ -82,8 +82,8 @@ const EVENTS: EventDef[] = [
   {
     name: "booking.no_show",
     label: "No-show",
-    description: "Player did not biometric-authenticate within the grace window.",
-    vars: ["booking_id", "court_id", "court_number", "user_id", "penalty_credits", "refund_credits"],
+    description: "Player did not biometric-authenticate within the grace window. `peripheral_outage` is true when the court's box was unreachable, in which case no penalty was charged.",
+    vars: ["booking_id", "court_id", "court_number", "user_id", "penalty_credits", "refund_credits", "peripheral_outage"],
   },
   {
     name: "booking.completed",
