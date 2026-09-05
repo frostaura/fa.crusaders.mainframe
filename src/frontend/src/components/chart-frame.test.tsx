@@ -1,24 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { BookingsLineChart, RevenueAreaChart } from "./Charts";
-import type { DailyAdminPoint } from "../lib/api";
+import { act, render, screen } from "@testing-library/react";
+import { BookingsLineChart, MyFlowBarChart, RevenueAreaChart } from "./Charts";
+import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 
 /**
- * The charts must not shout at the console when they have nowhere to draw.
+ * The charts must not shout at the console — including once they have somewhere to draw.
  *
  * <p>
- * `/reports` logged sixteen recharts warnings on every page load — "The width(-1) and height(-1)
- * of chart should be greater than 0" — because the report charts sit in a carousel whose
- * off-screen slides are laid out at zero width, and `ResponsiveContainer` complains when it
- * cannot measure its parent. Nothing was broken; each chart drew fine once its slide was
- * scrolled to. But `/reports` is the screen an admin opens when they think something is wrong,
- * and a console that is already full is one nobody reads the seventeenth line of.
+ * `/reports` logged recharts warnings on every page load — "The width(-1) and height(-1) of chart
+ * should be greater than 0" — and round 1 answered it by holding the chart back until its frame
+ * had a width. That fixed half of it. A headed pass then counted <b>six per load</b> with all
+ * three frames reporting `data-measurable="true"` and `clientWidth: 950`: `ResponsiveContainer`
+ * defaults `initialDimension` to {-1,-1} and warns on its own first render, before its
+ * ResizeObserver has run, so no parent can prevent it by being the right size.
  * </p>
  *
  * <p>
- * jsdom has no layout, so every container measures zero — which makes it exactly the
- * environment the bug lives in. A chart rendered here either stays quiet or reproduces the
- * defect.
+ * That is why this file has two tests and a layout stub. jsdom has no layout, so every element
+ * measures zero — which is the off-screen-carousel-slide case and nothing else. The round-1 test
+ * lived entirely inside it, never got a frame measurable, and therefore never reached the render
+ * that warns: it passed while the defect it names was untouched. `withLayout` gives the elements
+ * a size so the second test exercises the path a real browser takes.
  * </p>
  */
 
@@ -26,6 +28,38 @@ const SERIES: DailyAdminPoint[] = [
   { date: "2026-09-01", top_ups_credits: 100, booking_charges_credits: 40, refunds_credits: 0, penalties_credits: 0, bookings: 4, no_shows: 0 },
   { date: "2026-09-02", top_ups_credits: 160, booking_charges_credits: 80, refunds_credits: 0, penalties_credits: 5, bookings: 8, no_shows: 1 },
 ];
+
+const MY_SERIES: DailyMePoint[] = [
+  { date: "2026-09-01", top_ups_credits: 100, spent_credits: 50, refunds_credits: 0, bookings: 2, attended: 2, minutes_on_court: 30, balance_credits: 250 },
+  { date: "2026-09-02", top_ups_credits: 0, spent_credits: 100, refunds_credits: 25, bookings: 3, attended: 1, minutes_on_court: 15, balance_credits: 175 },
+];
+
+/**
+ * Gives every element a size, the way a browser does and jsdom does not.
+ *
+ * `clientWidth` is what `ChartFrame` measures; `getBoundingClientRect` is what
+ * `ResponsiveContainer`'s own effect reads a beat later. Stubbing only the first leaves the
+ * container resetting itself to zero and complaining anyway, which is a jsdom artefact rather
+ * than the product's behaviour.
+ */
+function withLayout(width: number, height: number) {
+  const rect = () => ({
+    width, height, top: 0, left: 0, right: width, bottom: height, x: 0, y: 0,
+    toJSON: () => ({}),
+  }) as DOMRect;
+
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(width);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(height);
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(rect);
+}
+
+/** Every console line that is recharts complaining about a non-positive chart size. */
+function sizeComplaints(...spies: { mock: { calls: unknown[][] } }[]) {
+  return spies
+    .flatMap((spy) => spy.mock.calls)
+    .map((args) => args.join(" "))
+    .filter((line) => /width\(-?\d+\) and height\(-?\d+\)/.test(line));
+}
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -36,11 +70,7 @@ describe("a chart with nowhere to draw", () => {
 
     render(<><RevenueAreaChart data={SERIES} /><BookingsLineChart data={SERIES} /></>);
 
-    const complaints = [...warn.mock.calls, ...error.mock.calls]
-      .map((args) => args.join(" "))
-      .filter((line) => /width\(-?\d+\) and height\(-?\d+\)/.test(line));
-
-    expect(complaints).toEqual([]);
+    expect(sizeComplaints(warn, error)).toEqual([]);
   });
 
   it("holds the chart back rather than drawing into nothing", () => {
@@ -51,5 +81,32 @@ describe("a chart with nowhere to draw", () => {
     expect(frames).toHaveLength(1);
     expect(frames[0]).toHaveAttribute("data-measurable", "false");
     expect(frames[0]).toBeEmptyDOMElement();
+  });
+});
+
+describe("a chart that does have somewhere to draw", () => {
+  it("draws, and still says nothing to the console", () => {
+    withLayout(950, 240);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // The three a member's /reports renders — the load the six warnings were counted on.
+    act(() => {
+      render(<>
+        <RevenueAreaChart data={SERIES} />
+        <BookingsLineChart data={SERIES} />
+        <MyFlowBarChart data={MY_SERIES} />
+      </>);
+    });
+
+    const frames = screen.getAllByTestId("chart-frame");
+    expect(frames).toHaveLength(3);
+    for (const frame of frames) {
+      // The gate is open — which is exactly the state the six warnings were measured in.
+      expect(frame).toHaveAttribute("data-measurable", "true");
+      expect(frame).not.toBeEmptyDOMElement();
+    }
+
+    expect(sizeComplaints(warn, error)).toEqual([]);
   });
 });

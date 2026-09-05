@@ -14,7 +14,49 @@ const WARNING = "#A16207";
 const DANGER = "#B91C1C";
 const TEXT_MUTED = "#6B7280";
 
+/** text.primary from tailwind.config.ts — 16.9:1 on white. See {@link legendProps}. */
+const LEGEND_TEXT = "#0F172A";
+
 const CHART_HEIGHT = 240;
+
+/**
+ * The height reserved above the plot for the topmost y-axis tick.
+ *
+ * <p>
+ * At 8px the top label was sliced in half by the SVG's own edge — "50.00 cr" rendered as a row
+ * of half-height digits above an intact "45.00 cr", which reads as a rendering fault rather than
+ * as a number. A tick is centred on its gridline, so the margin has to clear half a line of text
+ * at the 11px the axis is set in.
+ * </p>
+ */
+const TOP_MARGIN = 16;
+
+/**
+ * The y-axis gutter, in pixels, for a credit-denominated axis.
+ *
+ * <p>
+ * 48 was under the width of "50.00 cr" at 11px, and recharts wraps a tick that does not fit
+ * rather than overflowing it — so every single tick on the wallet-balance chart rendered on two
+ * lines, doubling the label column's height and pushing the top one into the clip described
+ * above. Counts ({@link COUNT_AXIS_WIDTH}) are short enough not to need it.
+ * </p>
+ */
+const CREDIT_AXIS_WIDTH = 64;
+
+/** The same gutter for an axis of plain integers — "12" needs nothing like the room "50.00 cr" does. */
+const COUNT_AXIS_WIDTH = 36;
+
+/**
+ * The left margin. Zero, not negative.
+ *
+ * <p>
+ * <code>left: -12</code> bought a little plot width by pulling the axis labels 12px outside the
+ * chart's own box — straight underneath the carousel's Previous arrow, which sits at the
+ * container's left edge less 12px. The arrow landed on top of the tick labels. The gutter above
+ * is what recovers the space, honestly, inside the box.
+ * </p>
+ */
+const LEFT_MARGIN = 0;
 
 /**
  * The box a chart is drawn in, which does not draw the chart until the box has a size.
@@ -39,15 +81,45 @@ const CHART_HEIGHT = 240;
  * than silencing it, and costs nothing visible: a slide with no width has nothing to show
  * anyway. The height is fixed, so only the width is ever in question.
  * </p>
+ *
+ * <p>
+ * <b>The gate alone was not enough, and the round-1 claim above was false as written.</b> A
+ * headed pass counted <i>six warnings per /reports load</i> at the same moment all three frames
+ * reported <code>data-measurable="true"</code> and <code>clientWidth: 950</code> — so the gate
+ * was open and the complaint was coming from inside <code>ResponsiveContainer</code> anyway.
+ * It defaults <code>initialDimension</code> to <code>{-1, -1}</code> and warns on its very first
+ * render, before its own ResizeObserver has had a chance to run; no parent can prevent that by
+ * being the right size, because the parent is not what it reads on that render. jsdom has no
+ * layout, so the round-1 test never got the frame measurable and never reached the render that
+ * warns — it passed while the defect was untouched. Handing the container the width the frame
+ * has already measured is what closes it: the first render is a real size, and there is no
+ * frame with nothing in it to warn about.
+ * </p>
+ *
+ * <p>
+ * Worth knowing before deciding this is a development-only annoyance: recharts' own
+ * <code>LogUtils</code> hard-codes <code>isDev = true</code> in the published build, so these
+ * warnings fire in production too.
+ * </p>
  */
 function ChartFrame({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [measurable, setMeasurable] = useState(false);
+  // Null until the box has a width; the width it FIRST had once it does. Only the first positive
+  // measurement is kept, because after that `ResponsiveContainer`'s own ResizeObserver owns the
+  // size — re-rendering the chart on every pixel of a window drag would buy nothing. The state
+  // therefore changes only on a null↔sized transition.
+  const [frame, setFrame] = useState<{ width: number } | null>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const check = () => setMeasurable(el.clientWidth > 0);
+    const check = () => {
+      const width = el.clientWidth;
+      setFrame((previous) => {
+        if (width <= 0) return null;
+        return previous ?? { width };
+      });
+    };
     check();
     if (typeof ResizeObserver === "undefined") {
       window.addEventListener("resize", check);
@@ -59,8 +131,12 @@ function ChartFrame({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div ref={ref} style={{ height: CHART_HEIGHT }} data-testid="chart-frame" data-measurable={measurable}>
-      {measurable ? <ResponsiveContainer>{children as React.ReactElement}</ResponsiveContainer> : null}
+    <div ref={ref} style={{ height: CHART_HEIGHT }} data-testid="chart-frame" data-measurable={frame !== null}>
+      {frame && (
+        <ResponsiveContainer initialDimension={{ width: frame.width, height: CHART_HEIGHT }}>
+          {children as React.ReactElement}
+        </ResponsiveContainer>
+      )}
     </div>
   );
 }
@@ -69,6 +145,37 @@ function ChartFrame({ children }: { children: React.ReactNode }) {
 const tooltipStyle = {
   contentStyle: { borderRadius: 8, border: "1px solid #E5E7EB", fontSize: 12, padding: "6px 10px" },
   labelStyle: { color: TEXT_MUTED, fontWeight: 500, marginBottom: 2 },
+} as const;
+
+/**
+ * A legend whose labels can be read.
+ *
+ * <p>
+ * recharts paints each legend label in that series' own colour. Three of the five labels on
+ * /reports used a <code>*-strong</code> token and were fine; the two that used the series
+ * <i>fill</i> — "Refunds (net)" on <code>success.soft</code> and "Booked" on
+ * <code>accent.soft</code> — measured <b>1.10:1 and 1.15:1 on white</b>. Those are pale ghosts
+ * beside a legible neighbour, against the 4.5:1 floor `docs/specs/design-system.md` commits to,
+ * and there is only one theme, so there is nowhere for them to become readable.
+ * </p>
+ *
+ * <p>
+ * The fix is not to darken the two fills: a soft fill next to a strong one is the whole point of
+ * the pairing, and "Booked" being lighter than "Played" is what makes the gap between the bars
+ * legible. The label is a different job from the swatch. The swatch keeps the series colour and
+ * carries the identification; the text is set in <code>text.primary</code> like every other
+ * label in the product, and a `formatter` is the only hook recharts offers for it.
+ * </p>
+ *
+ * <p>
+ * Applied through one shared object rather than per chart, for the reason the whole affordance
+ * layer in <code>index.css</code> exists: a rule applied per component is one a new component
+ * silently does not get, and that is precisely how two of these five ended up wrong.
+ * </p>
+ */
+const legendProps = {
+  wrapperStyle: { fontSize: 11 },
+  formatter: (value: string) => <span style={{ color: LEGEND_TEXT }}>{value}</span>,
 } as const;
 
 // Credits, not rand. These charts plot ledger movements and court spend, both of
@@ -118,7 +225,7 @@ const ZERO_LINE_STROKE = TEXT_MUTED;
 export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
   return (
     <ChartFrame>
-        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
+        <AreaChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
           <defs>
             <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={ACCENT} stopOpacity={0.4} />
@@ -127,7 +234,7 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Area type="monotone" dataKey="top_ups_credits" name="Top-ups" stroke={ACCENT} fill="url(#revFill)" strokeWidth={2} />
         </AreaChart>
@@ -143,13 +250,13 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
 export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
   return (
     <ChartFrame>
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }} stackOffset="sign">
+        <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} domain={SIGNED_DOMAIN} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} domain={SIGNED_DOMAIN} />
           <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Legend {...legendProps} />
           <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
           <Bar dataKey="booking_charges_credits" name="Bookings" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
           <Bar dataKey="penalties_credits" name="Penalties (net)" stackId="b" fill={WARNING} radius={[3, 3, 0, 0]} />
@@ -161,12 +268,12 @@ export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
 export function BookingsLineChart({ data }: { data: DailyAdminPoint[] }) {
   return (
     <ChartFrame>
-        <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
+        <LineChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis allowDecimals={false} fontSize={11} stroke={TEXT_MUTED} width={32} />
+          <YAxis allowDecimals={false} fontSize={11} stroke={TEXT_MUTED} width={COUNT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Legend {...legendProps} />
           <Line type="monotone" dataKey="bookings" name="Bookings" stroke={ACCENT} strokeWidth={2} dot={false} />
           <Line type="monotone" dataKey="no_shows" name="No-shows" stroke={DANGER} strokeWidth={2} dot={false} />
         </LineChart>
@@ -177,10 +284,10 @@ export function BookingsLineChart({ data }: { data: DailyAdminPoint[] }) {
 export function CourtsRevenueBarChart({ data }: { data: { court_name: string; revenue_credits: number; bookings: number }[] }) {
   return (
     <ChartFrame>
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
+        <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="court_name" fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} />
           <Bar dataKey="revenue_credits" name="Revenue" fill={ACCENT} radius={[6, 6, 0, 0]} />
         </BarChart>
@@ -201,7 +308,7 @@ export function NoShowDonut({ total, noShow }: { total: number; noShow: number }
             {data.map((d) => <Cell key={d.name} fill={d.color} />)}
           </Pie>
           <Tooltip {...tooltipStyle} />
-          <Legend verticalAlign="bottom" wrapperStyle={{ fontSize: 11 }} />
+          <Legend verticalAlign="bottom" {...legendProps} />
         </PieChart>
     </ChartFrame>
   );
@@ -210,7 +317,7 @@ export function NoShowDonut({ total, noShow }: { total: number; noShow: number }
 export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
   return (
     <ChartFrame>
-        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
+        <AreaChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
           <defs>
             <linearGradient id="balFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={ACCENT} stopOpacity={0.35} />
@@ -219,7 +326,7 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Area type="monotone" dataKey="balance_credits" name="Balance" stroke={ACCENT} fill="url(#balFill)" strokeWidth={2} />
         </AreaChart>
@@ -236,13 +343,13 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
 export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
   return (
     <ChartFrame>
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }} stackOffset="sign">
+        <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={48} domain={SIGNED_DOMAIN} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} domain={SIGNED_DOMAIN} />
           <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Legend {...legendProps} />
           <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
           <Bar dataKey="refunds_credits" name="Refunds (net)" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />
           <Bar dataKey="spent_credits" name="Spent" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
@@ -267,12 +374,12 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
 export function MyBookingsBarChart({ data }: { data: DailyMePoint[] }) {
   return (
     <ChartFrame>
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
+        <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis allowDecimals={false} fontSize={11} stroke={TEXT_MUTED} width={32} />
+          <YAxis allowDecimals={false} fontSize={11} stroke={TEXT_MUTED} width={COUNT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Legend {...legendProps} />
           <Bar dataKey="bookings" name="Booked" fill={ACCENT_SOFT} radius={[3, 3, 0, 0]} />
           <Bar dataKey="attended" name="Played" fill={ACCENT} radius={[3, 3, 0, 0]} />
         </BarChart>
