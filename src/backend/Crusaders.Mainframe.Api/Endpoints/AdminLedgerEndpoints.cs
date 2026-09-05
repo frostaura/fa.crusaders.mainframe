@@ -77,8 +77,15 @@ public static class LedgerRowMapper
                 (Treasury, e.Reason ?? "No-show penalty"),
             LedgerEntryType.LateCancellationPenalty =>
                 (Treasury, e.Reason ?? "Late-cancellation penalty"),
+            // The club, never the admin, however the money moved.
+            //
+            // This named the acting admin as the counterparty, so a negative adjustment
+            // rendered on a member's own statement as "Naledi Khoza → Crusaders Admin
+            // −10.00 cr" — reading as money handed to a person, next to booking charges
+            // that correctly say "Club treasury". Who did it is not lost: it is
+            // ActorName on this same row, which is where a statement should carry it.
             LedgerEntryType.AdminAdjustment =>
-                (actor == subject ? Treasury : actor, e.Reason ?? "Admin adjustment"),
+                (Treasury, e.Reason ?? "Admin adjustment"),
             LedgerEntryType.PaymentReversal =>
                 (PaymentGateway, e.Reason ?? "Payment reversal"),
             _ => (Treasury, e.Reason ?? e.Type.ToString()),
