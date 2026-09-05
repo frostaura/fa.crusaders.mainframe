@@ -281,7 +281,15 @@ public static class AdminConfigEndpoints
     private static string? ValidateDeviceNumbers(UpdateSettingsRequest req)
     {
         if (req.WalkUpMaxMinutes is < 1 or > RelayHardCap.Minutes) return "walk_up_max_minutes_out_of_range";
-        if (req.HeartbeatSeconds is < 10 or > 3600) return "heartbeat_seconds_out_of_range";
+        // The firmware's own bounds, not a wider policy one: bridgelogic::Cadence clamps
+        // the interval into [15, 300] whatever the API sends, so accepting 600 here only
+        // ever meant an admin reading 600 on the page while every box ran at 300 and the
+        // fleet then read as offline for 40% of each interval. See HeartbeatCadence.
+        if (req.HeartbeatSeconds is not null
+            && (req.HeartbeatSeconds < HeartbeatCadence.MinSeconds || req.HeartbeatSeconds > HeartbeatCadence.MaxSeconds))
+        {
+            return "heartbeat_seconds_out_of_range";
+        }
         if (req.ActivationForwardWindowMinutes is < 1 or > 1440) return "activation_forward_window_minutes_out_of_range";
         if (req.ActivationCueWindowMinutes is < 0 or > 1440) return "activation_cue_window_minutes_out_of_range";
         if (req.QrLifetimeSeconds is < 15 or > 3600) return "qr_lifetime_seconds_out_of_range";

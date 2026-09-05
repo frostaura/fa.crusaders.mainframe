@@ -23,9 +23,6 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </summary>
 public static class DeviceEndpoints
 {
-    /// <summary>Devices that stop calling within this window are treated as offline by the admin UI.</summary>
-    public const int OfflineAfterSeconds = 180;
-
     public static IEndpointRouteBuilder MapDeviceEndpoints(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/v1/device")

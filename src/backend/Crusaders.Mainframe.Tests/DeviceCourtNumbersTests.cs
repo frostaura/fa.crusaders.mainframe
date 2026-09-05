@@ -202,12 +202,20 @@ public sealed class DeviceCourtNumbersTests
     }
 
     /// <summary>
-    /// The default button map selects courts A–D. A box that would drive two of them
-    /// leaves two buttons selecting nothing, and the admin is told at the moment of
-    /// assigning the courts — on registration and on update alike.
+    /// The default button map selects courts A–D. A box that drives two of them is now
+    /// given the club's map with the two unreachable court buttons turned off, rather than
+    /// refused — closing re-review #13's residual.
+    ///
+    /// <para>
+    /// The refusal had no way forward from the screen the admin was on: their only options
+    /// were to edit the club's map, changing every other box, or to hand-compose an
+    /// override. A two-court box with C and D off is what they would have composed, and
+    /// what the discovery claim — which sends no <c>button_map</c> at all — needs, since
+    /// without this every two- or three-court box was unclaimable from the discovered list.
+    /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task A_box_with_fewer_courts_than_the_button_map_selects_is_refused_on_register_and_update()
+    public async Task A_box_with_fewer_courts_than_the_button_map_selects_is_trimmed_to_fit_rather_than_refused()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -215,26 +223,76 @@ public sealed class DeviceCourtNumbersTests
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var refused = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [1, 2]));
+        var response = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [1, 2]));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        // The admin is told it happened, and the map they got is the club's with the two
+        // buttons this box has no relay for turned off. Nothing else moves: the minute
+        // buttons mean the same thing on a box of any size.
+        Assert.True(body.GetProperty("button_map_trimmed").GetBoolean());
+        Assert.Equal(
+            ["court:A", "court:B", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
+            body.GetProperty("device").GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
+
+        // A four-court box under the same club map needs nothing derived and keeps none:
+        // it runs the club's map, so a later edit to that map reaches it.
+        var full = await client.PostAsJsonAsync(DevicesPath, Register("court-box-2", [1, 2, 3, 4]));
+        Assert.Equal(HttpStatusCode.OK, full.StatusCode);
+        var fullBody = JsonDocument.Parse(await full.Content.ReadAsStringAsync()).RootElement;
+        Assert.False(fullBody.GetProperty("button_map_trimmed").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, fullBody.GetProperty("device").GetProperty("button_map").ValueKind);
+
+        // Shrinking that box's list turns off the buttons it no longer has, same rule.
+        var id = fullBody.GetProperty("device").GetProperty("id").GetGuid();
+        var shrink = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1 } });
+        Assert.Equal(HttpStatusCode.OK, shrink.StatusCode);
+        Assert.Equal(
+            ["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
+            JsonDocument.Parse(await shrink.Content.ReadAsStringAsync()).RootElement
+                .GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
+
+        // A reorder keeps the count and is fine: the relay mapping is the admin's to choose.
+        var reorder = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1 } });
+        Assert.Equal(HttpStatusCode.OK, reorder.StatusCode);
+    }
+
+    /// <summary>
+    /// The trim applies only to a map the admin did NOT type. One they supplied that
+    /// reaches past the box's courts is still refused, because quietly rewriting what
+    /// somebody deliberately wrote is a worse failure than telling them it does not fit.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_override_the_admin_supplied_that_overreaches_is_still_refused()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        string[] reachesTooFar = ["court:A", "court:C", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"];
+
+        var refused = await client.PostAsJsonAsync(DevicesPath, new
+        {
+            deviceCode = "court-box-1",
+            name = "A box",
+            kind = (int)DeviceKind.CourtBox,
+            hardware = (int)DeviceHardware.Esp8266,
+            court_numbers = new[] { 1, 2 },
+            button_map = reachesTooFar,
+        });
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Equal(ButtonMap.SelectsCourtBeyondDeviceCourts,
             JsonDocument.Parse(await refused.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString());
 
         var ok = await client.PostAsJsonAsync(DevicesPath, Register("court-box-1", [1, 2, 3, 4]));
-        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         var id = JsonDocument.Parse(await ok.Content.ReadAsStringAsync()).RootElement.GetProperty("device").GetProperty("id").GetGuid();
 
-        var shrink = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1 } });
-        Assert.Equal(HttpStatusCode.BadRequest, shrink.StatusCode);
+        var patched = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 1, 2 }, button_map = reachesTooFar });
+        Assert.Equal(HttpStatusCode.BadRequest, patched.StatusCode);
         Assert.Equal(ButtonMap.SelectsCourtBeyondDeviceCourts,
-            JsonDocument.Parse(await shrink.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString());
-
-        // A reorder keeps the count and is fine: the relay mapping is the admin's to choose.
-        var reorder = await client.PatchAsJsonAsync($"{DevicesPath}{id}", new { court_numbers = new[] { 2, 1, 4, 3 } });
-        Assert.Equal(HttpStatusCode.OK, reorder.StatusCode);
-        var courts = JsonDocument.Parse(await reorder.Content.ReadAsStringAsync()).RootElement
-            .GetProperty("court_numbers").EnumerateArray().Select(e => e.GetInt32()).ToArray();
-        Assert.Equal([2, 1, 4, 3], courts);
+            JsonDocument.Parse(await patched.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString());
     }
 
     /// <summary>
@@ -260,9 +318,9 @@ public sealed class DeviceCourtNumbersTests
     private static readonly string[] AnnexMap = ["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"];
 
     /// <summary>
-    /// Under the club's four-court map a one-court annex box is refused — and registered
-    /// when the request carries the map the annex will run. The refusal is about the map
-    /// the box would run, which the admin can now supply on the same screen.
+    /// Under the club's four-court map a one-court annex box registers with the map the
+    /// annex will run, whether the admin supplies it or lets it be derived — and the two
+    /// come out the same, which is the point of deriving it at all.
     /// </summary>
     [SkippableFact]
     public async Task A_one_court_box_registers_with_its_own_button_map_under_a_four_court_club_map()
@@ -273,8 +331,12 @@ public sealed class DeviceCourtNumbersTests
         var seeded = await SeedAsync(factory);
         var client = AdminClient(factory, seeded);
 
-        var refused = await client.PostAsJsonAsync(DevicesPath, Register("annex", [3]));
-        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        // Supplying no map is no longer a refusal: the club's is trimmed to this box's one
+        // relay, which is exactly AnnexMap.
+        var derived = await client.PostAsJsonAsync(DevicesPath, Register("annex-derived", [3]));
+        Assert.Equal(HttpStatusCode.OK, derived.StatusCode);
+        Assert.Equal(AnnexMap, JsonDocument.Parse(await derived.Content.ReadAsStringAsync()).RootElement
+            .GetProperty("device").GetProperty("button_map").EnumerateArray().Select(e => e.GetString()).ToArray());
 
         var ok = await client.PostAsJsonAsync(DevicesPath, new
         {

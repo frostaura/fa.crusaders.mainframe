@@ -96,6 +96,73 @@ public sealed class DeviceRegistryService
     public Task<string?> CourtAssignmentErrorAsync(IReadOnlyList<int> courtNumbers, CancellationToken ct)
         => CourtAssignmentErrorAsync(courtNumbers, null, null, ct);
 
+    /// <summary>
+    /// The outcome of reconciling a box's court list with the map it would run:
+    /// <paramref name="Error"/> to refuse, else the override to store on the row —
+    /// <c>null</c> meaning "run the club's map", and <paramref name="Trimmed"/> saying
+    /// whether it was derived here rather than asked for.
+    /// </summary>
+    public sealed record CourtAssignment(string? Error, ButtonMap? Override, bool Trimmed)
+    {
+        public static CourtAssignment Refused(string error) => new(error, null, false);
+    }
+
+    /// <summary>
+    /// The court list and the map, reconciled: valid, refused, or made to fit.
+    ///
+    /// <para>
+    /// A court list naming a court the club does not have is always refused, and so is an
+    /// override the CALLER supplied that reaches past the list — they wrote it, and
+    /// silently rewriting it would be worse than saying it does not fit. What is no longer
+    /// refused is the case that had no way forward at all: a box with fewer courts than the
+    /// club's default map selects, registered or claimed with no map of its own. That is
+    /// every two- or three-court box in a club whose map names A–D, and the admin's only
+    /// options were to edit the club map (changing every other box) or hand-compose an
+    /// override. It gets one derived — the club's map with the unreachable court buttons
+    /// turned off — which is what they would have written (closing re-review #13 residual).
+    /// </para>
+    /// </summary>
+    /// <param name="requested">
+    /// Three-valued, like the PATCH field it comes from. <c>null</c> is "no opinion" — the
+    /// caller did not mention the map, so it is theirs to derive. <c>Optional(map)</c> is a
+    /// map they wrote. <c>Optional(null)</c> is "run the club's map", which is also
+    /// something they asked for: it is refused when the club's map does not fit, rather
+    /// than answered with a derived override they did not want.
+    /// </param>
+    /// <param name="storedOverrideJson">The row's existing override, on an update.</param>
+    public async Task<CourtAssignment> ResolveCourtAssignmentAsync(
+        IReadOnlyList<int> courtNumbers, Optional<ButtonMap?>? requested, string? storedOverrideJson, CancellationToken ct)
+    {
+        var known = await _db.Courts.AsNoTracking()
+            .Where(c => courtNumbers.Contains(c.CourtNumber))
+            .Select(c => c.CourtNumber)
+            .ToListAsync(ct);
+        if (courtNumbers.Any(n => !known.Contains(n))) return CourtAssignment.Refused(CourtNumberNotFound);
+
+        var settings = await _settings.GetAsync(ct);
+
+        // Asked for, and unusable: refuse, exactly as before. Covers both a map the caller
+        // wrote and an explicit "put this box back on the club's map".
+        if (requested is { } asked)
+        {
+            var map = asked.Value ?? settings.Buttons;
+            return map.FirstSelectionBeyond(courtNumbers.Count) is null
+                ? new CourtAssignment(null, asked.Value, false)
+                : CourtAssignment.Refused(ButtonMap.SelectsCourtBeyondDeviceCourts);
+        }
+
+        var stored = ButtonMap.FromJson(storedOverrideJson);
+        var effective = stored ?? settings.Buttons;
+        if (effective.FirstSelectionBeyond(courtNumbers.Count) is null)
+        {
+            // Nothing to do. Keep whatever override the row already had (null included) —
+            // this path must not turn "runs the club's map" into a frozen copy of it.
+            return new CourtAssignment(null, stored, false);
+        }
+
+        return new CourtAssignment(null, effective.TrimmedTo(courtNumbers.Count), true);
+    }
+
     public Task<List<Device>> ListAsync(CancellationToken ct) =>
         _db.Devices.OrderBy(d => d.Kind).ThenBy(d => d.DeviceCode).ToListAsync(ct);
 
@@ -243,6 +310,36 @@ public sealed class DeviceRegistryService
     {
         var normalised = macAddress.Trim().ToLowerInvariant();
         return _db.Devices.FirstOrDefaultAsync(d => d.MacAddress == normalised, ct);
+    }
+
+    /// <summary>Error code when a hand-typed MAC is not twelve hex characters.</summary>
+    public const string MacAddressInvalid = "mac_address_invalid";
+
+    /// <summary>
+    /// A MAC in the form the boards announce — twelve lowercase hex characters, no
+    /// separators — or null when it could not be one.
+    ///
+    /// <para>
+    /// Lenient about what an admin types and strict about what is stored. The separators a
+    /// MAC is printed with on a label (<c>5c:cf:7f:1a:2b:3c</c>, <c>5C-CF-7F-1A-2B-3C</c>,
+    /// <c>5ccf.7f1a.2b3c</c>) are all dropped, because a hand-typed MAC that does not match
+    /// the announced one byte for byte is worse than useless: it silently fails to
+    /// recognise the board it exists to recognise.
+    /// </para>
+    /// </summary>
+    public static string? NormaliseMacAddress(string? macAddress)
+    {
+        if (string.IsNullOrWhiteSpace(macAddress)) return null;
+
+        var text = macAddress.Trim();
+        var stripped = new string(text.Where(char.IsAsciiHexDigit).ToArray()).ToLowerInvariant();
+        var separators = text.Count(c => c is ':' or '-' or '.' or ' ');
+
+        // Reject anything that carried characters which were neither hex nor a separator —
+        // "5ccf7f1a2b3z" must not silently become an 11-character prefix.
+        return stripped.Length == 12 && stripped.Length + separators == text.Length
+            ? stripped
+            : null;
     }
 
     private string KeyFor(Device device) =>

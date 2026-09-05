@@ -34,11 +34,24 @@ public static class AdminDeviceEndpoints
         return app;
     }
 
-    private static async Task<IResult> ListAsync(DeviceRegistryService devices, CancellationToken ct)
-        => Results.Ok((await devices.ListAsync(ct)).Select(DeviceView.Of).ToList());
+    /// <summary>
+    /// The tenant's configured heartbeat interval, which every device view carries so the
+    /// page can derive an offline threshold from it rather than hardcoding one. See
+    /// <see cref="DeviceView"/> and <see cref="HeartbeatCadence"/>.
+    /// </summary>
+    private static async Task<int> HeartbeatSecondsAsync(TenantSettingsAccessor settingsAccessor, CancellationToken ct)
+        => (await settingsAccessor.GetAsync(ct)).HeartbeatSeconds;
+
+    private static async Task<IResult> ListAsync(
+        DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor, CancellationToken ct)
+    {
+        var heartbeat = await HeartbeatSecondsAsync(settingsAccessor, ct);
+        return Results.Ok((await devices.ListAsync(ct)).Select(d => DeviceView.Of(d, heartbeat)).ToList());
+    }
 
     private static async Task<IResult> RegisterAsync(
-        RegisterDeviceRequest req, DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+        RegisterDeviceRequest req, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
+        HttpContext ctx, CancellationToken ct)
     {
         var invalid = Validate(req);
         if (invalid is not null) return Results.BadRequest(new { error = invalid });
@@ -49,37 +62,82 @@ public static class AdminDeviceEndpoints
             return Results.BadRequest(new { error = "button_map_invalid", message = reason });
         }
 
-        if (await devices.DeviceCodeTakenAsync(req.DeviceCode.Trim(), ct))
+        // A MAC on a hand-registered box is what makes it recoverable later.
+        //
+        // Without one, a revoked hand-registered box had no way back at all: revoking sets
+        // RevokedAt for ever and nothing clears it, rotation issues no grant, and the
+        // discovery claim's un-revoke path finds its row BY MAC — which a hand-registered
+        // row does not have. The admin's only move was to register the same hardware again
+        // under a different device code, leaving a dead row and two identities for one box.
+        // Given a MAC, this endpoint reclaims that row exactly as the discovery claim does.
+        string? mac = null;
+        if (!string.IsNullOrWhiteSpace(req.MacAddress))
+        {
+            mac = DeviceRegistryService.NormaliseMacAddress(req.MacAddress);
+            if (mac is null) return Results.BadRequest(new { error = DeviceRegistryService.MacAddressInvalid });
+        }
+
+        var existing = mac is null ? null : await devices.FindByMacAddressAsync(mac, ct);
+
+        var codeTaken = existing is null
+            ? await devices.DeviceCodeTakenAsync(req.DeviceCode.Trim(), ct)
+            : await devices.DeviceCodeTakenAsync(req.DeviceCode.Trim(), existing.Id, ct);
+        if (codeTaken)
         {
             return Results.Conflict(new { error = "device_code_taken" });
         }
 
         // The map this box will run — its own override when the request carries one, else
         // the club's — must be able to address its court list, and the list must name real
-        // courts. Refused here, where the admin can act on it, rather than discovered
-        // later as buttons that do nothing or a relay that never lights.
-        if (req.Kind == DeviceKind.CourtBox
-            && await devices.CourtAssignmentErrorAsync(req.CourtNumbers!, buttons, null, ct) is { } mismatch)
+        // courts. A list naming a court the club does not have is refused here, where the
+        // admin can act on it. A map that reaches past the list is refused only when the
+        // admin wrote it; otherwise the club's map is trimmed to fit this box and stored as
+        // its override, because "your club map names four courts and this box drives two"
+        // used to be a dead end from this screen. See ResolveCourtAssignmentAsync.
+        var trimmed = false;
+        if (req.Kind == DeviceKind.CourtBox)
         {
-            return Results.BadRequest(new { error = mismatch });
+            // A registration either carries a map or does not; there is no "clear" on this
+            // path, so an absent one is no opinion at all and is the trim's to derive.
+            var assignment = await devices.ResolveCourtAssignmentAsync(
+                req.CourtNumbers!, buttons is null ? null : new Optional<ButtonMap?>(buttons), null, ct);
+            if (assignment.Error is { } mismatch) return Results.BadRequest(new { error = mismatch });
+            buttons = assignment.Override;
+            trimmed = assignment.Trimmed;
         }
 
-        var registered = await devices.RegisterAsync(
-            new RegisterDeviceCommand(req.DeviceCode, req.Name, req.Kind, req.Hardware, req.CourtNumbers, req.GateKey) { ButtonMap = buttons },
-            ctx.User.Id() ?? Guid.Empty, ct);
+        var command = new RegisterDeviceCommand(req.DeviceCode, req.Name, req.Kind, req.Hardware, req.CourtNumbers, req.GateKey)
+        {
+            ButtonMap = buttons,
+            MacAddress = mac,
+        };
+
+        var registered = existing is null
+            ? await devices.RegisterAsync(command, ctx.User.Id() ?? Guid.Empty, ct)
+            : await devices.ReclaimAsync(existing, command, ctx.User.Id() ?? Guid.Empty, ct);
 
         // Shown once. Flash it into the device's secrets.h and do not keep a copy here.
         return Results.Ok(new
         {
-            device = DeviceView.Of(registered.Device),
+            // True when this MAC already had a row here — revoked, reflashed, or key lost —
+            // and that row was re-keyed and re-enabled rather than duplicated.
+            reclaimed = existing is not null,
+            device = DeviceView.Of(registered.Device, await HeartbeatSecondsAsync(settingsAccessor, ct)),
             device_key = registered.DeviceKey,
             key_version = registered.Device.KeyVersion,
-            note = "Store this key on the device now. It is derived, not stored, and cannot be shown again.",
+            // True when this box got a button map derived from the club's rather than the
+            // club's own — its court buttons beyond its relay count are off. The map itself
+            // is in device.button_map.
+            button_map_trimmed = trimmed,
+            note = existing is null
+                ? "Store this key on the device now. It is derived, not stored, and cannot be shown again."
+                : "This board was already registered here; its row has been re-keyed and re-enabled. Store the new key on the device now — it cannot be shown again.",
         });
     }
 
     private static async Task<IResult> RotateKeyAsync(
-        Guid id, DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+        Guid id, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
+        HttpContext ctx, CancellationToken ct)
     {
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
@@ -88,7 +146,7 @@ public static class AdminDeviceEndpoints
 
         return Results.Ok(new
         {
-            device = DeviceView.Of(rotated.Device),
+            device = DeviceView.Of(rotated.Device, await HeartbeatSecondsAsync(settingsAccessor, ct)),
             device_key = rotated.DeviceKey,
             key_version = rotated.Device.KeyVersion,
             // The board cannot be handed this key: its next signed call is refused, it
@@ -99,7 +157,8 @@ public static class AdminDeviceEndpoints
     }
 
     private static async Task<IResult> UpdateAsync(
-        Guid id, UpdateDeviceRequest req, DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+        Guid id, UpdateDeviceRequest req, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
+        HttpContext ctx, CancellationToken ct)
     {
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
@@ -108,10 +167,14 @@ public static class AdminDeviceEndpoints
 
         // The effective map after this PATCH — the override it sets, else the one the row
         // keeps, else the club's — must be able to address the effective court list, and a
-        // new list must be well-formed and name real courts. Same two rules as registration.
-        if (await AssignmentErrorAsync(devices, device, req.CourtNumbers, buttons, ct) is { } invalid)
+        // new list must be well-formed and name real courts. Same three rules as
+        // registration, including the trim: shrinking a box's court list turns off the
+        // court buttons it no longer has rather than refusing the edit.
+        var resolved = await AssignmentAsync(devices, device, req.CourtNumbers, buttons, ct);
+        if (resolved is { } outcome)
         {
-            return Results.BadRequest(new { error = invalid });
+            if (outcome.Error is { } invalid) return Results.BadRequest(new { error = invalid });
+            buttons = new Optional<ButtonMap?>(outcome.Override);
         }
 
         var updated = await devices.UpdateAsync(
@@ -119,7 +182,7 @@ public static class AdminDeviceEndpoints
             new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, req.OtaChannel, req.PinnedVersion, buttons),
             ctx.User.Id() ?? Guid.Empty, ct);
 
-        return Results.Ok(DeviceView.Of(updated));
+        return Results.Ok(DeviceView.Of(updated, await HeartbeatSecondsAsync(settingsAccessor, ct)));
     }
 
     /// <summary>
@@ -151,25 +214,39 @@ public static class AdminDeviceEndpoints
         return null;
     }
 
-    /// <summary>The court-list and effective-map rules for a PATCH, or null when nothing relevant changed or all is well.</summary>
-    private static async Task<string?> AssignmentErrorAsync(
+    /// <summary>
+    /// The court-list and effective-map rules for a PATCH, or null when nothing relevant
+    /// changed — in which case the request's own button_map is left exactly as it arrived,
+    /// including absent.
+    /// </summary>
+    private static async Task<DeviceRegistryService.CourtAssignment?> AssignmentAsync(
         DeviceRegistryService devices, Device device, IReadOnlyList<int>? newCourts, Optional<ButtonMap?>? buttons, CancellationToken ct)
     {
         if (device.Kind != DeviceKind.CourtBox || (newCourts is null && buttons is null)) return null;
 
         var courts = newCourts ?? device.CourtNumbers;
-        var overrideJson = buttons is { } set ? set.Value?.ToJson() : device.ButtonMapJson;
-        return (newCourts is not null ? DeviceRegistryService.ValidateCourtNumbers(courts) : null)
-               ?? await devices.CourtAssignmentErrorAsync(courts, null, overrideJson, ct);
+        if (newCourts is not null && DeviceRegistryService.ValidateCourtNumbers(courts) is { } bad)
+        {
+            return DeviceRegistryService.CourtAssignment.Refused(bad);
+        }
+
+        // buttons is already the three-valued shape ResolveCourtAssignmentAsync wants:
+        // absent means the caller said nothing about the map, so shrinking the court list
+        // trims it; null means they explicitly asked for the club's map and is refused when
+        // it does not fit; a list is theirs and is refused when it does not fit.
+        return await devices.ResolveCourtAssignmentAsync(courts, buttons, device.ButtonMapJson, ct);
     }
 
     private static async Task<IResult> RevokeAsync(
-        Guid id, DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+        Guid id, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
+        HttpContext ctx, CancellationToken ct)
     {
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
 
-        return Results.Ok(DeviceView.Of(await devices.RevokeAsync(device, ctx.User.Id() ?? Guid.Empty, ct)));
+        return Results.Ok(DeviceView.Of(
+            await devices.RevokeAsync(device, ctx.User.Id() ?? Guid.Empty, ct),
+            await HeartbeatSecondsAsync(settingsAccessor, ct)));
     }
 
     private static string? Validate(RegisterDeviceRequest req)
@@ -204,7 +281,14 @@ public sealed record RegisterDeviceRequest(
     [property: JsonPropertyName("court_numbers")] IReadOnlyList<int>? CourtNumbers,
     string? GateKey,
     /// <summary>This box's own eight-entry button map, or omitted to run the club's.</summary>
-    [property: JsonPropertyName("button_map")] IReadOnlyList<string>? ButtonMap = null);
+    [property: JsonPropertyName("button_map")] IReadOnlyList<string>? ButtonMap = null,
+    /// <summary>
+    /// The board's MAC, however it is printed on the label — separators are stripped.
+    /// Optional, and worth typing: it is the only stable link between this row and the
+    /// physical board, so it is what lets a revoked or reflashed box be recovered later
+    /// instead of registered a second time under a different code.
+    /// </summary>
+    [property: JsonPropertyName("mac_address")] string? MacAddress = null);
 
 /// <summary>
 /// <c>button_map</c> is pinned snake_case like <c>court_numbers</c> and is three-valued:

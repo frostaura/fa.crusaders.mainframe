@@ -302,12 +302,20 @@ public class DeviceClaimTests
 
     /// <summary>
     /// The button map and a box's court list are edited on different screens and must
-    /// agree. The fixture's map is the default — courts A–D — so a box that would drive
-    /// only two courts leaves two court buttons selecting nothing, and the claim says so
-    /// rather than handing a key to a box with dead buttons.
+    /// agree. The fixture's map is the default — courts A–D — so a box that drives only two
+    /// courts is given that map with C and D turned off, as its own override.
+    ///
+    /// <para>
+    /// This used to be a refusal, and the discovery claim sends no <c>button_map</c> at all,
+    /// so every two- or three-court box in a club with the default map was unclaimable from
+    /// the discovered list until an admin either edited the club map — changing every other
+    /// box — or hand-registered it (closing re-review #13 residual). The invariant the
+    /// refusal protected still holds: no box is ever handed a key with buttons that select
+    /// a relay it does not have.
+    /// </para>
     /// </summary>
     [Fact]
-    public async Task A_claim_for_fewer_courts_than_the_button_map_selects_is_refused()
+    public async Task A_claim_for_fewer_courts_than_the_button_map_selects_is_trimmed_to_fit()
     {
         var f = await CreateAsync();
         f.Store.Upsert(Board());
@@ -315,9 +323,14 @@ public class DeviceClaimTests
         var result = await f.Service.ClaimAsync(
             new ClaimBoardCommand(Code, "court-box-1", "Court box", [1, 2]), f.Host.AdminUser.Id, default);
 
-        Assert.Equal(ClaimFailure.ButtonMapMismatch, result.Failure);
-        Assert.Empty(await f.Db.Devices.IgnoreQueryFilters().ToListAsync());
-        await AssertRefusalLoggedAsync(f, ClaimFailure.ButtonMapMismatch);
+        Assert.True(result.Succeeded, $"claim failed with {result.Failure}");
+
+        var stored = ButtonMap.FromJson(result.Registration!.Device.ButtonMapJson);
+        Assert.NotNull(stored);
+        Assert.Equal(
+            ["court:A", "court:B", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
+            stored.ToWire());
+        Assert.Null(stored.FirstSelectionBeyond(2));
     }
 
     // ---- Tenant isolation --------------------------------------------------
@@ -557,26 +570,64 @@ public class DeviceClaimTests
     }
 
     /// <summary>
-    /// A one-court annex box under the club's four-court map: refused without an override,
-    /// registered with one. The invariant is per box, not per club (review #17).
+    /// A one-court annex box under the club's four-court map: an override the admin
+    /// supplied is stored verbatim and is what the box is checked against, not the club's
+    /// map. The invariant is per box, not per club (review #17).
+    ///
+    /// <para>
+    /// Claimed with no override the box now gets one derived instead of a refusal, and the
+    /// derived map is the same map the admin would have written — which is the point. What
+    /// stays refused is an override the admin supplied that reaches past the box's courts:
+    /// see the case below.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task A_claim_with_its_own_button_map_is_checked_against_that_map_not_the_clubs()
     {
         var f = await CreateAsync();
-        f.Store.Upsert(Board());
 
-        var refused = await f.Service.ClaimAsync(
-            new ClaimBoardCommand(Code, "annex", "Annex box", [1]), f.Host.AdminUser.Id, default);
-        Assert.Equal(ClaimFailure.ButtonMapMismatch, refused.Failure);
+        string[] annexWire = ["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"];
+        Assert.True(ButtonMap.TryParse(annexWire, out var annexMap, out _));
 
-        Assert.True(ButtonMap.TryParse(["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"], out var annexMap, out _));
         f.Store.Upsert(Board());
         var accepted = await f.Service.ClaimAsync(
             new ClaimBoardCommand(Code, "annex", "Annex box", [1], annexMap), f.Host.AdminUser.Id, default);
 
         Assert.True(accepted.Succeeded, $"claim with override failed with {accepted.Failure}");
         Assert.Equal(annexMap!.ToJson(), accepted.Registration!.Device.ButtonMapJson);
+
+        // With no override the derived one says the same thing, so the admin never had to
+        // compose it by hand to get past the claim.
+        var second = await CreateAsync();
+        second.Store.Upsert(Board());
+        var derived = await second.Service.ClaimAsync(
+            new ClaimBoardCommand(Code, "annex", "Annex box", [1]), second.Host.AdminUser.Id, default);
+
+        Assert.True(derived.Succeeded, $"claim without override failed with {derived.Failure}");
+        Assert.Equal(annexWire, ButtonMap.FromJson(derived.Registration!.Device.ButtonMapJson)!.ToWire());
+    }
+
+    /// <summary>
+    /// The trim never rewrites a map the admin typed. An override that reaches past the
+    /// box's courts is still refused with the map named — telling them it does not fit is
+    /// the lesser failure.
+    /// </summary>
+    [Fact]
+    public async Task A_claim_whose_own_button_map_overreaches_is_still_refused()
+    {
+        var f = await CreateAsync();
+        f.Store.Upsert(Board());
+
+        Assert.True(ButtonMap.TryParse(
+            ["court:A", "court:C", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
+            out var reachesTooFar, out _));
+
+        var result = await f.Service.ClaimAsync(
+            new ClaimBoardCommand(Code, "annex", "Annex box", [1, 2], reachesTooFar), f.Host.AdminUser.Id, default);
+
+        Assert.Equal(ClaimFailure.ButtonMapMismatch, result.Failure);
+        Assert.Empty(await f.Db.Devices.IgnoreQueryFilters().ToListAsync());
+        await AssertRefusalLoggedAsync(f, ClaimFailure.ButtonMapMismatch);
     }
 
     /// <summary>A different board is still claimable while the first one is registered.</summary>
