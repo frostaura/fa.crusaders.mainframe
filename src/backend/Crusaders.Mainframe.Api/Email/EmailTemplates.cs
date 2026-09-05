@@ -42,6 +42,33 @@ public static class EmailTemplates
             </div>
             """);
 
+    /// <summary>
+    /// Tells a tenant admin that an application is waiting. Spec §2.3 has always required it and
+    /// nothing sent it — both registration mails went to the applicant.
+    /// </summary>
+    public static EmailMessage MembershipPendingAdminNotice(string to, string fullName, string applicantEmail, string membershipNumber, string clubName, string reviewUrl) => new(
+        To: to,
+        Subject: $"New membership application — {clubName}",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">Someone's waiting on you</h2>
+              <p>A new application needs review at {System.Net.WebUtility.HtmlEncode(clubName)}.</p>
+              <p style="margin:16px 0;background:#F1F5F9;border:1px solid #E2E8F0;border-radius:8px;padding:14px 18px">
+                <b>{System.Net.WebUtility.HtmlEncode(fullName)}</b><br />
+                {System.Net.WebUtility.HtmlEncode(applicantEmail)}<br />
+                Membership number {System.Net.WebUtility.HtmlEncode(membershipNumber)}
+              </p>
+              <p style="margin:24px 0">
+                <a href="{reviewUrl}"
+                   style="display:inline-block;background:#0369A1;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+                  Review applications
+                </a>
+              </p>
+              {FooterHtml}
+            </div>
+            """);
+
     public static EmailMessage MembershipApproved(string to, string magicLinkUrl, string clubName) => new(
         To: to,
         Subject: $"Welcome to {clubName}",
@@ -98,12 +125,29 @@ public static class EmailTemplates
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">Hi {fullName},</h2>
-              <p>An administrator has reset your password. You can sign in with the temporary password below.</p>
+              <p>An administrator has reset your password. Sign in with the temporary password below — you'll be asked to choose your own straight away, and this one stops working the moment you do.</p>
               <p style="margin:24px 0;font-size:18px;font-weight:600;letter-spacing:1px;
                         background:#F1F5F9;border:1px solid #E2E8F0;border-radius:8px;padding:14px 18px;display:inline-block">
                 {tempPassword}
               </p>
-              <p style="color:#475569">For your security, please change it after signing in.</p>
+              <p style="color:#475569">If you didn't ask for this, contact the club committee.</p>
+              {FooterHtml}
+            </div>
+            """);
+
+    /// <summary>
+    /// Confirms a self-service password change. The one signal a member has that somebody else
+    /// changed it — which is why it goes out even though the member just did it themselves.
+    /// </summary>
+    public static EmailMessage PasswordChanged(string to) => new(
+        To: to,
+        Subject: "Your password was changed — Crusaders Mainframe",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">Password changed</h2>
+              <p>Your Crusaders Mainframe password was just changed. If that was you, there's nothing to do.</p>
+              <p style="color:#475569">If it wasn't, contact the club committee straight away — someone else has access to your account.</p>
               {FooterHtml}
             </div>
             """);

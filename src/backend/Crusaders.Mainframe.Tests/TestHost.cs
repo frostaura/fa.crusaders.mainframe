@@ -27,11 +27,23 @@ public sealed class TestHost : IAsyncDisposable
     public List<Court> Courts { get; }
     public StubEmailService EmailService { get; }
 
+    /// <summary>
+    /// This host's own media root, matching <c>Media:StoragePath</c> in its configuration.
+    ///
+    /// <para>
+    /// Per-host and under the temp directory rather than the default <c>./media</c>, which is
+    /// relative to the test runner's working directory and therefore shared by every host in
+    /// the run. Registration writes files here, and a test that asserts a file was removed
+    /// cannot be reading a directory another test is writing into.
+    /// </para>
+    /// </summary>
+    public string MediaRoot { get; }
+
     public TestHost(string dbName, Tenant tenant, User adminUser, User playerUser, User leagueUser, List<Court> courts,
-        IServiceProvider services, StubEmailService emailService)
+        IServiceProvider services, StubEmailService emailService, string mediaRoot)
     {
         Tenant = tenant; AdminUser = adminUser; PlayerUser = playerUser; LeaguePlayerUser = leagueUser;
-        Courts = courts; Services = services; EmailService = emailService;
+        Courts = courts; Services = services; EmailService = emailService; MediaRoot = mediaRoot;
     }
 
     /// <summary>
@@ -44,6 +56,7 @@ public sealed class TestHost : IAsyncDisposable
     {
         var dbName = sharedDatabaseName ?? $"crusaders-test-{Guid.NewGuid():N}";
         var slug = tenantSlug ?? "crusaders";
+        var mediaRoot = Path.Combine(Path.GetTempPath(), $"crusaders-media-{Guid.NewGuid():N}");
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -56,6 +69,7 @@ public sealed class TestHost : IAsyncDisposable
                 ["App:PublicBaseUrl"] = "http://localhost:8088",
                 ["Smtp:Host"] = "stub",
                 ["Smtp:From"] = "noreply@test.local",
+                ["Media:StoragePath"] = mediaRoot,
             }).Build());
         services.AddDbContext<MainframeDbContext>(o => o.UseInMemoryDatabase(dbName));
 
@@ -127,7 +141,7 @@ public sealed class TestHost : IAsyncDisposable
             await db.SaveChangesAsync();
 
             tenantContext.Set(tenant.Id, tenant.Slug);
-            return new TestHost(dbName, tenant, admin, player, league, courts, sp, emailStub);
+            return new TestHost(dbName, tenant, admin, player, league, courts, sp, emailStub, mediaRoot);
         }
     }
 
@@ -172,6 +186,9 @@ public sealed class TestHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        try { if (Directory.Exists(MediaRoot)) Directory.Delete(MediaRoot, recursive: true); }
+        catch (IOException) { /* a leftover temp directory is not worth failing a test over */ }
+
         if (Services is IAsyncDisposable a) await a.DisposeAsync();
         else if (Services is IDisposable d) d.Dispose();
     }
