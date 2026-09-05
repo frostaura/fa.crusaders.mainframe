@@ -105,21 +105,15 @@ It is a **comma-delimited string**, not a JSON array, and that is load-bearing: 
 
 `docker-compose.onprem.yml` (overlay, optional) moves the backend to `network_mode: host`, points Postgres and MailHog at loopback, binds Kestrel to two addresses rather than all of them, and gives the gateway `extra_hosts: backend:host-gateway`. The header of that file is the operational note for whoever applies it, including why it is now a choice rather than a requirement.
 
-## .env / .env.example
-The keys a deploy actually sets. `.env.example` is the authoritative template, and every name below is one `docker-compose.yml` genuinely forwards — the service `environment:` map is an **allow-list**, so a name absent from it reaches the API not at all. That allow-list is worth re-checking after any change here: several keys were documented as settable and were reaching nothing at all until the compose file was corrected.
+## Two compose files, and what configures each
 
-- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` — `POSTGRES_PASSWORD` random.
-- `JWT_SECRET` (≥ 32 chars; the API reads it as `Jwt:Secret` and refuses to start without it), `JWT_ISSUER`, `JWT_AUDIENCE`, token lifetimes.
-- `MASTER_SECRETS_ENCRYPTION_KEY` — wraps per-tenant `tenant_secrets` data keys; required.
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_FROM_NAME` — email delivery.
-- `APP_PUBLIC_BASE_URL`, `APP_FRONTEND_URL`, `CORS_ALLOWED_ORIGINS`, `WEBAUTHN_ORIGIN`, `WEBAUTHN_RP_ID`, `WEBAUTHN_RP_NAME`.
-- `GATEWAY_PORT` (8088), `NGINX_BACKEND_PORT`, `NGINX_FRONTEND_PORT`, `NGINX_CLIENT_MAX_BODY_SIZE`.
-- `GATEWAY_TRUSTED_PROXIES` (→ `Gateway__TrustedProxies`, comma-delimited) — only when something other than the compose gateway fronts the API. `GATEWAY_FORWARD_LIMIT` (→ `Gateway__ForwardLimit`) — only with a third proxy hop.
-- `BACKEND_BIND_ADDRESS` — on-prem only: the address `backend:host-gateway` resolves to on this host. `docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'`; default `172.17.0.1`.
-- `BIOMETRIC_DRIVER` (`Null` until a driver exists), `BIOMETRIC_TEMPLATE_STORE_PATH`, `MEDIA_STORAGE_PATH`.
-- `PORTAINER_*` — read by CI only.
+`docker-compose.yml` builds from source and reads `.env` (`.env.example` is the template). It is for a developer's machine and `make up`.
 
-PayFast merchant credentials are **per-tenant settings** in the database (`tenant_settings.payfast`, sandbox/live chosen per tenant), not environment. There is no platform-level payment URL. Tenant branding and webhook secrets likewise live in the database. The only truly project-specific config a deploy needs are the two image-name slugs in the Portainer stack file; everything else is org-wide secrets in Portainer or per-tenant DB rows.
+`docker-compose.prod.yml` is **the Portainer stack, verbatim**. It pulls the three published images and carries every value inline — a Portainer stack has no `.env` behind it, and the founder's rule is that the file itself holds the minimum a running club needs. The lines marked `CHANGE-ME` (database password, JWT secret, public hostname, mailbox password) are edited once when the stack is created; nothing else is configuration. It publishes one port, `8088`, which cloudflared dials for members and the court box dials on the LAN.
+
+**Names must be the ones the API reads.** .NET configuration maps `Section__Key` to `Section:Key` and nothing else: `Jwt__Secret`, `App__PublicBaseUrl`, `Cors__AllowedOrigins__0`, `Smtp__Host`, `Media__StoragePath`, `Biometric__TemplateStorePath`, `Gateway__TrustedProxies`. Until 2026-09-05 both compose files forwarded flat names — `JWT_SECRET`, `APP_FRONTEND_URL`, `CORS_ALLOWED_ORIGINS`, `MASTER_SECRETS_ENCRYPTION_KEY`, `MEDIA_STORAGE_PATH`, `BIOMETRIC_DRIVER` — that no line of the API reads, while insisting on values for them; the API booted on the `appsettings.json` placeholders, dev JWT secret included. The three exceptions that do accept flat names, because their readers say so, are `SMTP_*` (`SmtpEmailService`) and `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGIN` (`Program.cs`). When adding a variable, find the `Configuration[...]` read first.
+
+PayFast merchant credentials are **per-tenant settings** in the database (`tenant_settings.payfast`, sandbox/live chosen per tenant), not environment. Tenant branding and webhook secrets likewise live in the database.
 
 ## Cloudflared tunnel
 - Hostname: TBD per tenant or per-platform (e.g. `*.mainframe.crusadersapp.co.za` wildcard CNAME → tunnel).

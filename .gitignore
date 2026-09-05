@@ -109,7 +109,7 @@ src/iot/**/*.hex
 # `Name 3.cpp` copies of files it has just seen written. Inside a sketch's src/
 # the Arduino IDE COMPILES them, and 27 of them were committed once before this
 # rule existed. `make arduino-export` also deletes them; belt and braces.
-src/iot/arduino/**/* [0-9].*
+src/iot/arduino/**/* [0-9]*.*
 src/iot/arduino/**/* [0-9]
 
 # Firmware secrets — a filled-in secrets.h was previously committable.
