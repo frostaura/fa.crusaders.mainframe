@@ -96,6 +96,41 @@ function nextProbeDelayMs(attempt: number): number {
   return Math.min(1000 * 2 ** attempt, 30_000);
 }
 
+/**
+ * Another tab signed out — or had its session revoked — and this one is still on screen.
+ *
+ * <p>
+ * `localStorage` is shared by every tab on the origin, and a `storage` event fires in all the
+ * OTHERS, never in the tab that made the change, which is exactly the signal needed here.
+ * Without it a second tab kept the whole signed-in chrome and its last-rendered data: the
+ * wallet still showed a balance and offered a Top up button, and every request it made went
+ * out with no token and came back refused — which the screens reported as "Check your
+ * connection and press Refresh." The member was told something untrue about their money,
+ * indefinitely, and only a manual reload put them back on /login.
+ * </p>
+ *
+ * <p>
+ * Only the token DISAPPEARING ends this tab's session. A `newValue` that is a different string
+ * is the ordinary background rotation of an access token by whichever tab got there first, and
+ * this tab keeps running on it — it reads storage on every request.
+ * </p>
+ */
+function useCrossTabSessionEnd(statusRef: { current: AuthState["status"] }, endSession: () => void) {
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      // `key === null` is `localStorage.clear()` — the whole store went, token included.
+      if (e.key !== null && e.key !== TOKEN_KEY) return;
+      if (e.newValue !== null) return;
+      // A tab still bootstrapping finds out for itself: its whoami goes out token-less and the
+      // api client's session-ended handler catches the refusal.
+      if (statusRef.current === "anonymous" || statusRef.current === "loading") return;
+      endSession();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [statusRef, endSession]);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -186,36 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, []);
 
-  /**
-   * Another tab signed out — or its session was revoked — and this one is still on screen.
-   *
-   * <p>
-   * `localStorage` is shared by every tab on the origin and a `storage` event fires in all the
-   * OTHERS, never in the tab that made the change, which is exactly the signal needed here.
-   * Without it a second tab kept the whole signed-in chrome and its last-rendered data: the
-   * wallet still offered a Top up button, and every request it made went out with no token and
-   * came back refused, which the screens reported as "Check your connection and press Refresh."
-   * The member was told something untrue about their money, indefinitely, and only a manual
-   * reload put them back on /login.
-   * </p>
-   *
-   * <p>
-   * Only the token DISAPPEARING ends this tab's session. A `newValue` that is a different
-   * string is the ordinary background rotation of an access token by whichever tab got there
-   * first, and this tab keeps running on it — it reads storage on every request.
-   * </p>
-   */
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      // `key === null` is `localStorage.clear()` — the whole store went, token included.
-      if (e.key !== null && e.key !== TOKEN_KEY) return;
-      if (e.newValue !== null) return;
-      if (statusRef.current === "anonymous" || statusRef.current === "loading") return;
-      endSession();
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [endSession]);
+  useCrossTabSessionEnd(statusRef, endSession);
 
   // While authenticated, proactively refresh the access token before it expires so an active
   // session never breaks under the user.
