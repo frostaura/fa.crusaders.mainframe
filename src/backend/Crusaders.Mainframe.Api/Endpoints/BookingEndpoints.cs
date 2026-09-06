@@ -61,12 +61,7 @@ public static class BookingEndpoints
             return ToHttpResult(result, ctx);
         });
 
-        admin.MapPost("/{bookingId:guid}/cancel", async (Guid bookingId, AdminCancelRequest? req, HttpContext ctx, BookingService svc, CancellationToken ct) =>
-        {
-            var actorId = ctx.User.Id() ?? Guid.Empty;
-            var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: true, waivePenalty: req?.WaivePenalty ?? false, ct);
-            return ToHttpResult(result, ctx);
-        });
+        admin.MapPost("/{bookingId:guid}/cancel", AdminCancelAsync);
 
         // Admin: block a slot for an event.
         //
@@ -92,6 +87,36 @@ public static class BookingEndpoints
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// §8's "cancel any booking on behalf of any member (penalty waiveable <b>with
+    /// reason</b>)", and §7's "logged with reason".
+    ///
+    /// <para>
+    /// The reason did not exist on the wire at all, so the audit row carried a bare
+    /// <c>waived: true</c> and a club reviewing waived penalties at month end could not tell
+    /// a genuine club decision from a quiet favour. It is refused rather than defaulted: an
+    /// audit field that may be left blank is one that always is. A cancellation that waives
+    /// nothing needs no reason — the requirement belongs to the waiver, not to the route.
+    /// </para>
+    ///
+    /// <para>
+    /// A named method rather than a lambda so <c>MapBookingEndpoints</c> stays a list of
+    /// routes; the decision below is the only one of them with a rule of its own.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> AdminCancelAsync(
+        Guid bookingId, AdminCancelRequest? req, HttpContext ctx, BookingService svc, CancellationToken ct)
+    {
+        var actorId = ctx.User.Id() ?? Guid.Empty;
+        var waive = req?.WaivePenalty ?? false;
+        var reason = req?.WaiveReason?.Trim();
+        if (waive && string.IsNullOrEmpty(reason))
+            return Results.BadRequest(new { error = "waive_reason_required" });
+
+        var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: true, waivePenalty: waive, ct, reason);
+        return ToHttpResult(result, ctx);
     }
 
     /// <summary>
@@ -172,4 +197,9 @@ public sealed record CreateBookingRequest(Guid CourtId, DateTimeOffset StartsAt,
 /// </summary>
 public sealed record AdminBookingRequest(
     Guid CourtId, Guid UserId, DateTimeOffset StartsAt, int SliceCount, bool AllowNegativeBalance = false);
-public sealed record AdminCancelRequest(bool WaivePenalty);
+/// <summary>
+/// <paramref name="WaiveReason"/> is required whenever <paramref name="WaivePenalty"/> is
+/// true — §7's "logged with reason". Defaulted so a cancellation that waives nothing needs
+/// no reason, and so an older client that never waives is unaffected.
+/// </summary>
+public sealed record AdminCancelRequest(bool WaivePenalty, string? WaiveReason = null);

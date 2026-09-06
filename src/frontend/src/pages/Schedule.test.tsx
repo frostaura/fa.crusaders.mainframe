@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import SchedulePage from "./Schedule";
 import { renderPage, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
 
@@ -332,11 +332,15 @@ describe("Schedule", () => {
     await screen.findByRole("dialog", { name: "Cancel this booking?" });
 
     fireEvent.click(await screen.findByLabelText(/Waive the 15\.00 cr penalty/));
+    // §7's "logged with reason" — the waiver does not go without one.
+    fireEvent.change(screen.getByLabelText("Why the penalty is being waived"), {
+      target: { value: "Club closed the court" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Cancel the booking" }));
 
     await waitFor(() => {
       const post = fetchStub.calls.find((c) => c.method === "POST" && c.path.endsWith(`/admin/bookings/${BOOKING_ID}/cancel`));
-      expect(post?.body).toMatchObject({ waivePenalty: true });
+      expect(post?.body).toMatchObject({ waivePenalty: true, waiveReason: "Club closed the court" });
     });
   });
 
@@ -509,8 +513,8 @@ describe("Schedule", () => {
       // Zero, which is the ordinary state of a club desk account: it never plays.
       { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
       { path: "/api/v1/admin/members/", body: [
-        { user_id: THEM, full_name: "Naledi Khumalo" },
-        { user_id: OTHER, full_name: "Liam O'Connor" },
+        { user_id: THEM, full_name: "Naledi Khumalo", balance_credits: 10 },
+        { user_id: OTHER, full_name: "Liam O'Connor", balance_credits: 500 },
       ] },
       { path: "/api/v1/schedule", body: DAY },
       { method: "POST", path: "/api/v1/admin/bookings/", status: postStatus, body: postBody, sequence: postSequence },
@@ -579,8 +583,9 @@ describe("Schedule", () => {
       expect(posts[1].body).toMatchObject({ courtId: COURT, userId: THEM, allowNegativeBalance: true });
     });
 
-    // The admin who has just put somebody in the red is told by how much, there and then.
-    expect(await screen.findByText(/Their balance is now -40\.00 cr/)).toBeInTheDocument();
+    // The admin who has just put somebody in the red is told by how much, there and then,
+    // and told WHOSE red it is — the confirmation used to say "that member" throughout.
+    expect(await screen.findByText(/Naledi Khumalo's balance is now -40\.00 cr/)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
@@ -648,5 +653,165 @@ describe("Schedule", () => {
     expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Book anyway/ })).not.toBeInTheDocument();
     expect(fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/bookings/")).toHaveLength(0);
+  });
+
+  // ---- J-F3: a refusal is answered IN the dialog that caused it ----
+
+  it("puts the refusal inside the confirmation dialog, not only in a toast behind it", async () => {
+    stub([{
+      method: "POST", path: "/api/v1/bookings/", status: 409,
+      body: { error: "per_day_cap_exceeded", cap_minutes: 60, already_booked_minutes: 60, attempted_minutes: 15 },
+    }]);
+    renderPage(<SchedulePage />);
+    const modal = await openBookingModal();
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+
+    // The modal stayed open with NOTHING in it and its button back at rest, while the only
+    // explanation painted under the modal's own 30% scrim and cleared itself after four
+    // seconds. A member watching the dialog — where their attention is — saw a control
+    // that did nothing and was never told why.
+    await waitFor(() => expect(modal).toHaveTextContent(/You already have 60 of your 60 minutes booked/));
+    expect(within(modal).getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("does not tell a member to refresh the schedule when the club's own system is down", async () => {
+    // An HTML body, because that is what a wedged gateway actually answers with — and
+    // because the client used to JSON.parse it BEFORE constructing the ApiError, so a real
+    // 502 reached the screen as a bare SyntaxError and no status-based branch could fire.
+    // A stub returning JSON with a 502 status passes either way and proves nothing; this
+    // one was found in a browser.
+    stub([{ method: "POST", path: "/api/v1/bookings/", status: 502, body: "<html><body>502 Bad Gateway</body></html>" }]);
+    renderPage(<SchedulePage />);
+    const modal = await openBookingModal();
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+
+    // Every 5xx used to come out as "Refresh the schedule and try again" — advice for a
+    // stale grid, and simply wrong for a gateway that is down: refreshing fails too.
+    await waitFor(() => expect(modal).toHaveTextContent(/isn't answering right now/));
+    expect(modal).toHaveTextContent(/no credit was taken/);
+    expect(screen.queryByText(/Refresh the schedule and try again/)).not.toBeInTheDocument();
+  });
+
+  it("clears the refusal when the admin changes who is being booked for", async () => {
+    adminAtTheDesk(409, { error: "slot_taken" });
+    renderPage(<SchedulePage />);
+    await chooseMember();
+    const modal = screen.getByRole("dialog", { name: "Confirm booking" });
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    await waitFor(() => expect(modal).toHaveTextContent(/Someone just took that slot/));
+
+    // A refusal belongs to one attempt against one payer, exactly as the shortfall does.
+    fireEvent.change(screen.getByLabelText("Member"), { target: { value: OTHER } });
+    expect(modal).not.toHaveTextContent(/Someone just took that slot/);
+  });
+
+  // ---- I-F13 / G-F10: the desk sees whose credit, how much, and what is left ----
+
+  it("shows the member's balance and the balance the booking leaves, before any refusal", async () => {
+    adminAtTheDesk(200, { booking_id: "88888888-8888-8888-8888-888888888888", balance_after_credits: 450 });
+    renderPage(<SchedulePage />);
+    const modal = await openBookingModal();
+    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
+    fireEvent.change(screen.getByLabelText("Member"), { target: { value: OTHER } });
+
+    // "Their balance: charged to the member" — a phrase where a number belongs — and no
+    // "balance after" row at all. §8 asks for the member's name, their balance, the price
+    // and the balance it will leave, and a member who could afford it produced none of it.
+    await waitFor(() => expect(modal).toHaveTextContent("Their balance"));
+    expect(modal).toHaveTextContent("500.00 cr");
+    expect(modal).toHaveTextContent("Their balance after");
+    expect(modal).toHaveTextContent("450.00 cr");
+    expect(modal).not.toHaveTextContent("charged to the member");
+  });
+
+  it("names the member in the on-behalf confirmation", async () => {
+    adminAtTheDesk(200, { booking_id: "88888888-8888-8888-8888-888888888888", balance_after_credits: 450 });
+    renderPage(<SchedulePage />);
+    await chooseMember();
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+
+    // "…for that member." The admin has just picked a name from a dropdown, and repeating
+    // it back is the one check that catches a mis-click.
+    expect(await screen.findByText(/Booked Court 1 at .* for Naledi Khumalo\./)).toBeInTheDocument();
+    expect(screen.queryByText(/for that member/)).not.toBeInTheDocument();
+  });
+
+  // ---- G-F5 / G-F6: an admin is not the member, and a waiver carries its reason ----
+
+  const THEIRS = { ...MY_SLOT, isMine: false, ownerUserId: THEM, ownerFirstName: "Naledi" };
+
+  function adminCancelling(quote: Partial<typeof QUOTE>, slotOverrides: Partial<typeof MY_SLOT> = {}) {
+    const whoami = signIn({ isAdmin: true });
+    return stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+      { path: "/api/v1/admin/members/", body: [] },
+      { path: "/api/v1/schedule", body: { ...DAY, slots: [{ ...THEIRS, ...slotOverrides }] } },
+      { path: `/api/v1/bookings/${BOOKING_ID}/cancellation-quote`, body: { ...QUOTE, ...quote } },
+      { method: "POST", path: `/api/v1/admin/bookings/${BOOKING_ID}/cancel`, body: { refunded_credits: 50, penalty_credits: 0 } },
+    ]);
+  }
+
+  async function openAdminCancel() {
+    fireEvent.click(await screen.findByRole("button", { name: /cancel on their behalf/ }));
+    return await screen.findByRole("dialog", { name: "Cancel this booking?" });
+  }
+
+  it("tells an admin the refund goes to the member, by name, not to 'your credit'", async () => {
+    adminCancelling({});
+    renderPage(<SchedulePage />);
+    const modal = await openAdminCancel();
+
+    // §7: "refunds always go to the booking's player". The dialog was written in the first
+    // person throughout and never named the member, so a desk account whose own balance is
+    // zero permanently was told the money was coming back to it.
+    await waitFor(() => expect(modal).toHaveTextContent(/goes back to Naledi's credit/));
+    expect(modal).toHaveTextContent("Naledi");
+    expect(modal).not.toHaveTextContent(/back to your credit/);
+  });
+
+  it("does not tell an admin that they themselves checked in", async () => {
+    adminCancelling({ checkedIn: true, refundCredits: 0, penaltyCredits: 0 }, { checkedIn: true });
+    renderPage(<SchedulePage />);
+    const modal = await openAdminCancel();
+
+    await waitFor(() => expect(modal).toHaveTextContent(/Naledi has already checked in/));
+    expect(modal).not.toHaveTextContent(/You've already checked in/);
+  });
+
+  it("names the member's credit in the confirmation after an admin cancellation", async () => {
+    adminCancelling({});
+    renderPage(<SchedulePage />);
+    await openAdminCancel();
+    await screen.findByText(/goes back to Naledi's credit/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel the booking" }));
+
+    expect(await screen.findByText(/50\.00 cr back to Naledi's credit/)).toBeInTheDocument();
+  });
+
+  it("refuses to waive a penalty until the admin says why, and sends the reason", async () => {
+    const fetchStub = adminCancelling({ insidePenaltyWindow: true, penaltyCredits: 15, refundCredits: 35 });
+    renderPage(<SchedulePage />);
+    await openAdminCancel();
+
+    fireEvent.click(await screen.findByLabelText(/Waive the 15\.00 cr penalty/));
+
+    // §7 and §8 both say "with reason". There was no field, nothing on the wire, and the
+    // audit row carried a bare `waived: true` — so a club reviewing waived penalties at
+    // month end could not tell a club decision from a quiet favour.
+    const confirm = screen.getByRole("button", { name: "Cancel the booking" });
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Why the penalty is being waived"), {
+      target: { value: "Court flooded — club's fault" },
+    });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+
+    await waitFor(() => {
+      const post = fetchStub.calls.find((c) => c.method === "POST" && c.path.endsWith(`/admin/bookings/${BOOKING_ID}/cancel`));
+      expect(post?.body).toMatchObject({ waivePenalty: true, waiveReason: "Court flooded — club's fault" });
+    });
   });
 });
