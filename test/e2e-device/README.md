@@ -50,7 +50,7 @@ The finding ids are those of `docs/reviews/e2e-adversarial-review-2026-08-24.md`
 | Step | Finding | Assertion, in one line |
 |---|---|---|
 | Preflight | C1 | this script's device request shape matches the shared corpus: an `Authorization: Bearer` header, and a `mac` that is already twelve lowercase hex (a vector pinning `5C:CF:...` would be a firmware that registers a second row for a board that already has one) |
-| Seed | setup | settings tuned over the admin API (slice 15, grace 1, cue 10, roster 120, forward 240, walk-up cap 90, QR lifetime 900); courts priced at 8; member M logged in via admin reset; credits via admin adjustment |
+| Seed | setup | settings tuned over the admin API (slice 15, grace 1, cue 10, roster 120, forward 240, walk-up cap 90, QR lifetime 900); **the club opened `00:00-23:59` on every weekday**, because the seeded hours are a real club's (`06:00-22:00`, `07:00-20:00` at the weekend) and outside them the walk-up leg cannot buy court time at all; courts priced at 8; member M logged in via admin reset; credits via admin adjustment; every seeded booking overlapping the windows this run books over is admin-cancelled **with its mandatory waiver reason**, and the windows are re-read to confirm they are actually clear |
 | 1 | **C1 / C4** | `GET /admin/devices/api-key` mints and returns the club's key with a `regenerated_at`, and a second read returns the **same** key (readable, not shown-once — it has to be pasteable into a `secrets.h` weeks later); a heartbeat with no key at all is 401; one with an unrecognised key is 401 with an **empty** body (no reason, no clock); the first heartbeat from an unknown MAC **registers the box itself**, named `box-<last six of the mac>` and driving `[1,2,3,4]`, with no `server_unix` and no `ota` anywhere in the response; the admin Devices list shows it flagged `auto_registered`; a second heartbeat from the same MAC does not create a second row; a `mac` that is not twelve hex characters is `400 mac_required` rather than a 404 that would read as "unknown board" |
 | 2 | **C2 / C4 / H2 / R17** | `court_numbers == [1,2,3,4]`; the heartbeat carries no `server_unix`; every roster entry matches `TOKEN\|relay\|opens_in\|closes_in`; M's bookings appear on relays 0 and 2 with signed relative seconds measured from the response instant (cue already open, `closes_in − opens_in = 45 min + cue`); the booking three hours out is absent at `roster_window 120`, present at 240, absent again at 120; tokens are 12-char access codes; the QR screen shows the same code the roster carries on relay 2; the admin device list shows the box's courts, `last_seen_at`, `running_version` and `button_map: null` (no per-box override), and the heartbeat carried the club's eight-entry map |
 | 3 | **C3 / C4** | `!SCAN` from the simulated scanner → `/activate` → `activated`, `court_number 3`, the booking's id, `granted_seconds ≤ 5400` and equal to the slot remainder; `!ON,C,<granted>` closes relay C on the simulator (`!STATE` mask + remaining, `[relay] court C ON`); a repeat scan is idempotent with fewer seconds; the ledger holds only the booking-time charge; `!OFF,C` reports `!EVT,OFF,C` and clears the mask |
@@ -81,6 +81,36 @@ and the 30-second sweep, which the script waits for rather than short-circuits �
   yet, so the ITN is signed with the Development seeder's placeholder passphrase
   (`Seeder.cs`). If that seed changes, `SEEDED_PAYFAST_PASSPHRASE` at the top of the script
   is the one place to follow it.
+
+## Two ways this harness lied to itself (2026-09-06)
+
+Both were found by CI going red at 16:09 UTC on a run that was green on the founder's
+machine at 19:57 SAST four hours later, and both are the same shape: **a step that asked the
+API for something, did not check the answer, and carried on.**
+
+- **`ensure_free` had been a no-op for as long as the waiver reason has been mandatory.**
+  §8's admin cancel is *"penalty waiveable with reason"* and the endpoint enforces it —
+  `{"waivePenalty": true}` with no `waiveReason` is `400 waive_reason_required` — and this
+  step sent exactly that, then **printed** the status instead of asserting it. Whether that
+  mattered depended on the hour: the seeder plants demo bookings at fixed local times, so at
+  19:57 SAST the seeded 19:00 slot on court 2 is in the past and nothing collides, while at
+  18:09 SAST it is fifty minutes out and survives. It then poses as this run's own fixtures —
+  the member-ident QR comes back as *that* booking's activation code, the roster carries it on
+  relay 1 where B6 should be, the walk-up correctly refuses it as a wallet, and the too-early
+  scan reports the time to the wrong slot. Five checks fail and none of them names the cause.
+  The cancel now carries its reason, every refusal is fatal, and the window is re-read
+  afterwards: *"I asked"* is not *"it is clear"*.
+- **The walk-up leg cannot run while the club is shut.** With the first bug fixed, a run after
+  20:00 on a Sunday failed `walk_up_refused` instead — correctly, because there is no court
+  time left to sell. The run now opens the club for the whole local day. That does not bypass
+  the closing-time rule: `walk_up_expectation` still derives what to expect from whatever the
+  schedule says the club's hours are, so a truncated grant is still asserted as truncated. It
+  moves the close somewhere the run is not standing on, and a club with nothing left to sell
+  now fails with a sentence saying so rather than an opaque wire error.
+
+The general lesson is the one `memory/gotchas.md` already carries in three other forms: **a
+test that books relative to `UtcNow` inherits the wall clock as a hidden input.** The
+mechanical tell in both cases was a step whose result was printed rather than asserted.
 
 ## Observations from the first passing runs (2026-09-04)
 
