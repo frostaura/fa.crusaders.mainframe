@@ -64,6 +64,69 @@ function owningTag(source: string, at: number): { name: string; text: string } {
   return { name, text: source.slice(open, end < 0 ? source.length : end + 1) };
 }
 
+/**
+ * CSS specificity as (id, class, type), the way the cascade computes it.
+ *
+ * <p>
+ * Written out rather than asserted as a substring because this file has now been wrong about
+ * the same thing twice — the reduced-motion override and `.no-lift` were both present,
+ * correct-looking and completely overridden — and a substring check cannot tell those apart
+ * from a rule that works. `:not()`, `:is()` and `:has()` contribute their argument's
+ * specificity, which is exactly the part the two mistakes turned on.
+ * </p>
+ */
+export function specificity(selector: string): [number, number, number] {
+  let rest = selector.trim();
+  let ids = 0, classes = 0, types = 0;
+
+  const functional = /:(?:not|is|has)\(([^()]*)\)/;
+  for (let m = rest.match(functional); m; m = rest.match(functional)) {
+    const [a, b, c] = specificity(m[1]);
+    ids += a; classes += b; types += c;
+    rest = rest.replace(functional, " ");
+  }
+
+  const take = (pattern: RegExp) => {
+    const n = (rest.match(pattern) ?? []).length;
+    rest = rest.replace(pattern, " ");
+    return n;
+  };
+
+  ids += take(/#[\w-]+/g);
+  classes += take(/\.[\w-]+/g);
+  classes += take(/\[[^\]]*\]/g);
+  types += take(/::[\w-]+/g);      // pseudo-ELEMENTS count as types; must be taken before :class
+  classes += take(/:[\w-]+/g);
+  types += take(/\b[a-zA-Z][\w-]*\b/g);
+
+  return [ids, classes, types];
+}
+
+/** Lexicographic, as the cascade compares them. */
+function beats(a: [number, number, number], b: [number, number, number]): boolean {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] > b[i];
+  }
+  return true; // equal specificity: the later rule wins, and `.no-lift` is later in the file
+}
+
+/**
+ * Every rule whose body contains `needle`, as its list of selectors.
+ *
+ * <p>
+ * All of them, not the first: `transform: none` appears in the reduced-motion block as well
+ * as in `.no-lift`, and a first-match helper silently handed back the wrong rule's selectors
+ * — which then filtered to nothing and would have made the assertion below vacuous.
+ * </p>
+ */
+function rulesWithBody(css: string, needle: RegExp): string[][] {
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = bare.matchAll(new RegExp(`([^{}]*)\\{([^{}]*)\\}`, "g"));
+  return [...rules]
+    .filter((r) => needle.test(r[2]))
+    .map((r) => r[1].split(",").map((s) => s.trim()).filter(Boolean));
+}
+
 describe("the affordance every clickable surface shares", () => {
   const css = readFileSync(join(SRC, "index.css"), "utf8");
 
@@ -117,6 +180,53 @@ describe("the affordance every clickable surface shares", () => {
       expect(reduced, `reduced motion does not override "${selector}" at equal specificity`)
         .toContain(selector);
     }
+  });
+
+  it("lets .no-lift actually win, because for two rounds it did not", () => {
+    // `.no-lift:hover` was (0,2,0) against a base lift of
+    // `button:not(:disabled):not([aria-disabled="true"]):hover` — (0,3,1) — and
+    // `a[href]:hover` — (0,2,1). It lost to both, so the opt-out did nothing at all:
+    // measured in Chromium, a hovered carousel dot reported
+    // `transform: matrix(1, 0, 0, 1, 0, -1)` and the full two-layer lift shadow. Being in a
+    // later @layer does not help — Tailwind's @layer is a source ordering, not a cascade
+    // layer, so specificity is decided first.
+    //
+    // The arithmetic is computed rather than described, because the description is what was
+    // wrong: the rule read correctly and was inert. e2e/affordance.spec.ts hovers a real dot
+    // in a real engine; this is the cheap half that runs on every commit.
+    const liftRules = rulesWithBody(css, /transform:\s*translateY\(-1px\)/);
+    expect(liftRules).toHaveLength(1);
+    const lift = liftRules[0];
+    const optOut = rulesWithBody(css, /transform:\s*none/)
+      .flat()
+      .filter((selector) => selector.includes(".no-lift") && selector.endsWith(":hover"));
+
+    expect(lift.length).toBeGreaterThan(1);
+    expect(optOut.length).toBeGreaterThan(0);
+
+    for (const out of optOut) {
+      for (const base of lift) {
+        expect(
+          beats(specificity(out), specificity(base)),
+          `"${out}" ${specificity(out).join(",")} does not beat "${base}" ${specificity(base).join(",")}, `
+          + "so a control marked .no-lift still lifts",
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("computes specificity the way the cascade does", () => {
+    // The calculator above is the thing this file now trusts, so it is worth its own check —
+    // a miscount here would clear the assertion above while the product still lifted.
+    expect(specificity("button")).toEqual([0, 0, 1]);
+    expect(specificity("a[href]:hover")).toEqual([0, 2, 1]);
+    expect(specificity(".no-lift:hover")).toEqual([0, 2, 0]);
+    expect(specificity('button:not(:disabled):not([aria-disabled="true"]):hover')).toEqual([0, 3, 1]);
+    expect(specificity('.no-lift:not(:disabled):not([aria-disabled="true"]):hover')).toEqual([0, 4, 0]);
+    // …and the comparison, including the case that made this a bug: more classes beats a type.
+    expect(beats([0, 4, 0], [0, 3, 1])).toBe(true);
+    expect(beats([0, 2, 0], [0, 3, 1])).toBe(false);
+    expect(beats([0, 2, 0], [0, 2, 1])).toBe(false);
   });
 
   it("reaches everything clickable, because nothing clickable is a bare div", () => {
