@@ -387,7 +387,15 @@ describe("RequireAuth", () => {
     render(<App />);
     // Not the path — the path was already /wallet before the session was confirmed. This waits
     // for RequireAuth to have finished deciding, which is what makes the tab a signed-in one.
-    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    //
+    // Waited on by ROLE, not by the booting copy. It used to wait for the string "Loading…" to
+    // disappear; when that screen became a spinner reading "Connecting to the club…", the wait
+    // passed instantly against a tab that was still bootstrapping, the storage event then landed
+    // while the status was still `loading` — which the listener deliberately ignores, because a
+    // bootstrapping tab finds out for itself — and the test failed claiming the redirect was
+    // broken when nothing was. A wait keyed on someone else's copy is a wait that stops waiting
+    // the day the copy changes.
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
     expect(window.location.pathname).toBe("/wallet");
 
     // The other tab's sign-out, as this tab experiences it: the shared key disappears, and
