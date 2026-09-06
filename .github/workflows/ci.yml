@@ -368,6 +368,9 @@ jobs:
         run: |
           set -euo pipefail
           ESP_URL=https://arduino.esp8266.com/stable/package_esp8266com_index.json
+          # The installer REFUSES to create its own BINDIR — "folder not found. Please create
+          # it before continuing." — and exits 1 without installing anything.
+          mkdir -p "$RUNNER_TEMP/bin"
           curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
             | BINDIR="$RUNNER_TEMP/bin" sh
           export PATH="$RUNNER_TEMP/bin:$PATH"
