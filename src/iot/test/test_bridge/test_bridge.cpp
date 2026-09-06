@@ -200,6 +200,46 @@ void test_queue_a_reboot_resumes_past_the_reserved_block() {
   TEST_ASSERT_TRUE(e.seq >= eventq::kSeqCheckpointStride);
 }
 
+/// The inference three API-side documents drew from "the sequence survives a reboot"
+/// plus "the API stores a receipt per (device, seq)", which does not follow: they
+/// concluded a gap after a reconnect would show that queued events were lost.
+///
+/// Here NOTHING is lost — every event was uploaded and released before the power
+/// cut — and the API still sees a 61-number hole, because the checkpoint reserved a
+/// block of 64 and begin() resumes past the whole of it. A gap therefore cannot
+/// distinguish "the queue lost N activations" from "the checkpoint skipped N
+/// numbers", and settlement-model.md I2, go-live-checklist.md section 8 and
+/// system-blueprint.html risk 9 have been corrected to say so. If this test ever
+/// goes red because the firmware issues numbers densely across a reboot, those three
+/// documents become wrong in the other direction and must be revisited.
+void test_queue_a_sequence_gap_after_a_reboot_is_not_evidence_of_loss() {
+  fakes::FakeStore store;
+
+  uint32_t lastBefore = 0U;
+  {
+    eventq::EventQueue<64U> q(&store);
+    q.begin();
+    for (int i = 0; i < 3; ++i) {
+      eventq::Event e = activation("member", 0U);
+      static_cast<void>(q.push(e));
+      lastBefore = e.seq;
+    }
+    // Uploaded and acknowledged, so the ring is empty and the breaker costs
+    // nothing whatsoever.
+    static_cast<void>(q.releaseThrough(lastBefore));
+    TEST_ASSERT_TRUE(q.empty());
+  }
+
+  eventq::EventQueue<64U> after(&store);
+  after.begin();
+  eventq::Event next = activation("member", 0U);
+  static_cast<void>(after.push(next));
+
+  TEST_ASSERT_EQUAL_UINT32(3U, lastBefore);
+  TEST_ASSERT_EQUAL_UINT32(eventq::kSeqCheckpointStride + 1U, next.seq);
+  TEST_ASSERT_TRUE(next.seq > lastBefore + 1U);
+}
+
 void test_queue_checkpoints_are_strided_not_per_event() {
   fakes::FakeStore store;
   Queue q(&store);
@@ -307,10 +347,11 @@ void test_queue_events_do_not_survive_a_power_cut_and_the_sequence_does() {
   }
 
   // The breaker goes. This is the documented limit, asserted rather than left
-  // to be discovered: the events were in RAM and are gone, because hal::IStore
-  // holds 32-byte values and an Event does not fit through it. What DOES
-  // survive is the sequence high-water mark, which is what the API's
-  // deduplication rests on.
+  // to be discovered: the events were in RAM and are gone. NOT because they
+  // could not be written — kStoreMaxValueLen is 128 and an Event is 48, so the
+  // port would take one; persisting the ring simply has not been built, and the
+  // header says so. What DOES survive is the sequence high-water mark, which is
+  // what the API's deduplication rests on.
   eventq::EventQueue<64U> after(&store);
   after.begin();
 
@@ -1344,6 +1385,7 @@ int main(int, char**) {
   RUN_TEST(test_queue_overflow_discards_the_oldest_and_says_so);
   RUN_TEST(test_queue_release_through_stops_at_an_unacknowledged_event);
   RUN_TEST(test_queue_a_reboot_resumes_past_the_reserved_block);
+  RUN_TEST(test_queue_a_sequence_gap_after_a_reboot_is_not_evidence_of_loss);
   RUN_TEST(test_queue_checkpoints_are_strided_not_per_event);
   RUN_TEST(test_queue_a_torn_sequence_mark_is_absent_not_mongrel);
   RUN_TEST(test_queue_a_store_that_refuses_every_write_still_queues);
