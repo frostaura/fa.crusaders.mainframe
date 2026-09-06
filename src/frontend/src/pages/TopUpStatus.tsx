@@ -57,7 +57,10 @@ function pollDelayMs(attempt: number): number | null {
 export default function TopUpStatusPage() {
   const { topupId } = useParams<{ topupId: string }>();
   const [s, setS] = useState<TopUpStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /* Whether the LAST attempt to read the status failed. Not the sentence — the two places
+     that report it say different things, because "we could not reach the club" means something
+     different before a status is known than it does beside one that is already on screen. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [gaveUp, setGaveUp] = useState(false);
   const [checking, setChecking] = useState(false);
   /** Bumped by "Check again", which restarts the schedule from the top. */
@@ -87,7 +90,7 @@ export default function TopUpStatusPage() {
         if (cancelled) return;
         settled();
         setS(snap);
-        setError(null);
+        setLoadFailed(false);
         if (snap.status === "Completed" && !refreshedOnce.current) {
           refreshedOnce.current = true;
           refreshBalanceRef.current();
@@ -100,7 +103,7 @@ export default function TopUpStatusPage() {
       } catch {
         if (cancelled) return;
         settled();
-        setError("Couldn't load top-up status.");
+        setLoadFailed(true);
       }
     };
 
@@ -117,7 +120,41 @@ export default function TopUpStatusPage() {
     setRound((r) => r + 1);
   };
 
-  if (error) return <Card><p className="text-sm text-danger-strong">{error}</p></Card>;
+  /*
+    A failed status request is not a dead end, and it used to be one: this branch was a bare
+    sentence in a bare card — no controls at all, no wallet link, not even the page's own
+    layout — so the only way out was the manual browser reload the whole finding is about.
+    The "Check again" button added in the previous round made that reachable in one press: a
+    refuter aborted the status request on a live Pending top-up, pressed it, and the page
+    became "Couldn't load top-up status." with nothing on it.
+
+    Two things follow. A failure BEFORE anything is known keeps the two controls the Pending
+    branch has, so the member can ask again or go look at their wallet. A failure AFTER a
+    status has been read does not throw that status away — the amount, the badge and the
+    controls stay, and the failure is a line beside them saying the screen may be stale. It
+    is also worth saying plainly that nothing here touches the payment: a member watching a
+    R500 top-up needs to know that a page that cannot reach the club has not cancelled it.
+  */
+  if (loadFailed && !s) {
+    return (
+      <div className="max-w-md mx-auto">
+        <Card>
+          <h1 className="text-xl font-semibold mb-2">Top-up</h1>
+          <p role="alert" className="text-sm text-danger-strong">
+            We couldn't reach the club to check on this payment. Nothing here cancels or
+            changes it — if it has already cleared, your credits are in your wallet, and
+            we'll email you either way.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="outline" onClick={checkAgain} disabled={checking} aria-busy={checking}>
+              {checking ? "Checking…" : "Check again"}
+            </Button>
+            <Link to="/wallet"><Button variant="ghost">View wallet</Button></Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
   if (!s) return <Card>Loading…</Card>;
 
   // Cancelled is the member's own decision and gets its own neutral treatment. It used to
@@ -131,6 +168,15 @@ export default function TopUpStatusPage() {
         <h1 className="text-xl font-semibold mb-2">Top-up</h1>
         <p className="text-sm text-text-secondary mb-3">{formatZar(s.amount_zar)}</p>
         <Badge tone={tone}>{s.status}</Badge>
+
+        {/* The status above was read before the club stopped answering, so it is kept and
+            labelled rather than replaced by the failure. */}
+        {loadFailed && (
+          <p role="alert" className="mt-3 text-sm text-danger-strong">
+            We couldn't reach the club just now, so this may be out of date. Nothing here
+            cancels or changes your payment — press Check again in a moment.
+          </p>
+        )}
 
         {/*
           The Pending branch carries a control now, and stops lying when it has stopped

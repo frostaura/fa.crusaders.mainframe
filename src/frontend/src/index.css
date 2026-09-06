@@ -128,8 +128,29 @@
 
   /*
    * Opt OUT, for the few surfaces where a lift is wrong: a grid cell that must not
-   * shift its neighbours, a full-width row in a table. They keep the cursor and the
-   * focus ring — the parts that say "this can be pressed" — and lose only the motion.
+   * shift its neighbours, a carousel dot that must not jump under a thumb, a
+   * full-width row in a table. They keep the cursor and the focus ring — the parts
+   * that say "this can be pressed" — and lose only the motion.
+   *
+   * The `:not()` pair is not a guard, it is the specificity. This rule read
+   * `.no-lift:hover` — (0,2,0) — against the base lift at
+   * `button:not(:disabled):not([aria-disabled="true"]):hover` — (0,3,1) — and
+   * `a[href]:hover` — (0,2,1). It lost to both, so it did nothing at all: measured in
+   * Chromium, a hovered carousel dot reported `transform: matrix(1, 0, 0, 1, 0, -1)`
+   * and the full two-layer lift shadow, on every one of the three controls that use
+   * the class. Being in a later layer does not help — Tailwind's `@layer` is a source
+   * ordering, not a cascade layer, so specificity is decided first.
+   *
+   * Repeating the base rule's two `:not()`s carries it to (0,4,0), which beats every
+   * selector in that set on the class count alone and does not depend on which element
+   * the class lands on. This is the second time this exact arithmetic has been got
+   * wrong in this file — see the reduced-motion block above — so it is measured rather
+   * than reasoned about: e2e/affordance.spec.ts hovers a real dot in a real engine, and
+   * src/components/affordance.test.ts computes the two specificities and compares them.
    */
-  .no-lift:hover, .no-lift:active { transform: none; box-shadow: none; }
+  .no-lift:not(:disabled):not([aria-disabled="true"]):hover,
+  .no-lift:not(:disabled):not([aria-disabled="true"]):active {
+    transform: none;
+    box-shadow: none;
+  }
 }

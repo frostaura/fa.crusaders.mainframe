@@ -29,6 +29,16 @@ namespace Crusaders.Mainframe.Tests;
 /// <c>add_header</c> inside a location silently discards every inherited one — so a file can
 /// carry a perfect server-level block and still serve the document bare.
 /// </para>
+/// <para>
+/// <b>And the presence assertion is scoped to the server level, which it was not.</b> It used to
+/// regex the whole file, so the four <c>add_header</c> lines repeated inside
+/// <c>location = /sw.js</c> satisfied it on their own: deleting the server-level block from
+/// <c>src/frontend/nginx.conf</c> left <c>location /</c> — the block that serves the signed-in
+/// document, on the hop that decides whether it can be framed — completely bare, and all eight
+/// tests stayed green. Demonstrated by running that mutant. Together the two theories are
+/// complete: the server level carries all four, and any location that sets one of its own
+/// repeats all four, so every block either inherits a full set or declares one.
+/// </para>
 /// </remarks>
 public sealed class SecurityHeaderPostureTests : IClassFixture<TestWebAppFactory>
 {
@@ -72,17 +82,23 @@ public sealed class SecurityHeaderPostureTests : IClassFixture<TestWebAppFactory
     [Theory]
     [InlineData("nginx/nginx.conf")]
     [InlineData("src/frontend/nginx.conf")]
-    public void Every_shipped_nginx_config_sends_the_four_headers(string relativePath)
+    public void Every_shipped_nginx_config_sends_the_four_headers_at_server_level(string relativePath)
     {
-        var directives = Directives(relativePath);
+        // Server level only. A copy inside some location block is not a substitute: nginx
+        // inherits add_header downwards, so this is the set every bare location gets, and it is
+        // the only set the block serving the document has.
+        var directives = ServerLevel(Directives(relativePath));
 
         foreach (var (name, value) in Required)
         {
             var match = Regex.Match(directives, $@"add_header\s+{Regex.Escape(name)}\s+""(?<value>[^""]*)""\s+always\s*;");
             Assert.True(
                 match.Success,
-                $"{relativePath} does not send {name}, or sends it without `always` (which drops it "
-                + "from every 4xx and 5xx). Without these four the signed-in app can be framed by any origin.");
+                $"{relativePath} does not send {name} at SERVER level, or sends it without `always` "
+                + "(which drops it from every 4xx and 5xx). A copy inside a location block does not "
+                + "count: nginx inherits downwards, so a location that sets no add_header of its own — "
+                + "`location /`, which serves the document — gets exactly this set and nothing else. "
+                + "Without these four the signed-in app can be framed by any origin.");
             Assert.Contains(value, match.Groups["value"].Value, StringComparison.Ordinal);
         }
     }
@@ -105,6 +121,34 @@ public sealed class SecurityHeaderPostureTests : IClassFixture<TestWebAppFactory
                     + "set rather than merging it, so this block serves its responses bare.");
             }
         }
+    }
+
+    /// <summary>
+    /// The directives outside every <c>location</c> block — the server level, which is what a
+    /// location that declares no <c>add_header</c> of its own inherits.
+    /// </summary>
+    private static string ServerLevel(string directives)
+    {
+        var kept = new System.Text.StringBuilder();
+        var from = 0;
+        foreach (Match start in Regex.Matches(directives, @"^\s*location[^\{]*\{", RegexOptions.Multiline))
+        {
+            // A nested location is already inside a span this loop has consumed.
+            if (start.Index < from) continue;
+
+            kept.Append(directives[from..start.Index]);
+            var depth = 1;
+            var i = start.Index + start.Length;
+            while (i < directives.Length && depth > 0)
+            {
+                if (directives[i] == '{') depth++;
+                else if (directives[i] == '}') depth--;
+                i++;
+            }
+            from = i;
+        }
+        kept.Append(directives[from..]);
+        return kept.ToString();
     }
 
     /// <summary>Brace-matched <c>location …{ }</c> blocks: (the location line, the block body).</summary>
