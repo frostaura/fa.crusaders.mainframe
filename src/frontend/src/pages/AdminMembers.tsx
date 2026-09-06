@@ -342,7 +342,7 @@ export default function AdminMembersPage() {
         {filtered.length === 0 ? (
           <EmptyState loading={loading} hasFilters={search.trim().length > 0 || status !== "all"} />
         ) : (
-          <ScrollArea label="Members">
+          <ScrollArea label="Members table">
             <table className="w-full text-sm">
               <thead className="hidden sm:table-header-group bg-bg-muted text-xs uppercase tracking-wide text-text-muted">
                 <tr>
@@ -687,7 +687,7 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
           actions column wide enough to clip its own header. `flex-wrap` is what keeps that
           honest at any width instead of trading one overflow for another.
         */}
-        <div className="flex flex-wrap items-center gap-1 sm:justify-end">
+        <div className="flex flex-row items-center gap-1 sm:justify-end">
           {m.status === "PendingApproval" && (
             <>
               <Button onClick={actions.approve} disabled={busy} className="h-9 px-3 text-xs">Approve</Button>

@@ -584,7 +584,7 @@ describe("AdminMembers — the table fits the screen it is on", () => {
     await screen.findByText("Ada Lovelace");
     // The component built in round 1 for exactly this problem, and applied only to the
     // ledger: a gradient, a keyboard tab stop, and a name a screen reader can read.
-    const region = screen.getByRole("region", { name: "Members" });
+    const region = screen.getByRole("region", { name: "Members table" });
     expect(region).toContainElement(screen.getByRole("table"));
     expect(region).toHaveAttribute("tabindex", "0");
   });
@@ -619,7 +619,12 @@ describe("AdminMembers — the table fits the screen it is on", () => {
 
     await screen.findByText("Ada Lovelace");
     const actions = screen.getByRole("button", { name: "Adjust credit" }).parentElement!;
-    expect(actions.className).toContain("flex-wrap");
+    // `flex-row`, not `flex-wrap`. Two rounds fixed this table in parallel and asserted
+    // opposite things about the same element: wrapping keeps the row inside a narrow column
+    // by turning four 32px buttons into a 165px stack, which is the half of the finding about
+    // rows being too tall. The horizontal scroll region above is what carries the width now,
+    // so the actions stay on one line and the region says it scrolls.
+    expect(actions.className).toContain("flex-row");
     expect(actions.className).not.toContain("flex-col");
   });
 });

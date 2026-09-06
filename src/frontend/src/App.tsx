@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
@@ -28,7 +28,6 @@ import { AdminDevicesPage } from "./pages/AdminDevices";
 import NotFoundPage from "./pages/NotFound";
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
-import { Loader2 } from "lucide-react";
 
 export default function App() {
   return (
@@ -95,7 +94,7 @@ export default function App() {
 function RequireAuth({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
   const auth = useAuth();
   const location = useLocation();
-  if (auth.status === "loading") return <Booting />;
+  if (auth.status === "loading") return <BootSplash />;
   // A session we cannot confirm is not a session we have lost. Bouncing to /login here is what
   // turned a few seconds of backend downtime into a permanent sign-out for everyone on the site.
   if (auth.status === "offline") return <ConnectionLost onRetry={auth.retryConnection} />;
@@ -108,26 +107,87 @@ function RequireAuth({ children, admin = false }: { children: React.ReactNode; a
 }
 
 /**
+ * The screen a member looks at while the app works out whether they are still signed in.
+ *
+ * <p>
+ * It used to be the literal word "Loading…" at 14px in the top-left corner, and it stayed that
+ * way for the full twenty seconds of the request budget against a backend that accepts the
+ * connection and never answers. Measured on a live page: identical at 2s, 6s, 12s and 20.1s —
+ * no spinner, no skeleton, no explanation, nothing to press. Twenty seconds of that reads as a
+ * broken app, not as a slow one, and it is a member's first impression of the club's software.
+ * </p>
+ *
+ * <p>
+ * So: something moving from the first frame, and a sentence that grows a second line once the
+ * wait stops being ordinary. The threshold is deliberately not a progress bar — nothing here
+ * knows how long the backend will take, and a bar that fills at a made-up rate and then sits at
+ * 95% is a worse lie than silence. The 20s ceiling itself is right and stays
+ * (`REQUEST_TIMEOUT_MS`): it does not spin for ever, which is the important half.
+ * </p>
+ */
+function BootSplash() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setSlow(true), 4000);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  return (
+    <div className="max-w-md mx-auto p-4" data-testid="boot-splash">
+      <Card>
+        {/* aria-live, because a screen-reader user gets nothing at all from a spinner. */}
+        <div className="flex items-center gap-3" role="status" aria-live="polite">
+          <Spinner />
+          <p className="text-text-secondary">Connecting to the club…</p>
+        </div>
+        {slow && (
+          <p className="mt-3 text-sm text-text-muted">
+            This is taking longer than usual. We'll keep trying for a few more seconds.
+          </p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/** The one spinner in the product. `motion-reduce` so it holds still for anyone who asked it to. */
+function Spinner() {
+  return (
+    <span
+      aria-hidden
+      className="inline-block w-5 h-5 shrink-0 rounded-full border-2 border-border border-t-accent-strong animate-spin motion-reduce:animate-none"
+    />
+  );
+}
+
+/**
  * Shown while a stored session exists and the club cannot be reached to confirm it.
  *
  * <p>
  * The member keeps their token throughout, so the moment the backend answers again the app
  * carries on where it was — no re-typed password, and nothing lost to a redeploy.
  * </p>
+ *
+ * <p>
+ * The button has a pending state because it is the only control this screen offers and, against
+ * a stalled backend, it did nothing observable for 25 seconds: measured, one button state
+ * throughout — not disabled, no `aria-busy`, no label change, no spinner. A member presses the
+ * one thing they are given and the app says nothing, so they press it again, and again. The
+ * retry now resolves when the probe does, which is what lets the label say so.
+ * </p>
  */
-function ConnectionLost({ onRetry }: { onRetry: () => Promise<void> }) {
-  // The button had no pending state of any kind: pressed against a backend that accepts
-  // the socket and never answers, it stayed `{ "Try again now", enabled, no aria-busy }`
-  // for the full 25 seconds it took to give up. The member presses the only control the
-  // outage screen offers and, as far as the screen is concerned, nothing happens — so
-  // they press it again, and again. A retry is worth nothing if it is not visibly a retry.
+function ConnectionLost({ onRetry }: { onRetry: () => void | Promise<void> }) {
   const [retrying, setRetrying] = useState(false);
-  const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
 
   const retry = async () => {
     setRetrying(true);
-    try { await onRetry(); } finally { if (alive.current) setRetrying(false); }
+    try {
+      await onRetry();
+    } finally {
+      // The probe resolving does not mean it succeeded — on failure this component stays mounted
+      // and the button has to come back, or the member is left with a dead control.
+      setRetrying(false);
+    }
   };
 
   return (
@@ -139,9 +199,8 @@ function ConnectionLost({ onRetry }: { onRetry: () => Promise<void> }) {
           page will carry on by itself once the connection is back.
         </p>
         <div className="mt-4">
-          <Button onClick={() => { void retry(); }} disabled={retrying} aria-busy={retrying}>
-            {retrying && <Loader2 size={16} className="animate-spin motion-reduce:animate-none mr-2" aria-hidden="true" />}
-            {retrying ? "Trying…" : "Try again now"}
+          <Button onClick={retry} disabled={retrying} aria-busy={retrying}>
+            {retrying ? <><Spinner />&nbsp;Trying…</> : "Try again now"}
           </Button>
         </div>
       </Card>
@@ -149,36 +208,3 @@ function ConnectionLost({ onRetry }: { onRetry: () => Promise<void> }) {
   );
 }
 
-/**
- * The screen between opening the app and knowing whether there is a session.
- *
- * <p>
- * It was the literal word "Loading…" at 14px in the top-left corner, and against a backend
- * that accepts the connection and never answers it stayed exactly that for the whole 20s
- * request budget: no spinner, no skeleton, nothing clickable, no explanation. Twenty
- * seconds of a single static word reads as a broken app, and the outage screen that comes
- * after it is fine — it is the silence in front of it that costs the trust.
- * </p>
- *
- * <p>
- * `role="status"` so a screen reader is told at all, and a second sentence once the wait
- * has stopped being ordinary. The spinner is what says the app is still trying; it is
- * dropped under `prefers-reduced-motion` and the words carry the meaning on their own.
- * </p>
- */
-function Booting() {
-  const [slow, setSlow] = useState(false);
-  useEffect(() => {
-    const t = window.setTimeout(() => setSlow(true), 4_000);
-    return () => window.clearTimeout(t);
-  }, []);
-
-  return (
-    <div role="status" aria-live="polite" className="max-w-md mx-auto px-4 py-16 flex flex-col items-center gap-3 text-center">
-      <Loader2 size={28} className="animate-spin motion-reduce:animate-none text-text-muted" aria-hidden="true" />
-      <p className="text-text-secondary">
-        {slow ? "Still connecting to the club — this is taking longer than usual." : "Connecting to the club…"}
-      </p>
-    </div>
-  );
-}

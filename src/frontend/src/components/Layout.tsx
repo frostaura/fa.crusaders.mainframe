@@ -5,6 +5,7 @@ import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
 import { useProfile } from "../lib/profile";
+import { ScrollArea } from "./ScrollArea";
 import { cn, formatCredits } from "../lib/utils";
 
 /**
@@ -55,6 +56,7 @@ export default function Layout() {
     auth.status === "authenticated" && auth.isAdmin,
     location.pathname,
   );
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   // Hide the chrome on auth-flow routes — login/register/verify/welcome/reset — so the
   // user only sees the auth modal itself.
@@ -65,13 +67,29 @@ export default function Layout() {
   // the card on /profile, with the chrome where they expect it.
   const headerless = /^\/(login|register|verify-email|welcome|forgot-password|reset-password|change-password)(\/|$)/.test(location.pathname);
 
+  // Every way out of the settings menu, including the keyboard one.
+  //
+  // Escape did nothing: only the mousedown listener existed, so a keyboard user who opened the
+  // menu could tab into it and choose an item, or tab back out, but could not dismiss it without
+  // reaching for the mouse. WAI-ARIA's menu pattern makes Escape the way out, and it also has to
+  // put focus back on the button that opened the menu — closing it while focus sits on a node
+  // that no longer exists drops the keyboard user at the top of the document.
   useEffect(() => {
     if (!menuOpen) return;
     const onDoc = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenuOpen(false);
+      menuButtonRef.current?.focus();
+    };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [menuOpen]);
 
   if (headerless) {
@@ -137,6 +155,7 @@ export default function Layout() {
             {auth.status === "authenticated" ? (
               <div className="relative" ref={menuRef}>
                 <button
+                  ref={menuButtonRef}
                   onClick={() => setMenuOpen((v) => !v)}
                   aria-label="Open menu"
                   aria-haspopup="menu"
@@ -185,14 +204,21 @@ export default function Layout() {
           </div>
         </div>
         {auth.status === "authenticated" && (
-          <nav className="md:hidden border-t border-border overflow-x-auto no-scrollbar">
-            <div className="flex items-center gap-1 px-2 py-1 text-sm w-max">
+          // The mobile tab strip scrolls sideways and used to hide its own scrollbar, so at 375px
+          // the last tab ("Reports") was simply cut off at the edge with nothing to say it was
+          // there. ScrollArea is the same container the wallet ledger uses: a fade at the edge for
+          // anyone who can see it, a tab stop so the arrow keys can reach the rest, and a sentence
+          // for a screen reader while there is more to reach.
+          <nav className="md:hidden border-t border-border" aria-label="Sections">
+            <ScrollArea label="Section tabs">
+              <div className="flex items-center gap-1 px-2 py-1 text-sm w-max">
               <NavTab to="/schedule" label="Bookings" />
               <NavTab to="/court-code" label="Court code" />
               {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
               {auth.isAdmin && <NavTab to="/admin/members" label="Members" badge={pendingApplications} />}
               <NavTab to="/reports" label="Reports" />
             </div>
+            </ScrollArea>
           </nav>
         )}
       </header>

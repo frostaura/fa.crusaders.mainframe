@@ -34,6 +34,10 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
   const inflight = useRef(false);
   /**
+   * The forced-password-change gate is armed, so the API refuses `/wallet` and the stream
+   * ticket with `403 password_change_required`.
+   *
+   * <p>
    * A session holding an admin-issued temporary password may reach nothing but the screen
    * that replaces it — `PasswordChangeGate` answers every other route `403
    * password_change_required`. The wallet is one of those routes, and the balance stream is
@@ -41,12 +45,7 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
    * re-requesting a stream ticket against a refusal that is permanent by policy, printing a
    * console error each time on the one screen where a member can do nothing about it.
    * Nothing here runs until the gate clears; the effects re-run when it does.
-   */
-  const gated = auth.status === "authenticated" && auth.mustChangePassword;
-
-  /**
-   * The forced-password-change gate is armed, so the API refuses `/wallet` (and the stream
-   * ticket) with `403 password_change_required`.
+   * </p>
    *
    * <p>
    * Carried as a DEPENDENCY for the same reason as in `profile.tsx`: `auth.status` stays

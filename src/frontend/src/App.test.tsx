@@ -80,7 +80,7 @@ describe("App — while the club does not answer", () => {
 
     // …and it says more once the wait stops being ordinary.
     await tick(5_000);
-    expect(screen.getByText(/Still connecting to the club/)).toBeInTheDocument();
+    expect(screen.getByText(/taking longer than usual/)).toBeInTheDocument();
   });
 
   it("shows the retry working, rather than looking ignored for twenty seconds", async () => {

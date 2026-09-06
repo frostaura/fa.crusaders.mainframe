@@ -23,6 +23,10 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Kestrel announces "Server: Kestrel" on every response by default, and the gateway announces
+// its own version on top of that. Neither buys anything and both name a version to look up.
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
+
 // ---- Postgres / EF Core ----
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
@@ -380,6 +384,11 @@ if (app.Environment.IsDevelopment())
     try { await Seeder.SeedAsync(app.Services, logger); }
     catch (Exception ex) { logger.LogError(ex, "Seed failed (non-fatal in dev)"); }
 }
+
+// First of all, ahead even of the forwarded-headers rewrite: a static file, a 404 and an
+// unhandled 500 have to carry the framing refusal too. See SecurityHeaders for what was
+// reachable without it.
+app.UseSecurityHeaders();
 
 app.UseForwardedHeaders();
 

@@ -54,10 +54,11 @@ type AuthCtx = AuthState & {
    * Re-run the bootstrap probe immediately, cancelling the backoff.
    *
    * <p>
-   * Resolves when the probe has an answer — which is up to the 20s request budget on a
-   * backend that accepts the connection and never replies. The outage screen's button
-   * needs that promise: without it the member pressed the only control they were offered
-   * and nothing at all happened on screen for twenty-five seconds.
+   * Returns the probe's own promise, and that return value is load-bearing rather than tidy:
+   * the outage screen's "Try again now" is the only control it offers, and against a stalled
+   * backend it sat in one state for the full 25 seconds — not disabled, no `aria-busy`, no
+   * label change. A member presses the one thing they are given, nothing happens, and they
+   * press it again. There is nothing else on this side that knows when the attempt is over.
    * </p>
    */
   retryConnection: () => Promise<void>;
@@ -262,6 +263,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const retryConnection = useCallback(() => {
     if (probeTimer.current) { window.clearTimeout(probeTimer.current); probeTimer.current = null; }
     probeAttempt.current = 0;
+    // Returned, not fire-and-forget. See the type above.
     return refreshFromToken();
   }, [refreshFromToken]);
 
