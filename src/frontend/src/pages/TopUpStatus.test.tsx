@@ -197,3 +197,102 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
     expect(screen.getByText(/Your wallet has been credited/)).toBeInTheDocument();
   });
 });
+
+/**
+ * H-F2, the half that survived the first fix: what the page does when it cannot reach the club.
+ *
+ * <p>
+ * The error branch was one sentence in a bare card — no Check again, no View wallet, not even
+ * the page's own layout — so the only way out was the manual browser reload the whole finding
+ * is about. Nothing walked a member into it before; the Check again button added in the last
+ * round does, in one press. A refuter aborted the status request on a live Pending top-up,
+ * pressed the button, and the page became "Couldn't load top-up status." with
+ * <code>buttons: [""]</code>.
+ * </p>
+ *
+ * <p>
+ * Worth being precise about what a member is owed here, because this screen is the only thing
+ * standing between them and R500 they have already paid: a way to ask again, a way back to the
+ * wallet, and a sentence saying that a page which cannot reach the club has not cancelled
+ * anything. And when a status HAS been read, losing it to a later network blip is itself the
+ * defect — the badge and the amount stay, and the failure is a line beside them.
+ * </p>
+ */
+describe("Top-up status — when the club cannot be reached", () => {
+  const ID = "aaaa1111-0000-0000-0000-000000000003";
+  const PENDING = { id: ID, status: "Pending", amount_zar: 500, conversion_rate: 1.6, failure_code: null };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", class {
+      close() {}
+      addEventListener() {}
+      removeEventListener() {}
+    } as unknown as typeof EventSource);
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); signOut(); });
+
+  /** `status` accepts an array, so the nth call can fail while the ones before it did not. */
+  function show(sequence: unknown[], status: number[]) {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: `/api/v1/credit/topup/${ID}`, body: null, sequence, status },
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    ]);
+    renderPage(
+      <BalanceProvider>
+        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+      </BalanceProvider>,
+      { initialEntries: [`/wallet/topup/${ID}`] },
+    );
+  }
+
+  const tick = async (ms = 50) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+
+  it("offers a way out instead of a sentence with nothing on it", async () => {
+    show([PENDING], [500]);
+    await tick();
+
+    // The two controls the Pending branch has. Their absence was the dead end.
+    expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "View wallet" })).toBeInTheDocument();
+
+    // And the one thing a member watching R500 needs to be told.
+    expect(screen.getByRole("alert")).toHaveTextContent(/Nothing here cancels or changes it/);
+    expect(screen.queryByText("Couldn't load top-up status.")).not.toBeInTheDocument();
+  });
+
+  it("does not throw away a status it has already read when a later check fails", async () => {
+    // Exactly the refuter's run: a live Pending page, then Check again against a club that
+    // has stopped answering.
+    show([PENDING, PENDING], [200, 500]);
+    await tick();
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await tick();
+
+    // The status, the amount and both controls survive the failure…
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("R500.00")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "View wallet" })).toBeInTheDocument();
+    // …and the page says the figures may be stale rather than pretending they are fresh.
+    expect(screen.getByRole("alert")).toHaveTextContent(/may be out of date/);
+  });
+
+  it("recovers when the club answers again, so the way out is a real one", async () => {
+    // A control for the two above: an escape that cannot actually escape is still a dead end.
+    show([PENDING, { ...PENDING, status: "Completed" }], [500, 200]);
+    await tick();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await tick();
+
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.getByText(/Your wallet has been credited/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
