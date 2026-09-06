@@ -498,3 +498,128 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
     expect(screen.queryByRole("button", { name: "Resend verification email" })).not.toBeInTheDocument();
   });
 });
+
+/**
+ * R2 I-F2. The row icon-actions took no `disabled` and read no `busyId`, so an ordinary
+ * impatient double-click fired two requests.
+ *
+ * <p>
+ * On Reactivate that is a 200 followed by a 409, two toasts stacked on screen at once —
+ * "Aisha Patel is active again." in green above "Couldn't reactivate this member." in red —
+ * and nothing saying which is true. On Resend it is two verification emails, and because a
+ * resend spends any earlier unused link (§2), the first of the two the member receives
+ * contains a dead one. The guarded Approve button beside them had read `busyId` all along.
+ * </p>
+ */
+describe("AdminMembers — one click, one request", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const MEMBERSHIP = "33333333-3333-3333-3333-333333333333";
+
+  const routes = (member: Record<string, unknown> = {}, extra: StubRoute[] = []): StubRoute[] => [
+    { path: "/api/v1/admin/members/", body: [memberFixture(member)] },
+    { path: "/api/v1/admin/biometric/enrollments", body: [] },
+    { path: "/api/v1/admin/ledger/", body: [] },
+    ...extra,
+  ];
+
+  it("reactivates once on a double-click, so no 409 lands on top of the 200", async () => {
+    const stub = stubFetch(routes({ status: "Suspended" }, [
+      // What the API actually answers a repeat with: the second call is a conflict, which
+      // is why the admin saw a red failure for an action that had worked.
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, status: [200, 409], body: { reactivated: true } },
+    ]));
+    renderPage(<AdminMembersPage />);
+
+    const button = await screen.findByRole("button", { name: "Reactivate member" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await waitFor(() => expect(stub.calls.some((c) => c.path.endsWith("/reactivate"))).toBe(true));
+    expect(stub.calls.filter((c) => c.path.endsWith("/reactivate"))).toHaveLength(1);
+    // And the admin is told one thing, not two contradictory things.
+    expect(await screen.findByText(/Ada Lovelace is active again/)).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't reactivate/)).not.toBeInTheDocument();
+  });
+
+  it("sends one verification email on a double-click, so the first link is not killed by the second", async () => {
+    const stub = stubFetch(routes({ email_verified: false }, [
+      { method: "POST", path: "/api/v1/auth/resend-verification", body: { ok: true } },
+    ]));
+    renderPage(<AdminMembersPage />);
+
+    const button = await screen.findByRole("button", { name: "Resend verification email" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await waitFor(() => expect(stub.calls.some((c) => c.path === "/api/v1/auth/resend-verification")).toBe(true));
+    expect(stub.calls.filter((c) => c.path === "/api/v1/auth/resend-verification")).toHaveLength(1);
+  });
+});
+
+/**
+ * R2 I-F6/I-F7/I-F8, F-F6, J-F6 — the members table at every width.
+ *
+ * <p>
+ * jsdom has no layout, so these hold the three structural decisions the measurements
+ * demanded rather than the pixel counts themselves (those were re-measured in a real
+ * browser at 375, 768 and 1440): the table lives in a `ScrollArea` that announces itself,
+ * every column carries the label its card form prints below `sm`, and the identity cell is
+ * sticky so the name cannot scroll away from the Suspend button.
+ * </p>
+ */
+describe("AdminMembers — the table fits the screen it is on", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const routes = (): StubRoute[] => [
+    { path: "/api/v1/admin/members/", body: [memberFixture()] },
+    { path: "/api/v1/admin/biometric/enrollments", body: [] },
+    { path: "/api/v1/admin/ledger/", body: [] },
+  ];
+
+  it("puts the table in a scroll region that says it is one", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await screen.findByText("Ada Lovelace");
+    // The component built in round 1 for exactly this problem, and applied only to the
+    // ledger: a gradient, a keyboard tab stop, and a name a screen reader can read.
+    const region = screen.getByRole("region", { name: "Members" });
+    expect(region).toContainElement(screen.getByRole("table"));
+    expect(region).toHaveAttribute("tabindex", "0");
+  });
+
+  it("labels every column, so the phone card shows what the header row would have said", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await screen.findByText("Ada Lovelace");
+    const labelled = Array.from(document.querySelectorAll("tbody td[data-label]")).map((td) => td.getAttribute("data-label"));
+    // Not one of these is dropped at 375 px — they stack instead.
+    expect(labelled).toEqual(["Email", "Member #", "Status", "Class", "Balance", "Joined", "Actions"]);
+  });
+
+  it("keeps the member's name in place while the rest of the row scrolls", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await screen.findByText("Ada Lovelace");
+    const identity = document.querySelector("tbody tr > td:first-child")!;
+    // Scrolled right to reach Suspend, the admin could no longer see whom they were
+    // suspending. The cell needs an opaque background as well, or the columns underneath
+    // read straight through it.
+    expect(identity.className).toMatch(/sm:sticky/);
+    expect(identity.className).toMatch(/sm:left-0/);
+    expect(identity.className).toMatch(/bg-bg-surface/);
+  });
+
+  it("lays the row's actions out in a row, not a 165px-tall column", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await screen.findByText("Ada Lovelace");
+    const actions = screen.getByRole("button", { name: "Adjust credit" }).parentElement!;
+    expect(actions.className).toContain("flex-wrap");
+    expect(actions.className).not.toContain("flex-col");
+  });
+});

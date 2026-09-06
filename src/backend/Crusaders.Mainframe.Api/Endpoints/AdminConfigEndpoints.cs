@@ -38,6 +38,14 @@ public static class AdminConfigEndpoints
                 advance_booking_days = GetInt(doc, "advance_booking_days", defaults.AdvanceBookingDays),
                 day_start_minute = GetInt(doc, "day_start_minute", defaults.DayStartMinute),
                 day_end_minute = GetInt(doc, "day_end_minute", defaults.DayEndMinute),
+
+                // The per-weekday map the engine has read since it existed, and this
+                // endpoint never served. A club could not change its opening hours: the
+                // screen offered only the flat pair above, the seeder names all seven days,
+                // so every save of "Day starts 09:00" reported success and changed nothing
+                // any member could see. Rendered from the parsed map, not echoed from the
+                // stored document, so the hours shown are the hours BookingService enforces.
+                operating_hours = defaults.OperatingHours.ToWire(),
                 penalty_pct = GetDecimal(doc, "penalty_pct", defaults.PenaltyPct),
                 grace_window_minutes = GetInt(doc, "grace_window_minutes", defaults.GraceWindowMinutes),
                 penalty_window_minutes = GetInt(doc, "penalty_window_minutes", defaults.PenaltyWindowMinutes),
@@ -80,6 +88,20 @@ public static class AdminConfigEndpoints
                 return Results.BadRequest(new { error = "slice_minutes_out_of_range" });
             if (req.DayStartMinute < 0 || req.DayEndMinute > 24 * 60 || req.DayStartMinute >= req.DayEndMinute)
                 return Results.BadRequest(new { error = "operating_hours_invalid" });
+
+            // The per-weekday map, strictly. Same posture as the button map: lenient when a
+            // box or the booking engine reads a stored document later — a broken one must
+            // never close the club — and strict here, because this is the one moment there
+            // is a person to tell. The refusal names the day, since "operating hours
+            // invalid" on a seven-row form says nothing about which row to fix.
+            Dictionary<string, string>? hours = null;
+            if (req.OperatingHours is not null)
+            {
+                if (!OperatingHours.TryParseWire(req.OperatingHours, out hours, out var badDay))
+                {
+                    return Results.BadRequest(new { error = "operating_hours_day_invalid", day = badDay });
+                }
+            }
             if (req.PenaltyPct is < 0 or > 100)
                 return Results.BadRequest(new { error = "penalty_pct_out_of_range" });
 
@@ -185,6 +207,10 @@ public static class AdminConfigEndpoints
             doc["penalty_window_minutes"] = ToElement(req.PenaltyWindowMinutes);
             // Omitted means unchanged, like the economics and device keys below it.
             if (req.Timezone is not null) doc["timezone"] = ToElement(req.Timezone.Trim());
+            // Same rule for the weekday map, and an EMPTY map is a real instruction rather
+            // than a no-op: it means "every day follows the flat pair", which is the only
+            // way back to the default once a club has named a day.
+            if (hours is not null) doc["operating_hours"] = ToElement(hours);
             // Omitted means unchanged, not "reset to default": a screen that does not
             // yet edit the button map must not wipe one an admin set through another.
             if (buttons is not null) doc["button_map"] = ToElement(buttons.ToWire());
@@ -423,6 +449,13 @@ public sealed record UpdateSettingsRequest(
     /// served by GET while this record had no member for it, so it could not be set.
     /// </summary>
     string? Timezone = null,
+
+    /// <summary>
+    /// The per-weekday opening hours, <c>{"mon":"06:00-22:00", …}</c>. Optional on the same
+    /// omitted-means-unchanged terms as everything below; an empty map clears it, so every
+    /// weekday falls back to <see cref="DayStartMinute"/>/<see cref="DayEndMinute"/>.
+    /// </summary>
+    IReadOnlyDictionary<string, string>? OperatingHours = null,
 
     // The nine economics keys. All nullable, all optional: omitted means unchanged, so a
     // screen that edits only booking settings cannot revert an economics change made from

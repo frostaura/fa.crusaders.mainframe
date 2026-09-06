@@ -1,5 +1,8 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { describeOfflineAfter, offlineAfterSeconds, timezoneOptions } from "./tenantSettings";
+import {
+  describeOfflineAfter, formatDayHours, offlineAfterSeconds, operatingHoursComplaint,
+  parseDayHours, timezoneOptions,
+} from "./tenantSettings";
 
 /**
  * The two rules the settings screen mirrors from the API.
@@ -57,5 +60,35 @@ describe("timezoneOptions", () => {
   it("survives a runtime whose supportedValuesOf throws", () => {
     vi.stubGlobal("Intl", { ...Intl, supportedValuesOf: () => { throw new Error("nope"); } });
     expect(timezoneOptions("Europe/London")).toContain("Europe/London");
+  });
+});
+
+/**
+ * The editor's half of `operating_hours`, which has to agree with
+ * `OperatingHours.TryParseWire` on the API: the same `HH:mm-HH:mm` text, and the same
+ * refusal of a close at or before the open. A club could not edit these hours at all until
+ * there was an editor, and an editor that writes text the engine cannot read would have
+ * been the same defect wearing a form.
+ */
+describe("operating hours", () => {
+  it("reads and writes the wire text the API stores", () => {
+    expect(parseDayHours("07:00-20:00")).toEqual({ open: "07:00", close: "20:00" });
+    // A person's typing, and a document written by hand: one-digit hours round-trip padded,
+    // which is what keeps the value the screen saves identical to the value it read.
+    expect(parseDayHours("7:00-20:00")).toEqual({ open: "07:00", close: "20:00" });
+    expect(formatDayHours({ open: "7:00", close: "20:00" })).toBe("07:00-20:00");
+    expect(parseDayHours("not a range")).toBeNull();
+    expect(parseDayHours(undefined)).toBeNull();
+  });
+
+  it("names the day whose hours cannot be saved, and stays quiet about the rest", () => {
+    expect(operatingHoursComplaint({ mon: "06:00-22:00", sat: "07:00-20:00" })).toBeNull();
+    // Close before open is a typo, not an overnight club — reading it the other way would
+    // sell the small hours, which is the very thing the setting exists to stop.
+    expect(operatingHoursComplaint({ sat: "20:00-07:00" })).toEqual({
+      day: "sat", message: "Closing time has to be after opening time.",
+    });
+    expect(operatingHoursComplaint({ sat: "20:00-20:00" })?.day).toBe("sat");
+    expect(operatingHoursComplaint({ tue: "rubbish" })?.day).toBe("tue");
   });
 });

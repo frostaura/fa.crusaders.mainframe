@@ -1,6 +1,9 @@
 import { useEffect, useState, cloneElement, isValidElement, useId } from "react";
 import { endpoints, type AdminSettings, type AdminCourt, ApiError } from "../lib/api";
-import { OFFLINE_FLOOR_SECONDS, describeOfflineAfter, timezoneOptions } from "../lib/tenantSettings";
+import {
+  DAY_KEYS, DAY_NAMES, OFFLINE_FLOOR_SECONDS, describeOfflineAfter, formatDayHours,
+  operatingHoursComplaint, parseDayHours, timezoneOptions, type DayHours, type DayKey,
+} from "../lib/tenantSettings";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -57,6 +60,11 @@ export default function AdminSettingsPage() {
 
   if (loading || !settings) return <p className="text-text-secondary">Loading settings…</p>;
 
+  // A weekly table with a bad row must not reach the API: the refusal names the day, but a
+  // toast that has faded says nothing about which of seven rows to fix, and the row itself
+  // is already saying it in red.
+  const hoursComplaint = operatingHoursComplaint(settings.operating_hours ?? {});
+
   return (
     <div className="space-y-6">
       <div>
@@ -101,6 +109,8 @@ export default function AdminSettingsPage() {
           </Field>
         </div>
       </Card>
+
+      <OperatingHoursSection settings={settings} onChange={setSettings} />
 
       <Card className="space-y-5">
         <h2 className="text-base font-semibold">No-show & cancellation policy</h2>
@@ -189,11 +199,117 @@ export default function AdminSettingsPage() {
           </Field>
         </div>
         <div className="flex justify-end">
-          <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save settings"}</Button>
+          <Button onClick={save} disabled={saving || hoursComplaint !== null}>{saving ? "Saving…" : "Save settings"}</Button>
         </div>
       </Card>
 
       <CourtsSection courts={courts} reload={load} />
+    </div>
+  );
+}
+
+/**
+ * The club's opening hours, per weekday.
+ *
+ * <p>
+ * The engine has read <code>operating_hours</code> since it existed and this screen could
+ * not write it. All the screen had was the flat "Day starts / Day ends" pair, which is only
+ * the default for a weekday the map does not name — and the seed names all seven, so the
+ * pair governed nothing. A club that changed it got <code>200 {"saved":true}</code>, a
+ * "Settings saved." toast, and a Saturday that still ran 07:00–20:00 because that is what
+ * the map said. The one setting the product enforces was the one setting it could not edit.
+ * </p>
+ *
+ * <p>
+ * A day is either on the club default or has hours of its own; there is no "closed all day",
+ * because the engine has no way to express one — a range whose close is at or before its
+ * open is refused as the typo it almost always is, on both sides of the wire.
+ * </p>
+ */
+function OperatingHoursSection({ settings, onChange }: { settings: AdminSettings; onChange: (next: AdminSettings) => void }) {
+  const map = settings.operating_hours ?? {};
+  const complaint = operatingHoursComplaint(map);
+
+  const setDay = (day: DayKey, hours: DayHours | null) => {
+    const next = { ...map };
+    if (hours === null) delete next[day];
+    else next[day] = formatDayHours(hours);
+    onChange({ ...settings, operating_hours: next });
+  };
+
+  return (
+    <Card className="space-y-5">
+      <h2 className="text-base font-semibold">Opening hours</h2>
+      <p className="text-sm text-text-secondary">
+        When members can book. A day left on the club default uses <strong className="text-text-primary">Day starts</strong> and{" "}
+        <strong className="text-text-primary">Day ends</strong> above ({minToHHMM(settings.day_start_minute)}–{minToHHMM(settings.day_end_minute)}).
+        These are the hours the booking grid draws and the API enforces — a slot outside them is refused, and a walk-up at the box is cut short at closing.
+      </p>
+      <div className="space-y-2">
+        {DAY_KEYS.map((day) => (
+          <DayHoursRow
+            key={day}
+            day={day}
+            hours={parseDayHours(map[day])}
+            fallback={{ open: minToHHMM(settings.day_start_minute), close: minToHHMM(settings.day_end_minute) }}
+            error={complaint?.day === day ? complaint.message : null}
+            onChange={(next) => setDay(day, next)}
+          />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** One weekday: the club default, or a pair of times of its own. */
+function DayHoursRow({ day, hours, fallback, error, onChange }: {
+  day: DayKey;
+  hours: DayHours | null;
+  fallback: DayHours;
+  error: string | null;
+  onChange: (next: DayHours | null) => void;
+}) {
+  const name = DAY_NAMES[day];
+  const custom = hours !== null;
+  const shown = hours ?? fallback;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-[120px_auto_1fr] gap-2 sm:items-center p-3 rounded-md border border-border">
+      <span className="text-sm font-medium text-text-primary">{name}</span>
+      <label className="flex items-center gap-2 text-xs text-text-secondary">
+        <input
+          type="checkbox"
+          checked={custom}
+          aria-label={`${name} has its own hours`}
+          // Ticking a day starts it at the club default rather than at 00:00, so the
+          // first thing an admin sees is the hours that are actually in force for it.
+          onChange={(e) => onChange(e.target.checked ? shown : null)}
+        />
+        Own hours
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        {custom ? (
+          <>
+            <Input
+              type="time"
+              className="h-9 w-32"
+              aria-label={`${name} opens`}
+              value={shown.open}
+              onChange={(e) => onChange({ ...shown, open: e.target.value })}
+            />
+            <span className="text-xs text-text-muted">to</span>
+            <Input
+              type="time"
+              className="h-9 w-32"
+              aria-label={`${name} closes`}
+              value={shown.close}
+              onChange={(e) => onChange({ ...shown, close: e.target.value })}
+            />
+          </>
+        ) : (
+          <span className="text-xs text-text-muted">Club default — {fallback.open} to {fallback.close}</span>
+        )}
+        {error && <span className="text-xs text-danger-strong">{error}</span>}
+      </div>
     </div>
   );
 }

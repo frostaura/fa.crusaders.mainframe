@@ -228,6 +228,11 @@ export const SETTINGS_FIXTURE = {
   penalty_window_minutes: 15,
   timezone: "Africa/Johannesburg",
   button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
+  // The club's real shape, and the seed's: weekdays long, weekend short, and — the part
+  // that made G-F2 a defect rather than a gap — the map names days the flat pair above
+  // cannot override. Sunday is deliberately absent, because a day the map does not name is
+  // the only way the flat pair means anything.
+  operating_hours: { mon: "06:00-22:00", tue: "06:00-22:00", wed: "06:00-22:00", thu: "06:00-22:00", fri: "06:00-22:00", sat: "07:00-20:00" },
   credits_per_zar_regular: 1.6,
   credits_per_zar_league: 2.4,
   topup_block_zar: 100,

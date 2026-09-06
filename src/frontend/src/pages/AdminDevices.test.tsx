@@ -643,4 +643,23 @@ describe("AdminDevices", () => {
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
     expect(stub.calls.filter((c) => c.method === "PATCH")[1].raw).toBe('{"button_map":null}');
   });
+  /**
+   * R2 I-F6, the second half. With the confirm button no longer forcing 435 px, the widest
+   * thing left on the Devices page was a button-map row: a fixed-width label and two
+   * intrinsically-sized selects that could neither wrap nor shrink, min-content 362 px, on
+   * a page whose content box at 375 px is 343 px. Measured in a headed Chromium: the page
+   * went 410 px -> 375 px once the row could wrap, which is the whole of "the admin console
+   * fits the phone the admin is holding".
+   */
+  it("lets a button-map row wrap rather than push the page wider than the phone", async () => {
+    stubFetch(baseRoutes());
+    renderPage(<AdminDevicesPage />);
+
+    const courtSelect = await screen.findByLabelText("Button 1 court");
+    const row = courtSelect.parentElement!;
+    expect(row.className).toContain("flex-wrap");
+    // A select whose min-width is auto cannot give way inside a flex row, whatever the
+    // wrapping does.
+    expect(courtSelect.className).toContain("min-w-0");
+  });
 });
