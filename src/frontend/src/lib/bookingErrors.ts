@@ -80,6 +80,23 @@ export const SESSION_LOST_TEXT = "Your session has expired — sign in again to 
 export const MEMBER_SHORT_TEXT =
   "That member doesn't have enough credit for this court. Try again to see what they're short by.";
 
+/**
+ * The same refusal when the short wallet is the signed-in admin's own.
+ *
+ * <p>
+ * §8's override is `payer.AllowNegativeBalance && actorId != userId` on the server
+ * (`BookingService`), so an admin cannot authorise an overdraft on themselves — an actor
+ * approving their own negative balance is not an override, it is an unlimited credit line.
+ * The picker lists the admin along with every other active member, so this refusal is
+ * reachable; before this sentence existed the screen offered the override anyway, refused
+ * it on the second press, discarded the figures and told the admin to "try again to see
+ * what they're short by", which returned them to the start with nothing new to see.
+ * </p>
+ */
+export const ADMIN_SELF_SHORT_TEXT =
+  "You don't have enough credit for this court. The admin override only works on another member's " +
+  "wallet, not your own — top up and book it again.";
+
 function describePeakHours(err: ApiError): string {
   const start = err.detail("peak_start");
   const end = err.detail("peak_end");

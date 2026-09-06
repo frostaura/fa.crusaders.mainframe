@@ -163,6 +163,59 @@ public class PeripheralHealthTests
         Assert.DoesNotContain(host.PlayerUser.Email, host.EmailService.Sent.Select(m => m.To));
     }
 
+    /// <summary>
+    /// The alert must not open by sending an admin to the plug.
+    ///
+    /// <para>
+    /// A box that has lost only its uplink keeps lighting courts from its cached roster and holds
+    /// the scans in a RAM ring (<c>src/iot/lib/eventq/include/eventq/EventQueue.h</c>). Cutting
+    /// the power discards them, and every court it lit during the outage then settles under S5a
+    /// as a full refund the club carries — the one accepted I2 exception. The alert that reports
+    /// the outage used to say "Check its power and its WiFi", i.e. it led with the single action
+    /// that converts a recoverable outage into free courts.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_unhealthy_alert_does_not_send_the_admin_to_the_plug_first()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
+        host.EmailService.Sent.Clear();
+
+        await CreateWorker(host).TickAsync(default);
+
+        var alert = Assert.Single(host.EmailService.Sent);
+        Assert.Contains("do not power-cycle it yet", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Check its power", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// And the all-clear must not promise what the hardware cannot deliver. It used to state flatly
+    /// that "anything the box recorded while it was offline uploads on its next few calls" — true
+    /// only while the box stayed powered, and false in exactly the case that costs the club money.
+    /// </summary>
+    [Fact]
+    public async Task The_recovery_mail_qualifies_the_upload_promise_with_the_power_cut()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
+        var worker = CreateWorker(host);
+        await worker.TickAsync(default);
+        host.EmailService.Sent.Clear();
+
+        box.LastSeenAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        await worker.TickAsync(default);
+
+        var allClear = Assert.Single(host.EmailService.Sent);
+        Assert.Contains("if it stayed powered", allClear.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("those scans are gone", allClear.HtmlBody, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Recovery, so an admin sent to a cupboard knows to stop looking.</summary>
     [Fact]
     public async Task A_box_that_comes_back_closes_its_outage_and_says_so()
@@ -197,8 +250,10 @@ public class PeripheralHealthTests
 
     // ----- money: §6a's "auto-credited (no penalty)" -----------------------------------
 
-    private static async Task<Booking> AddDueBookingAsync(TestHost host, MainframeDbContext db, decimal amount = 8m)
+    private static async Task<Booking> AddDueBookingAsync(
+        TestHost host, MainframeDbContext db, decimal amount = 8m, DateTimeOffset? startsAt = null)
     {
+        var starts = startsAt ?? DateTimeOffset.UtcNow.AddHours(-1);
         var booking = new Booking
         {
             TenantId = host.Tenant.Id,
@@ -206,8 +261,8 @@ public class PeripheralHealthTests
             UserId = host.PlayerUser.Id,
             BookedByUserId = host.PlayerUser.Id,
             PaidByUserId = host.PlayerUser.Id,
-            StartsAt = DateTimeOffset.UtcNow.AddHours(-1),
-            EndsAt = DateTimeOffset.UtcNow.AddMinutes(-45),
+            StartsAt = starts,
+            EndsAt = starts.AddMinutes(15),
             SliceMinutes = 15,
             SliceCount = 1,
             AmountChargedCredits = amount,
@@ -386,5 +441,119 @@ public class PeripheralHealthTests
         await CreateNoShowWorker(host).TickAsync(default);
 
         Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+    }
+
+    // ----- the waiver must not depend on when a worker happened to run ------------------
+
+    /// <summary>
+    /// One club, one due booking, one box that fell silent two minutes before that booking's
+    /// grace deadline, and the two production workers run in the given order. Returns what the
+    /// member is left with.
+    ///
+    /// <para>
+    /// <paramref name="deadlineMinutesAgo"/> is how late the sweep is: 0 means it runs as the
+    /// grace window closes, 5 means it runs five minutes afterwards. Nothing else differs
+    /// between the cases — the silence, the booking and the price are identical relative to the
+    /// deadline — so any difference in the balance is the worker schedule pricing the court.
+    /// </para>
+    /// </summary>
+    private static async Task<decimal> SweptBalanceAsync(int deadlineMinutesAgo, bool healthFirst)
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+
+        // A second's slack so the booking is unambiguously past its deadline for the sweep's
+        // own UtcNow, which is read after this one.
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(-deadlineMinutesAgo).AddSeconds(-1);
+        var startsAt = deadline.AddMinutes(-settings.GraceWindowMinutes);
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db, startsAt: startsAt);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // Two minutes of silence at the deadline. That is INSIDE offline_after_seconds (180 s at
+        // the seeded heartbeat_seconds = 60), so at the deadline the box was still reachable by
+        // the same definition the Devices page and the alert use.
+        await AddBoxAsync(host, db, deadline.AddMinutes(-2));
+
+        var health = CreateWorker(host);
+        var sweep = CreateNoShowWorker(host);
+        if (healthFirst)
+        {
+            await health.TickAsync(default);
+            await sweep.TickAsync(default);
+        }
+        else
+        {
+            await sweep.TickAsync(default);
+            await health.TickAsync(default);
+        }
+
+        return await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
+    }
+
+    /// <summary>
+    /// The defect this class was rewritten to close. Identical facts settled at two different
+    /// prices depending on how promptly the sweep ran: on time the 30% was charged, five minutes
+    /// late it was waived, because by then <c>PeripheralHealthWorker</c> had written an outage row
+    /// whose <c>StartedAt</c> reached back over the deadline and covered it retroactively.
+    ///
+    /// <para>
+    /// Four runs: prompt and late, and each with the two workers in both orders. All four must
+    /// agree, and they must agree on the answer the evidence at the deadline gives — two minutes
+    /// of silence is not an outage, so the penalty stands.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_waiver_is_the_same_whichever_order_the_two_workers_run_in()
+    {
+        var promptHealthFirst = await SweptBalanceAsync(deadlineMinutesAgo: 0, healthFirst: true);
+        var promptSweepFirst = await SweptBalanceAsync(deadlineMinutesAgo: 0, healthFirst: false);
+        var lateHealthFirst = await SweptBalanceAsync(deadlineMinutesAgo: 5, healthFirst: true);
+        var lateSweepFirst = await SweptBalanceAsync(deadlineMinutesAgo: 5, healthFirst: false);
+
+        Assert.Equal(promptHealthFirst, promptSweepFirst);
+        Assert.Equal(promptHealthFirst, lateHealthFirst);
+        Assert.Equal(promptHealthFirst, lateSweepFirst);
+
+        // Consistent AND right: 30% of 8 retained, because the box was inside its threshold at
+        // the instant that decides it.
+        Assert.Equal(97.60m, promptHealthFirst);
+    }
+
+    /// <summary>
+    /// The other half of the same property. A box silent well past the threshold at the deadline
+    /// waives the penalty even if <c>PeripheralHealthWorker</c> has never run and no
+    /// <see cref="DeviceOutage"/> row exists — the evidence is the last heartbeat, not the row.
+    /// Without this the sweep charges whoever it reaches first and waives for whoever it reaches
+    /// after the health tick.
+    /// </summary>
+    [Fact]
+    public async Task A_box_past_the_threshold_at_the_deadline_waives_before_any_outage_row_exists()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // Dark since half an hour before the booking even started, and nothing has noticed.
+        await AddBoxAsync(host, db, booking.StartsAt.AddMinutes(-30));
+        Assert.Empty(await db.DeviceOutages.IgnoreQueryFilters().ToListAsync());
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
     }
 }

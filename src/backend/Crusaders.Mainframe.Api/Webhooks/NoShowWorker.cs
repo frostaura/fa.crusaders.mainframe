@@ -139,16 +139,26 @@ public sealed class NoShowWorker : BackgroundService
         // feature-spec.md §6a / settlement-model.md S5a: a booking whose court had no reachable
         // box when its grace window closed is refunded in full with NO penalty. Owed(b) = 0.
         //
-        // The instant asked about is the grace DEADLINE, not the slot start, and that is the
-        // whole of the rule: a box that reconnected before the deadline uploads the events it
-        // queued through the outage, so if the member did play we already know it and this
-        // booking is not due at all. A box still dark at the deadline is one whose evidence had
-        // no path home — the member may have been standing at an unlit court, and charging them
-        // 30% for the club's own hardware is the club billing a member for its outage.
+        // The instant asked about is the grace DEADLINE, not the slot start, and "no reachable
+        // box" is the product's own definition of unreachable — silent for longer than
+        // offline_after_seconds AT THAT INSTANT, judged from the last heartbeat that preceded it
+        // (DeviceOutageIndex). A box that reconnected before the deadline uploads the events it
+        // queued through the outage, so if the member did play we usually already know it and
+        // this booking is not due at all. A box still dark at the deadline is one whose evidence
+        // had no path home — the member may have been standing at an unlit court, and charging
+        // them 30% for the club's own hardware is the club billing a member for its outage.
         //
-        // This does not make a played court free (invariant I2): if the court WAS lit, the box
-        // holds an activation, and when it reconnects that reverses the sweep to S6 and Owed
-        // returns to the full price. The waiver only ever removes the penalty leg.
+        // WHAT THIS COSTS, STATED PLAINLY. It can make a played court free, and that is a real
+        // I2 exception rather than something the design rules out. The box lights courts from
+        // its cached roster while its uplink is down and queues the activations, but that queue
+        // is in RAM (src/iot/lib/eventq/include/eventq/EventQueue.h) — a power cut discards it.
+        // A court lit during an outage that ended in a power cut is therefore never reported,
+        // this sweep concludes nobody played, and the full refund stands with Owed(b) = 0 and
+        // nobody to complain. The alternative — keeping a penalty against members who could not
+        // scan, so that the club retains something in the case it cannot see — bills every
+        // locked-out member for a loss the club's own hardware caused. The waiver is the chosen
+        // side of that trade; the exception is recorded in settlement-model.md I2 and on the
+        // go-live checklist rather than denied here.
         var courtWasDark = sweep.Outages.CourtWasDark(b.CourtId, b.StartsAt.AddMinutes(tSettings.GraceWindowMinutes));
 
         var penalty = PenaltyFor(b, tSettings, wasCharged, courtWasDark);
@@ -312,10 +322,6 @@ public sealed class NoShowWorker : BackgroundService
             // (and, before the refund guard below, mass-refund them) on the first tick.
             var lookbackFloor = now.AddDays(-tSettings.NoShowLookbackDays);
 
-            // Once per tenant, not once per booking. Covers exactly the span the sweep can
-            // still reach, so a long-closed outage costs nothing to carry.
-            var outages = await DeviceOutageIndex.BuildAsync(db, lookbackFloor, ct);
-
             var dueNoShow = await db.Bookings
                 .Where(b => b.Status == BookingStatus.Booked
                     && b.CheckedInAt == null
@@ -323,6 +329,16 @@ public sealed class NoShowWorker : BackgroundService
                     && b.StartsAt <= graceCutoff
                     && b.StartsAt >= lookbackFloor)
                 .ToListAsync(ct);
+
+            // Once per tenant, not once per booking, and only when there is something to settle
+            // — the overwhelmingly common tick has no due bookings and should touch neither the
+            // devices nor the outages table. Covers exactly the span the sweep can still reach,
+            // so a long-closed outage costs nothing to carry. The threshold is the tenant's own:
+            // "unreachable" has to mean the same number here that it means on the Devices page.
+            var outages = dueNoShow.Count == 0
+                ? DeviceOutageIndex.Empty
+                : await DeviceOutageIndex.BuildAsync(
+                    db, lookbackFloor, HeartbeatCadence.OfflineAfterSeconds(tSettings.HeartbeatSeconds), ct);
 
             foreach (var b in dueNoShow)
             {

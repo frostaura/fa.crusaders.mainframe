@@ -1,5 +1,22 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+/**
+ * Every `.cs` file in a tree, minus the generated and build directories.
+ *
+ * <p>
+ * Migrations are excluded because they mention nothing relevant and are the largest files in
+ * the project; `bin` and `obj` because a stale copy there would answer for source that no
+ * longer exists.
+ * </p>
+ */
+function csSources(dir: string): string[] {
+  const skip = new Set(["bin", "obj", "Migrations"]);
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return skip.has(entry.name) ? [] : csSources(join(dir, entry.name));
+    return entry.name.endsWith(".cs") ? [join(dir, entry.name)] : [];
+  });
+}
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import AdminWebhooksPage from "./AdminWebhooks";
@@ -116,9 +133,12 @@ describe("AdminWebhooks", () => {
       expect(await screen.findByRole("button", { name: new RegExp(`^${name.replace(".", "\\.")}$`) })).toBeInTheDocument();
     }
 
-    // And nothing the bus cannot fire: an event offered here that nothing emits is a filter
-    // an admin can select and then wait on forever.
-    expect(screen.queryByRole("button", { name: /peripheral\.faulted/ })).not.toBeInTheDocument();
+    // "And nothing the bus cannot fire" used to be asserted here, as
+    // `queryByRole({ name: /peripheral\.faulted/ })).not.toBeInTheDocument()`. That string
+    // occurs nowhere in the repository, so the assertion could not fail: it was a tautology
+    // sitting in the slot of the check it replaced. A hard-coded phantom name always is one
+    // — the property is "every class offered has an emitter", and only the backend can
+    // answer that. It is the test two below, which reads the emitters.
   });
 
   /**
@@ -176,6 +196,52 @@ describe("AdminWebhooks", () => {
     expect(offered.length).toBeGreaterThan(10);
     for (const name of offered) {
       expect(stated.has(name), `${name} is offered by the picker but feature-spec.md §9 never names it`).toBe(true);
+    }
+  });
+
+  /**
+   * D-F7's actual complaint, in the direction nothing was checking.
+   *
+   * <p>
+   * The §9 gate above is spec-versus-picker, and its "must not be offered" branch only bites
+   * on a bullet §9 has marked <em>not emitted</em> — there are none, so that branch iterates
+   * zero times and the picker could offer a class nothing anywhere fires. Selecting one is a
+   * filter an admin waits on forever. The only source that can answer is the backend, so this
+   * reads it: every class the picker offers must appear as a quoted literal somewhere in the
+   * API project.
+   * </p>
+   *
+   * <p>
+   * Deliberately a coarse match rather than a parse of <code>EmitAsync</code> call sites: the
+   * names arrive there three different ways (a literal argument, a <code>Type:</code> member,
+   * a local). A comment naming a class it does not emit would pass this, which is the known
+   * weakness and is worth far less than the phantom it catches. The two self-checks below are
+   * what stop it degenerating into the tautology it replaces — the search must be shown to
+   * find a real emitter and to miss a name that has none.
+   * </p>
+   */
+  it("offers no event class the backend never emits", async () => {
+    const apiRoot = resolve(__dirname, "../../../backend/Crusaders.Mainframe.Api");
+    const corpus = csSources(apiRoot).map((f) => readFileSync(f, "utf8")).join("\n");
+
+    expect(corpus.length, `no C# sources found under ${apiRoot}`).toBeGreaterThan(10_000);
+    expect(corpus, "the emitter search cannot find a class that is emitted").toContain('"peripheral.unhealthy"');
+    expect(corpus, "the emitter search matches a class nothing emits").not.toContain('"peripheral.faulted"');
+
+    stubFetch(routes());
+    renderPage(<AdminWebhooksPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /New endpoint/ }));
+
+    const offered = Array.from(document.querySelectorAll("button"))
+      .map((b) => b.textContent?.trim() ?? "")
+      .filter((t) => /^[a-z]+\.[a-z_]+$/.test(t));
+    expect(offered.length).toBeGreaterThan(10);
+
+    for (const name of offered) {
+      expect(
+        corpus.includes(`"${name}"`),
+        `${name} is offered by the picker but nothing in the API project emits it`,
+      ).toBe(true);
     }
   });
 
