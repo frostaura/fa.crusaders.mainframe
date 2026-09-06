@@ -140,6 +140,17 @@ export default function TopUpStatusPage() {
       <div className="max-w-md mx-auto">
         <Card>
           <h1 className="text-xl font-semibold mb-2">Top-up</h1>
+          {/*
+            "we'll email you either way" was written here before the API could keep it, and a
+            sibling lane removed the sentence for exactly that reason. The money lane then made
+            the promise TRUE instead: `NotifyNotCompletedAsync` in TopUpEndpoints.cs mails a
+            member whose payment ends Failed, Cancelled or amount-mismatched, alongside the
+            confirmation `CompleteAsync` already sent. So the sentence stands, and
+            `topup-status-email-promise.test.ts` holds it to the backend in BOTH directions —
+            it reads the shipped C# and fails if the copy promises a mail nothing sends, or
+            stays silent about one that does. It failed in the second direction the moment the
+            dispatch landed, which is how this sentence came back.
+          */}
           <p role="alert" className="text-sm text-danger-strong">
             We couldn't reach the club to check on this payment. Nothing here cancels or
             changes it — if it has already cleared, your credits are in your wallet, and
