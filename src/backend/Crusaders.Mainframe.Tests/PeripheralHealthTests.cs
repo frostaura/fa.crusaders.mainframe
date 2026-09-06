@@ -695,10 +695,20 @@ public class PeripheralHealthTests
     }
 
     /// <summary>
-    /// A box an admin decommissioned is not evidence of anything. It stops calling in by their
-    /// own decision — the same reason <c>PeripheralHealthWorker</c> skips it — so a row left in
-    /// the table beside its replacement must not waive every no-show on those courts for as
-    /// long as it sits there. The live box is healthy and the member simply did not turn up.
+    /// The retired-box shape with the admin's tidying DONE: the replacement is healthy, the
+    /// row beside it is switched off, and the member simply did not turn up.
+    ///
+    /// <para>
+    /// <b>This test does not discriminate <c>Enabled</c>, and it used to be cited as though it
+    /// did.</b> Once <c>CourtWasDark</c> came to require every box on the court to be dark, the
+    /// healthy replacement alone decides the outcome here, so flipping this fixture's
+    /// <c>enabled: false</c> to <c>true</c> changes nothing and the test becomes a duplicate of
+    /// <see cref="A_stale_but_enabled_box_beside_a_healthy_one_does_not_waive_the_penalty"/>.
+    /// What it still says is worth saying — the settlement is the same whether or not the admin
+    /// tidied up — but the filter itself is pinned by
+    /// <see cref="A_disabled_box_heard_from_seconds_ago_does_not_block_the_waiver"/>, which is
+    /// the only shape where <c>Enabled</c> moves money.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty()
@@ -725,6 +735,55 @@ public class PeripheralHealthTests
 
         Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.Contains(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// <b>The pin on <c>d.Enabled</c> in <c>DeviceOutageIndex.BuildAsync</c>, and the only
+    /// shape in which that filter moves money.</b>
+    ///
+    /// <para>
+    /// Every box the club expects to hear from on this court is dark across the deadline, and a
+    /// box an admin switched off was heard from twenty seconds ago — the spare on the bench, or
+    /// the replacement plugged in and not yet configured. A disabled box is not expected to call
+    /// in and is not evidence that the court was lit, so the member still gets S5a: refunded in
+    /// full, <c>Owed(b) = 0</c>. Drop the filter and that same bench spare is read as a live box
+    /// on the court, the court stops being dark, and the member pays 30% for a court that had no
+    /// working hardware on it.
+    /// </para>
+    ///
+    /// <para>
+    /// It is the mirror of <see cref="A_stale_but_enabled_box_beside_a_healthy_one_does_not_waive_the_penalty"/>,
+    /// which holds the other direction — an ENABLED box heard from recently DOES block the
+    /// waiver — so between them the fixture's <c>enabled</c> flag is what decides the outcome
+    /// and not the fixture's luck: flip this one to <c>enabled: true</c> and it goes red.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_disabled_box_heard_from_seconds_ago_does_not_block_the_waiver()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // The box that actually drives the court, dark right across the grace window.
+        var live = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90));
+        await AddOutageAsync(host, db, live, booking.StartsAt.AddMinutes(-10), endedAt: null);
+
+        // Switched off, on the same court, and heard from twenty seconds ago.
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20), enabled: false);
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
     }

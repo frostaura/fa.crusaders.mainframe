@@ -98,15 +98,40 @@ those courts permanently, for free, with nothing on any screen saying why. Switc
 row off removes it from the index (a disabled box is not expected to call in and contributes
 nothing in either direction), but the rule must not rest on an admin remembering to.
 
+**What the `Enabled` filter itself decides, now that the all-boxes rule carries the case above.**
+It is no longer the retired-row case: with every box on the court required to be dark, one silent
+extra box waives nothing by itself, so the filter is not what protects the club there — and the
+test this document used to name as its pin,
+`A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty`, stopped discriminating it
+(flip that fixture's `enabled` flag and nothing changes). The case the filter still prices is the
+mirror: a court whose enabled boxes are **all** dark, with a switched-off box beside them that was
+heard from seconds ago — a spare on the bench, or the replacement an admin has plugged in and not
+yet configured. A disabled box is not evidence that the court was lit, so the waiver stands and
+`Owed(b) = 0`; without the filter the bench spare reads as a live box on the court, the court stops
+being dark, and the member pays the 30% for hardware that was driving nothing. Pinned in both
+directions by `A_disabled_box_heard_from_seconds_ago_does_not_block_the_waiver` and
+`A_stale_but_enabled_box_beside_a_healthy_one_does_not_waive_the_penalty`.
+
 **A court no enabled box drives is not dark**, even though it trivially has "no reachable box".
 There is no evidence either way — the club has no hardware there — and reading the phrase
 literally would waive every no-show at a club that has not installed a box yet.
 `DeviceOutageIndex.CourtWasDark` therefore requires at least one enabled box on the court and all
-of them past the threshold. Pinned by `PeripheralHealthTests`:
-`A_stale_but_enabled_box_beside_a_healthy_one_does_not_waive_the_penalty`,
-`A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty`,
-`Two_boxes_on_one_court_both_dark_still_waives_the_penalty` and
-`An_outage_on_a_box_that_drives_other_courts_does_not_waive_the_penalty`.
+of them past the threshold. Pinned by `PeripheralHealthTests`, and each name pins the clause it is
+listed against rather than the section as a whole:
+
+| Clause | Pin |
+| --- | --- |
+| One dark box beside a healthy one is not a dark court | `A_stale_but_enabled_box_beside_a_healthy_one_does_not_waive_the_penalty` |
+| Every box on the court dark **does** waive | `Two_boxes_on_one_court_both_dark_still_waives_the_penalty` |
+| A disabled box is not evidence in either direction | `A_disabled_box_heard_from_seconds_ago_does_not_block_the_waiver` |
+| A box bears only on the courts it drives | `An_outage_on_a_box_that_drives_other_courts_does_not_waive_the_penalty` |
+| The settlement is the same once the retired row is switched off | `A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty` |
+
+The last two are the ones this document previously over-claimed.
+`An_outage_on_a_box_that_drives_other_courts_does_not_waive_the_penalty` puts its only box on a
+court forty numbers away, so it passes through the *no box on this court* branch and never reaches
+the all-boxes loop at all; and the decommissioned test is carried by its healthy replacement, as
+above. Neither is evidence for the all-boxes rule.
 
 **A box whose silence had not yet reached the threshold at the deadline is reachable for
 settlement purposes**, exactly as it is on the Devices page and in the alert. That is a decision

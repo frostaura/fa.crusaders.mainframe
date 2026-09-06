@@ -131,8 +131,24 @@ public sealed class DeviceOutageIndex
     /// <para>
     /// <b>Disabled boxes contribute nothing, in either direction.</b> An admin who switches a box
     /// off has said it is not expected to call in — the same reason <c>PeripheralHealthWorker</c>
-    /// skips them — and a decommissioned row left in the table would otherwise waive every
-    /// no-show on its courts for as long as it sat there.
+    /// skips them.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The direction in which that filter now moves money is the OTHER one, and this comment
+    /// used to name the wrong scenario.</b> It cited the decommissioned row left silent in the
+    /// table, which <see cref="CourtWasDark"/> stopped depending on the moment it came to require
+    /// EVERY box on the court to be dark: a silent extra box no longer waives anything by itself,
+    /// so the filter is not what protects the club there, and
+    /// <c>A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty</c> stopped
+    /// discriminating it — flipping that fixture's <c>enabled</c> flag changes nothing. What the
+    /// filter still decides is a court whose enabled boxes are ALL dark with a switched-off box
+    /// beside them that was heard from seconds ago — the spare on the bench, the replacement not
+    /// yet configured. Keep it and the member gets the S5a waiver they are owed; drop it and the
+    /// bench spare reads as a live box on the court and the member pays 30% for hardware that was
+    /// not driving anything. Pinned, in both directions, by
+    /// <c>A_disabled_box_heard_from_seconds_ago_does_not_block_the_waiver</c> and
+    /// <c>A_stale_but_enabled_box_beside_a_healthy_one_does_not_waive_the_penalty</c>.
     /// </para>
     /// </summary>
     public static async Task<DeviceOutageIndex> BuildAsync(
