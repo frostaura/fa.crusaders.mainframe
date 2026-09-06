@@ -282,3 +282,68 @@ describe("Reports — utilisation says what it counts", () => {
     expect(card.getByText(/for a no-show that is the penalty, not the price/)).toBeInTheDocument();
   });
 });
+
+/**
+ * A period in which nothing moved.
+ *
+ * <p>
+ * "My wallet — totals" hardcoded its own <code>+</code> and <code>−</code> around
+ * <code>formatCredits</code> for Top-ups, Spent and Penalties, while going through
+ * <code>formatSignedCredits</code> two lines away for Refunds and Adjustments. A member
+ * with no spend and no penalties was therefore shown <b>−0.00 cr</b> twice, on the one
+ * card whose whole job is to reconcile. Zero has no direction, and every figure on the
+ * card now comes through the same formatter.
+ * </p>
+ */
+describe("Reports — the totals card on a period with no movement", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const EMPTY_WALLET = {
+    from: "", to: "",
+    top_ups_credits: 0, spent_credits: 0, refunds_credits: 0,
+    penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
+    net_movement_credits: 0,
+    penalty_count: 0, attended_bookings: 0, minutes_on_court: 0, count: 0,
+  };
+
+  it("shows an unsigned zero rather than a negative one", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/reports/me/wallet", body: EMPTY_WALLET },
+      { path: "/api/v1/reports/me/daily", body: [] },
+    ]);
+    renderPage(<ReportsPage />);
+
+    const title = await screen.findByRole("heading", { name: "My wallet — totals" });
+    // The <dl> itself, not the card: the tiles above it carry the same labels.
+    const card = within(title.parentElement!.querySelector("dl")!);
+
+    // U+2212 MINUS is what the card actually printed, so look for that as well as a hyphen.
+    expect(card.queryByText("−0.00 cr")).not.toBeInTheDocument();
+    expect(card.queryByText("-0.00 cr")).not.toBeInTheDocument();
+    expect(card.queryByText("+0.00 cr")).not.toBeInTheDocument();
+
+    // Every bucket on the card, all of them zero, all of them unsigned.
+    for (const label of ["Top-ups", "Spent", "Refunds (net)", "Penalties", "Adjustments"]) {
+      const term = card.getByText(label);
+      expect(term.parentElement).toHaveTextContent(`${label}0.00 cr`);
+    }
+  });
+
+  it("still shows the direction of a figure that has one", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/reports/me/wallet", body: { ...EMPTY_WALLET, top_ups_credits: 160, spent_credits: 24, net_movement_credits: 136 } },
+      { path: "/api/v1/reports/me/daily", body: [] },
+    ]);
+    renderPage(<ReportsPage />);
+
+    const title = await screen.findByRole("heading", { name: "My wallet — totals" });
+    // The <dl> itself, not the card: the tiles above it carry the same labels.
+    const card = within(title.parentElement!.querySelector("dl")!);
+
+    expect(card.getByText("Top-ups").parentElement).toHaveTextContent("Top-ups+160.00 cr");
+    // Spend leaves the wallet, so it is negated — not merely labelled with a minus.
+    expect(card.getByText("Spent").parentElement).toHaveTextContent("Spent−24.00 cr");
+  });
+});

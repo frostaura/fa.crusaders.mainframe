@@ -56,7 +56,11 @@ describe("signed credits, rates and durations", () => {
   it("shows the sign explicitly, and uses a real minus so a column lines up", () => {
     expect(formatSignedCredits(2500)).toBe("+2500.00 cr");
     expect(formatSignedCredits(-15)).toBe("−15.00 cr");
-    expect(formatSignedCredits(0)).toBe("+0.00 cr");
+    // Zero is the exception, and it changed: it used to render "+0.00 cr" here and
+    // "−0.00 cr" on the reports card, which hardcoded its own minus. Nothing moved, so
+    // nothing carries a direction.
+    expect(formatSignedCredits(0)).toBe("0.00 cr");
+    expect(formatSignedCredits(-0)).toBe("0.00 cr");
 
     // U+2212 MINUS, not a hyphen: in the tabular-nums amount column a hyphen is narrower
     // than a plus, so a debit sits half a character out from the credit above it.
