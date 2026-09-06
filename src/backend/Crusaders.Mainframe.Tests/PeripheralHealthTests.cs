@@ -728,4 +728,72 @@ public class PeripheralHealthTests
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
     }
+
+    /// <summary>
+    /// The same leak with the admin's one act of tidying left undone, which is the case the
+    /// disabled test above does NOT cover. A replaced box that nobody switched off is silent
+    /// forever, so it is past the threshold at every deadline there will ever be; if one dark
+    /// box on the court were enough, every no-show on those courts would be waived for as long
+    /// as the row sat in the table. §6a says the waiver belongs to a booking whose court had
+    /// <b>no reachable box</b> at the deadline — and the live box beside it was reachable.
+    /// </summary>
+    [Fact]
+    public async Task A_stale_but_enabled_box_beside_a_healthy_one_does_not_waive_the_penalty()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // The box that actually drives the court, heart-beating normally.
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
+
+        // The one it replaced — still ENABLED, because nobody switched it off — silent for
+        // three days, on the same court, carrying an outage row nobody ever closed.
+        var stale = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddDays(-3), enabled: true);
+        await AddOutageAsync(host, db, stale, booking.StartsAt.AddDays(-3), endedAt: null);
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Contains(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// The other side of the same rule, so the fix cannot be "never waive when two boxes share
+    /// a court". Both boxes on the court are dark at the deadline — there is genuinely no
+    /// reachable box — and S5a still refunds in full with no penalty.
+    /// </summary>
+    [Fact]
+    public async Task Two_boxes_on_one_court_both_dark_still_waives_the_penalty()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        var first = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90));
+        await AddOutageAsync(host, db, first, booking.StartsAt.AddMinutes(-10), endedAt: null);
+        var second = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90));
+        await AddOutageAsync(host, db, second, booking.StartsAt.AddMinutes(-10), endedAt: null);
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
 }
