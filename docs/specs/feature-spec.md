@@ -261,6 +261,7 @@ Required emails:
 - No-show with penalty
 - Refund / credit adjustment
 - Top-up confirmation
+- **Top-up not completed** — declined, cancelled at the gateway, or settled for an amount other than the one it was registered for. Confirmation was emailed and failure was silent, so the one terminal outcome of a member handing over card details that sent nothing was the one where they most needed telling: a member who closed the tab after PayFast could only learn what happened by finding the status page again. `TopUpStatus.tsx` promises this mail in as many words on the branch where it cannot reach the club ("we'll email you either way"), which is exactly the branch where it is the only channel left. Cancellations get it too, because "either way" is what the screen says and a member who backed out still deserves to know nothing was taken. **Once per top-up, not once per ITN retry** — PayFast retries a notification until it is acknowledged and the handler's idempotency check short-circuits only on `Completed`. `provider_register_failed` is excluded: it happens while the member is still looking at the top-up form and reading the error, and no status page exists for it to promise anything from.
 - Password reset link
 - Magic-link sign-in
 - Admin-issued temporary password

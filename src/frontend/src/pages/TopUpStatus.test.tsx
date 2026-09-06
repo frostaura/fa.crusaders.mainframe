@@ -261,6 +261,13 @@ describe("Top-up status — when the club cannot be reached", () => {
     // And the one thing a member watching R500 needs to be told.
     expect(screen.getByRole("alert")).toHaveTextContent(/Nothing here cancels or changes it/);
     expect(screen.queryByText("Couldn't load top-up status.")).not.toBeInTheDocument();
+
+    // The promise the copy makes, kept: the API emails on every terminal outcome, not only
+    // on the one that credits. TopUpEndpoints.NotifyNotCompletedAsync is the other half,
+    // pinned by TopUpFlowTests.A_declined_payment_emails_the_member_that_nothing_was_charged
+    // and its two siblings. If that dispatch is ever removed, this sentence has to go with
+    // it — a named promise on screen that no code path keeps is this programme's archetype.
+    expect(screen.getByRole("alert")).toHaveTextContent(/we'll email you either way/);
   });
 
   it("does not throw away a status it has already read when a later check fails", async () => {

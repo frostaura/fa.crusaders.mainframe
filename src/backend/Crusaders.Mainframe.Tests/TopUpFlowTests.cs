@@ -8,8 +8,11 @@ using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Payments.PayFast;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Email;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Crusaders.Mainframe.Tests;
@@ -291,6 +294,165 @@ public sealed class TopUpFlowTests
         Assert.Equal("Failed", status.GetProperty("status").GetString());
         Assert.Equal("amount_mismatch", status.GetProperty("failure_code").GetString());
         Assert.DoesNotContain("reported=", status.GetRawText());
+    }
+
+    // ---- the failure email the status screen promises -----------------------
+
+    /// <summary>
+    /// The app with email captured into <paramref name="mail"/>, so the ITN's background
+    /// dispatch lands somewhere a test can read instead of dialling SMTP.
+    /// </summary>
+    private static WebApplicationFactory<Program> WithMail(TestWebAppFactory factory, StubEmailService mail)
+        => factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
+        {
+            s.RemoveAll<IEmailService>();
+            s.AddSingleton<IEmailService>(mail);
+        }));
+
+    /// <summary>
+    /// The notice is dispatched on a background task — PayFast retries an ITN until it is
+    /// acknowledged, so the handler must not wait on SMTP — which means it has not
+    /// necessarily arrived by the time the response has.
+    /// </summary>
+    private static async Task<EmailMessage?> PollMailAsync(StubEmailService mail)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            var found = mail.Sent.FirstOrDefault();
+            if (found is not null) return found;
+            await Task.Delay(25);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// <c>feature-spec.md</c> §11: every player-affecting event sends an email. A top-up
+    /// that ends without credits is the one terminal outcome of a member handing over card
+    /// details that sent nothing at all — confirmation was mailed, failure was silent — so a
+    /// member who closed the tab after PayFast could only find out by hunting for the status
+    /// page again. It is also the promise <c>TopUpStatus.tsx</c> makes in as many words on
+    /// the branch where it cannot reach the club ("we'll email you either way"), which is
+    /// precisely the branch where this mail is the only channel left.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_declined_payment_emails_the_member_that_nothing_was_charged()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = MemberClient(factory, seeded);
+        var body = await RegisterAsync(client, 100m);
+
+        var mail = new StubEmailService();
+        await using var quiet = WithMail(factory, mail);
+        await quiet.CreateClient().PostAsync(
+            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
+            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: "FAILED"));
+
+        var notice = await PollMailAsync(mail);
+        Assert.NotNull(notice);
+        Assert.Equal(seeded.Email, notice!.To);
+        Assert.Contains("didn't go through", notice.Subject, StringComparison.Ordinal);
+        Assert.Contains("R100.00", notice.Subject, StringComparison.Ordinal);
+        Assert.Contains("declined the payment", notice.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains("nothing was charged", notice.HtmlBody, StringComparison.Ordinal);
+
+        // Never a code, never an internal string: the column once held
+        // amount_mismatch:reported=100,00:expected=500,00 and it was shown to a member.
+        Assert.DoesNotContain("amount_mismatch", notice.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("gateway_error", notice.HtmlBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A member who backed out at PayFast is told nothing was taken, and is not told their
+    /// payment failed — the same distinction the status badge draws.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_cancelled_payment_emails_the_member_without_calling_it_a_failure()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = MemberClient(factory, seeded);
+        var body = await RegisterAsync(client, 100m);
+
+        var mail = new StubEmailService();
+        await using var quiet = WithMail(factory, mail);
+        await quiet.CreateClient().PostAsync(
+            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
+            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: "CANCELLED"));
+
+        var notice = await PollMailAsync(mail);
+        Assert.NotNull(notice);
+        Assert.Contains("cancelled", notice!.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("failed", notice.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("didn't go through", notice.Subject, StringComparison.Ordinal);
+        Assert.Contains("You cancelled this payment", notice.HtmlBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The one failure where money may genuinely have moved. The member is told what to send
+    /// the club rather than left to guess, and the reference is in the mail because that is
+    /// what a dispute turns on.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_amount_mismatch_emails_the_member_with_the_reference_to_quote()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = MemberClient(factory, seeded);
+        var body = await RegisterAsync(client, 500m);
+        var checkoutId = body.GetProperty("checkout_id").GetString()!;
+
+        var mail = new StubEmailService();
+        await using var quiet = WithMail(factory, mail);
+        var itn = await quiet.CreateClient().PostAsync(
+            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
+            SignedItn(checkoutId, "100.00"));
+        Assert.Equal(HttpStatusCode.BadRequest, itn.StatusCode);
+
+        var notice = await PollMailAsync(mail);
+        Assert.NotNull(notice);
+        Assert.Contains("R500.00", notice!.Subject, StringComparison.Ordinal);
+        Assert.Contains("send the club the reference below", notice.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains(checkoutId, notice.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("reported=", notice.HtmlBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// PayFast retries an ITN until it is acknowledged, and the handler's idempotency check
+    /// short-circuits only on <c>Completed</c> — so an already-failed row is re-judged on
+    /// every retry. One failure, one email.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_retried_notification_does_not_email_the_member_twice()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = MemberClient(factory, seeded);
+        var body = await RegisterAsync(client, 100m);
+        var checkoutId = body.GetProperty("checkout_id").GetString()!;
+
+        var mail = new StubEmailService();
+        await using var quiet = WithMail(factory, mail);
+        var itnClient = quiet.CreateClient();
+        await itnClient.PostAsync(
+            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}", SignedItn(checkoutId, "100.00", status: "FAILED"));
+        Assert.NotNull(await PollMailAsync(mail));
+
+        await itnClient.PostAsync(
+            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}", SignedItn(checkoutId, "100.00", status: "FAILED"));
+
+        // Give the second dispatch the same window the first one was polled over.
+        await Task.Delay(500);
+        Assert.Single(mail.Sent);
     }
 
     // ---- F6: the screen's numbers come from the tenant's settings ----------
