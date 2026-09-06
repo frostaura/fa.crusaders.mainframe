@@ -249,6 +249,74 @@ public sealed class DeviceAuthHttpTests
     }
 
     /// <summary>
+    /// The wiring behind the no-show waiver, over real HTTP: a heartbeat that ends a silence
+    /// past the club's threshold leaves a closed <c>DeviceOutage</c> behind, because the
+    /// heartbeat is the only actor that sees the instant a silence ended.
+    ///
+    /// <para>
+    /// Without it the row is written only when <c>PeripheralHealthWorker</c> happens to catch
+    /// the box mid-outage on its thirty-second stride, and a club power cut that ends between
+    /// two ticks settles the same booking at two different prices depending on whether the
+    /// sweep ran before or after the box came back. The unit half of this is
+    /// <c>PeripheralHealthTests.The_waiver_is_the_same_whether_the_box_came_back_before_or_after_the_sweep</c>;
+    /// this is the half that proves the endpoint calls it.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_heartbeat_that_ends_a_long_silence_records_the_outage_it_ended()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "alpha");
+        var mac = NewMac();
+        var client = factory.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+
+        // The box goes dark for twenty minutes. heartbeat_seconds is 45 here, so
+        // offline_after_seconds is the 180-second floor and twenty minutes is far past it.
+        var wentQuietAt = DateTimeOffset.UtcNow.AddMinutes(-20);
+        await BackdateAsync(factory, mac, wentQuietAt);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+            var outage = Assert.Single(await db.DeviceOutages.IgnoreQueryFilters()
+                .Where(o => o.DeviceId == device.Id).ToListAsync());
+
+            Assert.Equal(wentQuietAt, outage.StartedAt, TimeSpan.FromSeconds(1));
+            Assert.NotNull(outage.EndedAt);
+            Assert.Equal(device.LastSeenAt, outage.EndedAt);
+        }
+
+        // The control: an ordinary heartbeat inside the threshold records nothing, or every
+        // box in the club would carry an outage row per call.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+            Assert.Single(await db.DeviceOutages.IgnoreQueryFilters()
+                .Where(o => o.DeviceId == device.Id).ToListAsync());
+        }
+    }
+
+    /// <summary>Puts a box's last heartbeat back in time, which is what an outage looks like from the API side.</summary>
+    private static async Task BackdateAsync(TestWebAppFactory factory, string mac, DateTimeOffset lastSeenAt)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+        device.LastSeenAt = lastSeenAt;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
     /// The contract calls the field <c>firmware_version</c> and the firmware writes
     /// <c>running_version</c>. Both are read, so a rename on either side degrades to a
     /// column that keeps updating rather than one that silently stops.

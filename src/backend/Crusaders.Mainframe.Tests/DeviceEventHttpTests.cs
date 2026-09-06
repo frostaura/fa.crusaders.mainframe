@@ -229,6 +229,48 @@ public sealed class DeviceEventHttpTests
         Assert.Equal(3, await db.DeviceEventReceipts.IgnoreQueryFilters().CountAsync(r => r.DeviceId == box.DeviceId));
     }
 
+    /// <summary>
+    /// An upload is a liveness signal too, and it is very often the FIRST call a box makes
+    /// when it reconnects — it has a queue to drain. So it has to leave the same evidence a
+    /// heartbeat does: the silence it just ended, recorded as a closed <c>DeviceOutage</c>.
+    /// Without it the no-show waiver settles the outage window differently depending on
+    /// whether the health sweep happened to catch the box while it was still dark. The
+    /// heartbeat half of this is
+    /// <c>DeviceAuthHttpTests.A_heartbeat_that_ends_a_long_silence_records_the_outage_it_ended</c>.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_upload_that_ends_a_long_silence_records_the_outage_it_ended()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var client = factory.CreateClient();
+
+        // Twenty minutes dark, which is far past the 180-second floor under
+        // offline_after_seconds, and then the box drains its queue.
+        var wentQuietAt = DateTimeOffset.UtcNow.AddMinutes(-20);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == box.DeviceId);
+            device.LastSeenAt = wentQuietAt;
+            await db.SaveChangesAsync();
+        }
+
+        var response = await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(1))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var outage = Assert.Single(await db.DeviceOutages.IgnoreQueryFilters()
+                .Where(o => o.DeviceId == box.DeviceId).ToListAsync());
+            Assert.Equal(wentQuietAt, outage.StartedAt, TimeSpan.FromSeconds(1));
+            Assert.NotNull(outage.EndedAt);
+        }
+    }
+
     [SkippableFact]
     public async Task A_replayed_batch_is_acknowledged_without_being_recorded_twice()
     {

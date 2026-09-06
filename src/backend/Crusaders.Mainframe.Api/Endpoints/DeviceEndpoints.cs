@@ -54,15 +54,19 @@ public static class DeviceEndpoints
         // Read once. The roster's relative seconds are all measured from the same instant,
         // because the box anchors them to the moment it accepted this response.
         var now = DateTimeOffset.UtcNow;
+        var s = await settings.GetAsync(ct);
 
-        device!.LastSeenAt = now;
-        device.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
+        // Moves LastSeenAt AND, if this call ends a silence past the club's own threshold,
+        // records that silence — in this same save, because LastSeenAt is the evidence it
+        // would otherwise erase and the no-show waiver is settled from it. DeviceSilenceLog
+        // says why the health sweep alone cannot see this case.
+        DeviceSilenceLog.NoteHeartbeat(db, device!, now, HeartbeatCadence.OfflineAfterSeconds(s.HeartbeatSeconds));
+
+        device!.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
         if (req.EffectiveRunningVersion is { } running) device.RunningVersion = running;
         if (!string.IsNullOrWhiteSpace(req.MegaVersion)) device.MegaVersion = req.MegaVersion.Trim();
 
         await db.SaveChangesAsync(ct);
-
-        var s = await settings.GetAsync(ct);
 
         // The bookings this box may admit on its own, as TOKEN|relay|opens_in|closes_in.
         // Always present, even when empty: the firmware replaces its cache wholesale on
