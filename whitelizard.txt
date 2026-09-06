@@ -15,13 +15,14 @@
 #
 # THE NAMES HERE ARE LIZARD'S, NOT C#'s, and the two can disagree. lizard's C#
 # parser scopes a function under the most recently DECLARED type, not the type
-# that encloses it — so `TopUpEndpoints.MapTopUpEndpoints`, which sits directly
-# below the nested `FailureCodes` class, is reported as
-# `FailureCodes::MapTopUpEndpoints`. An entry written from the source rather
-# than from lizard's own output matches nothing and the gate stays red while
-# looking whitelisted, which is what `TopUpEndpoints::MapTopUpEndpoints` did
-# here. Copy the name out of `make complexity`'s warning line; never type it
-# from the C#.
+# that encloses it — so a method sitting directly BELOW a nested class is
+# reported inside that class. `TopUpEndpoints.MapTopUpEndpoints` has been
+# reported both ways: as `FailureCodes::MapTopUpEndpoints` when the nested
+# `FailureCodes` class sat above it, and as `TopUpEndpoints::MapTopUpEndpoints`
+# — which is what it reports TODAY — when it sits below. An entry written from
+# the source rather than from lizard's own output matches nothing and the gate
+# stays red while looking whitelisted. Copy the name out of `make complexity`'s
+# warning line; never type it from the C#.
 #
 # AND THE SCOPING IS NOT STABLE, so one name is not enough. Moving the nested
 # `FailureCodes` class below the map method — done to make the entry match —
@@ -36,6 +37,17 @@
 # below `MapTopUpEndpoints` while another, in parallel, renamed the entry to
 # `FailureCodes::`. Each was green alone and the merge of the two was red. Listing
 # both names is what makes the entry survive that.
+#
+# NEITHER OF THE TWO IS DEAD WEIGHT, however redundant one looks on any given day.
+# Only one of them matches at a time — the other is what catches the next move —
+# so deleting "the one that isn't firing" restores exactly the failure this pair
+# exists to prevent. Re-checked 2026-09-06 with lizard 1.24.0: the file as it
+# stands reports `TopUpEndpoints::MapTopUpEndpoints` (CCN 26, length 237), the
+# same file with `FailureCodes` moved above the map method reports
+# `FailureCodes::MapTopUpEndpoints` at identical numbers, and `make complexity`
+# is green either way only because both lines are here. `RepositoryPostureTests`
+# asserts both are present, so a tidy-up that drops one goes red in the suite
+# rather than months later on somebody else's unrelated commit.
 AdminConfigEndpoints::MapAdminConfigEndpoints
 AdminMemberEndpoints::MapAdminMemberEndpoints
 AdminMembersPage

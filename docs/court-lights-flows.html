@@ -431,12 +431,13 @@ var FLOWS=[
   {l:'api',t:'Build the snapshot',d:'Fresh from the database: <code>court_numbers</code> (index = relay), the button map, <code>heartbeat_seconds</code>, and the <b>roster</b>.<small>Roster = every booking on this box\'s courts whose window touches the next two hours, as up to 16 entries of <code>CODE|relay|opens_in|closes_in</code> in relative seconds, capped at 2 KB. Already-attended bookings stay in so a re-scan can re-light.</small>'},
   {l:'box',t:'Replace roster + settings',d:'Overwrites what it holds wholesale. An absent key leaves the old value; an empty roster clears it; a malformed entry is skipped and counted.<small>There is no incremental command stream, so a missed heartbeat can never leave the box half-updated.</small>',
    o:[{t:'no reply',d:'The roster keeps working for up to six hours from the last good heartbeat; then offline grants stop. A circuit breaker stops the box hammering a dead backend and probes again on a backoff.'}]},
-  {l:'api',t:'Last seen',d:'Stamps <i>last seen</i>. The Devices page calls a box offline after three missed beats at the interval you set.'}
+  {l:'api',t:'Last seen',d:'Stamps <i>last seen</i>. The Devices page calls a box offline after three missed beats at the interval you set, but never sooner than three minutes.<small>The floor matters at short intervals: on the 15-second minimum, three beats is 45 seconds and ordinary WiFi jitter would paint healthy boxes red all evening. At the default 60 s the two agree exactly.</small>'}
  ]},
 {id:'book',t:'Booking a court',tags:['member','money'],tg:['charge at booking'],
  s:'The slot, the credit charge and the court code are created in one transaction. The code is what the member shows at the box.',
  steps:[
-  {l:'phone',t:'Pick a slot',d:'Member picks a court and a time slice. The grid shows photo and name only.'},
+  {l:'phone',t:'Pick a slot',d:'Member picks a court and a time slice. The grid shows photo and name only, and it only draws the hours that weekday is open — the club\'s opening hours are a per-day setting the booking rule enforces, not a label.',
+   o:[{t:'outside opening hours',d:'Refused with that day\'s own open and close times. A slice that starts inside the window but runs past close is refused too, rather than silently shortened.'},{t:'too few credits',d:'Refused with the balance and the price. An admin booking on the member\'s behalf may re-send the request asking for the overdraft by name — same price, same charge, wallet goes negative, and the audit row says who authorised it and how deep.'}]},
   {l:'api',t:'Reserve + charge + mint',d:'In one unit of work: reserve the slot (a database exclusion constraint makes a double-booking impossible), post the <code>BookingCharge</code> ledger row in credits, mint the booking\'s 12-character code.<small>Balance is never a stored number; it is the sum of ledger rows. Every row carries actor, subject, reason and reference.</small>'},
   {l:'phone',t:'Court Code page',d:'Shows the code as a QR and as text. Valid until the booking ends plus the grace window.'},
   {l:'api',t:'Email + webhooks',d:'The member gets an email. Webhooks mirror the same event for anyone the club has wired up.',
@@ -536,9 +537,9 @@ var FLOWS=[
 {id:'admin',t:'Changing settings from anywhere',tags:['admin'],tg:['next heartbeat'],
  s:'Court numbers, button maps, prices, windows and the heartbeat interval are edited on the web and reach the box within a minute. Nothing is configured on the box.',
  steps:[
-  {l:'desk',t:'Save on the web',d:'<b>Devices:</b> name, court per relay, per-box button map (30–90 min buttons; 90 is the relay cap), delete. <b>Settings:</b> slice prices, grace and cue windows, walk-up max, heartbeat interval (15–300 s), the club\'s default button map.'},
+  {l:'desk',t:'Save on the web',d:'<b>Devices:</b> name, court per relay, per-box button map (a minute button may grant 1 to 90; 90 is the relay cap, and the default map is 15/30/45/60), delete. <b>Settings:</b> slice prices, grace and cue windows, walk-up max, heartbeat interval (15–300 s), the club\'s default button map.'},
   {l:'api',t:'Validate + store',d:'A button can\'t name a court the box doesn\'t have; every number is a tenant setting, none hardcoded.<small>A save on the Devices page sends only its own fields, so it can\'t revert something someone changed on Settings meanwhile.</small>'},
-  {l:'box',t:'Next heartbeat',d:'Picks the change up within the interval. The Devices page\'s offline threshold follows the interval you set.'},
+  {l:'box',t:'Next heartbeat',d:'Picks the change up within the interval. The Devices page\'s offline threshold follows the interval you set — three missed beats, floored at three minutes.'},
   {l:'mega',t:'Applied',d:'New court mapping and button meanings are live.'}
  ]},
 {id:'adjust',t:'The desk adjusts a member\'s credits',tags:['admin','money'],tg:['manual'],
