@@ -350,6 +350,78 @@ public static class EmailTemplates
             """);
 
     /// <summary>
+    /// What a member is told when a top-up ended in anything but credits.
+    ///
+    /// <para>
+    /// The sentences are the same ones <c>TopUpStatus.tsx</c> renders from the same stable
+    /// codes, deliberately: a member who reads the screen and a member who reads the mail must
+    /// not be told two different things about one payment. Codes never appear in the output —
+    /// the column once held <c>amount_mismatch:reported=100,00:expected=500,00</c> and it was
+    /// shown verbatim to a member as the explanation for a failed R500 payment.
+    /// </para>
+    /// </summary>
+    private static string TopUpFailureSentence(string? failureReason)
+    {
+        switch (failureReason)
+        {
+            case "cancelled":
+                return "You cancelled this payment at PayFast, so nothing was charged and no credits were added. "
+                     + "You can start a new top-up whenever you like.";
+            case "amount_mismatch":
+                return "PayFast reported a different amount from the one this top-up was for, so nothing was credited. "
+                     + "If money did leave your account, send the club the reference below and they will sort it out.";
+            case "declined":
+                return "Your bank declined the payment, so nothing was charged. Try again, or use a different card.";
+            default:
+                return "PayFast couldn't complete the payment and nothing was charged. Try again in a few minutes.";
+        }
+    }
+
+    /// <summary>
+    /// A top-up that ended without credits — declined, cancelled at the gateway, or settled
+    /// for an amount other than the one it was registered for.
+    ///
+    /// <para>
+    /// <c>feature-spec.md</c> §11's governing sentence is that every player-affecting event
+    /// sends an email, and this is the only terminal outcome of a member handing over card
+    /// details that sent nothing at all: a member who closed the tab after PayFast learnt
+    /// what happened to their money only by finding the status page again. The status screen
+    /// promises this mail in as many words ("we'll email you either way") on the branch where
+    /// it cannot reach the club — which is precisely the branch where the mail is the only
+    /// channel left.
+    /// </para>
+    ///
+    /// <para>
+    /// It states the amount and says nothing was charged where that is true, because the fear
+    /// a member has here is that the money left and the credits did not arrive. The one case
+    /// where money may genuinely have moved — <c>amount_mismatch</c> — says so and tells them
+    /// what to send the club.
+    /// </para>
+    /// </summary>
+    public static EmailMessage TopUpNotCompleted(
+        string to, decimal amountZar, string? failureReason, string reference) => new(
+        To: to,
+        Subject: failureReason == "cancelled"
+            ? $"Top-up cancelled — {Zar(amountZar)}"
+            : $"Top-up didn't go through — {Zar(amountZar)}",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">{(failureReason == "cancelled" ? "Your top-up was cancelled" : "Your top-up didn't go through")}</h2>
+              <table style="border-collapse:collapse;font-size:14px">
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Amount</td><td><strong>{Zar(amountZar)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Credited</td><td><strong>{Cr(0m)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Reference</td><td>{System.Net.WebUtility.HtmlEncode(reference)}</td></tr>
+              </table>
+              <p style="margin-top:16px">{System.Net.WebUtility.HtmlEncode(TopUpFailureSentence(failureReason))}</p>
+              <p style="margin-top:16px;font-size:13px;color:#475569">
+                Your wallet balance has not changed.
+              </p>
+              {FooterHtml}
+            </div>
+            """);
+
+    /// <summary>
     /// A manual credit adjustment by the desk — the other half of <c>feature-spec.md</c>
     /// §11's "Refund / credit adjustment", which also sent nothing. A member whose balance
     /// moves by someone else's hand is told what moved and why.

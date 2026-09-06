@@ -58,13 +58,54 @@ public class CourtActivationTests
                 new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, topUpCredits, host.PlayerUser.Id), default);
         }
 
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        // Every booking in this class starts NOW — that is what "a player standing in front
+        // of it" means — so, like a walk-up, the slot cannot be stepped forward the way
+        // TestHost.BookableSlot steps one. The club is moved instead. Without this, fourteen
+        // tests here are refused OutOfHours for the last hour of the club's local day: the
+        // fixture closes at local midnight (day_end_minute 1440) and a slice starting at
+        // 23:46 ends at 00:01. Same defect as the five walk-up tests, in a class the round
+        // that fixed those did not reach. Sixty minutes of headroom covers the longest thing
+        // bought here with room to spare. See TestHost.DayZoneFor.
+        await TestHost.ClearOfClosingAsync(db, host.Tenant.Id, 60);
+
         return new Fixture(
             host, scope,
             scope.ServiceProvider.GetRequiredService<CourtActivationService>(),
             ledger,
             scope.ServiceProvider.GetRequiredService<BookingService>(),
-            scope.ServiceProvider.GetRequiredService<MainframeDbContext>(),
+            db,
             host.EmailService);
+    }
+
+    /// <summary>
+    /// The fixture is clear of its own closing time — the guard that makes the line above
+    /// impossible to delete quietly.
+    ///
+    /// <para>
+    /// Every other test in this class would only notice its absence during the last hour of
+    /// the club's local day, which is exactly the property that let the defect sit here
+    /// through three rounds. This one notices at any hour, because it compares against the
+    /// seeded literal <c>"UTC"</c>, which <c>DayZoneFor</c> never returns.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_fixture_is_moved_clear_of_its_own_closing_time()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var row = await f.Db.TenantSettings.IgnoreQueryFilters().SingleAsync(x => x.TenantId == f.Host.Tenant.Id);
+        var zone = System.Text.Json.JsonDocument.Parse(row.SettingsJson).RootElement
+            .GetProperty("timezone").GetString();
+
+        Assert.NotEqual("UTC", zone);
+        var local = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone!));
+        Assert.True(
+            (local.Hour * 60) + local.Minute + 60 <= 24 * 60,
+            $"a booking made now still runs past local midnight (local {local:HH:mm} in {zone})");
     }
 
     /// <summary>A booking starting now, i.e. one a player is standing in front of.</summary>

@@ -147,6 +147,66 @@ public class WalkUpBookingTests
         }
     }
 
+    /// <summary>
+    /// The helper the five walk-up tests rest on actually moves the club, at any hour.
+    ///
+    /// <para>
+    /// The previous round's fix was effective and unpinned <b>against its own removal</b>: a
+    /// refuter made <see cref="TestHost.ClearOfClosingAsync"/> a no-op with an early return
+    /// and every test in this class, in <c>DeviceEventHttpTests</c> and in
+    /// <c>ConcurrentDecisionTests</c> stayed green — the original flake restored in silence
+    /// and visible for one hour a day.
+    /// <c>The_day_zone_leaves_room_at_every_hour_of_the_day</c> could not catch it, because
+    /// it exercises <see cref="TestHost.DayZoneFor"/>'s arithmetic in isolation and nothing
+    /// asserted that anything calls it.
+    /// </para>
+    ///
+    /// <para>
+    /// This compares against the seeded literal as well as against the helper's own answer.
+    /// The seed writes <c>"UTC"</c> and <see cref="TestHost.DayZoneFor"/> never returns that
+    /// string — its UTC case is the tzdb id <c>Etc/UTC</c> — so a helper that writes nothing
+    /// fails here at every hour of the day rather than at the unlucky ones.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Clearing_the_club_of_closing_actually_writes_the_zone()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var before = JsonDocument.Parse(
+            (await db.TenantSettings.IgnoreQueryFilters().SingleAsync(x => x.TenantId == host.Tenant.Id)).SettingsJson);
+        Assert.Equal("UTC", before.RootElement.GetProperty("timezone").GetString());
+
+        var now = await TestHost.NowClearOfClosingAsync(db, host.Tenant.Id, RelayHardCap.Minutes);
+
+        var after = JsonDocument.Parse(
+            (await db.TenantSettings.IgnoreQueryFilters().SingleAsync(x => x.TenantId == host.Tenant.Id)).SettingsJson);
+        var written = after.RootElement.GetProperty("timezone").GetString();
+
+        Assert.NotEqual("UTC", written);
+        Assert.Equal(TestHost.DayZoneFor(now, RelayHardCap.Minutes), written);
+
+        // And the zone it wrote really does leave the room it promised, read back through
+        // the tzdb rather than through the helper's own arithmetic.
+        var local = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.FindSystemTimeZoneById(written!));
+        Assert.True(
+            (local.Hour * 60) + local.Minute + RelayHardCap.Minutes <= 24 * 60,
+            $"a {RelayHardCap.Minutes}-minute walk-up still runs past local midnight (local {local:HH:mm} in {written})");
+
+        // Nothing else in the settings document moved: the club's prices, slice length and
+        // windows are what the tests around this one are asserting on. Compared before
+        // against after rather than against literals, so this stays a statement about the
+        // helper rather than a second copy of the fixture.
+        foreach (var key in new[] { "day_end_minute", "day_start_minute", "slice_minutes", "slice_price_credits", "peak_hours", "penalty_pct" })
+        {
+            Assert.Equal(
+                before.RootElement.GetProperty(key).GetRawText(),
+                after.RootElement.GetProperty(key).GetRawText());
+        }
+    }
+
     // ---- Pricing ----------------------------------------------------------
 
     /// <summary>

@@ -275,6 +275,32 @@ public sealed class TestHost : IAsyncDisposable
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// <see cref="ClearOfClosingAsync"/>, handing back the instant the caller should measure
+    /// its own times from.
+    ///
+    /// <para>
+    /// The return value is the point. A test that writes
+    /// <c>var startsAt = DateTimeOffset.UtcNow.AddMinutes(5)</c> and separately remembers to
+    /// move the club has two independent statements, and deleting the second leaves a test
+    /// that compiles, passes for twenty-three hours a day, and fails in the twenty-fourth.
+    /// Taking <c>now</c> FROM the move makes the two one statement: remove it and the test
+    /// no longer builds. That is the difference between a fix and a fix that stays.
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="minutesNeeded"/> is everything the caller's operation will consume of
+    /// the club's day measured from the returned instant — for a booking that starts in five
+    /// minutes and runs fifteen, that is twenty, not fifteen.
+    /// </para>
+    /// </summary>
+    public static async Task<DateTimeOffset> NowClearOfClosingAsync(
+        MainframeDbContext db, Guid tenantId, int minutesNeeded)
+    {
+        await ClearOfClosingAsync(db, tenantId, minutesNeeded);
+        return DateTimeOffset.UtcNow;
+    }
+
     public IServiceScope NewScope() => Services.CreateScope();
 
     public async ValueTask DisposeAsync()

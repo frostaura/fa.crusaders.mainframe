@@ -5,8 +5,14 @@ using Microsoft.EntityFrameworkCore;
 namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>
-/// "Was the box driving this court unreachable at that instant?" — answered from the evidence
+/// "Did this court have any reachable box at that instant?" — answered from the evidence
 /// that existed AT that instant, so the answer cannot change afterwards.
+///
+/// <para>
+/// The question is about the COURT, not about a box: a court is dark only when every enabled box
+/// driving it was unreachable, and courts with no box at all are never dark. See
+/// <see cref="CourtWasDark"/> for what each half of that costs when it is got wrong.
+/// </para>
 ///
 /// <para>
 /// <b>What "unreachable" means here is what it means everywhere else in the product.</b> A box is
@@ -83,25 +89,37 @@ namespace Crusaders.Mainframe.Api.Services;
 public sealed class DeviceOutageIndex
 {
     /// <summary>
-    /// One stretch during which a box was not heart-beating: it was last heard from at
-    /// <paramref name="LastHeartbeat"/>, and was heard from again at <paramref name="Ended"/>
-    /// (null while it is still quiet). <paramref name="Courts"/> is what that box drives.
+    /// One stretch during which a box was not heart-beating: <paramref name="DeviceId"/> was last
+    /// heard from at <paramref name="LastHeartbeat"/>, and was heard from again at
+    /// <paramref name="Ended"/> (null while it is still quiet).
+    ///
+    /// <para>
+    /// It is keyed by the box rather than by the courts, because the question S5a asks is about
+    /// a court and has to be answered across ALL the boxes driving it — see
+    /// <see cref="CourtWasDark"/>.
+    /// </para>
     /// </summary>
-    private sealed record Silence(List<int> Courts, DateTimeOffset LastHeartbeat, DateTimeOffset? Ended);
+    private sealed record Silence(Guid DeviceId, DateTimeOffset LastHeartbeat, DateTimeOffset? Ended);
 
     private readonly Dictionary<Guid, int> _courtNumberById;
+    private readonly Dictionary<int, List<Guid>> _deviceIdsByCourtNumber;
     private readonly List<Silence> _silences;
     private readonly TimeSpan _offlineAfter;
 
-    private DeviceOutageIndex(Dictionary<Guid, int> courtNumberById, List<Silence> silences, TimeSpan offlineAfter)
+    private DeviceOutageIndex(
+        Dictionary<Guid, int> courtNumberById,
+        Dictionary<int, List<Guid>> deviceIdsByCourtNumber,
+        List<Silence> silences,
+        TimeSpan offlineAfter)
     {
         _courtNumberById = courtNumberById;
+        _deviceIdsByCourtNumber = deviceIdsByCourtNumber;
         _silences = silences;
         _offlineAfter = offlineAfter;
     }
 
     /// <summary>No courts and no silences — nothing is ever dark. Used where a caller has no context to build from.</summary>
-    public static DeviceOutageIndex Empty { get; } = new([], [], TimeSpan.Zero);
+    public static DeviceOutageIndex Empty { get; } = new([], [], [], TimeSpan.Zero);
 
     /// <summary>
     /// The current tenant's stretches of box silence that could still matter, i.e. outages still
@@ -133,31 +151,49 @@ public sealed class DeviceOutageIndex
             .Where(o => o.EndedAt == null || o.EndedAt >= since)
             .ToListAsync(ct);
 
-        // The relay mapping, per box. A device drives the courts named in its own list, so a
-        // silence darkens exactly those and nothing else: a club with a second box on the annex
-        // court keeps charging no-shows there while the main box is out.
-        var courtsByDevice = devices.ToDictionary(d => d.Id, d => d.CourtNumbers);
+        // The relay mapping, inverted: which boxes drive each court. A device drives the courts
+        // named in its own list, so a silence bears on exactly those and nothing else — a club
+        // with a second box on the annex court keeps charging no-shows there while the main box
+        // is out — and a court with two boxes on it needs both of them before it is dark.
+        var deviceIdsByCourtNumber = new Dictionary<int, List<Guid>>();
+        foreach (var device in devices)
+        {
+            foreach (var court in device.CourtNumbers)
+            {
+                if (!deviceIdsByCourtNumber.TryGetValue(court, out var ids))
+                {
+                    ids = [];
+                    deviceIdsByCourtNumber[court] = ids;
+                }
+
+                ids.Add(device.Id);
+            }
+        }
+
         var heardFrom = HeardFrom(devices, outages);
 
         var silences = new List<Silence>(devices.Count + outages.Count);
         foreach (var device in devices)
         {
             // The stretch the box is in NOW, which is the one no outage row describes yet.
-            silences.Add(SilenceFrom(device.CourtNumbers, device.LastSeenAt!.Value, heardFrom[device.Id]));
+            silences.Add(SilenceFrom(device.Id, device.LastSeenAt!.Value, heardFrom[device.Id]));
         }
 
         foreach (var outage in outages)
         {
-            if (courtsByDevice.TryGetValue(outage.DeviceId, out var courts))
+            // A row whose box is gone from the enabled set contributes nothing, in either
+            // direction — the same rule as the query above.
+            if (heardFrom.ContainsKey(outage.DeviceId))
             {
-                silences.Add(SilenceFrom(courts, outage.StartedAt, heardFrom[outage.DeviceId]));
+                silences.Add(SilenceFrom(outage.DeviceId, outage.StartedAt, heardFrom[outage.DeviceId]));
             }
         }
 
         var courtNumberById = await db.Courts.AsNoTracking()
             .ToDictionaryAsync(c => c.Id, c => c.CourtNumber, ct);
 
-        return new DeviceOutageIndex(courtNumberById, silences, TimeSpan.FromSeconds(offlineAfterSeconds));
+        return new DeviceOutageIndex(
+            courtNumberById, deviceIdsByCourtNumber, silences, TimeSpan.FromSeconds(offlineAfterSeconds));
     }
 
     /// <summary>
@@ -192,7 +228,7 @@ public sealed class DeviceOutageIndex
     /// </para>
     /// </summary>
     private static Silence SilenceFrom(
-        List<int> courts, DateTimeOffset lastHeartbeat, List<DateTimeOffset> heardFrom)
+        Guid deviceId, DateTimeOffset lastHeartbeat, List<DateTimeOffset> heardFrom)
     {
         DateTimeOffset? ended = null;
         foreach (var instant in heardFrom)
@@ -203,12 +239,32 @@ public sealed class DeviceOutageIndex
             }
         }
 
-        return new Silence(courts, lastHeartbeat, ended);
+        return new Silence(deviceId, lastHeartbeat, ended);
     }
 
     /// <summary>
-    /// Whether some box driving <paramref name="courtId"/> had already been unreachable — silent
-    /// for longer than the tenant's threshold — at <paramref name="instant"/>.
+    /// Whether <paramref name="courtId"/> had NO reachable box at <paramref name="instant"/> —
+    /// which is the waiver `feature-spec.md` §6a and `settlement-model.md` S5a actually define,
+    /// and not "some box driving it was unreachable".
+    ///
+    /// <para>
+    /// <b>Every box driving the court has to be dark, and at least one has to exist.</b> The
+    /// difference is money. A club that replaces a box and leaves the old row in the table has
+    /// two boxes on one court: one heart-beating normally, one silent forever. If one dark box
+    /// were enough, every no-show on those courts would be waived for as long as that row sat
+    /// there — a member who genuinely did not turn up keeps their 30% because of an admin's
+    /// unfinished tidying, and nothing on any screen would say why. Switching the stale row off
+    /// removes it from the index entirely (see <see cref="BuildAsync"/>), but that is one act of
+    /// housekeeping standing between the club and a permanent leak, so the rule cannot rest on
+    /// it. The member is protected the moment there is nothing left that could have lit the
+    /// court, which is exactly when they could not have checked in.
+    /// </para>
+    ///
+    /// <para>
+    /// A court no enabled box drives is <b>not</b> dark. There is no evidence either way — the
+    /// club has no hardware on it — and reading "no reachable box" literally there would waive
+    /// every no-show at a club that has not installed a box yet.
+    /// </para>
     ///
     /// <para>
     /// The comparison is strictly greater-than, matching <c>PeripheralHealthWorker.JudgeAsync</c>
@@ -219,14 +275,30 @@ public sealed class DeviceOutageIndex
     /// </summary>
     public bool CourtWasDark(Guid courtId, DateTimeOffset instant)
     {
-        if (_silences.Count == 0) return false;
         if (!_courtNumberById.TryGetValue(courtId, out var courtNumber)) return false;
+        if (!_deviceIdsByCourtNumber.TryGetValue(courtNumber, out var deviceIds)) return false;
 
+        foreach (var deviceId in deviceIds)
+        {
+            if (!BoxWasUnreachable(deviceId, instant)) return false;
+        }
+
+        return deviceIds.Count > 0;
+    }
+
+    /// <summary>
+    /// Whether one box had been silent for longer than the threshold at <paramref name="instant"/>,
+    /// across every stretch of silence recorded for it.
+    /// </summary>
+    private bool BoxWasUnreachable(Guid deviceId, DateTimeOffset instant)
+    {
         foreach (var silence in _silences)
         {
+            if (silence.DeviceId != deviceId) continue;
+
             var quietAtInstant = instant - silence.LastHeartbeat;
             var stillQuiet = silence.Ended is null || instant < silence.Ended;
-            if (quietAtInstant > _offlineAfter && stillQuiet && silence.Courts.Contains(courtNumber))
+            if (quietAtInstant > _offlineAfter && stillQuiet)
             {
                 return true;
             }

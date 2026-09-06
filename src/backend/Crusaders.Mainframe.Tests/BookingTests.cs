@@ -1,4 +1,5 @@
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -123,8 +124,15 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
-        // Starts in 5 minutes — inside the 15-minute penalty window.
-        var startsAt = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        // Starts in 5 minutes — inside the 15-minute penalty window — and therefore ENDS in
+        // twenty. That is a slot that cannot be moved without leaving the window the test is
+        // about, so the club is moved instead: the fixture closes at local midnight, and
+        // from 23:41 local onwards this booking is refused OutOfHours and the test dies with
+        // an InvalidCastException naming OutOfHours inside a test about cancellation
+        // penalties. `now` comes FROM the move so the two cannot drift apart.
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var startsAt = (await TestHost.NowClearOfClosingAsync(db, host.Tenant.Id, 20)).AddMinutes(5);
         var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);

@@ -48,7 +48,7 @@ inside that sum, not outside it (§6).
 | S3 | `Cancelled` before check-in, **inside** the penalty window | `penalty = round(P × PenaltyPct/100, 2)` |
 | S4 | `Cancelled` after check-in | `P` — nothing back once the lights have been on |
 | S5 | `NoShow` — swept, no attendance evidence | `noShowPenalty = round(P × PenaltyPct/100, 2)` |
-| S5a | `NoShow` — swept while the court's own box was unreachable | `0` — refunded in full, no penalty (`feature-spec.md` §6a) |
+| S5a | `NoShow` — swept while the court had **no reachable box** | `0` — refunded in full, no penalty (`feature-spec.md` §6a) |
 | S6 | `NoShow` reversed by late attendance evidence | `P` (returns to S1) |
 | S7 | S2/S3 **and** the court was later lit on this booking's own code | `min(P, priorOwed + proRata(litMinutes))` |
 | S8 | **Displaced** (`ResoldTailRefunded`) | `0`, unconditionally |
@@ -88,6 +88,26 @@ otherwise miss any outage that began and ended between two ticks. A silence ends
 instant the API is known to have heard from the box afterwards, which is what makes a row the
 sweep has not closed yet and one it closed late answer the same question the same way.
 
+**How many boxes have to be dark: all of them.** S5a is a statement about the COURT, not about a
+box — `feature-spec.md` §6a says "a booking whose court had **no reachable box**". A court driven
+by two enabled boxes is dark only when both were past the threshold at the deadline; one dark box
+beside a healthy one is a court a member could still have checked in at. The distinction is not
+theoretical: a club that replaces a box and leaves the old row enabled in the table has exactly
+that shape, and the old row is silent forever, so "any box was dark" would waive every no-show on
+those courts permanently, for free, with nothing on any screen saying why. Switching the retired
+row off removes it from the index (a disabled box is not expected to call in and contributes
+nothing in either direction), but the rule must not rest on an admin remembering to.
+
+**A court no enabled box drives is not dark**, even though it trivially has "no reachable box".
+There is no evidence either way — the club has no hardware there — and reading the phrase
+literally would waive every no-show at a club that has not installed a box yet.
+`DeviceOutageIndex.CourtWasDark` therefore requires at least one enabled box on the court and all
+of them past the threshold. Pinned by `PeripheralHealthTests`:
+`A_stale_but_enabled_box_beside_a_healthy_one_does_not_waive_the_penalty`,
+`A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty`,
+`Two_boxes_on_one_court_both_dark_still_waives_the_penalty` and
+`An_outage_on_a_box_that_drives_other_courts_does_not_waive_the_penalty`.
+
 **A box whose silence had not yet reached the threshold at the deadline is reachable for
 settlement purposes**, exactly as it is on the Devices page and in the alert. That is a decision
 about which way to fall in a case nothing can see, and not a claim about the box: silence shorter
@@ -97,12 +117,50 @@ paragraph asserted the first of those — "being powered and inside its cached r
 that still lights the court and still queues the scan" — which the evidence cannot establish, and
 it is withdrawn.
 
-What is checkable is the size of the band and what the alternative costs. The band is bounded by
-`offline_after_seconds` (`HeartbeatCadence.OfflineAfterSeconds`, floored at 180 s), so at most a
-few minutes of silence before the deadline reads as reachable. Narrowing it means calling a box
-offline on ordinary WiFi jitter and waiving penalties for it; widening it means the money and the
-Devices page disagree about the same box at the same instant. The band is the price of one number
-meaning one thing in the alert, on the glass and in the ledger.
+**What is checkable is the size of the band, and it is wider than this paragraph used to say.**
+The band is `offline_after_seconds` — `HeartbeatCadence.OfflineAfterSeconds`, which is
+`max(180, clamp(heartbeat_seconds, 15, 300) × 3)` — and `AdminConfigEndpoints` accepts
+`heartbeat_seconds` anywhere in `[15, 300]`. So the band is **180 s at the shipped default
+cadence of 60 s and at every cadence below it, rising with the cadence to 900 s at the 300 s
+ceiling**. A club on the maximum cadence gives a box 15 minutes of silence that still reads as
+reachable, and a member who stood at that court through those 15 minutes pays the 30% penalty. An earlier version of this paragraph said "floored at 180 s, so at most a few minutes" —
+that is the ceiling of the *floor* stated as the ceiling of the *band*, and it was wrong at the
+top of its own range. The real table is pinned by
+`HeartbeatCadenceTests.The_offline_threshold_follows_the_effective_interval` (`300 → 900`), and
+this paragraph's numbers are pinned against the constants by
+`SettlementSpecPostureTests.The_band_this_spec_states_is_the_band_the_code_computes`.
+
+**The 900 s band is accepted rather than bounded, and this is what was weighed.** Three things
+rule out narrowing it:
+
+- **The threshold is one number with three consumers** — the `peripheral.unhealthy` alert, the
+  Devices page, and this ledger. A settlement-only ceiling would be a fourth definition of
+  "offline" and would make the product tell an admin one thing while billing a member on
+  another, which is the exact defect S5a's judging rule was rewritten to remove.
+- **The multiplier cannot come down.** One dropped call costs `2 × cadence` of silence before the
+  next beat lands, so `MissedBeatsBeforeOffline = 3` is one dropped call plus latency and nothing
+  more. At the 300 s cadence a 600 s ceiling *is* two beats, i.e. offline on a single retry — and
+  every box wrongly called offline waives the penalty on its courts, so narrowing moves money the
+  other way, silently, on every court at that cadence rather than only during a real outage.
+- **900 s is reached only by a club that chose the firmware's maximum cadence.** `[15, 300]` is
+  `bridgelogic::kMinHeartbeatMs`/`kMaxHeartbeatMs` transcribed; the API accepts exactly what the
+  fleet honours, and lowering the ceiling to shrink the band would put the API back to refusing
+  settings the boxes do run.
+
+**The admin who sets the cadence is told what it buys, which is what makes it a choice.** The
+Settings screen's `heartbeat_seconds` hint states the derived threshold for the value currently in
+the field — at 300 s it reads "that is 15 minutes" — from `lib/tenantSettings.ts`, which mirrors
+`MinOfflineAfterSeconds`, `MissedBeatsBeforeOffline` and the `[15, 300]` clamp with the server
+constant each one mirrors named beside it. So the band is chosen with its size on screen rather
+than discovered afterwards.
+
+**What would reopen this.** Two things. The hint attributes the threshold to the Devices page
+only — it does not say a member's no-show penalty turns on the same number — so an admin widening
+the cadence to reduce chatter is not told they are also widening the window in which a member pays
+for a dark court. And the mirror in `lib/tenantSettings.ts` is a copy: if
+`HeartbeatCadence`'s constants move and the copy does not, the club is shown one band and billed
+on another. The copy is pinned in both directions by `tenantSettings.test.ts` and by
+`SettlementSpecPostureTests`; the missing sentence in the hint is not.
 
 ---
 
@@ -310,7 +368,7 @@ booking, so it is paired by device, relay and time:
 | Cancel, no check-in, inside window | — | `CancellationRefund +P` **and** `LateCancellationPenalty −penalty`, one save, never netted. `Owed = penalty`. |
 | Cancel after check-in | — | nothing posted. `Owed = P`. |
 | No-show sweep | `Booked`, no `CheckedInAt`, past grace | `CancellationRefund +P`, `NoShowPenalty −penalty`, `EndsAt := now`, `Status := NoShow`. `Owed = penalty`. |
-| No-show sweep, court's box unreachable at the grace deadline | as above **and** an open or closed `DeviceOutage` covering that instant for a box driving the court | `CancellationRefund +P` only — no penalty leg (I10 forbids the zero row). `EndsAt := now`, `Status := NoShow`. `Owed = 0`. |
+| No-show sweep, court had no reachable box at the grace deadline | as above **and** at least one enabled box drives the court and **every** box that drives it had been silent longer than `offline_after_seconds` at that instant | `CancellationRefund +P` only — no penalty leg (I10 forbids the zero row). `EndsAt := now`, `Status := NoShow`. `Owed = 0`. |
 | Late activation on a `NoShow` | scan ≥ cue open (I7) | `CancellationRefund −refundBack`, `NoShowPenalty +penaltyBack` (I3), `Status := Booked`, `CheckedInAt := scan`, `NoShowReversedAt := now`, `EndsAt := provisional litEnd` (I8), displacement (I9). `Owed = P`. |
 | Late activation on a `Cancelled` row | scan ≥ cue open (I7); **not** displaced (I5); no `CheckedInAt` | `LightsPurchase −min(proRata(litMinutes), P − retainedPenalty)` (I1, I6). `Owed ≤ P`. |
 | Late activation on a **displaced** row | — | nothing posted; audit `device.activation_displaced_collision`. `Owed = 0`. |

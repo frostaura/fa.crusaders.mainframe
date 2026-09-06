@@ -198,6 +198,11 @@ public static partial class TopUpEndpoints
             var pending = await db.PendingTopups.FirstOrDefaultAsync(p => p.IdempotencyKey == interp.MerchantTransactionId, ct);
             if (pending is null) return Results.NotFound();
 
+            // PayFast retries an ITN until it is acknowledged and the short-circuit below only
+            // covers Completed, so a row that has already failed is re-judged on every retry.
+            // The member must be told once, not once per retry.
+            var wasPending = pending.Status == TopUpStatus.Pending;
+
             // Idempotent: PayFast retries an ITN until it is acknowledged, so a repeat is
             // the normal case rather than an attack. Answering 200 stops the retries.
             if (pending.Status == TopUpStatus.Completed)
@@ -217,6 +222,7 @@ public static partial class TopUpEndpoints
                 pending.FailureReason = FailureCodes.AmountMismatch;
                 await db.SaveChangesAsync(ct);
 
+                if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, pending, ct);
                 return Results.BadRequest(new { error = "amount_mismatch" });
             }
 
@@ -244,10 +250,47 @@ public static partial class TopUpEndpoints
                 : FailureCodes.GatewayError;
             pending.CompletedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
+
+            if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, pending, ct);
             return Results.Ok(new { ok = false, reason = pending.FailureReason });
         }).AllowAnonymous();
 
         return app;
+    }
+
+    /// <summary>
+    /// Tells the member their top-up ended without credits — <c>feature-spec.md</c> §11.
+    ///
+    /// <para>
+    /// This was the one terminal outcome of handing over card details that sent nothing.
+    /// Confirmation was emailed, failure was not, so a member who closed the tab after
+    /// PayFast could only learn what happened by finding the status page again — and the
+    /// status page's own copy on the branch where it cannot reach the club promises this
+    /// mail in as many words, which is exactly the branch where the mail is the only
+    /// channel left. Cancellations get it too, because "either way" is what the screen says
+    /// and a member who backed out still deserves to know nothing was taken.
+    /// </para>
+    ///
+    /// <para>
+    /// Dispatched in the background for the same reason the confirmation is: PayFast retries
+    /// an ITN until it is acknowledged, so a slow SMTP handshake on this path becomes a
+    /// duplicate notification. Callers gate it on the row having still been <c>Pending</c>,
+    /// so a retried ITN on an already-failed row does not mail the member again.
+    /// </para>
+    /// </summary>
+    private static async Task NotifyNotCompletedAsync(
+        MainframeDbContext db, IEmailService email, ILogger logger, PendingTopup pending, CancellationToken ct)
+    {
+        var recipient = await db.Users.AsNoTracking()
+            .Where(u => u.Id == pending.UserId).Select(u => u.Email).FirstOrDefaultAsync(ct);
+        if (string.IsNullOrEmpty(recipient)) return;
+
+        EmailDispatch.InBackground(
+            email, logger,
+            EmailTemplates.TopUpNotCompleted(
+                recipient, pending.AmountZar, pending.FailureReason,
+                pending.ExternalReference ?? pending.IdempotencyKey),
+            $"top-up failure notice for {pending.Id}");
     }
 
     /// <summary>The services <see cref="CompleteAsync"/> needs, bundled so the method stays inside the argument gate.</summary>

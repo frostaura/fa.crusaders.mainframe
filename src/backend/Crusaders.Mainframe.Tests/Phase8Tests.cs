@@ -243,8 +243,13 @@ public class Phase8Tests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
-        // 5 min in the future — well within the 15-minute penalty window.
-        var startsAt = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        // 5 min in the future — well within the 15-minute penalty window — so it ends in
+        // twenty, and from 23:41 local onwards the fixture's midnight close refuses it
+        // OutOfHours. The slot cannot move without leaving the window under test, so the
+        // club moves; `now` comes FROM the move so the two cannot drift apart.
+        var db0 = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var startsAt = (await TestHost.NowClearOfClosingAsync(db0, host.Tenant.Id, 20)).AddMinutes(5);
         var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         // Use admin actor so the "can't self-cancel after start" guard doesn't trip on edge timing.
