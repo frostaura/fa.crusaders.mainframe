@@ -299,7 +299,6 @@ public sealed class AuthService
         var user = await query.FirstOrDefaultAsync(ct);
         if (user is null || user.PasswordHash is null) return new LoginResult.InvalidCredentials();
         if (!_hasher.Verify(password, user.PasswordHash)) return new LoginResult.InvalidCredentials();
-        if (!user.EmailVerified) return new LoginResult.EmailNotVerified();
 
         if (!_tenant.IsResolved)
         {
@@ -308,6 +307,20 @@ public sealed class AuthService
         }
 
         var membership = await _db.Memberships.IgnoreQueryFilters().FirstOrDefaultAsync(m => m.UserId == user.Id, ct);
+        var decided = membership is not null && !user.IsAdmin
+            && membership.Status is MembershipStatus.Rejected or MembershipStatus.Suspended;
+        // A decision the club has already taken outranks an unconfirmed address.
+        //
+        // Verification used to be checked first for everybody, so a rejected applicant who had
+        // never clicked the verify link was told to go and confirm their email — and the screen
+        // offered the resend to go with it. That is a repair for a problem they do not have,
+        // ending at a screen saying an admin will review their application; the review had
+        // already happened and it was a refusal. Confirming an address cannot change a rejection
+        // or lift a suspension, so those two are reported as what they are, whatever the address
+        // is doing. A PENDING applicant is the opposite case — verifying is exactly what they
+        // still owe — so that order is unchanged.
+        if (decided) return new LoginResult.NotApproved(membership!.Status);
+        if (!user.EmailVerified) return new LoginResult.EmailNotVerified();
         if (membership is not null && membership.Status != MembershipStatus.Active && !user.IsAdmin)
             return new LoginResult.NotApproved(membership.Status);
 
@@ -359,6 +372,14 @@ public sealed class AuthService
         user.MustChangePassword = false;
         record.UsedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
+
+        // Spec §11 and §3: every successful password change emails the member, "the one signal a
+        // member has that somebody else changed it". Only the admin-issued and self-service
+        // paths were sending it; the reset path — the one a stolen or forwarded reset link
+        // travels — changed the password and told nobody. The reset mail itself is not that
+        // signal: it is sent before anything happens, and it is the mail an attacker with
+        // mailbox access has already read.
+        await SendOrLogAsync(EmailTemplates.PasswordChanged(user.Email), $"password-changed notice for {user.Email}", ct);
         return true;
     }
 
@@ -389,6 +410,17 @@ public sealed class AuthService
         return new LoginResult.Ok(jwt, user.Id, user.IsAdmin, user.MustChangePassword);
     }
 
+    /// <summary>
+    /// Re-mints an access token for a session that already holds a valid one.
+    /// </summary>
+    /// <remarks>
+    /// It applies the same membership test as <see cref="LoginAsync"/>, and that is the whole
+    /// point of it doing more than re-signing a claim set. The app refreshes on a timer for as
+    /// long as a tab is open, so without the test a member suspended at the desk kept renewing
+    /// a full session indefinitely — reading their wallet, their ledger and the schedule —
+    /// while the sign-in screen correctly refused them. Suspension has to end the session that
+    /// is already open, not only the next one.
+    /// </remarks>
     public async Task<LoginResult> RefreshAsync(Guid userId, CancellationToken ct)
     {
         var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
@@ -398,6 +430,9 @@ public sealed class AuthService
             var tenant = await _db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == user.TenantId, ct);
             _tenant.Set(tenant.Id, tenant.Slug);
         }
+        var membership = await _db.Memberships.IgnoreQueryFilters().FirstOrDefaultAsync(m => m.UserId == user.Id, ct);
+        if (membership is not null && membership.Status != MembershipStatus.Active && !user.IsAdmin)
+            return new LoginResult.NotApproved(membership.Status);
         var roles = new List<string>();
         if (user.IsAdmin) roles.Add("admin");
         if (user.IsPlatformAdmin) roles.Add("platform_admin");

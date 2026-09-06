@@ -2,7 +2,16 @@
  * Typed API client. Reads/writes the access token from localStorage so refresh-survives-reload.
  */
 
-const TOKEN_KEY = "crusaders.mainframe.token";
+/**
+ * The one `localStorage` key the session lives under.
+ *
+ * <p>
+ * Exported because `localStorage` is shared by every tab on the origin, and a `storage` event
+ * naming this key is how a tab learns that another tab ended the session. A listener that
+ * hard-coded the string would drift from the store beside it the first time either moved.
+ * </p>
+ */
+export const TOKEN_KEY = "crusaders.mainframe.token";
 
 export const tokenStore = {
   get: () => localStorage.getItem(TOKEN_KEY),
@@ -122,6 +131,34 @@ const UNAUTH_BYPASS = ["/api/v1/auth/login", "/api/v1/auth/webauthn/login", "/ap
 let unauthorizedHandler: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: (() => void) | null) { unauthorizedHandler = fn; }
 
+/**
+ * Does this answer mean the browser is no longer carrying a session?
+ *
+ * <p>
+ * A 401 on a request that DID carry a token is the ordinary case: expired, or revoked by a
+ * sign-out. The second case is the one that cost a member a working tab. A token-less request
+ * from a screen that believes it is signed in happens whenever another tab signs out — the
+ * token lives in `localStorage`, which every tab shares — and the API cannot resolve a tenant
+ * from a request with no credential at all, so it answers <b>400 `tenant_unresolved`</b>, not
+ * 401. Branching on 401 alone therefore let that tab treat the end of its session as a network
+ * fault: "Couldn't load the schedule. Check your connection and press Refresh." — forever,
+ * because refreshing sends the same token-less request again.
+ * </p>
+ *
+ * <p>
+ * The status alone can never settle this, which is the same lesson as {@link ApiError.code}:
+ * 400 covers a dozen refusals and only the stable snake_case token tells them apart.
+ * </p>
+ */
+function isSessionEnded(status: number, hadToken: boolean, payload: unknown): boolean {
+  if (status === 401) return true;
+  if (hadToken || status !== 400) return false;
+  const code = payload && typeof payload === "object" && "error" in payload
+    ? (payload as { error: unknown }).error
+    : null;
+  return code === "tenant_unresolved";
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const hadToken = !!tokenStore.get();
   const res = await fetchWithTimeout(path, {
@@ -132,14 +169,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401 && hadToken && !UNAUTH_BYPASS.some((p) => path.startsWith(p))) {
-    // Session expired or revoked — drop the token and let the AuthProvider redirect to /login.
-    tokenStore.clear();
-    unauthorizedHandler?.();
-  }
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   const payload = text ? JSON.parse(text) : null;
+  // Read the body FIRST: the token-less refusal is only distinguishable by the code inside it.
+  if (isSessionEnded(res.status, hadToken, payload) && !UNAUTH_BYPASS.some((p) => path.startsWith(p))) {
+    // Session expired, revoked, or signed out in another tab — drop the token and let the
+    // AuthProvider say so and redirect to /login.
+    tokenStore.clear();
+    unauthorizedHandler?.();
+  }
   if (!res.ok) throw new ApiError(res.status, payload);
   return payload as T;
 }

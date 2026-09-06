@@ -1,10 +1,47 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
+import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
 import { useProfile } from "../lib/profile";
 import { cn, formatCredits } from "../lib/utils";
+
+/**
+ * How many membership applications are sitting unreviewed — the in-app half of §2.3's
+ * "all tenant admins notified (email + in-app)".
+ *
+ * <p>
+ * Only the email half existed. An admin who signed in with somebody waiting to be approved saw
+ * nothing anywhere in the chrome — no badge, no count, nothing in the menu — and the only cue
+ * in the whole product was a line INSIDE /admin/members, which you have to already suspect
+ * something to go and look at. An application could sit for days behind an email nobody opened.
+ * </p>
+ *
+ * <p>
+ * Re-read on every navigation, which is what makes it correct after an approval: the console
+ * patches its row in place without refetching, so the badge would otherwise still claim a
+ * pending application the admin has just dealt with.
+ * </p>
+ */
+function usePendingApplicationCount(enabled: boolean, routeKey: string): number {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears the badge when the session stops being an admin one
+      setCount(0);
+      return;
+    }
+    let cancelled = false;
+    endpoints.adminMembers("PendingApproval")
+      .then((rows) => { if (!cancelled) setCount(rows.length); })
+      .catch(() => { /* A badge is a cue, not a screen: a failed read shows nothing rather than an error. */ });
+    return () => { cancelled = true; };
+  }, [enabled, routeKey]);
+
+  return count;
+}
 
 export default function Layout() {
   const auth = useAuth();
@@ -14,6 +51,10 @@ export default function Layout() {
   const { profile } = useProfile();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const pendingApplications = usePendingApplicationCount(
+    auth.status === "authenticated" && auth.isAdmin,
+    location.pathname,
+  );
 
   // Hide the chrome on auth-flow routes — login/register/verify/welcome/reset — so the
   // user only sees the auth modal itself.
@@ -51,7 +92,7 @@ export default function Layout() {
               <NavTab to="/schedule" label="Bookings" />
               <NavTab to="/court-code" label="Court code" />
               {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
-              {auth.isAdmin && <NavTab to="/admin/members" label="Members" />}
+              {auth.isAdmin && <NavTab to="/admin/members" label="Members" badge={pendingApplications} />}
               <NavTab to="/reports" label="Reports" />
             </nav>
           )}
@@ -149,7 +190,7 @@ export default function Layout() {
               <NavTab to="/schedule" label="Bookings" />
               <NavTab to="/court-code" label="Court code" />
               {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
-              {auth.isAdmin && <NavTab to="/admin/members" label="Members" />}
+              {auth.isAdmin && <NavTab to="/admin/members" label="Members" badge={pendingApplications} />}
               <NavTab to="/reports" label="Reports" />
             </div>
           </nav>
@@ -162,14 +203,25 @@ export default function Layout() {
   );
 }
 
-function NavTab({ to, label }: { to: string; label: string }) {
+function NavTab({ to, label, badge = 0 }: { to: string; label: string; badge?: number }) {
   return (
     <NavLink
       to={to}
       className={({ isActive }) =>
-        `px-3 h-9 inline-flex items-center rounded-lg ${isActive ? "bg-accent-soft text-accent-strong font-medium" : "text-text-secondary hover:bg-bg-muted"}`}
+        `px-3 h-9 inline-flex items-center gap-1.5 rounded-lg ${isActive ? "bg-accent-soft text-accent-strong font-medium" : "text-text-secondary hover:bg-bg-muted"}`}
     >
       {label}
+      {badge > 0 && (
+        // The number alone means nothing to a screen reader beside the word "Members", so the
+        // count carries the sentence and the digits are decoration.
+        <span
+          className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-info-soft text-info-strong text-xs font-semibold tabular-nums"
+          aria-label={`${badge} membership ${badge === 1 ? "application" : "applications"} awaiting review`}
+          title={`${badge} awaiting review`}
+        >
+          {badge}
+        </span>
+      )}
     </NavLink>
   );
 }

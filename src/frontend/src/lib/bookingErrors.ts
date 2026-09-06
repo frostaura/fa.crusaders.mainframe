@@ -37,6 +37,11 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
   already_started: "That booking has already started, so it can't be cancelled.",
   booking_not_found: "That booking is no longer there. Refresh the schedule.",
   block_not_found: "That block has already been lifted.",
+  // A suspended membership is not a stale screen. Without this key the refusal fell through to
+  // the schedule's fallback — "Couldn't make that booking. Refresh the schedule and try again." —
+  // which is advice that can never work: the member refreshes, presses Book again, and gets the
+  // same refusal with no way to learn why. The club is the only repair there is.
+  member_suspended: "Your membership is suspended, so you can't book. Speak to the club to have it restored.",
 };
 
 /** The sign-out sentence. The 401 handler in `lib/api.ts` does the actual redirect. */

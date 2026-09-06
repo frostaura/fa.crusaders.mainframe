@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
 import { ledgerRowFixture, memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
 
@@ -32,6 +32,43 @@ import { ledgerRowFixture, memberFixture, renderPage, stubFetch, type StubRoute 
  * are shown at the field rather than as a toast, and the form stays open on both.
  * </p>
  */
+/**
+ * What the admin is told they have just done to a member.
+ *
+ * <p>
+ * The temporary password used to be described as something "the member should change after
+ * signing in" — the advisory wording from before the forced-change gate existed. It is now the
+ * only thing that session can reach, and an admin who reads the weaker sentence cannot tell
+ * from this screen that the member is locked out of everything else until they replace it. The
+ * API's own response to the same call already says so.
+ * </p>
+ */
+describe("AdminMembers — the temporary password an admin issues", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("says the temporary password unlocks one screen and nothing else", async () => {
+    stubFetch([
+      { path: "/api/v1/admin/members/", body: [memberFixture()] },
+      { path: "/api/v1/admin/biometric/enrollments", body: [] },
+      {
+        method: "POST", path: "/api/v1/admin/members/33333333-3333-3333-3333-333333333333/reset-password",
+        body: { temp_password: "Xk7-tempo-92", email_sent_to: "ada@example.com" },
+      },
+    ]);
+    renderPage(<AdminMembersPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reset password" }));
+    const confirm = await screen.findByRole("dialog", { name: /Reset password for Ada Lovelace/ });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Reset password" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Temporary password generated" });
+    expect(dialog).toHaveTextContent("Xk7-tempo-92");
+    expect(dialog).toHaveTextContent(/only unlocks the change-password screen/i);
+    expect(dialog).toHaveTextContent(/must choose a new password before they can do anything else/i);
+    expect(dialog).not.toHaveTextContent(/should change it after signing in/i);
+  });
+});
+
 describe("AdminMembers — adjust credit", () => {
   afterEach(() => vi.unstubAllGlobals());
 

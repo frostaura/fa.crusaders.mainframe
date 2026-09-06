@@ -14,6 +14,33 @@ const DEV_ADMIN_PASSWORD = "ChangeMeOnFirstLogin!";
 /** Where a signed-in member goes when they did not ask for anywhere in particular. */
 const DEFAULT_LANDING = "/schedule";
 
+/**
+ * A refused sign-in, told apart by the membership status the API sends with it.
+ *
+ * <p>
+ * All three used to share one sentence — "Your account isn't approved yet. An admin will email
+ * you once they've reviewed it." — and for two of the three both halves of it were false. A
+ * suspended member HAD been approved and had already been emailed the reason; a rejected
+ * applicant had already been reviewed, and the review was a refusal. Neither was waiting for
+ * anything, so the one instruction the screen gave them was to wait.
+ * </p>
+ *
+ * <p>
+ * `status` is on the refusal body (`{"error":"not_approved","status":"Suspended"}`) and the
+ * screen simply threw it away. Each sentence now names what happened and who can undo it;
+ * only the genuinely pending case is asked to wait.
+ * </p>
+ */
+function describeNotApproved(status: string | number | null): string {
+  if (status === "Suspended") {
+    return "Your membership is suspended, so you can't sign in. The club emailed you the reason — speak to them to have it restored.";
+  }
+  if (status === "Rejected") {
+    return "Your application wasn't approved, so this account can't be used. The club emailed you the reason — contact them if you think it's a mistake.";
+  }
+  return "Your account isn't approved yet. An admin will email you once they've reviewed it.";
+}
+
 export default function LoginPage() {
   const auth = useAuth();
   const nav = useNavigate();
@@ -54,7 +81,7 @@ export default function LoginPage() {
       // the wrong thing about the wrong thing, and left them nothing to do.
       return "You haven't confirmed your email address yet. Check your inbox for the link we sent when you registered.";
     }
-    if (err.status === 403) return "Your account isn't approved yet. An admin will email you once they've reviewed it.";
+    if (err.status === 403) return describeNotApproved(err.detail("status"));
     return "Sign in failed. Try again in a moment.";
   };
 
@@ -155,7 +182,12 @@ export default function LoginPage() {
         </form>
         <div className="mt-4 flex justify-between text-sm">
           <Link to="/register" className="text-accent-strong hover:underline">Register</Link>
-          <Link to="/forgot-password" className="text-text-secondary hover:underline">Forgot password?</Link>
+          {/*
+            Reads as a link at rest, not on hover. It was body-slate with no underline — the
+            caption colour — sitting beside an accent-blue "Register", so the one control that
+            helps a member who cannot get in was the one that did not look clickable.
+          */}
+          <Link to="/forgot-password" className="text-accent-strong underline underline-offset-2 hover:no-underline">Forgot password?</Link>
         </div>
 
         {isPasskeySupported() && (

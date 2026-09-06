@@ -29,6 +29,27 @@ const STATUSES: { value: StatusFilter; label: string }[] = [
   { value: "Suspended", label: "Suspended" },
 ];
 
+/**
+ * What an admin is told the temporary password they just generated actually does.
+ *
+ * <p>
+ * It used to read "The member should change it after signing in" — the advisory wording from
+ * before the forced-change gate existed, when that sentence was the entire mechanism. The
+ * password now unlocks one screen and nothing else, and an admin reading the weaker sentence
+ * cannot tell from this screen that the member is locked out of everything until they replace
+ * it. This is the API's own wording for the same call.
+ * </p>
+ *
+ * <p>
+ * A named constant rather than a JSX block comment beside the paragraph: lizard's TSX scanner
+ * reads a braced JSX comment as the end of the enclosing function and swallows the rest of the
+ * file into one 347-line pseudo-function, which trips the length gate under a name nobody
+ * wrote. Same family as the brace traps already recorded for its C# parser.
+ * </p>
+ */
+const TEMP_PASSWORD_SCOPE =
+  "It only unlocks the change-password screen — they must choose a new password before they can do anything else.";
+
 export default function AdminMembersPage() {
   const toast = useToast();
   const [members, setMembers] = useState<AdminMember[] | null>(null);
@@ -502,7 +523,9 @@ export default function AdminMembersPage() {
       {/* Reset password — show generated password once */}
       {resetFor && resetResult && (
         <Modal onClose={() => { setResetFor(null); setResetResult(null); }} title="Temporary password generated">
-          <p className="text-sm text-text-secondary">Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. The member should change it after signing in.</p>
+          <p className="text-sm text-text-secondary">
+            Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. {TEMP_PASSWORD_SCOPE}
+          </p>
           <div className="my-4 px-4 py-3 rounded-lg border border-border bg-bg-muted font-mono text-base tracking-wider text-center select-all">
             {resetResult.tempPassword}
           </div>

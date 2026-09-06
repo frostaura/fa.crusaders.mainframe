@@ -44,8 +44,22 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
    */
   const gated = auth.status === "authenticated" && auth.mustChangePassword;
 
+  /**
+   * The forced-password-change gate is armed, so the API refuses `/wallet` (and the stream
+   * ticket) with `403 password_change_required`.
+   *
+   * <p>
+   * Carried as a DEPENDENCY for the same reason as in `profile.tsx`: `auth.status` stays
+   * `"authenticated"` right through the forced change, so an effect keyed on it alone never
+   * re-ran once the member had chosen their own password, and the header pill sat on "— cr"
+   * until a manual reload. Keying on the flag also stops the wallet-stream ticket being retried
+   * against a refusal that is permanent by policy while the gate is up.
+   * </p>
+   */
+  const gated = auth.status === "authenticated" && auth.mustChangePassword;
+
   const refresh = useCallback(async () => {
-    if (auth.status !== "authenticated") return;
+    if (auth.status !== "authenticated" || gated) return;
     if (inflight.current) return;
     inflight.current = true;
     setLoading(true);
@@ -58,9 +72,9 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
       inflight.current = false;
       setLoading(false);
     }
-  }, [auth.status]);
+  }, [auth.status, gated]);
 
-  // Initial fetch + refresh on auth flip.
+  // Initial fetch + refresh on auth flip, and on the forced-change gate coming down.
   useEffect(() => {
     if (auth.status !== "authenticated") {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale balance on sign-out
@@ -115,6 +129,9 @@ export function BalanceProvider({ children }: { children: React.ReactNode }) {
   // if nothing arrives for STREAM_SILENCE_MS the connection is dropped, the balance is
   // re-read over plain HTTP, and the stream is reopened — which also re-syncs on connect.
   useEffect(() => {
+    // Nothing to subscribe to while the forced-change gate is up: the ticket endpoint answers
+    // 403 by policy, so retrying it is a loop that can never succeed. The gate coming down is
+    // a dependency, so the stream opens the moment the member has their own password.
     if (auth.status !== "authenticated" || gated) return;
     if (!tokenStore.get()) return;
     let es: EventSource | null = null;

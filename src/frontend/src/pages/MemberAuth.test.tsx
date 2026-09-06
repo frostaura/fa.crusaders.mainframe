@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
 import App from "../App";
@@ -11,7 +11,8 @@ import ChangePasswordPage from "./ChangePassword";
 import ProfilePage from "./Profile";
 import { ToastProvider } from "../components/Toast";
 import { AuthProvider } from "../lib/auth";
-import { ProfileProvider } from "../lib/profile";
+import { BalanceProvider, useBalance } from "../lib/balance";
+import { ProfileProvider, useProfile } from "../lib/profile";
 import { signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
 
 /**
@@ -89,6 +90,43 @@ describe("Login — a 403 is two different problems", () => {
 
     expect(await screen.findByText(/isn't approved yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Resend the confirmation email/i })).not.toBeInTheDocument();
+  });
+
+  it("names a suspension instead of telling a suspended member to wait for a review", async () => {
+    // Both halves of "Your account isn't approved yet. An admin will email you once they've
+    // reviewed it." were false here: the member HAD been approved, and the club had already
+    // emailed them the reason for the suspension. The status is on the refusal; use it.
+    stubFetch([err("/api/v1/auth/login", 403, { error: "not_approved", status: "Suspended" })]);
+    renderAt(<LoginPage />);
+    await signInAs("suspended@club.test", "Password123!");
+
+    expect(await screen.findByText(/membership is suspended/i)).toBeInTheDocument();
+    expect(screen.queryByText(/isn't approved yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Resend the confirmation email/i })).not.toBeInTheDocument();
+  });
+
+  it("tells a rejected applicant the review already happened, and offers them no repair that cannot help", async () => {
+    stubFetch([err("/api/v1/auth/login", 403, { error: "not_approved", status: "Rejected" })]);
+    renderAt(<LoginPage />);
+    await signInAs("rejected@club.test", "Password123!");
+
+    expect(await screen.findByText(/wasn't approved/i)).toBeInTheDocument();
+    expect(screen.queryByText(/isn't approved yet/i)).not.toBeInTheDocument();
+    // Confirming an address cannot un-reject an application, and the walk ends at a screen
+    // saying an admin will review it — which is what had already happened.
+    expect(screen.queryByRole("button", { name: /Resend the confirmation email/i })).not.toBeInTheDocument();
+  });
+
+  it("renders 'Forgot password?' as something clickable rather than as a caption", () => {
+    stubFetch([]);
+    renderAt(<LoginPage />);
+
+    const forgot = screen.getByRole("link", { name: "Forgot password?" });
+    // It was the body-text slate with no underline, beside an accent-blue "Register" — so the
+    // one control that helps a member who cannot get in was the one that did not look like one.
+    expect(forgot.className).toContain("text-accent-strong");
+    expect(forgot.className).toMatch(/(^|\s)underline(\s|$)/);
+    expect(forgot.className).not.toContain("text-text-secondary");
   });
 
   it("says to wait rather than 'sign in failed' when the rate limiter answers", async () => {
@@ -336,6 +374,37 @@ describe("RequireAuth", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/wallet"));
   });
 
+  it("takes a tab whose session was signed out in another tab back to /login, saying so", async () => {
+    signIn({ isAdmin: false });
+    window.history.pushState({}, "", "/wallet");
+    stubFetch([
+      { path: "/api/v1/whoami", body: { ...signIn({ isAdmin: false }), user_id: "u1" } },
+      { path: "/api/v1/me/profile", body: { user_id: "u1", email: "a@b.test", is_admin: false, tenant_slug: "crusaders", full_name: "Ada", membership_number: "M-1", photo_url: null, status: "active" } },
+      { path: "/api/v1/wallet", body: { balance_credits: 300, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    ]);
+
+    render(<App />);
+    // Not the path — the path was already /wallet before the session was confirmed. This waits
+    // for RequireAuth to have finished deciding, which is what makes the tab a signed-in one.
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+    expect(window.location.pathname).toBe("/wallet");
+
+    // The other tab's sign-out, as this tab experiences it: the shared key disappears, and
+    // `storage` fires in every tab BUT the one that did it.
+    act(() => {
+      localStorage.removeItem("crusaders.mainframe.token");
+      window.dispatchEvent(new StorageEvent("storage", {
+        key: "crusaders.mainframe.token", oldValue: "test.token.value", newValue: null,
+      }));
+    });
+
+    // It used to keep the signed-in chrome and the last-rendered balance, offer a Top up
+    // button, and answer every click with "Check your connection and press Refresh."
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    expect(await screen.findByText(/Your session ended/i)).toBeInTheDocument();
+  });
+
   it("holds a session carrying an admin-issued temporary password on the change screen", async () => {
     signIn({ isAdmin: false });
     window.history.pushState({}, "", "/schedule");
@@ -349,5 +418,77 @@ describe("RequireAuth", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/change-password"));
     expect(await screen.findByLabelText("Temporary password")).toBeInTheDocument();
+  });
+});
+
+/**
+ * What the header does across the forced change.
+ *
+ * <p>
+ * The member finished the change, landed on /schedule, and sat there with a grey "?" where
+ * their photo belongs and a dead "— cr" where their balance belongs, indefinitely — only a
+ * manual page reload fixed it. Both providers keyed their effect on `auth.status`, which stays
+ * "authenticated" throughout: only `mustChangePassword` moves, so nothing re-ran.
+ * </p>
+ *
+ * <p>
+ * Asserted as CALLS rather than as pixels, because the two states are told apart by what the
+ * app asks the API for: nothing at all while the gate refuses it, and both reads the moment
+ * the gate comes down.
+ * </p>
+ */
+describe("the header across a forced password change", () => {
+  const ADA = {
+    user_id: "u1", email: "ada@club.test", is_admin: false, tenant_slug: "crusaders",
+    full_name: "Ada Lovelace", membership_number: "MEM-1001", photo_url: null, status: "active",
+  };
+
+  function HeaderProbe() {
+    const { profile } = useProfile();
+    const { balance } = useBalance();
+    return <span data-testid="header">{`${profile?.full_name ?? "?"}|${balance === null ? "— cr" : balance}`}</span>;
+  }
+
+  it("asks for the member's profile and balance the moment the gate comes down, with no reload", async () => {
+    vi.stubGlobal("EventSource", class { close() {} addEventListener() {} } as unknown as typeof EventSource);
+    signIn({ isAdmin: false });
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: { ...signIn({ isAdmin: false }), user_id: "u1", must_change_password: true } },
+      { path: "/api/v1/me/profile", body: ADA },
+      { path: "/api/v1/wallet", body: { balance_credits: 300, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+      { method: "POST", path: "/api/v1/me/password", body: { changed: true } },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <ProfileProvider>
+            <BalanceProvider>
+              <ToastProvider>
+                <ChangePasswordPage />
+                <HeaderProbe />
+              </ToastProvider>
+            </BalanceProvider>
+          </ProfileProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    const asked = (path: string) => stub.calls.filter((c) => c.path.startsWith(path)).length;
+    await screen.findByLabelText("Temporary password");
+    // While the gate is armed the API refuses both with 403 password_change_required, so the
+    // app does not ask — and the console does not fill with refusals the member cannot act on.
+    expect(screen.getByTestId("header")).toHaveTextContent("?|— cr");
+    expect(asked("/api/v1/me/profile")).toBe(0);
+    expect(asked("/api/v1/wallet")).toBe(0);
+
+    fireEvent.change(screen.getByLabelText("Temporary password"), { target: { value: "Temp-1234!" } });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "ChosenPass1!" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "ChosenPass1!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    await waitFor(() => expect(screen.getByTestId("header")).toHaveTextContent("Ada Lovelace|300"));
+    expect(asked("/api/v1/me/profile")).toBe(1);
   });
 });

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, endpoints, setUnauthorizedHandler, tokenStore } from "./api";
+import { ApiError, endpoints, setUnauthorizedHandler, TOKEN_KEY, tokenStore } from "./api";
 import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
 import { clearOfflineCache } from "./pwa";
 
@@ -105,11 +105,51 @@ function nextProbeDelayMs(attempt: number): number {
   return Math.min(1000 * 2 ** attempt, 30_000);
 }
 
+/**
+ * Another tab signed out — or had its session revoked — and this one is still on screen.
+ *
+ * <p>
+ * `localStorage` is shared by every tab on the origin, and a `storage` event fires in all the
+ * OTHERS, never in the tab that made the change, which is exactly the signal needed here.
+ * Without it a second tab kept the whole signed-in chrome and its last-rendered data: the
+ * wallet still showed a balance and offered a Top up button, and every request it made went
+ * out with no token and came back refused — which the screens reported as "Check your
+ * connection and press Refresh." The member was told something untrue about their money,
+ * indefinitely, and only a manual reload put them back on /login.
+ * </p>
+ *
+ * <p>
+ * Only the token DISAPPEARING ends this tab's session. A `newValue` that is a different string
+ * is the ordinary background rotation of an access token by whichever tab got there first, and
+ * this tab keeps running on it — it reads storage on every request.
+ * </p>
+ */
+function useCrossTabSessionEnd(statusRef: { current: AuthState["status"] }, endSession: () => void) {
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      // `key === null` is `localStorage.clear()` — the whole store went, token included.
+      if (e.key !== null && e.key !== TOKEN_KEY) return;
+      if (e.newValue !== null) return;
+      // A tab still bootstrapping finds out for itself: its whoami goes out token-less and the
+      // api client's session-ended handler catches the refusal.
+      if (statusRef.current === "anonymous" || statusRef.current === "loading") return;
+      endSession();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [statusRef, endSession]);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
   const [sessionExpired, setSessionExpired] = useState(false);
   const refreshTimer = useRef<number | null>(null);
   const probeTimer = useRef<number | null>(null);
+  // The current status, readable from callbacks that were registered once — the api client's
+  // session-expired handler and the cross-tab `storage` listener. Both are called by the
+  // browser at a moment of its choosing, so they need what the state is NOW, not what it was
+  // when they were wired up.
+  const statusRef = useRef<AuthState["status"]>("loading");
   const probeAttempt = useRef(0);
   // The retry re-enters the probe, and a `useCallback` cannot name itself in its own body.
   // A ref to the latest one keeps the recursion honest without re-creating the callback.
@@ -162,15 +202,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { probeAgain.current = refreshFromToken; }, [refreshFromToken]);
 
+  useEffect(() => { statusRef.current = state.status; }, [state.status]);
+
   // eslint-disable-next-line react-hooks/set-state-in-effect -- session bootstrap on mount; no-token path resolves to anonymous synchronously
   useEffect(() => { refreshFromToken(); }, [refreshFromToken]);
 
   useEffect(() => () => { if (probeTimer.current) window.clearTimeout(probeTimer.current); }, []);
 
-  // Centralised session-expired handler — wired to the api client so any 401 on an authenticated
-  // request flips the app back to anonymous and lets RequireAuth route the user to /login.
+  // Centralised session-expired handler — wired to the api client so a refusal on an
+  // authenticated request flips the app back to anonymous and lets RequireAuth route the user
+  // to /login.
+  //
+  // Guarded on the CURRENT status, through a ref rather than a dependency, because the handler
+  // is registered once and called from a fetch that may land at any time. A screen that is
+  // already anonymous — /login itself, /register — must not be told its session ended; without
+  // the guard, one refusal on an anonymous screen would put "Your session ended, so we've
+  // signed you out." above a sign-in form nobody had signed into.
   useEffect(() => {
     setUnauthorizedHandler(() => {
+      if (statusRef.current === "anonymous") return;
       // Same reasoning as endSession: the session is over, so nothing this browser cached
       // while it was alive may survive it.
       void clearOfflineCache();
@@ -179,6 +229,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     return () => setUnauthorizedHandler(null);
   }, []);
+
+  useCrossTabSessionEnd(statusRef, endSession);
 
   // While authenticated, proactively refresh the access token before it expires so an active
   // session never breaks under the user.
