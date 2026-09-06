@@ -7,6 +7,28 @@ last_verified: 2026-09-05
 
 # Live decisions
 
+## 2026-09-05/06 — the simplification, and how quality is now proven
+
+- **The device contract is hobby-grade by founder decision.** No OTA, no image signing, no runtime
+  credential store, no HMAC device auth, no discovery, no claim codes, no per-device keys, no device
+  clock. One per-tenant API key in `secrets.h`; a box auto-registers on its first heartbeat.
+  *Why:* the hardware and the backend share a LAN, only the frontend is public, and this is one club
+  with one box. The security machinery was defending a threat model that does not exist here, and it
+  was the largest single source of firmware complexity and flashing ceremony.
+- **Flashing is the Arduino IDE**, from generated sketches in `src/iot/arduino/`. PlatformIO remains
+  the tested build and the sketches are proven byte-identical for `court_mega`. *Why:* the founder
+  flashes these boards, and a Makefile target is not how that gets done at a squash club.
+- **Quality is proven by refutation, not by a passing suite.** Every fixer is followed by an
+  independent agent whose job is to disprove the fixer's own report, mutating each fix to prove its
+  test pins anything. This has caught, among others, a cross-member privacy leak, six false "this is
+  impossible" sentences written into specs by fixers, and a money rule whose test had stopped
+  discriminating it. *Why:* three separate audits have now found real defects in suites of hundreds
+  of passing tests; the suite measures the tests, not the code.
+- **Rounds repeat until two consecutive ones find nothing critical or high** — the founder's
+  instruction, 2026-09-06: "repeat this loop till youre happy, no matter how many rounds". Five have
+  run. *Why:* each round of fixes changes the product, and the changed product has its own defects —
+  five of round 2's nine highs were regressions introduced by round 1's fixes.
+
 Blueprint **Rev 2** (received 2026-05-09 from the Crusaders committee, filed at `docs/specs/client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md` in both `.md` and `.xlsx`) is the current economics and supersedes anything older.
 
 - **Credits, not rand, are the unit of account.** R100 → **160 credits (Regular)** / **240 credits (League or 65+)**. The club wanted class-based value without class-based pricing on the court.

@@ -1,11 +1,45 @@
 ---
 name: crusaders-mainframe-state
-description: "Phases A-J green — but the 2026-08-24 two-round adversarial E2E review (55 agents, against the fixed wiring schematic, old sketches and build photos) confirmed 30 defects incl. 7 critical: the book-online → scan → lights-on path does not exist end to end. Full evidence: docs/reviews/e2e-adversarial-review-2026-08-24.md. NOT go-live-ready for booked members"
+description: "The 2026-08-24 review's 30 defects are closed and the device contract was simplified to one club API key (no OTA, signing, discovery, claim codes or device clock). Five headed-browser rounds since have found and fixed 82 + 64 defects. Branch claude/e2e-fix-programme, PR #2 (draft): 898 backend and 400 frontend tests green locally. NOT yet proven on real hardware, and CI has been red on jobs the founder machine cannot reproduce"
 type: state
-last_verified: 2026-08-24
+last_verified: 2026-09-06
 ---
 
 # Current state
+
+## 2026-09-06 — the fix programme and five headed-browser rounds
+
+**The 2026-08-24 review is closed.** All seven criticals are fixed and each maps to an assertion in
+`make test-e2e-device`. On the founder's decision the device contract was then **simplified to
+hobby grade**: OTA, image signing, the runtime credential store, HMAC device auth, discovery, claim
+codes, per-device keys and the device clock are all gone. A box now carries one per-tenant API key
+in `secrets.h` and registers itself on its first heartbeat. Flashing is the **Arduino IDE** from the
+generated `src/iot/arduino/` sketches; PlatformIO remains the tested build.
+
+**Five rounds of headed-browser review have run since** — agents driving the real product in real
+browsers, told to refute that it works, each fixer followed by an independent refuter that mutates
+the fix to prove the test pins it. Round 1: 82 findings (2 critical, 21 high). Round 2: 64 (0
+critical, 9 high), five of the nine highs being regressions the round-1 fixes introduced. Rounds 3-5
+closed what survived refutation. Full record: `docs/reviews/headed-e2e-round-2026-09-05.md`.
+
+**Where it stands:** 898 backend and 400 frontend tests green locally, zero skipped, against real
+Postgres; complexity, lint, firmware host suite, ASAN/UBSAN, corpus and Arduino compile checks all
+green. Branch `claude/e2e-fix-programme` is pushed; PR #2 is open as a draft.
+
+**What the rounds proved about method, and this is the durable part:**
+
+- **A green suite on the founder's Mac is not a green suite.** Four CI jobs were red while
+  everything passed locally — including one test that CANNOT fail on macOS by construction (a
+  sub-microsecond tick truncation that only survives on Linux), and an e2e spec that had been
+  testing the discovery-and-claim flow for weeks after that flow was deleted.
+- **Refuters earn their cost.** They reproduced a service-worker privacy leak in a real browser (one
+  member's wallet served to another), disproved six sentences fixers had written into specs claiming
+  something was impossible or absent, and found a live money rule whose only test had stopped
+  discriminating it — by varying a fixture, not the code.
+- **Parallel fixers on overlapping screens cost the work twice.** Two rounds redesigned the admin
+  members table independently and shipped contradictory tests about the same element. Scope lanes by
+  FILE, not by theme.
+
 
 _Last verified: 2026-08-23 for everything firmware — the three board/simulator builds, the host
 suites under both native and ASAN/UBSAN, every lint gate, and a deliberate mutation of the relay
