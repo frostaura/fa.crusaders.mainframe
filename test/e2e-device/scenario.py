@@ -66,6 +66,11 @@ M_PASSWORD = "e2e-device-member-pw"
 
 RELAY_HARD_CAP_SECONDS = 5400
 
+# The weekday keys tenant_settings.operating_hours uses, and the close this run sets for
+# every one of them. See seed_and_tune for why the club is opened all day.
+DAY_KEYS = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
+OPEN_ALL_DAY_END_MINUTE = 23 * 60 + 59
+
 
 # ---------------------------------------------------------------------------
 # Reporting
@@ -933,8 +938,23 @@ def seed_and_tune(w: World) -> None:
         "sliceMinutes": 15,
         "slicePriceCredits": settings["slice_price_credits"],
         "advanceBookingDays": settings["advance_booking_days"],
-        "dayStartMinute": settings["day_start_minute"],
-        "dayEndMinute": settings["day_end_minute"],
+        # The club is open for the whole local day, for the run.
+        #
+        # The seeded hours are a CLUB's hours — 06:00-22:00 on a weekday, 07:00-20:00 at
+        # the weekend — and this scenario plays a day of court life in four minutes, so
+        # outside them it cannot buy court time at all: the walk-up leg is refused
+        # `walk_up_refused` and the whole C5/H3 block goes red for no reason but the hour
+        # somebody pressed the button. Both ends are set, because HoursFor falls back to
+        # the flat pair for any weekday operating_hours does not name.
+        #
+        # This does NOT bypass the closing-time rule — walk_up_expectation still derives
+        # what to expect from whatever the schedule says the club's hours are, and the
+        # walk-up still truncates at close. It moves the close somewhere the run is not
+        # standing on. 23:59 rather than 24:00 because ParseRange goes through
+        # TimeOnly.TryParse, which has no 24:00.
+        "dayStartMinute": 0,
+        "dayEndMinute": OPEN_ALL_DAY_END_MINUTE,
+        "operatingHours": {day: f"00:00-{OPEN_ALL_DAY_END_MINUTE // 60:02d}:{OPEN_ALL_DAY_END_MINUTE % 60:02d}" for day in DAY_KEYS},
         "penaltyPct": 30,
         "graceWindowMinutes": 1,
         "penaltyWindowMinutes": settings["penalty_window_minutes"],
@@ -956,6 +976,14 @@ def seed_and_tune(w: World) -> None:
         after["slice_minutes"] == 15 and after["grace_window_minutes"] == 1 and after["activation_cue_window_minutes"] == 10
         and after["roster_window_minutes"] == 120 and after["activation_forward_window_minutes"] == 240,
     )
+    # Asserted, not assumed: a settings PUT that silently dropped the map would put the
+    # walk-up leg back at the mercy of the club's trading hours, and the symptom would be
+    # an evening-only red run in CI with no mention of hours anywhere in it.
+    REPORT.check(
+        "setup", "the club is open all day for every weekday of the run, so no leg is refused for the hour it ran at",
+        after.get("operating_hours") == {day: "00:00-23:59" for day in DAY_KEYS}
+        and after["day_start_minute"] == 0 and after["day_end_minute"] == OPEN_ALL_DAY_END_MINUTE,
+        f"operating_hours={after.get('operating_hours')} flat={after.get('day_start_minute')}-{after.get('day_end_minute')}")
 
     courts = expect_status(w.http.get("/api/v1/admin/courts", token=w.admin_token), 200, "courts GET").json
     for c in courts:
@@ -1028,15 +1056,55 @@ def find_slot(w: World, booking_id: str, around: datetime) -> Optional[dict]:
     return None
 
 
-def ensure_free(w: World, court_number: int, start: datetime, end: datetime) -> None:
-    """Admin-cancel any seeded booking overlapping the window this run needs."""
+def booked_over(w: World, court_number: int, start: datetime, end: datetime) -> list[dict]:
+    """Live bookings on this court that collide with the window this run needs."""
+    out = []
     for slot in schedule_slots(w, start):
         if slot["courtNumber"] != court_number or slot["status"] != "booked":
             continue
         s, e = parse_dt(slot["startsAtUtc"]), parse_dt(slot["endsAtUtc"])
         if s < end and e > start:
-            r = w.http.post(f"/api/v1/admin/bookings/{slot['bookingId']}/cancel", {"waivePenalty": True}, token=w.admin_token)
-            print(f"  cleared seeded booking {slot['bookingId']} on court {court_number} ({s:%H:%M}-{e:%H:%M} UTC): HTTP {r.status}")
+            out.append(slot)
+    return out
+
+
+def ensure_free(w: World, court_number: int, start: datetime, end: datetime) -> None:
+    """Admin-cancel any seeded booking overlapping the window this run needs.
+
+    The waiver REASON is not optional, and this step used to send none. §8's admin
+    cancel is "penalty waiveable WITH REASON" and the endpoint enforces it — a waive
+    with no reason is 400 `waive_reason_required`, because an audit field that may be
+    left blank is one that always is. This function sent `{"waivePenalty": true}` and
+    then PRINTED the status rather than checking it, so every clear it attempted had
+    been silently refused for as long as the reason has been mandatory.
+
+    That is invisible for most of the day and then wrecks a run, which is why it took a
+    CI failure to find: the seeder plants demo bookings at fixed LOCAL times, so whether
+    one collides with this run depends on the hour it starts. At 19:57 SAST the seeded
+    19:00 slot on court 2 is in the past and nothing collides; at 18:09 SAST it is fifty
+    minutes out, survives the refused cancel, and then poses as the scenario's own
+    fixtures — the member-ident QR comes back as THAT booking's activation code, the box
+    roster carries it on relay 1 where B6 should be, the walk-up refuses it as a wallet
+    (correctly — a roster code is not a wallet), and the too-early scan reports the time
+    to the wrong slot. Five checks fail and none of them names the cause.
+
+    So the cancel now carries its reason, every refusal is fatal, and the window is
+    re-read afterwards: "I asked" is not the same as "it is clear".
+    """
+    for slot in booked_over(w, court_number, start, end):
+        s, e = parse_dt(slot["startsAtUtc"]), parse_dt(slot["endsAtUtc"])
+        r = w.http.post(
+            f"/api/v1/admin/bookings/{slot['bookingId']}/cancel",
+            {"waivePenalty": True, "waiveReason": "e2e-device: clearing the seeded slot this run books over"},
+            token=w.admin_token)
+        expect_status(r, 200, f"clear seeded booking on court {court_number} ({s:%H:%M}-{e:%H:%M} UTC)")
+        print(f"  cleared seeded booking {slot['bookingId']} on court {court_number} ({s:%H:%M}-{e:%H:%M} UTC)")
+
+    left = booked_over(w, court_number, start, end)
+    if left:
+        raise StepFailed(
+            f"court {court_number} is still booked over {start:%H:%M}-{end:%H:%M} UTC after cancelling: "
+            + ", ".join(f"{b['bookingId']} {b['startsAtUtc']}" for b in left))
 
 
 def admin_book(w: World, court_number: int, user_id: str, starts_at: datetime, slices: int, what: str) -> dict:
@@ -1315,6 +1383,15 @@ def walk_up(w: World) -> None:
     # cost a whole red run at 19:09 SAST. The expectation is derived from the club's own
     # hours for today and the pro-rata price the server computes from them.
     minutes, cost = walk_up_expectation(w, requested=60)
+    # A club with nothing left to sell refuses the purchase outright, and the wire says
+    # `walk_up_refused` — which reads as a broken walk-up and is a closed club. seed_and_tune
+    # opens the club 00:00-23:59 for every weekday precisely so this cannot happen; the only
+    # way here is a run that crossed the last minute of the local day on its way to this step.
+    if minutes < 1:
+        raise StepFailed(
+            f"the club has {minutes} sellable minutes left in the local day ({w.tenant_tz}), so no "
+            "walk-up can be bought and this leg cannot prove anything. Re-run: seed_and_tune opens "
+            "the club all day, so this is the last minute before local midnight, not a defect.")
 
     nonce = secrets.token_hex(8)
     req = {"minutes": 60, "method": "qr", "token": w.ident_code, "court": 2, "nonce": nonce}
