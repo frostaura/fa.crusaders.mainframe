@@ -18,22 +18,28 @@ import { expect, test } from "@playwright/test";
  *
  * <p>
  * <b>It also disproves the reason this repository used to give for a design decision.</b>
- * `public/sw.js` records that per-session cache keying was first rejected partly because "a
- * service worker could not be registered in this repo's automation". It can, and this spec is the
- * proof: it registers one on the Chromium Playwright already drives for `narrow-viewport.spec.ts`.
- * The rejection stands on its own merits (see §12), not on a machine limitation that was never
- * real.
- *
- * <b>How many places carried that sentence is deliberately not stated here.</b> The previous
- * wording said "four places / three files", which was wrong, and no count of a claim in history
- * can be checked by reading the tree this comment ships in. The live wording of the surviving
- * note is in `public/sw.js` and `src/test/swHarness.ts`; that is what a reader can verify.
+ * `public/sw.js` records that per-session cache keying was first rejected for a reason that was
+ * false — that "a service worker could not be registered in this repo's automation". It can, and
+ * this spec is the proof: the first test below registers one, in the Chromium Playwright already
+ * drives here, and asserts that it takes control of the page. The rejection stands on its own
+ * merits (see §12), not on a machine limitation that was never real.
  * </p>
  *
  * <p>
- * <b>Why it serves its own origin instead of using the app.</b> `src/lib/pwa.ts` registers the
- * worker only in a production build, and route interception does not reach requests a worker makes
- * for itself. So this spec stands up a small HTTP server that serves the real `public/sw.js` plus
+ * <b>Where else that sentence appears is deliberately not stated here, and the omission is the
+ * point.</b> The first wording claimed "four places / three files" and was wrong. Its replacement
+ * named two files and was also wrong — a refuter grepped the tree and found a third. Both were
+ * the same mistake: an inventory of prose held somewhere else, written into a comment that cannot
+ * notice when the prose moves, and wrong silently. What this file can demonstrate is the claim
+ * itself, and it does, by running. A reader who wants the current carriers should grep for the
+ * sentence rather than trust a count of it.
+ * </p>
+ *
+ * <p>
+ * <b>Why it serves its own origin instead of using the app.</b> `src/main.tsx` calls
+ * `registerServiceWorker` only under `import.meta.env.PROD`, so the dev server the rest of the
+ * E2E suite drives has no worker at all; and route interception does not reach requests a worker
+ * makes for itself. So this spec stands up a small HTTP server that serves the real `public/sw.js` plus
  * a wallet endpoint that answers with whoever asked — which is exactly the question the leak got
  * wrong. Nothing here is stubbed inside the browser: the worker, the Cache API and the fetches are
  * the browser's own.
