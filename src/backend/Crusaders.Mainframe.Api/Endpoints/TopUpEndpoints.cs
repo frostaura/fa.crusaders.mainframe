@@ -430,13 +430,23 @@ public static partial class TopUpEndpoints
         return fields;
     }
 
-    // Placed AFTER MapTopUpEndpoints, not before it, and the placement is load-bearing:
-    // lizard's C# parser scopes whatever follows a nested class into that class, so with
-    // FailureCodes at the top of the file the map method was reported as
-    // `FailureCodes::MapTopUpEndpoints`. whitelizard.txt names it
-    // `TopUpEndpoints::MapTopUpEndpoints`, so the ratchet entry silently stopped matching and
-    // `make complexity` was red on a file nobody had edited. Placement, not content — the same
-    // trap memory/gotchas.md records for expression-bodied members whose bodies carry braces.
+    // FailureCodes sits AFTER MapTopUpEndpoints, and where it sits changes what lizard calls
+    // the map method: the C# parser scopes whatever FOLLOWS a nested class into that class, so
+    // this order is reported as `TopUpEndpoints::MapTopUpEndpoints` and the other order as
+    // `FailureCodes::MapTopUpEndpoints`. Both are the same function; only the label moves.
+    //
+    // THE PLACEMENT IS NO LONGER WHAT HOLDS THE GATE — whitelizard.txt does, by listing BOTH
+    // names (see the note at the top of that file). It used to be load-bearing, and that is
+    // exactly why it stopped being so: one round moved this class to make the single entry
+    // match while another renamed the entry, each was green alone, and the merge was red on a
+    // file nobody had edited. So move this class if you have a reason to; do NOT delete either
+    // whitelizard line as redundant, because whichever one looks redundant is the one that
+    // catches the next move. Verified 2026-09-06 by making that move in a scratch copy: the
+    // reported name flipped to `FailureCodes::MapTopUpEndpoints` and `make complexity` stayed
+    // green (exit 0) with both entries present.
+    //
+    // The underlying parser quirk is the one memory/gotchas.md records for expression-bodied
+    // members whose bodies carry braces: what lizard reports is placement, not content.
     /// <summary>
     /// Stable, snake_case reasons a top-up did not complete.
     ///
