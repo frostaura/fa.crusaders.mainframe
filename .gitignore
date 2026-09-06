@@ -57,9 +57,17 @@ dist-ssr/
 .env.test.local
 .env.production.local
 
-# Playwright
+# Playwright and browser-driving agents.
+# `test-results/` is Playwright's default `outputDir` (traces, videos, screenshots and
+# `.last-run.json`) and `playwright-report/` its HTML reporter. `blob-report/` is the blob
+# reporter a sharded CI run writes. `.playwright-mcp/` is where the Playwright MCP server
+# drops the screenshots an agent takes while driving the app — none of the four is source,
+# all four appear inside the repo the moment somebody runs a headed round, and one of them
+# has already been left behind by a session that believed it had cleaned up.
 playwright-report/
 test-results/
+blob-report/
+.playwright-mcp/
 
 # IDE — VS Code
 .vscode/*
@@ -95,6 +103,13 @@ secrets.json
 # Scratch — every temporary artefact (logs, screenshots, captures, reports).
 # Emptied at the end of every session; see the tree root CLAUDE.md "Scratch" section.
 .tmp/
+
+# Agent worktrees. `git worktree add .claude/worktrees/<name>` puts a whole second
+# checkout inside this one; git reports it as a single untracked directory, so a
+# `git add -A` in the main checkout offers to commit it as an embedded repository.
+# Scoped to `worktrees/` rather than to `.claude/`, so a settings file somebody does
+# want tracked is still visible to `git status`.
+.claude/worktrees/
 
 # IoT firmware (src/iot) — build output, toolchain venv, coverage
 src/iot/.pio/
