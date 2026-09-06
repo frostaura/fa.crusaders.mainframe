@@ -643,18 +643,40 @@ describe("AdminMembers — the table fits the screen it is on", () => {
     expect(cell.className).toMatch(/bg-bg-surface/);
   });
 
-  it("keeps the balance column out from under the pinned actions", async () => {
+  it("pins the balance column beside the actions, so a balance is never half-covered", async () => {
     stubFetch(routes());
     renderPage(<AdminMembersPage />);
 
     await screen.findByText("Ada Lovelace");
+    const balance = document.querySelector<HTMLElement>('tbody tr:first-child td[data-label="Balance"]')!;
+    const actions = document.querySelector<HTMLElement>('tbody tr:first-child td[data-label="Actions"]')!;
+
+    // Round 4 asserted the OPPOSITE of this test's own name: it required Balance to sit
+    // immediately before Actions while its comment called that arrangement the dangerous one,
+    // and it was green only because Joined happened to sit between them in the DOM. Both
+    // halves were wrong. Measured in Chromium at every pixel of scroll, the shipped order put
+    // `1500.00 cr` on screen as `150` at scrollLeft 96 of 151 at 1440px, and `123456.78 cr`
+    // as `12345` at scrollLeft 0 — a 10x money misread with no ellipsis and no cue, on the
+    // screen where an admin adjusts credit. Reordering cannot fix it either: at 768px the
+    // left and right pins between them sweep the entire 1144px table, so no column position
+    // is safe from both.
+    //
+    // The money column is therefore pinned as well. What jsdom can hold is the coupling that
+    // makes the pin correct, and it is a coupling rather than two independent facts: the
+    // balance's sticky offset must equal the width the actions column is held to, or the
+    // balance slides straight back under the actions.
+    expect(balance.className).toMatch(/sm:sticky/);
+    expect(balance.className).toMatch(/bg-bg-surface/);
+    const offset = /sm:right-\[(\d+)px\]/.exec(balance.className)?.[1];
+    const width = /sm:min-w-\[(\d+)px\]/.exec(actions.className)?.[1];
+    expect(offset, "balance cell needs an explicit sm:right-[Npx] pin offset").toBeDefined();
+    expect(width, "actions cell needs an explicit sm:min-w-[Npx] so the offset above clears it").toBeDefined();
+    expect(offset).toBe(width);
+
+    // And the two pinned cells must be adjacent, or a scrolling column shows through the seam
+    // between them.
     const labels = Array.from(document.querySelectorAll("tbody tr:first-child td[data-label]"))
       .map((td) => td.getAttribute("data-label"));
-    // The pin overlays the columns behind it. With Balance immediately before Actions it was
-    // Balance that got half-covered at 1440px, and `1500.00 cr` clipped to `150` reads as a
-    // whole number. Joined takes that position instead: a clipped date cannot be misread as
-    // a smaller amount of money.
-    expect(labels.indexOf("Joined")).toBeLessThan(labels.indexOf("Balance"));
     expect(labels.indexOf("Balance")).toBe(labels.indexOf("Actions") - 1);
   });
 });

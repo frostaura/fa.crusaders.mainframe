@@ -96,4 +96,31 @@ describe("the admin members table", () => {
     expect(header.className).toMatch(/right-0/);
     expect(header.className).toMatch(/bg-bg-muted/);
   });
+
+  it("pins the balance header with its cells, at the same offset", async () => {
+    renderMembers();
+    await screen.findByRole("button", { name: "Adjust credit" });
+    const balance = screen.getByRole("columnheader", { name: "Balance" });
+    const actions = screen.getByRole("columnheader", { name: "Actions" });
+    // Balance is pinned beside Actions rather than left to scroll under it — measured in
+    // Chromium, the unpinned column showed `123456.78 cr` as `12345` at rest at 1440px and
+    // `1500.00 cr` as `150` at scrollLeft 96. See the note on the Actions cell in
+    // AdminMembers.tsx for why column order could not fix that at 768px.
+    //
+    // The header carries the same two numbers as the body cells and they have to agree with
+    // them, or the header names one column while sitting over another. A single mismatched
+    // bracket here is the whole defect coming back, so the offset is compared to the width
+    // rather than either being asserted alone.
+    expect(balance.className).toMatch(/sticky/);
+    expect(balance.className).toMatch(/bg-bg-muted/);
+    const headerOffset = /right-\[(\d+)px\]/.exec(balance.className)?.[1];
+    const headerWidth = /min-w-\[(\d+)px\]/.exec(actions.className)?.[1];
+    expect(headerOffset, "balance header needs an explicit right-[Npx]").toBeDefined();
+    expect(headerWidth, "actions header needs an explicit min-w-[Npx]").toBeDefined();
+    expect(headerOffset).toBe(headerWidth);
+
+    // ...and agree with the body cells, which are what the balance is actually drawn in.
+    const cell = document.querySelector<HTMLElement>('tbody td[data-label="Balance"]')!;
+    expect(/sm:right-\[(\d+)px\]/.exec(cell.className)?.[1]).toBe(headerOffset);
+  });
 });

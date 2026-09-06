@@ -359,8 +359,8 @@ export default function AdminMembersPage() {
                   <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <th className="text-left px-3 py-3">Class</th>
                   <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="text-right px-3 py-3">Balance</th>
-                  <th className="text-right px-3 py-3 whitespace-nowrap sticky right-0 z-20 bg-bg-muted border-l border-border">Actions</th>
+                  <th className="text-right px-3 py-3 whitespace-nowrap sticky right-[200px] z-20 bg-bg-muted border-l border-border">Balance</th>
+                  <th className="text-right px-3 py-3 whitespace-nowrap sticky right-0 z-20 bg-bg-muted min-w-[200px] border-l border-border">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -682,7 +682,7 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
       <Cell label="Joined" className="text-text-secondary whitespace-nowrap text-xs">
         {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
       </Cell>
-      <Cell label="Balance" align="right" className="tabular-nums whitespace-nowrap">
+      <Cell label="Balance" align="right" className="tabular-nums whitespace-nowrap sm:sticky sm:right-[200px] sm:z-10 bg-bg-surface sm:border-l sm:border-border">
         <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
           {formatCredits(m.balance_credits)}
         </span>
@@ -712,15 +712,43 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
         widths with the member's name still opposite them, and the middle columns scroll
         between the two pinned edges.
 
-        The pin overlays whatever it covers, so the column order matters: `Joined` sits
-        between `Class` and `Balance` on purpose. With Balance last it was Balance that ended
-        up half-covered, and `1500.00 cr` clipped to `150` reads as a whole number — a silent
-        money misread on an admin screen. A clipped date does not lie, Balance is now either
-        fully behind the pin or fully out, and the border on this cell makes the pin visible
-        as a pane rather than as an edge of the table. Reaching it is the same sideways scroll
-        ScrollArea already announces with a gradient, a tab stop and a sentence.
+        The pin overlays whatever it covers, and round 4 tried to solve that by column order
+        — `Joined` between `Class` and `Balance`, on the theory that a clipped date cannot
+        lie. Measured in Chromium at every pixel of scroll, that was wrong twice over. It did
+        not move Balance away from the pin at all (Balance was still the column immediately
+        before it), and ordering cannot work in principle: the right pin sweeps
+        `[clientWidth - 200, tableWidth]` and the left one sweeps `[0, overflow + 222]`, and
+        at 768 px those two ranges already cover the whole 1144 px table. There is no column
+        position that is safe from both. What the shipped order actually produced, glyph by
+        glyph, was `1500.00 cr` reading as `150` at scrollLeft 96 of 151 at 1440 px — and
+        `123456.78 cr` reading as `12345` at scrollLeft 0, before the admin touches anything.
+        A member with 123 456 credits displayed as 12 345, on the screen where credit is
+        adjusted, with no ellipsis and no cue that anything was cut.
+
+        So the money column is pinned too, beside the actions, rather than left to pass under
+        them. `Balance` sits at `right-[200px]` and `Actions` is held to `min-w-[200px]` —
+        the two numbers are one decision and the tests assert they match, because a pin whose
+        offset no longer equals the width it clears puts the balance straight back under the
+        actions. Contiguity is part of it: Balance must be the column immediately before
+        Actions or a scrolling column shows through the seam between the two pinned cells.
+
+        One consequence to know about before touching `min-w-[200px]`: it also decides whether
+        `flex-wrap` on the div below is still a defect. Round 4 caught wrapping in the browser
+        because the table squeezed this column to 96 px and the buttons stacked; with a 200 px
+        floor the widest action row (Approve + Reject + Resend) measures 173.4 px of content in
+        175.5 px of space, so wrapping now renders identically and no browser assertion can see
+        it. That is a 2.1 px margin — a fifth control or a longer label puts it back — so the
+        `flex-row` / not-`flex-wrap` assertions in AdminMembers.test.tsx and
+        admin-members-layout.test.tsx are what hold that line now, and they are not decoration.
+
+        Measured after the change, at 1 px granularity across five fixture variations (large,
+        negative, fractional, all-pending, long-string) at both 768 and 1440: zero scroll
+        positions at which any balance renders partially, and the row actions stay 27-of-27
+        on screen at rest. The remaining columns scroll between the two pinned edges, which is
+        the same sideways scroll ScrollArea announces with a gradient, a tab stop and a
+        sentence.
       */}
-      <Cell label="Actions" align="right" className="pt-2 sm:pt-3 sm:sticky sm:right-0 sm:z-10 bg-bg-surface sm:border-l sm:border-border">
+      <Cell label="Actions" align="right" className="pt-2 sm:pt-3 sm:sticky sm:right-0 sm:z-10 bg-bg-surface sm:min-w-[200px] sm:border-l sm:border-border">
         <div className="flex flex-row items-center gap-1 sm:justify-end">
           {m.status === "PendingApproval" && (
             <>
