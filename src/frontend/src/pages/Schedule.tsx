@@ -1,25 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { endpoints, type ScheduleDay, type ScheduleSlot } from "../lib/api";
 import { Card } from "../components/Card";
-import { Button } from "../components/Button";
+import { DayBar } from "../components/DayBar";
 import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
 import { formatCredits } from "../lib/utils";
-import { ADMIN_SELF_SHORT_TEXT, cancellationOutcome, describeBookingError, MEMBER_SHORT_TEXT } from "../lib/bookingErrors";
+import { ADMIN_SELF_SHORT_TEXT, describeBookingError, MEMBER_SHORT_TEXT } from "../lib/bookingErrors";
 import { ApiError } from "../lib/api";
 import { BookingConfirmModal, type AdminOption, type BookingIntent, type BookingOutcome } from "../components/BookingConfirmModal";
 import { CancelBookingModal } from "../components/CancelBookingModal";
-import { ScheduleGrid } from "../components/ScheduleCells";
+import { ScheduleBoard } from "../components/ScheduleCells";
+import { useSlotEnders, type CancelTarget } from "../lib/scheduleEnd";
 import { buildTimeSlices, groupSlotsByCourt } from "../lib/scheduleGrid";
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
-type CancelTarget = {
-  bookingId: string; courtName: string; whenLabel: string; mine: boolean;
-  /** The booking's own player, for the dialog an ADMIN is deciding on. Null for one's own. */
-  memberName: string | null;
-};
 
 /** A member the desk can book for, with the credit the club last read for them. */
 type MemberOption = { userId: string; name: string; balanceCredits: number | null };
@@ -153,105 +149,48 @@ export default function SchedulePage() {
     }
   };
 
-  const confirmCancel = async (waivePenalty: boolean, waiveReason: string) => {
-    if (!cancelling) return;
-    try {
-      const result = cancelling.mine
-        ? await endpoints.cancelBooking(cancelling.bookingId)
-        : await endpoints.adminCancelBooking(cancelling.bookingId, waivePenalty, waiveReason);
-      // The freed slot leaves the grid at once; the read that confirms it follows behind.
-      setDay((d) => withoutBooking(d, cancelling.bookingId));
-      setCancelling(null);
-      // The figures the server actually moved, not "refund pending", and named for whose
-      // credit moved: §7 refunds the booking's player, never the acting admin.
-      toast.push({
-        tone: "success",
-        text: cancellationOutcome(
-          result.refunded_credits, result.penalty_credits,
-          cancelling.mine ? null : cancelling.memberName ?? "the member"),
-      });
-      reconcile();
-      void refreshBalance();
-    } catch (err) {
-      toast.push({ tone: "danger", text: describeBookingError(err, "Couldn't cancel that booking. Refresh the schedule and try again.") });
-    }
-  };
-
-  const liftBlock = useCallback(async (blockId: string) => {
-    try {
-      await endpoints.adminUnblock(blockId);
-      setDay((d) => withoutBooking(d, blockId));
-      toast.push({ tone: "success", text: "Block lifted — the court is free again." });
-      reconcile();
-    } catch (err) {
-      toast.push({ tone: "danger", text: describeBookingError(err, "Couldn't lift that block.") });
-    }
-  }, [reconcile, toast]);
+  // Cancelling a booking and lifting an admin block, both of which end a slot: same optimistic
+  // removal, same reconcile, same failure copy. In their own hook because this page was over the
+  // 200-line gate and these two are the most self-contained thing in it — see lib/scheduleEnd.ts.
+  const { confirmCancel, liftBlock } = useSlotEnders({
+    cancelling, setCancelling, setDay, reconcile, refreshBalance, toast,
+  });
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <input
-          type="date"
-          aria-label="Schedule date"
-          value={date}
-          min={dateBounds.min}
-          max={dateBounds.max}
-          onChange={(e) => setDate(e.target.value)}
-          className="h-11 px-3 rounded-lg border border-border bg-bg-surface"
-        />
-        <Button variant="ghost" onClick={load} disabled={loading}>{loading ? "Loading…" : "Refresh"}</Button>
-        <span className="ml-auto text-sm font-medium text-text-secondary">{formatDayOfWeek(date)}</span>
-      </div>
+      <DayBar
+        date={date} bounds={dateBounds} loading={loading}
+        onDate={setDate} onRefresh={load}
+      />
 
       {error && <Card><p className="text-sm text-danger-strong">{error}</p></Card>}
 
       {day && (
-        <Card className="p-0 overflow-hidden mb-6">
-          <div className="overflow-auto max-h-[calc(100vh-220px)]">
-            <div className="grid min-w-[600px]" style={{ gridTemplateColumns: `64px repeat(${day.courts.length}, minmax(120px, 1fr))` }}>
-              <div className="sticky top-0 left-0 z-30 bg-bg-surface" />
-              {day.courts.map((c) => (
-                <div key={c.id} className="sticky top-0 z-20 bg-bg-surface px-2 py-2 text-xs text-text-secondary text-center border-b border-border">
-                  <div className="font-medium text-text-primary">{c.name}</div>
-                  <div>{formatCredits(c.slicePriceCredits)}/slice</div>
-                </div>
-              ))}
-              <ScheduleGrid
-                day={day}
-                slotsByCourt={slotsByCourt}
-                timeSlices={timeSlices}
-                loadedAt={loadedAt}
-                isAdmin={isAdmin}
-                onBook={openBooking}
-                onCancel={openCancel}
-                onLiftBlock={liftBlock}
-              />
-            </div>
-          </div>
-        </Card>
+        <ScheduleBoard
+          day={day}
+          slotsByCourt={slotsByCourt}
+          timeSlices={timeSlices}
+          loadedAt={loadedAt}
+          isAdmin={isAdmin}
+          onBook={openBooking}
+          onCancel={openCancel}
+          onLiftBlock={liftBlock}
+        />
       )}
 
       {booking && (
         <BookingConfirmModal
-          intent={booking}
-          balanceCredits={balance}
-          members={members}
-          isAdmin={isAdmin}
-          onCancel={() => setBooking(null)}
-          onConfirm={confirmBooking}
+          intent={booking} balanceCredits={balance} members={members} isAdmin={isAdmin}
+          onCancel={() => setBooking(null)} onConfirm={confirmBooking}
         />
       )}
 
       {cancelling && (
         <CancelBookingModal
-          bookingId={cancelling.bookingId}
-          courtName={cancelling.courtName}
-          whenLabel={cancelling.whenLabel}
+          bookingId={cancelling.bookingId} courtName={cancelling.courtName}
+          whenLabel={cancelling.whenLabel} memberName={cancelling.memberName}
           asAdmin={isAdmin && !cancelling.mine}
-          memberName={cancelling.memberName}
-          onClose={() => setCancelling(null)}
-          onConfirm={confirmCancel}
+          onClose={() => setCancelling(null)} onConfirm={confirmCancel}
         />
       )}
     </div>
@@ -358,6 +297,7 @@ function shortfallFrom(err: unknown, option: AdminOption, actorUserId: string | 
  * about a refusal that had nothing to do with it.
  * </p>
  */
+
 function refusalText(err: unknown, option: AdminOption, actorUserId: string | null): string {
   const fallback = "Couldn't make that booking. Refresh the schedule and try again.";
   if (option.kind === "member" && err instanceof ApiError && err.code === "insufficient_balance") {
@@ -398,15 +338,7 @@ function withSlot(day: ScheduleDay | null, slot: ScheduleSlot): ScheduleDay | nu
   return day ? { ...day, slots: [...day.slots, slot] } : day;
 }
 
-function withoutBooking(day: ScheduleDay | null, bookingId: string): ScheduleDay | null {
-  return day ? { ...day, slots: day.slots.filter((s) => s.bookingId !== bookingId) } : day;
-}
 
-function formatDayOfWeek(ymdDate: string): string {
-  const [y, m, d] = ymdDate.split("-").map(Number);
-  if (!y || !m || !d) return "";
-  return new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(new Date(y, m - 1, d));
-}
 
 function formatTime(utc: string, timezone: string): string {
   return new Intl.DateTimeFormat(undefined, {

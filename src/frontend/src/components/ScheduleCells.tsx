@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { Card } from "./Card";
 import type { ScheduleDay, ScheduleSlot } from "../lib/api";
 import { cn, formatCredits } from "../lib/utils";
 import { isSlotHead, slotAt, type TimeSlice } from "../lib/scheduleGrid";
@@ -33,6 +34,37 @@ type GridProps = {
  * change without giving the grid a new function on every render.
  * </p>
  */
+/**
+ * The board itself: the sticky court headers and the grid under them, in one scroller.
+ *
+ * <p>
+ * Here rather than in `pages/Schedule.tsx` because that page carries the schedule's entire
+ * state machine — two modals, four mutations, an optimistic grid — and the complexity gate's
+ * 200-line limit is what stops that growing without anyone choosing to let it. The chrome
+ * around the grid holds no state, so it moves for free; `ScheduleGrid` stays memoised inside
+ * it, which is what keeps opening a dialog from re-rendering two hundred cells.
+ * </p>
+ */
+export function ScheduleBoard(props: GridProps & { day: ScheduleDay }) {
+  const { day } = props;
+  return (
+    <Card className="p-0 overflow-hidden mb-6">
+      <div className="overflow-auto max-h-[calc(100vh-220px)]">
+        <div className="grid min-w-[600px]" style={{ gridTemplateColumns: `64px repeat(${day.courts.length}, minmax(120px, 1fr))` }}>
+          <div className="sticky top-0 left-0 z-30 bg-bg-surface" />
+          {day.courts.map((c) => (
+            <div key={c.id} className="sticky top-0 z-20 bg-bg-surface px-2 py-2 text-xs text-text-secondary text-center border-b border-border">
+              <div className="font-medium text-text-primary">{c.name}</div>
+              <div>{formatCredits(c.slicePriceCredits)}/slice</div>
+            </div>
+          ))}
+          <ScheduleGrid {...props} />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export const ScheduleGrid = memo(function ScheduleGrid(props: GridProps) {
   const { day, slotsByCourt, timeSlices, loadedAt, isAdmin, onBook, onCancel, onLiftBlock } = props;
   return (
