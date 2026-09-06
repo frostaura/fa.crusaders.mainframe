@@ -324,19 +324,26 @@ export default function AdminMembersPage() {
         scrolling to reach them took the member's NAME off screen, leaving an admin
         pressing Suspend on a row they could no longer identify.
 
-        Three changes, none of which drops a column:
+        Four changes, none of which drops a column:
         • below `sm` each row renders as a card (`block` rows and cells, with the column
           name printed from `data-label`), so everything is on screen at 375 px with no
-          sideways scroll at all;
+          sideways scroll at all — measured, 0 px of overflow;
         • from `sm` up the identity column is sticky, so the name stays put while the rest
           of the row scrolls under it;
+        • the actions column is sticky too, at the other edge, so the four things an admin
+          came here to press are on screen from the moment the page loads rather than 151 px
+          beyond the card's right edge;
         • the avatar moved into the name cell and the action icons run in a row rather than
-          a column, which took ~90 px off the table's width — it now fits the 990 px card
-          at desktop widths — and row height from 165 px to one line.
+          a column, which took ~90 px off the table's width and row height from 165 px to
+          one line (60.5–69 px, measured at 768 and 1440).
 
-        ScrollArea itself is the affordance for the band in between: a gradient, a keyboard
-        tab stop, and a sentence a screen reader can read, all of which the plain div had
-        none of. It was built in round 1 for exactly this and applied only to the ledger.
+        What did NOT happen is the table fitting the card. It is 1141 px against a 990 px
+        card at 1440 px and a 734 px one at 768 px, and no arrangement of eight columns that
+        keeps a readable name and email fits either. Sideways scroll is therefore the
+        mechanism, not a failure of one — and ScrollArea is what stops it being a silent one:
+        a gradient, a keyboard tab stop, and a sentence a screen reader can read, none of
+        which the plain div had. It was built in round 1 for exactly this and applied only to
+        the ledger.
       */}
       <Card className="!p-0 overflow-hidden">
         {filtered.length === 0 ? (
@@ -351,9 +358,9 @@ export default function AdminMembersPage() {
                   <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                   <th className="text-left px-3 py-3">Class</th>
-                  <th className="text-right px-3 py-3">Balance</th>
                   <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="text-right px-3 py-3 whitespace-nowrap">Actions</th>
+                  <th className="text-right px-3 py-3">Balance</th>
+                  <th className="text-right px-3 py-3 whitespace-nowrap sticky right-0 z-20 bg-bg-muted border-l border-border">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -672,21 +679,48 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
       <Cell label="Class">
         <MemberClassCell member={m} busy={busy} onChange={onClass} />
       </Cell>
+      <Cell label="Joined" className="text-text-secondary whitespace-nowrap text-xs">
+        {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
+      </Cell>
       <Cell label="Balance" align="right" className="tabular-nums whitespace-nowrap">
         <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
           {formatCredits(m.balance_credits)}
         </span>
       </Cell>
-      <Cell label="Joined" className="text-text-secondary whitespace-nowrap text-xs">
-        {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
-      </Cell>
-      <Cell label="Actions" align="right" className="pt-2 sm:pt-3">
-        {/*
-          A row, not a column. Four icons stacked vertically made every row 165 px tall —
-          about two members on a phone screen, six on a 1440 px desktop — and pushed the
-          actions column wide enough to clip its own header. `flex-wrap` is what keeps that
-          honest at any width instead of trading one overflow for another.
-        */}
+      {/*
+        Actions: one line, and pinned to the right edge from `sm` up.
+
+        Two rounds argued `flex-wrap` against `flex-row` on the div below without either
+        one measuring it, so this was settled in Chromium against the real stack — an admin
+        signed in against a seeded club of seven members, at 375, 768 and 1440 px. What the
+        three candidate layouts actually do (row height / how many of the 27 action controls
+        are on screen before the admin scrolls anything):
+
+          flex-wrap      768: 92.5–136.5 px, 0 of 27 · 1440: 92.5–136.5 px, 0 of 27
+          flex-row       768: 60.5–69 px,    0 of 27 · 1440: 60.5–69 px,    0 of 27
+          flex-row+pin   768: 60.5–69 px,   27 of 27 · 1440: 60.5–69 px,   27 of 27
+
+        So the comment that used to sit here had it backwards: wrapping is what MAKES the
+        tall row, not what prevents it — it lets the table squeeze this column from 197 px to
+        96 px, and the buttons then stack into the 136 px row that is two thirds of the way
+        back to the original 165 px one. `flex-row` with no wrap is what holds one line.
+
+        And `flex-row` alone was not enough either. The table is 1141 px wide and the card is
+        990 px at 1440 px, so before this the entire action set sat outside the scroller's
+        box on arrival: every action was reachable, and none was visible. Pinning the column
+        the way the identity column is already pinned puts all four on screen at both desktop
+        widths with the member's name still opposite them, and the middle columns scroll
+        between the two pinned edges.
+
+        The pin overlays whatever it covers, so the column order matters: `Joined` sits
+        between `Class` and `Balance` on purpose. With Balance last it was Balance that ended
+        up half-covered, and `1500.00 cr` clipped to `150` reads as a whole number — a silent
+        money misread on an admin screen. A clipped date does not lie, Balance is now either
+        fully behind the pin or fully out, and the border on this cell makes the pin visible
+        as a pane rather than as an edge of the table. Reaching it is the same sideways scroll
+        ScrollArea already announces with a gradient, a tab stop and a sentence.
+      */}
+      <Cell label="Actions" align="right" className="pt-2 sm:pt-3 sm:sticky sm:right-0 sm:z-10 bg-bg-surface sm:border-l sm:border-border">
         <div className="flex flex-row items-center gap-1 sm:justify-end">
           {m.status === "PendingApproval" && (
             <>

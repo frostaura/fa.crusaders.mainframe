@@ -596,7 +596,7 @@ describe("AdminMembers — the table fits the screen it is on", () => {
     await screen.findByText("Ada Lovelace");
     const labelled = Array.from(document.querySelectorAll("tbody td[data-label]")).map((td) => td.getAttribute("data-label"));
     // Not one of these is dropped at 375 px — they stack instead.
-    expect(labelled).toEqual(["Email", "Member #", "Status", "Class", "Balance", "Joined", "Actions"]);
+    expect(labelled).toEqual(["Email", "Member #", "Status", "Class", "Joined", "Balance", "Actions"]);
   });
 
   it("keeps the member's name in place while the rest of the row scrolls", async () => {
@@ -619,12 +619,42 @@ describe("AdminMembers — the table fits the screen it is on", () => {
 
     await screen.findByText("Ada Lovelace");
     const actions = screen.getByRole("button", { name: "Adjust credit" }).parentElement!;
-    // `flex-row`, not `flex-wrap`. Two rounds fixed this table in parallel and asserted
-    // opposite things about the same element: wrapping keeps the row inside a narrow column
-    // by turning four 32px buttons into a 165px stack, which is the half of the finding about
-    // rows being too tall. The horizontal scroll region above is what carries the width now,
-    // so the actions stay on one line and the region says it scrolls.
+    // `flex-row`, and NOT `flex-wrap` either — the two are what the round-3 and round-4
+    // lanes asserted against each other, and Chromium settled it: allowing the buttons to
+    // wrap lets the table squeeze this column from 197px to 96px, and the row grows from
+    // 60.5-69px to 92.5-136.5px. Wrapping is the cause of the tall row, not the cure.
     expect(actions.className).toContain("flex-row");
     expect(actions.className).not.toContain("flex-col");
+    expect(actions.className).not.toContain("flex-wrap");
+  });
+
+  it("pins the actions column to the right edge, so the buttons are on screen on arrival", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await screen.findByText("Ada Lovelace");
+    const cell = screen.getByRole("button", { name: "Adjust credit" }).closest("td")!;
+    // Measured in Chromium: without this, all 27 action controls of a seven-member club sat
+    // outside the scroller's box at both 768px and 1440px until the admin found the sideways
+    // scroll. With it, 27 of 27 are visible before anything is scrolled. Opaque background
+    // for the same reason the identity cell has one — the columns pass underneath it.
+    expect(cell.className).toMatch(/sm:sticky/);
+    expect(cell.className).toMatch(/sm:right-0/);
+    expect(cell.className).toMatch(/bg-bg-surface/);
+  });
+
+  it("keeps the balance column out from under the pinned actions", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await screen.findByText("Ada Lovelace");
+    const labels = Array.from(document.querySelectorAll("tbody tr:first-child td[data-label]"))
+      .map((td) => td.getAttribute("data-label"));
+    // The pin overlays the columns behind it. With Balance immediately before Actions it was
+    // Balance that got half-covered at 1440px, and `1500.00 cr` clipped to `150` reads as a
+    // whole number. Joined takes that position instead: a clipped date cannot be misread as
+    // a smaller amount of money.
+    expect(labels.indexOf("Joined")).toBeLessThan(labels.indexOf("Balance"));
+    expect(labels.indexOf("Balance")).toBe(labels.indexOf("Actions") - 1);
   });
 });

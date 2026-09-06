@@ -23,9 +23,29 @@ import { memberFixture, renderPage, stubFetch } from "../test/harness";
  * </p>
  *
  * <p>
+ * Round 4 measured all of it in Chromium against a live stack — a seeded club of seven members
+ * at 375, 768 and 1440px — because rounds 3 and 4 had by then asserted <code>flex-wrap</code>
+ * and <code>flex-row</code> against each other on the same element with no measurement behind
+ * either. The numbers: wrapping lets the table squeeze the actions column from 197px to 96px
+ * and the row grows to <b>92.5–136.5px</b>; not wrapping holds it at <b>60.5–69px</b>. So
+ * wrapping causes the tall row rather than curing it, and this file's original claim — that
+ * stacking is what produces a 164px row — was right about the cause and would have been
+ * defeated by the "fix".
+ * </p>
+ *
+ * <p>
+ * The second measurement is the one neither round took: with the actions merely on one line,
+ * <b>0 of 27</b> action controls were inside the scroller's box before the admin scrolled, at
+ * both 768 and 1440px — the table is 1141px against a 990px card. Pinning the actions column
+ * to the right edge, as the identity column is already pinned to the left, makes that
+ * <b>27 of 27</b>.
+ * </p>
+ *
+ * <p>
  * jsdom has no layout, so no pixel here can be re-measured; what these assertions hold is the
- * two decisions that produced the pixels — the actions run along the row, and the scroll region
- * announces itself.
+ * three decisions that produced the pixels — the actions run along the row, the actions column
+ * is pinned, and the scroll region announces itself. <code>e2e/admin-members-layout.spec.ts</code>
+ * re-measures the pixels in a real browser.
  * </p>
  */
 
@@ -54,8 +74,26 @@ describe("the admin members table", () => {
     const adjust = await screen.findByRole("button", { name: "Adjust credit" });
     const actions = adjust.parentElement!;
     // Four 32px buttons stacked vertically is a 164px row. This is the assertion that stops it
-    // coming back as a "tidier" column.
+    // coming back as a "tidier" column — or as a wrapping one, which measures at 136.5px and
+    // is the same defect wearing a different class name.
     expect(actions.className).toContain("flex-row");
     expect(actions.className).not.toContain("flex-col");
+    expect(actions.className).not.toContain("flex-wrap");
+  });
+
+  it("pins the actions column so the buttons do not start off-screen", async () => {
+    renderMembers();
+    const adjust = await screen.findByRole("button", { name: "Adjust credit" });
+    const cell = adjust.closest("td")!;
+    const header = screen.getByRole("columnheader", { name: "Actions" });
+    // 0 of 27 controls on screen before this, 27 of 27 after — see the file comment. The
+    // header is pinned with the cells or it slides away from the column it names, and both
+    // need an opaque background because the other columns pass underneath.
+    expect(cell.className).toMatch(/sm:sticky/);
+    expect(cell.className).toMatch(/sm:right-0/);
+    expect(cell.className).toMatch(/bg-bg-surface/);
+    expect(header.className).toMatch(/sticky/);
+    expect(header.className).toMatch(/right-0/);
+    expect(header.className).toMatch(/bg-bg-muted/);
   });
 });
