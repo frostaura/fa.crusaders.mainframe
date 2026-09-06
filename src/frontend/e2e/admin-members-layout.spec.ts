@@ -34,10 +34,14 @@ import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
 
 const MEMBERS = [
   { name: "Bartholomew Fitzwilliam", n: "MEM-1006", status: "PendingApproval", verified: false, bal: 0 },
-  { name: "Mia van der Merwe", n: "MEM-1005", status: "Active", verified: true, bal: 1500 },
+  // The balances are deliberately of different lengths, and at least one is long enough that
+  // its clipped prefix is a different plausible amount: `123456.78 cr` cut to `12345` is the
+  // exact misread this file's third test exists to catch, and a fixture of identical 1500s
+  // would have found it at only one scroll offset.
+  { name: "Mia van der Merwe", n: "MEM-1005", status: "Active", verified: true, bal: 123456.78 },
   { name: "Sipho Dlamini", n: "MEM-1004", status: "Active", verified: true, bal: 1500 },
-  { name: "Aisha Patel", n: "MEM-1003", status: "Active", verified: true, bal: 1500 },
-  { name: "Liam O'Connor", n: "MEM-1002", status: "Active", verified: true, bal: 1500 },
+  { name: "Aisha Patel", n: "MEM-1003", status: "Active", verified: true, bal: -1500 },
+  { name: "Liam O'Connor", n: "MEM-1002", status: "Active", verified: true, bal: 0.5 },
   { name: "Naledi Khoza", n: "MEM-1001", status: "Active", verified: true, bal: 500 },
   { name: "Crusaders Admin", n: "ADMIN-0001", status: "Active", verified: true, bal: 0 },
 ].map((m, i) => ({
@@ -94,9 +98,35 @@ async function measure(page: import("@playwright/test").Page) {
     const rowHeights = Array.from(document.querySelectorAll("tbody tr")).map(
       (r) => +r.getBoundingClientRect().height.toFixed(1),
     );
+    // How many LINES the controls in a row's action cell occupy. A row-height threshold is a
+    // proxy for this and stops being one the moment anything else about the row changes size:
+    // giving the actions column a minimum width so the balance pin has a fixed offset to clear
+    // meant wrapping went on wrapping while the row only grew from 69px to 96.5px, and the
+    // `< 110px` assertion below stopped noticing. This counts the thing itself.
+    //
+    // Lines are grouped by vertical OVERLAP, not by equal tops. The pending applicant's cell
+    // holds two 36px text buttons beside a 32px icon button, and `items-center` centres them —
+    // so on one line their tops differ by 2px. Comparing tops calls that two lines and fails a
+    // correct layout; two boxes that share vertical extent are on the same line whatever their
+    // heights.
+    const actionLines = Array.from(document.querySelectorAll("tbody td[data-label='Actions']")).map(
+      (cell) => {
+        const boxes = Array.from(cell.querySelectorAll<HTMLElement>("button"))
+          .map((b) => b.getBoundingClientRect())
+          .sort((a, b) => a.top - b.top);
+        let lines = 0;
+        let lineBottom = -Infinity;
+        for (const b of boxes) {
+          if (b.top >= lineBottom - 0.5) { lines += 1; lineBottom = b.bottom; }
+          else lineBottom = Math.min(lineBottom, b.bottom);
+        }
+        return lines;
+      },
+    );
     return {
       controls: controls.length,
       outsideAtRest,
+      maxActionLines: Math.max(0, ...actionLines),
       maxRowHeight: Math.max(...rowHeights),
       regionOverflow: region.scrollWidth - region.clientWidth,
       pageScrollsSideways:
@@ -124,11 +154,59 @@ for (const width of [768, 1440]) {
       expect(m.regionOverflow).toBeGreaterThan(0);
     });
 
+    test("never shows a member's balance as a smaller number than it is", async ({ page }) => {
+      await openMembers(page);
+      const partial = await page.evaluate(() => {
+        const region = document.querySelector('[role="region"][aria-label="Members table"]') as HTMLElement;
+        const max = region.scrollWidth - region.clientWidth;
+        const cells = Array.from(document.querySelectorAll<HTMLElement>('tbody td[data-label="Balance"]'));
+        const bad: { full: string; seen: string; at: number }[] = [];
+        for (let s = 0; s <= max; s += 1) {
+          region.scrollLeft = s;
+          const box = region.getBoundingClientRect();
+          for (const cell of cells) {
+            const span = cell.querySelector("span")!;
+            const node = span.firstChild!;
+            const full = node.textContent!;
+            let seen = "";
+            for (let i = 0; i < full.length; i++) {
+              const r = document.createRange();
+              r.setStart(node, i);
+              r.setEnd(node, i + 1);
+              const rect = r.getBoundingClientRect();
+              if (rect.width === 0) { seen += full[i]; continue; }
+              // Inside the scroller's box AND not painted over by a pinned cell. Occlusion is
+              // what a bounding box alone cannot see, and occlusion is the whole defect here,
+              // so it is read off the compositor with elementFromPoint rather than inferred.
+              const inBox = rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5;
+              const top = document.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+              const mine = top === span || span.contains(top) || top === cell || cell.contains(top!);
+              seen += inBox && mine ? full[i] : "";
+            }
+            if (seen !== full && seen !== "") bad.push({ full, seen, at: s });
+          }
+        }
+        region.scrollLeft = 0;
+        return bad;
+      });
+
+      // Every glyph of every balance, at every pixel of horizontal scroll: a balance is either
+      // fully legible or not drawn, never a readable prefix of itself. Before the balance
+      // column was pinned this list held 222 entries at 1440px, including `123456.78 cr`
+      // showing as `12345` at scrollLeft 0 — no scrolling, no ellipsis, no cue, on the screen
+      // where an admin adjusts a member's credit.
+      expect(partial.slice(0, 5), "balances readable as a different amount").toEqual([]);
+    });
+
     test("no row is a stack of buttons", async ({ page }) => {
       await openMembers(page);
       const m = await measure(page);
-      // Stacked: 164.5px. Wrapped: 136.5px. One line: 69px. 110 separates the shipped
-      // layout from both ways of losing it, with room for a longer name to wrap once.
+      // The assertion that actually discriminates: every control in an action cell shares one
+      // painted top, so the four things an admin came here to press sit along the row rather
+      // than down it. `flex-col` and `flex-wrap` both break this; a height threshold only
+      // catches them while nothing else constrains the column.
+      expect(m.maxActionLines, "lines of controls in the widest action cell").toBe(1);
+      // Kept as the coarse backstop it always was. Stacked: 164.5px. One line: 69px.
       expect(m.maxRowHeight).toBeLessThan(110);
     });
   });
