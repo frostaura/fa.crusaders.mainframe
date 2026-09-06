@@ -157,6 +157,39 @@ public sealed class TestHost : IAsyncDisposable
     }
 
     /// <summary>
+    /// <paramref name="instant"/> reduced to a value Postgres can store exactly: whole
+    /// microseconds.
+    ///
+    /// <para>
+    /// <b>This is a platform difference, not a clock-hour one, and it made CI red while the
+    /// founder's machine stayed green through five consecutive runs.</b> <c>timestamptz</c> is
+    /// a microsecond column, and .NET ticks are 100&#160;ns, so a persisted instant comes back
+    /// with its last digit removed. On macOS that is invisible: <c>DateTimeOffset.UtcNow</c>
+    /// there is read from a microsecond-resolution clock and its tick count is always a
+    /// multiple of ten, so the round trip is exact and every equality assertion holds. On the
+    /// Linux runner the same call is read from <c>clock_gettime</c> at full 100&#160;ns
+    /// resolution, so nine times in ten the value carries a remainder the column cannot hold
+    /// and <c>Assert.Equal(seeded, readBack)</c> fails by up to 900&#160;ns.
+    /// </para>
+    ///
+    /// <para>
+    /// So a fixture instant that any test will later compare for equality against a row it
+    /// read back has to come through here first. It cost the branch five red CI runs on
+    /// <c>ConcurrentDecisionTests.Sweeping_bookings_after_their_end_never_extends_one_into_the_next</c>,
+    /// which reads as a booking that was extended into the next slot and is nothing of the
+    /// kind — the two instants differ by three ticks. Diagnosing it from the founder's machine
+    /// is impossible by construction, because the defect cannot occur there;
+    /// <c>A_seeded_instant_survives_the_database_unchanged</c> manufactures the remainder
+    /// instead of waiting for a clock to supply one, so it fails on both platforms without it.
+    /// </para>
+    /// </summary>
+    public static DateTimeOffset Storable(DateTimeOffset instant)
+        => instant.AddTicks(-(instant.UtcTicks % TimeSpan.TicksPerMicrosecond));
+
+    /// <summary><see cref="Storable"/> applied to now — the clock a Postgres-backed fixture should seed from.</summary>
+    public static DateTimeOffset UtcNowStorable() => Storable(DateTimeOffset.UtcNow);
+
+    /// <summary>
     /// A bookable slot at least <paramref name="hoursAhead"/> from now that is <b>not</b>
     /// inside the fixture's peak window.
     ///

@@ -175,7 +175,10 @@ public sealed class ConcurrentDecisionTests
     {
         using var scope = RequestScope(factory, club);
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var firstStart = DateTimeOffset.UtcNow.AddHours(-3);
+        // Storable, not raw UtcNow: firstEnd is asserted for equality against the row read
+        // back, and a Postgres timestamptz cannot hold the 100 ns remainder a Linux clock
+        // puts on UtcNow. See TestHost.Storable — this exact line was five red CI runs.
+        var firstStart = TestHost.UtcNowStorable().AddHours(-3);
         var firstEnd = firstStart.AddMinutes(60);
         var ids = new List<Guid>();
         foreach (var (start, end) in new[] { (firstStart, firstEnd), (firstEnd, firstEnd.AddMinutes(60)) })
@@ -964,5 +967,84 @@ public sealed class ConcurrentDecisionTests
         Assert.Equal(firstEnd, rows.Single(b => b.Id == first).EndsAt);
         Assert.Equal(1, await CountAsync(factory, club, first, LedgerEntryType.NoShowPenalty));
         Assert.Equal(1, await CountAsync(factory, club, second, LedgerEntryType.NoShowPenalty));
+    }
+
+    /// <summary>
+    /// A fixture instant a test compares for equality has to be one the database can hold.
+    ///
+    /// <para>
+    /// The pin on <see cref="TestHost.Storable"/>, and it manufactures its own hazard rather
+    /// than waiting for a clock to supply one. <c>timestamptz</c> stores whole microseconds
+    /// and a .NET tick is 100&#160;ns, so an instant carrying a sub-microsecond remainder comes
+    /// back changed. macOS never produces one from <c>UtcNow</c> and Linux produces one nine
+    /// times in ten, which is exactly the shape that cannot be found on the machine it passes
+    /// on — the test above was red on five consecutive CI runs, at four different hours of the
+    /// day, and green here every time. Adding the remainder explicitly makes both platforms
+    /// agree, so deleting the truncation is red everywhere.
+    /// </para>
+    ///
+    /// <para>
+    /// Both halves are asserted deliberately. The first says the hazard is real; without it a
+    /// future column with nanosecond resolution would leave the second half passing for a
+    /// reason that no longer holds, and the truncation would look load-bearing when it was not.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_seeded_instant_survives_the_database_unchanged()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+
+        // Three ticks past a whole microsecond: what a Linux clock hands a fixture for free.
+        var hostile = TestHost.Storable(DateTimeOffset.UtcNow).AddTicks(3);
+        var readBack = await RoundTripEndsAtAsync(factory, club, hostile);
+        var storableReadBack = await RoundTripEndsAtAsync(factory, club, TestHost.Storable(hostile));
+
+        Assert.NotEqual(hostile, readBack);
+        Assert.Equal(TestHost.Storable(hostile), storableReadBack);
+    }
+
+    /// <summary>
+    /// Writes one booking ending at <paramref name="endsAt"/> and reads that column back.
+    ///
+    /// <para>
+    /// <c>Cancelled</c> on purpose: the overlap exclusion is defined <c>WHERE "Status" &lt;&gt; 1</c>
+    /// (AddBookingOverlapExclusion), so two calls a few hundred nanoseconds apart on the same
+    /// court do not collide, and the no-show sweep only looks at <c>Booked</c> rows.
+    /// </para>
+    /// </summary>
+    private static async Task<DateTimeOffset> RoundTripEndsAtAsync(
+        TestWebAppFactory factory, Club club, DateTimeOffset endsAt)
+    {
+        Guid id;
+        using (var write = RequestScope(factory, club))
+        {
+            var db = write.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var booking = new Booking
+            {
+                TenantId = club.TenantId,
+                CourtId = club.CourtId,
+                UserId = club.MemberId,
+                BookedByUserId = club.MemberId,
+                PaidByUserId = club.MemberId,
+                ActorUserId = club.MemberId,
+                StartsAt = endsAt.AddMinutes(-60),
+                EndsAt = endsAt,
+                SliceMinutes = 15,
+                SliceCount = 4,
+                AmountChargedCredits = BookingCost,
+                Status = BookingStatus.Cancelled,
+                ChargedAt = DateTimeOffset.UtcNow,
+            };
+            db.Bookings.Add(booking);
+            await db.SaveChangesAsync();
+            id = booking.Id;
+        }
+
+        using var read = RequestScope(factory, club);
+        var fresh = read.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return (await fresh.Bookings.AsNoTracking().FirstAsync(b => b.Id == id)).EndsAt;
     }
 }
