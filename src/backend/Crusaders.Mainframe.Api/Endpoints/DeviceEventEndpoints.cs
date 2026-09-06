@@ -158,7 +158,12 @@ public static class DeviceEventEndpoints
             acceptedThrough = e.Seq;
         }
 
-        device!.LastSeenAt = now;
+        // An upload is a liveness signal like the heartbeat is, and it is the call a box
+        // reconnecting after an outage very often makes first. Same recording, same reason:
+        // see DeviceSilenceLog.
+        var uploadSettings = await services.Settings.GetAsync(ct);
+        DeviceSilenceLog.NoteHeartbeat(
+            services.Db, device!, now, HeartbeatCadence.OfflineAfterSeconds(uploadSettings.HeartbeatSeconds));
         await services.Db.SaveChangesAsync(ct);
 
         return Results.Ok(new

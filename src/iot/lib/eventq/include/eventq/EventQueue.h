@@ -118,6 +118,16 @@ namespace eventq {
 /// 64 events, at the cost of skipping up to 63 numbers on an unclean reboot —
 /// which costs nothing, because the API only cares that a number is never
 /// REUSED.
+///
+/// A CONSEQUENCE THAT KEEPS BEING GOT WRONG ON THE API SIDE. Because of this,
+/// a gap in the sequence numbers the API has receipts for is NOT evidence that
+/// events were lost. A clean run of three events followed by a power cut leaves
+/// the next event at seq 65 with nothing dropped, and no query over
+/// DeviceEventReceipt can tell that apart from a queue that discarded 61. Three
+/// documents claimed the opposite and have been corrected (settlement-model.md
+/// I2, go-live-checklist.md section 8, system-blueprint.html risk 9). Detecting
+/// a lost queue needs something this file does not emit — a boot record naming
+/// what was discarded, or a durable ring.
 inline constexpr uint32_t kSeqCheckpointStride = 64U;
 
 /// The store key holding the high-water sequence mark.

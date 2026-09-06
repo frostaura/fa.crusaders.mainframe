@@ -242,10 +242,19 @@ Two things follow, and both are already true rather than planned:
 - The recovery mail no longer promises that everything recorded during the outage uploads. It
   says what is true: it uploads if the box stayed powered.
 
-Making the loss positively detectable is the work this item is really asking for and it is not
-scheduled: the box persists its sequence number across reboots and the API already stores a
-`DeviceEventReceipt` per `(device, seq)`, so a gap after a reconnect is derivable. Nothing
-derives it. Item 7 makes the whole failure rarer.
+Making the loss positively detectable is the work this item is really asking for, it is not
+scheduled, and **the route this item used to name for it does not work.** It said the box
+persists its sequence number across reboots and the API stores a `DeviceEventReceipt` per
+`(device, seq)`, so a gap after a reconnect is derivable. Both halves are true and the inference
+is not. `EventQueue` reserves sequence numbers in blocks of `kSeqCheckpointStride` = 64 and
+`begin()` resumes at `mark + 1` — the header says outright that "the previous boot may have issued
+any number inside that block, and there is no way to know which" — so every unclean reboot skips
+up to 63 numbers whether or not anything was lost, and a power cut *is* an unclean reboot.
+Compiled against the real header, a box that pushed three events and then lost power reports its
+next event as seq 65: a 61-number gap with zero events lost. A gap cannot distinguish "the queue
+lost N activations" from "the checkpoint skipped N numbers", so detection needs something new from
+the box — a boot record naming what it discarded, or a durable ring — not a query over the
+receipts. Item 7 makes the whole failure rarer.
 
 ---
 

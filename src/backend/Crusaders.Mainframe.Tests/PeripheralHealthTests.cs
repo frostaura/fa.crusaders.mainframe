@@ -556,4 +556,176 @@ public class PeripheralHealthTests
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
     }
+
+    /// <summary>
+    /// The same club, the same booking, the same ten minutes of darkness across its grace
+    /// deadline — and the three things that can happen afterwards, in every order they can
+    /// happen in. <paramref name="order"/> is read left to right:
+    /// <c>R</c> the box calls in again, <c>H</c> a <c>PeripheralHealthWorker</c> tick,
+    /// <c>S</c> the no-show sweep. Returns what the member is left with.
+    /// </summary>
+    private static async Task<decimal> DarkThenRecoveredBalanceAsync(string order)
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        var offlineAfter = HeartbeatCadence.OfflineAfterSeconds(settings.HeartbeatSeconds);
+
+        // The deadline is five minutes ago, so the booking is unambiguously due whichever
+        // instant the sweep reads for itself.
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(-5).AddSeconds(-1);
+        var startsAt = deadline.AddMinutes(-settings.GraceWindowMinutes);
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db, startsAt: startsAt);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // Dark from ten minutes before the deadline — well past offline_after_seconds — and
+        // back one minute after it.
+        var box = await AddBoxAsync(host, db, deadline.AddMinutes(-10));
+        var health = CreateWorker(host);
+        var sweep = CreateNoShowWorker(host);
+
+        foreach (var step in order)
+        {
+            switch (step)
+            {
+                case 'R':
+                    // Exactly what the heartbeat endpoint does when the box calls in.
+                    DeviceSilenceLog.NoteHeartbeat(db, box, deadline.AddMinutes(1), offlineAfter);
+                    await db.SaveChangesAsync();
+                    break;
+                case 'H': await health.TickAsync(default); break;
+                default: await sweep.TickAsync(default); break;
+            }
+        }
+
+        return await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
+    }
+
+    /// <summary>
+    /// The mirror of <c>The_waiver_is_the_same_whichever_order_the_two_workers_run_in</c>, and
+    /// the half that was still open. A box dark across the deadline and back a minute later
+    /// left no evidence at all when the health sweep's thirty-second stride missed it: no row
+    /// was ever opened, and the recovery heartbeat overwrote <c>LastSeenAt</c>, the only other
+    /// witness. The sweep then charged 30% if it ran after the box came back and waived if it
+    /// ran before — the club power cut, priced two ways.
+    ///
+    /// <para>
+    /// Five orders, one price. The waiver is right in all of them: the box was ten minutes
+    /// silent at the instant that decides it, so the member could not have scanned.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData("HSR")]   // noticed while dark, swept, then back
+    [InlineData("SHR")]   // swept while dark
+    [InlineData("RHS")]   // back before anything noticed, then swept
+    [InlineData("RSH")]   // back, swept, and only then a health tick
+    [InlineData("HRS")]   // a row opened, the box back, and the sweep beats the closing tick
+    public async Task The_waiver_is_the_same_whether_the_box_came_back_before_or_after_the_sweep(string order)
+        => Assert.Equal(100m, await DarkThenRecoveredBalanceAsync(order));
+
+    /// <summary>
+    /// A box that was dark, came back well BEFORE the booking's grace deadline, and has been
+    /// heart-beating on schedule ever since. <paramref name="closingTickRan"/> says whether
+    /// <c>PeripheralHealthWorker</c> has got round to closing the row it opened.
+    /// </summary>
+    private static async Task<decimal> RecoveredBeforeDeadlineBalanceAsync(bool closingTickRan)
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        var offlineAfter = HeartbeatCadence.OfflineAfterSeconds(settings.HeartbeatSeconds);
+
+        var now = DateTimeOffset.UtcNow;
+        var deadline = now.AddMinutes(-6).AddSeconds(-1);
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(
+            host, db, startsAt: deadline.AddMinutes(-settings.GraceWindowMinutes));
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // Dark since twenty minutes ago; the health sweep notices and opens its row.
+        var box = await AddBoxAsync(host, db, now.AddMinutes(-20));
+        var health = CreateWorker(host);
+        await health.TickAsync(default);
+
+        // Back eight minutes ago — two minutes before the deadline — and calling in every
+        // minute since, which is what the club's heartbeat_seconds asks of it.
+        for (var beat = now.AddMinutes(-8); beat <= now.AddSeconds(-30); beat = beat.AddMinutes(1))
+        {
+            DeviceSilenceLog.NoteHeartbeat(db, box, beat, offlineAfter);
+            await db.SaveChangesAsync();
+        }
+
+        if (closingTickRan) await health.TickAsync(default);
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        return await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
+    }
+
+    /// <summary>
+    /// The other way the health sweep's schedule reached the money. Its row is opened at the
+    /// last heartbeat before the silence and closed at whatever <c>LastSeenAt</c> says when a
+    /// tick gets to it — so a row it has not reached is open-ended, and one it reaches two
+    /// heartbeats late is stamped two heartbeats late. Either way the row claimed the box was
+    /// still dark at a deadline it had been back for two minutes before, and waived a penalty
+    /// the member owed.
+    ///
+    /// <para>
+    /// Both runs must be 97.60: the box was heard from a minute before the deadline, which is
+    /// inside <c>offline_after_seconds</c> — reachable to the Devices page, to the alert and
+    /// therefore to the money.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_box_back_before_the_deadline_pays_the_penalty_whether_or_not_the_row_was_closed()
+    {
+        var closed = await RecoveredBeforeDeadlineBalanceAsync(closingTickRan: true);
+        var stillOpen = await RecoveredBeforeDeadlineBalanceAsync(closingTickRan: false);
+
+        Assert.Equal(closed, stillOpen);
+        Assert.Equal(97.60m, closed);
+    }
+
+    /// <summary>
+    /// A box an admin decommissioned is not evidence of anything. It stops calling in by their
+    /// own decision — the same reason <c>PeripheralHealthWorker</c> skips it — so a row left in
+    /// the table beside its replacement must not waive every no-show on those courts for as
+    /// long as it sits there. The live box is healthy and the member simply did not turn up.
+    /// </summary>
+    [Fact]
+    public async Task A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // The box that actually drives the court, heart-beating normally.
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
+
+        // The one it replaced: switched off, silent for three days, still on the same court,
+        // and carrying an outage row nobody ever closed.
+        var retired = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddDays(-3), enabled: false);
+        await AddOutageAsync(host, db, retired, booking.StartsAt.AddDays(-3), endedAt: null);
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Contains(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
 }

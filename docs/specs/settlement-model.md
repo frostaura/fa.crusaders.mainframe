@@ -77,11 +77,32 @@ driving the court had been silent for longer than `offline_after_seconds` **at t
 deadline** — the same threshold the alert and the Devices page use — answered from the last
 heartbeat preceding that deadline, whether that comes from a `DeviceOutage` row or from
 `Device.LastSeenAt`. It is deliberately *not* "an outage row exists that spans the deadline": a
-row is only written once `PeripheralHealthWorker` notices, so that version priced the same facts
-differently depending on how promptly the sweep ran. A box whose silence had not yet reached the
-threshold at the deadline is reachable for settlement purposes, exactly as it is on the Devices
-page and in the alert — and, being powered and inside its cached roster, it is a box that still
-lights the court and still queues the scan.
+row is only written once something notices, so that version priced the same facts differently
+depending on how promptly the sweep ran.
+
+**And it is not "whatever `LastSeenAt` says now" either**, which is the same defect in the other
+direction: the heartbeat that ends an outage moves `LastSeenAt` past the whole of it. The silence
+is therefore recorded by the recovery itself — `DeviceSilenceLog.NoteHeartbeat`, in the same save
+that moves `LastSeenAt` — rather than only by the health sweep, whose thirty-second stride would
+otherwise miss any outage that began and ended between two ticks. A silence ends at the *earliest*
+instant the API is known to have heard from the box afterwards, which is what makes a row the
+sweep has not closed yet and one it closed late answer the same question the same way.
+
+**A box whose silence had not yet reached the threshold at the deadline is reachable for
+settlement purposes**, exactly as it is on the Devices page and in the alert. That is a decision
+about which way to fall in a case nothing can see, and not a claim about the box: silence shorter
+than the threshold does not distinguish a box that is up and between heartbeats from one that lost
+power ninety seconds ago, and nothing in the API can tell them apart. An earlier version of this
+paragraph asserted the first of those — "being powered and inside its cached roster, it is a box
+that still lights the court and still queues the scan" — which the evidence cannot establish, and
+it is withdrawn.
+
+What is checkable is the size of the band and what the alternative costs. The band is bounded by
+`offline_after_seconds` (`HeartbeatCadence.OfflineAfterSeconds`, floored at 180 s), so at most a
+few minutes of silence before the deadline reads as reachable. Narrowing it means calling a box
+offline on ordinary WiFi jitter and waiving penalties for it; widening it means the money and the
+Devices page disagree about the same box at the same instant. The band is the price of one number
+meaning one thing in the alert, on the glass and in the ledger.
 
 ---
 
@@ -120,8 +141,19 @@ earned: wrong, but visible on their own ledger and disputed by the member. Now i
 raises it. Two consequences are load-bearing and are enforced elsewhere: the outage alert must
 not tell an admin to power-cycle the box first (that is the action that destroys the evidence),
 and the recovery mail must not promise that everything recorded during the outage uploads. Both
-are in `EmailTemplates`. Making the loss positively detectable — a `(device, seq)` gap after a
-reconnect, which `DeviceEventReceipt` would support — is unbuilt.
+are in `EmailTemplates`.
+
+**Making the loss positively detectable is unbuilt, and the route this document used to name for
+it does not work.** It said a `(device, seq)` gap after a reconnect would be derivable from the
+`DeviceEventReceipt` rows already stored. It is not evidence of anything: `EventQueue` checkpoints
+its sequence mark in blocks of `kSeqCheckpointStride` = 64 and `begin()` resumes at `mark + 1`,
+with the comment "the previous boot may have issued any number inside that block, and there is no
+way to know which". *Every* unclean reboot therefore skips up to 63 numbers whether or not a single
+event was lost, and a power cut is precisely an unclean reboot. Compiled against the real header
+with the recording store fake, a box that pushed three events and lost power reports its next event
+as seq 65 — a 61-number gap with nothing lost at all. Detecting the loss needs something the box
+does not emit today: a boot record carrying what it discarded, or a durable ring. Not arithmetic on
+the receipts.
 
 ### I3 — A manual adjustment is netted per leg, never used as a signal
 

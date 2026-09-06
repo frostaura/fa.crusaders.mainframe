@@ -239,27 +239,6 @@ public static class EmailTemplates
             """);
 
     /// <summary>
-    /// <paramref name="amountCredits"/> and <paramref name="balanceAfterCredits"/> are
-    /// <b>credits</b>, and the penalty policy is the tenant's, not a literal: the previous
-    /// template hardcoded "within 15 minutes … 30%" and went on saying it after an admin had
-    /// moved the club to 30 minutes at 50%.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Takes a <see cref="BookingConfirmationDetails"/> rather than seven positional parameters.
-    /// Seven was already over the complexity gate's argument limit, and every one of them is a
-    /// decimal, an int or a string, so a transposed pair — the charge and the balance, the
-    /// penalty window and the penalty percentage — would have compiled and shipped a wrong
-    /// number to a member. Named members make that transposition a compile error.
-    /// </para>
-    /// <para>
-    /// The receipt is an <b>attachment</b> and not a link, deliberately: a link to a receipt is a
-    /// link that needs a session, and the member who most wants one is forwarding the mail to
-    /// somebody who has not got one. It is optional so a missing receipt is a message with no
-    /// attachment rather than a failed send.
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// The one sentence a member needs when the club desk has booked for them under
     /// <c>feature-spec.md</c> §8's override and their balance is now below zero.
     ///
@@ -280,6 +259,27 @@ public static class EmailTemplates
             </p>
             """;
 
+    /// <summary>
+    /// <c>AmountCredits</c> and <c>BalanceAfterCredits</c> on <paramref name="d"/> are
+    /// <b>credits</b>, and the penalty policy is the tenant's, not a literal: the previous
+    /// template hardcoded "within 15 minutes … 30%" and went on saying it after an admin had
+    /// moved the club to 30 minutes at 50%.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Takes a <see cref="BookingConfirmationDetails"/> rather than seven positional parameters.
+    /// Seven was already over the complexity gate's argument limit, and every one of them is a
+    /// decimal, an int or a string, so a transposed pair — the charge and the balance, the
+    /// penalty window and the penalty percentage — would have compiled and shipped a wrong
+    /// number to a member. Named members make that transposition a compile error.
+    /// </para>
+    /// <para>
+    /// The receipt is an <b>attachment</b> and not a link, deliberately: a link to a receipt is a
+    /// link that needs a session, and the member who most wants one is forwarding the mail to
+    /// somebody who has not got one. It is optional so a missing receipt is a message with no
+    /// attachment rather than a failed send.
+    /// </para>
+    /// </remarks>
     public static EmailMessage BookingConfirmation(
         string to, BookingConfirmationDetails d, EmailAttachment? receipt = null) => new(
         To: to,

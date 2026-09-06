@@ -30,11 +30,11 @@ namespace Crusaders.Mainframe.Api.Services;
 ///     nobody could have scanned in.
 ///   </item>
 ///   <item>
-///     A <see cref="DeviceOutage"/> row only exists once <c>PeripheralHealthWorker</c> has
-///     noticed. A sweep that runs before that tick sees no row at all. That was the defect this
-///     class was rewritten to close: the same booking, the same silence, settled at 97.60 when
-///     the sweep was prompt and at 100.00 when it was five minutes late, because by then a row
-///     existed whose <c>StartedAt</c> reached back over the deadline.
+///     A <see cref="DeviceOutage"/> row only exists once something has noticed. A sweep that
+///     runs before that sees no row at all. That was the defect this class was rewritten to
+///     close: the same booking, the same silence, settled at 97.60 when the sweep was prompt
+///     and at 100.00 when it was five minutes late, because by then a row existed whose
+///     <c>StartedAt</c> reached back over the deadline.
 ///   </item>
 /// </list>
 ///
@@ -44,9 +44,35 @@ namespace Crusaders.Mainframe.Api.Services;
 /// that stretch at the instant asked about. An outage row that began two minutes before the
 /// deadline says the box had been quiet for two minutes at the deadline; two minutes is under the
 /// threshold, so the box was not yet unreachable then, whether the row was written before the
-/// sweep or after it. That is the whole of the timing-invariance property, and
-/// <c>PeripheralHealthTests.The_waiver_is_the_same_whichever_order_the_two_workers_run_in</c>
-/// pins it.
+/// sweep or after it.
+/// </para>
+///
+/// <para>
+/// <b>The mirror direction, and why the recovery has to write a row.</b> Reading the two sources
+/// together is not enough on its own, because a silence that crossed the threshold and then
+/// ENDED before anything recorded it leaves no trace in either: no row was opened, and the
+/// heartbeat that ended it moved <c>LastSeenAt</c> past the whole thing. That is the club power
+/// cut shorter than the health sweep's stride, and it produced the same two prices with the
+/// order reversed. It is closed at the source rather than here —
+/// <see cref="DeviceSilenceLog.NoteHeartbeat"/> writes the row as part of the same save that
+/// moves <c>LastSeenAt</c> — so by the time this index is built, every silence past the
+/// threshold that has ended is carried by a row.
+/// </para>
+///
+/// <para>
+/// <b>A silence ends at the first instant the box was heard from after it began.</b> Rows are
+/// read as witnesses to that, not as objects: a row's own <c>EndedAt</c>, the ends of the other
+/// rows for the same box, and the box's current <c>LastSeenAt</c> are all the same kind of
+/// evidence, and the earliest one after the silence began is the one that counts. That is what
+/// makes a row the health sweep has not closed yet, and one it closed a tick or two late, answer
+/// the same question the same way as the heartbeat that actually ended the silence.
+/// </para>
+///
+/// <para>
+/// The three tests that pin this are
+/// <c>PeripheralHealthTests.The_waiver_is_the_same_whichever_order_the_two_workers_run_in</c>,
+/// <c>A_box_past_the_threshold_at_the_deadline_waives_before_any_outage_row_exists</c> and
+/// <c>The_waiver_is_the_same_whether_the_box_came_back_before_or_after_the_sweep</c>.
 /// </para>
 ///
 /// <para>
@@ -107,22 +133,24 @@ public sealed class DeviceOutageIndex
             .Where(o => o.EndedAt == null || o.EndedAt >= since)
             .ToListAsync(ct);
 
-        var silences = new List<Silence>(devices.Count + outages.Count);
-        foreach (var device in devices)
-        {
-            // The stretch the box is in NOW, which is the one no outage row describes yet.
-            silences.Add(new Silence(device.CourtNumbers, device.LastSeenAt!.Value, null));
-        }
-
         // The relay mapping, per box. A device drives the courts named in its own list, so a
         // silence darkens exactly those and nothing else: a club with a second box on the annex
         // court keeps charging no-shows there while the main box is out.
         var courtsByDevice = devices.ToDictionary(d => d.Id, d => d.CourtNumbers);
+        var heardFrom = HeardFrom(devices, outages);
+
+        var silences = new List<Silence>(devices.Count + outages.Count);
+        foreach (var device in devices)
+        {
+            // The stretch the box is in NOW, which is the one no outage row describes yet.
+            silences.Add(SilenceFrom(device.CourtNumbers, device.LastSeenAt!.Value, heardFrom[device.Id]));
+        }
+
         foreach (var outage in outages)
         {
             if (courtsByDevice.TryGetValue(outage.DeviceId, out var courts))
             {
-                silences.Add(new Silence(courts, outage.StartedAt, outage.EndedAt));
+                silences.Add(SilenceFrom(courts, outage.StartedAt, heardFrom[outage.DeviceId]));
             }
         }
 
@@ -130,6 +158,52 @@ public sealed class DeviceOutageIndex
             .ToDictionaryAsync(c => c.Id, c => c.CourtNumber, ct);
 
         return new DeviceOutageIndex(courtNumberById, silences, TimeSpan.FromSeconds(offlineAfterSeconds));
+    }
+
+    /// <summary>
+    /// Every instant the API is known to have heard from each box, from both sources: the
+    /// box's current <see cref="Device.LastSeenAt"/> and the end of every recorded silence.
+    /// </summary>
+    private static Dictionary<Guid, List<DateTimeOffset>> HeardFrom(
+        List<Device> devices, List<DeviceOutage> outages)
+    {
+        var heard = devices.ToDictionary(d => d.Id, d => new List<DateTimeOffset> { d.LastSeenAt!.Value });
+        foreach (var outage in outages)
+        {
+            if (outage.EndedAt is { } ended && heard.TryGetValue(outage.DeviceId, out var instants))
+            {
+                instants.Add(ended);
+            }
+        }
+
+        return heard;
+    }
+
+    /// <summary>
+    /// One stretch of silence, closed by the FIRST instant the box was heard from after it
+    /// began — whichever row or column happens to carry that instant.
+    ///
+    /// <para>
+    /// A row's own <c>EndedAt</c> is one witness and not a privileged one. The health sweep
+    /// closes a row at the box's <c>LastSeenAt</c> as at the tick that noticed, so a tick that
+    /// ran late stamps a later instant than the heartbeat that actually ended the silence, and
+    /// a row it has not reached at all stamps none. Taking the earliest witness makes all three
+    /// cases agree, which is the property the money rests on.
+    /// </para>
+    /// </summary>
+    private static Silence SilenceFrom(
+        List<int> courts, DateTimeOffset lastHeartbeat, List<DateTimeOffset> heardFrom)
+    {
+        DateTimeOffset? ended = null;
+        foreach (var instant in heardFrom)
+        {
+            if (instant > lastHeartbeat && (ended is null || instant < ended.Value))
+            {
+                ended = instant;
+            }
+        }
+
+        return new Silence(courts, lastHeartbeat, ended);
     }
 
     /// <summary>
