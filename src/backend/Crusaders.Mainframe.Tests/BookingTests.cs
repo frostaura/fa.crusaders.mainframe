@@ -255,8 +255,17 @@ public class BookingTests
         var db = scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Persistence.MainframeDbContext>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+
+        // Thirty minutes ahead of a raw UtcNow is thirty minutes past closing for the last
+        // quarter-hour of the club's day: day_end_minute is 1440, the operating-hours rule is
+        // evaluated on the slot's END, and a 15-minute slice starting after 23:45 ends at 1441.
+        // Real UTC 23:16 to 23:29, every night, this money test died with an
+        // InvalidCastException naming OutOfHours — which reads as a broken refund and is not.
+        // Taking `now` from the move makes the two one statement: delete it and this no longer
+        // compiles. 30 ahead + 15 of court is 45 minutes of the club's day.
+        var now = await TestHost.NowClearOfClosingAsync(db, host.Tenant.Id, minutesNeeded: 45);
         var booked = (BookingResult.Ok)await booking.CreateAsync(
-            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, DateTimeOffset.UtcNow.AddMinutes(30), 1, default);
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, now.AddMinutes(30), 1, default);
         Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // They turned up and played. The clock is irrelevant; this stamp is not.
