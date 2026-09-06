@@ -261,6 +261,15 @@ describe("Top-up status — when the club cannot be reached", () => {
     // And the one thing a member watching R500 needs to be told.
     expect(screen.getByRole("alert")).toHaveTextContent(/Nothing here cancels or changes it/);
     expect(screen.queryByText("Couldn't load top-up status.")).not.toBeInTheDocument();
+
+    // And not one thing more than the product does. This sentence used to end "we'll email you
+    // either way", which no code path keeps: the only top-up mail the API sends is
+    // TopUpConfirmation, from CompleteAsync — the Failed, Cancelled, amount_mismatch and
+    // provider_register_failed branches send nothing at all. Asserted on the rendered alert,
+    // not on the source, so moving the sentence into a constant or another file cannot lose it;
+    // topup-status-email-promise.test.ts is what holds the copy against the backend itself.
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/either way/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/we'll email you the confirmation/i);
   });
 
   it("does not throw away a status it has already read when a later check fails", async () => {

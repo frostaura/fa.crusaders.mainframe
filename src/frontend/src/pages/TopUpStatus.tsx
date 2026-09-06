@@ -140,10 +140,23 @@ export default function TopUpStatusPage() {
       <div className="max-w-md mx-auto">
         <Card>
           <h1 className="text-xl font-semibold mb-2">Top-up</h1>
+          {/*
+            "we'll email you EITHER WAY" is what this said, and the product does not do it.
+            `EmailDispatch.InBackground` appears once in TopUpEndpoints.cs, inside
+            CompleteAsync; the amount_mismatch, Failed/Cancelled and provider_register_failed
+            branches send nothing, EmailTemplates has a TopUpConfirmation and no failure
+            template, and feature-spec.md §11's required-email list names the confirmation and
+            no failure mail. So the sentence promised, on the one screen standing between a
+            member and money they have already paid, the exact thing this programme keeps
+            finding: copy a code path does not keep. It now claims only the confirmation,
+            which is real and unconditional on completion — and
+            `topup-status-email-promise.test.ts` reads both backend files and fails if the two
+            ever disagree again, in either direction.
+          */}
           <p role="alert" className="text-sm text-danger-strong">
             We couldn't reach the club to check on this payment. Nothing here cancels or
-            changes it — if it has already cleared, your credits are in your wallet, and
-            we'll email you either way.
+            changes it — if it has already cleared, your credits are in your wallet and
+            we'll email you the confirmation.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button variant="outline" onClick={checkAgain} disabled={checking} aria-busy={checking}>
