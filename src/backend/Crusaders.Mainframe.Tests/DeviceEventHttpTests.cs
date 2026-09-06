@@ -48,6 +48,14 @@ public sealed class DeviceEventHttpTests
         Guid DeviceId, string Mac, string ApiKey, Guid TenantId, string Slug, Guid CourtId, Guid MemberId,
         IReadOnlyDictionary<int, Guid> CourtIds);
 
+    /// <summary>Moves a seeded club clear of its own closing time; see <see cref="TestHost.DayZoneFor"/>.</summary>
+    private static async Task ClearOfClosingAsync(TestWebAppFactory factory, Guid tenantId, int minutesNeeded)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        await TestHost.ClearOfClosingAsync(db, tenantId, minutesNeeded);
+    }
+
     private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
 
     /// <summary>A tenant, a funded member, and a claimed box driving <paramref name="courtNumbers"/> (court 1 alone by default).</summary>
@@ -1630,6 +1638,11 @@ public sealed class DeviceEventHttpTests
 
         await using var factory = CreateFactory();
         var box = await SeedAsync(factory);
+        // The club's day ends at local midnight, and this test buys a full hour from the
+        // service's own UtcNow — so run it in a zone where that hour fits. See
+        // TestHost.DayZoneFor: without it this asserts 60 granted minutes and gets whatever
+        // was left of the local day, for the last hour of every day.
+        await ClearOfClosingAsync(factory, box.TenantId, 60);
         var client = factory.CreateClient();
         var nonce = Guid.NewGuid().ToString("N")[..16];
         var request = WalkUp(await QrCodeAsync(factory, box), minutes: 60, court: 1, nonce: nonce);

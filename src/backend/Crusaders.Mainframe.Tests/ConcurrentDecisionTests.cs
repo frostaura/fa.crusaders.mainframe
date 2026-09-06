@@ -790,6 +790,15 @@ public sealed class ConcurrentDecisionTests
 
         await using var factory = CreateFactory();
         var club = await SeedAsync(factory);
+        // Both attempts buy an hour from the service's own UtcNow, and the club shuts at
+        // local midnight — so run this in a zone where the hour fits, or the race is decided
+        // by closing time for the last hour of every day. See TestHost.DayZoneFor.
+        using (var zoneScope = factory.Services.CreateScope())
+        {
+            await TestHost.ClearOfClosingAsync(
+                zoneScope.ServiceProvider.GetRequiredService<MainframeDbContext>(), club.TenantId, 60);
+        }
+
         var code = await TestAccessCodes.MintIdentAsync(factory.Services, club.TenantId, club.Slug, club.MemberId);
         const string nonce = "9f2a4c6e8b0d1f3a";
 

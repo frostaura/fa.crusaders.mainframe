@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Crusaders.Mainframe.Api.Biometric;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Email;
@@ -210,6 +211,68 @@ public sealed class TestHost : IAsyncDisposable
         // neither peak nor the end of a day.
         if (slot.Hour == 23) slot = slot.AddHours(1);
         return slot;
+    }
+
+    /// <summary>
+    /// A tenant timezone in which <b>now</b> is comfortably mid-day, so a purchase made AT
+    /// this instant still has <paramref name="minutesNeeded"/> of the club's day in front of
+    /// it — plus an hour of slack at each end.
+    ///
+    /// <para>
+    /// <see cref="BookableSlotFrom"/> solves the same problem for a booking by moving the
+    /// SLOT. A walk-up cannot be moved: <c>BookingService.CreateWalkUpAsync</c> reads its own
+    /// <c>UtcNow</c> and sells from that instant, so a test that buys an hour is buying it at
+    /// whatever o'clock the suite happens to run. The fixtures set <c>day_end_minute</c> to
+    /// 1440, so the club closes at local midnight and a walk-up inside the last hour of the
+    /// local day is truncated to closing time — five walk-up tests across three classes went
+    /// red for the last hour of every day and green for the other twenty-three. The only
+    /// thing left to move is the club, so this moves the club.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>Etc/GMT+n</c> is <b>UTC−n</b> — the POSIX sign, inverted from how it reads — and
+    /// none of these zones observes DST, so the offset is exactly the offset. Walking +14
+    /// down to −12 visits every hour of the local clock, so a usable zone always exists;
+    /// <c>The_day_zone_leaves_room_at_every_hour_of_the_day</c> is what proves that rather
+    /// than trusting it.
+    /// </para>
+    /// </summary>
+    public static string DayZoneFor(DateTimeOffset now, int minutesNeeded)
+    {
+        for (var offsetHours = 14; offsetHours >= -12; offsetHours--)
+        {
+            var local = now.UtcDateTime.AddHours(offsetHours);
+            var minuteOfDay = (local.Hour * 60) + local.Minute;
+
+            // An hour clear of opening (00:00 in every fixture that calls this) and an hour
+            // clear of what the caller is about to buy, so a slow test cannot drift into
+            // either edge while it runs.
+            if (minuteOfDay >= 60 && minuteOfDay + minutesNeeded + 60 <= 1440)
+            {
+                return offsetHours switch
+                {
+                    0 => "Etc/UTC",
+                    > 0 => $"Etc/GMT-{offsetHours}",
+                    _ => $"Etc/GMT+{-offsetHours}",
+                };
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"No whole-hour zone leaves {minutesNeeded} minutes of the local day after {now:O}");
+    }
+
+    /// <summary>
+    /// Moves a club into <see cref="DayZoneFor"/> so a walk-up bought right now is not
+    /// truncated at closing time. Everything else about the settings document is untouched.
+    /// </summary>
+    public static async Task ClearOfClosingAsync(MainframeDbContext db, Guid tenantId, int minutesNeeded)
+    {
+        var row = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(s => s.TenantId == tenantId);
+        var settings = JsonNode.Parse(row.SettingsJson)!.AsObject();
+        settings["timezone"] = DayZoneFor(DateTimeOffset.UtcNow, minutesNeeded);
+        row.SettingsJson = settings.ToJsonString();
+        await db.SaveChangesAsync();
     }
 
     public IServiceScope NewScope() => Services.CreateScope();

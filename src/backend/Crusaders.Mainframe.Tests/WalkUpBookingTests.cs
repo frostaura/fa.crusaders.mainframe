@@ -48,11 +48,21 @@ public class WalkUpBookingTests
                 new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, topUpCredits, host.PlayerUser.Id), default);
         }
 
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        // A walk-up is sold from the service's own UtcNow and cannot be moved the way
+        // TestHost.BookableSlot moves a booking, so the club is moved instead: into a zone
+        // where the whole hard cap still fits before local closing time. Without this,
+        // three tests in this class assert 60 or 90 minutes and get whatever is left of the
+        // local day — green for twenty-three hours out of twenty-four and red for the last
+        // one. See TestHost.DayZoneFor.
+        await TestHost.ClearOfClosingAsync(db, host.Tenant.Id, RelayHardCap.Minutes);
+
         return new Fixture(
             host, scope,
             scope.ServiceProvider.GetRequiredService<BookingService>(),
             ledger,
-            scope.ServiceProvider.GetRequiredService<MainframeDbContext>());
+            db);
     }
 
     /// <summary>
@@ -94,6 +104,48 @@ public class WalkUpBookingTests
         f.Bookings.CreateWalkUpAsync(
             f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.PlayerUser.Id, minutes,
             DeviceEventEndpoints.WalkUpReference(Guid.NewGuid(), Guid.NewGuid().ToString("N")[..16]), default);
+
+    /// <summary>
+    /// The fix for five flakes, tested at every hour instead of at the hour the suite runs —
+    /// the same discipline as <c>BookingTests.A_bookable_slot_is_never_inside_peak_hours…</c>,
+    /// for the other kind of purchase.
+    ///
+    /// <para>
+    /// A walk-up starts at the service's own <c>UtcNow</c> and cannot be moved, so the club
+    /// is moved instead. This asserts the promise <see cref="TestHost.DayZoneFor"/> makes:
+    /// whatever the wall clock says, the zone it picks leaves the whole hard cap in front of
+    /// the purchase and is past opening. It converts through the real tzdb rather than
+    /// repeating the helper's arithmetic, because <c>Etc/GMT+n</c> is <c>UTC−n</c> and a
+    /// helper with the sign inverted would agree with itself perfectly.
+    /// </para>
+    ///
+    /// <para>
+    /// Minutes as well as hours: sweeping only on the hour would leave every local time at
+    /// :00, and 22:00 + 90 minutes lands exactly on midnight, which passes while 22:50 does
+    /// not.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void The_day_zone_leaves_room_at_every_hour_of_the_day()
+    {
+        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        foreach (var minute in new[] { 0, 1, 30, 45, 50, 59 })
+        {
+            for (var hour = 0; hour < 24; hour++)
+            {
+                var now = midnight.AddHours(hour).AddMinutes(minute);
+                var zone = TimeZoneInfo.FindSystemTimeZoneById(TestHost.DayZoneFor(now, RelayHardCap.Minutes));
+                var local = TimeZoneInfo.ConvertTime(now, zone);
+                var minuteOfDay = (local.Hour * 60) + local.Minute;
+                var where = $"(UTC {now:HH:mm} in {zone.Id}, local {local:HH:mm})";
+
+                Assert.True(minuteOfDay >= 60, $"the club has only just opened {where}");
+                Assert.True(
+                    minuteOfDay + RelayHardCap.Minutes <= 24 * 60,
+                    $"a {RelayHardCap.Minutes}-minute walk-up runs past local midnight {where}");
+            }
+        }
+    }
 
     // ---- Pricing ----------------------------------------------------------
 
