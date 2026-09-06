@@ -42,8 +42,21 @@ public class PeripheralHealthTests
         return emitted;
     }
 
+    /// <summary>
+    /// One box. <paramref name="installedAt"/> is the row's <c>CreatedAt</c> — when the club
+    /// got this hardware — and it is a separate question from when it was last heard from.
+    ///
+    /// <para>
+    /// It matters to the money: <c>DeviceOutageIndex</c> will not let a board vote on a deadline
+    /// it did not exist at, so a fixture that leaves it implicit is saying "this board arrived
+    /// the instant it was last seen", which for a healthy box is seconds ago. Left null the row
+    /// keeps the entity default of <c>UtcNow</c>, which is the right shape for a board that has
+    /// just appeared and the wrong one for a board the club has had for months.
+    /// </para>
+    /// </summary>
     private static async Task<Device> AddBoxAsync(
-        TestHost host, MainframeDbContext db, DateTimeOffset? lastSeen, bool enabled = true, params int[] courts)
+        TestHost host, MainframeDbContext db, DateTimeOffset? lastSeen, bool enabled = true,
+        DateTimeOffset? installedAt = null, params int[] courts)
     {
         var device = new Device
         {
@@ -54,6 +67,7 @@ public class PeripheralHealthTests
             CourtNumbers = courts.Length > 0 ? [.. courts] : [host.Courts[0].CourtNumber],
             Enabled = enabled,
             LastSeenAt = lastSeen,
+            CreatedAt = installedAt ?? DateTimeOffset.UtcNow,
         };
         db.Devices.Add(device);
         await db.SaveChangesAsync();
@@ -150,7 +164,7 @@ public class PeripheralHealthTests
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20), true, 1, 2);
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20), true, null, 1, 2);
         host.EmailService.Sent.Clear();
 
         await CreateWorker(host).TickAsync(default);
@@ -379,7 +393,7 @@ public class PeripheralHealthTests
             host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var elsewhere = host.Courts[0].CourtNumber + 40;
-        var annex = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), true, elsewhere);
+        var annex = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), true, null, elsewhere);
         await AddOutageAsync(host, db, annex, booking.StartsAt.AddMinutes(-10), endedAt: null);
 
         await CreateNoShowWorker(host).TickAsync(default);
@@ -809,8 +823,13 @@ public class PeripheralHealthTests
         await ledger.PostAsync(new LedgerPosting(
             host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
-        // The box that actually drives the court, heart-beating normally.
-        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
+        // The box that actually drives the court, heart-beating normally — and installed a
+        // month ago, which is a separate fact from "last seen twenty seconds ago" and is now
+        // load-bearing: a board cannot vote on a deadline it did not exist at, so leaving
+        // CreatedAt at its default said this replacement arrived twenty seconds ago and could
+        // not speak for a grace window that closed an hour before it.
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20),
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
 
         // The one it replaced — still ENABLED, because nobody switched it off — silent for
         // three days, on the same court, carrying an outage row nobody ever closed.
@@ -823,6 +842,87 @@ public class PeripheralHealthTests
         Assert.Contains(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// <b>A board that did not exist at the deadline does not get to vote on it — and until it
+    /// could not, auto-registration was quietly transferring the club's outage back onto its
+    /// members.</b>
+    ///
+    /// <para>
+    /// <c>DeviceRegistryService.AutoRegisterAsync</c> puts any unknown MAC straight onto the
+    /// club's first four courts with <c>Enabled</c> defaulting true — that is the whole of
+    /// provisioning, and it is what makes a box useful the moment it is switched on. Once S5a
+    /// came to require EVERY box on a court to be dark, that default acquired a second meaning
+    /// nobody chose: ONE healthy unconfigured board vetoed the §6a waiver on courts 1–4. The
+    /// spare on the desk, or the replacement an admin plugs in while the dead one is still in
+    /// the cupboard, and every member whose court was dark pays 30% for the club's own hardware.
+    /// The old rule could only ever ADD waivers with an extra board; the all-boxes rule made an
+    /// extra board able to remove them.
+    /// </para>
+    ///
+    /// <para>
+    /// The board here is created through the real auto-registration path, so the fixture cannot
+    /// drift from what a board actually gets when it announces itself.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_board_that_appeared_after_the_deadline_does_not_block_the_waiver()
+    {
+        Assert.Equal(100m, await SpareBoardBalanceAsync(installedAt: null));
+    }
+
+    /// <summary>
+    /// The other direction, and the reason the rule is about existence rather than about being
+    /// auto-registered: the same unconfigured board, on the same courts, heard from at the same
+    /// instant — but already there when the grace window closed. It could have lit the court,
+    /// so it blocks the waiver and the member owes the penalty.
+    ///
+    /// <para>
+    /// Only the board's install date differs between this test and the one above. That is what
+    /// makes the pair a pin on the rule and not on the fixture.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_board_already_installed_at_the_deadline_still_blocks_the_waiver()
+    {
+        Assert.Equal(97.60m, await SpareBoardBalanceAsync(installedAt: DateTimeOffset.UtcNow.AddDays(-7)));
+    }
+
+    /// <summary>
+    /// A court whose own box is dark right across the grace window, plus one auto-registered
+    /// board that is perfectly healthy, and the member's balance afterwards.
+    /// </summary>
+    private static async Task<decimal> SpareBoardBalanceAsync(DateTimeOffset? installedAt)
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // The court's own box, installed long ago and dark across the whole window.
+        var live = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90),
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+        await AddOutageAsync(host, db, live, booking.StartsAt.AddMinutes(-10), endedAt: null);
+
+        // An unknown MAC announces itself and lands on the club's first four courts, enabled,
+        // with nobody having confirmed that it drives any of them.
+        var spare = await scope.ServiceProvider.GetRequiredService<DeviceRegistryService>()
+            .AutoRegisterAsync("5ccf7f9e9e9e", default);
+        Assert.Contains(host.Courts[0].CourtNumber, spare.CourtNumbers);
+        Assert.True(spare.Enabled);
+        spare.LastSeenAt = DateTimeOffset.UtcNow.AddSeconds(-20);
+        if (installedAt is { } when) spare.CreatedAt = when;
+        await db.SaveChangesAsync();
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        return await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
     }
 
     /// <summary>

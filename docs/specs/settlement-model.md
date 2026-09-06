@@ -112,6 +112,21 @@ being dark, and the member pays the 30% for hardware that was driving nothing. P
 directions by `A_disabled_box_heard_from_seconds_ago_does_not_block_the_waiver` and
 `A_stale_but_enabled_box_beside_a_healthy_one_does_not_waive_the_penalty`.
 
+**A box only votes on deadlines it existed at.** `DeviceRegistryService.AutoRegisterAsync` puts any
+unknown MAC onto the club's first four courts with `Enabled` defaulting true, so under the all-boxes
+rule a single healthy unconfigured board — a spare on the desk, the replacement an admin plugs in
+while the dead one is still in the cupboard — vetoed the S5a waiver on courts 1–4 and handed the
+club's own outage back to its members at 30% each. The all-boxes rule created that: before it, an
+extra board could only add waivers. A board therefore counts in **either** direction only from the
+earliest instant it is known to have existed — the earliest of its row's `CreatedAt`, its
+`LastSeenAt` and the start of any recorded silence — and before that it is skipped rather than
+counted as dark, so a court whose only box arrived afterwards is "not dark" exactly as a court with
+no box is. `feature-spec.md` §6a carries the reasoning, including why the narrower existence rule
+was chosen over "an auto-registered box never votes". Pinned by
+`A_board_that_appeared_after_the_deadline_does_not_block_the_waiver` and
+`A_board_already_installed_at_the_deadline_still_blocks_the_waiver`, which differ only in the
+board's install date.
+
 **A court no enabled box drives is not dark**, even though it trivially has "no reachable box".
 There is no evidence either way — the club has no hardware there — and reading the phrase
 literally would waive every no-show at a club that has not installed a box yet.
@@ -125,6 +140,8 @@ listed against rather than the section as a whole:
 | Every box on the court dark **does** waive | `Two_boxes_on_one_court_both_dark_still_waives_the_penalty` |
 | A disabled box is not evidence in either direction | `A_disabled_box_heard_from_seconds_ago_does_not_block_the_waiver` |
 | A box bears only on the courts it drives | `An_outage_on_a_box_that_drives_other_courts_does_not_waive_the_penalty` |
+| A board that did not exist at the deadline is not evidence about it | `A_board_that_appeared_after_the_deadline_does_not_block_the_waiver` |
+| A board that did exist at it still is | `A_board_already_installed_at_the_deadline_still_blocks_the_waiver` |
 | The settlement is the same once the retired row is switched off | `A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty` |
 
 The last two are the ones this document previously over-claimed.

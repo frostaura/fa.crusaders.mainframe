@@ -103,23 +103,26 @@ public sealed class DeviceOutageIndex
 
     private readonly Dictionary<Guid, int> _courtNumberById;
     private readonly Dictionary<int, List<Guid>> _deviceIdsByCourtNumber;
+    private readonly Dictionary<Guid, DateTimeOffset> _knownToExistFrom;
     private readonly List<Silence> _silences;
     private readonly TimeSpan _offlineAfter;
 
     private DeviceOutageIndex(
         Dictionary<Guid, int> courtNumberById,
         Dictionary<int, List<Guid>> deviceIdsByCourtNumber,
+        Dictionary<Guid, DateTimeOffset> knownToExistFrom,
         List<Silence> silences,
         TimeSpan offlineAfter)
     {
         _courtNumberById = courtNumberById;
         _deviceIdsByCourtNumber = deviceIdsByCourtNumber;
+        _knownToExistFrom = knownToExistFrom;
         _silences = silences;
         _offlineAfter = offlineAfter;
     }
 
     /// <summary>No courts and no silences — nothing is ever dark. Used where a caller has no context to build from.</summary>
-    public static DeviceOutageIndex Empty { get; } = new([], [], [], TimeSpan.Zero);
+    public static DeviceOutageIndex Empty { get; } = new([], [], [], [], TimeSpan.Zero);
 
     /// <summary>
     /// The current tenant's stretches of box silence that could still matter, i.e. outages still
@@ -209,7 +212,54 @@ public sealed class DeviceOutageIndex
             .ToDictionaryAsync(c => c.Id, c => c.CourtNumber, ct);
 
         return new DeviceOutageIndex(
-            courtNumberById, deviceIdsByCourtNumber, silences, TimeSpan.FromSeconds(offlineAfterSeconds));
+            courtNumberById, deviceIdsByCourtNumber, KnownToExistFrom(devices, outages), silences,
+            TimeSpan.FromSeconds(offlineAfterSeconds));
+    }
+
+    /// <summary>
+    /// The earliest instant each box is known to have existed: the earliest of its row's
+    /// <see cref="Device.CreatedAt"/>, its <see cref="Device.LastSeenAt"/> and the start of any
+    /// silence recorded for it.
+    ///
+    /// <para>
+    /// <b>Why a box needs one at all.</b> Without it a board that did not exist at the deadline
+    /// still voted on it. <see cref="BoxWasUnreachable"/> answers "had this box been silent
+    /// longer than the threshold at <c>instant</c>?", and for an instant BEFORE the box's first
+    /// heartbeat the honest answer is "there was no box", while the arithmetic says "no, it was
+    /// not silent" — i.e. reachable, i.e. evidence against the member. Auto-registration makes
+    /// that reachable by the hour: an unknown MAC is put straight onto the club's first four
+    /// courts with <c>Enabled</c> defaulting true, so ONE healthy unconfigured board — the spare
+    /// on the desk, or the replacement an admin plugs in while the dead one is still in the
+    /// cupboard — vetoed the §6a waiver on courts 1–4 and handed the club's own outage back to
+    /// its members as a 30% penalty each. That is the exact direction §6a exists to prevent, and
+    /// it arrived as a side effect of requiring every box on a court to be dark.
+    /// </para>
+    ///
+    /// <para>
+    /// Read as evidence rather than as a field, for the same reason a silence's end is: a
+    /// heartbeat at <c>T</c> proves the board existed at <c>T</c> whatever the row says, and a
+    /// row created by that heartbeat carries a <c>CreatedAt</c> no earlier. Taking the earliest
+    /// of the three is what makes a row whose history reaches further back than its own creation
+    /// stamp — a fixture, a restore, a re-registration after a delete — answer the same question
+    /// the same way.
+    /// </para>
+    /// </summary>
+    private static Dictionary<Guid, DateTimeOffset> KnownToExistFrom(
+        List<Device> devices, List<DeviceOutage> outages)
+    {
+        var known = devices.ToDictionary(
+            d => d.Id,
+            d => d.LastSeenAt is { } seen && seen < d.CreatedAt ? seen : d.CreatedAt);
+
+        foreach (var outage in outages)
+        {
+            if (known.TryGetValue(outage.DeviceId, out var from) && outage.StartedAt < from)
+            {
+                known[outage.DeviceId] = outage.StartedAt;
+            }
+        }
+
+        return known;
     }
 
     /// <summary>
@@ -294,12 +344,20 @@ public sealed class DeviceOutageIndex
         if (!_courtNumberById.TryGetValue(courtId, out var courtNumber)) return false;
         if (!_deviceIdsByCourtNumber.TryGetValue(courtNumber, out var deviceIds)) return false;
 
+        var existed = 0;
         foreach (var deviceId in deviceIds)
         {
+            // A board that did not exist at the deadline is not evidence about it, in either
+            // direction — see KnownToExistFrom. It is skipped rather than counted as dark, so a
+            // court whose only box arrived afterwards still falls through the clause below and
+            // is "not dark", exactly as a court with no box at all is.
+            if (_knownToExistFrom[deviceId] > instant) continue;
+
+            existed++;
             if (!BoxWasUnreachable(deviceId, instant)) return false;
         }
 
-        return deviceIds.Count > 0;
+        return existed > 0;
     }
 
     /// <summary>
