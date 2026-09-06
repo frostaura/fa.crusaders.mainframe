@@ -1,5 +1,6 @@
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
 import { tokenStore } from "./lib/api";
 
@@ -27,6 +28,13 @@ import { tokenStore } from "./lib/api";
  * directly: what was wrong was which screen `RequireAuth` puts up and what the auth context hands
  * it, and a component rendered on its own cannot be wrong about either.
  * </p>
+ *
+ * <p>
+ * And inside `StrictMode`, because `src/main.tsx` mounts it that way. The first attempt at the
+ * pending state guarded its `setRetrying(false)` behind the mounted-ref idiom, which StrictMode's
+ * mount → cleanup → mount falsifies before the first paint — the button then read "Trying…",
+ * disabled, for the life of the tab. Every test here rendered a bare `<App />` and saw none of it.
+ * </p>
  */
 
 afterEach(() => {
@@ -43,7 +51,12 @@ const unreachable = () => Promise.reject(new TypeError("Failed to fetch"));
 
 function renderAppAt(path: string) {
   window.history.pushState({}, "", path);
-  return render(<App />);
+  return render(<StrictMode><App /></StrictMode>);
+}
+
+/** Let real macrotasks and microtasks drain — this file runs on the real clock, not fake timers. */
+async function settle(ms = 50) {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
 }
 
 describe("the wait before the app knows whether you are signed in", () => {
@@ -86,5 +99,17 @@ describe("the outage screen's only control", () => {
       expect(busy).toBeDisabled();
       expect(busy).toHaveAttribute("aria-busy", "true");
     });
+
+    // The assertion above is not enough on its own, and a refuter proved it: `waitFor` runs its
+    // first check synchronously, so it passes on the render that `setRetrying(true)` caused and
+    // never looks again. Replace `return refreshFromToken()` in `retryConnection` with
+    // `void refreshFromToken()` — the exact regression this pending state exists to prevent — and
+    // the button flicks back to "Try again now" a microtask later while everything above stays
+    // green. So: still busy after the clock has actually moved, with the probe still in flight.
+    await settle();
+    const stillBusy = screen.getByRole("button", { name: /trying/i });
+    expect(stillBusy).toBeDisabled();
+    expect(stillBusy).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("button", { name: /try again now/i })).not.toBeInTheDocument();
   });
 });
