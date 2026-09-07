@@ -1,3 +1,4 @@
+using System.Globalization;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Persistence;
@@ -367,6 +368,25 @@ public class PeripheralHealthTests
         var notice = Assert.Single(host.EmailService.Sent, m => m.To == host.PlayerUser.Email);
         Assert.Contains("offline", notice.Subject, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("no-show", notice.HtmlBody, StringComparison.OrdinalIgnoreCase);
+
+        // THE FIGURE THE WORKER PASSED, not the figure a template renders when handed one. Every
+        // other assertion here survives `Notice()` being changed to pass a constant: a verifier
+        // substituted a hard-coded `0m` for `refundedCredits` at the CALL SITE and the whole suite
+        // stayed green at 1019, so a member whose ledger holds +8.00 would have been mailed
+        // "Refunded 0.00 credits" with nothing to notice it. The templates are pinned letter by
+        // letter one layer down; this is the wiring, which is where the money actually travels.
+        //
+        // `NoShowWorker`'s own doc records this exact slot shipping wrong once already — the net
+        // figure passed into the gross slot, mailing "Refunded 35.00 credits" against a ledger
+        // holding +50.00 and -15.00. It had no pin then either.
+        var refund = Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.CancellationRefund)
+            .ToListAsync());
+        Assert.Equal(8m, refund.AmountCredits);
+        Assert.Contains(refund.AmountCredits.ToString("0.00", CultureInfo.InvariantCulture), notice.HtmlBody);
+        // …and the court and club it names are the ones this booking is on, which the same
+        // substitution showed were equally free to be anything.
+        Assert.Contains(host.Courts[0].Name, notice.HtmlBody);
     }
 
     /// <summary>
@@ -1206,6 +1226,16 @@ public class PeripheralHealthTests
         Assert.Contains("offline", notice.Subject, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("when it reconnects", notice.HtmlBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("out of service", notice.HtmlBody, StringComparison.OrdinalIgnoreCase);
+
+        // The figure the worker passed, for the same reason as its twin above: substituting a
+        // constant at the CALL SITE left every other assertion in this file green. Both branches
+        // need it, because they are two separate call sites into two separate templates.
+        var refund = Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id && l.Type == LedgerEntryType.CancellationRefund)
+            .ToListAsync());
+        Assert.Equal(8m, refund.AmountCredits);
+        Assert.Contains(refund.AmountCredits.ToString("0.00", CultureInfo.InvariantCulture), notice.HtmlBody);
+        Assert.Contains(host.Courts[0].Name, notice.HtmlBody);
     }
 
     /// <summary>
