@@ -78,10 +78,20 @@ const START_ERRORS: Record<string, string> = {
  * the new price by pressing the button again, deliberately.
  * </p>
  */
+/**
+ * The figures a refusal restated, held so the screen can show them and the next press pay at
+ * them. A named type rather than an inline object literal in the generic below: lizard's .tsx
+ * lexer reads the `<` of `React.Dispatch<...>` as a JSX tag when braces follow inside it, never
+ * finds the close, and swallows the rest of the file into `submit` — which then measured 72
+ * NLOC / 27 CCN / 133 length and failed `make complexity` on a function nobody had grown. Same
+ * family as the bare-apostrophe and bare-`<` traps already noted in this file.
+ */
+type RestatedQuote = { rate: number; credits: number };
+
 function reQuote(
   payload: Record<string, unknown>,
   setOptions: React.Dispatch<React.SetStateAction<TopUpOptions | null>>,
-  setRestated: React.Dispatch<React.SetStateAction<{ rate: number; credits: number } | null>>,
+  setRestated: React.Dispatch<React.SetStateAction<RestatedQuote | null>>,
 ): void {
   const rate = Number(payload.conversion_rate);
   const credits = Number(payload.quoted_credits);
@@ -108,7 +118,7 @@ export default function TopUpPage() {
    * the payment is held HERE rather than sent on to PayFast. It carries the figures the
    * server registered, and the member's next press proceeds at those.
    */
-  const [restated, setRestated] = useState<{ rate: number; credits: number } | null>(null);
+  const [restated, setRestated] = useState<RestatedQuote | null>(null);
 
   const loadOptions = useCallback(() => {
     endpoints.topupOptions()
@@ -224,12 +234,18 @@ export default function TopUpPage() {
               <p className="text-[11px] text-text-muted mt-2">
                 {/*
                   The class label survives a restatement, and stays true through one. A headed
-                  run against the other lane's fix showed "At 2.4 credits / R1 (regular rate)" —
+                  run against the other lane fix showed "At 2.4 credits / R1 (regular rate)" —
                   the new number beside the old reason for it, a second small untruth arriving
                   with the fix for the first. That lane dropped the label to avoid it. It does
                   not have to be dropped: the 409 the server refuses with carries `member_class`
                   alongside the new rate, so `reQuote` moves both together and the line names
                   the right class rather than none.
+
+                  Not one apostrophe in this block, deliberately — the same trap the paragraph
+                  further down carries a note about, and this file now holds the second bare
+                  one, which is one more than it resyncs from. Writing the possessive of "lane"
+                  here reported submit at 72 NLOC / 27 CCN / 133 length and turned the gate red
+                  on a line nobody had touched.
                 */}
                 At {formatRate(options.conversion_rate)} credits / R1 ({options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"}).
                 Your rate is fixed the moment the club registers this payment, and it can't change while you're at PayFast.
