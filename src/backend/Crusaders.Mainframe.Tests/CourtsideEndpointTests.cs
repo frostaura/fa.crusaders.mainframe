@@ -153,6 +153,76 @@ public sealed class CourtsideEndpointTests
         return await db.Bookings.IgnoreQueryFilters().AsNoTracking().SingleAsync(b => b.Id == s.BookingId);
     }
 
+    // ---- the club's decision reaches the courtside touchpoints (finding K-F1) --------
+
+    /// <summary>Moves the seeded player into <paramref name="status"/>, changing nothing else.</summary>
+    private static async Task SetMembershipAsync(TestWebAppFactory factory, Seeded s, MembershipStatus status)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var membership = await db.Memberships.IgnoreQueryFilters().SingleAsync(m => m.UserId == s.PlayerUserId);
+        membership.Status = status;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// A member the club has not approved opens nothing at the desk kiosk either.
+    ///
+    /// <para>
+    /// The filter has lived in <c>CourtActivationService.CandidatesAsync</c> and
+    /// <c>FindForUserAsync</c> since suspension shipped and <b>no test anywhere asserted
+    /// it</b> — every courtside test seeds an Active membership, so the clause could have
+    /// been deleted outright and the suite would have stayed green. These are the two
+    /// endpoints that reach that clause; the box's own paths are pinned in
+    /// <c>DeviceEventHttpTests</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Answered as an ordinary "no booking" rather than a named refusal: the member was
+    /// told why by email, and a kiosk that named the reason would be announcing it to
+    /// whoever is standing at the court.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("pin", MembershipStatus.Active, true)]
+    [InlineData("pin", MembershipStatus.Suspended, false)]
+    [InlineData("pin", MembershipStatus.Rejected, false)]
+    [InlineData("pin", MembershipStatus.PendingApproval, false)]
+    [InlineData("qr", MembershipStatus.Active, true)]
+    [InlineData("qr", MembershipStatus.Suspended, false)]
+    [InlineData("qr", MembershipStatus.Rejected, false)]
+    [InlineData("qr", MembershipStatus.PendingApproval, false)]
+    public async Task Only_an_active_member_activates_at_the_courtside_touchpoints(
+        string method, MembershipStatus status, bool activated)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var s = await SeedAsync(factory);
+        await SetMembershipAsync(factory, s, status);
+        var client = AdminClient(factory, s);
+
+        var response = method == "pin"
+            ? await client.PostAsJsonAsync($"/api/v1/court/{s.CourtNumber}/pin/match", new { Pin })
+            : await client.PostAsJsonAsync($"/api/v1/court/{s.CourtNumber}/qr/match",
+                new { Token = await TestAccessCodes.MintIdentAsync(factory.Services, s.TenantId, s.Slug, s.PlayerUserId) });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        // A barred member's booking is simply not in the candidate set, so both endpoints
+        // answer the shape they already had for "nobody here has a booking" — `matched:
+        // false`, with no `activated` key at all. That is the whole point of enforcing this
+        // on the candidate set: no new refusal has to be routed through four screens.
+        Assert.Equal(activated, json.GetProperty("matched").GetBoolean());
+        Assert.Equal(activated, json.TryGetProperty("activated", out var flag) && flag.GetBoolean());
+
+        // The money is the point: a refused activation charges nothing and stamps nothing,
+        // so the booking still reaches the no-show sweep as the absence it is.
+        Assert.Equal(activated ? 92m : 100m, await BalanceAsync(factory, s));
+        Assert.Equal(activated, (await BookingAsync(factory, s)).CheckedInAt is not null);
+    }
+
     // ---- PIN ---------------------------------------------------------------
 
     /// <summary>

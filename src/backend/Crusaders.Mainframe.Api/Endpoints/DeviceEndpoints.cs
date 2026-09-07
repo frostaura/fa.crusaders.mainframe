@@ -92,6 +92,19 @@ public static class DeviceEndpoints
             {
                 slice_minutes = s.SliceMinutes,
                 grace_window_minutes = s.GraceWindowMinutes,
+                // The longest walk-up this club will actually sell — the same bound
+                // WalkUpForDeviceAsync applies, min(club cap, relay hard cap), so the box
+                // is never told a number the API will refuse.
+                //
+                // Sent because it was not (finding M-F1): a club that lowered its walk-up
+                // maximum to 20 left the box advertising 15/30/45/60 on its minute buttons
+                // and the API refusing three of the four with `minutes_out_of_range` — a
+                // configuration change the member got blamed for, at a court with nobody at
+                // the desk. The console now warns an admin whose button map exceeds this
+                // (see AdminDevices), and the box has the number it needs to grey the
+                // button out or refuse it locally rather than round-tripping to a refusal.
+                walk_up_max_minutes = Math.Min(s.WalkUpMaxMinutes, RelayHardCap.Minutes),
+
                 // What each of the eight buttons does, by physical position. Sent on
                 // every heartbeat rather than only when it changes: a box that
                 // rebooted and missed the change would otherwise open the wrong

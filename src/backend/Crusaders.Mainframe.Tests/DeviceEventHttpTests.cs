@@ -2225,6 +2225,386 @@ public sealed class DeviceEventHttpTests
         Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_adjusted"));
     }
 
+    // ---- the box can say the club is shut (finding M-F5) -----------------------------
+
+    /// <summary>
+    /// Closes the club around <b>now</b>, deterministically at every hour of the day.
+    ///
+    /// <para>
+    /// A fixed window would be open for part of the day and shut for the rest, which is the
+    /// wall-clock flake <c>memory/gotchas.md</c> records twice over. The window is chosen
+    /// from the current minute-of-day instead — late in the day picks the first hour,
+    /// early in the day picks the last — so it never contains now and never wraps midnight,
+    /// which the operating-hours rule cannot express anyway. Returns what the API should
+    /// quote back.
+    /// </para>
+    /// </summary>
+    private static async Task<(string OpensAt, string ClosesAt)> CloseTheClubAsync(TestWebAppFactory factory, Box box)
+    {
+        var minuteOfDay = (DateTimeOffset.UtcNow.Hour * 60) + DateTimeOffset.UtcNow.Minute;
+        var (open, close) = minuteOfDay >= 720 ? (0, 60) : (1380, 1440);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var row = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(t => t.TenantId == box.TenantId);
+        row.SettingsJson = row.SettingsJson.TrimEnd('}') + $",\"day_start_minute\":{open},\"day_end_minute\":{close}}}";
+        await db.SaveChangesAsync();
+
+        return ($"{open / 60:D2}:{open % 60:D2}", $"{close / 60:D2}:{close % 60:D2}");
+    }
+
+    /// <summary>
+    /// A walk-up at a shut club names the hours. It used to collapse into the catch-all
+    /// <c>walk_up_refused</c>, throwing away the two times the member needs — and, because
+    /// that code is in no firmware table either, painting SEE THE DESK at a locked club
+    /// after hours, when there is no desk. The Settings page promises the API enforces these
+    /// hours; this is the half of that promise the box could not keep.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_walk_up_at_a_closed_club_is_refused_with_the_opening_hours()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (opensAt, closesAt) = await CloseTheClubAsync(factory, box);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 30)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("club_closed", body.GetProperty("error").GetString());
+        Assert.Equal(opensAt, body.GetProperty("opens_at").GetString());
+        Assert.Equal(closesAt, body.GetProperty("closes_at").GetString());
+
+        // Refused, so nothing was sold and nothing was charged.
+        Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
+    }
+
+    // ---- the club's walk-up cap reaches the box (finding M-F1) ------------------------
+
+    /// <summary>
+    /// The heartbeat carries the longest walk-up this club will sell, so the box is never
+    /// advertising a minute button the API is about to refuse. A club that lowered its cap
+    /// to 20 left every box showing 15/30/45/60 and three of the four pressing through to
+    /// <c>minutes_out_of_range</c> — a configuration change the member got blamed for. The
+    /// number is the same bound the walk-up applies, <c>min(club cap, relay hard cap)</c>,
+    /// so the two cannot disagree.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(null, RelayHardCap.Minutes)]
+    [InlineData(20, 20)]
+    [InlineData(60, 60)]
+    public async Task Heartbeat_carries_the_clubs_walk_up_maximum(int? configured, int expected)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+
+        if (configured is { } cap)
+        {
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(t => t.TenantId == box.TenantId);
+            row.SettingsJson = row.SettingsJson.TrimEnd('}') + $",\"walk_up_max_minutes\":{cap}}}";
+            await db.SaveChangesAsync();
+        }
+
+        var body = await HeartbeatAsync(factory, box);
+
+        Assert.Equal(expected, body.GetProperty("config").GetProperty("walk_up_max_minutes").GetInt32());
+
+        // And it is the number the walk-up itself enforces, not a second opinion: one more
+        // minute than the advertised cap is refused with that same figure.
+        var refusal = await factory.CreateClient().SendAsync(
+            FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: expected + 1)));
+        Assert.Equal(HttpStatusCode.BadRequest, refusal.StatusCode);
+        var refused = await refusal.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("minutes_out_of_range", refused.GetProperty("error").GetString());
+        Assert.Equal(expected, refused.GetProperty("max_minutes").GetInt32());
+    }
+
+    // ---- a working box is a reporting box (finding L-F5) -----------------------------
+
+    /// <summary>Backdates the box's last-seen, as a silence of <paramref name="minutes"/> would.</summary>
+    private static async Task<DateTimeOffset> WentQuietAsync(TestWebAppFactory factory, Box box, int minutes)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == box.DeviceId);
+        var quietAt = DateTimeOffset.UtcNow.AddMinutes(-minutes);
+        device.LastSeenAt = quietAt;
+        await db.SaveChangesAsync();
+        return quietAt;
+    }
+
+    private static async Task<Device> DeviceAsync(TestWebAppFactory factory, Box box)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.Devices.IgnoreQueryFilters().AsNoTracking().SingleAsync(d => d.Id == box.DeviceId);
+    }
+
+    /// <summary>
+    /// A box that is switching courts on is not silent. <c>LastSeenAt</c> moved on
+    /// <c>/heartbeat</c> and <c>/events</c> only, so a box whose periodic POST had stalled
+    /// while request/response still worked was alerted on as "not reporting" mid-scan, shown
+    /// as "last seen 11m ago" beside a court it had just lit, and — through §6a — had that
+    /// court's no-show penalties waived. Every device call is liveness now, and the silence
+    /// it ended is recorded on the way past, exactly as the heartbeat records it.
+    /// </summary>
+    [SkippableFact]
+    public async Task Lighting_a_booked_court_counts_as_the_box_reporting()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: 1);
+        var quietAt = await WentQuietAsync(factory, box, minutes: 20);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, ActivatePath, new { method = "qr", token = booked.Code }));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        Assert.Equal(DateTimeOffset.UtcNow, (await DeviceAsync(factory, box)).LastSeenAt!.Value, TimeSpan.FromMinutes(1));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var outage = Assert.Single(await db.DeviceOutages.IgnoreQueryFilters().Where(o => o.DeviceId == box.DeviceId).ToListAsync());
+        Assert.Equal(quietAt, outage.StartedAt, TimeSpan.FromSeconds(1));
+        Assert.NotNull(outage.EndedAt);
+    }
+
+    /// <summary>
+    /// The same for a refusal: the box called, whatever the answer was. Driven with a token
+    /// this club has never minted, so nothing else about the request could have moved the row.
+    /// </summary>
+    [SkippableFact]
+    public async Task Even_a_refused_scan_counts_as_the_box_reporting()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        await WentQuietAsync(factory, box, minutes: 20);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, ActivatePath, new { method = "qr", token = "7Q3F9KM2XZ8B" }));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("not_recognised", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("reason").GetString());
+
+        Assert.Equal(DateTimeOffset.UtcNow, (await DeviceAsync(factory, box)).LastSeenAt!.Value, TimeSpan.FromMinutes(1));
+    }
+
+    /// <summary>Selling court time is the same evidence, and the same rule.</summary>
+    [SkippableFact]
+    public async Task Selling_a_walk_up_counts_as_the_box_reporting()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        await WentQuietAsync(factory, box, minutes: 20);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 30)));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        Assert.Equal(DateTimeOffset.UtcNow, (await DeviceAsync(factory, box)).LastSeenAt!.Value, TimeSpan.FromMinutes(1));
+    }
+
+    // ---- a membership the club has barred, at the box (finding K-F1) -----------------
+    //
+    // The critical of round 3: a suspended member walked up to the touchpad, was sold fifty
+    // credits of court time and had the lights switched on, twice, while the console's own
+    // suspend modal promised in those words that they could not "open a court at the box".
+    // The guards existed on the pre-booked path and the roster and nowhere else, because a
+    // walk-up CREATES its booking and so never met a candidate set.
+    //
+    // These drive every door a box can reach, over the real wire, and the theory varies the
+    // MEMBERSHIP ROW alone — an Active row on the same fixture must still sell, or the tests
+    // would pass just as well against a build that refused everybody.
+
+    /// <summary>Moves the box's member into <paramref name="status"/>, changing nothing else.</summary>
+    private static async Task SetMembershipAsync(TestWebAppFactory factory, Box box, MembershipStatus status)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var membership = await db.Memberships.IgnoreQueryFilters().SingleAsync(m => m.UserId == box.MemberId);
+        membership.Status = status;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Buying court time at the box, by membership state. Only an Active member may;
+    /// suspended, rejected and still-awaiting-approval are all refused, and refused
+    /// <b>before</b> anything is charged — the whole point is that no money moves.
+    ///
+    /// <para>
+    /// <c>not_recognised</c> is the answer on purpose: it is the one walk-up refusal whose
+    /// firmware row carries <c>recognised:false</c>, so no button window is armed for a
+    /// barred member, and its screen is SEE THE DESK, which is exactly what they must do.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(MembershipStatus.Active, true)]
+    [InlineData(MembershipStatus.Suspended, false)]
+    [InlineData(MembershipStatus.Rejected, false)]
+    [InlineData(MembershipStatus.PendingApproval, false)]
+    public async Task Only_an_active_member_can_buy_court_time_at_the_box(MembershipStatus status, bool sold)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        await SetMembershipAsync(factory, box, status);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 30)));
+
+        if (sold)
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(184m, await BalanceAsync(factory, box.MemberId));
+            return;
+        }
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("not_recognised", body.GetProperty("error").GetString());
+
+        // No booking, no debit, no lit court. A refusal that arrives after the charge is a
+        // refund to write rather than a sale not made.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Empty(await db.Bookings.IgnoreQueryFilters().Where(b => b.UserId == box.MemberId).ToListAsync());
+        Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
+    }
+
+    /// <summary>
+    /// The second door. A booking-activation code names its booking outright, so
+    /// <c>ForBookingCodeAsync</c> looked the row up by id and never met the candidate-set
+    /// filter that drops a barred member — a suspended member's own code lit their court and
+    /// charged them for it. Answered <c>no_booking</c>, the same sentence the ident-code
+    /// branch has always given, because a box that named the suspension would be announcing
+    /// it to whoever is standing at the court.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(MembershipStatus.Active, true)]
+    [InlineData(MembershipStatus.Suspended, false)]
+    [InlineData(MembershipStatus.Rejected, false)]
+    [InlineData(MembershipStatus.PendingApproval, false)]
+    public async Task Only_an_active_member_can_light_a_booked_court_from_the_box(MembershipStatus status, bool lit)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: 1);
+        await SetMembershipAsync(factory, box, status);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, ActivatePath, new { method = "qr", token = booked.Code }));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(lit, body.GetProperty("activated").GetBoolean());
+        Assert.Equal(lit ? "ok" : "no_booking", body.GetProperty("reason").GetString());
+
+        var after = await BookingAsync(factory, booked.BookingId);
+        Assert.Equal(lit, after.CheckedInAt is not null);
+    }
+
+    /// <summary>
+    /// The same door with the other kind of code. A member-ident code searches the box's
+    /// courts through <c>FindForUserAsync</c>, which has carried the filter all along — this
+    /// pins that it still does, so a later tidy-up of the two branches cannot quietly drop
+    /// one of them.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(MembershipStatus.Active, true)]
+    [InlineData(MembershipStatus.Suspended, false)]
+    public async Task Only_an_active_member_can_light_a_booked_court_with_an_ident_code(MembershipStatus status, bool lit)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: 1);
+        await SetMembershipAsync(factory, box, status);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, ActivatePath, new { method = "qr", token = await QrCodeAsync(factory, box) }));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(lit, body.GetProperty("activated").GetBoolean());
+        Assert.Equal(lit, (await BookingAsync(factory, booked.BookingId)).CheckedInAt is not null);
+    }
+
+    /// <summary>
+    /// And the cached door: a barred member is off the roster the box decides against while
+    /// the link is down. Suspension that held only while the API was reachable would fail in
+    /// exactly the window a club most wants it to hold.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(MembershipStatus.Active, 1)]
+    [InlineData(MembershipStatus.Suspended, 0)]
+    [InlineData(MembershipStatus.Rejected, 0)]
+    [InlineData(MembershipStatus.PendingApproval, 0)]
+    public async Task The_roster_carries_only_active_members(MembershipStatus status, int entries)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        await BookAsync(factory, box, courtNumber: 2, startsInMinutes: 5);
+        await SetMembershipAsync(factory, box, status);
+
+        var body = await HeartbeatAsync(factory, box);
+
+        Assert.Equal(entries, body.GetProperty("roster").GetArrayLength());
+    }
+
+    /// <summary>
+    /// The deliberate carve-out, pinned so nobody "completes" the fix by closing it.
+    ///
+    /// <para>
+    /// <c>/events</c> is not the API deciding whether lights come on; it is a report that
+    /// they already did. The roster drops a barred member from every push, so the only way
+    /// one reaches this handler is a box that admitted them from a cache fetched before the
+    /// club's decision — the relay has run and the member has played. Refusing the
+    /// attendance would unlight nothing: it would make them a no-show, refund the court they
+    /// used and waive the penalty. The money follows the lights, here as everywhere else.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_scan_the_box_had_already_admitted_offline_is_still_recorded_for_a_suspended_member()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: -10);
+        await SetMembershipAsync(factory, box, MembershipStatus.Suspended);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, EventsPath, Batch(Activation(1, subject: booked.Code, court: 1))));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        Assert.NotNull((await BookingAsync(factory, booked.BookingId)).CheckedInAt);
+
+        // And the sweep leaves it alone: no refund of a court that was played on, no waived
+        // penalty for the club to absorb.
+        await SweepAsync(factory);
+        var ledger = await LedgerAsync(factory, booked.BookingId);
+        Assert.DoesNotContain(ledger, l => l.Type == LedgerEntryType.CancellationRefund);
+        Assert.DoesNotContain(ledger, l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
     private static async Task<bool> CodeIsLiveAsync(TestWebAppFactory factory, string code)
     {
         using var scope = factory.Services.CreateScope();

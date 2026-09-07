@@ -5,7 +5,7 @@ import { describeDeviceError } from "../lib/deviceErrors";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
-import { ButtonMapEditor, buttonMapWithinCap, RELAYS } from "../components/ButtonMapEditor";
+import { ButtonMapEditor, buttonMapWithinCap, MAX_GRANT_MINUTES, RELAYS } from "../components/ButtonMapEditor";
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
 import { useToast } from "../components/Toast";
 
@@ -67,6 +67,79 @@ const HEARTBEAT_FALLBACK_S = 60;
  * </p>
  */
 const MISSED_BEATS_BEFORE_OFFLINE = 3;
+
+/**
+ * How often the page re-reads the boxes, milliseconds.
+ *
+ * <p>
+ * This screen's entire content is liveness — "online" / "last seen Nm ago" — and the
+ * peripheral-health email tells an admin to open it and watch a box recover. It loaded once
+ * on mount and never again, so the page the alert LINKS TO showed the state at the moment
+ * it was opened: a tab left open read "online" for a box six and a half minutes dark, more
+ * than double the offline threshold and long after the club had been emailed about it,
+ * while a second tab on the same URL opened two seconds later read "last seen 6m ago"
+ * (finding M-F2).
+ * </p>
+ *
+ * <p>
+ * Fifteen seconds is the firmware's own minimum heartbeat interval
+ * (`bridgelogic::kMinHeartbeatMs`, mirrored in HEARTBEAT_MIN_S above), so the page cannot
+ * be more than one beat behind the fastest box a club can configure. Only the device list
+ * is re-read; the settings and courts behind it change when an admin changes them.
+ * </p>
+ */
+const REFRESH_MS = 15_000;
+
+/** The grant a `minutes:N` button makes, or null for any other action. */
+function grantMinutes(wire: string): number | null {
+  const text = wire.trim().toLowerCase();
+  if (!text.startsWith("minutes:")) return null;
+  const minutes = Number(text.slice(8) || "15");
+  return Number.isFinite(minutes) ? minutes : null;
+}
+
+/** The 1-based button numbers in this map that grant more than `cap` minutes. */
+function buttonsOverCap(map: string[], cap: number): number[] {
+  const over: number[] = [];
+  map.forEach((wire, index) => {
+    const minutes = grantMinutes(wire);
+    if (minutes !== null && minutes > cap) over.push(index + 1);
+  });
+  return over;
+}
+
+/**
+ * Says which minute buttons the club's own walk-up maximum will refuse.
+ *
+ * <p>
+ * The editor validates against the relay hard cap of 90 and nothing else, so lowering
+ * `walk_up_max_minutes` to 20 left every box still advertising 15/30/45/60 while the API
+ * refused three of the four presses with `minutes_out_of_range` — the club's own
+ * configuration change, blamed on the member, at a court with nobody at the desk
+ * (finding M-F1). The word "walk-up" did not appear on this page at all.
+ * </p>
+ *
+ * <p>
+ * A warning rather than a refusal: the cap can be raised afterwards, and a button map that
+ * anticipates that is not wrong. Blocking the save would also deadlock the two screens
+ * against each other.
+ * </p>
+ */
+function WalkUpCapNotice({ map, cap }: { map: string[]; cap: number | null }) {
+  if (cap === null) return null;
+  const over = buttonsOverCap(map, cap);
+  if (over.length === 0) return null;
+
+  const one = over.length === 1;
+  return (
+    <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+      {one ? `Button ${over[0]} grants` : `Buttons ${over.join(", ")} grant`} more than this club's
+      walk-up maximum of {cap} minutes, so the box refuses {one ? "that press" : "those presses"} and
+      sends the member to the desk. Raise <b>Walk-up maximum (minutes)</b> under Admin settings, or
+      lower {one ? "the button" : "the buttons"}.
+    </p>
+  );
+}
 
 /** How long since the last beat before this box counts as offline, seconds. */
 function offlineAfterSeconds(device: AdminDevice, tenantSeconds: number | null): number {
@@ -171,10 +244,12 @@ function CourtListEditor({
  * "the club's map".
  */
 function DeviceButtonMapPanel({
-  device, clubMap, onSave, onClose,
+  device, clubMap, walkUpMax, onSave, onClose,
 }: {
   device: AdminDevice;
   clubMap: string[];
+  /** The club's walk-up maximum, for the notice. Null when settings have not loaded. */
+  walkUpMax: number | null;
   onSave: (map: string[] | null) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -205,6 +280,7 @@ function DeviceButtonMapPanel({
         </label>
       </div>
       {own && <ButtonMapEditor value={draft} onChange={setDraft} disabled={saving} labelPrefix={device.name} />}
+      <WalkUpCapNotice map={own ? draft : clubMap} cap={walkUpMax} />
       <div className="flex gap-2">
         <Button className="h-8 px-3 text-xs" onClick={() => void save()} disabled={saving || (own && !buttonMapWithinCap(draft))}>
           {saving ? "Saving…" : "Save buttons"}
@@ -221,6 +297,8 @@ function DeviceButtonMapPanel({
 type DeviceActions = {
   details: (name: string, courtNumbers: number[]) => Promise<boolean>;
   buttonMap: (map: string[] | null) => Promise<boolean>;
+  /** Out of service, or back in. See DeviceRow for what the switch actually does. */
+  setEnabled: (enabled: boolean) => Promise<void>;
   remove: () => Promise<void>;
 };
 
@@ -286,13 +364,22 @@ function DeviceRowHeader({ device, online }: { device: AdminDevice; online: bool
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        {online
+        {device.enabled && online
           ? <Wifi className="h-4 w-4 text-emerald-500" aria-label="online" />
-          : <WifiOff className="h-4 w-4 text-slate-300" aria-label="offline" />}
+          : <WifiOff className="h-4 w-4 text-slate-300" aria-label={device.enabled ? "offline" : "out of service"} />}
         <span className="font-medium">{device.name}</span>
-        <Badge tone={online ? "success" : "muted"}>
-          {online ? "online" : `last seen ${relative(device.last_seen_at)}`}
-        </Badge>
+        {/* A box an admin switched off is not "offline" — nobody expects it to call in,
+            and showing it beside the boxes that have genuinely gone quiet is how a club
+            learns to ignore the state that matters. Silence is loud, though: a box that
+            has gone quiet on its own gets the danger tone, not the neutral grey it had
+            while a louder amber "New" badge sat next to it (M-F2, secondary). */}
+        {!device.enabled
+          ? <Badge tone="muted">out of service</Badge>
+          : (
+            <Badge tone={online ? "success" : "danger"}>
+              {online ? "online" : `not reporting — last seen ${relative(device.last_seen_at)}`}
+            </Badge>
+          )}
         {/* A box registers itself with a generated name and default courts. Until an
             admin has looked, the club has a live box whose relays probably point at the
             wrong courts — which is a league night with the wrong lights on, not a
@@ -314,11 +401,13 @@ function DeviceRowHeader({ device, online }: { device: AdminDevice; online: bool
 }
 
 function DeviceRow({
-  device, courts, clubMap, actions, offlineAfter,
+  device, courts, clubMap, walkUpMax, actions, offlineAfter,
 }: {
   device: AdminDevice;
   courts: AdminCourt[];
   clubMap: string[];
+  /** The club's walk-up maximum, for the button-map notice. */
+  walkUpMax: number | null;
   actions: DeviceActions;
   /** Seconds since the last beat before this box is offline. See offlineAfterSeconds. */
   offlineAfter: number;
@@ -338,7 +427,26 @@ function DeviceRow({
       )}
 
       {editing === "buttons" && (
-        <DeviceButtonMapPanel device={device} clubMap={clubMap} onSave={actions.buttonMap} onClose={() => setEditing(null)} />
+        <DeviceButtonMapPanel
+          device={device}
+          clubMap={clubMap}
+          walkUpMax={walkUpMax}
+          onSave={actions.buttonMap}
+          onClose={() => setEditing(null)}
+        />
+      )}
+
+      {/* What "out of service" actually means, said on the rows where it is in force
+          rather than buried in a tooltip. All three sentences are things the code does:
+          DeviceIdentity refuses a disabled box 403 on every endpoint,
+          PeripheralHealthWorker filters `d.Enabled`, and DeviceOutageIndex builds its
+          silence index from the enabled boxes alone. */}
+      {!device.enabled && (
+        <p className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+          Out of service. The API refuses this box, so it switches nothing on; the club is not
+          alerted about its silence; and {describeCourts(device.court_numbers)} are judged by whatever
+          other boxes drive them.
+        </p>
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -351,6 +459,30 @@ function DeviceRow({
         {isBox && hasOwnMapField && editing === null && (
           <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => setEditing("buttons")}>
             Edit buttons
+          </Button>
+        )}
+
+        {/* Out of service — the control the API, the health sweep and the settlement model
+            were all written around and that no screen offered (finding M-F3). Without it a
+            box that is broken or has been unplugged for good stays enabled for ever, so the
+            club is alerted about a silence it created, and — because a court is "dark" only
+            when every ENABLED box driving it is dark — every no-show on that box's courts is
+            refunded with no penalty, indefinitely. The only lever the page had was Delete,
+            which the page itself describes as a reset: the box re-registers on its next
+            heartbeat, so it is useless for a box that is still powered.
+
+            Confirmed on the way out, because a live box stops working; plain on the way
+            back, because restoring a box is not a decision anyone regrets. */}
+        {device.enabled ? (
+          <ConfirmButton
+            idleLabel="Take out of service"
+            confirmLabel="Out of service? The box stops switching lights on."
+            onConfirm={() => actions.setEnabled(false)}
+            className="h-8 px-3"
+          />
+        ) : (
+          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => void actions.setEnabled(true)}>
+            Put back in service
           </Button>
         )}
 
@@ -408,6 +540,32 @@ function useDeviceActions(reload: () => Promise<void>) {
         return false;
       }
     },
+    /**
+     * Out of service, or back in. `enabled` has been on the API and on the typed client
+     * since the row existed and nothing ever sent it — the two mutations above send
+     * `{name, court_numbers}` and `{button_map}` and nothing else.
+     */
+    setEnabled: async (enabled) => {
+      try {
+        await endpoints.adminDeviceUpdate(device.id, { enabled });
+        toast.push({
+          tone: "success",
+          // Both sentences are consequences the code actually has: the health sweep
+          // filters on Enabled, and so does the silence index the no-show waiver reads.
+          text: enabled
+            ? `${device.name} is back in service. It works again on its next call, and the club is alerted if it goes quiet.`
+            : `${device.name} is out of service. It switches nothing on, the club is not alerted about it, and its courts are judged by whatever other boxes drive them.`,
+          durationMs: 8000,
+        });
+        await reload();
+      } catch (e) {
+        toast.push({
+          tone: "danger",
+          text: describeDeviceError(e, enabled ? "Could not put that box back in service." : "Could not take that box out of service."),
+          durationMs: 8000,
+        });
+      }
+    },
     remove: async () => {
       try {
         await endpoints.adminDeviceDelete(device.id);
@@ -432,6 +590,19 @@ export function AdminDevicesPage() {
   const [buttonMap, setButtonMap] = useState<string[]>([]);
   const [savingMap, setSavingMap] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  /**
+   * Re-reads the boxes and nothing else — this is the only thing on the page that goes
+   * stale on its own. Settings and courts change when an admin changes them, and
+   * re-fetching them on a timer would fight the club button map an admin is editing
+   * below.
+   */
+  const refreshDevices = useCallback(async () => {
+    setDevices(await endpoints.adminDevicesList());
+    setCheckedAt(new Date().toISOString());
+  }, []);
 
   const load = useCallback(async () => {
     const [list, config, courtList] = await Promise.all([
@@ -443,13 +614,52 @@ export function AdminDevicesPage() {
     setSettings(config);
     setButtonMap(config.button_map);
     setCourts(courtList);
+    setCheckedAt(new Date().toISOString());
     setLoading(false);
   }, []);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- as above
   useEffect(() => { void load(); }, [load]);
 
+  /**
+   * Keeps the liveness live (finding M-F2).
+   *
+   * <p>
+   * No `mounted` ref and no early-return guard: StrictMode runs mount → cleanup → mount,
+   * and a ref written only on cleanup is already false before the first tick — that exact
+   * shape has produced two defects in this repo (a confirm button stuck on "Working…" and
+   * a dead retry button on the outage screen). Clearing the interval is the whole cleanup,
+   * and a second mount simply starts a second interval and clears the first.
+   * </p>
+   *
+   * <p>
+   * A failed poll is swallowed: the page keeps whatever it last read and the "checked"
+   * line stops advancing, which is the honest thing for it to say. A toast every fifteen
+   * seconds while a laptop is off the wifi would be worse than the staleness.
+   * </p>
+   */
+  useEffect(() => {
+    const timer = setInterval(() => { void refreshDevices().catch(() => {}); }, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [refreshDevices]);
+
+  async function refreshNow() {
+    setRefreshing(true);
+    try {
+      await refreshDevices();
+    } catch (e) {
+      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not re-read the boxes.") });
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const actionsFor = useDeviceActions(load);
+
+  // The bound a minute button is actually held to: the club's own walk-up maximum, never
+  // above the relay's hard cap. The editor already refuses anything past the hard cap; the
+  // club's cap is the half nothing on this page knew about.
+  const walkUpCap = settings ? Math.min(settings.walk_up_max_minutes, MAX_GRANT_MINUTES) : null;
 
   async function saveButtonMap() {
     if (!settings) return;
@@ -496,10 +706,25 @@ export function AdminDevicesPage() {
       <DeviceApiKeyPanel />
 
       <Card className="p-5">
-        <div className="mb-3 flex items-center gap-2">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
           <Cpu className="h-5 w-5 text-slate-400" />
           <h2 className="text-lg font-semibold">Connected boards</h2>
+          {/* The outage email says "open the Devices page" and watch the box come back, so
+              the page has to be able to say when it last looked and to look again on
+              demand — the Bookings screen has had a Refresh button all along, and it is
+              far less time-critical than this one. */}
+          <Button
+            variant="outline"
+            className="ml-auto h-8 px-3 text-xs"
+            onClick={() => void refreshNow()}
+            disabled={refreshing || loading}
+          >
+            {refreshing ? "Checking…" : "Refresh"}
+          </Button>
         </div>
+        <p className="mb-3 text-xs text-slate-500">
+          {checkedAt ? `Checked ${relative(checkedAt)}` : "Checking…"} · this page re-reads the boxes every {REFRESH_MS / 1000} seconds.
+        </p>
 
         {loading ? (
           <p className="text-sm text-slate-500">Loading…</p>
@@ -515,6 +740,7 @@ export function AdminDevicesPage() {
                 device={device}
                 courts={courts}
                 clubMap={buttonMap}
+                walkUpMax={walkUpCap}
                 actions={actionsFor(device)}
                 offlineAfter={offlineAfterSeconds(device, settings?.heartbeat_seconds ?? null)}
               />
@@ -536,6 +762,8 @@ export function AdminDevicesPage() {
         </p>
 
         <ButtonMapEditor value={buttonMap} onChange={setButtonMap} disabled={savingMap || loading} />
+
+        <WalkUpCapNotice map={buttonMap} cap={walkUpCap} />
 
         <div className="mt-4">
           <Button onClick={() => void saveButtonMap()} disabled={savingMap || loading || !buttonMapWithinCap(buttonMap)}>

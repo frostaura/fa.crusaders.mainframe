@@ -286,6 +286,18 @@ public static class DeviceEventEndpoints
     /// offline for longer than the grace window uploads scans the sweep has already ruled
     /// on; see <see cref="SettleAsync"/> for what a settled no-show becomes.
     /// </para>
+    ///
+    /// <para>
+    /// <b>A barred membership is deliberately NOT a refusal here</b>, unlike on
+    /// <c>/walkup</c> and <c>/activate</c> (finding K-F1). Those two are the API deciding
+    /// whether lights come on; this is a report that they already did. The roster excludes a
+    /// barred member from every push, so the only way one reaches this handler is a box that
+    /// admitted them from a cache fetched before the club's decision — the member is on the
+    /// court and the relay has run. Refusing the attendance would not unlight anything; it
+    /// would make them a no-show, refund the court they played and charge the club a penalty
+    /// waiver. Recording it keeps the money matching the lights, which is the settlement
+    /// model's rule everywhere else too.
+    /// </para>
     /// </summary>
     private static async Task<ActivationOutcome> ActivationOutcomeAsync(
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
@@ -698,6 +710,13 @@ public static class DeviceEventEndpoints
     {
         var (db, bookings, activation, identities, settingsAccessor, _) = services;
 
+        var settings = await settingsAccessor.GetAsync(ct);
+
+        // A box selling court time is a box that is reporting (finding L-F5). Recorded
+        // before the decision, so a refused purchase counts as liveness too — the box
+        // called, whatever the answer was.
+        await DeviceSilenceLog.NoteContactAsync(db, device, settings, DateTimeOffset.UtcNow, ct);
+
         if (RefuseNonce(req) is { } badNonce) return badNonce;
         var reference = WalkUpReference(device.Id, req.Nonce!);
 
@@ -706,7 +725,6 @@ public static class DeviceEventEndpoints
         // has already been made.
         if (await ReplayAsync(reference, req, services, ct) is { } replayed) return replayed;
 
-        var settings = await settingsAccessor.GetAsync(ct);
         if (RefuseFields(device, req, settings) is { } badRequest) return badRequest;
 
         var court = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == req.Court && c.IsActive, ct);
@@ -714,6 +732,34 @@ public static class DeviceEventEndpoints
 
         var userId = await identities.ResolveAsync(req.Method, req.Token, ct);
         if (userId is null) return Results.BadRequest(new { error = "not_recognised" });
+
+        // A member the club has barred cannot buy court time here (finding K-F1). This was
+        // the one door into the money with no membership test on it: the app's booking route
+        // refuses with `member_suspended`, and the activation paths and the cached roster
+        // both drop a barred member's bookings — but a walk-up CREATES its booking, so it
+        // never met a candidate set and never met a filter. A member suspended at the desk
+        // walked up, was charged fifty credits and had the court lit, twice, while the
+        // console's own suspend modal promised they could not "open a court at the box".
+        //
+        // Checked BEFORE CreateWalkUpAsync, not after: everything below this line commits
+        // money, and a refusal that arrives after the debit is a refund to write rather than
+        // a sale not made.
+        //
+        // Answered as `not_recognised` — the same refusal an unreadable code gets — for two
+        // reasons. It is the only walk-up refusal whose firmware row sets `recognised:false`
+        // (WalkUp.cpp kErrors), so the box arms no button window for a barred member, which
+        // is the behaviour wanted; and it puts SEE THE DESK on the glass, which is exactly
+        // what the member must do. Naming the suspension at the court would explain it to
+        // whoever happens to be standing there, which is the reasoning CourtActivationService
+        // already records for the pre-booked path.
+        //
+        // The REPLAY above is deliberately not gated. It is the box retrying a purchase
+        // already made and already paid for; refusing it leaves the member charged and the
+        // court dark, which is the H3 defect the nonce exists to prevent.
+        if (await MembershipAccess.IsBarredFromCourtsAsync(db, userId.Value, ct))
+        {
+            return Results.BadRequest(new { error = "not_recognised" });
+        }
 
         var created = await bookings.CreateWalkUpAsync(court.Id, userId.Value, userId.Value, req.Minutes, reference, ct);
 
@@ -896,6 +942,26 @@ public static class DeviceEventEndpoints
             BookingResult.NoTimeAvailable => Results.Conflict(new { error = "no_time_available" }),
 
             BookingResult.SlotTaken => Results.Conflict(new { error = "court_in_use" }),
+
+            // The club is shut, and the box can say so (finding M-F5). This collapsed into
+            // the catch-all below, which threw away the two times the member actually needs
+            // — at a locked club, after hours, in front of a screen reading SEE THE DESK
+            // when there is no desk. Every other refusal on this path has a purpose-written
+            // screen; this is the one the Settings page promises ("a walk-up at the box is
+            // cut short at closing") and could not deliver the other half of.
+            //
+            // `club_closed` rather than the app route's `out_of_hours`: that one means "the
+            // slot you picked falls outside opening hours" and can be answered by picking
+            // another slot, while this one means "the club is shut right now" and cannot.
+            // 400, like the catch-all it replaces, so a firmware build that does not yet
+            // know the code still falls through byStatus(400) to the screen it shows today
+            // rather than to 409's COURT NOT FREE, which would be a new lie.
+            BookingResult.OutOfHours h => Results.BadRequest(new
+            {
+                error = "club_closed",
+                opens_at = h.OpensAt,
+                closes_at = h.ClosesAt,
+            }),
 
             _ => Results.BadRequest(new { error = "walk_up_refused" }),
         };

@@ -39,7 +39,9 @@ public class DeviceActivateTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var codes = scope.ServiceProvider.GetRequiredService<AccessCodeService>();
         return new Fixture(host, scope, db, codes, ledger,
-            new DeviceActivateServices(db, codes, scope.ServiceProvider.GetRequiredService<CourtActivationService>()));
+            new DeviceActivateServices(db, codes,
+                scope.ServiceProvider.GetRequiredService<CourtActivationService>(),
+                scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>()));
     }
 
     /// <summary>The MAC every box in this suite announces. One box, so one MAC.</summary>

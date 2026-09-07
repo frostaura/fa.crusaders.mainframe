@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { AdminDevicesPage } from "./AdminDevices";
 import {
   COURTS_FIXTURE,
@@ -643,6 +643,222 @@ describe("AdminDevices", () => {
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
     expect(stub.calls.filter((c) => c.method === "PATCH")[1].raw).toBe('{"button_map":null}');
   });
+  // --- the page the outage email links to (finding M-F2) ----------------------------
+
+  /**
+   * The number of times the page has re-read the device list.
+   *
+   * `/api/v1/admin/devices/` is a prefix of `/api/v1/admin/devices/api-key`, so the count
+   * has to exclude the key — the same trap the harness's longest-prefix routing exists for.
+   */
+  const deviceReads = (stub: { calls: { method: string; path: string }[] }) =>
+    stub.calls.filter((c) => c.method === "GET" && c.path === "/api/v1/admin/devices/").length;
+
+  /**
+   * The M-F2 headline, as the finder measured it: a tab left open on this page read
+   * "online" for a box that had been dark for six and a half minutes — more than double
+   * the offline threshold, and long after the club had been emailed "court box not
+   * reporting" with a link to this very page — while a second tab on the same URL, opened
+   * two seconds later, read "last seen 6m ago".
+   *
+   * <p>
+   * The clock is faked and nothing about the fixture changes: the same box, the same
+   * `last_seen_at`, and the passage of time alone is what should move it from online to
+   * silent. A page that renders once cannot do that.
+   * </p>
+   *
+   * <p>
+   * Rendered under StrictMode, as <code>src/main.tsx</code> renders the app. The
+   * mount → cleanup → mount cycle is exactly what a `mounted`-ref guard round a poller
+   * gets wrong, and two defects in this repo have come from that shape — the interval must
+   * still be doing work after the second mount, which the exact read count below proves.
+   * </p>
+   *
+   * <p>
+   * <b>Via <code>reactStrictMode: true</code>, not a <code>&lt;StrictMode&gt;</code> element
+   * inside the page.</b> Testing Library puts the option's wrapper OUTSIDE its own
+   * <code>wrapper</code>, whereas <code>renderPage(&lt;StrictMode&gt;…&lt;/StrictMode&gt;)</code>
+   * puts it inside the harness's providers — and there it double-invokes nothing at all.
+   * Measured: a probe under <code>render(&lt;StrictMode&gt;…)</code> logs
+   * mount → cleanup → mount, the same probe under
+   * <code>renderPage(&lt;StrictMode&gt;…)</code> logs only mount. A test written the second
+   * way looks like it is guarding against the StrictMode defects and is not.
+   * </p>
+   */
+  it("keeps the liveness live on an open tab instead of freezing it at load", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const stub = stubFetch(withDevices([deviceFixture({ last_seen_at: new Date().toISOString() })]));
+
+    renderPage(<AdminDevicesPage />, { reactStrictMode: true });
+    // The initial load settles on microtasks, not on a timer.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText("online")).toBeInTheDocument();
+
+    const atLoad = deviceReads(stub);
+
+    // Thirteen fifteen-second ticks — 195 s — past a 180 s threshold (three beats of the
+    // club's 60 s heartbeat). Nothing else moves.
+    for (let i = 0; i < 13; i++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    }
+
+    expect(screen.queryByText("online")).not.toBeInTheDocument();
+    expect(screen.getByText(/not reporting — last seen 3m ago/)).toBeInTheDocument();
+
+    // And it is the poller doing it — one read per tick, all thirteen, still running long
+    // after StrictMode's second mount. An exact count rather than "more than before":
+    // advancing the clock re-renders the tree for other reasons too, and a row that
+    // re-computes `isOnline` off the moved clock would otherwise satisfy the assertions
+    // above with no poller behind them at all.
+    expect(deviceReads(stub)).toBe(atLoad + 13);
+    vi.useRealTimers();
+  });
+
+  it("says when it last looked, and looks again on demand", async () => {
+    const stub = stubFetch(withDevices([deviceFixture()]));
+
+    renderPage(<AdminDevicesPage />);
+
+    // The sentence is a promise about behaviour, so it names the interval the page runs.
+    expect(await screen.findByText(/re-reads the boxes every 15 seconds/)).toBeInTheDocument();
+    expect(screen.getByText(/^Checked /)).toBeInTheDocument();
+
+    const atLoad = deviceReads(stub);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(deviceReads(stub)).toBe(atLoad + 1));
+    // Only the boxes. Re-reading the settings on this button would fight the club button
+    // map an admin may be part-way through editing on the same screen.
+    expect(stub.calls.filter((c) => c.method === "GET" && c.path === "/api/v1/admin/settings/")).toHaveLength(1);
+  });
+
+  // --- taking a box out of service (finding M-F3) -----------------------------------
+
+  /**
+   * `Device.Enabled` has been on the API, on the typed client and in the settlement model
+   * since the row existed, and no screen ever sent it. The consequences are not cosmetic:
+   * `PeripheralHealthWorker` filters on it, so a box that is broken or unplugged for good
+   * alerts the club every thirty seconds about a silence nobody can stop; and
+   * `DeviceOutageIndex` builds its silence index from enabled boxes alone, so a court whose
+   * only box is dead-but-enabled is "dark" for ever and every no-show on it is refunded
+   * with no penalty. The only lever the page offered was Delete, which the page itself
+   * describes as a reset.
+   */
+  it("takes a box out of service behind a confirm, and says what that costs", async () => {
+    const stub = stubFetch([
+      ...withDevices([deviceFixture()]),
+      { method: "PATCH", path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111", body: deviceFixture({ enabled: false }) },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    // Arms first: a live box stops switching lights on the moment this lands.
+    const take = await screen.findByRole("button", { name: "Take out of service" });
+    fireEvent.click(take);
+    expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
+
+    fireEvent.click(await screen.findByRole("button", { name: /The box stops switching lights on/ }));
+
+    await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+    // Exactly the one field. Sending the name and courts alongside would rewrite whatever
+    // another admin had just changed on this row.
+    expect(stub.calls.find((c) => c.method === "PATCH")!.raw).toBe('{"enabled":false}');
+  });
+
+  it("shows an out-of-service box as that rather than as offline, and offers it back", async () => {
+    const stub = stubFetch([
+      ...withDevices([deviceFixture({ enabled: false, court_numbers: [1, 2] })]),
+      { method: "PATCH", path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111", body: deviceFixture() },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    // Not "offline": nobody expects it to call in, and showing it beside the boxes that
+    // have genuinely gone quiet is how a club learns to ignore the state that matters.
+    expect(await screen.findByText("out of service")).toBeInTheDocument();
+    expect(screen.queryByText(/not reporting/)).not.toBeInTheDocument();
+
+    // All three sentences are things the code does — the API refuses a disabled box, the
+    // health sweep skips it, and the silence index behind the no-show waiver is built from
+    // enabled boxes alone.
+    expect(screen.getByText(/The API refuses this box, so it switches nothing on/)).toBeInTheDocument();
+    expect(screen.getByText(/not alerted about its silence/)).toBeInTheDocument();
+    expect(screen.getByText(/A: court 1, B: court 2 are judged by whatever other boxes drive them/)).toBeInTheDocument();
+
+    // Restoring is not a decision anyone regrets, so it is one tap.
+    fireEvent.click(screen.getByRole("button", { name: "Put back in service" }));
+    await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
+    expect(stub.calls.find((c) => c.method === "PATCH")!.raw).toBe('{"enabled":true}');
+  });
+
+  // --- the club's walk-up cap, on the screen that sets the buttons (finding M-F1) ----
+
+  /**
+   * The button-map editor validated against the 90-minute relay hard cap and nothing else,
+   * so a club that lowered its walk-up maximum to 20 left every box still advertising
+   * 15/30/45/60 while the API refused three of the four presses with
+   * `minutes_out_of_range`. The word "walk-up" did not appear on this page at all, and the
+   * member at the box got the blame for the club's own configuration change.
+   */
+  it("warns which minute buttons the club's own walk-up maximum will refuse", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/settings/"),
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, walk_up_max_minutes: 20 } },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    // Buttons 6, 7 and 8 are 30/45/60 in the fixture map; button 5 is 15 and is fine.
+    const notice = await screen.findByText(/Buttons 6, 7, 8 grant more than this club's walk-up maximum of 20 minutes/);
+    // Both halves of what to do about it, because either one alone is a dead end.
+    expect(notice).toHaveTextContent("Walk-up maximum (minutes)");
+    expect(notice).toHaveTextContent("or lower the buttons");
+  });
+
+  it("says nothing about the walk-up cap when every button is inside it", async () => {
+    stubFetch(baseRoutes());
+
+    renderPage(<AdminDevicesPage />);
+
+    await screen.findByLabelText("Button 1 action");
+    expect(screen.queryByText(/walk-up maximum/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The per-box override is the same rule on a different map — a box given its own map is
+   * exactly where a club puts a longer grant, and exactly where nothing warned.
+   */
+  it("warns on a box's own button map too, and in the singular for one button", async () => {
+    stubFetch([
+      ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/settings/" && r.path !== "/api/v1/admin/devices/"),
+      {
+        path: "/api/v1/admin/settings/",
+        body: {
+          ...SETTINGS_FIXTURE,
+          walk_up_max_minutes: 45,
+          // The CLUB map is kept inside the cap, so the only notice on the page is the
+          // box's own. Otherwise both fire and the query below is ambiguous — which is
+          // itself the right behaviour, and not what this test is about.
+          button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
+        },
+      },
+      {
+        path: "/api/v1/admin/devices/",
+        body: [deviceFixture({
+          button_map: ["court:A", "none", "none", "none", "minutes:15", "minutes:30", "minutes:45", "minutes:60"],
+        })],
+      },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Edit buttons/ }));
+
+    // 60 is over; 45 is exactly the cap and is sellable.
+    expect(await screen.findByText(/Button 8 grants more than this club's walk-up maximum of 45 minutes/)).toBeInTheDocument();
+    expect(screen.getByText(/refuses that press/)).toBeInTheDocument();
+  });
+
   /**
    * R2 I-F6, the second half. With the confirm button no longer forcing 435 px, the widest
    * thing left on the Devices page was a button-map row: a fixed-width label and two
