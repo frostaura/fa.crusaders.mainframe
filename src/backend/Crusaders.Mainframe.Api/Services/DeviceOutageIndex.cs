@@ -10,9 +10,10 @@ namespace Crusaders.Mainframe.Api.Services;
 ///
 /// <para>
 /// The question is about the COURT, not about a box: a court is dark when every enabled box
-/// driving it was unreachable, or when the club's boxes on it have all been switched out of
-/// service AND had already stopped answering by that instant — and a court the club has put no
-/// box on at all is never dark. That last bound is load-bearing rather than pedantic: without
+/// driving it was unreachable, or when the club's boxes on it had all been switched out of
+/// service by that instant — and a court the club has put no box on at all is never dark. The
+/// switch-off is read from the instant it was recorded at, not from the present value of
+/// <see cref="Device.Enabled"/>, and that bound is load-bearing rather than pedantic: without
 /// it, flipping a box out of service today changed the price of deadlines that passed while it
 /// was working, which is the invariant in the sentence above. See <see cref="DarknessAt"/> for
 /// what each of those costs when it is got wrong.
@@ -135,6 +136,7 @@ public sealed class DeviceOutageIndex
     private readonly Dictionary<int, List<Guid>> _deviceIdsByCourtNumber;
     private readonly Dictionary<int, List<Guid>> _outOfServiceIdsByCourtNumber;
     private readonly Dictionary<Guid, DateTimeOffset> _knownToExistFrom;
+    private readonly Dictionary<Guid, DateTimeOffset> _outOfServiceSince;
     private readonly List<Silence> _silences;
     private readonly TimeSpan _offlineAfter;
 
@@ -143,6 +145,7 @@ public sealed class DeviceOutageIndex
         Dictionary<int, List<Guid>> deviceIdsByCourtNumber,
         Dictionary<int, List<Guid>> outOfServiceIdsByCourtNumber,
         Dictionary<Guid, DateTimeOffset> knownToExistFrom,
+        Dictionary<Guid, DateTimeOffset> outOfServiceSince,
         List<Silence> silences,
         TimeSpan offlineAfter)
     {
@@ -150,12 +153,13 @@ public sealed class DeviceOutageIndex
         _deviceIdsByCourtNumber = deviceIdsByCourtNumber;
         _outOfServiceIdsByCourtNumber = outOfServiceIdsByCourtNumber;
         _knownToExistFrom = knownToExistFrom;
+        _outOfServiceSince = outOfServiceSince;
         _silences = silences;
         _offlineAfter = offlineAfter;
     }
 
     /// <summary>No courts and no silences — nothing is ever dark. Used where a caller has no context to build from.</summary>
-    public static DeviceOutageIndex Empty { get; } = new([], [], [], [], [], TimeSpan.Zero);
+    public static DeviceOutageIndex Empty { get; } = new([], [], [], [], [], [], TimeSpan.Zero);
 
     /// <summary>
     /// The current tenant's stretches of box silence that could still matter, i.e. outages still
@@ -182,13 +186,13 @@ public sealed class DeviceOutageIndex
     /// </para>
     ///
     /// <para>
-    /// <b>Their silence is measured too, and that is what stops the switch re-pricing the past.</b>
+    /// <b>Their silence is measured too, and it decides everything before the switch was thrown.</b>
     /// A switched-off row still carries <see cref="Device.LastSeenAt"/> and its old
-    /// <see cref="DeviceOutage"/> rows, and because the API refuses a disabled board, that
-    /// evidence stops exactly when the switch was thrown. It is therefore the recorded switch-off
-    /// instant that <c>Enabled</c> itself does not carry, and a court is out of service only from
-    /// the point that evidence runs past the threshold. Without it, one click waived every
-    /// unsettled deadline back to the sweep's lookback floor — see <see cref="DarknessAt"/> and
+    /// <see cref="DeviceOutage"/> rows, and for any instant at or before
+    /// <see cref="Device.OutOfServiceSince"/> that evidence is what answers — the same question
+    /// the enabled branch asks, so the click changes no answer that had already been given.
+    /// Without it, one click waived every unsettled deadline back to the sweep's lookback floor —
+    /// see <see cref="DarknessAt"/>, <see cref="DoorWasShutFor"/> and
     /// <c>A_switch_off_darkens_only_the_deadlines_the_board_had_already_gone_quiet_for</c>.
     /// </para>
     ///
@@ -266,9 +270,16 @@ public sealed class DeviceOutageIndex
         var courtNumberById = await db.Courts.AsNoTracking()
             .ToDictionaryAsync(c => c.Id, c => c.CourtNumber, ct);
 
+        // The recorded switch-off instants, for the boards that are switched off now. A row
+        // whose column is null carries no instant and is judged by its silence alone — see
+        // DoorWasShutFor.
+        var outOfServiceSince = outOfService
+            .Where(d => d.OutOfServiceSince is not null)
+            .ToDictionary(d => d.Id, d => d.OutOfServiceSince!.Value);
+
         return new DeviceOutageIndex(
             courtNumberById, CourtIndex(devices), CourtIndex(outOfService),
-            KnownToExistFrom([.. devices, .. outOfService], outages), silences,
+            KnownToExistFrom([.. devices, .. outOfService], outages), outOfServiceSince, silences,
             TimeSpan.FromSeconds(offlineAfterSeconds));
     }
 
@@ -452,16 +463,29 @@ public sealed class DeviceOutageIndex
     /// </para>
     ///
     /// <para>
-    /// <b>So a switched-off board is judged by the same silence its enabled siblings are.</b> A
-    /// disabled board is refused 403 on every courtside endpoint, so the instant an admin throws
-    /// the switch is the instant that board stops being heard from: <see cref="Device.LastSeenAt"/>
-    /// on a switched-off row is the recorded shadow of the switch-off, and a heartbeat at
-    /// <c>T</c> is positive proof the board was still in service at <c>T</c>, because a board out
-    /// of service cannot produce one. The court is therefore out of service at
-    /// <paramref name="instant"/> only once that evidence has run past
-    /// <c>offline_after_seconds</c> — the same threshold, the same comparison, the same reading
-    /// of outage rows as everywhere else. A board that has never called in at all was never in
-    /// service, and is a closed door from the moment it existed.
+    /// <b>The third rule fixed THAT and cost the member up to three minutes of a court the club
+    /// had already shut.</b> It bounded the switch by the board's own silence — treating
+    /// <see cref="Device.LastSeenAt"/> on a switched-off row as the recorded shadow of the
+    /// switch-off — so the court became out of service only once that evidence had run past
+    /// <c>offline_after_seconds</c>. The last heartbeat is not the click: the click lands some
+    /// seconds or minutes after it, and for that whole gap the court read Lit while every
+    /// courtside endpoint already answered <c>403</c>. A booking whose grace deadline fell in it
+    /// was settled as an ordinary no-show, penalty and all, and mailed the plain "Missed booking"
+    /// notice — for a door an admin had closed a minute earlier.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>So the switch-off instant is recorded, and the rule is answered from it.</b>
+    /// <see cref="Device.OutOfServiceSince"/> is stamped where the transition happens
+    /// (<c>DeviceRegistryService.UpdateAsync</c>). After it the door is shut with no waiting
+    /// period, because the club has declared it and there is nothing left to be uncertain about;
+    /// at or before it the board was in service and is judged by exactly the silence test its
+    /// enabled siblings get, so no deadline is re-priced by the click. Bounding it at
+    /// <c>LastSeenAt</c> instead — the obvious alternative, and the one this file used to
+    /// argue for — puts the retroactive switch back for every deadline in
+    /// <c>(LastSeenAt, LastSeenAt + offline_after_seconds)</c>. See
+    /// <see cref="DoorWasShutFor"/>, which is where all three parts live. A board that has never
+    /// called in at all was never in service, and is a closed door from the moment it existed.
     /// </para>
     ///
     /// <para>
@@ -508,13 +532,14 @@ public sealed class DeviceOutageIndex
 
     /// <summary>
     /// The out-of-service half, asked only where no enabled board drove the court at that
-    /// instant: had the club put hardware on this court that had already stopped answering?
+    /// instant: had the club put hardware on this court whose door was already shut?
     ///
     /// <para>
     /// The shape mirrors the enabled loop above deliberately — at least one board existed, and
-    /// every board that existed was past the threshold — because the question is the same one. A
-    /// club with two switched-off boards on a court, one of which was still heart-beating at the
-    /// deadline, had a working door there at the deadline.
+    /// every board that existed had its door shut — because the question is the same one. A club
+    /// with two switched-off boards on a court, one of which the club had not yet switched off
+    /// and which was still heart-beating at the deadline, had a working door there at the
+    /// deadline.
     /// </para>
     /// </summary>
     private CourtDarkness DoorWasShutAt(int courtNumber, DateTimeOffset instant)
@@ -530,10 +555,67 @@ public sealed class DeviceOutageIndex
             if (_knownToExistFrom[deviceId] > instant) continue;
 
             existed++;
-            if (!BoxWasUnreachable(deviceId, instant)) return CourtDarkness.Lit;
+            if (!DoorWasShutFor(deviceId, instant)) return CourtDarkness.Lit;
         }
 
         return existed > 0 ? CourtDarkness.OutOfService : CourtDarkness.Lit;
+    }
+
+    /// <summary>
+    /// Whether one switched-off board's door was shut at <paramref name="instant"/>, in either of
+    /// the two ways it can be — and this is the whole of the out-of-service rule.
+    ///
+    /// <para>
+    /// <b>After the switch was thrown, the door is shut, full stop.</b> The club has declared it:
+    /// from that instant the API answers <c>403</c> on every courtside endpoint for this board,
+    /// so nobody standing at the court can check in by any means, and there is nothing left to
+    /// wait <c>offline_after_seconds</c> for. Waiting anyway is not neutral — it charged the
+    /// member the full 30% for a door the club had shut up to three minutes earlier, which is the
+    /// exact direction §6a exists to prevent.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Before the switch was thrown, it is the enabled board's own question, asked the same
+    /// way.</b> The board was in service then, so what decides is what decides for any board in
+    /// service: had it been silent longer than the threshold at that instant. This half is what
+    /// keeps the click from re-pricing the past — every deadline that had already passed when the
+    /// admin clicked keeps the answer it had before the click, because the same
+    /// <see cref="BoxWasUnreachable"/> call answers it on both sides of the switch. A deadline at
+    /// or before the board's last heartbeat is Lit either way; a deadline the board had genuinely
+    /// gone quiet across is dark either way.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Why this needs a column and could not be read off <see cref="Device.LastSeenAt"/>.</b>
+    /// That was the previous rule, and this file argued for it at length: a disabled board is
+    /// refused <c>403</c>, so its last heartbeat was said to be "the recorded shadow of the
+    /// switch-off". It is not the same instant. The switch is thrown some seconds or minutes
+    /// AFTER the last heartbeat, and a deadline inside that gap is priced differently by the two
+    /// readings — so the gap is money. Using the threshold there (the shipped rule) charged the
+    /// member for up to <c>offline_after_seconds</c> of a court the club had already shut; using
+    /// the last heartbeat exactly (the obvious alternative) flipped a deadline that had already
+    /// passed from penalty to waiver the moment an admin clicked, which is the retroactive switch
+    /// this class was rewritten twice to remove. Measured, not reasoned: with the second rule in
+    /// place the whole backend suite stayed green while a sixty-second-old deadline changed price
+    /// by 2.40 on the click alone. Recording the instant is what lets both answers be right.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>A row with no recorded instant falls back to its silence alone</b>, which is what
+    /// shipped before the column existed. Every switch thrown through the product records one
+    /// (<c>DeviceRegistryService.UpdateAsync</c>), so this covers rows disabled by a fixture, a
+    /// seed or a restore, where the honest answer is that nobody knows when the door shut. It
+    /// falls the conservative way: the club's own evidence decides, and no click moves anything.
+    /// </para>
+    /// </summary>
+    private bool DoorWasShutFor(Guid deviceId, DateTimeOffset instant)
+    {
+        if (_outOfServiceSince.TryGetValue(deviceId, out var switchedOffAt) && instant > switchedOffAt)
+        {
+            return true;
+        }
+
+        return BoxWasUnreachable(deviceId, instant);
     }
 
     /// <summary>

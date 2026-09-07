@@ -141,12 +141,75 @@ public sealed class SettlementSpecPostureTests
     {
         var settlement = SettlementModel().ReplaceLineEndings("\n").Replace("\n", " ");
         Assert.Contains("**But the switch itself does not reach backwards", settlement);
-        Assert.Contains("**The switch-off instant IS recorded — as `LastSeenAt` on the switched-off row.**", settlement);
         Assert.Contains("A board **registered** after the deadline does not speak for it", settlement);
         Assert.DoesNotContain("| A board switched off after the deadline does not speak for it |", settlement);
 
         var feature = FeatureSpec().ReplaceLineEndings("\n").Replace("\n", " ");
         Assert.Contains("**The switch is not retroactive**", feature);
-        Assert.Contains("**That half is bounded by the same silence test, and the first version of it was not**", feature);
+    }
+
+    /// <summary>
+    /// <b>The other end of the same bound: the switch is not DELAYED either, and both specs have
+    /// to say which instant it is measured from.</b>
+    ///
+    /// <para>
+    /// The sentence this replaces — "The switch-off instant IS recorded — as `LastSeenAt` on the
+    /// switched-off row" — was the one the shipped code was written from, and it was false in a
+    /// way that cost members money: the switch lands after the board's last heartbeat, not on it,
+    /// so bounding the branch by the board's silence left the court reading Lit for up to
+    /// `offline_after_seconds` after the click while every courtside endpoint already answered
+    /// 403. Restoring that sentence would authorise the defect again, so it is asserted absent as
+    /// well as replaced — the same shape as
+    /// <see cref="The_withdrawn_few_minutes_claim_does_not_come_back"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// The three-part rule is pinned row by row rather than as a summary, because the middle row
+    /// is the one a reader is most likely to drop as redundant and it is the whole of "the switch
+    /// does not reach backwards": bounding at the recorded instant ALONE, with no silence test
+    /// behind it, re-prices every deadline in `(LastSeenAt, LastSeenAt + offline_after_seconds)`
+    /// on the click.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Both_specs_measure_the_switch_off_from_the_recorded_instant_and_not_from_a_heartbeat()
+    {
+        var settlement = SettlementModel().ReplaceLineEndings("\n").Replace("\n", " ");
+        Assert.Contains("**The switch-off instant is recorded, and it is its own column.**", settlement);
+        Assert.Contains("`devices.OutOfServiceSince`", settlement);
+        Assert.Contains(
+            "**It is not `LastSeenAt`, and this document said for one round that it was.**", settlement);
+        Assert.Contains("**Judged by `offline_after_seconds`**", settlement);
+        Assert.Contains("**Out of service, at once.**", settlement);
+
+        // The withdrawn sentence. It reads as a settled fact and is the one the shipped defect
+        // was written from.
+        Assert.DoesNotContain(
+            "**The switch-off instant IS recorded — as `LastSeenAt` on the switched-off row.**", settlement);
+
+        var feature = FeatureSpec().ReplaceLineEndings("\n").Replace("\n", " ");
+        Assert.Contains(
+            "**That half is bounded, and it took three tries to bound it in the right place**", feature);
+        Assert.Contains("**Nor is it delayed**", feature);
+        Assert.Contains("`devices.OutOfServiceSince`", feature);
+        Assert.DoesNotContain(
+            "**That half is bounded by the same silence test, and the first version of it was not**", feature);
+    }
+
+    /// <summary>
+    /// The waiver mail's own paragraph in the settlement model, which changed with the rule
+    /// behind it: a court is out of service from the click, so the notice can no longer open
+    /// "No court box was answering". A spec that still says it can is a spec the next fix will
+    /// restore the sentence from.
+    /// </summary>
+    [Fact]
+    public void The_settlement_model_records_why_the_out_of_service_notice_changed_its_opening()
+    {
+        var settlement = SettlementModel().ReplaceLineEndings("\n").Replace("\n", " ");
+        Assert.Contains(
+            "**The out-of-service notice no longer opens \"No court box was answering\", and " +
+            "recording the switch-off instant is what made that sentence false.**", settlement);
+        Assert.Contains("`Every_sentence_of_the_out_of_service_waiver_mail`", settlement);
+        Assert.Contains("`Every_sentence_of_the_outage_waiver_mail`", settlement);
     }
 }

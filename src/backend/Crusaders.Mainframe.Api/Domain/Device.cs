@@ -115,6 +115,32 @@ public sealed class Device : ITenantScoped
 
     public bool Enabled { get; set; } = true;
 
+    /// <summary>
+    /// When an admin last took this board <b>out of service</b> — null while it is in service.
+    ///
+    /// <para>
+    /// <b>It exists because <see cref="Enabled"/> carries no history, and the money needs one.</b>
+    /// Taking the last board off a court shuts that court's door for good: the API answers 403 on
+    /// every courtside endpoint for a disabled board, so nobody standing there can check in by
+    /// heartbeat, activation, walk-up, PIN, QR or biometric, and
+    /// <c>settlement-model.md</c> S5a waives the no-show penalty for the bookings that fall after
+    /// it. Deciding that from <see cref="Enabled"/> alone answers "was this court shut at <c>T</c>?"
+    /// with today's value of a boolean, so one click re-priced every unsettled deadline behind it.
+    /// Deciding it from <see cref="LastSeenAt"/> instead — the board's last heartbeat — is not the
+    /// same instant: the switch is thrown some seconds or minutes AFTER the last heartbeat, and
+    /// reading the two as one moves money in whichever direction the gap happens to point.
+    /// </para>
+    ///
+    /// <para>
+    /// So the instant is recorded when the switch is thrown (<c>DeviceRegistryService.UpdateAsync</c>)
+    /// and read as evidence about the past, exactly like <see cref="LastSeenAt"/> and a
+    /// <see cref="DeviceOutage"/> row. Putting the board back in service clears it, because the
+    /// column says what is true of this row now and one column cannot hold a history of
+    /// switch-offs; what that costs is written down in <c>settlement-model.md</c> S5a.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? OutOfServiceSince { get; set; }
+
     public DateTimeOffset? LastSeenAt { get; set; }
 
     /// <summary>Firmware version last reported by heartbeat. Null until it first checks in.</summary>

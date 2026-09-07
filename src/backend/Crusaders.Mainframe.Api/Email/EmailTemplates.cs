@@ -720,6 +720,19 @@ public static class EmailTemplates
     /// What the two mails share is the part that is true either way: the court could not be
     /// released against their name, the charge is fully back, and no penalty was taken.
     /// </para>
+    ///
+    /// <para>
+    /// <b>The opening sentence used to say "No court box was answering on {court} during your
+    /// booking", and recording the switch-off instant made that false.</b> A court is now out of
+    /// service from the click, not from the point the board's silence passed
+    /// <c>offline_after_seconds</c> — so the board this mail is sent about may have been
+    /// answering perfectly a minute before the grace window closed, and was simply switched off.
+    /// What holds in both cases is that no check-in on that court could have reached the club:
+    /// before the click because the board had gone quiet past the threshold, after it because
+    /// the API refuses the board outright. That is what the sentence says now. See
+    /// <c>DeviceOutageIndex.DoorWasShutFor</c>, and
+    /// <c>Every_sentence_of_the_out_of_service_waiver_mail</c>, which pins each sentence here.
+    /// </para>
     /// </summary>
     public static EmailMessage BookingRefundedForOutOfServiceBox(
         string to, string courtName, decimal refundedCredits, string clubName) => new(
@@ -729,7 +742,7 @@ public static class EmailTemplates
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">Your booking has been refunded in full</h2>
-              <p>No court box was answering on <strong>{System.Net.WebUtility.HtmlEncode(courtName)}</strong> at {System.Net.WebUtility.HtmlEncode(clubName)} during your booking, so the lights could not be released against your name. That court's box is out of service at the club.</p>
+              <p>Nobody checked in on <strong>{System.Net.WebUtility.HtmlEncode(courtName)}</strong> at {System.Net.WebUtility.HtmlEncode(clubName)} during your booking, and no check-in on that court could have reached the club if they had: its box is out of service.</p>
               <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Refunded</td><td><strong>{Cr(refundedCredits)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Penalty</td><td><strong>None</strong></td></tr>
