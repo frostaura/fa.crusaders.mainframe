@@ -245,7 +245,68 @@ public sealed class AdminWaiveReasonHttpTests
         var details = await CancellationAuditAsync(factory, s);
         Assert.False(details.GetProperty("waived").GetBoolean());
         // Present and null rather than absent, so a reader never has to guess whether an
-        // older row simply predates the field.
+        // older row simply predates the field. Null because the desk typed nothing — not
+        // because nothing was waived; see the test below for that distinction.
+        Assert.Equal(JsonValueKind.Null, details.GetProperty("waive_reason").ValueKind);
+    }
+
+    /// <summary>
+    /// A reason typed on a cancellation that waives nothing is still the club's reason, and
+    /// it still reaches the club's own record — over real HTTP, from the shape the console
+    /// actually sends.
+    ///
+    /// <para>
+    /// The field was briefly gated on the derived waiver, so an admin who cancelled a court
+    /// and said why left a row reading <c>{"waived": false, "waive_reason": null}</c> and a
+    /// mail with no reason line in it at all. <c>bookings.cancellation_reason</c> is a mapped,
+    /// migrated column that no service writes, so this row is the whole of the club's memory
+    /// of why it cancelled somebody's booking; a gate here does not tidy it, it erases it.
+    /// </para>
+    ///
+    /// <para>
+    /// The penalty is still taken, which is the point of the pairing: the reason travelling
+    /// is not the club quietly waiving anything.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_cancellation_that_waives_nothing_still_records_the_reason_the_admin_typed()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var s = await SeedAsync(factory);
+
+        var (status, body) = await PostAsync(AdminClient(factory, s), CancelPath(s.BookingId),
+            new { waivePenalty = false, waiveReason = "Court flooded" });
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(SlicePriceCredits * 0.30m, body.GetProperty("penalty_credits").GetDecimal());
+
+        var details = await CancellationAuditAsync(factory, s);
+        Assert.False(details.GetProperty("waived").GetBoolean());
+        Assert.Equal("Court flooded", details.GetProperty("waive_reason").GetString());
+    }
+
+    /// <summary>
+    /// Blank is not a reason. A whitespace-only string on a cancellation that waives nothing
+    /// is not refused — the route's requirement belongs to the waiver — but neither is it
+    /// written into the audit row as an empty string a month-end reader would have to squint
+    /// at. Null means "nobody said why", and it has to keep meaning only that.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_blank_reason_is_recorded_as_nothing_rather_than_as_an_empty_string()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var s = await SeedAsync(factory);
+
+        var (status, _) = await PostAsync(AdminClient(factory, s), CancelPath(s.BookingId),
+            new { waivePenalty = false, waiveReason = "   " });
+
+        Assert.Equal(HttpStatusCode.OK, status);
+
+        var details = await CancellationAuditAsync(factory, s);
         Assert.Equal(JsonValueKind.Null, details.GetProperty("waive_reason").ValueKind);
     }
 }

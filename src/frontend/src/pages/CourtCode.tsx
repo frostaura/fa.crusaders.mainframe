@@ -171,20 +171,77 @@ function secondsUntil(deadline: Deadline): number {
  * <p>
  * The page holds this separately from its `error` state because the two are not the same
  * kind of thing: `error` is a bad minute on the network and the page goes on trying, this
- * is a decision the club has taken and the page must stop making the offer.
+ * is a decision the club has taken and the page stops making the offer by itself.
+ * </p>
+ *
+ * <p>
+ * <b>One control, and it is the whole point of the card.</b> This state used to be terminal
+ * for the life of the tab: no button, and dropping the code stopped the only effect that
+ * ever re-fetched, so a member whose suspension had just been lifted at the desk stood at a
+ * court watching a page that would never ask again — measured at ninety seconds with zero
+ * further calls. The automatic polling staying off is right; the member having no way to
+ * ask was not. "Check again" is not "Refresh": there is no code on screen to refresh, and
+ * what is being re-tested is the club's decision, not the network.
  * </p>
  */
-function BarredCard({ reason }: { reason: string }) {
+function BarredCard(props: {
+  reason: string;
+  error: string | null;
+  loading: boolean;
+  onCheckAgain: () => void;
+}) {
+  const { reason, error, loading, onCheckAgain } = props;
   return (
     <div className="max-w-xl mx-auto space-y-6">
       <h1 className="text-xl font-semibold">Your court code</h1>
-      <Card className="space-y-2">
+      <Card className="space-y-3">
         <p role="alert" className="text-sm text-danger-strong">{reason}</p>
         <p className="text-sm text-text-secondary">
           There is no code to show while that is the case, because a code would be turned away at the court.
+          If the desk has just sorted it out, check again.
         </p>
+        <Button variant="outline" onClick={onCheckAgain} disabled={loading}>
+          <RefreshCw size={14} className={cn("mr-1", loading && "animate-spin")} /> Check again
+        </Button>
+        {error && <p className="text-xs text-danger-strong">{error}</p>}
       </Card>
     </div>
+  );
+}
+
+/**
+ * The "walk up / pay for someone" switch.
+ *
+ * <p>
+ * Without it, a member with a booking within a couple of hours is handed a booking code
+ * and nothing else — and a booking code is refused at every court but its own, so walking
+ * up to a free court or paying for a friend was a trip to the desk.
+ * </p>
+ */
+function WalkUpSwitch(props: { walkUp: boolean; loading: boolean; onChoose: (next: boolean) => void }) {
+  const { walkUp, loading, onChoose } = props;
+  return (
+    <Card className="flex items-start gap-3 py-4">
+      <input
+        id="walk-up"
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 shrink-0"
+        checked={walkUp}
+        disabled={loading}
+        onChange={(e) => onChoose(e.target.checked)}
+      />
+      <div className="min-w-0">
+        <label htmlFor="walk-up" className="text-sm font-medium">Walk up / pay for someone</label>
+        {/* A string literal, not JSX text, and it has to stay one: lizard's .tsx lexer
+            desyncs on an odd number of bare apostrophes in JSX TEXT, and this sentence
+            carries the file's odd one. Written as text here it swallows CourtCodePage
+            whole and `make complexity` reports a function nobody wrote. */}
+        <p className="text-xs text-text-muted">
+          {"Shows the code that works at any court, even when you have a booking coming up — for starting on a "
+            + "free court now, or paying for someone else's time."}
+        </p>
+      </div>
+    </Card>
   );
 }
 
@@ -198,7 +255,7 @@ export default function CourtCodePage() {
   const [error, setError] = useState<string | null>(null);
   /** On: ask for an ident code outright, whatever bookings the member has. */
   const [walkUp, setWalkUp] = useState(false);
-  /** The club has barred this member: no code to be had, and no point asking again. */
+  /** Barred: the page stops asking by itself. The member still can — see BarredCard. */
   const [barred, setBarred] = useState<string | null>(null);
   const lastFetchAt = useRef(0);
   const inflight = useRef(false);
@@ -240,6 +297,9 @@ export default function CourtCodePage() {
       setDeadline(deadlineFor(next.expires_in_seconds));
       setSecondsLeft(next.expires_in_seconds);
       setError(null);
+      // A code in hand is the club saying the bar is lifted; without this the page would
+      // render the suspension sentence over a perfectly good code. The dead end, other side.
+      setBarred(null);
     } catch (e) {
       // Surfaced on BOTH modes. A pre-fetch is silent about every other failure, but a
       // member suspended while this page was open must not go on holding a dead code.
@@ -314,10 +374,11 @@ export default function CourtCodePage() {
   }, [qr, loading, secondsLeft, walkUp, fetchCode]);
 
   const meaning = qr ? describeKind(qr) : null;
+  /** Ask for a code now — Refresh, Try again and the barred card's Check again all mean this. */
+  const refetch = () => void fetchCode("replace", walkUp ? "ident" : undefined);
 
-  // Placed after every hook, so none is skipped. See BarredCard for why it replaces the
-  // whole page rather than sitting beside the code.
-  if (barred !== null) return <BarredCard reason={barred} />;
+  // After every hook, so none is skipped. BarredCard says why it replaces the whole page.
+  if (barred !== null) return <BarredCard reason={barred} error={error} loading={loading} onCheckAgain={refetch} />;
 
   return (
     <div className="max-w-xl mx-auto space-y-6">
@@ -328,33 +389,13 @@ export default function CourtCodePage() {
         </p>
       </div>
 
-      {/* Without this, a member with a booking within a couple of hours is handed a
-          booking code and nothing else — and a booking code is refused at every court
-          but its own, so walking up to a free court or paying for a friend was a trip
-          to the desk. */}
-      <Card className="flex items-start gap-3 py-4">
-        <input
-          id="walk-up"
-          type="checkbox"
-          className="mt-0.5 h-4 w-4 shrink-0"
-          checked={walkUp}
-          disabled={loading}
-          onChange={(e) => chooseWalkUp(e.target.checked)}
-        />
-        <div className="min-w-0">
-          <label htmlFor="walk-up" className="text-sm font-medium">Walk up / pay for someone</label>
-          <p className="text-xs text-text-muted">
-            Shows the code that works at any court, even when you have a booking coming up — for starting on a
-            free court now, or paying for someone else's time.
-          </p>
-        </div>
-      </Card>
+      <WalkUpSwitch walkUp={walkUp} loading={loading} onChoose={chooseWalkUp} />
 
       <Card className="space-y-5">
         {error && !qr ? (
           <div className="space-y-3">
             <p className="text-sm text-danger-strong">{error}</p>
-            <Button onClick={() => void fetchCode("replace", walkUp ? "ident" : undefined)} disabled={loading}>Try again</Button>
+            <Button onClick={refetch} disabled={loading}>Try again</Button>
           </div>
         ) : !qr ? (
           <p className="text-sm text-text-secondary">Getting your code…</p>
@@ -378,7 +419,7 @@ export default function CourtCodePage() {
               <Button
                 variant="outline"
                 className="h-9 px-3 text-xs"
-                onClick={() => void fetchCode("replace", walkUp ? "ident" : undefined)}
+                onClick={refetch}
                 disabled={loading}
               >
                 <RefreshCw size={14} className={cn("mr-1", loading && "animate-spin")} /> Refresh
