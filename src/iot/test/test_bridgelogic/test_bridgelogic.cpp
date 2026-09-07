@@ -782,6 +782,11 @@ void test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided
       // (M-F5). Recognised: club_closed is produced past the token resolution.
       {400U, "{\"error\":\"club_closed\",\"opens_at\":\"06:00\",\"closes_at\":\"22:00\"}", "CLUB CLOSED",
        true, true},
+      // The sale was made, could not be opened, and was UNDONE before this answer
+      // was written, so the court is free. It read COURT NOT FREE until 2026-09-07.
+      // Recognised: the API had resolved the token and committed a booking for this
+      // member before it refused.
+      {409U, "{\"error\":\"activation_refused\"}", "COULD NOT START", true, true},
       {0U, "", "NO CONNECTION", false, false},
       {503U, "", "SEE THE DESK", false, false},
       {429U, "", "SEE THE DESK", false, false},
@@ -839,6 +844,33 @@ void test_walkup_a_closed_club_puts_its_opening_time_on_the_glass() {
   const bridgelogic::WalkUpResult s = bridgelogic::onWalkUpResponse(400U, silly, len(silly), 1U, 30U);
   TEST_ASSERT_TRUE(strlen(s.outcome.line1) <= court::kLineLen);
   TEST_ASSERT_TRUE(strlen(s.outcome.line2) <= court::kLineLen);
+}
+
+void test_walkup_a_refused_activation_does_not_say_the_court_is_busy() {
+  // The glass was made to lie by a fix behind it. `activation_refused` is the answer
+  // the API gives when it sold the court, could not open it, and undid the sale — the
+  // charge reversed and the slot released in the same request. With no row of its own
+  // it fell through byStatus(409) to COURT NOT FREE / SCAN TO START, which was true
+  // while the abandoned booking still held the court and false the instant the undo
+  // started landing. The member is told the court is busy, standing at a court that is
+  // free, holding a mail that says "Try again at the box".
+  const char refused[] = "{\"error\":\"activation_refused\"}";
+  const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(409U, refused, len(refused), 2U, 30U);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+  TEST_ASSERT_TRUE(r.decided);
+  TEST_ASSERT_EQUAL_STRING("COULD NOT START", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("SCAN TO RETRY", r.outcome.line2);
+  // Named rather than implied: the specific sentence this row exists to stop.
+  TEST_ASSERT_TRUE(strcmp(r.outcome.line1, "COURT NOT FREE") != 0);
+  // A verdict about a member the API identified and had already booked.
+  TEST_ASSERT_TRUE(r.outcome.recognised);
+  TEST_ASSERT_TRUE(strlen(r.outcome.line1) <= court::kLineLen);
+  TEST_ASSERT_TRUE(strlen(r.outcome.line2) <= court::kLineLen);
+
+  // The fallthrough is still there for a 409 this build has no row for, so the change
+  // is one error code and not a rewrite of what a bare conflict says.
+  TEST_ASSERT_EQUAL_STRING("COURT NOT FREE",
+                           bridgelogic::onWalkUpResponse(409U, "{}", 2U, 2U, 30U).outcome.line1);
 }
 
 void test_walkup_recognised_comes_from_the_body_never_from_the_status() {
@@ -2362,6 +2394,7 @@ int main(int, char**) {
   RUN_TEST(test_walkup_a_grant_and_a_replayed_grant_light_the_court_identically);
   RUN_TEST(test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided);
   RUN_TEST(test_walkup_a_closed_club_puts_its_opening_time_on_the_glass);
+  RUN_TEST(test_walkup_a_refused_activation_does_not_say_the_court_is_busy);
   RUN_TEST(test_walkup_recognised_comes_from_the_body_never_from_the_status);
 
   RUN_TEST(test_state_mask_parses_decimal_and_refuses_everything_else);
