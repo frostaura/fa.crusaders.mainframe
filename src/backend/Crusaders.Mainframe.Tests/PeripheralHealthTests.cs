@@ -1,4 +1,5 @@
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
 using Crusaders.Mainframe.Api.Webhooks;
@@ -57,6 +58,26 @@ public class PeripheralHealthTests
     private static async Task<Device> AddBoxAsync(
         TestHost host, MainframeDbContext db, DateTimeOffset? lastSeen, bool enabled = true,
         DateTimeOffset? installedAt = null, params int[] courts)
+        => await AddBoxAsync(host, db, lastSeen, enabled, installedAt, null, courts);
+
+    /// <summary>
+    /// <paramref name="outOfServiceSince"/> is the recorded instant an admin threw the switch —
+    /// <see cref="Device.OutOfServiceSince"/>, which <c>DeviceRegistryService.UpdateAsync</c>
+    /// stamps on the transition. It is a third, separate question from the two above: when the
+    /// club got the hardware, when it was last heard from, and when it was taken out of service
+    /// are three different instants, and the money turns on the gap between the last two.
+    ///
+    /// <para>
+    /// Left null on a switched-off row it means "no record of when the door shut", which is what
+    /// every row looked like before the column existed and is judged by the board's silence
+    /// alone. A fixture that leaves it implicit is therefore testing the fallback, not the rule
+    /// the product uses — see
+    /// <see cref="A_switched_off_row_with_no_recorded_instant_is_judged_by_its_silence_alone"/>.
+    /// </para>
+    /// </summary>
+    private static async Task<Device> AddBoxAsync(
+        TestHost host, MainframeDbContext db, DateTimeOffset? lastSeen, bool enabled,
+        DateTimeOffset? installedAt, DateTimeOffset? outOfServiceSince, params int[] courts)
     {
         var device = new Device
         {
@@ -67,6 +88,7 @@ public class PeripheralHealthTests
             CourtNumbers = courts.Length > 0 ? [.. courts] : [host.Courts[0].CourtNumber],
             Enabled = enabled,
             LastSeenAt = lastSeen,
+            OutOfServiceSince = outOfServiceSince,
             CreatedAt = installedAt ?? DateTimeOffset.UtcNow,
         };
         db.Devices.Add(device);
@@ -854,7 +876,7 @@ public class PeripheralHealthTests
         // The only box on the court, switched off by an admin and installed long enough ago to
         // speak for this deadline.
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), enabled: false,
-            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
 
         await CreateNoShowWorker(host).TickAsync(default);
 
@@ -884,13 +906,16 @@ public class PeripheralHealthTests
     /// </para>
     ///
     /// <para>
-    /// <b>What IS recorded is <c>LastSeenAt</c>, and it is not a weaker witness than a switch-off
-    /// column would be.</b> A disabled box is refused 403 on every courtside endpoint, so the
-    /// instant an admin throws the switch is the instant that box stops being heard from — a
-    /// heartbeat at <c>T</c> is proof the board was still in service at <c>T</c>, because a
-    /// board out of service cannot produce one. Here it called in twenty seconds ago and the
-    /// deadline is fifty-five minutes old, so the club had a working door on that court when the
-    /// member did not turn up. 97.60, penalty charged.
+    /// <b>That paragraph then argued <c>LastSeenAt</c> was as good as a switch-off column, and
+    /// that was the next thing to be wrong.</b> The two instants are not the same: the switch
+    /// lands after the board's last heartbeat, and a deadline in the gap is priced differently by
+    /// the two readings. There is now a column — <see cref="Device.OutOfServiceSince"/>, stamped
+    /// where the transition happens — and this fixture carries it: the board called in twenty
+    /// seconds ago, the switch was thrown now, and the deadline is fifty-five minutes old, so it
+    /// is judged by exactly the silence test an enabled board gets and the club had a working
+    /// door on that court when the member did not turn up. 97.60, penalty charged. The window the
+    /// column decides is pinned separately, by
+    /// <see cref="A_court_is_out_of_service_from_the_instant_the_switch_was_thrown"/>.
     /// </para>
     ///
     /// <para>
@@ -915,7 +940,7 @@ public class PeripheralHealthTests
             host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20), enabled: false,
-            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
 
         await CreateNoShowWorker(host).TickAsync(default);
 
@@ -930,14 +955,21 @@ public class PeripheralHealthTests
     /// is when the board went quiet.</b>
     ///
     /// <para>
-    /// Everything else is held identical — the same court, the same single board, switched off,
-    /// installed thirty days before the deadline, the same booking whose grace window closed
-    /// fifty-five minutes ago. Only <c>LastSeenAt</c> moves, and it is the recorded shadow of the
-    /// switch-off instant (a disabled board is refused 403, so it stops being heard from the
-    /// moment the switch is thrown). Ninety minutes of silence at the deadline is past
-    /// <c>offline_after_seconds</c>, so the door was already shut and the member owes nothing;
-    /// one minute of silence is inside it, so the board was in service and the member owes the
-    /// 30%.
+    /// Everything else is held identical — the same court, the same single board, switched off
+    /// now, installed thirty days before the deadline, the same booking whose grace window closed
+    /// fifty-five minutes ago. Only <c>LastSeenAt</c> moves. Both rows sit BEFORE the recorded
+    /// switch-off instant, so both are judged by the silence test an enabled board gets, which is
+    /// the whole point: the click must not re-price either of them. Ninety minutes of silence at
+    /// the deadline is past <c>offline_after_seconds</c>, so the door was already shut and the
+    /// member owes nothing; one minute of silence is inside it, so the board was in service and
+    /// the member owes the 30%.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>This theory says nothing about deadlines AFTER the switch</b>, which is where the next
+    /// defect lived: both its rows are 55 minutes old against a switch thrown now, and the window
+    /// that was wrong is the three minutes immediately after the click. See
+    /// <see cref="A_court_is_out_of_service_from_the_instant_the_switch_was_thrown"/>.
     /// </para>
     ///
     /// <para>
@@ -975,7 +1007,7 @@ public class PeripheralHealthTests
             host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(lastSeenMinutes), enabled: false,
-            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
 
         await CreateNoShowWorker(host).TickAsync(default);
 
@@ -1010,7 +1042,7 @@ public class PeripheralHealthTests
             host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20), enabled: false,
-            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
         await AddOutageAsync(host, db, box,
             DateTimeOffset.UtcNow.AddDays(-5), endedAt: DateTimeOffset.UtcNow.AddHours(-4));
 
@@ -1049,7 +1081,7 @@ public class PeripheralHealthTests
             host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-30), enabled: false,
-            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
         await AddOutageAsync(host, db, box,
             booking.StartsAt.AddMinutes(-10), endedAt: DateTimeOffset.UtcNow.AddMinutes(-30));
 
@@ -1090,7 +1122,7 @@ public class PeripheralHealthTests
             host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, lastSeen: null, enabled: false,
-            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
 
         await CreateNoShowWorker(host).TickAsync(default);
 
@@ -1132,7 +1164,7 @@ public class PeripheralHealthTests
             host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), enabled: false,
-            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
         host.EmailService.Sent.Clear();
 
         await CreateNoShowWorker(host).TickAsync(default);
@@ -1204,7 +1236,7 @@ public class PeripheralHealthTests
         // Switched off, installed long ago — but on the annex court, forty numbers away.
         var elsewhere = host.Courts[0].CourtNumber + 40;
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), false,
-            DateTimeOffset.UtcNow.AddDays(-30), elsewhere);
+            DateTimeOffset.UtcNow.AddDays(-30), DateTimeOffset.UtcNow, elsewhere);
 
         await CreateNoShowWorker(host).TickAsync(default);
 
@@ -1250,7 +1282,7 @@ public class PeripheralHealthTests
         // Registered a minute ago, never heard from, already switched off. The booking's grace
         // window closed fifty-five minutes before this row existed.
         await AddBoxAsync(host, db, lastSeen: null, enabled: false,
-            installedAt: DateTimeOffset.UtcNow.AddMinutes(-1));
+            installedAt: DateTimeOffset.UtcNow.AddMinutes(-1), outOfServiceSince: DateTimeOffset.UtcNow);
 
         await CreateNoShowWorker(host).TickAsync(default);
 
@@ -1412,5 +1444,281 @@ public class PeripheralHealthTests
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    // ----- the switch-off instant ------------------------------------------------------
+
+    /// <summary>
+    /// One booking, one board, one court, and the only thing that moves is <b>when the admin
+    /// threw the switch</b> relative to the grace deadline. Both rows sit inside the window
+    /// where the board's own silence says "reachable", so the silence rule cannot answer either
+    /// of them and only the recorded switch-off instant can.
+    ///
+    /// <para>
+    /// <b>Why this window is money.</b> The board last called in two minutes ago and the
+    /// deadline fell one minute ago — sixty seconds of silence, well inside
+    /// <c>offline_after_seconds</c> (180 s at the shipped default). The rule this replaces
+    /// bounded the out-of-service branch at that threshold, so a court an admin had switched off
+    /// read <b>Lit</b> for up to three minutes after the click while every courtside endpoint
+    /// already answered 403. A member standing at that court could not check in by heartbeat,
+    /// activation, walk-up, PIN, QR or biometric, and was charged the full 30% and mailed the
+    /// plain "Missed booking" notice for it — the exact direction <c>feature-spec.md</c> §6a
+    /// exists to prevent, and proved end to end on a live stack before this test existed.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Why the obvious alternative is not the fix, measured rather than argued.</b> Bounding
+    /// the branch at <c>LastSeenAt</c> exactly closes the same window and reopens the one round
+    /// 9 shut: the second row here is a deadline that had ALREADY PASSED when the switch was
+    /// thrown, and under that rule it flips from a 2.40 penalty to a full waiver on the click
+    /// alone. That is <c>settlement-model.md</c> S5a's "the switch itself does not reach
+    /// backwards", 180 seconds wide instead of seven days. It was run: with the exact-LastSeenAt
+    /// bound in place this fixture's second row paid 100.00 instead of 97.60 and the whole
+    /// backend suite stayed green, 1008 passed, 0 failed — which is why the fix is a recorded
+    /// instant and not a different threshold.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The fixture variation that says which rule is answering.</b> Flip <c>enabled</c> to
+    /// true on both rows and both pay the penalty (97.60), because sixty seconds of silence is
+    /// reachable by the ordinary rule — so the waiver in the first row is carried by the
+    /// out-of-service branch and by nothing else. Run, not assumed.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(-90, 100.00)]
+    [InlineData(-30, 97.60)]
+    public async Task A_court_is_out_of_service_from_the_instant_the_switch_was_thrown(
+        int switchedOffSecondsAgo, decimal expectedBalance)
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var now = DateTimeOffset.UtcNow;
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+
+        // Grace is 5 minutes, so the deadline is 60 seconds ago.
+        var booking = await AddDueBookingAsync(host, db, startsAt: now.AddMinutes(-6));
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        await AddBoxAsync(host, db, now.AddMinutes(-2), enabled: false,
+            installedAt: now.AddDays(-30), outOfServiceSince: now.AddSeconds(switchedOffSecondsAgo));
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(expectedBalance, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var rows = await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync();
+        Assert.Equal(expectedBalance == 97.60m, rows.Any(l => l.Type == LedgerEntryType.NoShowPenalty));
+    }
+
+    /// <summary>
+    /// The same fixture as the theory above, read for the <b>mail</b> rather than the ledger,
+    /// because the two halves of §6a.3 failed together: the member inside the window was mailed
+    /// the plain no-show notice for a court the club had shut a minute earlier.
+    /// </summary>
+    [Fact]
+    public async Task The_member_inside_that_window_gets_the_waiver_mail_and_not_the_no_show_notice()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var now = DateTimeOffset.UtcNow;
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db, startsAt: now.AddMinutes(-6));
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        await AddBoxAsync(host, db, now.AddMinutes(-2), enabled: false,
+            installedAt: now.AddDays(-30), outOfServiceSince: now.AddSeconds(-90));
+        host.EmailService.Sent.Clear();
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        var notice = Assert.Single(host.EmailService.Sent, m => m.To == host.PlayerUser.Email);
+        Assert.Contains("out of service", notice.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Missed booking", notice.Subject, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A switched-off row carrying no recorded instant falls back to its silence alone — which
+    /// is exactly what shipped before the column existed, and is the conservative direction: the
+    /// club's own evidence decides and no click moves anything behind it.
+    ///
+    /// <para>
+    /// It exists for rows a fixture, a seed or a restore disabled without going through
+    /// <c>DeviceRegistryService.UpdateAsync</c>. Named and pinned rather than left implicit,
+    /// because a silent fallback is how a rule stops being tested: several tests in this file
+    /// leave the instant null, and this is the test that says what that means.
+    /// </para>
+    ///
+    /// <para>
+    /// Same sixty-second window as the theory above. With no instant recorded the deadline is
+    /// judged by the board's silence, which is inside the threshold, so the penalty stands.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_switched_off_row_with_no_recorded_instant_is_judged_by_its_silence_alone()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var now = DateTimeOffset.UtcNow;
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db, startsAt: now.AddMinutes(-6));
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        var box = await AddBoxAsync(host, db, now.AddMinutes(-2), enabled: false, installedAt: now.AddDays(-30));
+        Assert.Null(box.OutOfServiceSince);
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+    }
+
+    /// <summary>
+    /// The stamp itself, at the one place in the product that writes it: taking a board out of
+    /// service through the admin service records the instant, and putting it back in service
+    /// clears it. Without this the rule above is answered from a column nothing fills.
+    ///
+    /// <para>
+    /// The clear on the way back matters as much as the stamp. A board returned to service is
+    /// not out of service since anything, and leaving a stale instant behind would let a court
+    /// read dark for deadlines that fell while it was working again.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Taking_a_board_out_of_service_records_the_instant_and_returning_it_clears_it()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var registry = scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
+
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
+        Assert.Null(box.OutOfServiceSince);
+
+        var before = DateTimeOffset.UtcNow;
+        await registry.UpdateAsync(box, new UpdateDeviceCommand(null, false, null), host.AdminUser.Id, default);
+        var after = DateTimeOffset.UtcNow;
+
+        var stamped = Assert.IsType<DateTimeOffset>(box.OutOfServiceSince);
+        Assert.InRange(stamped, before, after);
+
+        // An edit that does not touch the switch leaves the instant where it was.
+        await registry.UpdateAsync(box, new UpdateDeviceCommand("Renamed", null, null), host.AdminUser.Id, default);
+        Assert.Equal(stamped, box.OutOfServiceSince);
+
+        await registry.UpdateAsync(box, new UpdateDeviceCommand(null, true, null), host.AdminUser.Id, default);
+        Assert.Null(box.OutOfServiceSince);
+    }
+
+    // ----- the two waiver mails, sentence by sentence ----------------------------------
+
+    /// <summary>
+    /// <b>Every sentence of the out-of-service waiver mail, pinned to the letter.</b>
+    ///
+    /// <para>
+    /// An independent verifier broke four of this template's five sentences one at a time —
+    /// including both that state the money, "Penalty: None" inverted to "Penalty: 30% of the
+    /// booking" and "nothing has been deducted" to "A penalty has been deducted and you have
+    /// been marked down for missing it" — and the full backend suite stayed 991/991 green. A
+    /// waiver mail that tells a member they were penalised, on a booking refunded in full with
+    /// no penalty, is a promise the ledger does not keep, and every one of those sentences was
+    /// guarding nothing. The two branch tests below it discriminate WHICH template is sent; this
+    /// one is what makes the template's own words a promise anything can fail on.
+    /// </para>
+    ///
+    /// <para>
+    /// Read as a whole rather than by keyword: the substring assertions the branch tests use
+    /// ("out of service", "this refund is final") survive an inverted money line, which is
+    /// exactly how the gap stayed open. The court name and the club name are asserted where they
+    /// appear, so dropping either from the sentence goes red too.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Every_sentence_of_the_out_of_service_waiver_mail()
+    {
+        var mail = EmailTemplates.BookingRefundedForOutOfServiceBox(
+            "player@test.local", "Court 4", 8m, "Crusaders Squash Club");
+
+        Assert.Equal("Refunded — the box on Court 4 is out of service", mail.Subject);
+        Assert.Contains("Your booking has been refunded in full", mail.HtmlBody);
+        Assert.Contains(
+            "Nobody checked in on <strong>Court 4</strong> at Crusaders Squash Club during your " +
+            "booking, and no check-in on that court could have reached the club if they had: its " +
+            "box is out of service.",
+            mail.HtmlBody);
+        Assert.Contains(">Refunded</td><td><strong>8.00 credits</strong>", mail.HtmlBody);
+        Assert.Contains(">Penalty</td><td><strong>None</strong>", mail.HtmlBody);
+        Assert.Contains(
+            "You have not been marked down for missing it, and nothing has been deducted. Because " +
+            "that box is out of service it will not send the club anything further, so this refund " +
+            "is final — if you did get onto the court, please tell the desk rather than waiting " +
+            "for it to correct itself.",
+            mail.HtmlBody);
+
+        // The one sentence this template exists to NOT make. S6 cannot reach a board the API
+        // refuses, so a member who did play must be sent to the desk, not told to wait.
+        Assert.DoesNotContain("when it reconnects", mail.HtmlBody);
+        Assert.DoesNotContain("settles as attended", mail.HtmlBody);
+    }
+
+    /// <summary>
+    /// <b>Every sentence of the outage waiver mail</b>, for the same reason and to the same
+    /// standard. This is the branch that CAN be undone, so its reconnect promise is load-bearing
+    /// rather than decorative: S6 reverses the sweep when the box uploads what it queued.
+    /// </summary>
+    [Fact]
+    public void Every_sentence_of_the_outage_waiver_mail()
+    {
+        var mail = EmailTemplates.BookingRefundedForOutage(
+            "player@test.local", "Court 4", 8m, "Crusaders Squash Club");
+
+        Assert.Equal("Refunded — Court 4 was offline", mail.Subject);
+        Assert.Contains("Your booking has been refunded in full", mail.HtmlBody);
+        Assert.Contains(
+            "The court controller at Crusaders Squash Club was offline during your booking on " +
+            "<strong>Court 4</strong>, so the lights could not be released against your name.",
+            mail.HtmlBody);
+        Assert.Contains(">Refunded</td><td><strong>8.00 credits</strong>", mail.HtmlBody);
+        Assert.Contains(">Penalty</td><td><strong>None</strong>", mail.HtmlBody);
+        Assert.Contains(
+            "You have not been marked down for missing it, and nothing has been deducted. If you " +
+            "did get onto the court, the box uploads its record when it reconnects and the booking " +
+            "settles as attended — the refund is reversed and you are charged the original price, " +
+            "with no penalty either way.",
+            mail.HtmlBody);
+
+        // The sentence this one must not make: its board is still in service, so telling the
+        // member the refund is final would be false in the direction that costs them a court.
+        Assert.DoesNotContain("out of service", mail.HtmlBody);
+        Assert.DoesNotContain("this refund is final", mail.HtmlBody);
+    }
+
+    /// <summary>
+    /// The amounts in both waiver mails are the booking's, not a constant. The verifier's
+    /// aggregate mutation replaced the money lines with text; asserting one fixed figure would
+    /// have let a template that hard-codes "8.00 credits" pass.
+    /// </summary>
+    [Theory]
+    [InlineData(12.5, "12.50 credits")]
+    [InlineData(0, "0.00 credits")]
+    public void Both_waiver_mails_quote_the_bookings_own_refund(decimal refunded, string rendered)
+    {
+        Assert.Contains(
+            $">Refunded</td><td><strong>{rendered}</strong>",
+            EmailTemplates.BookingRefundedForOutOfServiceBox("a@b.c", "Court 4", refunded, "Club").HtmlBody);
+        Assert.Contains(
+            $">Refunded</td><td><strong>{rendered}</strong>",
+            EmailTemplates.BookingRefundedForOutage("a@b.c", "Court 4", refunded, "Club").HtmlBody);
     }
 }

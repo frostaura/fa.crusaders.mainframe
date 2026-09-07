@@ -155,29 +155,59 @@ against the club, invisibly, on the next thirty-second tick. It is the same defe
 earlier rules for: it made the price of a settled fact depend on something that happened
 afterwards, and priced identical facts two ways depending on whether an admin had clicked yet.
 
-**The switch-off instant IS recorded — as `LastSeenAt` on the switched-off row.** The API refuses a
-disabled board `403` on every courtside endpoint, so the moment the switch is thrown is the moment
-that board stops being heard from, and a heartbeat at `T` is positive proof the board was still in
-service at `T` (a board out of service cannot produce one). A switched-off board therefore shuts
-its court's door only from the point that evidence has run past `offline_after_seconds` — the same
-threshold, the same strictly-greater comparison, and the same reading of `DeviceOutage` rows that
-judges an enabled board. A board that has never called in at all was never in service, and shuts
-the door from the moment it existed.
+**The switch-off instant is recorded, and it is its own column.** `devices.OutOfServiceSince` is
+stamped where the transition happens (`DeviceRegistryService.UpdateAsync`) and cleared when the
+board goes back into service. **It is not `LastSeenAt`, and this document said for one round that
+it was.** The argument then was that a disabled board is refused `403`, so the moment the switch is
+thrown is the moment it stops being heard from — true, but the two instants are not the same one.
+The switch lands some seconds or minutes *after* the board's last heartbeat, and that gap is money:
+it is up to a heartbeat cadence wide, and a grace deadline inside it is priced one way if the gap
+is read as "still in service" and the other way if it is read as "already switched off".
+
+**So the rule is three parts, and each is answered from evidence that existed at the instant asked
+about.** For a switched-off board and a deadline `D`, with the switch thrown at `S`:
+
+| | |
+| --- | --- |
+| `D` at or before the board's last heartbeat | **Lit.** The board answered the API then; there is positive proof it was in service. |
+| `D` after that heartbeat but at or before `S` | **Judged by `offline_after_seconds`**, the same test, the same strictly-greater comparison and the same reading of `DeviceOutage` rows an *enabled* board gets. The board was in service at `D`; the click had not happened. |
+| `D` after `S` | **Out of service, at once.** The club has declared the door shut — every courtside endpoint answers `403` from that instant — so there is no ambiguity left to wait `offline_after_seconds` for. |
+
+The middle row is the whole of "the switch does not reach backwards": the same `BoxWasUnreachable`
+call answers a past deadline on both sides of the click, so throwing the switch cannot change a
+price that had already been decided. The bottom row is the half that was missing. Bounding the
+branch by the board's silence instead — the rule that shipped — left the court reading **Lit** for
+up to `offline_after_seconds` (180 s at the shipped default) after the click, while every courtside
+endpoint already refused it: a member standing at a court the club had switched off a minute
+earlier was charged the full `penalty_pct` and mailed the plain no-show notice. Bounding it at
+`LastSeenAt` exactly — the other obvious candidate — closes that and reopens the retroactive
+switch for every deadline in `(LastSeenAt, LastSeenAt + offline_after_seconds)`. Both were run: with
+the second rule in place a sixty-second-old deadline moved from `97.60` to `100.00` on the click
+alone and the whole backend suite stayed green. Only the recorded instant answers both.
+
+**What the column cannot carry, stated rather than implied.** It is one instant, not a history.
+Putting a board back in service clears it, so an off-period that has ended leaves no record of when
+it began — and `PeripheralHealthWorker` does not alert on a disabled board, so no `DeviceOutage`
+row covers it either. An unsettled deadline inside a *finished* off-period is therefore judged by
+the board's silence across it, which reads dark whenever that period exceeded
+`offline_after_seconds` and Lit when it did not. That is a known gap in the club's favour for
+off-periods shorter than the threshold, and it is the price of one column instead of a table.
 
 `DeviceOutageIndex.CourtWasDark` therefore answers **dark** when every enabled box driving the
 court was past the threshold at the deadline, **or** when no enabled box drove it and every
-out-of-service board that did was itself past the threshold then; and **not dark** when a reachable
-enabled box drove it, when the last board on it was still being heard from at that instant, or when
-the club has no board on it at all. `DeviceOutageIndex.DarknessAt` returns which of the two dark
-states it was, because they do not carry the same promise to the member (below).
+out-of-service board that did had its door shut then by the three-part rule above; and **not dark**
+when a reachable enabled box drove it, when the last board on it was still in service and being
+heard from at that instant, or when the club has no board on it at all.
+`DeviceOutageIndex.DarknessAt` returns which of the two dark states it was, because they do not
+carry the same promise to the member (below).
 
 **A switched-off board only speaks for deadlines it existed at, exactly as an enabled one does.**
 The floor is the earliest of the row's `CreatedAt` and its `LastSeenAt` — `LastSeenAt` may be null
 here, unlike in the enabled set, because a board that was switched off before it ever heart-beat is
-still hardware the club installed. The floor and the silence bound close different holes and both
-are needed: the floor stops a board *registered* after the deadline from speaking for it, and the
-silence bound stops a board *switched off* after the deadline from speaking for it. Only the first
-of the two existed after finding M-F3, and the pin table below listed it against the second.
+still hardware the club installed. The floor and the switch-off instant close different holes and
+both are needed: the floor stops a board *registered* after the deadline from speaking for it, and
+the recorded instant stops a board *switched off* after the deadline from speaking for it. Only the
+first of the two existed after finding M-F3, and the pin table below listed it against the second.
 
 **The waiver mail differs between the two dark states, and that is a settlement fact rather than
 copy.** S5a is reversible by S6 only while the board is in service: an outage ends, the board
@@ -187,6 +217,17 @@ S5a settlement is final. The outage notice says the record arrives when the box 
 out-of-service notice says the refund is final and sends the member to the desk. Pinned by
 `The_out_of_service_waiver_mail_does_not_promise_a_box_that_will_never_reconnect` and
 `The_outage_waiver_mail_still_promises_the_upload_for_a_box_that_can_come_back`.
+
+**The out-of-service notice no longer opens "No court box was answering", and recording the
+switch-off instant is what made that sentence false.** A court is out of service from the click,
+so the board this mail is sent about may have been answering perfectly a minute before the grace
+window closed — it was simply switched off. What holds in both halves of the state is that no
+check-in on that court could have reached the club: before the click because the board had gone
+quiet past the threshold, after it because the API refuses the board outright. That is what the
+sentence says now. Every sentence in both mails is pinned to the letter by
+`Every_sentence_of_the_out_of_service_waiver_mail` and `Every_sentence_of_the_outage_waiver_mail`,
+because a verifier inverted four of this template's five sentences — "Penalty: None" to "Penalty:
+30% of the booking" among them — with the whole backend suite green.
 
 Pinned by `PeripheralHealthTests`, and each name pins the clause it is listed against rather than
 the section as a whole:
@@ -201,7 +242,12 @@ the section as a whole:
 | A board that did exist at it still is | `A_board_already_installed_at_the_deadline_still_blocks_the_waiver` |
 | The settlement is the same once the retired row is switched off | `A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty` |
 | A court whose only box is out of service **is** dark | `A_court_whose_only_box_is_out_of_service_waives_the_penalty` |
-| …but only from the point that board went quiet | `A_switch_off_darkens_only_the_deadlines_the_board_had_already_gone_quiet_for` |
+| …from the instant the switch was thrown, with no waiting period | `A_court_is_out_of_service_from_the_instant_the_switch_was_thrown`, row `-90` |
+| …and not one second before it: a deadline already past when the switch was thrown keeps its price | the same theory, row `-30` |
+| …and the member inside that window gets the waiver mail, not the no-show notice | `The_member_inside_that_window_gets_the_waiver_mail_and_not_the_no_show_notice` |
+| The instant is stamped on the switch and cleared on the way back in | `Taking_a_board_out_of_service_records_the_instant_and_returning_it_clears_it` |
+| A switched-off row with no recorded instant falls back to its silence alone | `A_switched_off_row_with_no_recorded_instant_is_judged_by_its_silence_alone` |
+| Deadlines before the switch are judged by the board's silence, both ways | `A_switch_off_darkens_only_the_deadlines_the_board_had_already_gone_quiet_for` |
 | …so a board still heart-beating when it was switched off does not waive an older deadline | `A_court_whose_only_box_was_just_switched_off_still_charges_the_older_deadline` |
 | …not even hardened with a silence on both sides of it | `A_switched_off_board_heard_from_on_both_sides_of_the_deadline_does_not_waive_it` |
 | …and a real outage keeps its waiver once the club switches the board off | `A_board_dark_across_the_deadline_still_waives_it_after_an_admin_switches_it_off` |
@@ -210,6 +256,9 @@ the section as a whole:
 | A board **registered** after the deadline does not speak for it | `A_box_switched_off_after_the_deadline_does_not_make_its_court_out_of_service` |
 | The out-of-service waiver mail does not promise a reconnect | `The_out_of_service_waiver_mail_does_not_promise_a_box_that_will_never_reconnect` |
 | The outage waiver mail still does | `The_outage_waiver_mail_still_promises_the_upload_for_a_box_that_can_come_back` |
+| Every sentence of the out-of-service mail, including both that state the money | `Every_sentence_of_the_out_of_service_waiver_mail` |
+| Every sentence of the outage mail | `Every_sentence_of_the_outage_waiver_mail` |
+| Both mails quote the booking's own refund rather than a constant | `Both_waiver_mails_quote_the_bookings_own_refund` |
 
 **The row named "A board switched off after the deadline does not speak for it" was false, and it
 is the reason the regression above shipped.** Its pin varies `installedAt` — a board *created*

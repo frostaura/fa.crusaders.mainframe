@@ -182,6 +182,24 @@ public sealed class DeviceRegistryService
     public async Task<Device> UpdateAsync(Device device, UpdateDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
     {
         if (cmd.Name is not null) device.Name = cmd.Name.Trim();
+
+        // The switch-off INSTANT, recorded on the transition rather than derived afterwards.
+        //
+        // `Enabled` is a boolean with no history, and the settlement asks a question about the
+        // past: "was this court's door shut when that grace window closed?" (settlement-model.md
+        // S5a). Answering it from the boolean alone let one click re-price every deadline still
+        // inside the sweep's lookback; answering it from LastSeenAt instead reads the board's
+        // last heartbeat as the click, which it is not — the gap between them is up to a
+        // heartbeat cadence wide, and a deadline inside that gap was priced one way before the
+        // click and the other way after it. Only the instant itself answers both, so it is
+        // stamped here, where the transition actually happens.
+        //
+        // Cleared on the way back in: a board in service is not out of service since anything.
+        if (cmd.Enabled is { } enabled && enabled != device.Enabled)
+        {
+            device.OutOfServiceSince = enabled ? null : DateTimeOffset.UtcNow;
+        }
+
         if (cmd.Enabled is not null) device.Enabled = cmd.Enabled.Value;
         if (cmd.CourtNumbers is not null) device.CourtNumbers = cmd.CourtNumbers.ToList();
         if (cmd.ButtonMap is { } buttons) device.ButtonMapJson = buttons.Value?.ToJson();

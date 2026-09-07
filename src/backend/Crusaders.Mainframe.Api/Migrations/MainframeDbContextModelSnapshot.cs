@@ -366,6 +366,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<DateTimeOffset?>("OutOfServiceSince")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("RunningVersion")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");

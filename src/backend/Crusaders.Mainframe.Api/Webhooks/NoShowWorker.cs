@@ -192,10 +192,13 @@ public sealed class NoShowWorker : BackgroundService
         // side of that trade; the exception is recorded in settlement-model.md I2 and on the
         // go-live checklist rather than denied here.
         //
-        // A switched-off box counts here only from the point its own evidence had run past the
-        // threshold, for the same reason a row is not read as an object: `Enabled` carries no
-        // history, so treating the switch as retroactive re-priced deadlines that had already
-        // passed. See DeviceOutageIndex.DarknessAt.
+        // A switched-off box shuts its court's door from the instant the switch was thrown, which
+        // is recorded (Device.OutOfServiceSince) rather than inferred from the present value of
+        // `Enabled`: a boolean carries no history, and treating the switch as retroactive
+        // re-priced deadlines that had already passed. Deadlines at or before that instant are
+        // judged by the same silence test an enabled board gets, so the click moves nothing
+        // behind it; deadlines after it are dark at once, because there is no longer any door.
+        // See DeviceOutageIndex.DoorWasShutFor.
         var darkness = sweep.Outages.DarknessAt(b.CourtId, b.StartsAt.AddMinutes(tSettings.GraceWindowMinutes));
         var courtWasDark = darkness != CourtDarkness.Lit;
 
