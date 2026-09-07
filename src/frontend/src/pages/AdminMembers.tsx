@@ -702,18 +702,33 @@ const COLUMN_DISPLAY = {
  * </p>
  *
  * <p>
+ * <b>What the trade costs, stated rather than discovered.</b> Under the old auto layout no
+ * cell ever ellipsised — every column was as wide as its content — and the price was the
+ * overflow, and therefore the occlusion. A fixed column can clip where an auto one grew, so
+ * the numbers below are the measured content widths at 1280px (Name 238 · Email 208 ·
+ * Member # 107 · Status 95 · Class 163 · Joined 105 · Balance 122 · Actions 209, summing to
+ * 1247 against a 1246px container — the old layout fitted at `xl` by one pixel and by luck)
+ * with the slack moved to Name. Measured against the seeded club, nothing clips at 375, 640,
+ * 700, 767, 1023, 1100, 1279, 1280, 1440, 1600 or 1920. At 768 six names and at 1024 one
+ * name ellipsise — and at exactly those two widths the old layout overflowed by 61px and 9px
+ * with the `Class` and `Joined` headers partly under a pinned cell. A name cut with an
+ * ellipsis and a hover title is a cued loss; a header painted over by a pinned column is a
+ * silent one. That is the whole exchange.
+ * </p>
+ *
+ * <p>
  * Changing any number here means re-running <code>e2e/admin-members-layout.spec.ts</code>,
- * which measures the result in a real browser at eight widths — and which now varies the
+ * which measures the result in a real browser at four widths — and which now varies the
  * fixture's longest name, because a layout that only holds for one club's data is not fixed.
  * </p>
  */
 const COLUMN_WIDTH = {
-  email: "w-[200px]",
-  memberNumber: "w-[110px]",
-  status: "w-[124px]",
-  memberClass: "w-[150px]",
-  joined: "w-[104px]",
-  balance: "w-[132px]",
+  email: "w-[216px]",
+  memberNumber: "w-[104px]",
+  status: "w-[118px]",
+  memberClass: "w-[148px]",
+  joined: "w-[100px]",
+  balance: "w-[126px]",
   actions: "w-[200px]",
 } as const;
 
