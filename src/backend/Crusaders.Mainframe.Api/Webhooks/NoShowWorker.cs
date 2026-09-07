@@ -90,12 +90,20 @@ public sealed class NoShowWorker : BackgroundService
     /// court had no reachable box may have been standing in front of it, so they get the reason
     /// instead of the accusation.
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="refundedCredits"/> is the <b>gross</b> <c>CancellationRefund</c> leg, not
+    /// that leg less the penalty. This used to pass the net figure into the cancellation
+    /// template's gross slot, so a member whose ledger held <c>+50.00</c> and <c>-15.00</c> — the
+    /// two rows I11 requires — was mailed "Refunded 35.00 credits", a number that appears nowhere
+    /// in the ledger and which, read beside the penalty line, deducts the 15 twice.
+    /// </para>
     /// </summary>
     private static EmailMessage Notice(
-        string to, string courtName, string clubName, decimal netRefund, decimal penalty, bool courtWasDark)
+        string to, string courtName, string clubName, decimal refundedCredits, decimal penalty, bool courtWasDark)
         => courtWasDark
-            ? EmailTemplates.BookingRefundedForOutage(to, courtName, netRefund, clubName)
-            : EmailTemplates.BookingCancellation(to, courtName + " (no-show)", netRefund, penalty);
+            ? EmailTemplates.BookingRefundedForOutage(to, courtName, refundedCredits, clubName)
+            : EmailTemplates.BookingNoShow(to, courtName, refundedCredits, penalty);
 
     /// <summary>
     /// Reverses one no-show: refund, penalty, status, notification, event.
@@ -252,10 +260,16 @@ public sealed class NoShowWorker : BackgroundService
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == b.UserId, ct);
         var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == b.CourtId, ct);
 
-        // What the member is actually left with, which is nothing at all if nothing was
-        // ever taken — quoting them a refund they did not receive is how a support
-        // ticket starts.
-        var netRefund = wasCharged ? b.AmountChargedCredits - penalty : 0m;
+        // The refund LEG, exactly as it was posted above — gross, and zero when nothing was
+        // ever taken, because quoting a member a refund they did not receive is how a
+        // support ticket starts.
+        //
+        // Not the net. The ledger holds two rows and I11 forbids a netted one, so the mail
+        // and the booking.no_show event must quote the same two figures the member can see
+        // on /wallet. Subtracting the penalty here produced a third number that exists
+        // nowhere — "Refunded 35.00" against a +50.00 row — and, beside the penalty line,
+        // read as though the 15 came off twice.
+        var refundedCredits = wasCharged ? b.AmountChargedCredits : 0m;
         var courtName = court?.Name ?? "a court";
         if (user is null)
         {
@@ -267,7 +281,7 @@ public sealed class NoShowWorker : BackgroundService
             try
             {
                 await email.SendAsync(
-                    Notice(user.Email, courtName, tenant.DisplayName, netRefund, penalty, courtWasDark), ct);
+                    Notice(user.Email, courtName, tenant.DisplayName, refundedCredits, penalty, courtWasDark), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show email failed for {BookingId}", b.Id); }
         }
@@ -284,7 +298,7 @@ public sealed class NoShowWorker : BackgroundService
                 ["court_number"] = court?.CourtNumber,
                 ["user_id"] = b.UserId,
                 ["penalty_credits"] = penalty,
-                ["refund_credits"] = netRefund,
+                ["refund_credits"] = refundedCredits,
                 // True when the penalty was waived because the court's box was unreachable
                 // (§6a). A club reconciling its no-show revenue needs to tell the two apart.
                 ["peripheral_outage"] = courtWasDark,

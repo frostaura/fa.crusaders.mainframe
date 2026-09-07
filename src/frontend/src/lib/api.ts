@@ -934,7 +934,15 @@ export const endpoints = {
    * `AmountZar`, so the amount bound to 0, the positivity guard fired, and no member
    * could top up at all — the screen told them their amount was a bad multiple of R100.
    */
-  topupStart: (amountZar: number) => api.post<TopUpStart>("/api/v1/credit/topup", { amountZar }),
+  /**
+   * Registers a top-up. `quotedConversionRate` is the rate the member was looking at when
+   * they pressed Continue, and it is not optional: the server compares it with the live one
+   * and answers 409 `topup_rate_changed` rather than registering a top-up at a rate the
+   * member was never shown. Sending nothing would silently opt this screen back into the
+   * defect — a member offered 240 credits for R100 and given 160.
+   */
+  topupStart: (amountZar: number, quotedConversionRate: number) =>
+    api.post<TopUpStart>("/api/v1/credit/topup", { amountZar, quotedConversionRate }),
   topupStatus: (topupId: string) => api.get<TopUpStatus>(`/api/v1/credit/topup/${topupId}`),
 
   // Webhooks (admin)

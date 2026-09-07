@@ -16,6 +16,19 @@ namespace Crusaders.Mainframe.Api.Email;
 /// <c>PenaltyPct</c> travel with them because the template used to hardcode "15 minutes / 30%"
 /// and went on saying so after an admin moved the club to 30 minutes at 50%.
 /// </remarks>
+/// <param name="IsWalkUp">
+/// Court time bought at the box rather than a reservation made ahead of it.
+///
+/// <para>
+/// It changes what the mail is allowed to promise. A walk-up starts the instant it is bought —
+/// <c>StartsAt = now</c>, and the same request activates the court — so the confirmation used to
+/// tell a member standing under lit lights that cancelling would cost them 30% and return the
+/// rest. It returns nothing: <c>settlement-model.md</c> S4 gives nothing back once someone has
+/// checked in, and the server's own cancellation quote for these bookings answers
+/// <c>refundCredits 0</c>. Defaulted to <c>false</c> so an ordinary booking keeps the penalty
+/// heads-up it is entitled to.
+/// </para>
+/// </param>
 public sealed record BookingConfirmationDetails(
     string CourtName,
     string StartsAtLocal,
@@ -23,7 +36,33 @@ public sealed record BookingConfirmationDetails(
     decimal AmountCredits,
     decimal BalanceAfterCredits,
     int PenaltyWindowMinutes,
-    decimal PenaltyPct);
+    decimal PenaltyPct,
+    bool IsWalkUp = false);
+
+/// <summary>
+/// The two things a member needs to know when the <b>club</b> cancelled their booking rather
+/// than they themselves — who did it and why.
+/// </summary>
+/// <remarks>
+/// <para>
+/// An admin cancellation used to reach the member as a mail indistinguishable from one they
+/// sent themselves: "Your booking on Court 4 has been cancelled. Refunded 50.00 credits." No
+/// actor, no reason, and no mention that the penalty had been waived on their behalf — while
+/// the audit row beside it carried all three. Email is the only channel the member has; the
+/// schedule grid just shows the slot free again.
+/// </para>
+/// <para>
+/// Its own record rather than three more positional parameters: <see cref="EmailTemplates.BookingCancellation"/>
+/// would otherwise take seven, past the complexity gate's six, and every one of them a bool,
+/// a string or a decimal that would transpose silently.
+/// </para>
+/// </remarks>
+/// <param name="Reason">The waiver reason the admin typed, or null when they gave none.</param>
+/// <param name="PenaltyWaived">
+/// True when the club waived a penalty this cancellation would otherwise have carried — the
+/// same <c>waived</c> flag the audit row records.
+/// </param>
+public sealed record ClubCancellation(string? Reason, bool PenaltyWaived);
 
 /// <summary>
 /// Everything the two peripheral alerts state, as named members — the same shape, and the same
@@ -283,39 +322,133 @@ public static class EmailTemplates
     public static EmailMessage BookingConfirmation(
         string to, BookingConfirmationDetails d, EmailAttachment? receipt = null) => new(
         To: to,
-        Subject: $"Booking confirmed — {d.CourtName} {d.StartsAtLocal}",
+        Subject: d.IsWalkUp
+            ? $"Court time started — {d.CourtName} {d.StartsAtLocal}"
+            : $"Booking confirmed — {d.CourtName} {d.StartsAtLocal}",
         HtmlBody:
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
-              <h2 style="margin:0 0 12px">You're booked</h2>
+              <h2 style="margin:0 0 12px">{(d.IsWalkUp ? "You're on court" : "You're booked")}</h2>
               <table style="border-collapse:collapse;font-size:14px">
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Court</td><td><strong>{d.CourtName}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Starts</td><td><strong>{d.StartsAtLocal}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">{(d.IsWalkUp ? "Started" : "Starts")}</td><td><strong>{d.StartsAtLocal}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Duration</td><td><strong>{d.Duration}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Charged</td><td><strong>{Cr(d.AmountCredits)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(d.BalanceAfterCredits)}</strong></td></tr>
               </table>
               {OverdrawnNoticeHtml(d.BalanceAfterCredits)}
-              <p style="margin-top:16px;font-size:13px;color:#A16207">
-                Heads-up: cancelling within {d.PenaltyWindowMinutes} minutes of the start, or not turning the lights on, incurs a {Num(d.PenaltyPct)}% penalty.
-              </p>
+              {CancellationTermsHtml(d)}
               <p style="margin-top:16px;font-size:13px;color:#475569">Your receipt is attached.</p>
               {FooterHtml}
             </div>
             """,
         Attachments: receipt is null ? null : [receipt]);
 
-    /// <summary>Both figures are <b>credits</b>. See <see cref="Cr"/>.</summary>
-    public static EmailMessage BookingCancellation(string to, string courtName, decimal refundedCredits, decimal? penaltyCredits) => new(
+    /// <summary>
+    /// What this particular booking can still be cancelled for — the one paragraph of the
+    /// confirmation that is a promise about money.
+    /// </summary>
+    /// <remarks>
+    /// A walk-up gets the other sentence. It is bought at the box, starts immediately and
+    /// activates the court in the same request, so the penalty line offered a member already
+    /// under the lights 70% of their money back for cancelling; the server refunds nothing
+    /// (<c>settlement-model.md</c> S4, and the cancellation quote's own <c>refundCredits 0</c>).
+    /// Neither half of the old sentence was true for one: the lights are on, and the 30% figure
+    /// describes a refund that does not happen.
+    /// </remarks>
+    private static string CancellationTermsHtml(BookingConfirmationDetails d)
+    {
+        if (d.IsWalkUp)
+        {
+            return """
+                <p style="margin-top:16px;font-size:13px;color:#A16207">
+                  This is court time bought at the box, so it has already started.
+                  Court time is not refunded once the lights have been on, and there is nothing to cancel.
+                </p>
+                """;
+        }
+
+        return $"""
+            <p style="margin-top:16px;font-size:13px;color:#A16207">
+              Heads-up: cancelling within {d.PenaltyWindowMinutes} minutes of the start, or not turning the lights on, incurs a {Num(d.PenaltyPct)}% penalty.
+            </p>
+            """;
+    }
+
+    /// <summary>
+    /// A cancelled booking, in the member's mail. Both figures are <b>credits</b>; see <see cref="Cr"/>.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="refundedCredits"/> is the <b>gross</b> refund — the <c>CancellationRefund</c>
+    /// row exactly as the ledger holds it, never that row less the penalty. I11 forbids netting,
+    /// so a mail quoting a net figure names a number the member cannot find on <c>/wallet</c>, and
+    /// read as English beside the penalty line it double-counts the deduction.
+    /// <paramref name="byClub"/> is null when the member cancelled it themselves.
+    /// </remarks>
+    public static EmailMessage BookingCancellation(
+        string to, string courtName, decimal refundedCredits, decimal? penaltyCredits,
+        ClubCancellation? byClub = null) => new(
         To: to,
-        Subject: $"Booking cancelled — {courtName}",
+        Subject: byClub is null ? $"Booking cancelled — {courtName}" : $"The club cancelled your booking — {courtName}",
         HtmlBody:
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
-              <h2 style="margin:0 0 12px">Cancelled</h2>
-              <p>Your booking on {courtName} has been cancelled.</p>
+              <h2 style="margin:0 0 12px">{(byClub is null ? "Cancelled" : "Cancelled by the club")}</h2>
+              <p>{(byClub is null
+                  ? $"Your booking on {System.Net.WebUtility.HtmlEncode(courtName)} has been cancelled."
+                  : $"The club cancelled your booking on {System.Net.WebUtility.HtmlEncode(courtName)} on your behalf. You did not do this.")}</p>
+              {ClubReasonHtml(byClub)}
               <p>Refunded to your credit: <strong>{Cr(refundedCredits)}</strong>.</p>
               {(penaltyCredits is > 0 ? $"<p>Late-cancellation penalty applied: <strong>{Cr(penaltyCredits.Value)}</strong>.</p>" : "")}
+              {(byClub is { PenaltyWaived: true } ? "<p>The late-cancellation penalty was waived, so nothing was deducted for it.</p>" : "")}
+              {FooterHtml}
+            </div>
+            """);
+
+    /// <summary>
+    /// The reason an admin typed when cancelling on a member's behalf, or nothing when they gave
+    /// none. Encoded, because it is free text an admin wrote into a mail sent to somebody else.
+    /// </summary>
+    private static string ClubReasonHtml(ClubCancellation? byClub)
+    {
+        var reason = byClub?.Reason?.Trim();
+        if (string.IsNullOrEmpty(reason)) return "";
+        return $"""<p>Reason given by the club: <strong>{System.Net.WebUtility.HtmlEncode(reason)}</strong>.</p>""";
+    }
+
+    /// <summary>
+    /// A booking swept as a no-show — <c>feature-spec.md</c> §11's "No-show with penalty", which
+    /// is a required email in its own right and had been borrowing the cancellation one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Borrowing it was wrong on four counts at once, all money-facing: the mail was headed
+    /// "Cancelled" for something the member never cancelled, the court was renamed
+    /// "Court 3 (no-show)", a <c>NoShowPenalty</c> was labelled a <b>late-cancellation</b>
+    /// penalty, and the refund quoted was the penalty already subtracted — a figure that
+    /// appears nowhere in the ledger, which holds the two legs I11 requires
+    /// (<c>CancellationRefund +50.00</c> and <c>NoShowPenalty −15.00</c>) and no netted row.
+    /// </para>
+    /// <para>
+    /// <paramref name="refundedCredits"/> is therefore the gross leg, and the two figures are
+    /// stated as the two movements they are. No netted total is printed either: 35.00 is
+    /// precisely the number that started this, and the balance the member is left with is on
+    /// <c>/wallet</c>, computed the only way this system computes one — by summing the rows.
+    /// </para>
+    /// </remarks>
+    public static EmailMessage BookingNoShow(string to, string courtName, decimal refundedCredits, decimal penaltyCredits) => new(
+        To: to,
+        Subject: $"Missed booking — {courtName}",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">You missed this booking</h2>
+              <p>Nobody was identified at the court for your booking on {System.Net.WebUtility.HtmlEncode(courtName)} before the grace window closed, so it was released and marked as a no-show.</p>
+              <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Booking refunded</td><td><strong>{Cr(refundedCredits)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">No-show penalty</td><td><strong>{(penaltyCredits > 0 ? Cr(-penaltyCredits) : "None")}</strong></td></tr>
+              </table>
+              <p style="font-size:13px;color:#475569">Both movements appear separately in your wallet — the refund and the penalty are two rows, not one. If you were at the court and could not get the lights on, tell the club and they can reverse this.</p>
               {FooterHtml}
             </div>
             """);

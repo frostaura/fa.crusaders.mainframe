@@ -46,10 +46,20 @@ public static class ReceiptPdf
     /// Renders the receipt for one booking.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every figure passed in is <b>credits</b>. Credits are the unit of account in this system —
     /// rand exists only on the top-up row for reconciliation — and a receipt that printed a rand
     /// sign over a credit figure would overstate the charge by the conversion rate, which is the
     /// exact defect this repo already carried once.
+    /// </para>
+    /// <para>
+    /// <b>Both</b> times are the club's own wall clock, and that is why this takes
+    /// <paramref name="issuedAtLocal"/> already formatted rather than a <c>DateTimeOffset</c> it
+    /// would stamp itself. It used to render <c>UtcNow</c> with a literal "UTC" two lines above a
+    /// "Starts" that had been converted to <c>tenant_settings.timezone</c>, so every receipt
+    /// carried two times two hours apart for the same booking — on the one artefact a member
+    /// keeps against a disputed charge.
+    /// </para>
     /// </remarks>
     public static byte[] ForBooking(
         string clubName,
@@ -60,7 +70,7 @@ public static class ReceiptPdf
         string duration,
         decimal amountCredits,
         decimal balanceAfterCredits,
-        DateTimeOffset issuedAt)
+        string issuedAtLocal)
     {
         var lines = new List<Line>
         {
@@ -68,7 +78,7 @@ public static class ReceiptPdf
             new("Booking receipt"),
             new(""),
             new("Receipt no.", bookingReference),
-            new("Issued", issuedAt.ToString("ddd dd MMM yyyy HH:mm 'UTC'", CultureInfo.InvariantCulture)),
+            new("Issued", issuedAtLocal),
             new("Member", memberName),
             new(""),
             new("Court", courtName),
@@ -78,7 +88,7 @@ public static class ReceiptPdf
             new("Charged", Credits(amountCredits)),
             new("Balance after", Credits(balanceAfterCredits)),
             new(""),
-            new("Credits are this club's unit of account."),
+            new("Times are this club's local time. Credits are its unit of account."),
             new("This receipt records one ledger movement; your wallet holds the full history."),
         };
         return Render(lines);

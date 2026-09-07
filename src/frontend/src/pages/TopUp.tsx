@@ -58,6 +58,44 @@ const START_ERRORS: Record<string, string> = {
   provider_register_failed: "PayFast wouldn't start this payment. Try again in a minute.",
 };
 
+/**
+ * The rate the member is looking at, re-quoted when the club has moved it.
+ *
+ * <p>
+ * `/credit/topup/options` is fetched once on mount and never revalidated, and this screen
+ * promises beside the figure that the rate is locked in when you continue. It was locked
+ * from the POST onward and not before it, so an admin changing the member's class — or
+ * editing the club's `credits_per_zar_*`, which reaches EVERY member with this screen open
+ * — moved the price under the tab. The screen went on saying 240.00 credits, Continue
+ * registered 160, and the next thing the member saw was a card form. Two testers
+ * reproduced it independently on the same day.
+ * </p>
+ *
+ * <p>
+ * The server now refuses a stale quote with `topup_rate_changed` instead of repricing it,
+ * so the member is never charged at a rate they were not shown. This puts the new figure
+ * on the screen and stops, rather than continuing to the gateway — the member commits to
+ * the new price by pressing the button again, deliberately.
+ * </p>
+ */
+function reQuote(
+  payload: Record<string, unknown>,
+  amountZar: number,
+  setOptions: React.Dispatch<React.SetStateAction<TopUpOptions | null>>,
+): string {
+  const rate = Number(payload.conversion_rate);
+  const credits = Number(payload.quoted_credits);
+  const memberClass = payload.member_class === "LeagueOrSenior" || payload.member_class === "Regular"
+    ? payload.member_class
+    : null;
+  if (Number.isFinite(rate)) {
+    setOptions((o) => (o ? { ...o, conversion_rate: rate, member_class: memberClass ?? o.member_class } : o));
+  }
+  const nowBuys = Number.isFinite(credits) ? credits : amountZar * rate;
+  return `The club changed the credit rate while this page was open — ${formatZar(amountZar)} now buys `
+    + `${formatCredits(nowBuys, { long: true })}. Nothing has been charged. Check the new figure and continue when you're happy with it.`;
+}
+
 export default function TopUpPage() {
   const nav = useNavigate();
   const [options, setOptions] = useState<TopUpOptions | null>(null);
@@ -86,16 +124,22 @@ export default function TopUpPage() {
     // button — so an invalid amount greyed the button out and said nothing at all, and the
     // member had to infer the rule from a hint line.
     if (problem) { setError(problem); return; }
+    if (!options) { setError("Couldn't load the club's top-up settings. Try again in a moment."); return; }
     setError(null);
     setLoading(true);
     try {
-      const res = await endpoints.topupStart(value);
+      // The quoted rate travels with the amount, so the server can refuse an offer the club
+      // has moved away from rather than registering the member at the new one.
+      const res = await endpoints.topupStart(value, options.conversion_rate);
       postToGateway(res.redirect_url, res.form_fields);
     } catch (err) {
-      const code = err instanceof ApiError && isRecord(err.payload) ? String(err.payload.error ?? "") : "";
-      setError(START_ERRORS[code] ?? (err instanceof ApiError
-        ? "We couldn't start this payment. Try again in a moment."
-        : "No connection — check your signal and try again."));
+      const payload = err instanceof ApiError && isRecord(err.payload) ? err.payload : null;
+      const code = payload ? String(payload.error ?? "") : "";
+      setError(code === "topup_rate_changed" && payload
+        ? reQuote(payload, value, setOptions)
+        : START_ERRORS[code] ?? (err instanceof ApiError
+          ? "We couldn't start this payment. Try again in a moment."
+          : "No connection — check your signal and try again."));
       setLoading(false);
     }
   };
@@ -141,7 +185,8 @@ export default function TopUpPage() {
             {options && (
               <p className="text-[11px] text-text-muted mt-2">
                 At {formatRate(options.conversion_rate)} credits / R1 ({options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"}).
-                This rate is locked in when you continue, so it can't change while you're paying.
+                This rate is locked in when you continue, so it can't change while you're paying — and if the club
+                changes it before then, we'll show you the new figure rather than charge you at it.
               </p>
             )}
           </div>

@@ -109,7 +109,7 @@ public class NoShowWorkerTests
 
         // And the email the member actually reads. 8 credits at 30% would print 2.40
         // penalty and 5.60 back; neither figure may appear when nothing was taken.
-        var mail = Assert.Single(host.EmailService.Sent, m => m.Subject.Contains("ancel", StringComparison.OrdinalIgnoreCase));
+        var mail = Assert.Single(host.EmailService.Sent, m => m.Subject.StartsWith("Missed booking", StringComparison.Ordinal));
         Assert.DoesNotContain("2.40", mail.HtmlBody);
         Assert.DoesNotContain("5.60", mail.HtmlBody);
     }
@@ -514,5 +514,69 @@ public class NoShowWorkerTests
 
         await db.Entry(ancient).ReloadAsync();
         Assert.Equal(BookingStatus.Booked, ancient.Status);
+    }
+
+    /// <summary>
+    /// <b>R3 K-F2, the money test.</b> The mail and the webhook quote the <b>two</b> figures
+    /// the ledger holds, and neither of them quotes a third one that does not exist.
+    ///
+    /// <para>
+    /// The sweep posted <c>CancellationRefund +50.00</c> and <c>NoShowPenalty −15.00</c> — the
+    /// two rows I11 requires and forbids netting — and then mailed the member "Refunded to your
+    /// credit: 35.00 credits. Late-cancellation penalty applied: 15.00 credits." 35.00 appears
+    /// nowhere in the ledger, so a member reconciling the mail against <c>/wallet</c> cannot
+    /// make the two agree; read as English the two sentences deduct the 15 twice; and
+    /// <c>booking.no_show</c> carried the same 35 to every programmatic consumer. The identical
+    /// template on the *cancellation* path passed the gross leg, so one sentence meant two
+    /// different things depending on which worker sent it.
+    /// </para>
+    ///
+    /// <para>
+    /// Mutation-proved: restoring <c>b.AmountChargedCredits - penalty</c> in <c>SweepOneAsync</c>
+    /// puts 35.00 back into both the mail and the event, and this test fails on the refund
+    /// figure in each. The fixture varies the price so the arithmetic cannot coincide — at
+    /// 50 credits and 30% the gross (50), the net (35) and the penalty (15) are three distinct
+    /// numbers, none of which is a rounding of another.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_swept_no_show_quotes_the_gross_refund_and_names_the_penalty_a_no_show_penalty()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bus = host.Services.GetRequiredService<IEventBus>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        var booking = await AddBookingAsync(host, db, charged: true, amount: 50m);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.BookingCharge, -50m, host.PlayerUser.Id,
+            RelatedBookingId: booking.Id), default);
+
+        await CreateWorker(host).TickAsync(default);
+
+        // What the ledger actually holds: two rows, never netted.
+        var rows = db.LedgerEntries.Where(l => l.RelatedBookingId == booking.Id).ToList();
+        Assert.Equal(50m, Assert.Single(rows, l => l.Type == LedgerEntryType.CancellationRefund).AmountCredits);
+        Assert.Equal(-15m, Assert.Single(rows, l => l.Type == LedgerEntryType.NoShowPenalty).AmountCredits);
+
+        var mail = Assert.Single(host.EmailService.Sent, m => m.Subject.StartsWith("Missed booking", StringComparison.Ordinal));
+
+        // The gross leg, as posted. 35.00 is the netted figure and belongs nowhere.
+        Assert.Contains("50.00 credits", mail.HtmlBody);
+        Assert.DoesNotContain("35.00", mail.HtmlBody);
+
+        // A NoShowPenalty is not a late-cancellation penalty, and the member cancelled nothing.
+        Assert.Contains("No-show penalty", mail.HtmlBody);
+        Assert.DoesNotContain("Late-cancellation", mail.HtmlBody);
+        Assert.DoesNotContain("Cancelled", mail.HtmlBody);
+        Assert.DoesNotContain("(no-show)", mail.Subject);
+
+        // And the webhook mirrors the same event stream — §9 — so it carries the same figure.
+        var emitted = new List<DomainEvent>();
+        while (bus.Reader.TryRead(out var evt)) emitted.Add(evt);
+        var noShow = Assert.Single(emitted, e => e.Type == "booking.no_show");
+        Assert.Equal(50m, Assert.IsType<decimal>(noShow.Data["refund_credits"]));
+        Assert.Equal(15m, Assert.IsType<decimal>(noShow.Data["penalty_credits"]));
     }
 }
