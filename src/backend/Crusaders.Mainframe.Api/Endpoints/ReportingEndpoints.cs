@@ -363,6 +363,17 @@ public static class ReportingEndpoints
     /// filter and the day enumeration are driven from it. A movement is in the report if and
     /// only if it falls on a club day the report covers.
     /// </para>
+    /// <para>
+    /// <b>What that costs, said out loud, because it widened the contract.</b> The day either
+    /// marker names is covered <b>in full</b>, so <c>to=2026-03-06T00:00:00Z</c> — an
+    /// exclusive midnight, which is what a caller reading <c>to</c> as an INSTANT means by it
+    /// — takes in the whole of 6 March rather than stopping at its first second. Both shapes
+    /// the page can send therefore name the same window, and there is no shape of <c>to</c>
+    /// that asks for part of a day. That is the contract, it is stated for callers in
+    /// <c>docs/specs/reporting.md</c> § The report window, and both directions of it are
+    /// pinned by <c>ReportWindowTests</c> — on this endpoint and on the five others that
+    /// reach this helper, none of which had a range test before.
+    /// </para>
     /// </remarks>
     private static (DateOnly First, DateOnly Last, DateTimeOffset Start, DateTimeOffset End)
         ResolveWindow(DateTimeOffset? from, DateTimeOffset? to, TimeZoneInfo tz)

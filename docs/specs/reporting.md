@@ -30,6 +30,38 @@ Every report supports:
 
 Filter state lives in the URL query string so a report can be shared / bookmarked.
 
+### The report window — what `from` and `to` mean
+
+Every endpoint that takes a time range takes it as `from` and `to`, and **both are day
+markers, not instants**: what is read off each parameter is the UTC calendar date it names,
+and nothing else about it. The report then covers every one of the **club's own** calendar
+days from `from`'s date to `to`'s date, **inclusive at both ends** — the window handed to the
+queries is the one UTC interval that holds exactly those days, in `tenant_settings.timezone`.
+
+Three consequences a caller has to know:
+
+- **The day `to` names is covered in full.** `to=2026-03-06T00:00:00Z` reads as an *exclusive*
+  midnight if you take it for an instant, and it is not one: the whole of 6 March is in the
+  report. So `…T00:00:00Z` and `…T23:59:59Z` on the same date name the same window, and there
+  is no shape of `to` that asks for part of a day. The Reports page sends the second of those
+  (`Reports.tsx`), so this clause is about **direct API callers** — but it is the reading the
+  page's own shape already depended on, and stating only one of the two would leave the other
+  free to drift.
+- **The club's clock decides the edges, not UTC's.** A movement at 00:30 on the first day is
+  in the report for a club at UTC+2, where the window opens at 22:00Z the evening before. The
+  markers themselves are read in UTC precisely so that they name the same two dates whether
+  the club is east or west of UTC.
+- **Omitting a parameter is not the same as passing today's date.** With no `to` the last day
+  is the club's *current* day, which runs to the end of the club's day — up to 24 hours ahead
+  of now. Nothing in the app calls these endpoints without a range; a caller that does gets a
+  window that includes bookings which have not happened yet.
+
+Endpoints on this contract: `/api/v1/reports/me/wallet`, `/reports/me/wallet.csv`,
+`/reports/me/daily`, `/api/v1/admin/reports/revenue`, `/utilisation`, `/no-shows` and
+`/daily`. They share one helper (`ReportingEndpoints.ResolveWindow`) and are pinned together
+by `ReportWindowTests`, one test per endpoint, because a combined test can only fail on its
+first assertion and would hide four unpinned surfaces behind one.
+
 ## Charts
 - **Time series:** line chart, one series per dimension. Default view: bookings per day for the last 30 days.
 - **Distribution:** bar chart for "by court", "by weekday", "by hour-of-day".
