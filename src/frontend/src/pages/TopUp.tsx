@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError, endpoints, type PayFastFormField, type TopUpOptions } from "../lib/api";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 import { formatCredits, formatRate, formatZar } from "../lib/utils";
+import { rateMoved } from "../lib/topupQuote";
 
 /**
  * Why an amount is not acceptable, or null when it is.
@@ -64,8 +65,14 @@ export default function TopUpPage() {
   const [amount, setAmount] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /**
+   * The club's rate moved between this page loading and the member pressing Continue, so
+   * the payment is held HERE rather than sent on to PayFast. It carries the figures the
+   * server registered, and the member's next press proceeds at those.
+   */
+  const [restated, setRestated] = useState<{ rate: number; credits: number } | null>(null);
 
-  useEffect(() => {
+  const loadOptions = useCallback(() => {
     endpoints.topupOptions()
       .then((o) => {
         setOptions(o);
@@ -73,6 +80,17 @@ export default function TopUpPage() {
       })
       .catch(() => setError("Couldn't load the club's top-up settings. Try again in a moment."));
   }, []);
+
+  useEffect(() => { loadOptions(); }, [loadOptions]);
+
+  // A tab left open across a class change or a settings edit quotes a price the club will
+  // not honour, and a member who switches away and back is the commonest way that happens.
+  // Re-reading on focus narrows the window; the check at Continue below is what closes it.
+  useEffect(() => {
+    const onFocus = () => loadOptions();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [loadOptions]);
 
   const problem = amountProblem(amount, options);
   const value = Number(amount.trim());
@@ -90,6 +108,14 @@ export default function TopUpPage() {
     setLoading(true);
     try {
       const res = await endpoints.topupStart(value);
+      if (rateMoved(options?.conversion_rate, res.conversion_rate)) {
+        // Not sent to the gateway. The member agreed to a number that is no longer the
+        // club's, and the one thing they must not do is find out from a ledger row.
+        setOptions((o) => (o ? { ...o, conversion_rate: res.conversion_rate } : o));
+        setRestated({ rate: res.conversion_rate, credits: res.quoted_credits });
+        setLoading(false);
+        return;
+      }
       postToGateway(res.redirect_url, res.form_fields);
     } catch (err) {
       const code = err instanceof ApiError && isRecord(err.payload) ? String(err.payload.error ?? "") : "";
@@ -110,14 +136,14 @@ export default function TopUpPage() {
             <Label>Amount (ZAR)</Label>
             <div className="flex gap-2 mb-2 flex-wrap">
               {(options?.presets_zar ?? []).map((p) => (
-                <Button key={p} type="button" variant={String(p) === amount ? "default" : "outline"} onClick={() => { setAmount(String(p)); setError(null); }}>
+                <Button key={p} type="button" variant={String(p) === amount ? "default" : "outline"} onClick={() => { setAmount(String(p)); setError(null); setRestated(null); }}>
                   R{p}
                 </Button>
               ))}
             </div>
             <Input
               value={amount}
-              onChange={(e) => { setAmount(e.target.value); setError(null); }}
+              onChange={(e) => { setAmount(e.target.value); setError(null); setRestated(null); }}
               inputMode="decimal"
               placeholder={options ? `Custom amount (multiple of ${formatZar(options.block_zar)})` : "Custom amount"}
             />
@@ -139,12 +165,32 @@ export default function TopUpPage() {
               <span className="font-semibold text-accent-strong">{creditsPreview === null ? "—" : formatCredits(creditsPreview, { long: true })}</span>
             </div>
             {options && (
+              /*
+                What this sentence may claim is exactly what the code above keeps.
+                It used to read "This rate is locked in when you continue, so it can't
+                change while you're paying" — and the club's rate could move under a tab
+                left open, so the member pressed Continue on 480 credits and the server
+                registered 320. Three finders drove that in round 3. The rate IS frozen
+                from the moment the pending row is written (`PendingTopup.ConversionRate`
+                is what the ITN settles at); what was never true is that the figure ON
+                SCREEN is the one that gets frozen. So the promise now names the moment,
+                and `submit` above stops rather than pays when the two disagree.
+              */
               <p className="text-[11px] text-text-muted mt-2">
                 At {formatRate(options.conversion_rate)} credits / R1 ({options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"}).
-                This rate is locked in when you continue, so it can't change while you're paying.
+                Your rate is fixed the moment the club registers this payment, and it can't change while you're at PayFast.
+                If the club's rate has moved since this page loaded, we'll show you the new figure before sending you there.
               </p>
             )}
           </div>
+
+          {restated && (
+            <p role="alert" className="text-sm text-warning-strong">
+              The club's rate changed while this page was open, so nothing has been sent to
+              PayFast yet. {formatZar(value)} now buys {formatCredits(restated.credits, { long: true })} at{" "}
+              {formatRate(restated.rate)} credits / R1. Press Continue again to pay at that rate.
+            </p>
+          )}
 
           {/* The reason an amount isn't accepted, shown as soon as it isn't — not only on submit. */}
           {(error ?? (amount.trim() !== "" && problem)) && (

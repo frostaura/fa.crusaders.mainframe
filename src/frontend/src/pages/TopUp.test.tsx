@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import TopUpPage from "./TopUp";
+import { rateMoved } from "../lib/topupQuote";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
 /**
@@ -215,5 +216,169 @@ describe("Top-up — what the checkout actually sends", () => {
 
     expect(await screen.findByText("Payments aren't set up for this club yet — please ask an admin.")).toBeInTheDocument();
     expect(screen.queryByText(/payments_not_configured/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * L-F1 / N-F1 / K-F3 — the best-corroborated defect of round 3, driven twice each by three
+ * independent finders.
+ *
+ * <p>
+ * The screen fetched the club's rate once on mount and then told the member, in so many
+ * words, that "this rate is locked in when you continue, so it can't change while you're
+ * paying". It is not the rate that was locked — it is whatever the server resolves when the
+ * POST lands. So an admin editing <code>credits_per_zar_*</code>, or that member's class
+ * changing, left a member pressing Continue on 480.00 credits and being registered at 320,
+ * with nothing between the offer and the ledger row to say so.
+ * </p>
+ *
+ * <p>
+ * The response has always carried <code>conversion_rate</code> and <code>quoted_credits</code>
+ * — the server was handing the client the truth and the client dropped it on the floor. These
+ * assertions are about what the page does with that answer, and about the sentence beside the
+ * figure: copy is a promise, and this programme has now found five screens promising what no
+ * code path keeps.
+ * </p>
+ */
+describe("Top-up — the quoted rate against the registered one", () => {
+  const LEAGUE = {
+    block_zar: 100, min_zar: 100, max_zar: 1000, presets_zar: [100, 200, 500, 1000],
+    conversion_rate: 2.4, member_class: "LeagueOrSenior" as const,
+  };
+
+  /** What the server registers once the club has demoted the member behind their back. */
+  const REGISTERED_AT_REGULAR = {
+    topup_id: "aaaa1111-0000-0000-0000-000000000001",
+    checkout_id: "CRS-002",
+    redirect_url: "https://sandbox.payfast.co.za/eng/process",
+    form_fields: [{ name: "signature", value: "deadbeef" }],
+    quoted_credits: 320,
+    conversion_rate: 1.6,
+  };
+
+  const submitted: HTMLFormElement[] = [];
+  beforeEach(() => {
+    submitted.length = 0;
+    vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function (this: HTMLFormElement) {
+      submitted.push(this);
+    });
+  });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); signOut(); });
+
+  it("does not hand the member to PayFast at a rate they were never shown", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/credit/topup/options", body: LEAGUE },
+      { method: "POST", path: "/api/v1/credit/topup", body: REGISTERED_AT_REGULAR },
+    ]);
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    // The offer the member is looking at when they press the button.
+    expect(screen.getByText("480.00 credits")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+
+    // The whole finding: the browser went to PayFast to pay R200 for a top-up the server
+    // had already written at 1.6, and the first place 320 appeared was a ledger row.
+    await screen.findByRole("alert");
+    expect(submitted).toHaveLength(0);
+
+    // …and the member is told, in the club's own figures, what changed.
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/The club's rate changed while this page was open/);
+    expect(alert).toHaveTextContent("320.00 credits");
+    expect(alert).toHaveTextContent("1.6 credits / R1");
+    // The preview moves with it, so nothing on screen still says 480.
+    expect(screen.queryByText("480.00 credits")).not.toBeInTheDocument();
+    expect(screen.getByText("320.00 credits")).toBeInTheDocument();
+  });
+
+  it("goes through on the second press, now that the member has seen the real figure", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/credit/topup/options", body: LEAGUE },
+      { method: "POST", path: "/api/v1/credit/topup", body: REGISTERED_AT_REGULAR },
+    ]);
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+
+    // A hold that cannot be got past is a dead end, which is the other half of this
+    // programme's error-copy rule.
+    await vi.waitFor(() => expect(submitted).toHaveLength(1));
+  });
+
+  /**
+   * The fixture, varied. The check above passes trivially if the page simply never posts the
+   * form, so the ordinary case — the club's rate is exactly what the screen said — has to be
+   * driven through the same code path.
+   */
+  it("sends the payment straight on when the rate has not moved", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/credit/topup/options", body: LEAGUE },
+      {
+        method: "POST", path: "/api/v1/credit/topup",
+        body: { ...REGISTERED_AT_REGULAR, quoted_credits: 480, conversion_rate: 2.4 },
+      },
+    ]);
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+
+    await vi.waitFor(() => expect(submitted).toHaveLength(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not tell the member the rate cannot change, because it can", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/credit/topup/options", body: LEAGUE },
+      { method: "POST", path: "/api/v1/credit/topup", body: REGISTERED_AT_REGULAR },
+    ]);
+    renderPage(<TopUpPage />);
+
+    // The retired sentence, word for word off the three finders' screenshots.
+    expect(await screen.findByText(/At 2.4 credits \/ R1/)).toBeInTheDocument();
+    expect(screen.queryByText(/locked in when you continue/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/can't change while you're paying\./)).not.toBeInTheDocument();
+    // What is true, and what the code above now keeps.
+    expect(screen.getByText(/fixed the moment the club registers this payment/)).toBeInTheDocument();
+    expect(screen.getByText(/we'll show you the new figure before sending you there/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The comparison itself, without a screen. Two of its branches are reachable only from an
+ * API answering something this page merely reads, and a branch nobody has run is a branch
+ * nobody has checked.
+ */
+describe("rateMoved", () => {
+  it("is false when the two rates agree, and true when they do not", () => {
+    expect(rateMoved(1.6, 1.6)).toBe(false);
+    expect(rateMoved(2.4, 1.6)).toBe(true);
+    expect(rateMoved(1.6, 2.4)).toBe(true);
+  });
+
+  it("tolerates float noise rather than holding a payment over 1e-15", () => {
+    expect(rateMoved(0.1 + 0.2, 0.3)).toBe(false);
+    // `credits_per_zar_*` carries four decimals, so a real difference is never this small.
+    expect(rateMoved(1.6667, 1.6668)).toBe(true);
+  });
+
+  it("does not block a payment on a field it cannot read", () => {
+    // An older API, a proxy that mangled the body, a null. Refusing to pay here would turn
+    // a missing field into a club that cannot take money.
+    expect(rateMoved(1.6, undefined)).toBe(false);
+    expect(rateMoved(1.6, null)).toBe(false);
+    expect(rateMoved(1.6, "1.6")).toBe(false);
+    expect(rateMoved(1.6, Number.NaN)).toBe(false);
+    expect(rateMoved(undefined, 1.6)).toBe(false);
   });
 });
