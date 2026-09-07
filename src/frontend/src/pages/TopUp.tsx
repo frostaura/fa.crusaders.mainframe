@@ -177,7 +177,14 @@ export default function TopUpPage() {
                 and `submit` above stops rather than pays when the two disagree.
               */
               <p className="text-[11px] text-text-muted mt-2">
-                At {formatRate(options.conversion_rate)} credits / R1 ({options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"}).
+                {/*
+                  The class label is dropped once the rate has been restated. `POST /credit/topup`
+                  answers with the rate it registered and NOT with the member class behind it, so
+                  after a restatement this line knew the new number and only the old reason for it
+                  — a headed run showed "At 2.4 credits / R1 (regular rate)", which is a second
+                  small untruth arriving with the fix for the first.
+                */}
+                At {formatRate(options.conversion_rate)} credits / R1{restated ? "" : ` (${options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"})`}.
                 Your rate is fixed the moment the club registers this payment, and it can't change while you're at PayFast.
                 If the club's rate has moved since this page loaded, we'll show you the new figure before sending you there.
               </p>

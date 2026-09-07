@@ -292,6 +292,12 @@ describe("Top-up — the quoted rate against the registered one", () => {
     // The preview moves with it, so nothing on screen still says 480.
     expect(screen.queryByText("480.00 credits")).not.toBeInTheDocument();
     expect(screen.getByText("320.00 credits")).toBeInTheDocument();
+    // …and the class label goes with it. A headed run showed "At 2.4 credits / R1 (regular
+    // rate)" here: the POST answers with the rate it registered and not with the class behind
+    // it, so the line knew the new number and only the old reason for it. A second small
+    // untruth arriving alongside the fix for the first is still an untruth.
+    expect(screen.getByText(/At 1\.6 credits \/ R1\./)).toBeInTheDocument();
+    expect(screen.queryByText(/league \/ senior rate/)).not.toBeInTheDocument();
   });
 
   it("goes through on the second press, now that the member has seen the real figure", async () => {
