@@ -893,6 +893,60 @@ describe("AdminDevices", () => {
   });
 
   /**
+   * The toast is a fourth place the same promise is made, and it had none of its own test.
+   *
+   * <p>
+   * It is generated from the same {@link outOfServiceConsequences} as the row notice, which is
+   * the point: round 8 had the two saying different things about one click, and the toast is
+   * the half an admin actually reads, because the row is behind it.
+   * </p>
+   */
+  it("says in the toast exactly what the row says, for the courts the click strands", async () => {
+    stubFetch([
+      ...withDevices([deviceFixture()]),
+      { method: "PATCH", path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111", body: deviceFixture({ enabled: false }) },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Nothing else drives court 1/ }));
+
+    expect(await screen.findByText(
+      "Court 1 box is out of service. It switches nothing on, and the club is not alerted about its silence."
+      + " No box in service drives court 1, so nobody can check in there: bookings on it are refunded in full"
+      + " with no no-show penalty until a box is back in service.",
+    )).toBeInTheDocument();
+  });
+
+  /**
+   * Both consequences at once, which is the only shape that exercises the joining of them —
+   * and the only one where the second sentence has to say "too".
+   */
+  it("names a shut court and a quiet one separately when a box strands both", async () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    stubFetch(withDevices([
+      deviceFixture({ court_numbers: [1, 2] }),
+      deviceFixture({
+        id: "33333333-3333-3333-3333-333333333333",
+        device_code: "court-box-2",
+        name: "Court 2 spare",
+        court_numbers: [2],
+        last_seen_at: threeHoursAgo,
+      }),
+    ]));
+
+    renderPage(<AdminDevicesPage />);
+
+    const confirms = await screen.findAllByRole("button", { name: "Take out of service" });
+    fireEvent.click(confirms[0]);
+    expect(await screen.findByRole("button", {
+      name: "Out of service? Nothing else drives court 1 — nobody can check in there and its no-shows stop being"
+        + " penalised. No other box on court 2 is reporting, so its no-shows stop being penalised too.",
+    })).toBeInTheDocument();
+  });
+
+  /**
    * R8V-R3. The covered sentence was false whenever the covering box had gone quiet.
    *
    * <p>
