@@ -64,4 +64,34 @@ public static class DeviceSilenceLog
 
         device.LastSeenAt = now;
     }
+
+    /// <summary>
+    /// The same record, saved, for a call that is not the heartbeat — an activation or a
+    /// walk-up (finding L-F5).
+    ///
+    /// <para>
+    /// <b>Any authenticated call from a box is proof it is reporting.</b> <c>LastSeenAt</c>
+    /// used to move on <c>/heartbeat</c> and <c>/events</c> alone, so a box that was
+    /// switching courts on through <c>/device/activate</c> every few minutes — the loudest
+    /// possible evidence that it is alive and doing its job — was judged silent: the club
+    /// got a high-priority "court box not reporting" alert while the box was mid-scan, the
+    /// Devices page read "last seen 11m ago" beside a court it had just lit, and §6a's
+    /// outage waiver then refunded that court's no-shows and waived the penalty. Anything
+    /// that breaks the periodic POST while leaving request/response working — a stalled
+    /// firmware timer, a rate limit, a proxy that buffers — converted into free courts and
+    /// alert noise, and no screen said why.
+    /// </para>
+    ///
+    /// <para>
+    /// Saved here rather than left to the caller because these two paths have branches that
+    /// return without ever saving, and the liveness is true on every one of them: the box
+    /// called, whatever the answer was.
+    /// </para>
+    /// </summary>
+    public static async Task NoteContactAsync(
+        MainframeDbContext db, Device device, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    {
+        NoteHeartbeat(db, device, now, HeartbeatCadence.OfflineAfterSeconds(settings.HeartbeatSeconds));
+        await db.SaveChangesAsync(ct);
+    }
 }

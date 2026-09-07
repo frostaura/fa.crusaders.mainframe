@@ -55,6 +55,11 @@ public static class DeviceActivateEndpoint
     {
         var now = DateTimeOffset.UtcNow;
 
+        // A box asking this question is a box that is reporting (finding L-F5). Recorded
+        // before the decision, and on every branch including the refusals — see
+        // DeviceSilenceLog.NoteContactAsync for what judging a working box "silent" cost.
+        await DeviceSilenceLog.NoteContactAsync(services.Db, device, await services.Settings.GetAsync(ct), now, ct);
+
         // Same rule as the walk-up: only a method that identifies a member globally. A PIN
         // against the whole roll is an oracle, not an identification.
         if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return Refused("not_recognised");
@@ -236,7 +241,8 @@ public static class DeviceActivateEndpoint
 public sealed record DeviceActivateServices(
     MainframeDbContext Db,
     AccessCodeService Codes,
-    CourtActivationService Activation);
+    CourtActivationService Activation,
+    TenantSettingsAccessor Settings);
 
 /// <summary>
 /// What a box sends when a scan needs the server. <c>mac</c> names the board;

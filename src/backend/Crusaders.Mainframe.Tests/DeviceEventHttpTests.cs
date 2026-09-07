@@ -2225,6 +2225,96 @@ public sealed class DeviceEventHttpTests
         Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_adjusted"));
     }
 
+    // ---- a working box is a reporting box (finding L-F5) -----------------------------
+
+    /// <summary>Backdates the box's last-seen, as a silence of <paramref name="minutes"/> would.</summary>
+    private static async Task<DateTimeOffset> WentQuietAsync(TestWebAppFactory factory, Box box, int minutes)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == box.DeviceId);
+        var quietAt = DateTimeOffset.UtcNow.AddMinutes(-minutes);
+        device.LastSeenAt = quietAt;
+        await db.SaveChangesAsync();
+        return quietAt;
+    }
+
+    private static async Task<Device> DeviceAsync(TestWebAppFactory factory, Box box)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.Devices.IgnoreQueryFilters().AsNoTracking().SingleAsync(d => d.Id == box.DeviceId);
+    }
+
+    /// <summary>
+    /// A box that is switching courts on is not silent. <c>LastSeenAt</c> moved on
+    /// <c>/heartbeat</c> and <c>/events</c> only, so a box whose periodic POST had stalled
+    /// while request/response still worked was alerted on as "not reporting" mid-scan, shown
+    /// as "last seen 11m ago" beside a court it had just lit, and — through §6a — had that
+    /// court's no-show penalties waived. Every device call is liveness now, and the silence
+    /// it ended is recorded on the way past, exactly as the heartbeat records it.
+    /// </summary>
+    [SkippableFact]
+    public async Task Lighting_a_booked_court_counts_as_the_box_reporting()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: 1);
+        var quietAt = await WentQuietAsync(factory, box, minutes: 20);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, ActivatePath, new { method = "qr", token = booked.Code }));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        Assert.Equal(DateTimeOffset.UtcNow, (await DeviceAsync(factory, box)).LastSeenAt!.Value, TimeSpan.FromMinutes(1));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var outage = Assert.Single(await db.DeviceOutages.IgnoreQueryFilters().Where(o => o.DeviceId == box.DeviceId).ToListAsync());
+        Assert.Equal(quietAt, outage.StartedAt, TimeSpan.FromSeconds(1));
+        Assert.NotNull(outage.EndedAt);
+    }
+
+    /// <summary>
+    /// The same for a refusal: the box called, whatever the answer was. Driven with a token
+    /// this club has never minted, so nothing else about the request could have moved the row.
+    /// </summary>
+    [SkippableFact]
+    public async Task Even_a_refused_scan_counts_as_the_box_reporting()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        await WentQuietAsync(factory, box, minutes: 20);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, ActivatePath, new { method = "qr", token = "7Q3F9KM2XZ8B" }));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("not_recognised", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("reason").GetString());
+
+        Assert.Equal(DateTimeOffset.UtcNow, (await DeviceAsync(factory, box)).LastSeenAt!.Value, TimeSpan.FromMinutes(1));
+    }
+
+    /// <summary>Selling court time is the same evidence, and the same rule.</summary>
+    [SkippableFact]
+    public async Task Selling_a_walk_up_counts_as_the_box_reporting()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        await WentQuietAsync(factory, box, minutes: 20);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 30)));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        Assert.Equal(DateTimeOffset.UtcNow, (await DeviceAsync(factory, box)).LastSeenAt!.Value, TimeSpan.FromMinutes(1));
+    }
+
     // ---- a membership the club has barred, at the box (finding K-F1) -----------------
     //
     // The critical of round 3: a suspended member walked up to the touchpad, was sold fifty

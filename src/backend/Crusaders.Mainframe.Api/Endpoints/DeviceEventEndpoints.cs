@@ -710,6 +710,13 @@ public static class DeviceEventEndpoints
     {
         var (db, bookings, activation, identities, settingsAccessor, _) = services;
 
+        var settings = await settingsAccessor.GetAsync(ct);
+
+        // A box selling court time is a box that is reporting (finding L-F5). Recorded
+        // before the decision, so a refused purchase counts as liveness too — the box
+        // called, whatever the answer was.
+        await DeviceSilenceLog.NoteContactAsync(db, device, settings, DateTimeOffset.UtcNow, ct);
+
         if (RefuseNonce(req) is { } badNonce) return badNonce;
         var reference = WalkUpReference(device.Id, req.Nonce!);
 
@@ -718,7 +725,6 @@ public static class DeviceEventEndpoints
         // has already been made.
         if (await ReplayAsync(reference, req, services, ct) is { } replayed) return replayed;
 
-        var settings = await settingsAccessor.GetAsync(ct);
         if (RefuseFields(device, req, settings) is { } badRequest) return badRequest;
 
         var court = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == req.Court && c.IsActive, ct);
