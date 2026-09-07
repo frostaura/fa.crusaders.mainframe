@@ -850,7 +850,9 @@ describe("AdminDevices", () => {
     expect(notice).toHaveTextContent("bookings on it are refunded in full with no no-show penalty");
     // And the court that is covered is named as covered, rather than swept into the same
     // sentence as the one that is not.
-    expect(notice).toHaveTextContent("Other boxes still drive court 2, so its no-shows are judged as normal");
+    // "still reporting on", not "still drive": a box that is in service but has gone quiet
+    // drives nothing the settlement will believe in. See the silent-sibling test below.
+    expect(notice).toHaveTextContent("Other boxes are still reporting on court 2, so its no-shows are judged as normal");
 
     // The live box is now the only thing in service on court 2 — the row above is out of
     // service and covers nothing — so its own confirm warns about court 2 and about
@@ -888,6 +890,152 @@ describe("AdminDevices", () => {
 
     expect(screen.queryByRole("button", { name: /Nothing else drives/ })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /The box stops switching lights on/ })).toHaveLength(2);
+  });
+
+  /**
+   * The toast is a fourth place the same promise is made, and it had none of its own test.
+   *
+   * <p>
+   * It is generated from the same {@link outOfServiceConsequences} as the row notice, which is
+   * the point: round 8 had the two saying different things about one click, and the toast is
+   * the half an admin actually reads, because the row is behind it.
+   * </p>
+   */
+  it("says in the toast exactly what the row says, for the courts the click strands", async () => {
+    stubFetch([
+      ...withDevices([deviceFixture()]),
+      { method: "PATCH", path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111", body: deviceFixture({ enabled: false }) },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Nothing else drives court 1/ }));
+
+    expect(await screen.findByText(
+      "Court 1 box is out of service. It switches nothing on, and the club is not alerted about its silence."
+      + " No box in service drives court 1, so nobody can check in there: bookings on it are refunded in full"
+      + " with no no-show penalty until a box is back in service.",
+    )).toBeInTheDocument();
+  });
+
+  /**
+   * Both consequences at once, which is the only shape that exercises the joining of them —
+   * and the only one where the second sentence has to say "too".
+   */
+  it("names a shut court and a quiet one separately when a box strands both", async () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    stubFetch(withDevices([
+      deviceFixture({ court_numbers: [1, 2] }),
+      deviceFixture({
+        id: "33333333-3333-3333-3333-333333333333",
+        device_code: "court-box-2",
+        name: "Court 2 spare",
+        court_numbers: [2],
+        last_seen_at: threeHoursAgo,
+      }),
+    ]));
+
+    renderPage(<AdminDevicesPage />);
+
+    const confirms = await screen.findAllByRole("button", { name: "Take out of service" });
+    fireEvent.click(confirms[0]);
+    expect(await screen.findByRole("button", {
+      name: "Out of service? Nothing else drives court 1 — nobody can check in there and its no-shows stop being"
+        + " penalised. No other box on court 2 is reporting, so its no-shows stop being penalised too.",
+    })).toBeInTheDocument();
+  });
+
+  /**
+   * R8V-R3. The covered sentence was false whenever the covering box had gone quiet.
+   *
+   * <p>
+   * `DeviceOutageIndex.CourtWasDark` calls a court dark when every ENABLED box driving it was
+   * past the offline threshold — enabled AND silent. This page tested `enabled` alone, so a
+   * court whose only remaining box was in service but three hours quiet was reported as
+   * covered. Round 8's verifier proved the money half on a live stack: with the spare in
+   * service an identical settled booking got CancellationRefund 8.00 AND NoShowPenalty -2.40;
+   * with the spare taken out, refund 8.00 and no penalty row at all. The click DID stop that
+   * court being penalised, while the confirm showed the plain sentence and the row afterwards
+   * said its no-shows were judged as normal.
+   * </p>
+   *
+   * <p>
+   * The club heartbeat is 60 s here, so the offline threshold is three beats — 180 s — and a
+   * sibling last seen three hours ago is well past it. The page renders that sibling as "not
+   * reporting" in its own header; the point of this test is that the sentence two lines below
+   * agrees with the badge.
+   * </p>
+   */
+  it("warns when the only other box on the court is in service but has stopped reporting", async () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    stubFetch(withDevices([
+      deviceFixture({ name: "Court 2 spare", court_numbers: [2] }),
+      deviceFixture({
+        id: "33333333-3333-3333-3333-333333333333",
+        device_code: "court-box-2",
+        name: "Court 1 and 2 box",
+        court_numbers: [1, 2],
+        last_seen_at: threeHoursAgo,
+      }),
+    ]));
+
+    renderPage(<AdminDevicesPage />);
+
+    // The page already says the sibling is not reporting, in its own header.
+    expect(await screen.findByText(/not reporting — last seen 3h ago/)).toBeInTheDocument();
+
+    // Taking the one reporting box on court 2 out of service is what stops court 2's
+    // no-shows being penalised, and the confirm now says so instead of the plain sentence.
+    const confirms = screen.getAllByRole("button", { name: "Take out of service" });
+    fireEvent.click(confirms[0]);
+    expect(await screen.findByRole("button", {
+      name: "Out of service? No other box on court 2 is reporting, so its no-shows stop being penalised.",
+    })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /The box stops switching lights on/ })).not.toBeInTheDocument();
+    // And not the stronger claim, which this page cannot support: a silent box may still be
+    // answering the door. What is measurable is that nothing is reporting.
+    expect(screen.queryByRole("button", { name: /nobody can check in/ })).not.toBeInTheDocument();
+  });
+
+  it("says on the row, too, that nothing in service is reporting on the court", async () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    stubFetch(withDevices([
+      deviceFixture({ enabled: false, name: "Court 2 spare", court_numbers: [2] }),
+      deviceFixture({
+        id: "33333333-3333-3333-3333-333333333333",
+        device_code: "court-box-2",
+        name: "Court 1 and 2 box",
+        court_numbers: [1, 2],
+        last_seen_at: threeHoursAgo,
+      }),
+    ]));
+
+    renderPage(<AdminDevicesPage />);
+
+    const notice = await screen.findByText(/The API refuses this box, so it switches nothing on/);
+    expect(notice).toHaveTextContent("Nothing in service is reporting on court 2");
+    expect(notice).toHaveTextContent("refunded in full with no no-show penalty until one calls in again");
+    // The sentence this replaced. It was the one the ledger contradicted.
+    expect(notice).not.toHaveTextContent("judged as normal");
+    // And not the shut-door sentence either: a box IS in service on court 2, it is just quiet.
+    expect(notice).not.toHaveTextContent("nobody can check in there");
+  });
+
+  /**
+   * One word, read live off the stack by round 8's verifier: the confirm did not pluralise
+   * where the row notice did — "Nothing else drives courts 1 and 2 — nobody can check in there
+   * and ITS no-shows stop being penalised."
+   */
+  it("agrees with itself about number when a box strands two courts", async () => {
+    stubFetch(withDevices([deviceFixture({ court_numbers: [1, 2] })]));
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
+    expect(await screen.findByRole("button", {
+      name: "Out of service? Nothing else drives courts 1 and 2 — nobody can check in there and their no-shows stop being penalised.",
+    })).toBeInTheDocument();
   });
 
   /**

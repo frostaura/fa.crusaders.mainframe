@@ -717,3 +717,142 @@ describe("AdminMembers — the table fits the screen it is on", () => {
     expect(labels.indexOf("Balance")).toBe(labels.indexOf("Actions") - 1);
   });
 });
+
+/**
+ * The four sentences an admin reads when the club's mail server is down.
+ *
+ * <p>
+ * Round 8 gave suspend, reactivate and reset-password a "we could not tell the member"
+ * branch off <code>member_notified</code>, and gave the temporary-password dialog a
+ * "Not emailed" branch off a null <code>email_sent_to</code>. Round 8's verifier then forced
+ * each of those four to its wrong branch, one at a time, and the whole frontend suite stayed
+ * green every time: <code>grep -rn</code> found each string in <code>AdminMembers.tsx</code>
+ * and in no test at all. Four promises guarding nothing, any of which a merge could drop in
+ * silence — which is the exact failure mode this programme keeps rediscovering, so each one
+ * is pinned here.
+ * </p>
+ *
+ * <p>
+ * Each test asserts the sentence on the failing branch <b>and</b> its absence on the
+ * succeeding one. Only the pair discriminates: a mutant that collapses the ternary to one
+ * arm survives either assertion alone, and both of the round-8 branches were written as
+ * ternaries.
+ * </p>
+ *
+ * <p>
+ * The sentences are also checked against what the backend does, because a pinned falsehood is
+ * worse than an unpinned promise. A suspended membership is refused at the court —
+ * <code>BookingMembershipGate</code> answers <code>member_suspended</code> and
+ * <code>CourtActivationService</code> tests <code>!= Active</code> — so "they will find out at
+ * the door" is what actually happens to a member nobody could email. The temporary password
+ * really is on the screen below the toast, in the dialog these tests read. And the dialog no
+ * longer says the mail server "refused" the message: <code>/reset-password</code> sets
+ * <code>member_notified</code> false on <em>any</em> exception out of
+ * <code>IEmailService.SendAsync</code> — a refused connection, a DNS failure and a timeout all
+ * land there — so the honest sentence is that the send failed.
+ * </p>
+ */
+describe("AdminMembers — what the admin is told when the member could not be emailed", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const MEMBERSHIP = "33333333-3333-3333-3333-333333333333";
+
+  const routes = (member: Record<string, unknown>, extra: StubRoute[]): StubRoute[] => [
+    { path: "/api/v1/admin/members/", body: [memberFixture(member)] },
+    { path: "/api/v1/admin/biometric/enrollments", body: [] },
+    { path: "/api/v1/admin/ledger/", body: [] },
+    ...extra,
+  ];
+
+  async function suspendWith(notified: boolean) {
+    stubFetch(routes({}, [
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/suspend`, body: { suspended: true, member_notified: notified } },
+    ]));
+    renderPage(<AdminMembersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Suspend member" }));
+    fireEvent.change(screen.getByPlaceholderText(/Membership dues unpaid/), { target: { value: "Dues unpaid since March." } });
+    fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
+  }
+
+  it("tells the admin a suspended member will find out at the door, when the email did not go", async () => {
+    await suspendWith(false);
+    expect(await screen.findByText(
+      "Ada Lovelace is suspended, but the email couldn't be sent. They'll find out at the door unless you tell them.",
+    )).toBeInTheDocument();
+  });
+
+  it("says none of that when the suspension email did go", async () => {
+    await suspendWith(true);
+    expect(await screen.findByText("Ada Lovelace suspended.")).toBeInTheDocument();
+    expect(screen.queryByText(/find out at the door/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be sent/)).not.toBeInTheDocument();
+  });
+
+  async function reactivateWith(notified: boolean) {
+    stubFetch(routes({ status: "Suspended" }, [
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, body: { reactivated: true, member_notified: notified } },
+    ]));
+    renderPage(<AdminMembersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reactivate member" }));
+  }
+
+  it("tells the admin to say so themselves when a reactivation email did not go", async () => {
+    await reactivateWith(false);
+    expect(await screen.findByText(
+      "Ada Lovelace is active again, but the email couldn't be sent. Tell them directly.",
+    )).toBeInTheDocument();
+  });
+
+  it("says none of that when the reactivation email did go", async () => {
+    await reactivateWith(true);
+    expect(await screen.findByText("Ada Lovelace is active again.")).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be sent/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tell them directly/)).not.toBeInTheDocument();
+  });
+
+  async function resetWith(notified: boolean) {
+    stubFetch(routes({}, [
+      {
+        method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reset-password`,
+        body: { temp_password: "Xk7-tempo-92", email_sent_to: notified ? "ada@example.com" : null, member_notified: notified },
+      },
+    ]));
+    renderPage(<AdminMembersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reset password" }));
+    const confirm = await screen.findByRole("dialog", { name: /Reset password for Ada Lovelace/ });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Reset password" }));
+  }
+
+  it("sends the admin to the password on the screen when the reset email did not go", async () => {
+    await resetWith(false);
+    expect(await screen.findByText(
+      "Password reset for Ada Lovelace, but the email couldn't be sent. Read them the password below.",
+    )).toBeInTheDocument();
+    // "below" has to be true: the password the toast points at is on the same screen.
+    const dialog = await screen.findByRole("dialog", { name: "Temporary password generated" });
+    expect(dialog).toHaveTextContent("Xk7-tempo-92");
+  });
+
+  it("says none of that when the reset email did go", async () => {
+    await resetWith(true);
+    expect(await screen.findByText("Password reset for Ada Lovelace.")).toBeInTheDocument();
+    expect(screen.queryByText(/Read them the password below/)).not.toBeInTheDocument();
+  });
+
+  it("says the temporary password was not emailed, rather than naming an address it never reached", async () => {
+    await resetWith(false);
+    const dialog = await screen.findByRole("dialog", { name: "Temporary password generated" });
+    expect(dialog).toHaveTextContent("Not emailed");
+    expect(dialog).toHaveTextContent("the send failed, so this password only reaches the member if you pass it on");
+    // The bug this branch exists for: the dialog used to print "Emailed to null".
+    expect(dialog).not.toHaveTextContent(/Emailed to/);
+    expect(dialog).not.toHaveTextContent(/null/);
+  });
+
+  it("names the address when the temporary password really was emailed", async () => {
+    await resetWith(true);
+    const dialog = await screen.findByRole("dialog", { name: "Temporary password generated" });
+    expect(dialog).toHaveTextContent("Emailed to ada@example.com");
+    expect(dialog).not.toHaveTextContent(/Not emailed/);
+  });
+});

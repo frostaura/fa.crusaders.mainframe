@@ -85,7 +85,10 @@ function membersOf(club: Club) {
     // would have found it at only one scroll offset.
     { name: "Mia van der Merwe", n: "MEM-1005", status: "Active", verified: true, bal: club.topBalance },
     { name: "Sipho Dlamini", n: "MEM-1004", status: "Active", verified: true, bal: 1500 },
-    { name: "Aisha Patel", n: "MEM-1003", status: "Active", verified: true, bal: -1500 },
+    // The negative twin of the club's largest balance, because a minus sign is a glyph like
+    // any other and the widest string a money column has to hold is the negative one. Club 1
+    // keeps its -1500: varying one field at a time is what makes a fixture tell you anything.
+    { name: "Aisha Patel", n: "MEM-1003", status: "Active", verified: true, bal: club.topBalance === 123456.78 ? -1500 : -club.topBalance },
     { name: "Liam O'Connor", n: "MEM-1002", status: "Active", verified: true, bal: 0.5 },
     { name: "Naledi Khoza", n: "MEM-1001", status: "Active", verified: true, bal: 500 },
     { name: "Crusaders Admin", n: "ADMIN-0001", status: "Active", verified: true, bal: 0 },
@@ -209,8 +212,40 @@ async function measure(page: import("@playwright/test").Page) {
       .filter((th) => getComputedStyle(th).display !== "none")
       .map((th) => th.innerText.trim().replace(/\s+/g, " "));
 
+    // TEXT that does not fit its own box, which every other probe in this file is blind to.
+    //
+    // Region-level clipping and occlusion are what the assertions above measure, and a cell
+    // whose content is ellipsised is neither: the region does not overflow, the header is not
+    // covered, and the glyph-range walk in the balance test credits a clipped glyph as seen
+    // because `Range.getBoundingClientRect` reports layout geometry that `overflow: hidden`
+    // never touches, and because the ellipsis itself paints inside the cell. So the round-8
+    // fix shipped `98765432.19 cr` rendering as `98765432.1…` at 640, 768, 1024, 1280, 1440
+    // AND 1920 with this whole file green, while the comment beside the column claimed 132px
+    // held nine significant digits and the column was declared at 126px. A layout gate that
+    // cannot see truncated text is the reason that reached an admin.
+    //
+    // scrollWidth against clientWidth is the direct question — "is this element wider than
+    // the box it is drawn in" — and it is the only one of these measurements that survives
+    // the content being clipped rather than moved.
+    // Every element the table asks to ellipsise — `truncate` is the Tailwind utility that
+    // produces this loss and the only thing that can, so the probe looks for the mechanism
+    // rather than for a list of columns somebody has to remember to extend.
+    const truncated = Array.from(document.querySelectorAll<HTMLElement>("tbody td"))
+      .flatMap((cell) => {
+        if (getComputedStyle(cell).display === "none") return [];
+        const label = cell.getAttribute("data-label") ?? "Name";
+        return Array.from(cell.querySelectorAll<HTMLElement>('[class*="truncate"]')).flatMap((el) => {
+          const text = (el.innerText ?? "").trim();
+          if (!text) return [];
+          // 1px of slack: sub-pixel text metrics round scrollWidth up on strings that fit.
+          if (el.scrollWidth <= el.clientWidth + 1) return [];
+          return [{ label, text, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, recoverable: el.title === text }];
+        });
+      });
+
     return {
       controls: controls.length,
+      truncated,
       outsideAtRest,
       hiddenColumns,
       drawnColumns,
@@ -309,6 +344,42 @@ for (const club of CLUBS) {
         expect(partial.slice(0, 5), "balances readable as a different amount").toEqual([]);
       });
 
+      /**
+       * The check the three tests above are all blind to.
+       *
+       * <p>
+       * Nothing else in this file can see a cell whose text is cut off <em>inside</em> its own
+       * box: the region does not overflow, no header is covered, and the balance test's
+       * glyph-range walk credits a clipped glyph as seen. Round 8 shipped an eight-digit
+       * balance reading as <code>98765432.1…</code> at every width with this file green, on
+       * this file's own second fixture.
+       * </p>
+       *
+       * <p>
+       * The money column is the one that must never elide, because a balance is the only
+       * string here whose prefix is a different, plausible, smaller amount. Everything else
+       * may — a fixed column has to take its width from somewhere — but only with the hover
+       * title that makes the loss recoverable rather than final.
+       * </p>
+       */
+      test("never cuts a balance off inside its own column", async ({ page }) => {
+        await openMembers(page, club);
+        const m = await measure(page);
+
+        const balances = m.truncated.filter((t) => t.label === "Balance");
+        expect(balances, "balances ellipsised inside the Balance column").toEqual([]);
+      });
+
+      test("gives every column it does elide a hover title to read it back", async ({ page }) => {
+        await openMembers(page, club);
+        const m = await measure(page);
+
+        // A truncated membership number had no title at all until round 9 — 245px of content
+        // in an 80px box, cut to `MEM-CRUSA…`, with nothing anywhere on the screen holding the
+        // rest of it. An ellipsis with no hover text is a silent loss wearing a cue.
+        expect(m.truncated.filter((t) => !t.recoverable), "elided cells with no title to recover them").toEqual([]);
+      });
+
       test("no row is a stack of buttons", async ({ page }) => {
         await openMembers(page, club);
         const m = await measure(page);
@@ -404,4 +475,49 @@ for (const club of CLUBS) {
       expect(m.pageScrollsSideways).toBe(false);
     });
   });
+}
+
+/**
+ * The same table, with the browser's own font size turned up.
+ *
+ * <p>
+ * "Make text bigger" is an ordinary accessibility setting, not an exotic one, and it is the
+ * one variation none of this file's fixtures could reach: every club above differs in its
+ * DATA, and this differs in the reader. Round 8's verifier found it by hand — at a 24px root
+ * font the fixed 104px Member # header's nowrap sort button spilled onto its neighbour and
+ * painted over 3 of 20 sample points of the Status header, while <code>regionOverflow</code>
+ * stayed 0 and every other assertion in this file stayed green. A fixed-width column cannot
+ * grow for its own header, so the header has to give way inside its column instead: it is
+ * clipped with an ellipsis and a hover title, which is a cued loss rather than a silent one.
+ * </p>
+ *
+ * <p>
+ * The balance column is declared in <code>rem</code> for the same reason and it is the reason
+ * this block asserts the truncation check too. Text scales with the root font and a column
+ * declared in <code>px</code> does not, so at 20px <code>98765432.19 cr</code> needed 133px of
+ * a 113px box and at 24px it needed 160 of 107 — the money column silently elided at exactly
+ * the setting a reader turns on because they are finding it hard to read.
+ * </p>
+ *
+ * <p>
+ * 24px is the largest of Chrome's five preset font sizes ("Very large"); 20px is "Large".
+ * </p>
+ */
+for (const rootFont of [20, 24]) {
+  for (const width of [640, 768, 1024, 1440]) {
+    test.describe(`the admin members table at ${width}px with a ${rootFont}px root font`, () => {
+      test.use({ viewport: { width, height: 900 } });
+
+      test("keeps every header clear of its neighbours and every balance whole", async ({ page }) => {
+        await openMembers(page, CLUBS[1]);
+        await page.addStyleTag({ content: `html { font-size: ${rootFont}px }` });
+        const m = await measure(page);
+
+        expect(m.hiddenColumns, "headers painted over at a raised root font").toEqual([]);
+        expect(m.regionOverflow, "table wider than the card it sits in").toBe(0);
+        expect(m.truncated.filter((t) => t.label === "Balance"), "balances ellipsised").toEqual([]);
+        expect(m.truncated.filter((t) => !t.recoverable), "elided cells with no title").toEqual([]);
+      });
+    });
+  }
 }
