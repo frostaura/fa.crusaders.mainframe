@@ -127,12 +127,38 @@ was chosen over "an auto-registered box never votes". Pinned by
 `A_board_already_installed_at_the_deadline_still_blocks_the_waiver`, which differ only in the
 board's install date.
 
-**A court no enabled box drives is not dark**, even though it trivially has "no reachable box".
-There is no evidence either way — the club has no hardware there — and reading the phrase
-literally would waive every no-show at a club that has not installed a box yet.
-`DeviceOutageIndex.CourtWasDark` therefore requires at least one enabled box on the court and all
-of them past the threshold. Pinned by `PeripheralHealthTests`, and each name pins the clause it is
-listed against rather than the section as a whole:
+**A court the club has put no box on at all is not dark**, even though it trivially has "no
+reachable box". There is no evidence either way — the club has no hardware there — and reading the
+phrase literally would waive every no-show at a club that has not installed a box yet.
+
+**A court whose boxes have ALL been switched out of service is a different state, and it IS dark.**
+This sentence used to read "a court no enabled box drives is not dark", full stop, and in that
+form it cost members money. `Enabled` is not a filter on evidence when it is the last box on the
+court: the API refuses a disabled box `403` on every courtside endpoint (`DeviceIdentity.ResolveAsync`
+on `!device.IsActive`), so once an admin takes the last box off a court, nobody standing at that
+court can check in by heartbeat, activation, walk-up, PIN, QR or biometric — and the sweep settled
+those bookings as ordinary no-shows carrying the full `penalty_pct`. That is a member billed 30%
+for a door the club shut, which is the exact direction S5a exists to prevent. The out-of-service
+switch reached a screen for the first time in finding M-F3, so the state went from unreachable to
+one confirm-click away in the same change.
+
+The two are told apart by whether a board exists at all on that court, not by a judgement about
+intent: a club with nothing on the court has never asked anyone to check in there, while a club
+with a switched-off board has taken a working door away. `DeviceOutageIndex.CourtWasDark` therefore
+answers **dark** when every enabled box driving the court was past the threshold at the deadline,
+**or** when no enabled box drove it and at least one out-of-service board did; and **not dark**
+when a reachable enabled box drove it, or when the club has no board on it at all.
+
+**A switched-off board only speaks for deadlines it existed at, exactly as an enabled one does —
+and the floor matters more here, because `Enabled` carries no history.** A board switched off this
+afternoon is indistinguishable in the table from one that was off all week, so without the floor,
+registering a board and parking it would retroactively declare its courts out of service at
+deadlines settled on working hardware. The floor is the earliest of the row's `CreatedAt` and its
+`LastSeenAt` — `LastSeenAt` may be null here, unlike in the enabled set, because a board that was
+switched off before it ever heart-beat is still hardware the club installed.
+
+Pinned by `PeripheralHealthTests`, and each name pins the clause it is listed against rather than
+the section as a whole:
 
 | Clause | Pin |
 | --- | --- |
@@ -143,12 +169,20 @@ listed against rather than the section as a whole:
 | A board that did not exist at the deadline is not evidence about it | `A_board_that_appeared_after_the_deadline_does_not_block_the_waiver` |
 | A board that did exist at it still is | `A_board_already_installed_at_the_deadline_still_blocks_the_waiver` |
 | The settlement is the same once the retired row is switched off | `A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty` |
+| A court whose only box is out of service **is** dark | `A_court_whose_only_box_is_out_of_service_waives_the_penalty` |
+| …and that turns on the refusal, not on silence | `A_court_whose_only_box_was_just_switched_off_waives_the_penalty_too` |
+| A court with no board of its own is still not dark | `A_court_with_no_box_of_its_own_pays_the_penalty_even_beside_an_out_of_service_box` |
+| A board switched off after the deadline does not speak for it | `A_box_switched_off_after_the_deadline_does_not_make_its_court_out_of_service` |
 
 The last two are the ones this document previously over-claimed.
 `An_outage_on_a_box_that_drives_other_courts_does_not_waive_the_penalty` puts its only box on a
 court forty numbers away, so it passes through the *no box on this court* branch and never reaches
 the all-boxes loop at all; and the decommissioned test is carried by its healthy replacement, as
-above. Neither is evidence for the all-boxes rule.
+above. Neither is evidence for the all-boxes rule. The decommissioned test was not even carried by
+its replacement until 2026-09-07: `AddBoxAsync` defaults `CreatedAt` to now, so the replacement had
+not existed at the deadline and was skipped by the existence rule, and the test was green because
+*nothing* voted. It only surfaced when a court whose surviving hardware is switched off became
+dark. Its fixture now gives the replacement the same thirty-day install date its sibling carries.
 
 **A box whose silence had not yet reached the threshold at the deadline is reachable for
 settlement purposes**, exactly as it is on the Devices page and in the alert. That is a decision

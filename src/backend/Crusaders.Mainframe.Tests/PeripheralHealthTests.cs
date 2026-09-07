@@ -723,6 +723,18 @@ public class PeripheralHealthTests
     /// <see cref="A_disabled_box_heard_from_seconds_ago_does_not_block_the_waiver"/>, which is
     /// the only shape where <c>Enabled</c> moves money.
     /// </para>
+    ///
+    /// <para>
+    /// <b>And it was not carried by the replacement at all until the replacement was given an
+    /// install date.</b> The claim above — "the healthy replacement alone decides the outcome
+    /// here" — was false as written: <c>AddBoxAsync</c> defaults <c>CreatedAt</c> to now, so the
+    /// replacement had not existed at a deadline fifty-five minutes old and was skipped by the
+    /// existence rule. The test passed because NO box voted, which under the rule of the day
+    /// meant "not dark". It went red the moment a court whose only surviving hardware is
+    /// switched off became dark, which is what a fixture that is green for the wrong reason does
+    /// eventually. The replacement now carries the same thirty-day <c>installedAt</c> its
+    /// sibling above already carried, and the test asserts what its name says.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty()
@@ -737,8 +749,10 @@ public class PeripheralHealthTests
         await ledger.PostAsync(new LedgerPosting(
             host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
 
-        // The box that actually drives the court, heart-beating normally.
-        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
+        // The box that actually drives the court, heart-beating normally — and installed a
+        // month ago, so it can speak for a deadline that closed an hour before this fixture ran.
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20),
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
 
         // The one it replaced: switched off, silent for three days, still on the same court,
         // and carrying an outage row nobody ever closed.
@@ -798,6 +812,181 @@ public class PeripheralHealthTests
 
         Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// <b>Taking the LAST box off a court used to charge that court's members 30% for a door
+    /// the club had shut.</b> The money half of finding M-F3, and the reason the out-of-service
+    /// switch could not ship with the copy it shipped with.
+    ///
+    /// <para>
+    /// A disabled box is refused 403 on every courtside endpoint —
+    /// <c>DeviceIdentity.ResolveAsync</c> on <c>!device.IsActive</c>, with
+    /// <c>Device.IsActive =&gt; Enabled</c> — so once the only box on a court is switched off
+    /// nobody standing at that court can check in by heartbeat, activation, walk-up, PIN, QR or
+    /// biometric. There is no path left. The sweep nevertheless read the court as "no enabled
+    /// box, therefore no evidence, therefore not dark" and settled the booking as an ordinary
+    /// no-show: refunded, less the full 30%.
+    /// </para>
+    ///
+    /// <para>
+    /// This fixture is the one an independent verifier proved it with, and the assertion is the
+    /// inverse of what it used to make: <c>Assert.Contains(… NoShowPenalty)</c> passed here
+    /// before the fix. Mutate <c>CourtWasDark</c>'s final clause back to <c>return false</c> and
+    /// this goes red at 97.60.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_court_whose_only_box_is_out_of_service_waives_the_penalty()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // The only box on the court, switched off by an admin and installed long enough ago to
+        // speak for this deadline.
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), enabled: false,
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// The same court, with the one fixture field varied that the rule must NOT depend on: the
+    /// switched-off box was heard from twenty seconds ago.
+    ///
+    /// <para>
+    /// It is here because "all its boxes are dark" and "all its boxes are out of service" are
+    /// different facts and only the second one is being pinned. A box an admin switched off two
+    /// minutes ago is not silent at all — the previous test's box had been quiet for ninety
+    /// minutes, and a fix that read a disabled box as merely "silent" would pass that one and
+    /// fail this. What makes the court dark is that the API refuses the box, which is true from
+    /// the moment the switch is thrown and has nothing to do with heartbeats.
+    /// </para>
+    ///
+    /// <para>
+    /// It is also the shape a club actually produces: an admin takes a live box out of service
+    /// at 18:00 because it is behaving oddly, and the 18:05 booking on its court is settled
+    /// minutes later.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_court_whose_only_box_was_just_switched_off_waives_the_penalty_too()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20), enabled: false,
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// The boundary the two tests above must not cross: a court the club has put <b>no box on
+    /// at all</b> is still not dark, even while a switched-off box sits on another court.
+    ///
+    /// <para>
+    /// S5a's reasoning is unchanged here — reading "no reachable box" literally at a club that
+    /// has not installed hardware yet would waive every no-show it ever books. What the new
+    /// clause reads is a court whose own relays are driven by a board the API now refuses, and
+    /// this fixture proves it is keyed by the courts the board actually drives rather than by
+    /// the mere existence of a disabled row somewhere in the club.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_court_with_no_box_of_its_own_pays_the_penalty_even_beside_an_out_of_service_box()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // Switched off, installed long ago — but on the annex court, forty numbers away.
+        var elsewhere = host.Courts[0].CourtNumber + 40;
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), false,
+            DateTimeOffset.UtcNow.AddDays(-30), elsewhere);
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Contains(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// The existence floor, applied to a switched-off board for the same reason it is applied to
+    /// an enabled one — and it is needed harder here, because <c>Enabled</c> carries no history.
+    ///
+    /// <para>
+    /// A board switched off this afternoon looks, in the table, exactly like one that was off
+    /// all week. Without a floor, registering a board on a court and switching it off would
+    /// retroactively declare that court out of service at deadlines it did not exist at, and the
+    /// sweep would waive penalties for bookings that were settled on real, working hardware.
+    /// This board arrived after the deadline and has never heart-beat: it is the replacement an
+    /// admin plugs in and immediately parks, and it says nothing about the hour before it
+    /// appeared.
+    /// </para>
+    ///
+    /// <para>
+    /// The mirror of <see cref="A_court_whose_only_box_is_out_of_service_waives_the_penalty"/>,
+    /// from which it differs only in the board's install date: move <c>installedAt</c> back
+    /// thirty days and this test goes green at 100.00 instead.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_box_switched_off_after_the_deadline_does_not_make_its_court_out_of_service()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // Registered a minute ago, never heard from, already switched off. The booking's grace
+        // window closed fifty-five minutes before this row existed.
+        await AddBoxAsync(host, db, lastSeen: null, enabled: false,
+            installedAt: DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Contains(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
     }

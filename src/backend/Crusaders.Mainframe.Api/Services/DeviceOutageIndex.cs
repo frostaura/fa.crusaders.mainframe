@@ -9,9 +9,10 @@ namespace Crusaders.Mainframe.Api.Services;
 /// that existed AT that instant, so the answer cannot change afterwards.
 ///
 /// <para>
-/// The question is about the COURT, not about a box: a court is dark only when every enabled box
-/// driving it was unreachable, and courts with no box at all are never dark. See
-/// <see cref="CourtWasDark"/> for what each half of that costs when it is got wrong.
+/// The question is about the COURT, not about a box: a court is dark when every enabled box
+/// driving it was unreachable, or when the club's boxes on it have all been switched out of
+/// service — and a court the club has put no box on at all is never dark. See
+/// <see cref="CourtWasDark"/> for what each of those costs when it is got wrong.
 /// </para>
 ///
 /// <para>
@@ -103,6 +104,7 @@ public sealed class DeviceOutageIndex
 
     private readonly Dictionary<Guid, int> _courtNumberById;
     private readonly Dictionary<int, List<Guid>> _deviceIdsByCourtNumber;
+    private readonly Dictionary<int, DateTimeOffset> _outOfServiceFromByCourtNumber;
     private readonly Dictionary<Guid, DateTimeOffset> _knownToExistFrom;
     private readonly List<Silence> _silences;
     private readonly TimeSpan _offlineAfter;
@@ -110,19 +112,21 @@ public sealed class DeviceOutageIndex
     private DeviceOutageIndex(
         Dictionary<Guid, int> courtNumberById,
         Dictionary<int, List<Guid>> deviceIdsByCourtNumber,
+        Dictionary<int, DateTimeOffset> outOfServiceFromByCourtNumber,
         Dictionary<Guid, DateTimeOffset> knownToExistFrom,
         List<Silence> silences,
         TimeSpan offlineAfter)
     {
         _courtNumberById = courtNumberById;
         _deviceIdsByCourtNumber = deviceIdsByCourtNumber;
+        _outOfServiceFromByCourtNumber = outOfServiceFromByCourtNumber;
         _knownToExistFrom = knownToExistFrom;
         _silences = silences;
         _offlineAfter = offlineAfter;
     }
 
     /// <summary>No courts and no silences — nothing is ever dark. Used where a caller has no context to build from.</summary>
-    public static DeviceOutageIndex Empty { get; } = new([], [], [], [], TimeSpan.Zero);
+    public static DeviceOutageIndex Empty { get; } = new([], [], [], [], [], TimeSpan.Zero);
 
     /// <summary>
     /// The current tenant's stretches of box silence that could still matter, i.e. outages still
@@ -132,9 +136,20 @@ public sealed class DeviceOutageIndex
     /// tenant's own threshold, from <see cref="HeartbeatCadence.OfflineAfterSeconds"/>.
     ///
     /// <para>
-    /// <b>Disabled boxes contribute nothing, in either direction.</b> An admin who switches a box
-    /// off has said it is not expected to call in — the same reason <c>PeripheralHealthWorker</c>
-    /// skips them.
+    /// <b>Disabled boxes contribute no SILENCE, in either direction.</b> An admin who switches a
+    /// box off has said it is not expected to call in — the same reason
+    /// <c>PeripheralHealthWorker</c> skips them — so a disabled box is neither dark evidence nor
+    /// live evidence about a court that still has working hardware on it.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>They are read for one thing only: whether the club has hardware on the court at all.</b>
+    /// A box the API refuses cannot light anything — <c>DeviceIdentity.ResolveAsync</c> answers
+    /// 403 on every courtside endpoint for <c>!device.IsActive</c> — so when the LAST box on a
+    /// court is switched off, that court has no working check-in at all and every no-show on it
+    /// was charged the full 30% for a door the club had closed. See <see cref="CourtWasDark"/>,
+    /// which is where the two halves are put back together, and
+    /// <c>A_court_whose_only_box_is_out_of_service_waives_the_penalty</c>.
     /// </para>
     ///
     /// <para>
@@ -157,14 +172,19 @@ public sealed class DeviceOutageIndex
     public static async Task<DeviceOutageIndex> BuildAsync(
         MainframeDbContext db, DateTimeOffset since, int offlineAfterSeconds, CancellationToken ct)
     {
+        // Read once and split, because the two halves answer different questions: the enabled
+        // boxes carry the silence, and the switched-off ones only say whether the club has any
+        // hardware on the court at all (see OutOfServiceFrom).
+        var allDevices = await db.Devices.AsNoTracking().ToListAsync(ct);
+
         // A box that has never called in is not silent, it is unborn — LastSeenAt is null only
         // between auto-registration and the first save, and in seeded fixtures. Same rule the
         // health sweep applies, so the two agree about which boxes exist.
-        var devices = await db.Devices.AsNoTracking()
-            .Where(d => d.Enabled && d.LastSeenAt != null)
-            .ToListAsync(ct);
+        var devices = allDevices.Where(d => d.Enabled && d.LastSeenAt != null).ToList();
+        var outOfService = allDevices.Where(d => !d.Enabled).ToList();
 
-        if (devices.Count == 0) return Empty;
+        // No hardware anywhere: no silence to record and no court to declare out of service.
+        if (devices.Count == 0 && outOfService.Count == 0) return Empty;
 
         var outages = await db.DeviceOutages.AsNoTracking()
             .Where(o => o.EndedAt == null || o.EndedAt >= since)
@@ -212,8 +232,53 @@ public sealed class DeviceOutageIndex
             .ToDictionaryAsync(c => c.Id, c => c.CourtNumber, ct);
 
         return new DeviceOutageIndex(
-            courtNumberById, deviceIdsByCourtNumber, KnownToExistFrom(devices, outages), silences,
+            courtNumberById, deviceIdsByCourtNumber, OutOfServiceFrom(outOfService),
+            KnownToExistFrom(devices, outages), silences,
             TimeSpan.FromSeconds(offlineAfterSeconds));
+    }
+
+    /// <summary>
+    /// For each court, the earliest instant at which some box driving it is known to have been
+    /// installed and is now switched off.
+    ///
+    /// <para>
+    /// It answers one question and only one: <i>did the club have hardware on this court that
+    /// the API will now refuse?</i> A switched-off box is not evidence about silence — see
+    /// <see cref="BuildAsync"/> — but it is proof that the club put a board on that court, and
+    /// <see cref="CourtWasDark"/> reads it only where no enabled box remains.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Existence is applied here for the same reason it is applied to an enabled board.</b>
+    /// <c>Enabled</c> carries no history — a box switched off this afternoon looks, in the table,
+    /// exactly like one that was off all week — so without a floor a board registered after the
+    /// deadline would retroactively declare a court out of service at an instant it did not
+    /// exist at. The floor is the earliest of the row's <c>CreatedAt</c> and its
+    /// <c>LastSeenAt</c>, the same two witnesses <see cref="KnownToExistFrom"/> takes.
+    /// <c>LastSeenAt</c> may be null here, unlike in the enabled set: a board that registered
+    /// and was switched off before it ever heart-beat is still hardware the club installed on
+    /// that court, and the question being asked is not about heartbeats.
+    /// </para>
+    /// </summary>
+    private static Dictionary<int, DateTimeOffset> OutOfServiceFrom(List<Device> outOfService)
+    {
+        var from = new Dictionary<int, DateTimeOffset>();
+        foreach (var device in outOfService)
+        {
+            var existedFrom = device.LastSeenAt is { } seen && seen < device.CreatedAt
+                ? seen
+                : device.CreatedAt;
+
+            foreach (var court in device.CourtNumbers)
+            {
+                if (!from.TryGetValue(court, out var earliest) || existedFrom < earliest)
+                {
+                    from[court] = existedFrom;
+                }
+            }
+        }
+
+        return from;
     }
 
     /// <summary>
@@ -327,9 +392,30 @@ public sealed class DeviceOutageIndex
     /// </para>
     ///
     /// <para>
-    /// A court no enabled box drives is <b>not</b> dark. There is no evidence either way — the
-    /// club has no hardware on it — and reading "no reachable box" literally there would waive
+    /// A court the club has <b>no box on at all</b> is not dark. There is no evidence either way
+    /// — the club has no hardware there — and reading "no reachable box" literally would waive
     /// every no-show at a club that has not installed a box yet.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>A court whose boxes are all switched OFF is a different state, and it is dark.</b> This
+    /// is the money half of finding M-F3 and it used to be got wrong in the direction that
+    /// charges members. The out-of-service switch is what an admin uses on a box that is broken
+    /// or has been unplugged for good, and the API then refuses that box 403 on every courtside
+    /// endpoint — heartbeat, activate and walkup alike. Take the LAST box off a court and nobody
+    /// standing at it can check in by any means; the old rule read that court as "no enabled box,
+    /// therefore no evidence, therefore not dark" and settled its no-shows at the full 30%. The
+    /// member was billed a penalty for a door the club had closed, and neither the console nor
+    /// the spec said so. It is the same test as everywhere else — could the member have checked
+    /// in? — applied to the one state where the answer is no by an admin's own deliberate act.
+    /// </para>
+    ///
+    /// <para>
+    /// The two are distinguished by whether a row exists, not by a judgement about intent: a
+    /// club with nothing on the court has never asked anyone to check in there, while a club
+    /// with a switched-off board has taken a working door away. A disabled board that was never
+    /// on that court's relays does not appear here at all, because
+    /// <see cref="OutOfServiceFrom"/> is keyed by the courts each board actually drives.
     /// </para>
     ///
     /// <para>
@@ -342,22 +428,31 @@ public sealed class DeviceOutageIndex
     public bool CourtWasDark(Guid courtId, DateTimeOffset instant)
     {
         if (!_courtNumberById.TryGetValue(courtId, out var courtNumber)) return false;
-        if (!_deviceIdsByCourtNumber.TryGetValue(courtNumber, out var deviceIds)) return false;
 
         var existed = 0;
-        foreach (var deviceId in deviceIds)
+        if (_deviceIdsByCourtNumber.TryGetValue(courtNumber, out var deviceIds))
         {
-            // A board that did not exist at the deadline is not evidence about it, in either
-            // direction — see KnownToExistFrom. It is skipped rather than counted as dark, so a
-            // court whose only box arrived afterwards still falls through the clause below and
-            // is "not dark", exactly as a court with no box at all is.
-            if (_knownToExistFrom[deviceId] > instant) continue;
+            foreach (var deviceId in deviceIds)
+            {
+                // A board that did not exist at the deadline is not evidence about it, in either
+                // direction — see KnownToExistFrom. It is skipped rather than counted as dark, so
+                // a court whose only box arrived afterwards falls through to the clause below and
+                // is judged as a court with no enabled box on it.
+                if (_knownToExistFrom[deviceId] > instant) continue;
 
-            existed++;
-            if (!BoxWasUnreachable(deviceId, instant)) return false;
+                existed++;
+                if (!BoxWasUnreachable(deviceId, instant)) return false;
+            }
         }
 
-        return existed > 0;
+        // Every box the club expects to hear from on this court was past the threshold.
+        if (existed > 0) return true;
+
+        // None of them existed yet, or there are none. The court is dark only if the club had
+        // hardware on it that an admin has switched off — a box the API refuses is a door that
+        // is shut, not an absence of evidence. See the summary.
+        return _outOfServiceFromByCourtNumber.TryGetValue(courtNumber, out var outOfServiceFrom)
+            && outOfServiceFrom <= instant;
     }
 
     /// <summary>

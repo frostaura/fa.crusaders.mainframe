@@ -120,15 +120,25 @@ struct WalkUpResult {
 ///                PURCHASE ENDED when it says `purchase_ended`: a replayed
 ///                nonce whose window is over (a replay is granted what is
 ///                LEFT of the purchase, never the original length).
+///   400        → CLUB CLOSED / OPENS <hh:mm> when the body says `club_closed`,
+///                reading the time out of the body's `opens_at`; TOO LONG /
+///                TRY LESS TIME when it says `minutes_out_of_range`.
 ///   0          → NO CONNECTION (undecided)
 ///   5xx / 429  → SEE THE DESK (undecided)
 ///   other      → SEE THE DESK (decided)
 ///
+/// The two 400s are there because SEE THE DESK was a lie in both of them. A club
+/// that lowers `walk_up_max_minutes` below what a button grants makes that button
+/// dead, and the member can fix it themselves by pressing a shorter one (M-F1); a
+/// member at a locked club after hours is being sent to a desk that does not
+/// exist, when the API has already said what time it opens (M-F5).
+///
 /// `recognised` — the bit that arms the button window — comes from the body's
 /// `error`, never from the status. insufficient_balance, court_in_use,
-/// no_time_available and purchase_ended are verdicts about a member the API
-/// identified; not_recognised, court_not_on_device, an error this build does
-/// not know and a bare status are not, and arm nothing.
+/// no_time_available, purchase_ended and club_closed are verdicts about a member
+/// the API identified; not_recognised, court_not_on_device,
+/// minutes_out_of_range (all three refused before the token is resolved), an
+/// error this build does not know and a bare status are not, and arm nothing.
 WalkUpResult onWalkUpResponse(uint16_t status, const char* body, size_t len, uint8_t relay,
                               uint16_t requestedMinutes);
 
