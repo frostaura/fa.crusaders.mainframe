@@ -79,8 +79,8 @@ describe("AdminSettings", () => {
     // absent from this page — an admin could see none of them and change none of them.
     expect(await screen.findByLabelText(/Walk-up maximum/)).toHaveValue(90);
     expect(screen.getByLabelText(/Heartbeat interval/)).toHaveValue(60);
-    expect(screen.getByLabelText(/Activation window before a booking/)).toHaveValue(120);
-    expect(screen.getByLabelText(/Lights cue before a booking/)).toHaveValue(10);
+    expect(screen.getByLabelText(/Booking lookahead at the box/)).toHaveValue(120);
+    expect(screen.getByLabelText(/Lights on this early/)).toHaveValue(10);
     expect(screen.getByLabelText(/Court code lifetime/)).toHaveValue(60);
     expect(screen.getByLabelText(/Offline roster reach/)).toHaveValue(120);
 
@@ -93,7 +93,34 @@ describe("AdminSettings", () => {
     expect(screen.getByLabelText(/Heartbeat interval/)).toHaveAttribute("max", "300");
     expect(screen.getByLabelText(/Court code lifetime/)).toHaveAttribute("min", "15");
     // The cue must fit inside the forward window; the cap follows the window's value.
-    expect(screen.getByLabelText(/Lights cue before a booking/)).toHaveAttribute("max", "120");
+    expect(screen.getByLabelText(/Lights on this early/)).toHaveAttribute("max", "120");
+
+    // The two court-box windows, named for what they actually do.
+    //
+    // They were described the wrong way round. The field labelled "Activation window
+    // before a booking", hinted "How early a scan may switch a booking's lights on",
+    // controls nothing of the kind: measured against a real box, raising it from 120 to
+    // 1440 left a scan 19.5 minutes early still answering `too_early`, and raising the
+    // CUE from 10 to 30 lit the court. `activation_forward_window_minutes` only decides
+    // whether the box RECOGNISES the booking (outside it: `no_booking`);
+    // `activation_cue_window_minutes` is the one that lights it. An admin wanting members
+    // to open the court half an hour early edited the field that said so, saw "Settings
+    // saved.", and changed nothing — and nothing on the screen pointed at the field that
+    // works.
+    // The hint is a separate <p> wired by aria-describedby, which is also what a screen
+    // reader reads out with the field.
+    const hintOf = (field: HTMLElement) =>
+      document.getElementById(field.getAttribute("aria-describedby")!)!.textContent!;
+
+    const cueHint = hintOf(screen.getByLabelText(/Lights on this early/));
+    expect(cueHint).toMatch(/decides how early a scan actually switches a booking's lights on/);
+
+    const lookaheadHint = hintOf(screen.getByLabelText(/Booking lookahead at the box/));
+    expect(lookaheadHint).toMatch(/recognises a booking at all/);
+    expect(lookaheadHint).toMatch(/does NOT decide when the lights come on/i);
+
+    // And the sentence that sent admins to the wrong field is gone for good.
+    expect(screen.queryByText(/How early a scan may switch a booking's lights on/)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/Court code lifetime/), { target: { value: "45" } });
     fireEvent.change(screen.getByLabelText(/Walk-up maximum/), { target: { value: "60" } });
