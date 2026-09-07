@@ -479,10 +479,16 @@ public sealed class BookingService
         // Credits, not rand — the template printed a rand sign over both of these. The penalty
         // policy travels with them for the same reason: it was hardcoded "15 minutes / 30%" and
         // went on saying so after an admin moved the club.
+        // IsWalkUp travels with them because it decides what the mail may promise. A walk-up
+        // starts the instant it is bought and the same request lights the court, so the shared
+        // template's "cancelling early costs 30%" told a member already under the lights they
+        // would get 70% back; S4 returns nothing once a session has started, and the server's
+        // own cancellation quote for these bookings answers refundCredits 0.
         var details = new Email.BookingConfirmationDetails(
             court.Name, startsAtLocal, spec.DurationLabel,
             spec.TotalCost, balance,
-            settings.PenaltyWindowMinutes, settings.PenaltyPct);
+            settings.PenaltyWindowMinutes, settings.PenaltyPct,
+            IsWalkUp: spec.IsWalkUp);
         var confirmationMsg = EmailTemplates.BookingConfirmation(
             user.Email, details, await BuildReceiptAsync(booking, details, userId, ct));
         SendEmailInBackground(confirmationMsg, $"booking confirmation for {booking.Id}");
@@ -763,7 +769,16 @@ public sealed class BookingService
 
         var court = await _db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
         var user = await _db.Users.FirstAsync(u => u.Id == booking.UserId, ct);
-        var cancellationMsg = EmailTemplates.BookingCancellation(user.Email, court.Name, refundAmount, penaltyAmount > 0 ? penaltyAmount : null);
+        // An admin cancelling on a member's behalf is not the same event as the member
+        // cancelling their own court, and it used to arrive as an identical mail: no actor, no
+        // reason, no mention of a waiver. The audit row already carries all three (see the
+        // DetailsJson above) and email is the only channel the member has — the grid just shows
+        // the slot free again. Null on a self-cancellation, which keeps that mail as it was.
+        var byClub = actorIsAdmin && actorId != booking.UserId
+            ? new Email.ClubCancellation(waiveReason?.Trim(), waived)
+            : null;
+        var cancellationMsg = EmailTemplates.BookingCancellation(
+            user.Email, court.Name, refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
         SendEmailInBackground(cancellationMsg, $"cancellation for {booking.Id}");
 
         await _bus.EmitAsync(new DomainEvent(
@@ -2159,7 +2174,7 @@ public sealed class BookingService
                 duration: details.Duration,
                 amountCredits: details.AmountCredits,
                 balanceAfterCredits: details.BalanceAfterCredits,
-                issuedAt: DateTimeOffset.UtcNow);
+                issuedAtLocal: IssuedAtLocal(await _settings.GetAsync(ct)));
 
             return new Email.EmailAttachment($"receipt-{booking.Id:N}.pdf", "application/pdf", pdf);
         }
@@ -2169,6 +2184,20 @@ public sealed class BookingService
             return null;
         }
     }
+
+    /// <summary>
+    /// Now, in the club's own wall clock, for the receipt's "Issued" stamp.
+    ///
+    /// <para>
+    /// It was <c>DateTimeOffset.UtcNow</c> formatted with a literal "UTC", printed two lines
+    /// above a "Starts" already converted to <c>tenant_settings.timezone</c> — so every receipt
+    /// carried two times two hours apart for one booking, and <c>reporting.md</c> says reports
+    /// honour the tenant timezone. One clock per document.
+    /// </para>
+    /// </summary>
+    private static string IssuedAtLocal(TenantSettingsView settings) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTimeOffset.UtcNow.UtcDateTime, ResolveTz(settings.Timezone))
+            .ToString("ddd dd MMM yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// A booking's slot, in the club's own wall clock, for a ledger comment.

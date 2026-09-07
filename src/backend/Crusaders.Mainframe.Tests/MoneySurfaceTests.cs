@@ -316,4 +316,156 @@ public class MoneySurfaceTests
                 charge.Reason);
         }
     }
+
+    // ---- R3 K-F4: a walk-up confirmation may not promise a refund ----------
+
+    /// <summary>
+    /// The confirmation for court time bought at the box said, verbatim, <i>"cancelling within
+    /// 15 minutes of the start, or not turning the lights on, incurs a 30% penalty"</i> — under
+    /// a heading "You're booked" and a "Starts" time for a court whose lights were already on.
+    ///
+    /// <para>
+    /// Both halves are false for a walk-up. The session has started, and cancelling returns
+    /// <b>nothing</b>, not 70%: <c>settlement-model.md</c> S4, and the server's own quote for
+    /// exactly these bookings answers <c>refundCredits 0 / checkedIn true</c>. A member who
+    /// acted on that sentence would be asking the club for 35 credits that were never coming.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void A_walk_up_confirmation_does_not_offer_a_refund_the_server_will_not_pay()
+    {
+        var walkUp = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
+            "Court 2", "Sun 06 Sep 22:51", "15 min", 50m, 100m,
+            PenaltyWindowMinutes: 15, PenaltyPct: 30m, IsWalkUp: true));
+
+        Assert.DoesNotContain("30% penalty", walkUp.HtmlBody);
+        Assert.DoesNotContain("cancelling within", walkUp.HtmlBody);
+        Assert.DoesNotContain("You're booked", walkUp.HtmlBody);
+        Assert.Contains("not refunded once the lights have been on", walkUp.HtmlBody);
+        Assert.Contains("You're on court", walkUp.HtmlBody);
+        // "Starts" is wrong on a session that already has; the same figure, correctly labelled.
+        Assert.Contains(">Started<", walkUp.HtmlBody);
+
+        // And an ordinary reservation keeps the heads-up it is entitled to — the flag defaults
+        // to false, so nothing that is not a walk-up loses it.
+        var reservation = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
+            "Court 2", "Sun 06 Sep 22:51", "15 min", 50m, 100m,
+            PenaltyWindowMinutes: 15, PenaltyPct: 30m));
+        Assert.Contains("30% penalty", reservation.HtmlBody);
+        Assert.Contains(">Starts<", reservation.HtmlBody);
+    }
+
+    /// <summary>
+    /// The same, through the path that actually sends it: a walk-up bought at the box. The
+    /// template can only be right if <c>BookingService</c> tells it which kind of booking this
+    /// is, and the flag is set from <c>NewBooking.IsWalkUp</c> — the same field that decides
+    /// whether the charge posts as a <see cref="LedgerEntryType.LightsPurchase"/>.
+    /// </summary>
+    [Fact]
+    public async Task Buying_court_time_at_the_box_emails_the_walk_up_terms_and_not_the_penalty()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        // A walk-up is sold from UtcNow and truncated at the club's closing time, so move the
+        // club rather than the purchase — see TestHost.ClearOfClosingAsync.
+        await TestHost.ClearOfClosingAsync(db, host.Tenant.Id, 15);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+
+        var result = await bookings.CreateWalkUpAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, 15, $"walkup:test:{Guid.NewGuid():N}", default);
+        Assert.IsType<BookingResult.Ok>(result);
+
+        var mail = await PollMail(host, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
+        Assert.NotNull(mail);
+        Assert.DoesNotContain("30% penalty", mail!.HtmlBody);
+        Assert.Contains("not refunded once the lights have been on", mail.HtmlBody);
+    }
+
+    // ---- R3 K-F7: an admin cancellation says who did it, and why -----------
+
+    /// <summary>
+    /// A booking the club cancelled on a member's behalf arrived as a mail indistinguishable
+    /// from one the member sent themselves — no actor, no reason, no mention that the penalty
+    /// had been waived — while the audit row beside it carried all three. Email is the only
+    /// channel the member has; the grid just shows the slot free again.
+    /// </summary>
+    [Fact]
+    public void A_club_cancellation_names_the_club_the_reason_and_the_waiver()
+    {
+        var byClub = EmailTemplates.BookingCancellation(
+            "member@test.local", "Court 4", 50m, null,
+            new ClubCancellation("Court double-booked by the desk", PenaltyWaived: true));
+
+        Assert.Contains("The club cancelled your booking", byClub.HtmlBody);
+        Assert.Contains("Court double-booked by the desk", byClub.HtmlBody);
+        Assert.Contains("waived", byClub.HtmlBody);
+        Assert.Contains("50.00 credits", byClub.HtmlBody);
+        Assert.Contains("club", byClub.Subject);
+
+        // A member cancelling their own court is a different event and keeps its own mail —
+        // no actor, because there is nobody to name.
+        var self = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m);
+        Assert.DoesNotContain("The club cancelled", self.HtmlBody);
+        Assert.DoesNotContain("waived", self.HtmlBody);
+        Assert.Equal("Booking cancelled — Court 4", self.Subject);
+    }
+
+    /// <summary>
+    /// And through the path that sends it. The reason reaching the member is the reason the
+    /// audit row records — one value, quoted twice, so the club cannot tell the member one
+    /// story and its own report another.
+    /// </summary>
+    [Fact]
+    public async Task An_admin_cancelling_for_a_member_emails_them_the_actor_and_the_reason()
+    {
+        const string reason = "Court double-booked by the desk";
+
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        var created = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id,
+            TestHost.BookableSlot(2), sliceCount: 1, default));
+
+        // Pull the slot inside the penalty window, which is the only state in which there is a
+        // penalty to waive at all.
+        var row = await db.Bookings.FirstAsync(b => b.Id == created.Booking.Id);
+        var length = row.EndsAt - row.StartsAt;
+        row.StartsAt = TestHost.Storable(DateTimeOffset.UtcNow.AddMinutes(5));
+        row.EndsAt = row.StartsAt + length;
+        await db.SaveChangesAsync();
+
+        var cancelled = await bookings.CancelAsync(
+            row.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: true, default, reason);
+        var ok = Assert.IsType<CancellationResult.Ok>(cancelled);
+        Assert.Equal(0m, ok.PenaltyCredits);
+
+        var mail = await PollMail(host, m => m.Subject.Contains("club", StringComparison.Ordinal));
+        Assert.NotNull(mail);
+        Assert.Contains("The club cancelled your booking", mail!.HtmlBody);
+        Assert.Contains(reason, mail.HtmlBody);
+        Assert.Contains("waived", mail.HtmlBody);
+    }
+
+    /// <summary>Waits for a background send rather than racing it.</summary>
+    private static async Task<Api.Email.EmailMessage?> PollMail(
+        TestHost host, Func<Api.Email.EmailMessage, bool> match, int timeoutMs = 5000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            var found = host.EmailService.Sent.FirstOrDefault(match);
+            if (found is not null) return found;
+            await Task.Delay(25);
+        }
+        return host.EmailService.Sent.FirstOrDefault(match);
+    }
 }
