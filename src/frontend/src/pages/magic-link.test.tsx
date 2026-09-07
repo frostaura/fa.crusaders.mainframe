@@ -169,6 +169,35 @@ describe("a welcome link that has already been spent", () => {
     expect(await screen.findByText("Schedule")).toBeInTheDocument();
   });
 
+  it("spends the link once and shows one card under StrictMode's double-invoke", async () => {
+    // StrictMode's mount → cleanup → mount has produced two separate defects on this screen
+    // already, and this file's own history is one of them: the effect used to fire four times
+    // and the three losers reported "expired" about a link that had just worked. The new
+    // render-time redirect is a second thing that runs twice, so it is driven twice here.
+    const stub = stubFetch([
+      { method: "POST", path: "/api/v1/auth/magic-link/", status: 400, body: { error: "invalid_or_expired" } },
+    ]);
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={["/welcome/tok-spent"]}>
+          <AuthProvider>
+            <Routes>
+              <Route path="/welcome/:token" element={<WelcomePage />} />
+              <Route path="/schedule" element={<span>Schedule</span>} />
+              <Route path="/login" element={<span>Sign-in screen</span>} />
+              <Route path="/forgot-password" element={<span>Reset screen</span>} />
+            </Routes>
+          </AuthProvider>
+        </MemoryRouter>
+      </StrictMode>,
+    );
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(consumed(stub.calls, "/api/v1/auth/magic-link/")).toBe(1);
+    expect(screen.getAllByRole("link", { name: "Sign in" })).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: /already been used/ })).toBeInTheDocument();
+  });
+
   it("says which link is incomplete rather than printing 'Missing token.'", async () => {
     render(
       <MemoryRouter initialEntries={["/welcome/"]}>
