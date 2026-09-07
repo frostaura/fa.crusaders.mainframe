@@ -360,6 +360,16 @@ public class MoneySurfaceTests
     /// template can only be right if <c>BookingService</c> tells it which kind of booking this
     /// is, and the flag is set from <c>NewBooking.IsWalkUp</c> — the same field that decides
     /// whether the charge posts as a <see cref="LedgerEntryType.LightsPurchase"/>.
+    ///
+    /// <para>
+    /// A walk-up never sends it from inside the commit, so this exercises the shape production
+    /// runs rather than one beside it. The deferral is the fix for a false sentence: mailed
+    /// from inside the commit, "it has already started… not
+    /// refunded once the lights have been on" went out before the activation that lights the
+    /// court, and was untrue on the refusal path. Both halves are asserted here — that nothing
+    /// is sent until the caller says the court is lit, and that the same mail is sent when it
+    /// does.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task Buying_court_time_at_the_box_emails_the_walk_up_terms_and_not_the_penalty()
@@ -377,7 +387,14 @@ public class MoneySurfaceTests
 
         var result = await bookings.CreateWalkUpAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, 15, $"walkup:test:{Guid.NewGuid():N}", default);
-        Assert.IsType<BookingResult.Ok>(result);
+        var ok = Assert.IsType<BookingResult.Ok>(result);
+
+        // Held, not lost. Nothing is in flight yet — the send has not been reached, let alone
+        // queued — so this needs no wait to be sound.
+        Assert.NotNull(ok.SendConfirmationAsync);
+        Assert.DoesNotContain(host.EmailService.Sent, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
+
+        await ok.SendConfirmationAsync!(default);
 
         var mail = await PollMail(host, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
         Assert.NotNull(mail);
@@ -415,9 +432,21 @@ public class MoneySurfaceTests
     }
 
     /// <summary>
-    /// And through the path that sends it. The reason reaching the member is the reason the
-    /// audit row records — one value, quoted twice, so the club cannot tell the member one
-    /// story and its own report another.
+    /// And through the path that sends it, inside the penalty window — where there is a
+    /// penalty to waive, and the two stories agreed even before they came from one value.
+    ///
+    /// <para>
+    /// <b>This case alone proves nothing about the general rule.</b> It used to carry a
+    /// sentence saying the reason reaching the member is the reason the audit row records,
+    /// "one value, quoted twice" — and that was false: the audit row recorded the admin's
+    /// TICK while the mail recorded the OUTCOME, and the reason was gated differently again.
+    /// The two agreed here only because inside the window with a penalty on the row, tick
+    /// and outcome are the same thing. A refuter drove the case where they are not, on a
+    /// live stack, and got <c>{"waived": true, "waive_reason": null}</c> in the club's report
+    /// beside a mail printing the reason and mentioning no waiver.
+    /// <see cref="A_waiver_that_did_not_happen_is_absent_from_the_audit_row_and_from_the_mail_alike"/>
+    /// is that case, and it is the one that holds the rule up.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task An_admin_cancelling_for_a_member_emails_them_the_actor_and_the_reason()
@@ -453,6 +482,84 @@ public class MoneySurfaceTests
         Assert.Contains("The club cancelled your booking", mail!.HtmlBody);
         Assert.Contains(reason, mail.HtmlBody);
         Assert.Contains("waived", mail.HtmlBody);
+    }
+
+    /// <summary>
+    /// An admin ticking "waive the penalty" on a cancellation that carries no penalty waives
+    /// nothing — and the club's report and the member's mail must both say so, in the same
+    /// words, because they are the same two values.
+    ///
+    /// <para>
+    /// The refuted case, pinned. Outside the penalty window <c>SettleCancellation</c> charges
+    /// nothing whether the box is ticked or not, so the tick is a request that was never
+    /// needed. The audit row used to record it anyway as <c>waived: true</c> — the club's own
+    /// month-end waiver report counting a waiver that never happened — while suppressing the
+    /// reason, and the mail did the exact opposite. No money differs in either version, which
+    /// is precisely why nothing caught it: the defect is in the records, and the records are
+    /// what a disputed cancellation is settled from.
+    /// </para>
+    ///
+    /// <para>
+    /// Deliberately NOT reachable from the console — the waive control is rendered only when
+    /// the quote carries a penalty — so this drives the service directly, the way the refuter
+    /// drove the raw API. A route that grows the ability to send it is not a new defect
+    /// afterwards.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_waiver_that_did_not_happen_is_absent_from_the_audit_row_and_from_the_mail_alike()
+    {
+        const string reason = "Court double-booked by the desk";
+
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        var created = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id,
+            TestHost.BookableSlot(2), sliceCount: 1, default));
+
+        // Left where it was booked: two hours out, against a 15-minute penalty window. This
+        // is the whole variable — the test above is the same call inside the window.
+        var cancelled = await bookings.CancelAsync(
+            created.Booking.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: true, default, reason);
+        var ok = Assert.IsType<CancellationResult.Ok>(cancelled);
+
+        // Nothing was waived because nothing was owed. The refund is the whole price.
+        Assert.Equal(0m, ok.PenaltyCredits);
+        Assert.Equal(created.Booking.AmountChargedCredits, ok.RefundedCredits);
+
+        var audit = await db.AuditLogs
+            .Where(a => a.Action == "booking.cancelled")
+            .OrderByDescending(a => a.CreatedAt)
+            .FirstAsync();
+        using var details = System.Text.Json.JsonDocument.Parse(audit.DetailsJson!);
+        var auditWaived = details.RootElement.GetProperty("waived").GetBoolean();
+        var auditReason = details.RootElement.GetProperty("waive_reason");
+
+        // The club's report: no waiver, and no reason for one.
+        Assert.False(auditWaived);
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, auditReason.ValueKind);
+
+        var mail = await PollMail(host, m => m.Subject.Contains("club", StringComparison.Ordinal));
+        Assert.NotNull(mail);
+        Assert.Contains("The club cancelled your booking", mail!.HtmlBody);
+
+        // And the member's mail says exactly what the audit row says. Asserted as the SAME
+        // two facts rather than as two independent strings, because "they agree" is the rule
+        // and a pair of literals would go on passing while they drifted apart again.
+        Assert.Equal(auditWaived, mail.HtmlBody.Contains("was waived", StringComparison.Ordinal));
+        Assert.Equal(
+            auditReason.ValueKind is not System.Text.Json.JsonValueKind.Null,
+            mail.HtmlBody.Contains(reason, StringComparison.Ordinal));
+
+        // Stated once more as literals, so a reader can see which way round the agreement
+        // fell without re-deriving it: nothing waived, nothing said about a waiver.
+        Assert.DoesNotContain("was waived", mail.HtmlBody);
+        Assert.DoesNotContain(reason, mail.HtmlBody);
     }
 
     /// <summary>Waits for a background send rather than racing it.</summary>

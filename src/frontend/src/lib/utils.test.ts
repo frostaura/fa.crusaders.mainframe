@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCredits, formatMinutes, formatRate, formatSignedCredits, formatZar } from "./utils";
+import { formatCredits, formatMinutes, formatRate, formatRatePerRand, formatSignedCredits, formatZar } from "./utils";
 
 /**
  * The money-rendering bug, pinned.
@@ -75,6 +75,25 @@ describe("signed credits, rates and durations", () => {
     expect(formatRate(1.6)).toBe("1.6");
     expect(formatRate(2.4)).toBe("2.4");
     expect(formatRate(2)).toBe("2");
+  });
+
+  it("agrees the noun with the rate, so a 1:1 club is not quoted 1 credits", () => {
+    // Seen live on the re-quote screen: a club whose rate is exactly 1 read
+    // "At 1 credits / R1". The trimming that makes 1.6000 into 1.6 is what leaves 1
+    // standing beside a plural noun, so the noun belongs with the number.
+    expect(formatRatePerRand(1)).toBe("1 credit / R1");
+    expect(formatRatePerRand(1.0)).toBe("1 credit / R1");
+    // 1.0000 IS one, and 0.9999 is not — the boundary is the trimmed number, not the input.
+    expect(formatRatePerRand(1.00001)).toBe("1 credit / R1");
+    expect(formatRatePerRand(0.9999)).toBe("0.9999 credits / R1");
+
+    // Everything else is plural, including the fractions and the zero. English pluralises
+    // every quantity but one, so this is not a special case list, it is the rule.
+    expect(formatRatePerRand(1.6)).toBe("1.6 credits / R1");
+    expect(formatRatePerRand(1.6667)).toBe("1.6667 credits / R1");
+    expect(formatRatePerRand(2)).toBe("2 credits / R1");
+    expect(formatRatePerRand(0.5)).toBe("0.5 credits / R1");
+    expect(formatRatePerRand(0)).toBe("0 credits / R1");
   });
 
   it("says a duration the way a person says it", () => {

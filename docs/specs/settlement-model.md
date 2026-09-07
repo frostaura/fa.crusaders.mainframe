@@ -440,6 +440,8 @@ booking, so it is paired by device, relay and time:
 | Event | Precondition | Effect |
 | --- | --- | --- |
 | Booking created | balance ≥ `P` under the payer's lock, **or** an admin on-behalf booking carrying `feature-spec.md` §8's explicit override (§6) | row + `BookingCharge −P` in one save. `Owed = P`. |
+| Walk-up bought at the box | balance ≥ `P` under the payer's lock | row + `LightsPurchase −P` in one save, and the confirmation email is **held**. The same request then activates the court; only then is it sent. `Owed = P`. |
+| Walk-up whose activation is then refused | the purchase's own activation answers anything but `Activated`; no `CheckedInAt` | `LightsPurchase +P` under `<purchase reference>:void` (I11 — same type, opposite sign, never netted), `Status := Cancelled`, one save. No penalty leg on either side: the court was never lit, so I2 does not apply. No confirmation is sent; the member is mailed that nothing was bought. `Owed = 0`. |
 | Cancel, no check-in, outside window | — | `CancellationRefund +P`. `Owed = 0`. |
 | Cancel, no check-in, inside window | — | `CancellationRefund +P` **and** `LateCancellationPenalty −penalty`, one save, never netted. `Owed = penalty`. |
 | Cancel after check-in | — | nothing posted. `Owed = P`. |
@@ -498,6 +500,7 @@ Recorded here rather than left for the next reviewer to rediscover.
 | Rule | Code |
 | --- | --- |
 | S1–S5, I11 | `Services/BookingService.cs` — `CreateAsync`, `CommitAsync`, `SettleCancellation`, `CancelAsync`; `Webhooks/NoShowWorker.cs` — `SweepOneAsync` |
+| Walk-up purchase, and its undo | `Services/BookingService.cs` — `CreateWalkUpAsync`, `VoidUnstartedWalkUpAsync`; `Endpoints/DeviceEventEndpoints.cs` — `WalkUpForDeviceAsync`, which decides between them and owns the ordering of the confirmation |
 | S5a | `Webhooks/NoShowWorker.cs` — `SweepOneAsync` (`courtWasDark`); `Services/DeviceOutageIndex.cs`; `Webhooks/PeripheralHealthWorker.cs` writes the evidence |
 | S6, I3, I8, I9, I10, I12 | `Services/BookingService.cs` — `ReverseNoShowAsync`, `SettledLegsAsync`, `DisplacementAsync`, `RestoreEnd`, `ReinstateDisplacedAsync` |
 | S7, I1, I6 | `Services/BookingService.cs` — `ChargeLitCancelledBookingAsync`, `SettleReleaseAsync`; `Endpoints/DeviceEventEndpoints.cs` — `LitWindow` |

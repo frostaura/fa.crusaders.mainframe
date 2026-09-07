@@ -770,4 +770,200 @@ public class WalkUpBookingTests
         Assert.Equal(error, body.GetProperty("error").GetString());
         Assert.Empty(await f.Db.Bookings.ToListAsync());
     }
+    // ---- R8: the confirmation follows the lights, and a refusal gives the money back ----
+
+    private static WalkUpServices ServicesRefusingActivation(Fixture f) =>
+        ServicesOf(f) with { Activation = new RefusingActivation(f.Scope) };
+
+    /// <summary>
+    /// A walk-up the court would not open costs the member nothing, and tells them nothing
+    /// that is untrue.
+    ///
+    /// <para>
+    /// The commit and the activation are two steps and the commit takes the money. Round 7
+    /// mailed the confirmation from inside the commit — <i>"this is court time bought at the
+    /// box, so it has already started… not refunded once the lights have been on, and there
+    /// is nothing to cancel"</i> — and then refused the activation, leaving every clause of
+    /// that sentence false and a charged, un-checked-in booking sitting on the court. Nothing
+    /// repaired it: the box paints COURT NOT FREE, a fresh scan is a fresh nonce and is
+    /// refused by the abandoned booking, and <c>NoShowWorker</c> settles it at the grace
+    /// deadline with the club's no-show penalty on a member the API itself turned away.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_walk_up_the_court_refuses_is_undone_and_never_confirmed()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+        var opening = await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default);
+
+        var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(await CodeAsync(f), court: 1, minutes: 30),
+            ServicesRefusingActivation(f), default));
+
+        Assert.Equal(409, status);
+        Assert.Equal("activation_refused", body.GetProperty("error").GetString());
+
+        // The money is back, in full. This is the whole point: a refusal after a charge must
+        // not strand credits.
+        Assert.Equal(opening, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+
+        // Two rows, same type, opposite sign (I11) — never a netted one and never an edit.
+        var booking = await f.Db.Bookings.AsNoTracking().SingleAsync(b => b.UserId == f.Host.PlayerUser.Id);
+        var rows = await f.Db.LedgerEntries.AsNoTracking()
+            .Where(l => l.RelatedBookingId == booking.Id)
+            .OrderBy(l => l.AmountCredits)
+            .ToListAsync();
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, r => Assert.Equal(LedgerEntryType.LightsPurchase, r.Type));
+        Assert.Equal(-rows[0].AmountCredits, rows[1].AmountCredits);
+        Assert.True(rows[1].AmountCredits > 0m);
+
+        // The slot is released and was never attended, so no sweep can reach it.
+        Assert.Equal(BookingStatus.Cancelled, booking.Status);
+        Assert.Null(booking.CheckedInAt);
+
+        // Nothing was said that was not true. The confirmation is the sentence this test is
+        // named after: it was composed inside the commit and is now composed after the
+        // activation, so a refusal produces none at all.
+        var sent = await SettledMailAsync(f);
+        Assert.DoesNotContain(sent, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
+        var told = Assert.Single(sent, m => m.Subject.StartsWith("Court time not started", StringComparison.Ordinal));
+        Assert.Contains("Nothing was bought", told.HtmlBody);
+        Assert.Contains("Put back on your credit", told.HtmlBody);
+        Assert.DoesNotContain("penalty", told.HtmlBody);
+
+        // And the court is free again — the member can press the button a second time and be
+        // sold what they were refused. Before the undo, their own abandoned booking answered
+        // court_in_use for the length of the purchase.
+        var (retryStatus, _) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(await CodeAsync(f), court: 1, minutes: 30), ServicesOf(f), default));
+        Assert.Equal(200, retryStatus);
+    }
+
+    /// <summary>
+    /// The other half of the same rule: when the court DOES open, the confirmation is sent —
+    /// deferring it must not lose it. The mail describes a court that is lit, and the booking
+    /// it names is checked in.
+    /// </summary>
+    [Fact]
+    public async Task A_walk_up_that_lights_the_court_is_confirmed_once_it_is_lit()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+
+        var (status, _) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(await CodeAsync(f), court: 1, minutes: 30), ServicesOf(f), default));
+        Assert.Equal(200, status);
+
+        var booking = await f.Db.Bookings.AsNoTracking().SingleAsync(b => b.UserId == f.Host.PlayerUser.Id);
+        Assert.NotNull(booking.CheckedInAt);
+
+        var sent = await SettledMailAsync(f);
+        var confirmation = Assert.Single(sent, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
+        Assert.Contains("not refunded once the lights have been on", confirmation.HtmlBody);
+        // And no undo mail, which would mean the money had been taken back off a lit court.
+        Assert.DoesNotContain(sent, m => m.Subject.StartsWith("Court time not started", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The window the deferral opens, and the replay that closes it.
+    ///
+    /// <para>
+    /// Holding the confirmation until the activation means a request that dies between the
+    /// debit and the mail sends nothing at all — where the old ordering had already queued
+    /// it from inside the commit. The box retries the same nonce, the replay re-activates
+    /// the booking it finds (which is what the replay is for), and it owes the member the
+    /// confirmation that attempt never sent. "Every player-affecting event sends an email"
+    /// is an invariant, not a nicety: the member is standing on a court they paid for.
+    /// </para>
+    ///
+    /// <para>
+    /// The died-mid-request state is built the way it actually arises — a walk-up committed
+    /// and charged, with nothing having activated it.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_replay_that_repairs_an_unactivated_purchase_sends_the_confirmation_it_never_got()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+        const string nonce = "abcdef0123456789";
+
+        // The commit, and nothing after it: charged, unstamped, unconfirmed.
+        var created = Assert.IsType<BookingResult.Ok>(await f.Bookings.CreateWalkUpAsync(
+            f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.PlayerUser.Id, 30,
+            DeviceEventEndpoints.WalkUpReference(box.Id, nonce), default));
+        Assert.NotNull(created.SendConfirmationAsync);
+        Assert.Empty(f.Host.EmailService.Sent);
+
+        var (status, body) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(await CodeAsync(f), court: 1, minutes: 30, nonce: nonce), ServicesOf(f), default));
+
+        Assert.Equal(200, status);
+        Assert.True(body.GetProperty("replayed").GetBoolean());
+        Assert.Equal(created.Booking.Id, body.GetProperty("booking_id").GetGuid());
+
+        var booking = await f.Db.Bookings.AsNoTracking().SingleAsync(b => b.Id == created.Booking.Id);
+        Assert.NotNull(booking.CheckedInAt);
+
+        var sent = await SettledMailAsync(f);
+        var confirmation = Assert.Single(sent, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
+        // The figures are re-derived in a different request from the purchase, so they are
+        // asserted rather than assumed: the price on the row, and the balance it left behind.
+        Assert.Contains("16.00 credits", confirmation.HtmlBody);
+        Assert.Contains("184.00 credits", confirmation.HtmlBody);
+        Assert.Contains("not refunded once the lights have been on", confirmation.HtmlBody);
+    }
+
+    /// <summary>
+    /// And the ordinary replay — the box that retried because it never read the 200 — sends
+    /// NO second confirmation. One purchase, one "you are on court".
+    /// </summary>
+    [Fact]
+    public async Task A_replay_of_a_completed_purchase_does_not_confirm_it_twice()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var box = await BoxOnAsync(f, 1);
+        var code = await CodeAsync(f);
+        const string nonce = "0f1e2d3c4b5a6978";
+
+        var (first, _) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(code, court: 1, minutes: 30, nonce: nonce), ServicesOf(f), default));
+        Assert.Equal(200, first);
+
+        var (second, secondBody) = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+            box, Request(code, court: 1, minutes: 30, nonce: nonce), ServicesOf(f), default));
+        Assert.Equal(200, second);
+        Assert.True(secondBody.GetProperty("replayed").GetBoolean());
+
+        var sent = await SettledMailAsync(f);
+        Assert.Single(sent, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Waits for the background sends to land rather than racing them, then returns
+    /// everything sent. Bounded, so an absent mail costs a second rather than a hang.
+    /// </summary>
+    private static async Task<IReadOnlyList<Api.Email.EmailMessage>> SettledMailAsync(Fixture f, int timeoutMs = 3000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline && f.Host.EmailService.Sent.Count == 0) await Task.Delay(25);
+        // One more grace period, so a second message arriving just behind the first is seen
+        // and an assertion about what was NOT sent is not simply early.
+        await Task.Delay(250);
+        return [.. f.Host.EmailService.Sent];
+    }
 }

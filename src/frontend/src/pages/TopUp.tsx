@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, endpoints, type PayFastFormField, type TopUpOptions } from "../lib/api";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
-import { formatCredits, formatRate, formatZar } from "../lib/utils";
+import { formatCredits, formatRatePerRand, formatZar } from "../lib/utils";
 
 /**
  * Why an amount is not acceptable, or null when it is.
@@ -247,7 +247,7 @@ export default function TopUpPage() {
                   here reported submit at 72 NLOC / 27 CCN / 133 length and turned the gate red
                   on a line nobody had touched.
                 */}
-                At {formatRate(options.conversion_rate)} credits / R1 ({options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"}).
+                At {formatRatePerRand(options.conversion_rate)} ({options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"}).
                 Your rate is fixed the moment the club registers this payment, and it can't change while you're at PayFast.
                 If the club's rate has moved since this page loaded, we'll show you the new figure before sending you there.
               </p>
@@ -267,7 +267,7 @@ export default function TopUpPage() {
               The club changed its rate while this page was open, so nothing has been sent to
               PayFast yet. {formatZar(value)} now buys{" "}
               {formatCredits(Number.isFinite(restated.credits) ? restated.credits : value * restated.rate, { long: true })} at{" "}
-              {formatRate(restated.rate)} credits / R1. Press Continue again to pay at that rate.
+              {formatRatePerRand(restated.rate)}. Press Continue again to pay at that rate.
             </p>
           )}
 

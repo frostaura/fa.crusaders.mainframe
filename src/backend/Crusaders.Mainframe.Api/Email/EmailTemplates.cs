@@ -376,6 +376,42 @@ public static class EmailTemplates
     }
 
     /// <summary>
+    /// A walk-up the court would not open, and the money already back.
+    ///
+    /// <remarks>
+    /// <para>
+    /// Its own message rather than the cancellation one, because nobody cancelled anything:
+    /// the member pressed a button, the API took the credits, the activation refused, and the
+    /// API put them back inside the same request. "The club cancelled your booking. You did
+    /// not do this." would be three untrue sentences about an event that lasted a second.
+    /// </para>
+    /// <para>
+    /// It exists at all because of the invariant that every player-affecting event reaches the
+    /// member: the alternative was a debit and a credit appearing on <c>/wallet</c> with no
+    /// explanation between them, for a member who is standing at a box reading COURT NOT FREE.
+    /// The figure is the <b>gross</b> refund, which is also the whole price — there is no
+    /// penalty leg on a court that was never lit. A court priced at zero has no figure to
+    /// print and gets the shorter sentence: I10 writes no zero ledger row, so quoting "0.00
+    /// credits" here would name a movement that is not on the statement.
+    /// </para>
+    /// </remarks>
+    public static EmailMessage WalkUpNotStarted(string to, string courtName, decimal refundedCredits) => new(
+        To: to,
+        Subject: $"Court time not started — {courtName}",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">Nothing was bought</h2>
+              <p>The box could not start {System.Net.WebUtility.HtmlEncode(courtName)} for you, so the court time you pressed for was not sold.</p>
+              {(refundedCredits > 0
+                  ? $"<p>Put back on your credit: <strong>{Cr(refundedCredits)}</strong>. Your balance is where it was before you pressed.</p>"
+                  : "<p>Nothing was taken off your credit.</p>")}
+              <p>Try again at the box, or ask at the desk.</p>
+              {FooterHtml}
+            </div>
+            """);
+
+    /// <summary>
     /// A cancelled booking, in the member's mail. Both figures are <b>credits</b>; see <see cref="Cr"/>.
     /// </summary>
     /// <remarks>

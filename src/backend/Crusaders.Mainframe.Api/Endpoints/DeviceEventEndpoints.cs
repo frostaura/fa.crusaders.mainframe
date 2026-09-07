@@ -701,6 +701,13 @@ public static class DeviceEventEndpoints
     public static string WalkUpReference(Guid deviceId, string nonce) => $"walkup:{deviceId:N}:{nonce}";
 
     /// <summary>
+    /// The reference the undo of that purchase is posted under — the purchase's own with a
+    /// suffix, so the two read as a pair on the ledger and so two concurrent undos of one
+    /// purchase post one refund (the filtered unique index refuses the second).
+    /// </summary>
+    public static string VoidReference(string purchaseReference) => $"{purchaseReference}:void";
+
+    /// <summary>
     /// The walk-up decision for an already-authenticated box. Public, and separate from the
     /// HTTP handler, so the decision can be driven directly by a test that does not want to
     /// sign requests — the money and court semantics live here, the wire lives above.
@@ -761,7 +768,17 @@ public static class DeviceEventEndpoints
             return Results.BadRequest(new { error = "not_recognised" });
         }
 
-        var created = await bookings.CreateWalkUpAsync(court.Id, userId.Value, userId.Value, req.Minutes, reference, ct);
+        // The purchase is not finished when this returns, and the confirmation is not sent.
+        //
+        // The commit takes the money and would, left to itself, mail the member "this is court
+        // time bought at the box, so it has already started… not refunded once the lights have
+        // been on, and there is nothing to cancel". The activation is the line below it, and
+        // on a refusal every clause of that sentence was false: the lights never came on, the
+        // booking was still refundable, and there was very much something to cancel. The mail
+        // is held and sent after the activation instead, which is the only ordering in which
+        // it describes what happened.
+        var created = await bookings.CreateWalkUpAsync(
+            court.Id, userId.Value, userId.Value, req.Minutes, reference, ct);
 
         // Two retries in flight together: the replay check above found nothing because the
         // other attempt had not committed yet, and the database refused this one — on the
@@ -781,8 +798,16 @@ public static class DeviceEventEndpoints
             new ActivationTarget(court, ok.Booking, userId.Value, req.Method ?? "qr", OccurredAt: null, DurationMs: 0), ct);
         if (activated is not ActivationResult.Activated live)
         {
+            // The purchase is undone rather than left standing. Charged and un-checked-in on a
+            // court nobody can now buy, it would be settled as a no-show at the grace deadline
+            // and carry the club's penalty — for a member the API itself refused. No mail was
+            // sent above, so nothing has yet told them a lie about it either.
+            await bookings.VoidUnstartedWalkUpAsync(ok.Booking, VoidReference(reference), ct);
             return Results.Conflict(new { error = "activation_refused" });
         }
+
+        // NOW the confirmation, with the lights on and the sentence in it true.
+        await ok.SendConfirmationAsync!(ct);
 
         return Results.Ok(Grant(ok.Booking, live.AmountCredits, ok.BalanceAfterCredits, replayed: false));
     }
@@ -875,7 +900,7 @@ public static class DeviceEventEndpoints
     private static async Task<IResult?> ReplayAsync(
         string reference, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, _, activation, _, _, ledger) = services;
+        var (db, bookings, activation, _, _, ledger) = services;
 
         var entry = await db.LedgerEntries.AsNoTracking()
             .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
@@ -891,12 +916,27 @@ public static class DeviceEventEndpoints
         }
 
         var court = await db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
+
+        // Read BEFORE the activation below, which is the whole point of reading it: an
+        // unstamped booking is one whose first attempt died between the charge and the
+        // check-in, so its confirmation was never sent and this replay owes the member one.
+        // A stamped one was confirmed by whichever attempt stamped it, and mailing again
+        // would send a second "you are on court" for a single purchase.
+        var wasNeverActivated = booking.CheckedInAt is null;
+
         var activated = await ActivateOnceAsync(db, activation,
             new ActivationTarget(court, booking, entry.UserId, req.Method ?? "qr", OccurredAt: null, DurationMs: 0), ct);
         if (activated is not ActivationResult.Activated)
         {
+            // Same reasoning as the first attempt, and the same idempotent reference: a
+            // purchase this endpoint will not open is a purchase the member gets back, not
+            // one left on the court to be swept as a no-show.
+            await bookings.VoidUnstartedWalkUpAsync(booking, VoidReference(reference), ct);
             return Results.Conflict(new { error = "activation_refused" });
         }
+
+        // The confirmation the first attempt owed and never sent. See `wasNeverActivated`.
+        if (wasNeverActivated) await bookings.SendWalkUpConfirmationAsync(booking, ct);
 
         // The balance now rather than as it stood after the first attempt: the box shows
         // the member what they have, and a movement between the two attempts is real.

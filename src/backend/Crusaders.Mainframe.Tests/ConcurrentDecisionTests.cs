@@ -846,6 +846,76 @@ public sealed class ConcurrentDecisionTests
     }
 
     /// <summary>
+    /// A walk-up the court refuses gives every credit back, and the released slot and the
+    /// refund land together. <b>Postgres only</b>: the undo sets the booking's status and
+    /// posts the refund through one <c>SaveChanges</c>, and on the in-memory provider that
+    /// is not one transaction at all — <c>memory/gotchas.md</c> records a test that "proved"
+    /// exactly this shape while demonstrating the failure it was written to catch.
+    ///
+    /// <para>
+    /// The refusal itself is forced (see <see cref="RefusingActivation"/>); everything the
+    /// assertions read — the booking row, both ledger legs, the balance — is written by the
+    /// real services against a real database.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task Walkup_refused_at_activation_returns_every_credit_and_releases_the_slot()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        using (var zoneScope = factory.Services.CreateScope())
+        {
+            await TestHost.ClearOfClosingAsync(
+                zoneScope.ServiceProvider.GetRequiredService<MainframeDbContext>(), club.TenantId, 60);
+        }
+
+        var opening = await BalanceAsync(factory, club, club.MemberId);
+        var code = await TestAccessCodes.MintIdentAsync(factory.Services, club.TenantId, club.Slug, club.MemberId);
+        const string nonce = "1a2b3c4d5e6f7081";
+
+        (int Status, JsonElement Body) refused;
+        using (var scope = RequestScope(factory, club))
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var device = await db.Devices.FirstAsync(d => d.Id == club.DeviceId);
+            var services = WalkUpServicesOf(scope) with { Activation = new RefusingActivation(scope) };
+            refused = Unwrap(await DeviceEventEndpoints.WalkUpForDeviceAsync(
+                device, new WalkUpRequest(device.MacAddress, 60, "qr", code, 2, nonce), services, default));
+        }
+
+        Assert.Equal(409, refused.Status);
+        Assert.Equal("activation_refused", refused.Body.GetProperty("error").GetString());
+
+        // Nothing is stranded. Left standing, this booking would have been settled as an
+        // ordinary no-show at the grace deadline and carried the club penalty.
+        Assert.Equal(opening, await BalanceAsync(factory, club, club.MemberId));
+
+        using var check = RequestScope(factory, club);
+        var checkDb = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var booking = Assert.Single(await checkDb.Bookings.Where(b => b.UserId == club.MemberId).ToListAsync());
+        Assert.Equal(BookingStatus.Cancelled, booking.Status);
+        Assert.Null(booking.CheckedInAt);
+
+        // Both legs, same type, opposite sign (I11), each under its own reference so a retry
+        // of either cannot post it twice.
+        var purchase = Assert.Single(await checkDb.LedgerEntries
+            .Where(l => l.ExternalReference == DeviceEventEndpoints.WalkUpReference(club.DeviceId, nonce)).ToListAsync());
+        var undo = Assert.Single(await checkDb.LedgerEntries
+            .Where(l => l.ExternalReference ==
+                DeviceEventEndpoints.VoidReference(DeviceEventEndpoints.WalkUpReference(club.DeviceId, nonce))).ToListAsync());
+        Assert.Equal(LedgerEntryType.LightsPurchase, purchase.Type);
+        Assert.Equal(LedgerEntryType.LightsPurchase, undo.Type);
+        Assert.Equal(-purchase.AmountCredits, undo.AmountCredits);
+        Assert.True(undo.AmountCredits > 0m);
+
+        // The court was never lit, so nothing claims it was.
+        Assert.Empty(await checkDb.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
+        Assert.Single(await checkDb.AuditLogs.Where(a => a.Action == "booking.walk_up_voided").ToListAsync());
+    }
+
+    /// <summary>
     /// Two uncharged bookings, one payer, credits for one: two concurrent activations debit
     /// once. This is the never-charged branch of <c>ChargeOnActivationAsync</c>, which read
     /// an unlocked <c>SUM</c> and debited — the same race <c>CommitAsync</c> closes for a

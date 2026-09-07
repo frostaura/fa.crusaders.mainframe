@@ -1,4 +1,3 @@
-import { StrictMode } from "react";
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import TopUpPage from "./TopUp";
@@ -138,7 +137,11 @@ describe("Top-up — the quoted rate is the registered rate", () => {
       { path: "/api/v1/credit/topup/options", body: LEAGUE_OPTIONS },
       { method: "POST", path: "/api/v1/credit/topup", status: 409, body: MOVED },
     ]);
-    renderPage(<StrictMode><TopUpPage /></StrictMode>);
+    // The render OPTION, not a <StrictMode> element passed as the ui. Testing Library puts
+    // its `wrapper` OUTSIDE the ui, so a <StrictMode> handed to renderPage lands inside the
+    // harness's providers and double-invokes nothing — measured with a probe in round 7,
+    // which is why this line changed. `reactStrictMode` is applied outside the wrapper.
+    renderPage(<TopUpPage />, { reactStrictMode: true });
 
     fireEvent.click(await screen.findByRole("button", { name: "R100" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));

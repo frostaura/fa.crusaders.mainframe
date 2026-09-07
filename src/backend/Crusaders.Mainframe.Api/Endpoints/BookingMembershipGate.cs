@@ -5,7 +5,8 @@ using Crusaders.Mainframe.Api.Services;
 namespace Crusaders.Mainframe.Api.Endpoints;
 
 /// <summary>
-/// The one line both booking routes need: refuse a member the club will not let onto a court.
+/// The one line the booking routes and the member's court-code route need: refuse a member
+/// the club will not let onto a court.
 ///
 /// <para>
 /// Its own file rather than a private helper on <see cref="BookingEndpoints"/> for the
@@ -31,6 +32,13 @@ internal static class BookingMembershipGate
     /// <para>
     /// Callers pass the PAYER, not the actor. The desk booking on behalf is authorized; the
     /// question this answers is whether the person being CHARGED can use what is being bought.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>POST /me/qr/generate</c> asks it too, about the signed-in member. Nothing is charged
+    /// there — the code it would mint is already inert at every box — but the screen showing
+    /// it promises a walk-up, and a promise nothing keeps is the defect. Same gate, so the
+    /// screen and the box refuse for the same stated reason.
     /// </para>
     /// </summary>
     public static async Task<IResult?> RefuseIfBarredAsync(

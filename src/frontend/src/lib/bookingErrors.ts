@@ -203,6 +203,44 @@ export function provesStaleGrid(e: unknown): boolean {
 }
 
 /**
+ * The same two membership refusals, said to a member standing in front of the code screen
+ * rather than in front of the schedule — or null when this is not that refusal.
+ *
+ * <p>
+ * `POST /me/qr/generate` refuses a barred member, because the screen it feeds promises the
+ * code will "start a walk-up on a free court, or pay for someone else's time" and the box
+ * refuses a barred member every one of those. Round 7 made the code inert without making
+ * the screen say so, which left a member holding a QR nothing would honour.
+ * </p>
+ *
+ * <p>
+ * Its own sentences rather than {@link describeBookingError}'s, for the reason that file
+ * already carries twice (see {@link MEMBER_SHORT_TEXT}): one code, two audiences. The
+ * schedule's version says "you can't book", which is the wrong half of the truth here —
+ * nothing on this screen books anything — and `member_not_active`'s says "approve it on the
+ * Members page", which is an instruction to a desk, on a screen only the member sees.
+ * </p>
+ *
+ * <p>
+ * <b>Null, not a fallback sentence.</b> The caller needs to tell a barred membership from a
+ * flat battery: one is permanent and the screen must stop offering the code, the other
+ * clears on its own and the screen should keep trying.
+ * </p>
+ */
+export function describeCourtCodeRefusal(e: unknown): string | null {
+  if (!(e instanceof ApiError) || e.status !== 403) return null;
+  if (e.code === "member_suspended") {
+    return "Your membership is suspended, so a court code would not open anything — the boxes turn one away. "
+      + "Speak to the club to have it restored.";
+  }
+  if (e.code === "member_not_active") {
+    return "Your membership isn't active yet, so a court code would not open anything — the boxes turn one away. "
+      + "The club has to approve it first.";
+  }
+  return null;
+}
+
+/**
  * The message after a cancellation, naming what actually moved.
  *
  * <p>

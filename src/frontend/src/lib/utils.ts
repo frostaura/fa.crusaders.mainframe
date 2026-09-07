@@ -53,13 +53,31 @@ export function formatSignedCredits(value: number) {
 }
 
 /**
- * A rate, as "1.6 credits / R1" would read it — trailing zeros trimmed.
+ * A conversion rate as a bare number — trailing zeros trimmed.
  *
  * `credits_per_zar_*` accepts four decimals, so this cannot be `toFixed(2)`: a club on
  * 1.6667 would be quoted 1.67 on the screen and settled at 1.6667 in the ledger.
+ *
+ * It is the NUMBER only. Say the rate to a member through {@link formatRatePerRand},
+ * which owns the unit noun beside it — see the singular trap recorded there.
  */
 export function formatRate(value: number) {
   return String(Number(value.toFixed(4)));
+}
+
+/**
+ * A conversion rate as a member reads it: "1.6 credits / R1", and "1 credit / R1".
+ *
+ * Trimming the trailing zeros is right for 1.6667 and wrong for exactly 1, which came out
+ * as the bare "1" and left the top-up screens reading "At 1 credits / R1" for any club on
+ * a 1:1 rate — seen live on the re-quote screen. The noun has to agree with the number, so
+ * the noun lives here with the number rather than as loose text at each call site, which is
+ * how the two got out of step. Only 1 is singular: 0, 0.5 and 1.6 all take "credits", which
+ * is English rather than an arbitrary rule, and 1.0000 is the same rate as 1.
+ */
+export function formatRatePerRand(value: number) {
+  const rate = formatRate(value);
+  return `${rate} ${rate === "1" ? "credit" : "credits"} / R1`;
 }
 
 /**

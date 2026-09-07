@@ -206,6 +206,17 @@ public sealed class BookingService
     /// for two attempts in flight at once, which no read-first check can catch.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// <b>The confirmation email is not sent here — the caller sends it.</b> A walk-up is not
+    /// finished when this returns: the caller activates the court next, and the mail says "it
+    /// has already started… not refunded once the lights have been on, and there is nothing to
+    /// cancel", which is only true once that has happened. Sent from inside the commit it went
+    /// out ahead of the activation and was false on every clause when the activation refused.
+    /// So <see cref="BookingResult.Ok.SendConfirmationAsync"/> is non-null on every walk-up and
+    /// the caller invokes it once the lights are on — or does not, and undoes the purchase
+    /// instead (<see cref="VoidUnstartedWalkUpAsync"/>). It is not optional, because a walk-up
+    /// with no activation step is not a walk-up.
+    /// </remarks>
     public async Task<BookingResult> CreateWalkUpAsync(
         Guid courtId, Guid userId, Guid actorId, int requestedMinutes, string externalReference, CancellationToken ct)
     {
@@ -260,7 +271,177 @@ public sealed class BookingService
             TotalCost: totalCost,
             DurationLabel: $"{grantedMinutes} min",
             IsWalkUp: true,
-            ExternalReference: externalReference), ct);
+            ExternalReference: externalReference,
+            DeferConfirmation: true), ct);
+    }
+
+    /// <summary>
+    /// Composes one booking confirmation and hands it to the background sender. The one
+    /// place the mail is built, so the commit path and the repair path below cannot compose
+    /// it two different ways.
+    /// </summary>
+    private async Task MailConfirmationAsync(
+        Booking booking, string toEmail, Guid userId, Email.BookingConfirmationDetails details, CancellationToken ct)
+    {
+        var message = EmailTemplates.BookingConfirmation(
+            toEmail, details, await BuildReceiptAsync(booking, details, userId, ct));
+        SendEmailInBackground(message, $"booking confirmation for {booking.Id}");
+    }
+
+    /// <summary>
+    /// The confirmation for a walk-up that was charged but never confirmed — the repair path.
+    ///
+    /// <para>
+    /// A walk-up holds its confirmation until the activation has happened
+    /// (<see cref="CreateWalkUpAsync"/>), which leaves one window: the request dies between
+    /// the debit and the mail. The box retries the same nonce, the replay re-activates the
+    /// booking it finds, and without this nothing would ever tell the member about a court
+    /// they paid for and are standing on. Every player-affecting event reaches the member,
+    /// which is the repo's own invariant and the reason this is not left to the sweep.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The caller decides whether to call it, and the test is attendance BEFORE the
+    /// replay's own activation.</b> A booking already stamped was confirmed by the attempt
+    /// that stamped it; mailing again would send a second "you are on court" for one
+    /// purchase, which is the failure this method is one step away from being.
+    /// </para>
+    /// </summary>
+    public async Task SendWalkUpConfirmationAsync(Booking booking, CancellationToken ct)
+    {
+        if (booking.UserId is null) return;
+        var userId = booking.UserId.Value;
+        var settings = await _settings.GetAsync(ct);
+        var court = await _db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
+        var user = await _db.Users.FirstAsync(u => u.Id == userId, ct);
+
+        var minutes = (int)Math.Round((booking.EndsAt - booking.StartsAt).TotalMinutes);
+        var startsAtLocal = TimeZoneInfo
+            .ConvertTimeFromUtc(booking.StartsAt.UtcDateTime, ResolveTz(settings.Timezone))
+            .ToString("ddd dd MMM HH:mm");
+
+        // The figures come off the row and the ledger rather than from a caller: this runs in
+        // a different request from the purchase, so there is nothing in scope to trust.
+        var details = new Email.BookingConfirmationDetails(
+            court.Name, startsAtLocal, $"{minutes} min",
+            booking.AmountChargedCredits, await _ledger.GetBalanceAsync(userId, ct),
+            settings.PenaltyWindowMinutes, settings.PenaltyPct,
+            IsWalkUp: true);
+
+        await MailConfirmationAsync(booking, user.Email, userId, details, ct);
+    }
+
+    /// <summary>
+    /// Undoes a walk-up the court would not open: the money back in full, the slot released,
+    /// and nothing said to the member about lights that never came on.
+    ///
+    /// <para>
+    /// <b>Why it exists.</b> A walk-up commits its booking and its debit, and the same request
+    /// then activates the court. If that activation refuses, the old code answered
+    /// <c>409 activation_refused</c> and walked away from a charged, un-checked-in booking
+    /// sitting on the court. Nothing repaired it: the box paints COURT NOT FREE and the member
+    /// scans again, which is a NEW nonce and therefore a new purchase, which the abandoned
+    /// booking then refuses as <c>court_in_use</c>. At the grace deadline
+    /// <c>NoShowWorker</c> settles it as an ordinary no-show — the court is not dark, the box
+    /// is plainly reporting — and takes the club's no-show penalty off a member who was
+    /// refused. A refusal after a charge must not strand credits.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Same type, opposite sign</b> (I11): the debit was a
+    /// <see cref="LedgerEntryType.LightsPurchase"/>, so this is a positive
+    /// <c>LightsPurchase</c> and not a <c>CancellationRefund</c> — nobody cancelled anything,
+    /// and every report bucket nets back to zero for a purchase that did not happen. No
+    /// penalty leg on either side: I2 asks for a played court never to be free, and this court
+    /// was never lit — <see cref="Booking.CheckedInAt"/> is the source of truth for that and it
+    /// is null here by the guard below.
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="externalReference"/> makes it idempotent through the filtered unique
+    /// index, the same way the purchase itself is: two attempts to undo one purchase post one
+    /// refund. Pass the purchase's own reference with a suffix, so the pair reads as a pair on
+    /// the ledger.
+    /// </para>
+    /// </summary>
+    /// <returns>True when this call is what undid it; false when there was nothing to undo.</returns>
+    public async Task<bool> VoidUnstartedWalkUpAsync(
+        Booking booking, string externalReference, CancellationToken ct)
+    {
+        // Never a court that was lit, and never a row somebody else has already decided.
+        // CheckedInAt is the attendance test everywhere in this file and it is the one that
+        // keeps this method away from I2.
+        if (booking.Status != BookingStatus.Booked || booking.CheckedInAt is not null) return false;
+        if (booking.UserId is null) return false;
+
+        var payerUserId = booking.PaidByUserId ?? booking.UserId.Value;
+        var court = await _db.Courts.FirstAsync(c => c.Id == booking.CourtId, ct);
+
+        booking.Status = BookingStatus.Cancelled;
+        booking.CancelledAt = DateTimeOffset.UtcNow;
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = booking.ActorUserId,
+            SubjectUserId = booking.UserId.Value,
+            Action = "booking.walk_up_voided",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                booking_id = booking.Id,
+                court = court.Name,
+                refunded = booking.AmountChargedCredits,
+                reason = "activation_refused",
+            }),
+        });
+
+        try
+        {
+            // A court priced at zero has nothing to give back, and I10 forbids the zero row —
+            // it would move nothing and burn the reference the real posting would need. The
+            // slot is still released, because a booking left standing on the court is the
+            // other half of the defect and costs money whatever the court is priced at.
+            if (booking.AmountChargedCredits > 0m)
+            {
+                // Carries the status change with it: LedgerService.PostAsync saves through
+                // this tracked context, so the released slot and the money back are one write.
+                await _ledger.PostAsync(new LedgerPosting(
+                    UserId: payerUserId,
+                    Type: LedgerEntryType.LightsPurchase,
+                    AmountCredits: booking.AmountChargedCredits,
+                    ActorUserId: booking.ActorUserId,
+                    RelatedBookingId: booking.Id,
+                    Reason: $"Walk-up refused at {court.Name}",
+                    ExternalReference: externalReference), ct);
+            }
+            else
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+        catch (DbUpdateException ex) when (IsDuplicateReference(ex))
+        {
+            // Already undone by the twin of this request. Nothing more to do, and nothing
+            // to tell the member twice.
+            _logger.LogInformation("Walk-up void {Reference} was already posted", externalReference);
+            DiscardPendingAdds();
+            return false;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The row moved under us — the other attempt activated it, most likely. Its
+            // outcome stands; ours does not.
+            _logger.LogInformation("Walk-up void of {BookingId} lost a concurrent write", booking.Id);
+            DiscardPendingAdds();
+            return false;
+        }
+
+        var user = await _db.Users.FirstAsync(u => u.Id == booking.UserId, ct);
+        SendEmailInBackground(
+            EmailTemplates.WalkUpNotStarted(user.Email, court.Name, booking.AmountChargedCredits),
+            $"walk-up void for {booking.Id}");
+
+        return true;
     }
 
     /// <summary>
@@ -319,11 +500,16 @@ public sealed class BookingService
     /// same guard the caller lifted, under the lock, or the two disagree at the one moment
     /// that decides whether money moves.
     /// </summary>
+    /// <param name="DeferConfirmation">
+    /// Hand the confirmation email back on <see cref="BookingResult.Ok"/> instead of sending
+    /// it here. See that member for why the walk-up needs it.
+    /// </param>
     private sealed record NewBooking(
         Booking Row, Court Court, TenantSettingsView Settings,
         decimal TotalCost, string DurationLabel, bool IsWalkUp,
         string? ExternalReference = null,
-        bool AllowNegativeBalance = false);
+        bool AllowNegativeBalance = false,
+        bool DeferConfirmation = false);
 
     private async Task<BookingResult> CommitAsync(NewBooking spec, CancellationToken ct)
     {
@@ -489,9 +675,14 @@ public sealed class BookingService
             spec.TotalCost, balance,
             settings.PenaltyWindowMinutes, settings.PenaltyPct,
             IsWalkUp: spec.IsWalkUp);
-        var confirmationMsg = EmailTemplates.BookingConfirmation(
-            user.Email, details, await BuildReceiptAsync(booking, details, userId, ct));
-        SendEmailInBackground(confirmationMsg, $"booking confirmation for {booking.Id}");
+
+        async Task SendConfirmationAsync(CancellationToken cancel) =>
+            await MailConfirmationAsync(booking, user.Email, userId, details, cancel);
+
+        // Sent here unless the caller asked to hold it. A walk-up holds it because the court
+        // is not lit yet and the mail it would send says otherwise; see
+        // BookingResult.Ok.SendConfirmationAsync.
+        if (!spec.DeferConfirmation) await SendConfirmationAsync(ct);
 
         await _bus.EmitAsync(new DomainEvent(
             Id: $"evt_{Guid.NewGuid():N}",
@@ -516,7 +707,8 @@ public sealed class BookingService
                 ["walk_up"] = spec.IsWalkUp,
             }), ct);
 
-        return new BookingResult.Ok(booking, balance);
+        return new BookingResult.Ok(
+            booking, balance, spec.DeferConfirmation ? SendConfirmationAsync : null);
     }
 
     /// <summary>
@@ -700,12 +892,32 @@ public sealed class BookingService
         // while the status was not, which is how one cancellation pays out twice.
         booking.Status = BookingStatus.Cancelled;
         booking.CancelledAt = DateTimeOffset.UtcNow;
-        var waived = waivePenalty && insidePenaltyWindow;
+
+        // ONE waiver, and everything downstream quotes it. `waived` is whether the club
+        // actually gave up a penalty it would otherwise have charged — derived from the
+        // settlement function itself, by settling the same cancellation twice, so it cannot
+        // drift from what the ledger did. `waivePenalty` alone is only the REQUEST: an admin
+        // may tick the box on a cancellation carrying no penalty to waive, outside the
+        // penalty window or after the member has checked in, and nothing is then waived.
+        //
+        // This is why it is derived rather than re-stated. The audit row recorded the tick
+        // (`waived = waivePenalty`) while the mail below recorded the outcome, and gated the
+        // reason on a third expression again — so an admin cancelling OUTSIDE the window with
+        // waive ticked wrote `{"waived": true, "waive_reason": null}` into the club's own
+        // report while the member's mail printed the reason and said nothing about a waiver.
+        // Same event, two stories, and no money to tell them apart by. Reproduced on a live
+        // stack in round 7; the two values now come from here and nowhere else.
+        var (_, penaltyWithoutWaiver) =
+            SettleCancellation(booking, settings, insidePenaltyWindow, waivePenalty: false);
+        var waived = penaltyWithoutWaiver > penaltyAmount;
+
+        // The reason belongs to the waiver, so it is recorded exactly when one happened: a
+        // reason attached to a cancellation that waived nothing would be noise in the one
+        // report — waived penalties, month end — this field exists to answer.
+        var waiveReasonRecorded = waived ? waiveReason?.Trim() : null;
+
         booking.CancellationPenaltyWaived = waived;
 
-        // The reason is recorded only when a penalty was actually waived: a reason attached
-        // to a cancellation that waived nothing would be noise in the one report — waived
-        // penalties, month end — this field exists to answer.
         _db.AuditLogs.Add(new AuditLog
         {
             TenantId = _tenant.TenantId,
@@ -717,8 +929,8 @@ public sealed class BookingService
                 booking_id = booking.Id,
                 refund = refundAmount,
                 penalty = penaltyAmount,
-                waived = waivePenalty,
-                waive_reason = waived ? waiveReason?.Trim() : null,
+                waived,
+                waive_reason = waiveReasonRecorded,
                 was_charged = booking.ChargedAt is not null,
             }),
         });
@@ -774,8 +986,13 @@ public sealed class BookingService
         // reason, no mention of a waiver. The audit row already carries all three (see the
         // DetailsJson above) and email is the only channel the member has — the grid just shows
         // the slot free again. Null on a self-cancellation, which keeps that mail as it was.
+        //
+        // The two waiver values are the audit row's own, verbatim — see `waived` and
+        // `waiveReasonRecorded` above. Quoting them rather than re-deriving them is the fix
+        // for the round-7 defect where the mail and the audit row described one cancellation
+        // two different ways; it is pinned by a test that reads both out of one cancellation.
         var byClub = actorIsAdmin && actorId != booking.UserId
-            ? new Email.ClubCancellation(waiveReason?.Trim(), waived)
+            ? new Email.ClubCancellation(waiveReasonRecorded, waived)
             : null;
         var cancellationMsg = EmailTemplates.BookingCancellation(
             user.Email, court.Name, refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
@@ -2261,7 +2478,31 @@ public readonly record struct BookingPayer(Guid UserId, Guid ActorId, bool Allow
 
 public abstract record BookingResult
 {
-    public sealed record Ok(Booking Booking, decimal BalanceAfterCredits) : BookingResult;
+    /// <param name="SendConfirmationAsync">
+    /// The member's confirmation email, not yet sent — non-null exactly when the caller asked
+    /// for it to be deferred, and null on every ordinary booking, which mails inside the
+    /// commit as it always did.
+    ///
+    /// <para>
+    /// It exists for the walk-up, where the purchase is not finished when the money commits:
+    /// the same request then activates the court, and the confirmation says <i>"this is court
+    /// time bought at the box, so it has already started… not refunded once the lights have
+    /// been on, and there is nothing to cancel"</i>. Mailed before the activation, that
+    /// sentence was false on the refusal path — the lights were never on and the booking was
+    /// refundable — which is the defect this member exists to close. Nothing about it is
+    /// walk-up-specific; any caller that must decide something after the debit and before the
+    /// member is told may ask for it.
+    /// </para>
+    ///
+    /// <para>
+    /// The receipt is composed inside it rather than before it, so a purchase that never
+    /// completes costs no PDF.
+    /// </para>
+    /// </param>
+    public sealed record Ok(
+        Booking Booking,
+        decimal BalanceAfterCredits,
+        Func<CancellationToken, Task>? SendConfirmationAsync = null) : BookingResult;
     public sealed record NotFound : BookingResult;
     public sealed record PastTime : BookingResult;
     public sealed record TooFarAhead : BookingResult;
