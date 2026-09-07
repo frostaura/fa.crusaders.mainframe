@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Cpu, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { endpoints, type AdminCourt, type AdminDevice, type AdminSettings } from "../lib/api";
 import { describeDeviceError } from "../lib/deviceErrors";
+import {
+  coverageWithout, outOfServiceConfirm, outOfServiceConsequences, type CourtCoverage,
+} from "../lib/deviceCoverage";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -170,150 +173,6 @@ function relative(iso: string | null) {
 function describeCourts(courtNumbers: number[]) {
   if (courtNumbers.length === 0) return "no courts";
   return courtNumbers.map((n, i) => `${RELAYS[i]}: court ${n}`).join(", ");
-}
-
-/**
- * "court 1", "courts 1 and 3", "courts 1, 2 and 3" — courts as a sentence, without the
- * relay letters, because the consequence below is about the courts and not about which
- * output of this particular box happens to drive them.
- */
-function listCourts(courtNumbers: number[]) {
-  const names = courtNumbers.map((n) => `court ${n}`);
-  if (names.length === 1) return names[0];
-  return `courts ${courtNumbers.slice(0, -1).join(", ")} and ${courtNumbers[courtNumbers.length - 1]}`;
-}
-
-/**
- * A box's courts, split by what would still be true of them without this box.
- *
- * <p>
- * A named alias rather than an inline object type, deliberately: lizard's .tsx lexer swallows
- * the rest of a file when an inline object type appears inside a generic argument, and a named
- * one over the same generic does not (see memory/gotchas.md).
- * </p>
- */
-type CourtCoverage = {
-  /** No other box drives these while in service. Nobody can check in on them at all. */
-  shut: number[];
-  /** Another box in service drives these, but nothing has reported inside the threshold. */
-  unattested: number[];
-  /** Another box in service is reporting on these. Their no-shows are judged as normal. */
-  covered: number[];
-};
-
-/**
- * What happens to each of a box's courts if this box stops being in service.
- *
- * <p>
- * <b>The test has to be the one the money uses, and until round 9 it was a weaker one.</b>
- * `DeviceOutageIndex.CourtWasDark` calls a court dark when every ENABLED box driving it was
- * past the offline threshold at the deadline — enabled AND silent, not enabled alone. This
- * page filtered on `enabled` by itself, so a court whose only remaining box was in service but
- * had not been heard from in three hours was reported as covered. Round 8's verifier proved
- * both halves on a live stack: with the spare in service the sweep wrote CancellationRefund
- * 8.00 AND NoShowPenalty -2.40; with the spare taken out, an identical booking got the refund
- * and no penalty at all. The click DID stop that court being penalised, while the confirm
- * showed the plain "the box stops switching lights on" and the row afterwards read "Other
- * boxes still drive court 2, so its no-shows are judged as normal" — a sentence the ledger
- * had just contradicted.
- * </p>
- *
- * <p>
- * The three outcomes are kept apart because they are three different sentences, and merging
- * them would put a claim in one that is only true of another:
- * </p>
- *
- * <ul>
- *   <li><b>shut</b> — no other box drives the court while in service at all. The API refuses a
- *       disabled box 403 on every courtside endpoint, so nobody can check in there by any
- *       means. That is a door the club has closed, and it is the only branch entitled to say
- *       so.</li>
- *   <li><b>unattested</b> — another box in service does drive the court, but nothing has been
- *       heard from it for longer than the offline threshold. The settlement calls that court
- *       dark and waives the penalty; the door may well still work, and this page cannot know,
- *       so the copy says what is measurable — nothing is reporting — and not "nobody can check
- *       in".</li>
- *   <li><b>covered</b> — another box in service is reporting on the court. Its no-shows are
- *       judged as normal, which is the sentence that was false before.</li>
- * </ul>
- *
- * <p>
- * The box's own row is excluded whatever its current state, so the answer means the same thing
- * read from an enabled row ("what taking this out would strand") and from a disabled one
- * ("what is stranded now"). Reachability is judged per sibling with that sibling's own
- * threshold — the same {@link isOnline} the header badge beside it uses — so one screen cannot
- * call a box "not reporting" in its title and count it as cover two lines below.
- * </p>
- */
-function coverageWithout(device: AdminDevice, devices: AdminDevice[], tenantSeconds: number | null): CourtCoverage {
-  const shut: number[] = [];
-  const unattested: number[] = [];
-  const covered: number[] = [];
-  for (const court of device.court_numbers) {
-    const others = devices.filter((d) => d.id !== device.id && d.enabled && d.court_numbers.includes(court));
-    if (others.some((d) => isOnline(d, offlineAfterSeconds(d, tenantSeconds)))) covered.push(court);
-    else if (others.length > 0) unattested.push(court);
-    else shut.push(court);
-  }
-  return { shut, unattested, covered };
-}
-
-/** "its" / "their" — a possessive that agrees with a list of courts. */
-function possessive(courts: number[]) {
-  return courts.length === 1 ? "its" : "their";
-}
-
-/** "it" / "them" — the same agreement, for a court as an object. */
-function pronoun(courts: number[]) {
-  return courts.length === 1 ? "it" : "them";
-}
-
-/**
- * What being out of service does to this box's courts, one sentence per outcome.
- *
- * <p>
- * Shared by the row notice and the toast so the two cannot drift apart, which they had: the
- * toast said "its courts are judged by the other boxes that drive them" in the state where
- * there are none, and the notice said the same thing in different words.
- * </p>
- */
-function outOfServiceConsequences(c: CourtCoverage): string[] {
-  const out: string[] = [];
-  if (c.shut.length > 0) {
-    out.push(`No box in service drives ${listCourts(c.shut)}, so nobody can check in there: bookings on ${pronoun(c.shut)} are refunded in full with no no-show penalty until a box is back in service.`);
-  }
-  if (c.unattested.length > 0) {
-    out.push(`Nothing in service is reporting on ${listCourts(c.unattested)} — the other ${c.unattested.length === 1 ? "box that drives it has" : "boxes that drive them have"} gone quiet — so bookings on ${pronoun(c.unattested)} are refunded in full with no no-show penalty until one calls in again.`);
-  }
-  if (c.covered.length > 0) {
-    out.push(`Other boxes are still reporting on ${listCourts(c.covered)}, so ${possessive(c.covered)} no-shows are judged as normal.`);
-  }
-  return out;
-}
-
-/**
- * The confirm label for "Take out of service".
- *
- * <p>
- * It names the consequence that is hardest to undo knowing about, and only the ones that are
- * true of this box: an admin taking a spare out beside a reporting box gets the plain
- * sentence, because for them none of the rest is true. It also agrees with itself — the row
- * notice pluralised "its" and this label did not, so a two-court box confirmed with "Nothing
- * else drives courts 1 and 2 — nobody can check in there and ITS no-shows stop being
- * penalised."
- * </p>
- */
-function outOfServiceConfirm(c: CourtCoverage): string {
-  const parts: string[] = [];
-  if (c.shut.length > 0) {
-    parts.push(`Nothing else drives ${listCourts(c.shut)} — nobody can check in there and ${possessive(c.shut)} no-shows stop being penalised.`);
-  }
-  if (c.unattested.length > 0) {
-    parts.push(`No other box on ${listCourts(c.unattested)} is reporting, so ${possessive(c.unattested)} no-shows stop being penalised${c.shut.length > 0 ? " too" : ""}.`);
-  }
-  return parts.length === 0
-    ? "Out of service? The box stops switching lights on."
-    : `Out of service? ${parts.join(" ")}`;
 }
 
 // --- relay → court editor -------------------------------------------------------
@@ -558,7 +417,7 @@ function DeviceRow({
   actions: DeviceActions;
   /** Seconds since the last beat before this box is offline. See offlineAfterSeconds. */
   offlineAfter: number;
-  /** What each of this box's courts would be left with without it. See coverageWithout. */
+  /** What each of this box's courts would be left with without it. See lib/deviceCoverage. */
   coverage: CourtCoverage;
 }) {
   const online = isOnline(device, offlineAfter);
@@ -596,8 +455,10 @@ function DeviceRow({
           the box's courts "are judged by whatever other boxes drive them", which names nothing
           in exactly the state that costs money; the round that fixed that then said the
           opposite in the state where the covering box is in service but has gone quiet, which
-          the settlement calls dark. See outOfServiceConsequences, which both this and the
-          toast read, so the two cannot disagree again. */}
+          the settlement calls dark. See outOfServiceConsequences in lib/deviceCoverage, which
+          both this and the toast read, so the two cannot disagree again — and which is where
+          every word that varies with number is now decided, over one test matrix, because three
+          rounds running shipped a sentence that disagreed with the one beside it. */}
       {!device.enabled && (
         <p className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
           Out of service. The API refuses this box, so it switches nothing on, and the club is not
@@ -634,7 +495,8 @@ function DeviceRow({
           <ConfirmButton
             idleLabel="Take out of service"
             // The confirm names the consequence that is hardest to undo knowing about, per
-            // court and only where it is true — see outOfServiceConfirm. An admin taking a
+            // court and only where it is true — see outOfServiceConfirm in lib/deviceCoverage.
+            // An admin taking a
             // spare out of service beside a box that is reporting gets the plain sentence.
             confirmLabel={outOfServiceConfirm(coverage)}
             onConfirm={() => actions.setEnabled(false)}
@@ -923,7 +785,8 @@ export function AdminDevicesPage() {
           <div className="space-y-3">
             {devices.map((device) => {
               // One coverage per row: the confirm, the notice and the toast all read it.
-              const coverage = coverageWithout(device, devices, tenantHeartbeat);
+              const coverage = coverageWithout(device, devices,
+                (d) => isOnline(d, offlineAfterSeconds(d, tenantHeartbeat)));
               return (
                 <DeviceRow
                   key={device.id} device={device} courts={courts} clubMap={buttonMap} walkUpMax={walkUpCap}

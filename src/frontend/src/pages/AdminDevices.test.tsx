@@ -810,7 +810,10 @@ describe("AdminDevices", () => {
     const notice = screen.getByText(/The API refuses this box, so it switches nothing on/);
     expect(notice).toHaveTextContent("not alerted about its silence");
     expect(notice).toHaveTextContent("No box in service drives courts 1 and 2, so nobody can check in there");
-    expect(notice).toHaveTextContent("refunded in full with no no-show penalty");
+    // "them", not "it". The plural arm of this pronoun had never been executed by any test in
+    // this repo — round 9's verifier forced the helper to return "it" always and both suites
+    // stayed green, so the row could read "bookings on it" under a confirm reading "their".
+    expect(notice).toHaveTextContent("bookings on them are refunded in full with no no-show penalty");
     expect(notice).not.toHaveTextContent("judged as normal");
 
     // Restoring is not a decision anyone regrets, so it is one tap.
@@ -852,7 +855,10 @@ describe("AdminDevices", () => {
     // sentence as the one that is not.
     // "still reporting on", not "still drive": a box that is in service but has gone quiet
     // drives nothing the settlement will believe in. See the silent-sibling test below.
-    expect(notice).toHaveTextContent("Other boxes are still reporting on court 2, so its no-shows are judged as normal");
+    // "Another box", singular, because there is exactly one — this sentence said "Other boxes"
+    // at every count until round 10, so the commonest shape in a four-box club was told there
+    // were several. The full number matrix is in lib/deviceCoverage.test.ts.
+    expect(notice).toHaveTextContent("Another box is still reporting on court 2, so its no-shows are judged as normal");
 
     // The live box is now the only thing in service on court 2 — the row above is out of
     // service and covers nothing — so its own confirm warns about court 2 and about
@@ -1023,6 +1029,92 @@ describe("AdminDevices", () => {
   });
 
   /**
+   * The same count, on the branch that reassures rather than warns. One spare still reporting on
+   * both of this box's courts is ONE box — the sentence said "Other boxes are still reporting"
+   * at every count until round 10, which is the same defect as the quiet clause below, pointing
+   * the other way: an admin told several boxes have them covered when one does.
+   */
+  it("names one covering box as one box, however many of the courts it covers", async () => {
+    stubFetch(withDevices([
+      deviceFixture({ enabled: false, court_numbers: [1, 2] }),
+      deviceFixture({
+        id: "33333333-3333-3333-3333-333333333333",
+        device_code: "court-box-2",
+        name: "Courts 1 and 2 spare",
+        court_numbers: [1, 2],
+      }),
+    ]));
+
+    renderPage(<AdminDevicesPage />);
+
+    const notice = await screen.findByText(/The API refuses this box, so it switches nothing on/);
+    expect(notice).toHaveTextContent(
+      "Another box is still reporting on courts 1 and 2, so their no-shows are judged as normal.",
+    );
+    expect(notice).not.toHaveTextContent("Other boxes are");
+  });
+
+  /**
+   * R9V. The clause that replaced R8V-R3's falsehood carried a new one: it pluralised on the
+   * number of COURTS while naming BOXES, so it told an admin the wrong number of boxes to walk
+   * to — and it was wrong in both directions, on the screen whose entire job is saying which
+   * hardware to go and look at.
+   *
+   * <p>
+   * This is the first direction, read verbatim off the production build in headless Chromium
+   * by round 9's verifier: ONE quiet box driving TWO courts said "the other BOXES that drive
+   * them HAVE gone quiet". The sentence matrix in `lib/deviceCoverage.test.ts` pins the words;
+   * this pins the number the page hands them, which the matrix cannot see.
+   * </p>
+   */
+  it("names one quiet box as one box, however many of the courts it drives", async () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    stubFetch(withDevices([
+      deviceFixture({ enabled: false, court_numbers: [1, 2] }),
+      deviceFixture({
+        id: "33333333-3333-3333-3333-333333333333",
+        device_code: "court-box-2",
+        name: "Courts 1 and 2 spare",
+        court_numbers: [1, 2],
+        last_seen_at: threeHoursAgo,
+      }),
+    ]));
+
+    renderPage(<AdminDevicesPage />);
+
+    const notice = await screen.findByText(/The API refuses this box, so it switches nothing on/);
+    expect(notice).toHaveTextContent(
+      "Nothing in service is reporting on courts 1 and 2 — the other box that drives them has gone quiet"
+      + " — so bookings on them are refunded in full with no no-show penalty until one calls in again.",
+    );
+  });
+
+  /**
+   * The other direction, and the one an admin pays for: TWO quiet boxes driving ONE court said
+   * "the other BOX that drives it HAS gone quiet", so an admin who fixed the one box they were
+   * sent to would have left the court dark and still been told the screen was satisfied.
+   */
+  it("names two quiet boxes on one court as two boxes", async () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    const quiet = (id: string, code: string, name: string) => deviceFixture({
+      id, device_code: code, name, court_numbers: [1], last_seen_at: threeHoursAgo,
+    });
+    stubFetch(withDevices([
+      deviceFixture({ enabled: false, court_numbers: [1] }),
+      quiet("33333333-3333-3333-3333-333333333333", "court-box-2", "Court 1 spare"),
+      quiet("44444444-4444-4444-4444-444444444444", "court-box-3", "Court 1 second spare"),
+    ]));
+
+    renderPage(<AdminDevicesPage />);
+
+    const notice = await screen.findByText(/The API refuses this box, so it switches nothing on/);
+    expect(notice).toHaveTextContent(
+      "Nothing in service is reporting on court 1 — the other boxes that drive it have gone quiet"
+      + " — so bookings on it are refunded in full with no no-show penalty until one calls in again.",
+    );
+  });
+
+  /**
    * One word, read live off the stack by round 8's verifier: the confirm did not pluralise
    * where the row notice did — "Nothing else drives courts 1 and 2 — nobody can check in there
    * and ITS no-shows stop being penalised."
@@ -1036,6 +1128,30 @@ describe("AdminDevices", () => {
     expect(await screen.findByRole("button", {
       name: "Out of service? Nothing else drives courts 1 and 2 — nobody can check in there and their no-shows stop being penalised.",
     })).toBeInTheDocument();
+  });
+
+  /**
+   * And the half that was still disagreeing after round 9 fixed the confirm: the row notice and
+   * the toast one line below said "bookings on IT" for the same two courts the confirm had just
+   * called "their". Round 9's verifier forced `pronoun()` to "it" always and watched vitest stay
+   * at 485/485 and Playwright at 230/230, because only the singular arm had ever been asserted.
+   */
+  it("keeps the toast agreeing with the confirm it follows about number", async () => {
+    stubFetch([
+      ...withDevices([deviceFixture({ court_numbers: [1, 2] })]),
+      { method: "PATCH", path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111", body: deviceFixture({ court_numbers: [1, 2], enabled: false }) },
+    ]);
+
+    renderPage(<AdminDevicesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Nothing else drives courts 1 and 2/ }));
+
+    expect(await screen.findByText(
+      "Court 1 box is out of service. It switches nothing on, and the club is not alerted about its silence."
+      + " No box in service drives courts 1 and 2, so nobody can check in there: bookings on them are refunded"
+      + " in full with no no-show penalty until a box is back in service.",
+    )).toBeInTheDocument();
   });
 
   /**
