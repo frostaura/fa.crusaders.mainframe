@@ -25,8 +25,8 @@ import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
  */
 
 const SERIES: DailyAdminPoint[] = [
-  { date: "2026-09-01", top_ups_credits: 100, booking_charges_credits: 40, refunds_credits: 0, penalties_credits: 0, bookings: 4, no_shows: 0 },
-  { date: "2026-09-02", top_ups_credits: 160, booking_charges_credits: 80, refunds_credits: 0, penalties_credits: 5, bookings: 8, no_shows: 1 },
+  { date: "2026-09-01", top_ups_credits: 100, booking_charges_credits: 40, refunds_credits: 0, penalties_credits: 0, adjustments_credits: 0, bookings: 4, no_shows: 0 },
+  { date: "2026-09-02", top_ups_credits: 160, booking_charges_credits: 80, refunds_credits: 0, penalties_credits: 5, adjustments_credits: 0, bookings: 8, no_shows: 1 },
 ];
 
 const MY_SERIES: DailyMePoint[] = [

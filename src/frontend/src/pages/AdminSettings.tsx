@@ -354,11 +354,34 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
           <Input type="number" min={15} max={300} value={settings.heartbeat_seconds}
             onChange={(e) => set({ heartbeat_seconds: Number(e.target.value) })} />
         </Field>
-        <Field label="Activation window before a booking (minutes)" hint="1–1440. How early a scan may switch a booking's lights on.">
+        {/*
+            These two were described the wrong way round, and the one whose hint promised to
+            control how early the lights come on is not the one that does.
+
+            Measured against a real box and a real booking: with the forward window at 1440
+            and the cue at 10, a scan 19.5 minutes before the start answered `too_early`;
+            raising the CUE to 30 lit the court, and raising it to 900 lit a court 13.8 hours
+            early. The forward window only decides whether the box recognises the booking at
+            all — outside it the answer is `no_booking` — which is what
+            `CourtActivationService.WindowAsync` and `DeviceActivateEndpoint` have always
+            done. An admin who wanted members to open the court half an hour early edited the
+            field that said so, saw "Settings saved.", and changed nothing.
+
+            So the cue is now named as the one that switches the lights, and the forward
+            window is named as recognition. `feature-spec.md` and `lights-controller.md`
+            describe the mechanism; only this screen described it backwards.
+        */}
+        <Field
+          label="Booking lookahead at the box (minutes)"
+          hint="1–1440. How far ahead the box recognises a booking at all. Outside this the box answers “no booking behind this code”; inside it, but before the lights cue below, it answers “too early” and says when to come back. This does NOT decide when the lights come on."
+        >
           <Input type="number" min={1} max={1440} value={settings.activation_forward_window_minutes}
             onChange={(e) => set({ activation_forward_window_minutes: Number(e.target.value) })} />
         </Field>
-        <Field label="Lights cue before a booking (minutes)" hint={`0–${settings.activation_forward_window_minutes}. Must not exceed the activation window.`}>
+        <Field
+          label="Lights on this early (minutes before a booking)"
+          hint={`0–${settings.activation_forward_window_minutes}. This is the one that decides how early a scan actually switches a booking's lights on. Must not exceed the booking lookahead.`}
+        >
           <Input type="number" min={0} max={settings.activation_forward_window_minutes} value={settings.activation_cue_window_minutes}
             onChange={(e) => set({ activation_cue_window_minutes: Number(e.target.value) })} />
         </Field>

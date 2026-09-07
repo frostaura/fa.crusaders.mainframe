@@ -276,7 +276,14 @@ public static class Seeder
                     AmountCredits = -court.SlicePriceCredits,
                     RelatedBookingId = booking.Id,
                     ActorUserId = adminUserId,
-                    Reason = $"Booking {court.Name} {startsAtUtc:yyyy-MM-dd HH:mm}",
+                    // Club time, exactly as BookingService.SlotLabel writes it for a real
+                    // booking. This was `startsAtUtc`, so a seeded row read "Booking Court 1
+                    // 2026-09-12 05:00" for a court the grid, the confirmation email and the
+                    // wallet's own Time column all called 07:00 — and it sat two lines above
+                    // a genuine row that used club time, on the same admin Transactions
+                    // screen. Demo data, but it is in every screenshot of the ledger anyone
+                    // takes, and "05:00" is the sort of number that gets believed.
+                    Reason = $"Booking {court.Name} {startsAtUtc + sast:yyyy-MM-dd HH:mm}",
                 });
                 bookingsCreated++;
             }

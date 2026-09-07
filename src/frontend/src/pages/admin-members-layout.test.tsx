@@ -97,6 +97,65 @@ describe("the admin members table", () => {
     expect(header.className).toMatch(/bg-bg-muted/);
   });
 
+  /**
+   * The column that was drawn and invisible.
+   *
+   * <p>
+   * A right-pinned column is pulled left of its in-flow position by exactly the un-scrolled
+   * overflow, so whatever sits in that band is underneath it. Measured in Chromium against
+   * a live stack: the table is 1079px, the scroll container was <b>990px at 1440 AND at
+   * 1920</b>, and the 89px band immediately left of the pins is where the 99px `Joined`
+   * column sat — header rendering as a bare glyph, each cell as a single `S`, at every
+   * desktop width, with ~800px of page beside it unused. At 768 the overflow is 345px and
+   * `Status` and `Class` go under as well.
+   * </p>
+   *
+   * <p>
+   * Column ORDER cannot fix that — the band is wherever the pins land, so every arrangement
+   * has a victim — which is why three rounds arguing about order got nowhere. The overflow
+   * itself is what goes: `/admin/*` gets `max-w-7xl` (Layout.tsx), and below the width at
+   * which a column fits it is <b>not drawn</b> rather than drawn underneath something. The
+   * card layout below `sm` keeps every field, because nothing is a column there.
+   * </p>
+   *
+   * <p>
+   * jsdom has no layout, so what is asserted here is the decision, not the pixels:
+   * `e2e/admin-members-layout.spec.ts` re-measures those in a browser.
+   * </p>
+   */
+  it("draws a column only at the widths where it fits, and keeps every field in card mode", async () => {
+    renderMembers();
+    await screen.findByRole("button", { name: "Adjust credit" });
+
+    const expected: Record<string, string> = {
+      // Email is the widest optional column and lands last, at the width where the whole
+      // table finally fits its container.
+      Email: "xl",
+      "Member #": "lg",
+      Joined: "lg",
+      Class: "md",
+    };
+
+    for (const [label, bp] of Object.entries(expected)) {
+      const header = screen.getByRole("columnheader", { name: new RegExp(`^${label}`) });
+      expect(header.className, `${label} header`).toContain("hidden");
+      expect(header.className, `${label} header`).toContain(`${bp}:table-cell`);
+
+      const cell = document.querySelector<HTMLElement>(`tbody td[data-label="${label}"]`)!;
+      // `block` first: below `sm` the row is a card and every field is on screen.
+      expect(cell.className, `${label} cell`).toMatch(/(^|\s)block(\s|$)/);
+      expect(cell.className, `${label} cell`).toContain("sm:hidden");
+      expect(cell.className, `${label} cell`).toContain(`${bp}:table-cell`);
+    }
+
+    // Name, Status, Balance and Actions are the four that never drop: identity, state,
+    // money, and the things an admin came here to press.
+    for (const label of ["Status", "Balance", "Actions"]) {
+      const cell = document.querySelector<HTMLElement>(`tbody td[data-label="${label}"]`)!;
+      expect(cell.className, `${label} cell`).not.toContain("sm:hidden");
+    }
+  });
+
   it("pins the balance header with its cells, at the same offset", async () => {
     renderMembers();
     await screen.findByRole("button", { name: "Adjust credit" });

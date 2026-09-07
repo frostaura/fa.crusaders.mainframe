@@ -28,8 +28,8 @@ describe("Charts — net series and the sign of a day", () => {
   const ADMIN_DAYS: DailyAdminPoint[] = [
     // Tuesday: the sweep. Wednesday: the box's upload lands and the sweep is reversed,
     // so the penalty bucket for Wednesday is the reversal alone, and negative.
-    { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, bookings: 3, no_shows: 1 },
-    { date: "2026-09-02", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: -8, penalties_credits: -2.4, bookings: 0, no_shows: 0 },
+    { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, adjustments_credits: 0, bookings: 3, no_shows: 1 },
+    { date: "2026-09-02", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: -8, penalties_credits: -2.4, adjustments_credits: 0, bookings: 0, no_shows: 0 },
   ];
 
   // `attended` and `minutes_on_court` come off `CheckedInAt`, the attendance source of

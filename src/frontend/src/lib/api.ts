@@ -730,7 +730,7 @@ export type WalletReport = {
   minutes_on_court: number;
   count: number;
 };
-export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; bookings: number; no_shows: number };
+export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; adjustments_credits: number; bookings: number; no_shows: number };
 export type DailyMePoint = { date: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; bookings: number; attended: number; minutes_on_court: number; balance_credits: number };
 /**
  * Club revenue over a window, in BOTH units, because they are not interchangeable.

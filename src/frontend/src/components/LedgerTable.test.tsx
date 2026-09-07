@@ -78,6 +78,29 @@ describe("LedgerTable — what survives a 375px screen", () => {
     }
   });
 
+  it("lets the Comment wrap on a phone instead of ellipsising it out of reach", () => {
+    render(<LedgerTable rows={rows} label="Ledger" />);
+
+    // The comment is the only column that says what a movement WAS, and for a top-up the
+    // only place the rand amount and the conversion rate appear at all. It was capped at
+    // 140px and ellipsised at EVERY width, so at 375px every row read "Booking Court 2 2…"
+    // / "PayFast top-up (R100.00 → 160…" — and the container offered 30px of sideways
+    // travel against a 287px cell, so the sentence under the table promising "there is
+    // more to see" was true of the table and false of this column. The only escape was a
+    // `title` tooltip, which a touch device has no way to open.
+    for (const cell of cellsOf("Comment")) {
+      // No unconditional truncate, and no phone-width cap: below `sm` the text wraps.
+      expect(cell.className).not.toMatch(/(^|\s)truncate(\s|$)/);
+      expect(cell.className).not.toMatch(/(^|\s)max-w-\[\d+px\]/);
+      expect(cell.className).toContain("break-words");
+      // From `sm` up there is room for a column, so it truncates with the tooltip again.
+      expect(cell.className).toContain("sm:truncate");
+      expect(cell.className).toContain("sm:max-w-[280px]");
+      // The tooltip stays for a mouse, but it is no longer the only way to read the text.
+      expect(cell.getAttribute("title")).toBe(cell.textContent);
+    }
+  });
+
   it("carries the counterparty under the amount, so folding From/To loses no information", () => {
     render(<LedgerTable rows={rows} label="Ledger" />);
     const amounts = cellsOf("Amount");

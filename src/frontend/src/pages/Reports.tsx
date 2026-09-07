@@ -85,6 +85,11 @@ export default function ReportsPage() {
         { label: "Time on court", value: wallet ? formatMinutes(wallet.minutes_on_court) : "—", tone: "neutral" as const },
       ];
 
+  // Summed from the daily buckets the server already aggregates, not from raw rows —
+  // `reporting.md` § Implementation notes forbids client-side aggregation over large
+  // datasets, and a bounded day series is the pre-aggregation it asks for.
+  const clubTotals = dailyAdmin && sumDays(dailyAdmin);
+
   const slides: CarouselSlide[] = [];
   if (isAdmin && dailyAdmin) {
     slides.push({ key: "rev", title: "Top-ups over time", node: <RevenueAreaChart data={dailyAdmin} /> });
@@ -143,8 +148,42 @@ export default function ReportsPage() {
         {tiles.map((t) => <Tile key={t.label} {...t} />)}
       </div>
 
-      {/* Personal wallet summary — sits right under the tiles for at-a-glance context. */}
-      {wallet && (
+      {/*
+        The club's own money, including the figure that was on no screen at all.
+
+        An admin opening /reports got a "My wallet — totals" panel showing the ADMIN'S wallet
+        — all zeros, permanently, because `feature-spec.md` §8 makes a desk account's balance
+        zero by design ("it never plays") — sitting in the middle of the club-wide report and
+        ending with "…it is exactly what your balance moved by". Inert furniture. Meanwhile
+        the club's report carried Top-ups, Charges, Refunds and Penalties and no ADJUSTMENTS
+        anywhere: a tenant with 2,525.50 credits handed out by the desk could see that figure
+        on a member's own report and on Transactions, and nowhere on the report whose subject
+        is where the club's money went.
+      */}
+      {isAdmin && clubTotals && (
+        <Card>
+          <h2 className="font-semibold mb-3">Club money — totals</h2>
+          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <Stat label="Top-ups" value={formatSignedCredits(clubTotals.topUps)} />
+            <Stat label="Charges" value={formatSignedCredits(-clubTotals.charges)} />
+            <Stat label="Refunds (net)" value={formatSignedCredits(clubTotals.refunds)} />
+            <Stat label="Penalties (net)" value={formatSignedCredits(-clubTotals.penalties)} />
+            <Stat label="Adjustments" value={formatSignedCredits(clubTotals.adjustments)} />
+            <Stat label="Courts played" value={String(clubTotals.bookings)} />
+            <Stat label="No-shows" value={String(clubTotals.noShows)} />
+            <Stat label="Days" value={String(clubTotals.days)} />
+          </dl>
+          <p className="mt-3 text-xs text-text-muted">
+            Credit held by members moved by <strong className="font-mono">{formatSignedCredits(clubTotals.net)}</strong> over
+            this period — top-ups − charges + refunds − penalties + adjustments, which is every ledger movement in the club
+            summed. <strong>Adjustments</strong> is what the desk added or took back by hand.
+          </p>
+        </Card>
+      )}
+
+      {/* Personal wallet summary — sits right under the tiles for at-a-glance context.
+          Members only: an admin's own wallet is zero by design and says nothing about the club. */}
+      {!isAdmin && wallet && (
         <Card>
           <h2 className="font-semibold mb-3">My wallet — totals</h2>
           {/*
@@ -234,11 +273,24 @@ export default function ReportsPage() {
               { key: "booking_charges_credits", header: "Charges", align: "right", cell: (r) => cr(r.booking_charges_credits), sortValue: (r) => r.booking_charges_credits },
               { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
               { key: "penalties_credits", header: "Penalties (net)", align: "right", cell: (r) => <NetCredits value={r.penalties_credits} />, sortValue: (r) => r.penalties_credits },
-              { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
+              { key: "adjustments_credits", header: "Adjustments", align: "right", cell: (r) => <NetCredits value={r.adjustments_credits} />, sortValue: (r) => r.adjustments_credits },
+              // "Courts played", not "Bookings". These two columns count the day the court
+              // is USED; the four money columns to their left count the day the money MOVED.
+              // Under a 14-day advance window those are routinely different days, which is
+              // how one row came to read "Charges 2300.00 cr · Bookings 6" — 46 slices' worth
+              // of money beside six courts. The header says which clock it is on and the
+              // footnote below spells the consequence out.
+              { key: "bookings", header: "Courts played", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
               { key: "no_shows", header: "No-shows", align: "right", cell: (r) => r.no_shows, sortValue: (r) => r.no_shows },
             ] satisfies DataColumn<DailyAdminPoint>[]}
           />
-          <NetNote what="Refunds and penalties" />
+          <p className="mt-2 text-xs text-text-muted">
+            <strong>Two dates in one row, on purpose.</strong> The money columns count the day the money moved;
+            <strong> Courts played</strong> and <strong>No-shows</strong> count the day the court is booked for. A member
+            who books a fortnight ahead is charged today and plays later, so the two halves of a row are not about the
+            same bookings. Days are the club's own, in its configured timezone.
+          </p>
+          <NetNote what="Refunds, penalties and adjustments" />
         </Card>
       )}
 
@@ -269,6 +321,33 @@ export default function ReportsPage() {
 
     </div>
   );
+}
+
+/**
+ * The club's period totals, summed over the server's daily buckets.
+ *
+ * <p>
+ * Declared as a standalone function AFTER the component for the lizard reason recorded on
+ * `downloadCsv`: a `.tsx` function declared between two others steals the attribution for
+ * the component's whole render body.
+ * </p>
+ */
+function sumDays(days: DailyAdminPoint[]) {
+  const sum = (pick: (d: DailyAdminPoint) => number) => days.reduce((s, d) => s + pick(d), 0);
+  const topUps = sum((d) => d.top_ups_credits);
+  const charges = sum((d) => d.booking_charges_credits);
+  const refunds = sum((d) => d.refunds_credits);
+  const penalties = sum((d) => d.penalties_credits);
+  const adjustments = sum((d) => d.adjustments_credits);
+  return {
+    topUps, charges, refunds, penalties, adjustments,
+    bookings: sum((d) => d.bookings),
+    noShows: sum((d) => d.no_shows),
+    days: days.length,
+    // The same arithmetic the member's own net line uses, so the two screens cannot
+    // disagree about what "net" means.
+    net: topUps - charges + refunds - penalties + adjustments,
+  };
 }
 
 /**

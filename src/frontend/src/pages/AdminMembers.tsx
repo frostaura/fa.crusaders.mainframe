@@ -5,6 +5,7 @@ import {
   OTHER_BOOKING, newIdempotencyKey, recentBookingsFrom, relatedBookingRefusal,
   validateAdjustment, type RecentBooking,
 } from "../lib/creditAdjustment";
+import { notifyPendingApplicationsChanged } from "../lib/pendingApplications";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -123,7 +124,16 @@ export default function AdminMembersPage() {
 
   const approve = async (m: AdminMember) => {
     setBusyId(m.membership_id);
-    try { await endpoints.adminApprove(m.membership_id); toast.push({ tone: "success", text: `${m.full_name} approved.` }); await load(); }
+    try {
+      await endpoints.adminApprove(m.membership_id);
+      toast.push({ tone: "success", text: `${m.full_name} approved.` });
+      // The chrome's "Members N" badge counts the same applications this screen's "N pending"
+      // summary does, and it re-read itself only on navigation — which an approval pressed ON
+      // /admin/members does not cause. The two numbers sat contradicting each other on one
+      // screen until the admin left the route and came back. See lib/pendingApplications.
+      notifyPendingApplicationsChanged();
+      await load();
+    }
     catch { toast.push({ tone: "danger", text: "Approval failed." }); }
     finally { setBusyId(null); }
   };
@@ -135,6 +145,7 @@ export default function AdminMembersPage() {
       await endpoints.adminReject(rejectFor.membership_id, rejectReason);
       toast.push({ tone: "success", text: "Application rejected." });
       setRejectFor(null); setRejectReason("");
+      notifyPendingApplicationsChanged();
       await load();
     } catch { toast.push({ tone: "danger", text: "Rejection failed." }); }
     finally { setBusyId(null); }
@@ -354,11 +365,11 @@ export default function AdminMembersPage() {
               <thead className="hidden sm:table-header-group bg-bg-muted text-xs uppercase tracking-wide text-text-muted">
                 <tr>
                   <SortHeader label="Name" k="full_name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="sticky left-0 z-20 bg-bg-muted" />
-                  <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                  <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden xl:table-cell" />
+                  <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden lg:table-cell" />
                   <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="text-left px-3 py-3">Class</th>
-                  <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+                  <th className="hidden md:table-cell text-left px-3 py-3">Class</th>
+                  <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden lg:table-cell" />
                   <th className="text-right px-3 py-3 whitespace-nowrap sticky right-[200px] z-20 bg-bg-muted border-l border-border">Balance</th>
                   <th className="text-right px-3 py-3 whitespace-nowrap sticky right-0 z-20 bg-bg-muted min-w-[200px] border-l border-border">Actions</th>
                 </tr>
@@ -392,8 +403,13 @@ export default function AdminMembersPage() {
       {/* Reject modal */}
       {rejectFor && (
         <Modal onClose={() => setRejectFor(null)} title={`Reject ${rejectFor.full_name}'s application`}>
-          <Label>Reason (visible to applicant)</Label>
-          <Input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="e.g. Membership number not on file." />
+          {/* Bound, not merely adjacent. Both this and the suspend field below carried a
+              <Label> with no `htmlFor` and an <Input> with no `id`, so `el.labels.length`
+              was 0 and a screen reader announced an unlabelled edit box — for the one field
+              on the screen whose text is emailed verbatim to the person it is about. The
+              adjust-credit modal a few lines down had it right all along. */}
+          <Label htmlFor="reject-reason">Reason (visible to applicant)</Label>
+          <Input id="reject-reason" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="e.g. Membership number not on file." />
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="ghost" onClick={() => setRejectFor(null)}>Cancel</Button>
             <Button variant="danger" onClick={reject} disabled={!rejectReason.trim()}>Reject</Button>
@@ -409,8 +425,8 @@ export default function AdminMembersPage() {
             and any bookings they already have are left exactly as they are, and reactivating restores
             everything. The reason is emailed to them.
           </p>
-          <Label className="mt-3">Reason (visible to the member)</Label>
-          <Input value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} placeholder="e.g. Membership dues unpaid since March." />
+          <Label htmlFor="suspend-reason" className="mt-3">Reason (visible to the member)</Label>
+          <Input id="suspend-reason" value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} placeholder="e.g. Membership dues unpaid since March." />
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="ghost" onClick={() => setSuspendFor(null)}>Cancel</Button>
             <Button variant="danger" onClick={suspend} disabled={!suspendReason.trim() || busyId === suspendFor.membership_id}>
@@ -580,12 +596,56 @@ type MemberRowActions = {
  * every `getByText("Status")` in the suite would then match two nodes.
  * </p>
  */
-function Cell({ label, className, align = "left", children }: { label: string; className?: string; align?: "left" | "right"; children: React.ReactNode }) {
+/**
+ * Which widths each column is drawn at — one place, so a header and its body cells cannot
+ * disagree about it.
+ *
+ * <p>
+ * <b>A pinned column hides whatever the table overflows by.</b> `position: sticky` on the
+ * right pulls a cell LEFT of where it sits in flow by exactly the un-scrolled overflow, and
+ * whatever was in that band is underneath it. Measured in Chromium against a seeded club:
+ * the table is 1079px, its container was 990px at <em>both</em> 1440px and 1920px, and the
+ * 89px band immediately left of the pins is precisely where the 99px `Joined` column sat —
+ * so the header rendered as a bare glyph and every cell as a single `S`, at every desktop
+ * width, with ~800px of page beside it unused. At 768px the overflow is 345px and `Status`
+ * and `Class` go under too.
+ * </p>
+ *
+ * <p>
+ * Three rounds tried to solve that by column ORDER, and order cannot solve it: the hidden
+ * band is wherever the pins land, so every arrangement has a victim. The only overlap-free
+ * states are "no overflow" or "no pinning", and pinning is what puts the row actions on
+ * screen at all. So this removes the overflow instead: the container widened to `max-w-7xl`
+ * for `/admin/*` (Layout.tsx), and below that the columns that do not fit are <b>not drawn</b>
+ * rather than drawn underneath something. Below `sm` every field is still on screen, because
+ * the row is a card there and nothing is a column at all.
+ * </p>
+ *
+ * <p>
+ * The breakpoints come from measured column widths — Name 192 · Email 156 · Member # 103 ·
+ * Status 81 · Class 157 · Joined 99 · Balance 90 · Actions 200 — against the container at
+ * each one: 608 at `sm`, 734 at `md`, 992 at `lg`, 1248 at `xl`. Changing a width means
+ * re-measuring these, which `e2e/admin-members-layout.spec.ts` does in a real browser.
+ * </p>
+ */
+const COLUMN_DISPLAY = {
+  /** Card field below `sm`, table cell above it. */
+  always: "block sm:table-cell",
+  /** Card field below `sm`; from 768 up, once `Class` fits beside the pinned pair. */
+  fromMd: "block sm:hidden md:table-cell",
+  /** Card field below `sm`; from 1024 up — `Member #` and `Joined`. */
+  fromLg: "block sm:hidden lg:table-cell",
+  /** Card field below `sm`; from 1280 up, where the full table finally fits its container. */
+  fromXl: "block sm:hidden xl:table-cell",
+} as const;
+
+function Cell({ label, className, align = "left", display = COLUMN_DISPLAY.always, children }: { label: string; className?: string; align?: "left" | "right"; display?: string; children: React.ReactNode }) {
   return (
     <td
       data-label={label}
       className={cn(
-        "block sm:table-cell px-0 sm:px-3 py-0.5 sm:py-3 text-left",
+        display,
+        "px-0 sm:px-3 py-0.5 sm:py-3 text-left",
         // The label, on a phone only. `content-none` from `sm` up is what keeps it off the
         // desktop table, where the column header already says it.
         "before:content-[attr(data-label)] before:mr-2 before:text-[10px] before:uppercase before:tracking-wide before:text-text-muted sm:before:content-none",
@@ -663,7 +723,7 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
           </div>
         </div>
       </td>
-      <Cell label="Email" className="text-text-secondary sm:max-w-[200px]">
+      <Cell label="Email" display={COLUMN_DISPLAY.fromXl} className="text-text-secondary sm:max-w-[200px]">
         <span className="inline-block align-middle max-w-[200px] truncate" title={m.email}>{m.email}</span>
         {m.email_verified === false && (
           <span
@@ -674,12 +734,12 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
           </span>
         )}
       </Cell>
-      <Cell label="Member #" className="font-mono text-xs text-text-secondary">{m.membership_number}</Cell>
+      <Cell label="Member #" display={COLUMN_DISPLAY.fromLg} className="font-mono text-xs text-text-secondary">{m.membership_number}</Cell>
       <Cell label="Status"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></Cell>
-      <Cell label="Class">
+      <Cell label="Class" display={COLUMN_DISPLAY.fromMd}>
         <MemberClassCell member={m} busy={busy} onChange={onClass} />
       </Cell>
-      <Cell label="Joined" className="text-text-secondary whitespace-nowrap text-xs">
+      <Cell label="Joined" display={COLUMN_DISPLAY.fromLg} className="text-text-secondary whitespace-nowrap text-xs">
         {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
       </Cell>
       <Cell label="Balance" align="right" className="tabular-nums whitespace-nowrap sm:sticky sm:right-[200px] sm:z-10 bg-bg-surface sm:border-l sm:border-border">
