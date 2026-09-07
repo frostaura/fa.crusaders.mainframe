@@ -52,7 +52,7 @@ describe("AdminMembers — the temporary password an admin issues", () => {
       { path: "/api/v1/admin/biometric/enrollments", body: [] },
       {
         method: "POST", path: "/api/v1/admin/members/33333333-3333-3333-3333-333333333333/reset-password",
-        body: { temp_password: "Xk7-tempo-92", email_sent_to: "ada@example.com" },
+        body: { temp_password: "Xk7-tempo-92", email_sent_to: "ada@example.com", member_notified: true },
       },
     ]);
     renderPage(<AdminMembersPage />);
@@ -433,7 +433,9 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
 
   it("suspends with a reason, and says the member's money and bookings are untouched", async () => {
     const stub = stubFetch(routes({}, [
-      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/suspend`, body: { suspended: true } },
+      // `member_notified` is part of the wire shape of all four lifecycle transitions; a stub
+      // that omits it exercises the "we could not tell the member" copy by accident.
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/suspend`, body: { suspended: true, member_notified: true } },
     ]));
     renderPage(<AdminMembersPage />);
 
@@ -492,7 +494,7 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
 
   it("offers reactivate — and only reactivate-shaped actions — on a suspended member", async () => {
     const stub = stubFetch(routes({ status: "Suspended" }, [
-      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, body: { reactivated: true } },
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, body: { reactivated: true, member_notified: true } },
     ]));
     renderPage(<AdminMembersPage />);
 
@@ -562,7 +564,7 @@ describe("AdminMembers — one click, one request", () => {
     const stub = stubFetch(routes({ status: "Suspended" }, [
       // What the API actually answers a repeat with: the second call is a conflict, which
       // is why the admin saw a red failure for an action that had worked.
-      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, status: [200, 409], body: { reactivated: true } },
+      { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, status: [200, 409], body: { reactivated: true, member_notified: true } },
     ]));
     renderPage(<AdminMembersPage />);
 
@@ -573,7 +575,7 @@ describe("AdminMembers — one click, one request", () => {
     await waitFor(() => expect(stub.calls.some((c) => c.path.endsWith("/reactivate"))).toBe(true));
     expect(stub.calls.filter((c) => c.path.endsWith("/reactivate"))).toHaveLength(1);
     // And the admin is told one thing, not two contradictory things.
-    expect(await screen.findByText(/Ada Lovelace is active again/)).toBeInTheDocument();
+    expect(await screen.findByText("Ada Lovelace is active again.")).toBeInTheDocument();
     expect(screen.queryByText(/Couldn't reactivate/)).not.toBeInTheDocument();
   });
 
