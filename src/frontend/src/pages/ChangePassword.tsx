@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ApiError, endpoints, errorCode } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useToast } from "../components/Toast";
@@ -110,12 +110,29 @@ export default function ChangePasswordPage() {
     <div className="max-w-md mx-auto pt-6">
       <Card>
         <h1 className="text-xl font-semibold mb-1">{forced ? "Choose your own password" : "Change your password"}</h1>
+        {/*
+          N-F10: this said "the one you just used is temporary", and this screen has three
+          arrivals and only one of them used anything. A member who clicked the welcome magic
+          link did not type a password at all; a member whose password an admin reset while
+          they were signed in did not either (L-F4 routes them here mid-session). Naming the
+          temporary password as a thing that EXISTS is true in all three, and the link below
+          is what a member who has not got it can actually do — before, they had to know that
+          "Forgot password?" on the sign-in screen was the way out of a screen that does not
+          mention it.
+        */}
         <p className="text-sm text-text-secondary mb-5">
           {forced
-            ? "An admin reset your password, so the one you just used is temporary. Choose your own to carry on — it stops working the moment you do."
+            ? "An admin has reset your password, so the one on your account is a temporary one they issued. Choose your own to carry on — the temporary one stops working the moment you do."
             : "You'll need your current password to set a new one."}
         </p>
         <ChangePasswordForm forced={forced} onDone={() => nav(forced ? "/schedule" : "/profile")} />
+        {forced && (
+          <p className="text-sm text-text-secondary mt-4">
+            Haven't got the temporary password?{" "}
+            <Link to="/forgot-password" className="text-accent-strong hover:underline">Email yourself a reset link</Link>{" "}
+            instead.
+          </p>
+        )}
       </Card>
     </div>
   );

@@ -219,3 +219,162 @@ describe("Top-up — what the checkout actually sends", () => {
     expect(screen.queryByText(/payments_not_configured/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * L-F1 / N-F1 / K-F3 — the best-corroborated defect of round 3, driven twice each by three
+ * independent finders.
+ *
+ * <p>
+ * The screen fetched the club's rate once on mount and then told the member, in so many
+ * words, that "this rate is locked in when you continue, so it can't change while you're
+ * paying". It is not the rate that was locked — it is whatever the server resolves when the
+ * POST lands. So an admin editing <code>credits_per_zar_*</code>, or that member's class
+ * changing, left a member pressing Continue on 480.00 credits and being registered at 320,
+ * with nothing between the offer and the ledger row to say so.
+ * </p>
+ *
+ * <p>
+ * Two lanes closed this in the same round, by different seams. One read the rate off the
+ * POST's own answer and declined to go on — a check the server does not enforce, run after
+ * the pending row had already been written at the new rate. The other sends the quoted rate
+ * WITH the amount so the server refuses with <code>409 topup_rate_changed</code> before
+ * writing anything. The second shipped, so these assertions drive the refusal rather than a
+ * 200 at a surprising rate. What they are really about is unchanged: what the page does with
+ * that answer, and the sentence beside the figure. Copy is a promise, and this programme has
+ * now found five screens promising what no code path keeps.
+ * </p>
+ */
+describe("Top-up — the quoted rate against the registered one", () => {
+  const LEAGUE = {
+    block_zar: 100, min_zar: 100, max_zar: 1000, presets_zar: [100, 200, 500, 1000],
+    conversion_rate: 2.4, member_class: "LeagueOrSenior" as const,
+  };
+
+  /** What the server answers once the club has demoted the member behind their back. */
+  const RATE_MOVED = {
+    error: "topup_rate_changed",
+    conversion_rate: 1.6,
+    quoted_credits: 320,
+    member_class: "Regular",
+  };
+
+  /** …and what it answers on the second press, at the figure the member has now seen. */
+  const REGISTERED = {
+    topup_id: "aaaa1111-0000-0000-0000-000000000001",
+    checkout_id: "CRS-002",
+    redirect_url: "https://sandbox.payfast.co.za/eng/process",
+    form_fields: [{ name: "signature", value: "deadbeef" }],
+    quoted_credits: 320,
+    conversion_rate: 1.6,
+  };
+
+  const submitted: HTMLFormElement[] = [];
+  beforeEach(() => {
+    submitted.length = 0;
+    vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(function (this: HTMLFormElement) {
+      submitted.push(this);
+    });
+  });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); signOut(); });
+
+  it("does not hand the member to PayFast at a rate they were never shown", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/credit/topup/options", body: LEAGUE },
+      { method: "POST", path: "/api/v1/credit/topup", status: 409, body: RATE_MOVED },
+    ]);
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    // The offer the member is looking at when they press the button.
+    expect(screen.getByText("480.00 credits")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+
+    // The whole finding: the browser went to PayFast to pay R200 for a top-up the server
+    // had already written at 1.6, and the first place 320 appeared was a ledger row.
+    await screen.findByRole("alert");
+    expect(submitted).toHaveLength(0);
+
+    // …and the member is told, in the club's own figures, what changed.
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/The club changed its rate while this page was open/);
+    expect(alert).toHaveTextContent("320.00 credits");
+    expect(alert).toHaveTextContent("1.6 credits / R1");
+    // The preview moves with it, so nothing on screen still says 480.
+    expect(screen.queryByText("480.00 credits")).not.toBeInTheDocument();
+    expect(screen.getByText("320.00 credits")).toBeInTheDocument();
+    // …and the class label moves with it too, rather than being dropped. A headed run against
+    // the client-side version of this fix showed "At 2.4 credits / R1 (regular rate)" — the new
+    // number beside the old reason for it, a second small untruth arriving with the fix for the
+    // first. That lane dropped the label. It does not have to be dropped: the refusal carries
+    // `member_class`, so the line can name the RIGHT class, which is what is asserted here.
+    expect(screen.getByText(/At 1\.6 credits \/ R1 \(regular rate\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/league \/ senior rate/)).not.toBeInTheDocument();
+  });
+
+  it("goes through on the second press, now that the member has seen the real figure", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/credit/topup/options", body: LEAGUE },
+      // Refused, then accepted: the member's second press agrees to the club's new rate, and
+      // the quote it now sends matches, so the server has nothing left to refuse.
+      { method: "POST", path: "/api/v1/credit/topup", status: [409, 200], sequence: [RATE_MOVED, REGISTERED], body: RATE_MOVED },
+    ]);
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+
+    // A hold that cannot be got past is a dead end, which is the other half of this
+    // programme's error-copy rule.
+    await vi.waitFor(() => expect(submitted).toHaveLength(1));
+  });
+
+  /**
+   * The fixture, varied. The check above passes trivially if the page simply never posts the
+   * form, so the ordinary case — the club's rate is exactly what the screen said — has to be
+   * driven through the same code path. It also pins the wire field the refusal depends on: a
+   * POST that stops sending the quote is a POST the server can no longer refuse, and every
+   * assertion above would still pass while the defect walked back in.
+   */
+  it("sends the payment straight on when the rate has not moved, and sends the quote with it", async () => {
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/credit/topup/options", body: LEAGUE },
+      {
+        method: "POST", path: "/api/v1/credit/topup",
+        body: { ...REGISTERED, quoted_credits: 480, conversion_rate: 2.4 },
+      },
+    ]);
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+
+    await vi.waitFor(() => expect(submitted).toHaveLength(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const posted = stub.calls.filter((c) => c.method === "POST" && c.path.startsWith("/api/v1/credit/topup"));
+    expect(posted.map((c) => c.body)).toEqual([{ amountZar: 200, quotedConversionRate: 2.4 }]);
+  });
+
+  it("does not tell the member the rate cannot change, because it can", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/credit/topup/options", body: LEAGUE },
+      { method: "POST", path: "/api/v1/credit/topup", status: 409, body: RATE_MOVED },
+    ]);
+    renderPage(<TopUpPage />);
+
+    // The retired sentence, word for word off the three finders' screenshots.
+    expect(await screen.findByText(/At 2.4 credits \/ R1/)).toBeInTheDocument();
+    expect(screen.queryByText(/locked in when you continue/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/can't change while you're paying\./)).not.toBeInTheDocument();
+    // What is true, and what the code above now keeps.
+    expect(screen.getByText(/fixed the moment the club registers this payment/)).toBeInTheDocument();
+    expect(screen.getByText(/we'll show you the new figure before sending you there/)).toBeInTheDocument();
+  });
+});

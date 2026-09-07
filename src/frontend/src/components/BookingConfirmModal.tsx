@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal } from "./Modal";
 import { Button, Label } from "./Button";
-import { CostSummary, OverdraftNotice, Refusal } from "./BookingConfirmParts";
+import { CostSummary, OverdraftNotice, Refusal, ShortfallPrompt } from "./BookingConfirmParts";
 import { formatCredits } from "../lib/utils";
 
 export type BookingIntent = {
@@ -86,7 +86,7 @@ type Props = {
  * </p>
  */
 export function BookingConfirmModal({ intent, balanceCredits, members, isAdmin, onCancel, onConfirm }: Props) {
-  const [mode, setMode] = useState<Mode>("self");
+  const [mode, setMode] = useState<Mode>(openingMode(isAdmin));
   const [memberId, setMemberId] = useState("");
   const [blockLabel, setBlockLabel] = useState("Tournament");
   const [busy, setBusy] = useState(false);
@@ -153,7 +153,7 @@ export function BookingConfirmModal({ intent, balanceCredits, members, isAdmin, 
     <Modal title="Confirm booking" onClose={onCancel}>
       <CostSummary
         intent={intent} balanceCredits={balanceCredits} memberBalance={picked.balance}
-        free={free} cost={cost} chargedToSomeoneElse={chargedToSomeoneElse}
+        free={free} cost={cost} chargedToSomeoneElse={chargedToSomeoneElse} canAfford={canAfford}
       />
 
       {isAdmin && (
@@ -165,11 +165,7 @@ export function BookingConfirmModal({ intent, balanceCredits, members, isAdmin, 
         />
       )}
 
-      {!canAfford && (
-        <p className="text-sm text-danger-strong mb-3">
-          That's more than you have. Top up your wallet, then book.
-        </p>
-      )}
+      {!canAfford && <ShortfallPrompt />}
 
       {refusal && <Refusal message={refusal} />}
 
@@ -236,6 +232,23 @@ function ConfirmActions(props: {
 }
 
 type Mode = "self" | "member" | "block";
+
+/**
+ * Which of §8's three admin actions the dialog opens on.
+ *
+ * <p>
+ * N-F11: an admin opens on "on behalf of a member", not on their own wallet. §8 is explicit
+ * that "a desk account's balance is zero permanently, because it never plays", so defaulting
+ * to "My own booking" made the FIRST state of this dialog, on every slot, every time, a
+ * refusal of the person who had just opened it — `Balance now 0.00 cr · Balance after
+ * -50.00 cr`, "That's more than you have", and a disabled Book button — and the admin had to
+ * notice the select and change it before the dialog did anything useful. "My own booking" is
+ * still there for an admin who does play: it is the default that was wrong, not the option.
+ * </p>
+ */
+function openingMode(isAdmin: boolean): Mode {
+  return isAdmin ? "member" : "self";
+}
 
 /**
  * §8's three admin actions, on the slot the admin is looking at: book it for themselves,

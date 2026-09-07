@@ -500,3 +500,123 @@ describe("the header across a forced password change", () => {
     expect(asked("/api/v1/me/profile")).toBe(1);
   });
 });
+
+/**
+ * L-F4 and N-F10 — an admin resets a member's password while that member is signed in.
+ *
+ * <p>
+ * The server side is right: `PasswordChangeGate` refuses every route but the change itself
+ * with `403 password_change_required`. The client only ever learned the flag from `whoami` at
+ * boot, so an in-app route change afterwards rendered against a stale context and the 403s
+ * landed in each screen's own `catch`. A finder clicked Reports and got
+ * `TOP-UPS — · SPENT — · REFUNDS (NET) — · TIME ON COURT —`, a stale "−40.00 cr" still in the
+ * header, a Download wallet CSV button still offered, and nothing in
+ * `[role=status],[role=alert]` at any sample. A full page load did the right thing, which is
+ * what made it look like a page bug rather than a context one.
+ * </p>
+ */
+describe("an admin reset lands on a session that is already open", () => {
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", class {
+      close() {}
+      addEventListener() {}
+      removeEventListener() {}
+    } as unknown as typeof EventSource);
+  });
+
+  /** Signed in and un-gated at boot; every subsequent call refused, as the gate really does. */
+  function afterTheReset(routes: StubRoute[] = []) {
+    signIn({ isAdmin: false });
+    const GATED = { status: 403, body: { error: "password_change_required", message: "Your password was reset by an admin. Choose a new one before continuing." } };
+    return stubFetch([
+      ...routes,
+      // whoami is on the gate's allow-list, and at boot it had not been reset yet.
+      { path: "/api/v1/whoami", body: { ...signIn({ isAdmin: false }), user_id: "u1" } },
+      { path: "/api/v1/me/profile", ...GATED },
+      { path: "/api/v1/wallet", ...GATED },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", ...GATED },
+      { path: "/api/v1/reports/", ...GATED },
+    ]);
+  }
+
+  it("routes the open session to the change-password screen instead of swallowing the refusal", async () => {
+    window.history.pushState({}, "", "/wallet");
+    afterTheReset();
+
+    render(<App />);
+
+    // Before: the member stayed on /wallet with a stale balance and no message of any kind.
+    await waitFor(() => expect(window.location.pathname).toBe("/change-password"));
+    expect(await screen.findByLabelText("Temporary password")).toBeInTheDocument();
+    expect(screen.getByText(/An admin has reset your password/)).toBeInTheDocument();
+  });
+
+  /**
+   * The fixture, varied. A 403 that is NOT this gate — the admin surfaces answer one to a
+   * member — must not throw them onto the change-password screen; that would be the same
+   * defect wearing the fix's clothes.
+   */
+  it("does not treat every 403 as a password reset", async () => {
+    window.history.pushState({}, "", "/wallet");
+    signIn({ isAdmin: false });
+    stubFetch([
+      { path: "/api/v1/whoami", body: { ...signIn({ isAdmin: false }), user_id: "u1" } },
+      { path: "/api/v1/me/profile", body: { user_id: "u1", email: "a@b.test", is_admin: false, tenant_slug: "crusaders", full_name: "Ada", membership_number: "M-1", photo_url: null, status: "active" } },
+      { path: "/api/v1/wallet", status: 403, body: { error: "admin_only" } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    ]);
+
+    render(<App />);
+
+    await screen.findByText(/Wallet/i);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(window.location.pathname).toBe("/wallet");
+  });
+});
+
+/**
+ * N-F10 — what the forced screen may say about how the member got there.
+ *
+ * <p>
+ * It said "An admin reset your password, so <b>the one you just used</b> is temporary", and
+ * this screen has three arrivals of which only one used anything: a member who clicked the
+ * welcome magic link typed no password at all, and a member reset mid-session (L-F4 above)
+ * did not either. Both are then asked for a "Temporary password" they have to go and find in
+ * another email, on a screen that never mentions the way out.
+ * </p>
+ */
+describe("the forced change-password screen's copy", () => {
+  function forced() {
+    signIn({ isAdmin: false });
+    stubFetch([
+      { path: "/api/v1/whoami", body: { ...signIn({ isAdmin: false }), user_id: "u1", must_change_password: true } },
+    ]);
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <ToastProvider><ChangePasswordPage /></ToastProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("does not tell a member they just used a password they may never have seen", async () => {
+    forced();
+    await screen.findByLabelText("Temporary password");
+
+    expect(screen.queryByText(/the one you just used/)).not.toBeInTheDocument();
+    // True on all three arrivals: the temporary password EXISTS, whether or not it was used.
+    expect(screen.getByText(/An admin has reset your password/)).toBeInTheDocument();
+    expect(screen.getByText(/stops working the moment you do/)).toBeInTheDocument();
+  });
+
+  it("offers a way through for a member who has not got the temporary password", async () => {
+    forced();
+    await screen.findByLabelText("Temporary password");
+
+    // Before, the only exit was knowing that "Forgot password?" on the sign-in screen — a
+    // screen this one does not link to and does not mention — would do it.
+    const out = screen.getByRole("link", { name: /Email yourself a reset link/ });
+    expect(out).toHaveAttribute("href", "/forgot-password");
+  });
+});

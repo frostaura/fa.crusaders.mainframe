@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { endpoints, type ScheduleDay } from "./api";
-import { cancellationOutcome, describeBookingError } from "./bookingErrors";
+import { cancellationOutcome, describeBookingError, provesStaleGrid } from "./bookingErrors";
 
 export type CancelTarget = {
   bookingId: string; courtName: string; whenLabel: string; mine: boolean;
@@ -56,6 +56,10 @@ export function useSlotEnders({ cancelling, setCancelling, setDay, reconcile, re
       reconcile();
       void refreshBalance();
     } catch (err) {
+      // Same rule as the booking path: a booking that is "no longer there" is the server
+      // saying this grid is stale, so it is refetched — and awaited, so the sentence that
+      // says the schedule is up to date is true when the member reads it.
+      if (provesStaleGrid(err)) await reconcile();
       toast.push({ tone: "danger", text: describeBookingError(err, "Couldn't cancel that booking. Refresh the schedule and try again.") });
     }
   };
@@ -67,6 +71,7 @@ export function useSlotEnders({ cancelling, setCancelling, setDay, reconcile, re
       toast.push({ tone: "success", text: "Block lifted — the court is free again." });
       reconcile();
     } catch (err) {
+      if (provesStaleGrid(err)) await reconcile();
       toast.push({ tone: "danger", text: describeBookingError(err, "Couldn't lift that block.") });
     }
   }, [reconcile, setDay, toast]);

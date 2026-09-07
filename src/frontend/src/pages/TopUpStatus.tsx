@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { endpoints, type TopUpStatus } from "../lib/api";
+import { ApiError, endpoints, type TopUpStatus } from "../lib/api";
 import { Card } from "../components/Card";
 import { Badge, Button } from "../components/Button";
 import { useBalance } from "../lib/balance";
@@ -61,6 +61,19 @@ export default function TopUpStatusPage() {
      that report it say different things, because "we could not reach the club" means something
      different before a status is known than it does beside one that is already on screen. */
   const [loadFailed, setLoadFailed] = useState(false);
+  /**
+   * The club answered, definitively, that there is no such top-up for this member.
+   *
+   * <p>
+   * Held apart from {@link loadFailed} because a 404 is not an outage and the two owe the
+   * member opposite things. The catch below used to be bare, so `GET /credit/topup/{id}`
+   * answering 404 rendered "We couldn't reach the club to check on this payment … we'll
+   * email you either way" beside a Check-again button that can never resolve — a promise of
+   * a mail against a `PendingTopup` row that does not exist, and an invitation to keep
+   * pressing. A definite answer deserves a definite screen.
+   * </p>
+   */
+  const [missing, setMissing] = useState(false);
   const [gaveUp, setGaveUp] = useState(false);
   const [checking, setChecking] = useState(false);
   /** Bumped by "Check again", which restarts the schedule from the top. */
@@ -100,9 +113,12 @@ export default function TopUpStatusPage() {
         const delay = pollDelayMs(attempts++);
         if (delay === null) { setGaveUp(true); return; }
         timer = setTimeout(() => { void tick(); }, delay);
-      } catch {
+      } catch (err) {
         if (cancelled) return;
         settled();
+        // A 404 is the club answering, not the club being unreachable — and there is
+        // nothing left to ask, so the poll stops here rather than rescheduling.
+        if (err instanceof ApiError && err.status === 404) { setMissing(true); return; }
         setLoadFailed(true);
       }
     };
@@ -117,8 +133,11 @@ export default function TopUpStatusPage() {
   const checkAgain = () => {
     setChecking(true);
     setGaveUp(false);
+    setMissing(false);
     setRound((r) => r + 1);
   };
+
+  if (missing) return <NoSuchTopUp />;
 
   /*
     A failed status request is not a dead end, and it used to be one: this branch was a bare
@@ -231,6 +250,45 @@ export default function TopUpStatusPage() {
         {s.status === "Completed" && (
           <p className="mt-3 text-sm">Your wallet has been credited. <Link to="/wallet" className="text-accent-strong hover:underline">View wallet →</Link></p>
         )}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * K-F6 — the club answered, and the answer was "there is no such top-up".
+ *
+ * <p>
+ * Three things followed from treating that 404 as an outage, and all three were wrong. It
+ * blamed the club's connection for an answer the club had given. It promised a mail that
+ * <code>NotifyNotCompletedAsync</code> can only send against a real <code>PendingTopup</code>
+ * row, so on this branch nothing would ever arrive — the one channel the screen falls back to
+ * does not exist. And it offered <b>Check again</b>, which re-asks a question already
+ * answered and can never resolve, to a member who is watching for money.
+ * </p>
+ *
+ * <p>
+ * What a member can actually do is look at their wallet — the credits are either in it or
+ * they are not — or start a top-up that does exist. Both are offered; neither is a retry.
+ * Out here as its own component because `TopUpStatusPage` is against the 200-line gate, and
+ * lizard measures a .tsx function by what it last scoped: moving code to another function is
+ * what shrinks it, extracting it into the same one is not.
+ * </p>
+ */
+function NoSuchTopUp() {
+  return (
+    <div className="max-w-md mx-auto">
+      <Card>
+        <h1 className="text-xl font-semibold mb-2">Top-up</h1>
+        <p role="alert" className="text-sm text-danger-strong">
+          We can't find this top-up on your account. The link may be wrong, or it may belong
+          to a different account — nothing has been charged for it. Your wallet shows every
+          top-up that did go through.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link to="/wallet"><Button variant="outline">View wallet</Button></Link>
+          <Link to="/wallet/topup"><Button variant="ghost">Top up</Button></Link>
+        </div>
       </Card>
     </div>
   );

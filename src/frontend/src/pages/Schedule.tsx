@@ -6,7 +6,7 @@ import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
 import { formatCredits } from "../lib/utils";
-import { ADMIN_SELF_SHORT_TEXT, describeBookingError, MEMBER_SHORT_TEXT } from "../lib/bookingErrors";
+import { ADMIN_SELF_SHORT_TEXT, describeBookingError, MEMBER_SHORT_TEXT, provesStaleGrid } from "../lib/bookingErrors";
 import { ApiError } from "../lib/api";
 import { BookingConfirmModal, type AdminOption, type BookingIntent, type BookingOutcome } from "../components/BookingConfirmModal";
 import { CancelBookingModal } from "../components/CancelBookingModal";
@@ -67,8 +67,12 @@ export default function SchedulePage() {
   // SUCCEEDED. Telling a member who has just booked and been charged that the schedule
   // could not be loaded would be alarming and untrue, and the patched grid is not wrong,
   // only unconfirmed. Refresh, a date change and the next visit all reload properly.
+  //
+  // Returned, not fire-and-forget: a refusal that proves the grid is stale (L-F2) refetches
+  // and AWAITS this before its sentence is shown, so "the schedule behind this is up to date
+  // now" is a statement about what has already happened rather than a hope.
   const reconcile = useCallback(() => {
-    endpoints.schedule(date)
+    return endpoints.schedule(date)
       .then((fresh) => { setDay(fresh); setLoadedAt(Date.now()); })
       .catch(() => { /* the optimistic view stands until something asks for the day again */ });
   }, [date]);
@@ -140,6 +144,11 @@ export default function SchedulePage() {
       // figures in front of them.
       const short = shortfallFrom(err, option, actorUserId);
       if (short) return short;
+      // The server has just told us this day is not what we are showing — a slot taken in
+      // another browser, a court retired, the club's closing time moved under an open modal.
+      // The grid used to keep offering the slot as "Available" for the life of the tab, and
+      // the only Refresh control on the page is behind this dialog's own overlay.
+      if (provesStaleGrid(err)) await reconcile();
       // Every other refusal goes back into the dialog too — see `BookingOutcome`. A toast here
       // renders BEHIND the modal, which is the whole of finding J-F3: the member is left with a
       // dialog that did nothing and no reason anywhere they can see. `actorUserId` comes from

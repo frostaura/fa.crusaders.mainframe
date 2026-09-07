@@ -82,6 +82,16 @@ public sealed class ScheduleService
         // and this is that day's answer.
         var (openMinute, closeMinute) = settings.HoursFor(dayStartLocal.DayOfWeek);
 
+        // N-F6. The peak-hours rule was enforced by BookingService and invisible to the grid,
+        // so 44 cells a day rendered to a Regular member as green, clickable "Available" —
+        // same colour, same cursor, same "Book Court 2 at 17:00 for 50.00 cr" label as a slot
+        // they could actually have — and the refusal arrived only after they had read a price
+        // and pressed Confirm. The client cannot infer this: the member's class is not on any
+        // member-facing payload and peak_hours is admin-only. So the day carries the window,
+        // the advance allowance, and one flag saying whether THIS viewer is bound by it.
+        var peak = settings.PeakHours();
+        var viewerMayBookPeak = viewerIsAdmin || await ViewerBypassesPeakAsync(viewingUserId, ct);
+
         return new ScheduleDay(
             Date: date,
             Timezone: settings.Timezone,
@@ -91,8 +101,32 @@ public sealed class ScheduleService
             AdvanceBookingDays: settings.AdvanceBookingDays,
             PenaltyPct: settings.PenaltyPct,
             PenaltyWindowMinutes: settings.PenaltyWindowMinutes,
+            PeakStartMinute: peak is { } p ? (int)p.start.ToTimeSpan().TotalMinutes : null,
+            PeakEndMinute: peak is { } q ? (int)q.end.ToTimeSpan().TotalMinutes : null,
+            PeakAdvanceHoursForRegular: settings.PeakAdvanceHoursForRegular,
+            ViewerMayBookPeak: viewerMayBookPeak,
             Courts: courts.Select(c => new ScheduleCourt(c.Id, c.CourtNumber, c.Name, c.SlicePriceCredits)).ToList(),
             Slots: slots);
+    }
+
+    /// <summary>
+    /// Is this viewer exempt from the peak-hours league/senior rule?
+    /// </summary>
+    /// <remarks>
+    /// Mirrors <c>BookingService.CheckPeakHoursRule</c>'s first line, which returns null — no
+    /// refusal — for <see cref="MemberClass.LeagueOrSenior"/>. An anonymous or membership-less
+    /// viewer falls to <c>Regular</c>, the stricter answer: the grid may never offer a slot the
+    /// booking service would refuse, and the cost of being wrong the other way is one extra
+    /// cell drawn as restricted.
+    /// </remarks>
+    private async Task<bool> ViewerBypassesPeakAsync(Guid? viewingUserId, CancellationToken ct)
+    {
+        if (viewingUserId is not { } userId) return false;
+        var cls = await _db.Memberships
+            .Where(m => m.UserId == userId)
+            .Select(m => m.MemberClass)
+            .FirstOrDefaultAsync(ct);
+        return cls == MemberClass.LeagueOrSenior;
     }
 
     private static string FirstName(string fullName)
@@ -117,6 +151,13 @@ public sealed record ScheduleDay(
     int AdvanceBookingDays,
     decimal PenaltyPct,
     int PenaltyWindowMinutes,
+    /// <summary>Peak window, minutes past local midnight. Null when `peak_hours` is unset or malformed.</summary>
+    int? PeakStartMinute,
+    int? PeakEndMinute,
+    /// <summary>How close to a peak slot a Regular member may take it anyway (A.12).</summary>
+    int PeakAdvanceHoursForRegular,
+    /// <summary>True for an admin or a league/senior member — the two the peak rule never refuses.</summary>
+    bool ViewerMayBookPeak,
     List<ScheduleCourt> Courts,
     List<ScheduleSlot> Slots);
 

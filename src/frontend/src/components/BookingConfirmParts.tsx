@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+import { Button } from "./Button";
 import { formatCredits } from "../lib/utils";
 import type { BookingIntent } from "./BookingConfirmModal";
 
@@ -25,9 +27,9 @@ import type { BookingIntent } from "./BookingConfirmModal";
  */
 export function CostSummary(props: {
   intent: BookingIntent; balanceCredits: number | null; memberBalance: number | null;
-  free: boolean; cost: number; chargedToSomeoneElse: boolean;
+  free: boolean; cost: number; chargedToSomeoneElse: boolean; canAfford: boolean;
 }) {
-  const { intent, balanceCredits, memberBalance, free, cost, chargedToSomeoneElse } = props;
+  const { intent, balanceCredits, memberBalance, free, cost, chargedToSomeoneElse, canAfford } = props;
   const wallet = chargedToSomeoneElse ? memberBalance : balanceCredits;
   return (
     <dl className="text-sm space-y-1.5 mb-4">
@@ -35,7 +37,7 @@ export function CostSummary(props: {
       <Row term="Time" value={intent.whenLabel} />
       <Row term="Duration" value={`${intent.sliceMinutes} min`} />
       <Row term="Cost" value={free ? "No charge — court held, not sold" : formatCredits(cost)} />
-      {!free && <BalanceRows wallet={wallet} cost={cost} theirs={chargedToSomeoneElse} />}
+      {!free && <BalanceRows wallet={wallet} cost={cost} theirs={chargedToSomeoneElse} canAfford={canAfford} />}
     </dl>
   );
 }
@@ -52,8 +54,24 @@ export function CostSummary(props: {
  * refused, and §8's override panel restates both figures from the refusal itself.
  * </p>
  */
-export function BalanceRows({ wallet, cost, theirs }: { wallet: number | null; cost: number; theirs: boolean }) {
+export function BalanceRows(
+  { wallet, cost, theirs, canAfford = true }:
+  { wallet: number | null; cost: number; theirs: boolean; canAfford?: boolean },
+) {
   if (wallet !== null) {
+    // N-F7's second half. "Balance after -30.00 cr" is a figure for a booking the dialog has
+    // already decided will not happen — the Book button beside it is disabled — and nothing
+    // told the member it was hypothetical. What is true, and what they can act on, is how far
+    // short they are. The spec's "balance after" is kept for the case where the booking can
+    // actually go through, which is the case it was written about.
+    if (!canAfford) {
+      return (
+        <>
+          <Row term={theirs ? "Their balance" : "Balance now"} value={formatCredits(wallet)} />
+          <Row term="Short by" value={formatCredits(cost - wallet)} emphasise />
+        </>
+      );
+    }
     return (
       <>
         <Row term={theirs ? "Their balance" : "Balance now"} value={formatCredits(wallet)} />
@@ -130,6 +148,30 @@ export function Row({ term, value, emphasise }: { term: string; value: string; e
     <div className="flex justify-between gap-4">
       <dt className="text-text-secondary">{term}</dt>
       <dd className={emphasise ? "font-semibold text-text-primary" : "text-text-primary"}>{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * N-F7 — §5's "If not, prompt to top up", as a prompt rather than as a sentence.
+ *
+ * <p>
+ * This was the sentence and nothing else. The dialog contained zero links and zero controls
+ * besides <b>Keep looking</b> and a disabled <b>Book</b>, so a member who was short had to
+ * dismiss it, find the balance chip in the header, open the wallet and press Top up there.
+ * The admin-on-behalf path had done this properly for a round already — it shows the same
+ * two figures and then offers a named override button.
+ * </p>
+ */
+export function ShortfallPrompt() {
+  return (
+    <div className="mb-3">
+      <p className="text-sm text-danger-strong">
+        That's more than you have. Top up your wallet, then book.
+      </p>
+      <Link to="/wallet/topup" className="inline-block mt-2">
+        <Button variant="outline">Top up</Button>
+      </Link>
     </div>
   );
 }

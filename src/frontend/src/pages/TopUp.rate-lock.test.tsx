@@ -99,11 +99,14 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     expect(screen.getByText("240.00 credits")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
-    // The member is told, in their own words and with the number that matters.
-    expect(await screen.findByText(/The club changed the credit rate while this page was open/))
-      .toBeInTheDocument();
-    expect(screen.getByText(/R100\.00 now buys 160\.00 credits/)).toBeInTheDocument();
-    expect(screen.getByText(/Nothing has been charged/)).toBeInTheDocument();
+    // The member is told, in their own words and with the number that matters. It is an
+    // alert rather than a red error line: nothing went wrong and nothing was charged, the
+    // price moved — so it is announced, and it says what the next press will do.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/The club changed its rate while this page was open/);
+    expect(alert).toHaveTextContent("R100.00 now buys 160.00 credits");
+    expect(alert).toHaveTextContent(/nothing has been sent to PayFast yet/);
+    expect(alert).toHaveTextContent(/Press Continue again to pay at that rate/);
 
     // The preview is re-quoted rather than left lying: the stale 240.00 is gone.
     expect(screen.getByText("160.00 credits")).toBeInTheDocument();
@@ -126,7 +129,7 @@ describe("Top-up — the quoted rate is the registered rate", () => {
    * writes options state from inside an error handler while the mount effect that fetched
    * those options has run twice, which is exactly the shape that goes wrong: a second
    * mount's fetch resolving after the refusal would put the stale 240.00 back on the
-   * screen with "nothing has been charged" still underneath it.
+   * screen with "nothing has been sent to PayFast yet" still underneath it.
    * </p>
    */
   it("re-quotes correctly under StrictMode's double mount", async () => {
@@ -140,7 +143,7 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     fireEvent.click(await screen.findByRole("button", { name: "R100" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
-    expect(await screen.findByText(/R100\.00 now buys 160\.00 credits/)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("R100.00 now buys 160.00 credits");
     expect(screen.getByText("160.00 credits")).toBeInTheDocument();
     expect(screen.queryByText("240.00 credits")).not.toBeInTheDocument();
     expect(submitted.length).toBe(0);

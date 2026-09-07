@@ -361,7 +361,10 @@ describe("Schedule", () => {
 
     // Booking it for THEMSELVES they genuinely cannot afford, and the modal says so.
     // This also proves the wallet answer has landed, so the assertions below are not
-    // passing on a balance that is merely still null.
+    // passing on a balance that is merely still null. The dialog no longer OPENS here —
+    // N-F11: a desk account's balance is zero permanently, so opening on "My own booking"
+    // made every slot's first state a refusal — so this selects it deliberately.
+    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "self" } });
     await screen.findByText(/more than you have/);
 
     fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
@@ -850,5 +853,358 @@ describe("Schedule", () => {
       const post = fetchStub.calls.find((c) => c.method === "POST" && c.path.endsWith(`/admin/bookings/${BOOKING_ID}/cancel`));
       expect(post?.body).toMatchObject({ waivePenalty: true, waiveReason: "Court flooded — club's fault" });
     });
+  });
+});
+
+/**
+ * L-F2 — after a refusal that proves the grid is wrong, the grid is still wrong.
+ *
+ * <p>
+ * A finder opened the confirmation on Court 3 at 12:00, had an admin book that slot from
+ * another browser, and pressed Book. The refusal was right — <em>"Someone just took that
+ * slot. Refresh the schedule to see what's left."</em> — and nothing else happened: no
+ * refetch went out, the grid behind the modal still said <em>12:00 Court 3 · Available</em>
+ * thirty seconds later (there is no polling), and the page's only Refresh control sits behind
+ * the dialog's own <code>aria-modal</code> overlay, which intercepts a real click. The
+ * sentence asked for the one thing the member could not do.
+ * </p>
+ *
+ * <p>
+ * The <code>out_of_hours</code> half is the same hole through a different door and is worse:
+ * an admin moving Monday's closing time to 09:00 left every slot from 09:00 to 19:15 still
+ * drawn as bookable, one modal at a time, until something reloaded the day.
+ * </p>
+ *
+ * <p>
+ * These assert the REFETCH and the redrawn grid, not the sentence: a screen can apologise
+ * perfectly while still offering the slot it has just refused.
+ * </p>
+ */
+describe("Schedule — a refusal that proves the grid is stale refetches it", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const COURT = "11111111-1111-1111-1111-111111111111";
+  const DATE = "2030-09-07";
+  const sast = (hh: number, mm = 0) => new Date(Date.UTC(2030, 8, 7, hh - 2, mm, 0)).toISOString();
+
+  const OPEN_DAY = {
+    date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
+    dayStartMinute: 7 * 60, dayEndMinute: 20 * 60, advanceBookingDays: 14,
+    penaltyPct: 30, penaltyWindowMinutes: 15,
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    slots: [] as unknown[],
+  };
+
+  /** The same day as the club now has it: somebody else owns 07:00. */
+  const TAKEN_DAY = {
+    ...OPEN_DAY,
+    slots: [{
+      courtId: COURT, courtNumber: 1, startsAtUtc: sast(7), endsAtUtc: sast(7, 15),
+      status: "booked", ownerUserId: "77777777-7777-7777-7777-777777777777",
+      ownerFirstName: "Sipho", ownerPhotoUrl: null, isMine: false,
+      bookingId: "88888888-8888-8888-8888-888888888888", blockLabel: null,
+      checkedIn: null, amountChargedCredits: null,
+    }],
+  };
+
+  /**
+   * The same day after an admin moved closing time to 09:00 on the Settings page.
+   *
+   * It keeps one 19:00 booking, exactly as the finder's club did: the grid is drawn to the
+   * club's hours UNION whatever range the day's bookings occupy, so the rows between 09:00
+   * and 19:15 still exist — which is what makes "still offered as Available" a thing that can
+   * be observed at all, rather than rows that simply vanish.
+   */
+  const SHORT_DAY = {
+    ...OPEN_DAY,
+    dayEndMinute: 9 * 60,
+    slots: [{
+      courtId: COURT, courtNumber: 1, startsAtUtc: sast(19), endsAtUtc: sast(19, 15),
+      status: "booked", ownerUserId: "77777777-7777-7777-7777-777777777777",
+      ownerFirstName: "Sipho", ownerPhotoUrl: null, isMine: false,
+      bookingId: "88888888-8888-8888-8888-888888888888", blockLabel: null,
+      checkedIn: null, amountChargedCredits: null,
+    }],
+  };
+
+  function drive(days: unknown[], refusal: unknown) {
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { balance_credits: 1635, entries: [] } },
+      { path: "/api/v1/schedule", body: null, sequence: days },
+      { method: "POST", path: "/api/v1/bookings/", status: 409, body: refusal },
+    ]);
+    renderPage(<SchedulePage />);
+    return stub;
+  }
+
+  const scheduleReads = (stub: { calls: { method: string; path: string }[] }) =>
+    stub.calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/v1/schedule")).length;
+
+  it("refetches the day when the slot was taken, and stops offering it", async () => {
+    const stub = drive([OPEN_DAY, TAKEN_DAY], { error: "slot_taken" });
+
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+    expect(scheduleReads(stub)).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    await waitFor(() => expect(modal).toHaveTextContent(/Someone just took that slot/));
+
+    // The refetch the page never issued.
+    expect(scheduleReads(stub)).toBe(2);
+    // And the grid behind the modal, which used to go on offering it for ever.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ })).not.toBeInTheDocument());
+    expect(screen.getByLabelText(/Court 1 at 07:00 — booked by Sipho/)).toBeInTheDocument();
+  });
+
+  it("redraws the day as closed when the club's hours moved under an open modal", async () => {
+    const stub = drive([OPEN_DAY, SHORT_DAY], { error: "out_of_hours", opens_at: "07:00", closes_at: "09:00" });
+
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 11:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    await waitFor(() => expect(modal).toHaveTextContent(/The club is open 07:00–09:00 that day/));
+
+    expect(scheduleReads(stub)).toBe(2);
+    // The finder counted every slot from 09:00 to 19:15 still drawn as bookable after this
+    // refusal; a press of the header Refresh redrew them all as Closed, so the API was right
+    // and only the un-refetched client was wrong.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Book Court 1 at 11:00/ })).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Court 1 at 11:00 — the club is closed")).toBeInTheDocument();
+    // 07:00–09:00 is still open, so this is a redraw and not a blanked grid.
+    expect(screen.getByRole("button", { name: /^Book Court 1 at 08:45/ })).toBeInTheDocument();
+  });
+
+  /**
+   * The fixture, varied. Every assertion above passes just as well if the page refetches on
+   * EVERY refusal — which would be a day-sized read on each press of a button a capped member
+   * cannot use, on a phone. A refusal about the member is not evidence about the day.
+   */
+  it("does not refetch on a refusal that says nothing about the day", async () => {
+    const stub = drive([OPEN_DAY, TAKEN_DAY], {
+      error: "per_day_cap_exceeded", cap_minutes: 60, already_booked_minutes: 60, attempted_minutes: 15,
+    });
+
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    await waitFor(() => expect(modal).toHaveTextContent(/You already have 60 of your 60 minutes booked/));
+
+    expect(scheduleReads(stub)).toBe(1);
+  });
+});
+
+/**
+ * N-F7 and N-F11 — the confirmation dialog's two dead first states.
+ *
+ * <p>
+ * N-F7: feature-spec §5 says "On confirm: balance must cover cost. If not, <b>prompt to top
+ * up</b>." What a short member got was the sentence "Top up your wallet, then book." on a
+ * dialog with zero links and zero controls but Keep looking and a disabled Book — so the
+ * prompt was a sentence, and the member had to dismiss it, find the balance chip in the
+ * header, open the wallet and press Top up there. Beside it sat "Balance after -30.00 cr", a
+ * figure for a booking the dialog had already decided would not happen, with nothing to say
+ * it was hypothetical.
+ * </p>
+ *
+ * <p>
+ * N-F11: the admin's dialog defaulted to "My own booking" against a desk account whose
+ * balance is zero permanently by design (§8, "because it never plays"), so the first state
+ * of the modal on every slot, every time, was a refusal of the person who had just opened it.
+ * </p>
+ */
+describe("Schedule — the confirmation dialog opens on something useful", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const COURT = "11111111-1111-1111-1111-111111111111";
+  const THEM = "55555555-5555-5555-5555-555555555555";
+  const DATE = "2030-09-07";
+
+  const DAY = {
+    date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
+    dayStartMinute: 7 * 60, dayEndMinute: 20 * 60, advanceBookingDays: 14,
+    penaltyPct: 30, penaltyWindowMinutes: 15,
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    slots: [] as unknown[],
+  };
+
+  function open(opts: { isAdmin: boolean; balance: number }) {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: opts.isAdmin }) },
+      { path: "/api/v1/wallet", body: { balance_credits: opts.balance, entries: [] } },
+      { path: "/api/v1/admin/members/", body: [{ user_id: THEM, full_name: "Naledi Khumalo", balance_credits: 500 }] },
+      { path: "/api/v1/schedule", body: DAY },
+    ]);
+    renderPage(<SchedulePage />);
+  }
+
+  it("gives a short member a control to top up, not only advice to", async () => {
+    open({ isAdmin: false, balance: 20 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    await waitFor(() => expect(modal).toHaveTextContent(/That's more than you have/));
+    // The finding, measured: "Links inside the modal: zero."
+    expect(within(modal).getByRole("button", { name: "Top up" })).toBeInTheDocument();
+    expect(within(modal).getByRole("link", { name: "Top up" })).toHaveAttribute("href", "/wallet/topup");
+  });
+
+  it("tells a short member how far short they are, not what a refused booking would have left", async () => {
+    open({ isAdmin: false, balance: 20 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    await waitFor(() => expect(modal).toHaveTextContent(/That's more than you have/));
+    expect(modal).toHaveTextContent("Balance now");
+    expect(modal).toHaveTextContent("20.00 cr");
+    expect(modal).toHaveTextContent("Short by");
+    expect(modal).toHaveTextContent("30.00 cr");
+    // The hypothetical the member had no way to recognise as one.
+    expect(modal).not.toHaveTextContent("Balance after");
+    expect(modal).not.toHaveTextContent("-30.00 cr");
+  });
+
+  /** The fixture, varied: a member who CAN afford it still gets §5's six figures. */
+  it("still shows the balance a booking will leave when the booking can happen", async () => {
+    open({ isAdmin: false, balance: 200 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    await waitFor(() => expect(modal).toHaveTextContent("Balance after"));
+    expect(modal).toHaveTextContent("150.00 cr");
+    expect(modal).not.toHaveTextContent("Short by");
+    expect(within(modal).queryByRole("button", { name: "Top up" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeEnabled();
+  });
+
+  it("opens an admin on the member they are booking for, not on the desk's empty wallet", async () => {
+    open({ isAdmin: true, balance: 0 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    // Every slot used to open on "Balance now 0.00 cr · Balance after -50.00 cr" and
+    // "That's more than you have", with the Book button disabled, before the admin had done
+    // anything at all.
+    expect(screen.getByLabelText("Book this as")).toHaveValue("member");
+    expect(modal).not.toHaveTextContent(/That's more than you have/);
+    expect(within(modal).queryByRole("button", { name: "Top up" })).not.toBeInTheDocument();
+    // The member picker is there and nothing is chosen, so Book waits rather than refuses.
+    expect(screen.getByLabelText("Member")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeDisabled();
+
+    // …and "My own booking" is still reachable for an admin who does play.
+    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "self" } });
+    await waitFor(() => expect(modal).toHaveTextContent(/That's more than you have/));
+  });
+
+  it("opens a member on their own booking — the default only moves for an admin", async () => {
+    open({ isAdmin: false, balance: 200 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    expect(screen.queryByLabelText("Book this as")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeEnabled();
+  });
+});
+
+/**
+ * N-F6 — 44 green, clickable "Available" cells a day that a Regular member could not book.
+ *
+ * <p>
+ * The finder counted them on 2026-09-10: every cell between 16:00 and 19:00 rendered with text
+ * "Available", background `rgb(220, 252, 231)` — the same green as a bookable slot — `cursor:
+ * pointer`, `disabled = false`, and `aria-label="Book Court 2 at 17:00 for 50.00 cr"`. Clicking
+ * one opened the confirmation, which quoted court, time, cost, balance now and balance after,
+ * as if the booking were going to happen; the refusal came only after Confirm. feature-spec §5
+ * defines `available` as "green, clickable", so roughly a quarter of the club's day was
+ * advertised in the one colour the grid uses for "you can have this" and then taken away one
+ * modal at a time.
+ * </p>
+ *
+ * <p>
+ * Driven through the page rather than through `peakRestricted` alone, because the arithmetic
+ * being right is not the same as the cell being drawn — and the assertions are on the aria
+ * labels, which are what a member tabbing the grid actually gets.
+ * </p>
+ */
+describe("Schedule — peak-hour slots a member cannot book are not offered as if they could", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const COURT = "11111111-1111-1111-1111-111111111111";
+  const DATE = "2030-09-09";
+
+  const PEAK_DAY = {
+    date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
+    dayStartMinute: 7 * 60, dayEndMinute: 20 * 60, advanceBookingDays: 14,
+    penaltyPct: 30, penaltyWindowMinutes: 15,
+    peakStartMinute: 16 * 60, peakEndMinute: 19 * 60,
+    peakAdvanceHoursForRegular: 1,
+    viewerMayBookPeak: false,
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    slots: [] as unknown[],
+  };
+
+  function openDay(day: unknown) {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { balance_credits: 1635, entries: [] } },
+      { path: "/api/v1/schedule", body: day },
+    ]);
+    renderPage(<SchedulePage />);
+  }
+
+  it("draws a peak cell as reserved rather than as an offer a click would withdraw", async () => {
+    openDay(PEAK_DAY);
+    await screen.findByLabelText(/Court 1 at 07:00/);
+
+    // The cell that used to carry "Book Court 1 at 17:00 for 50.00 cr" and open a priced modal.
+    expect(screen.queryByRole("button", { name: /^Book Court 1 at 17:00/ })).not.toBeInTheDocument();
+    const cell = screen.getByLabelText(/Court 1 at 17:00 — reserved for league and senior members/);
+    expect(cell).toBeInTheDocument();
+    // Inert, like `out_of_hours`: rendered so the member can see the slot exists, not clickable.
+    expect(cell.tagName).not.toBe("BUTTON");
+  });
+
+  it("leaves every cell outside the window bookable, so it is a rule and not a blanked grid", async () => {
+    openDay(PEAK_DAY);
+
+    // [16:00, 19:00) on the slot's start — the same half-open window CheckPeakHoursRule uses.
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 15:45 for 50\.00 cr/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Book Court 1 at 19:00 for 50\.00 cr/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Book Court 1 at 18:45/ })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The fixture, varied on the one field that decides it. Everything above would pass just as
+   * well if the grid greyed peak cells out for everybody — which would stop the club booking
+   * its own league night (A.6/A.11: "admin always bypasses caps and peak-hour rules").
+   */
+  it("offers the same cells to a viewer the rule never refuses", async () => {
+    openDay({ ...PEAK_DAY, viewerMayBookPeak: true });
+
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00 for 50\.00 cr/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/reserved for league and senior members/)).not.toBeInTheDocument();
+  });
+
+  /** And an older payload that carries none of it must offer everything, not hide everything. */
+  it("offers the whole day when the payload says nothing about the rule", async () => {
+    const { peakStartMinute, peakEndMinute, peakAdvanceHoursForRegular, viewerMayBookPeak, ...bare } = PEAK_DAY;
+    void peakStartMinute; void peakEndMinute; void peakAdvanceHoursForRegular; void viewerMayBookPeak;
+    openDay(bare);
+
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00 for 50\.00 cr/ })).toBeInTheDocument();
   });
 });
