@@ -303,3 +303,96 @@ describe("Top-up status — when the club cannot be reached", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * K-F6 — a 404 is not an outage.
+ *
+ * <p>
+ * <code>GET /credit/topup/{id}</code> answers <code>Results.NotFound()</code> for an id that
+ * is not this member's, and the page's bare <code>catch</code> put all of it on the
+ * unreachable-club branch: "We couldn't reach the club to check on this payment … we'll email
+ * you either way", with a Check-again button. Every clause of that is wrong here. The club
+ * answered. Nothing will email, because <code>NotifyNotCompletedAsync</code> mails against a
+ * <code>PendingTopup</code> row and there isn't one. And Check again re-asks a question that
+ * has already been answered, so the member can press it for ever.
+ * </p>
+ *
+ * <p>
+ * A member reading this screen is looking for money. What they are owed is a definite
+ * sentence and two things they can actually do — neither of which is a retry.
+ * </p>
+ */
+describe("Top-up status — a top-up that does not exist", () => {
+  const ID = "11111111-2222-3333-4444-555555555555";
+
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", class {
+      close() {}
+      addEventListener() {}
+      removeEventListener() {}
+    } as unknown as typeof EventSource);
+  });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  /** `status` drives the answer; the API returns an EMPTY body with its 404, as it really does. */
+  function show(status: number, body: unknown = "") {
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: `/api/v1/credit/topup/${ID}`, status, body },
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    ]);
+    renderPage(
+      <BalanceProvider>
+        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+      </BalanceProvider>,
+      { initialEntries: [`/wallet/topup/${ID}`] },
+    );
+    return stub;
+  }
+
+  it("says the top-up cannot be found, rather than blaming the connection", async () => {
+    show(404);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/We can't find this top-up on your account/);
+    expect(alert).toHaveTextContent(/nothing has been charged for it/);
+
+    // The three clauses that were wrong, each one named.
+    expect(alert).not.toHaveTextContent(/couldn't reach the club/i);
+    expect(alert).not.toHaveTextContent(/email you either way/i);
+    expect(screen.queryByRole("button", { name: "Check again" })).not.toBeInTheDocument();
+  });
+
+  it("offers the two things a member can actually do about it", async () => {
+    show(404);
+    await screen.findByRole("alert");
+
+    // Not a dead end and not a retry: the wallet is where the credits either are or aren't.
+    expect(screen.getByRole("button", { name: "View wallet" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Top up" })).toBeInTheDocument();
+  });
+
+  it("stops asking, because the answer will not change", async () => {
+    const stub = show(404);
+    await screen.findByRole("alert");
+
+    await new Promise((r) => setTimeout(r, 60));
+    expect(stub.calls.filter((c) => c.path.startsWith(`/api/v1/credit/topup/${ID}`))).toHaveLength(1);
+  });
+
+  /**
+   * The fixture, varied. Every assertion above would also pass if the page simply showed the
+   * not-found screen for every failure, which would be the same defect with the sentences
+   * swapped — so a real outage has to still get the outage screen.
+   */
+  it("still treats a 500 as an outage, with its retry and its email promise intact", async () => {
+    show(500, { error: "boom" });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/couldn't reach the club/i);
+    expect(alert).toHaveTextContent(/we'll email you either way/);
+    expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
+    expect(screen.queryByText(/We can't find this top-up/)).not.toBeInTheDocument();
+  });
+});
