@@ -63,6 +63,19 @@ constexpr ErrorLines kErrors[] = {
     // (AuthPolicy::afterWalkUp ignores a refusal), so the honest value costs
     // nothing, and a `true` here would be a claim the API never made.
     {"minutes_out_of_range", "TOO LONG", "TRY LESS TIME", false},
+    // The API sold the court, could not open it, and UNDID the sale — the money is
+    // back and the slot is released before this answer is written
+    // (BookingService.VoidUnstartedWalkUpAsync). So the court is FREE, and until
+    // 2026-09-07 this fell through byStatus(409) to "COURT NOT FREE / SCAN TO START",
+    // which was true while the refused booking still sat on the court and became false
+    // the moment the undo landed. A member who scans again now succeeds, and the mail
+    // the API sends for this ("Nothing was bought … Try again at the box") said so
+    // while the glass in front of them said the opposite.
+    //
+    // `recognised` is TRUE, unlike the two rows above it: this refusal is produced
+    // after the token resolved and after a booking was committed for that member, so
+    // it is a verdict about somebody the API knows.
+    {"activation_refused", "COULD NOT START", "SCAN TO RETRY", true},
 };
 
 /// The one refusal on this path whose second line is not fixed text.

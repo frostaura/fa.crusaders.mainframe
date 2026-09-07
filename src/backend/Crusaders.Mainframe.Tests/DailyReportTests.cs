@@ -70,6 +70,9 @@ public sealed class DailyReportTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Jwt(tenantId, slug, adminId));
 
+        // `to` is a day marker, so this covers the whole of 6 March. Nothing is seeded on
+        // it, which is why this test is insensitive to that end of the window — the
+        // exclusive-midnight shape is pinned in both directions by ReportWindowTests.
         var response = await client.GetAsync(
             "/api/v1/admin/reports/daily?from=2026-03-01T00:00:00Z&to=2026-03-06T00:00:00Z");
         response.EnsureSuccessStatusCode();
@@ -106,6 +109,9 @@ public sealed class DailyReportTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Jwt(tenantId, slug, adminId));
 
+        // `to` is a day marker, so this covers the whole of 6 March. Nothing is seeded on
+        // it, which is why this test is insensitive to that end of the window — the
+        // exclusive-midnight shape is pinned in both directions by ReportWindowTests.
         var response = await client.GetAsync(
             "/api/v1/admin/reports/daily?from=2026-03-01T00:00:00Z&to=2026-03-06T00:00:00Z");
         response.EnsureSuccessStatusCode();

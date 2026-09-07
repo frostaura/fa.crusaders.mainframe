@@ -573,19 +573,40 @@ public sealed class BookingService
         // one outcome.
         try
         {
-            await _ledger.PostAsync(new LedgerPosting(
-                UserId: userId,
-                // A walk-up is light time bought at the court, not a reservation, and the
-                // enum member exists to tell the two apart in reporting. Nothing had ever
-                // posted it: every walk-up landed as a BookingCharge, so a
-                // Where(Type == LightsPurchase) report was guaranteed to be empty. Both are
-                // in LedgerEntryTypes.Spend, so no bucket total moves.
-                Type: spec.IsWalkUp ? LedgerEntryType.LightsPurchase : LedgerEntryType.BookingCharge,
-                AmountCredits: -spec.TotalCost,
-                ActorUserId: actorId,
-                RelatedBookingId: booking.Id,
-                Reason: $"Booking {court.Name} {SlotLabel(booking, settings)}",
-                ExternalReference: spec.ExternalReference), ct);
+            // I10 — a posting of zero credits is not written. A court priced at zero
+            // charges nothing, and a 0.00 row moves nothing while reading on the member's
+            // statement as a movement that did not happen. The booking row still has to
+            // flush here rather than at the SaveChanges below, because the overlap
+            // constraint is what decides the slot race and the catch for it is on this try.
+            //
+            // The walk-up is the ONE exception, and it is not a licence: its
+            // ExternalReference is the box's idempotency key, and the row under it is the
+            // only record the purchase has. Drop the row on a free court and a box retrying
+            // a lost response finds nothing to replay, books again, loses the overlap race
+            // and is told COURT NOT FREE about a court the member has already bought.
+            // Nothing else is ever posted under that reference, so I10's "burns its
+            // idempotency ExternalReference" — the harm the invariant is named for — does
+            // not arise. Written into I10 rather than left as a local exception.
+            if (spec.TotalCost == 0m && spec.ExternalReference is null)
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+            else
+            {
+                await _ledger.PostAsync(new LedgerPosting(
+                    UserId: userId,
+                    // A walk-up is light time bought at the court, not a reservation, and
+                    // the enum member exists to tell the two apart in reporting. Nothing
+                    // had ever posted it: every walk-up landed as a BookingCharge, so a
+                    // Where(Type == LightsPurchase) report was guaranteed to be empty. Both
+                    // are in LedgerEntryTypes.Spend, so no bucket total moves.
+                    Type: spec.IsWalkUp ? LedgerEntryType.LightsPurchase : LedgerEntryType.BookingCharge,
+                    AmountCredits: -spec.TotalCost,
+                    ActorUserId: actorId,
+                    RelatedBookingId: booking.Id,
+                    Reason: $"Booking {court.Name} {SlotLabel(booking, settings)}",
+                    ExternalReference: spec.ExternalReference), ct);
+            }
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
         {
