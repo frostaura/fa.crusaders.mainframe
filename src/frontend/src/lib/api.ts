@@ -132,6 +132,39 @@ let unauthorizedHandler: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: (() => void) | null) { unauthorizedHandler = fn; }
 
 /**
+ * Told whenever the API refuses a call with <code>403 password_change_required</code>.
+ *
+ * <p>
+ * L-F4. An admin pressing "Reset password" flips the flag on the server, and
+ * <code>PasswordChangeGate</code> then refuses that member's session everywhere but the
+ * change-password route. The client only ever learned about the flag from <code>whoami</code>
+ * at boot, so an SPA route change after the flip rendered the new page against a stale
+ * context and the 403s landed in each screen's own <code>catch</code>. A finder watched
+ * Reports fill with em-dashes — <code>TOP-UPS — · SPENT — · TIME ON COURT —</code> — beside a
+ * stale "-40.00 cr" in the header and a Download wallet CSV button, with no banner, no toast
+ * and nothing in <code>[role=status],[role=alert]</code> at any sample. Only a full page load
+ * re-read <code>whoami</code> and did the right thing.
+ * </p>
+ *
+ * <p>
+ * A single handler, wired once by <code>AuthProvider</code>, is the same shape as
+ * {@link setUnauthorizedHandler} above and for the same reason: every screen makes requests,
+ * and none of them should have to know about this rule.
+ * </p>
+ */
+let passwordChangeRequiredHandler: (() => void) | null = null;
+export function setPasswordChangeRequiredHandler(fn: (() => void) | null) { passwordChangeRequiredHandler = fn; }
+
+/** The stable snake_case `error` token in a failure body, or null. */
+function bodyErrorCode(payload: unknown): string | null {
+  if (payload && typeof payload === "object" && "error" in payload) {
+    const value = (payload as { error: unknown }).error;
+    if (typeof value === "string") return value;
+  }
+  return null;
+}
+
+/**
  * Does this answer mean the browser is no longer carrying a session?
  *
  * <p>
@@ -178,6 +211,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     // AuthProvider say so and redirect to /login.
     tokenStore.clear();
     unauthorizedHandler?.();
+  }
+  // The forced-password-change gate, which no screen should have to recognise for itself.
+  if (res.status === 403 && bodyErrorCode(payload) === "password_change_required") {
+    passwordChangeRequiredHandler?.();
   }
   if (!res.ok) throw new ApiError(res.status, payload);
   return payload as T;

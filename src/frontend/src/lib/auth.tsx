@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, endpoints, setUnauthorizedHandler, TOKEN_KEY, tokenStore } from "./api";
+import { ApiError, endpoints, setPasswordChangeRequiredHandler, setUnauthorizedHandler, TOKEN_KEY, tokenStore } from "./api";
 import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
 import { clearOfflineCache } from "./pwa";
 
@@ -141,6 +141,35 @@ function useCrossTabSessionEnd(statusRef: { current: AuthState["status"] }, endS
   }, [statusRef, endSession]);
 }
 
+/**
+ * An admin reset this member's password while their session was open.
+ *
+ * <p>
+ * L-F4. The reset arms `PasswordChangeGate`, which then refuses that session everywhere but
+ * the change-password route with `403 password_change_required`. This context only ever
+ * learned the flag from `whoami` at boot, so an in-app route change afterwards rendered the
+ * new screen against a stale context: a finder clicked Reports and got
+ * `TOP-UPS — · SPENT — · REFUNDS (NET) — · TIME ON COURT —`, a stale "−40.00 cr" still in the
+ * header, a Download wallet CSV button still offered, and no message of any kind — two 403s
+ * swallowed into an empty state. Only a full page load re-read `whoami` and did the right
+ * thing, which is what made it look like a page bug rather than a context one.
+ * </p>
+ *
+ * <p>
+ * Taking the refusal itself as evidence about the flag puts `RequireAuth` back in charge: it
+ * routes to /change-password, where the screen says what happened and offers the one thing
+ * that clears it. Its own hook for the same reason as {@link useCrossTabSessionEnd} — the
+ * provider is against the complexity gate's length limit, and lizard only counts a line as
+ * gone when it moves to another function.
+ * </p>
+ */
+function usePasswordChangeRequired(arm: () => void) {
+  useEffect(() => {
+    setPasswordChangeRequiredHandler(arm);
+    return () => setPasswordChangeRequiredHandler(null);
+  }, [arm]);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -230,6 +259,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     return () => setUnauthorizedHandler(null);
   }, []);
+
+  const armPasswordChange = useCallback(() => {
+    setState((s) => (s.status === "authenticated" && !s.mustChangePassword
+      ? { ...s, mustChangePassword: true }
+      : s));
+  }, []);
+  usePasswordChangeRequired(armPasswordChange);
 
   useCrossTabSessionEnd(statusRef, endSession);
 
