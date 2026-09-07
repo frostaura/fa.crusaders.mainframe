@@ -2225,6 +2225,107 @@ public sealed class DeviceEventHttpTests
         Assert.Empty(await AuditAsync(factory, box.TenantId, "booking.cancelled_lights_adjusted"));
     }
 
+    // ---- the box can say the club is shut (finding M-F5) -----------------------------
+
+    /// <summary>
+    /// Closes the club around <b>now</b>, deterministically at every hour of the day.
+    ///
+    /// <para>
+    /// A fixed window would be open for part of the day and shut for the rest, which is the
+    /// wall-clock flake <c>memory/gotchas.md</c> records twice over. The window is chosen
+    /// from the current minute-of-day instead — late in the day picks the first hour,
+    /// early in the day picks the last — so it never contains now and never wraps midnight,
+    /// which the operating-hours rule cannot express anyway. Returns what the API should
+    /// quote back.
+    /// </para>
+    /// </summary>
+    private static async Task<(string OpensAt, string ClosesAt)> CloseTheClubAsync(TestWebAppFactory factory, Box box)
+    {
+        var minuteOfDay = (DateTimeOffset.UtcNow.Hour * 60) + DateTimeOffset.UtcNow.Minute;
+        var (open, close) = minuteOfDay >= 720 ? (0, 60) : (1380, 1440);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var row = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(t => t.TenantId == box.TenantId);
+        row.SettingsJson = row.SettingsJson.TrimEnd('}') + $",\"day_start_minute\":{open},\"day_end_minute\":{close}}}";
+        await db.SaveChangesAsync();
+
+        return ($"{open / 60:D2}:{open % 60:D2}", $"{close / 60:D2}:{close % 60:D2}");
+    }
+
+    /// <summary>
+    /// A walk-up at a shut club names the hours. It used to collapse into the catch-all
+    /// <c>walk_up_refused</c>, throwing away the two times the member needs — and, because
+    /// that code is in no firmware table either, painting SEE THE DESK at a locked club
+    /// after hours, when there is no desk. The Settings page promises the API enforces these
+    /// hours; this is the half of that promise the box could not keep.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_walk_up_at_a_closed_club_is_refused_with_the_opening_hours()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var (opensAt, closesAt) = await CloseTheClubAsync(factory, box);
+
+        var response = await factory.CreateClient().SendAsync(
+            FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: 30)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("club_closed", body.GetProperty("error").GetString());
+        Assert.Equal(opensAt, body.GetProperty("opens_at").GetString());
+        Assert.Equal(closesAt, body.GetProperty("closes_at").GetString());
+
+        // Refused, so nothing was sold and nothing was charged.
+        Assert.Equal(200m, await BalanceAsync(factory, box.MemberId));
+    }
+
+    // ---- the club's walk-up cap reaches the box (finding M-F1) ------------------------
+
+    /// <summary>
+    /// The heartbeat carries the longest walk-up this club will sell, so the box is never
+    /// advertising a minute button the API is about to refuse. A club that lowered its cap
+    /// to 20 left every box showing 15/30/45/60 and three of the four pressing through to
+    /// <c>minutes_out_of_range</c> — a configuration change the member got blamed for. The
+    /// number is the same bound the walk-up applies, <c>min(club cap, relay hard cap)</c>,
+    /// so the two cannot disagree.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(null, RelayHardCap.Minutes)]
+    [InlineData(20, 20)]
+    [InlineData(60, 60)]
+    public async Task Heartbeat_carries_the_clubs_walk_up_maximum(int? configured, int expected)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+
+        if (configured is { } cap)
+        {
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(t => t.TenantId == box.TenantId);
+            row.SettingsJson = row.SettingsJson.TrimEnd('}') + $",\"walk_up_max_minutes\":{cap}}}";
+            await db.SaveChangesAsync();
+        }
+
+        var body = await HeartbeatAsync(factory, box);
+
+        Assert.Equal(expected, body.GetProperty("config").GetProperty("walk_up_max_minutes").GetInt32());
+
+        // And it is the number the walk-up itself enforces, not a second opinion: one more
+        // minute than the advertised cap is refused with that same figure.
+        var refusal = await factory.CreateClient().SendAsync(
+            FromBox(box, WalkUpPath, WalkUp(await QrCodeAsync(factory, box), minutes: expected + 1)));
+        Assert.Equal(HttpStatusCode.BadRequest, refusal.StatusCode);
+        var refused = await refusal.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("minutes_out_of_range", refused.GetProperty("error").GetString());
+        Assert.Equal(expected, refused.GetProperty("max_minutes").GetInt32());
+    }
+
     // ---- a working box is a reporting box (finding L-F5) -----------------------------
 
     /// <summary>Backdates the box's last-seen, as a silence of <paramref name="minutes"/> would.</summary>

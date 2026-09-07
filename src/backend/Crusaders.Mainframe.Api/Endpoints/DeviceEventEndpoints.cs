@@ -943,6 +943,26 @@ public static class DeviceEventEndpoints
 
             BookingResult.SlotTaken => Results.Conflict(new { error = "court_in_use" }),
 
+            // The club is shut, and the box can say so (finding M-F5). This collapsed into
+            // the catch-all below, which threw away the two times the member actually needs
+            // — at a locked club, after hours, in front of a screen reading SEE THE DESK
+            // when there is no desk. Every other refusal on this path has a purpose-written
+            // screen; this is the one the Settings page promises ("a walk-up at the box is
+            // cut short at closing") and could not deliver the other half of.
+            //
+            // `club_closed` rather than the app route's `out_of_hours`: that one means "the
+            // slot you picked falls outside opening hours" and can be answered by picking
+            // another slot, while this one means "the club is shut right now" and cannot.
+            // 400, like the catch-all it replaces, so a firmware build that does not yet
+            // know the code still falls through byStatus(400) to the screen it shows today
+            // rather than to 409's COURT NOT FREE, which would be a new lie.
+            BookingResult.OutOfHours h => Results.BadRequest(new
+            {
+                error = "club_closed",
+                opens_at = h.OpensAt,
+                closes_at = h.ClosesAt,
+            }),
+
             _ => Results.BadRequest(new { error = "walk_up_refused" }),
         };
     }
