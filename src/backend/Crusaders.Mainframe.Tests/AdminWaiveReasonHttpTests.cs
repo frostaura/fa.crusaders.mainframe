@@ -258,9 +258,11 @@ public sealed class AdminWaiveReasonHttpTests
     /// <para>
     /// The field was briefly gated on the derived waiver, so an admin who cancelled a court
     /// and said why left a row reading <c>{"waived": false, "waive_reason": null}</c> and a
-    /// mail with no reason line in it at all. <c>bookings.cancellation_reason</c> is a mapped,
-    /// migrated column that no service writes, so this row is the whole of the club's memory
-    /// of why it cancelled somebody's booking; a gate here does not tidy it, it erases it.
+    /// mail with no reason line in it at all. <c>bookings.cancellation_reason</c> is no help
+    /// there — it is the displacement marker the resale path writes <c>ResoldTailRefunded</c>
+    /// into and the money path reads back (<c>settlement-model.md</c> I5 / S8), and this path
+    /// never writes it — so this row is the whole of the club's memory of why it cancelled
+    /// somebody's booking; a gate here does not tidy it, it erases it.
     /// </para>
     ///
     /// <para>

@@ -483,4 +483,70 @@ describe("CourtCode", () => {
     expect(screen.queryByLabelText("Walk up / pay for someone")).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent(/membership is suspended/i);
   });
+
+  /**
+   * The rate limit, said in the words of the screen it lands on.
+   *
+   * <p>
+   * `/me/qr/generate` sits behind the auth rate-limit bucket, which is shared with login,
+   * and the barred card's button has no pacing guard of its own — so a member pressing
+   * "Check again" while the desk sorts out their membership is exactly who reaches a 429.
+   * Making the error line reachable on this card made that branch reachable with it, and
+   * its sentence was "Too many refreshes. Give it a moment and try again." on a card that
+   * shows no code to refresh. "shows no code and no walk-up offer to a member the club has
+   * barred" already asserts no control named Refresh exists on that card — but only in the
+   * first-render state, which the 429 branch is not. So the wording and the absence are
+   * re-asserted here together.
+   * </p>
+   *
+   * <p>
+   * Both halves are asserted, because either alone would pass on the defect: the sentence
+   * this card should say, and the absence of the one that belongs to the code card.
+   * </p>
+   */
+  it("names the control it has when checking again is rate-limited, and never offers a refresh", async () => {
+    stubFetch([{
+      method: "POST",
+      path: "/api/v1/me/qr/generate",
+      // `body` is ignored while `sequence` is set; the route type still wants one.
+      body: {},
+      status: [403, 429],
+      sequence: [{ error: "member_suspended" }, { error: "rate_limited" }],
+    }]);
+
+    renderPage(<CourtCodePage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/membership is suspended/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /Check again/ }));
+
+    expect(await screen.findByText(/That's a lot of checking at once/)).toBeInTheDocument();
+    expect(screen.getByText(/Give it a moment, then check again/)).toBeInTheDocument();
+    // The code card's sentence, on a card with no code and no Refresh.
+    expect(screen.queryByText(/Too many refreshes/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Refresh/ })).toBeNull();
+    // Still a network failure, not the club changing its mind.
+    expect(screen.getByRole("alert")).toHaveTextContent(/membership is suspended/i);
+  });
+
+  /**
+   * The code card keeps its own sentence. The fix above splits one string into two, so the
+   * half that was already right has to be held in place as well.
+   */
+  it("still says too many refreshes when the code card's own Refresh is rate-limited", async () => {
+    stubFetch([{
+      method: "POST",
+      path: "/api/v1/me/qr/generate",
+      body: {},
+      status: [200, 429],
+      sequence: [IDENT, { error: "rate_limited" }],
+    }]);
+
+    renderPage(<CourtCodePage />);
+    expect(await screen.findByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh/ }));
+
+    expect(await screen.findByText(/Too many refreshes/)).toBeInTheDocument();
+    expect(screen.queryByText(/lot of checking at once/)).toBeNull();
+  });
 });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QrCode as QrIcon, RefreshCw } from "lucide-react";
-import { ApiError, endpoints, type MyQrCode, type MyQrKind } from "../lib/api";
-import { describeCourtCodeRefusal } from "../lib/bookingErrors";
+import { endpoints, type MyQrCode, type MyQrKind } from "../lib/api";
+import { describeCourtCodeFetchFailure, describeCourtCodeRefusal } from "../lib/bookingErrors";
 import { encodeQr, qrPath } from "../lib/qr";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
@@ -257,6 +257,9 @@ export default function CourtCodePage() {
   const [walkUp, setWalkUp] = useState(false);
   /** Barred: the page stops asking by itself. The member still can — see BarredCard. */
   const [barred, setBarred] = useState<string | null>(null);
+  /** `barred`, read inside the fetch — state is a frame stale there, and which card is on
+   *  screen decides how a failure is worded. See `describeCourtCodeFetchFailure`. */
+  const barredNow = useRef<string | null>(null);
   const lastFetchAt = useRef(0);
   const inflight = useRef(false);
   /** The code a pre-fetch was last made for, so the same code is not pre-fetched over and over as it runs out. */
@@ -300,21 +303,20 @@ export default function CourtCodePage() {
       // A code in hand is the club saying the bar is lifted; without this the page would
       // render the suspension sentence over a perfectly good code. The dead end, other side.
       setBarred(null);
+      barredNow.current = null;
     } catch (e) {
       // Surfaced on BOTH modes. A pre-fetch is silent about every other failure, but a
       // member suspended while this page was open must not go on holding a dead code.
       const refused = describeCourtCodeRefusal(e);
       if (refused !== null) {
         setBarred(refused);
+        barredNow.current = refused;
         setQr(null);
         setDeadline(null);
         setError(null);
       } else if (mode === "replace") {
-        setError(
-          e instanceof ApiError && e.status === 429
-            ? "Too many refreshes. Give it a moment and try again."
-            : "Couldn't get a code. Check your connection and try again.",
-        );
+        // Which card is asking decides the wording: see describeCourtCodeFetchFailure.
+        setError(describeCourtCodeFetchFailure(e, barredNow.current !== null ? "barred" : "code"));
       }
     } finally {
       inflight.current = false;

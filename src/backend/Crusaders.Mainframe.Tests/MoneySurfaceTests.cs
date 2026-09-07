@@ -589,11 +589,13 @@ public class MoneySurfaceTests
     /// </para>
     ///
     /// <para>
-    /// Gated on the waiver it did not survive, and the loss was total rather than partial:
-    /// <c>Booking.CancellationReason</c> is a mapped, migrated column that no service writes,
-    /// so the audit row is the only record there is, and the mail was the member's only
-    /// notice. A club that cancelled a court mid-session then held no answer to "why?" at
-    /// all.
+    /// Gated on the waiver it did not survive, and the loss was total rather than partial.
+    /// <c>Booking.CancellationReason</c> is not a second copy of the desk's words: it is the
+    /// displacement marker the resale path writes <c>ResoldTailRefunded</c> into and the money
+    /// path reads back as a discriminator (<c>settlement-model.md</c> I5 / S8), and this
+    /// cancellation path never writes it. So the audit row is the only record there is, and
+    /// the mail was the member's only notice. A club that cancelled a court mid-session then
+    /// held no answer to "why?" at all.
     /// </para>
     /// </summary>
     [Fact]
