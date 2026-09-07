@@ -772,7 +772,16 @@ void test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided
       {409U, "{\"error\":\"purchase_ended\"}", "PURCHASE ENDED", true, true},
       {400U, "{\"error\":\"not_recognised\"}", "SEE THE DESK", true, false},
       {400U, "{\"error\":\"court_not_on_device\"}", "SEE THE DESK", true, false},
-      {400U, "{\"error\":\"minutes_out_of_range\"}", "SEE THE DESK", true, false},
+      // Both of these read SEE THE DESK until 2026-09-07, and both were wrong in a
+      // way that stranded the member. The club lowered its walk-up maximum below
+      // what this button grants, so a SHORTER button works and the desk is not the
+      // problem (M-F1); recognised stays false because RefuseFields runs before the
+      // API has resolved the token, exactly as for court_not_on_device.
+      {400U, "{\"error\":\"minutes_out_of_range\",\"max_minutes\":20}", "TOO LONG", true, false},
+      // And the club is shut, at a locked door, with nobody at the desk to see
+      // (M-F5). Recognised: club_closed is produced past the token resolution.
+      {400U, "{\"error\":\"club_closed\",\"opens_at\":\"06:00\",\"closes_at\":\"22:00\"}", "CLUB CLOSED",
+       true, true},
       {0U, "", "NO CONNECTION", false, false},
       {503U, "", "SEE THE DESK", false, false},
       {429U, "", "SEE THE DESK", false, false},
@@ -790,6 +799,46 @@ void test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided
   const char ended[] = "{\"error\":\"purchase_ended\",\"booking_id\":\"b1\"}";
   TEST_ASSERT_EQUAL_STRING("SCAN TO START",
                            bridgelogic::onWalkUpResponse(409U, ended, len(ended), 0U, 30U).outcome.line2);
+
+  // The second lines of the two 400s, which are the half that tells the member what
+  // to do instead of standing there.
+  const char tooLong[] = "{\"error\":\"minutes_out_of_range\",\"max_minutes\":20}";
+  TEST_ASSERT_EQUAL_STRING("TRY LESS TIME",
+                           bridgelogic::onWalkUpResponse(400U, tooLong, len(tooLong), 0U, 60U).outcome.line2);
+}
+
+void test_walkup_a_closed_club_puts_its_opening_time_on_the_glass() {
+  // The finding, in one assertion: `club_closed` used to fall through byStatus(400)
+  // and paint SEE THE DESK — at a locked club, after hours, when there is no desk.
+  // The API has been sending the club's own opening time since the refusal was given
+  // its own code; nothing read it.
+  const char shut[] = "{\"error\":\"club_closed\",\"opens_at\":\"06:00\",\"closes_at\":\"22:00\"}";
+  const bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(400U, shut, len(shut), 1U, 30U);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+  TEST_ASSERT_TRUE(r.decided);
+  TEST_ASSERT_EQUAL_STRING("CLUB CLOSED", r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("OPENS 06:00", r.outcome.line2);
+
+  // A club that opens at a two-digit hour is the ordinary case, and the line is
+  // sixteen characters wide, so this cannot be allowed to clip into "OPENS 1".
+  const char later[] = "{\"error\":\"club_closed\",\"opens_at\":\"14:30\",\"closes_at\":\"23:00\"}";
+  TEST_ASSERT_EQUAL_STRING("OPENS 14:30",
+                           bridgelogic::onWalkUpResponse(400U, later, len(later), 1U, 30U).outcome.line2);
+
+  // An API that sends the code without the time — an older build, or a club whose
+  // hours could not be resolved. The first line is the half that explains why
+  // nothing happened, and it still lands; the second falls back rather than
+  // reading "OPENS " with nothing after it.
+  const char bare[] = "{\"error\":\"club_closed\"}";
+  const bridgelogic::WalkUpResult b = bridgelogic::onWalkUpResponse(400U, bare, len(bare), 1U, 30U);
+  TEST_ASSERT_EQUAL_STRING("CLUB CLOSED", b.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("TRY LATER", b.outcome.line2);
+
+  // Whatever the club sends, it has to fit the glass.
+  const char silly[] = "{\"error\":\"club_closed\",\"opens_at\":\"06:00 tomorrow morning\"}";
+  const bridgelogic::WalkUpResult s = bridgelogic::onWalkUpResponse(400U, silly, len(silly), 1U, 30U);
+  TEST_ASSERT_TRUE(strlen(s.outcome.line1) <= court::kLineLen);
+  TEST_ASSERT_TRUE(strlen(s.outcome.line2) <= court::kLineLen);
 }
 
 void test_walkup_recognised_comes_from_the_body_never_from_the_status() {
@@ -2312,6 +2361,7 @@ int main(int, char**) {
   RUN_TEST(test_walkup_nonce_is_reused_only_for_the_same_undecided_purchase);
   RUN_TEST(test_walkup_a_grant_and_a_replayed_grant_light_the_court_identically);
   RUN_TEST(test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided);
+  RUN_TEST(test_walkup_a_closed_club_puts_its_opening_time_on_the_glass);
   RUN_TEST(test_walkup_recognised_comes_from_the_body_never_from_the_status);
 
   RUN_TEST(test_state_mask_parses_decimal_and_refuses_everything_else);

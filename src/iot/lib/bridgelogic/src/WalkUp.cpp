@@ -48,7 +48,47 @@ constexpr ErrorLines kErrors[] = {
     {"not_recognised", "SEE THE DESK", "SCAN TO START", false},
     // A relay the heartbeat never mapped, or a court this box does not drive.
     {"court_not_on_device", "SEE THE DESK", "SCAN TO START", false},
+    // The club lowered its walk-up maximum below what this button grants. The
+    // member can act on it themselves — press a shorter button — which is the
+    // whole reason it is not SEE THE DESK: the box refuses 15/30/45/60 in turn
+    // while the panel still advertises all four, and the only sentence the glass
+    // had for it sent the member to a desk that is not the problem (M-F1).
+    //
+    // `recognised` is FALSE, and that is deliberate rather than an oversight.
+    // The refusal comes out of `RefuseFields`, which runs BEFORE the API resolves
+    // the token, so it is not a verdict about anybody — exactly like
+    // court_not_on_device beside it. Nothing on this path acts on the bit
+    // (AuthPolicy::afterWalkUp ignores a refusal), so the honest value costs
+    // nothing, and a `true` here would be a claim the API never made.
+    {"minutes_out_of_range", "TOO LONG", "TRY LESS TIME", false},
 };
+
+/// The one refusal on this path whose second line is not fixed text.
+///
+/// The API sends the club's own opening time with `club_closed`, and a member
+/// standing at a locked club after hours can act on "OPENS 06:00" and cannot act
+/// on anything else — there is no desk to see, which is what the old screen told
+/// them to do (M-F5). `opens_at` is `HH:mm` local to the club.
+///
+/// An answer with no `opens_at` still gets the first line, because "CLUB CLOSED"
+/// is the half that explains why nothing happened.
+court::Outcome clubClosed(const char* body, size_t len) {
+  char opens[12] = {};
+  char line2[court::kLineLen + 1U] = {};
+  if (devapi::json::stringField(body, len, "opens_at", opens, sizeof(opens)) && opens[0] != '\0') {
+    snprintf(line2, sizeof(line2), "OPENS %s", opens);
+  } else {
+    snprintf(line2, sizeof(line2), "%s", "TRY LATER");
+  }
+
+  court::Outcome outcome = lines("CLUB CLOSED", line2);
+  // A verdict about a member the API identified: `club_closed` is produced past
+  // the token resolution, by the booking attempt itself.
+  outcome.recognised = true;
+  return outcome;
+}
+
+constexpr char kClubClosed[] = "club_closed";
 
 /// The screen for a status whose body named no error this build knows. The
 /// status still says what a member can act on; it does not say who they are,
@@ -76,6 +116,9 @@ court::Outcome refusal(uint16_t status, const char* body, size_t len) {
   }
   char error[32] = {};
   if (devapi::json::stringField(body, len, "error", error, sizeof(error))) {
+    if (strcmp(error, kClubClosed) == 0) {
+      return clubClosed(body, len);
+    }
     for (const ErrorLines& row : kErrors) {
       if (strcmp(error, row.error) == 0) {
         court::Outcome outcome = lines(row.line1, row.line2);
