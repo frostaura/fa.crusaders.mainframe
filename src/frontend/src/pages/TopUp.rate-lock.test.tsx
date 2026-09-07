@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import TopUpPage from "./TopUp";
@@ -113,6 +114,36 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     // appearing as the next thing the member saw.
     expect(submitted.length).toBe(0);
     expect(screen.getByRole("button", { name: "Continue to PayFast" })).not.toBeDisabled();
+  });
+
+  /**
+   * The same refusal under StrictMode's mount -> cleanup -> mount.
+   *
+   * <p>
+   * The shared harness renders without it, and StrictMode's double-invoke has already
+   * produced two defects in this repo that unit tests could not see — a confirm button
+   * stuck on "Working…" and a retry button dead for the life of the tab. The re-quote
+   * writes options state from inside an error handler while the mount effect that fetched
+   * those options has run twice, which is exactly the shape that goes wrong: a second
+   * mount's fetch resolving after the refusal would put the stale 240.00 back on the
+   * screen with "nothing has been charged" still underneath it.
+   * </p>
+   */
+  it("re-quotes correctly under StrictMode's double mount", async () => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/credit/topup/options", body: LEAGUE_OPTIONS },
+      { method: "POST", path: "/api/v1/credit/topup", status: 409, body: MOVED },
+    ]);
+    renderPage(<StrictMode><TopUpPage /></StrictMode>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
+
+    expect(await screen.findByText(/R100\.00 now buys 160\.00 credits/)).toBeInTheDocument();
+    expect(screen.getByText("160.00 credits")).toBeInTheDocument();
+    expect(screen.queryByText("240.00 credits")).not.toBeInTheDocument();
+    expect(submitted.length).toBe(0);
   });
 
   it("does not turn an unrelated refusal into a re-quote", async () => {
