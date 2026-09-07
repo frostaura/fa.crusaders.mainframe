@@ -286,7 +286,7 @@ describe("Top-up — the quoted rate against the registered one", () => {
 
     // …and the member is told, in the club's own figures, what changed.
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent(/The club's rate changed while this page was open/);
+    expect(alert).toHaveTextContent(/The club changed its rate while this page was open/);
     expect(alert).toHaveTextContent("320.00 credits");
     expect(alert).toHaveTextContent("1.6 credits / R1");
     // The preview moves with it, so nothing on screen still says 480.

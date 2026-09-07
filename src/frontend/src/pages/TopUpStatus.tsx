@@ -137,34 +137,7 @@ export default function TopUpStatusPage() {
     setRound((r) => r + 1);
   };
 
-  /*
-    K-F6. A definite "no such top-up" is not an outage, and the three things this screen was
-    getting wrong all followed from treating it as one: it blamed the club's connection for
-    an answer the club had given; it promised a mail that `NotifyNotCompletedAsync` can only
-    send against a real `PendingTopup` row, so on this branch nothing would ever arrive; and
-    it offered Check again, which re-asks a question already answered and can never resolve.
-
-    What a member can actually do here is look at their wallet — the credits are either in it
-    or they are not — or start a top-up that does exist. Both are offered; neither is a retry.
-  */
-  if (missing) {
-    return (
-      <div className="max-w-md mx-auto">
-        <Card>
-          <h1 className="text-xl font-semibold mb-2">Top-up</h1>
-          <p role="alert" className="text-sm text-danger-strong">
-            We can't find this top-up on your account. The link may be wrong, or it may belong
-            to a different account — nothing has been charged for it. Your wallet shows every
-            top-up that did go through.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Link to="/wallet"><Button variant="outline">View wallet</Button></Link>
-            <Link to="/wallet/topup"><Button variant="ghost">Top up</Button></Link>
-          </div>
-        </Card>
-      </div>
-    );
-  }
+  if (missing) return <NoSuchTopUp />;
 
   /*
     A failed status request is not a dead end, and it used to be one: this branch was a bare
@@ -277,6 +250,45 @@ export default function TopUpStatusPage() {
         {s.status === "Completed" && (
           <p className="mt-3 text-sm">Your wallet has been credited. <Link to="/wallet" className="text-accent-strong hover:underline">View wallet →</Link></p>
         )}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * K-F6 — the club answered, and the answer was "there is no such top-up".
+ *
+ * <p>
+ * Three things followed from treating that 404 as an outage, and all three were wrong. It
+ * blamed the club's connection for an answer the club had given. It promised a mail that
+ * <code>NotifyNotCompletedAsync</code> can only send against a real <code>PendingTopup</code>
+ * row, so on this branch nothing would ever arrive — the one channel the screen falls back to
+ * does not exist. And it offered <b>Check again</b>, which re-asks a question already
+ * answered and can never resolve, to a member who is watching for money.
+ * </p>
+ *
+ * <p>
+ * What a member can actually do is look at their wallet — the credits are either in it or
+ * they are not — or start a top-up that does exist. Both are offered; neither is a retry.
+ * Out here as its own component because `TopUpStatusPage` is against the 200-line gate, and
+ * lizard measures a .tsx function by what it last scoped: moving code to another function is
+ * what shrinks it, extracting it into the same one is not.
+ * </p>
+ */
+function NoSuchTopUp() {
+  return (
+    <div className="max-w-md mx-auto">
+      <Card>
+        <h1 className="text-xl font-semibold mb-2">Top-up</h1>
+        <p role="alert" className="text-sm text-danger-strong">
+          We can't find this top-up on your account. The link may be wrong, or it may belong
+          to a different account — nothing has been charged for it. Your wallet shows every
+          top-up that did go through.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link to="/wallet"><Button variant="outline">View wallet</Button></Link>
+          <Link to="/wallet/topup"><Button variant="ghost">Top up</Button></Link>
+        </div>
       </Card>
     </div>
   );

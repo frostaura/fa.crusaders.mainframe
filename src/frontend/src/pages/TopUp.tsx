@@ -184,9 +184,17 @@ export default function TopUpPage() {
             )}
           </div>
 
+          {/*
+            No apostrophe in this paragraph, deliberately. lizard's .tsx lexer treats a bare
+            ' in JSX TEXT as a string-literal opener and swallows the rest of the file into
+            one anonymous function, which `make complexity` then reports at line 183 with 8
+            PARAM and a length nobody wrote. The file's other apostrophes happen to come in
+            pairs, so it resyncs; adding an odd one broke it. Same family as the bare `<`
+            trap already recorded for this parser.
+          */}
           {restated && (
             <p role="alert" className="text-sm text-warning-strong">
-              The club's rate changed while this page was open, so nothing has been sent to
+              The club changed its rate while this page was open, so nothing has been sent to
               PayFast yet. {formatZar(value)} now buys {formatCredits(restated.credits, { long: true })} at{" "}
               {formatRate(restated.rate)} credits / R1. Press Continue again to pay at that rate.
             </p>
