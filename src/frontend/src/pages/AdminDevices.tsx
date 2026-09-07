@@ -169,6 +169,44 @@ function describeCourts(courtNumbers: number[]) {
   return courtNumbers.map((n, i) => `${RELAYS[i]}: court ${n}`).join(", ");
 }
 
+/**
+ * "court 1", "courts 1 and 3", "courts 1, 2 and 3" — courts as a sentence, without the
+ * relay letters, because the consequence below is about the courts and not about which
+ * output of this particular box happens to drive them.
+ */
+function listCourts(courtNumbers: number[]) {
+  const names = courtNumbers.map((n) => `court ${n}`);
+  if (names.length === 1) return names[0];
+  return `courts ${courtNumbers.slice(0, -1).join(", ")} and ${courtNumbers[courtNumbers.length - 1]}`;
+}
+
+/**
+ * The courts this box drives that no OTHER box in service drives — i.e. the courts that
+ * are left with no working check-in at all while this box is out of service.
+ *
+ * <p>
+ * This is a money question, not a cosmetic one, and the console got it wrong in the
+ * direction that costs members. A disabled box is refused 403 on every courtside endpoint,
+ * so taking the LAST box off a court leaves nobody able to check in there — and until
+ * 2026-09-07 the settlement read that court as "no enabled box, therefore no evidence,
+ * therefore not dark" and charged its no-shows the full penalty. `CourtWasDark` now calls
+ * such a court dark and the waiver applies, and this function is what lets the page say so
+ * per court instead of the flat "judged by whatever other boxes drive them" — a sentence
+ * that is empty in exactly the state where the consequence bites.
+ * </p>
+ *
+ * <p>
+ * The box's own row is excluded whatever its current state, so the answer means the same
+ * thing read from an enabled row ("what taking this out would strand") and from a disabled
+ * one ("what is stranded now").
+ * </p>
+ */
+function courtsWithNoOtherBox(device: AdminDevice, devices: AdminDevice[]) {
+  return device.court_numbers.filter(
+    (court) => !devices.some((d) => d.id !== device.id && d.enabled && d.court_numbers.includes(court)),
+  );
+}
+
 // --- relay → court editor -------------------------------------------------------
 
 /**
@@ -401,7 +439,7 @@ function DeviceRowHeader({ device, online }: { device: AdminDevice; online: bool
 }
 
 function DeviceRow({
-  device, courts, clubMap, walkUpMax, actions, offlineAfter,
+  device, courts, clubMap, walkUpMax, actions, offlineAfter, strandedCourts,
 }: {
   device: AdminDevice;
   courts: AdminCourt[];
@@ -411,8 +449,11 @@ function DeviceRow({
   actions: DeviceActions;
   /** Seconds since the last beat before this box is offline. See offlineAfterSeconds. */
   offlineAfter: number;
+  /** The courts no other box in service drives. See courtsWithNoOtherBox. */
+  strandedCourts: number[];
 }) {
   const online = isOnline(device, offlineAfter);
+  const covered = device.court_numbers.filter((c) => !strandedCourts.includes(c));
   const [editing, setEditing] = useState<"details" | "buttons" | null>(null);
   const isBox = device.kind !== "Gate";
   // Presence-gated: an API that does not send the field gets no editor for it.
@@ -437,15 +478,35 @@ function DeviceRow({
       )}
 
       {/* What "out of service" actually means, said on the rows where it is in force
-          rather than buried in a tooltip. All three sentences are things the code does:
+          rather than buried in a tooltip. Every sentence is something the code does:
           DeviceIdentity refuses a disabled box 403 on every endpoint,
-          PeripheralHealthWorker filters `d.Enabled`, and DeviceOutageIndex builds its
-          silence index from the enabled boxes alone. */}
+          PeripheralHealthWorker filters `d.Enabled`, DeviceOutageIndex builds its silence
+          index from the enabled boxes alone — and a court left with no box in service is
+          dark, so its no-shows are refunded in full with no penalty.
+
+          The last clause is the one this notice used to get wrong. It said flatly that the
+          box's courts "are judged by whatever other boxes drive them", which is an empty
+          sentence in exactly the state that costs money — the state where there ARE no
+          other boxes — and an admin reads it as "something else covers it". Which courts
+          are stranded is knowable from the list this page has already loaded, so the page
+          says it per court rather than in general. */}
       {!device.enabled && (
         <p className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
-          Out of service. The API refuses this box, so it switches nothing on; the club is not
-          alerted about its silence; and {describeCourts(device.court_numbers)} are judged by whatever
-          other boxes drive them.
+          Out of service. The API refuses this box, so it switches nothing on, and the club is not
+          alerted about its silence.{" "}
+          {strandedCourts.length > 0 && (
+            <>
+              No box in service drives {listCourts(strandedCourts)}, so nobody can check in there:
+              bookings on {strandedCourts.length === 1 ? "it" : "them"} are refunded in full with no
+              no-show penalty until a box is back in service.{" "}
+            </>
+          )}
+          {covered.length > 0 && (
+            <>
+              Other boxes still drive {listCourts(covered)}, so {covered.length === 1 ? "its" : "their"} no-shows
+              are judged as normal.
+            </>
+          )}
         </p>
       )}
 
@@ -476,7 +537,14 @@ function DeviceRow({
         {device.enabled ? (
           <ConfirmButton
             idleLabel="Take out of service"
-            confirmLabel="Out of service? The box stops switching lights on."
+            // The confirm names the consequence that is hardest to undo knowing about:
+            // when this is the last box in service on a court, that court has no check-in
+            // at all afterwards and its no-shows stop being penalised. An admin taking a
+            // spare out of service beside a working box gets the plain sentence, because
+            // for them none of that is true.
+            confirmLabel={strandedCourts.length > 0
+              ? `Out of service? Nothing else drives ${listCourts(strandedCourts)} — nobody can check in there and its no-shows stop being penalised.`
+              : "Out of service? The box stops switching lights on."}
             onConfirm={() => actions.setEnabled(false)}
             className="h-8 px-3"
           />
@@ -511,7 +579,7 @@ function DeviceRow({
 function useDeviceActions(reload: () => Promise<void>) {
   const toast = useToast();
 
-  return (device: AdminDevice): DeviceActions => ({
+  return (device: AdminDevice, strandedCourts: number[]): DeviceActions => ({
     /** Returns whether the save went through, so the row knows whether to leave edit mode. */
     details: async (name, courtNumbers) => {
       try {
@@ -550,11 +618,17 @@ function useDeviceActions(reload: () => Promise<void>) {
         await endpoints.adminDeviceUpdate(device.id, { enabled });
         toast.push({
           tone: "success",
-          // Both sentences are consequences the code actually has: the health sweep
-          // filters on Enabled, and so does the silence index the no-show waiver reads.
+          // Every clause is a consequence the code actually has: the health sweep filters
+          // on Enabled, the silence index the no-show waiver reads does too, and a court
+          // left with no box in service is dark, so its no-shows are waived rather than
+          // charged. The last of those is what this toast used to say the opposite of, by
+          // promising the box's courts were "judged by whatever other boxes drive them"
+          // in the very state where there are none.
           text: enabled
             ? `${device.name} is back in service. It works again on its next call, and the club is alerted if it goes quiet.`
-            : `${device.name} is out of service. It switches nothing on, the club is not alerted about it, and its courts are judged by whatever other boxes drive them.`,
+            : strandedCourts.length > 0
+              ? `${device.name} is out of service. It switches nothing on, and nothing else drives ${listCourts(strandedCourts)} — nobody can check in there, so bookings on ${strandedCourts.length === 1 ? "it" : "them"} are refunded in full with no no-show penalty.`
+              : `${device.name} is out of service. It switches nothing on, the club is not alerted about it, and its courts are judged by the other boxes that drive them.`,
           durationMs: 8000,
         });
         await reload();
@@ -639,8 +713,27 @@ export function AdminDevicesPage() {
    * </p>
    */
   useEffect(() => {
-    const timer = setInterval(() => { void refreshDevices().catch(() => {}); }, REFRESH_MS);
-    return () => clearInterval(timer);
+    // Only while somebody is looking. A club that leaves this tab open all day was making
+    // four calls a minute for ever, on a screen whose entire content is "what is happening
+    // right now" — nobody is reading it from a background tab, and the data it holds is
+    // worthless by the time they come back to it either way.
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      void refreshDevices().catch(() => {});
+    };
+
+    // And a read on the way back IN, rather than up to fifteen seconds of the state the tab
+    // was left in. That is the same failure M-F2 was about — a page the outage email links
+    // to, showing a box as online long after the club was emailed that it was not — so a
+    // gate that saved requests by widening that window would be trading the fix away.
+    const onVisibility = () => { if (document.visibilityState === "visible") tick(); };
+
+    const timer = setInterval(tick, REFRESH_MS);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [refreshDevices]);
 
   async function refreshNow() {
@@ -723,7 +816,7 @@ export function AdminDevicesPage() {
           </Button>
         </div>
         <p className="mb-3 text-xs text-slate-500">
-          {checkedAt ? `Checked ${relative(checkedAt)}` : "Checking…"} · this page re-reads the boxes every {REFRESH_MS / 1000} seconds.
+          {checkedAt ? `Checked ${relative(checkedAt)}` : "Checking…"} · this page re-reads the boxes every {REFRESH_MS / 1000} seconds while this tab is in front.
         </p>
 
         {loading ? (
@@ -741,8 +834,9 @@ export function AdminDevicesPage() {
                 courts={courts}
                 clubMap={buttonMap}
                 walkUpMax={walkUpCap}
-                actions={actionsFor(device)}
+                actions={actionsFor(device, courtsWithNoOtherBox(device, devices))}
                 offlineAfter={offlineAfterSeconds(device, settings?.heartbeat_seconds ?? null)}
+                strandedCourts={courtsWithNoOtherBox(device, devices)}
               />
             ))}
           </div>

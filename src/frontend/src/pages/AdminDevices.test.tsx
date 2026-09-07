@@ -720,8 +720,15 @@ describe("AdminDevices", () => {
     renderPage(<AdminDevicesPage />);
 
     // The sentence is a promise about behaviour, so it names the interval the page runs.
-    expect(await screen.findByText(/re-reads the boxes every 15 seconds/)).toBeInTheDocument();
-    expect(screen.getByText(/^Checked /)).toBeInTheDocument();
+    //
+    // Both assertions are made against the SAME element, found by the half that only
+    // appears once the load has resolved. Split into a `findByText` on the interval
+    // sentence followed by a synchronous `getByText(/^Checked /)`, this test failed about
+    // one run in four: the interval sentence is rendered from first paint, while `Checked`
+    // waits on `checkedAt`, so the find resolved against the pre-load render and the get
+    // then ran against a paragraph still reading "Checking…".
+    const status = await screen.findByText(/^Checked /);
+    expect(status).toHaveTextContent(/re-reads the boxes every 15 seconds/);
 
     const atLoad = deviceReads(stub);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -757,7 +764,14 @@ describe("AdminDevices", () => {
     fireEvent.click(take);
     expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
 
-    fireEvent.click(await screen.findByRole("button", { name: /The box stops switching lights on/ }));
+    // And the confirm names the consequence an admin cannot see from the row: this is the
+    // only box on court 1, so afterwards nobody can check in there at all and the sweep
+    // stops charging the no-show penalty on it (settlement-model.md S5a). The confirm used
+    // to say only "the box stops switching lights on", which is the half that costs the
+    // CLUB nothing.
+    const confirm = await screen.findByRole("button", { name: /Nothing else drives court 1/ });
+    expect(confirm).toHaveAccessibleName(/no-shows stop being penalised/);
+    fireEvent.click(confirm);
 
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
     // Exactly the one field. Sending the name and courts alongside would rewrite whatever
@@ -778,17 +792,140 @@ describe("AdminDevices", () => {
     expect(await screen.findByText("out of service")).toBeInTheDocument();
     expect(screen.queryByText(/not reporting/)).not.toBeInTheDocument();
 
-    // All three sentences are things the code does — the API refuses a disabled box, the
-    // health sweep skips it, and the silence index behind the no-show waiver is built from
-    // enabled boxes alone.
-    expect(screen.getByText(/The API refuses this box, so it switches nothing on/)).toBeInTheDocument();
-    expect(screen.getByText(/not alerted about its silence/)).toBeInTheDocument();
-    expect(screen.getByText(/A: court 1, B: court 2 are judged by whatever other boxes drive them/)).toBeInTheDocument();
+    // Every sentence is something the code does — the API refuses a disabled box, the
+    // health sweep skips it, and a court left with no box in service is dark, so its
+    // no-shows are refunded in full with no penalty.
+    //
+    // That last clause used to read "A: court 1, B: court 2 are judged by whatever other
+    // boxes drive them", which in this state — the only box in the club — names nothing at
+    // all, and an admin reads it as "something else covers it". It is the state where the
+    // money moves.
+    const notice = screen.getByText(/The API refuses this box, so it switches nothing on/);
+    expect(notice).toHaveTextContent("not alerted about its silence");
+    expect(notice).toHaveTextContent("No box in service drives courts 1 and 2, so nobody can check in there");
+    expect(notice).toHaveTextContent("refunded in full with no no-show penalty");
+    expect(notice).not.toHaveTextContent("judged as normal");
 
     // Restoring is not a decision anyone regrets, so it is one tap.
     fireEvent.click(screen.getByRole("button", { name: "Put back in service" }));
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
     expect(stub.calls.find((c) => c.method === "PATCH")!.raw).toBe('{"enabled":true}');
+  });
+
+  /**
+   * The other side of the same sentence, and the reason it has to be computed per court
+   * rather than written flat: a box whose courts ARE covered by another box in service
+   * gets no warning at all, on the row and on the confirm.
+   *
+   * <p>
+   * Court 2 is driven by a second box that is still in service; court 1 is not. So the
+   * notice has to say both things about one row, and the confirm on the OTHER row — the
+   * live box on court 2 alone — has to stay the plain one. Without this test the fix could
+   * be "always warn", which is the same defect as "never warn" a fortnight later, when
+   * admins have learned to click through it.
+   * </p>
+   */
+  it("warns only about the courts a box actually strands, and not about the covered ones", async () => {
+    stubFetch(withDevices([
+      deviceFixture({ enabled: false, court_numbers: [1, 2] }),
+      deviceFixture({
+        id: "33333333-3333-3333-3333-333333333333",
+        device_code: "court-box-2",
+        name: "Court 2 box",
+        court_numbers: [2],
+      }),
+    ]));
+
+    renderPage(<AdminDevicesPage />);
+
+    const notice = await screen.findByText(/The API refuses this box, so it switches nothing on/);
+    expect(notice).toHaveTextContent("No box in service drives court 1, so nobody can check in there");
+    expect(notice).toHaveTextContent("bookings on it are refunded in full with no no-show penalty");
+    // And the court that is covered is named as covered, rather than swept into the same
+    // sentence as the one that is not.
+    expect(notice).toHaveTextContent("Other boxes still drive court 2, so its no-shows are judged as normal");
+
+    // The live box is now the only thing in service on court 2 — the row above is out of
+    // service and covers nothing — so its own confirm warns about court 2 and about
+    // nothing else. (The out-of-service row offers "Put back in service", not a confirm,
+    // so this is unambiguous.)
+    fireEvent.click(screen.getByRole("button", { name: "Take out of service" }));
+    expect(await screen.findByRole("button", { name: /Nothing else drives court 2/ })).toBeInTheDocument();
+  });
+
+  /**
+   * The negative: two boxes in service on the same court, so taking either one out strands
+   * nothing and the confirm stays the plain sentence.
+   *
+   * <p>
+   * Without this the fix could be "always warn", which is the same defect as "never warn"
+   * a fortnight later, once admins have learned to click through it.
+   * </p>
+   */
+  it("keeps the plain confirm on a box whose courts another box in service also drives", async () => {
+    stubFetch(withDevices([
+      deviceFixture({ court_numbers: [2] }),
+      deviceFixture({
+        id: "33333333-3333-3333-3333-333333333333",
+        device_code: "court-box-2",
+        name: "Court 2 spare",
+        court_numbers: [2],
+      }),
+    ]));
+
+    renderPage(<AdminDevicesPage />);
+
+    const confirms = await screen.findAllByRole("button", { name: "Take out of service" });
+    expect(confirms).toHaveLength(2);
+    for (const button of confirms) fireEvent.click(button);
+
+    expect(screen.queryByRole("button", { name: /Nothing else drives/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /The box stops switching lights on/ })).toHaveLength(2);
+  });
+
+  /**
+   * M-F2's poller, gated on the tab being in front. It was a flat 15 s interval that never
+   * stopped, so a club that leaves the Devices page open all day made four calls a minute
+   * for ever against a screen nobody was looking at.
+   *
+   * <p>
+   * The read on the way back IN is the half that matters, and is why this is not simply a
+   * cheaper poller. Pausing alone would leave a returning admin looking at up to fifteen
+   * seconds of the state the tab was left in — which is a smaller version of the defect
+   * M-F2 was about, on the page an outage email links to.
+   * </p>
+   */
+  it("does not poll a background tab, and re-reads the moment it comes back", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const stub = stubFetch(withDevices([deviceFixture()]));
+    const setVisibility = (state: string) => {
+      Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+
+    try {
+      renderPage(<AdminDevicesPage />, { reactStrictMode: true });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const atLoad = deviceReads(stub);
+
+      setVisibility("hidden");
+      for (let i = 0; i < 4; i++) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      }
+      // A minute in the background costs the API nothing.
+      expect(deviceReads(stub)).toBe(atLoad);
+
+      setVisibility("visible");
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(deviceReads(stub)).toBe(atLoad + 1);
+
+      // And the interval is live again, rather than having been cleared by the pause.
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      expect(deviceReads(stub)).toBe(atLoad + 2);
+    } finally {
+      setVisibility("visible");
+      vi.useRealTimers();
+    }
   });
 
   // --- the club's walk-up cap, on the screen that sets the buttons (finding M-F1) ----
