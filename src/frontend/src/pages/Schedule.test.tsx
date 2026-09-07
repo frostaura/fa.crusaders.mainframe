@@ -361,7 +361,10 @@ describe("Schedule", () => {
 
     // Booking it for THEMSELVES they genuinely cannot afford, and the modal says so.
     // This also proves the wallet answer has landed, so the assertions below are not
-    // passing on a balance that is merely still null.
+    // passing on a balance that is merely still null. The dialog no longer OPENS here —
+    // N-F11: a desk account's balance is zero permanently, so opening on "My own booking"
+    // made every slot's first state a refusal — so this selects it deliberately.
+    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "self" } });
     await screen.findByText(/more than you have/);
 
     fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
@@ -996,5 +999,123 @@ describe("Schedule — a refusal that proves the grid is stale refetches it", ()
     await waitFor(() => expect(modal).toHaveTextContent(/You already have 60 of your 60 minutes booked/));
 
     expect(scheduleReads(stub)).toBe(1);
+  });
+});
+
+/**
+ * N-F7 and N-F11 — the confirmation dialog's two dead first states.
+ *
+ * <p>
+ * N-F7: feature-spec §5 says "On confirm: balance must cover cost. If not, <b>prompt to top
+ * up</b>." What a short member got was the sentence "Top up your wallet, then book." on a
+ * dialog with zero links and zero controls but Keep looking and a disabled Book — so the
+ * prompt was a sentence, and the member had to dismiss it, find the balance chip in the
+ * header, open the wallet and press Top up there. Beside it sat "Balance after -30.00 cr", a
+ * figure for a booking the dialog had already decided would not happen, with nothing to say
+ * it was hypothetical.
+ * </p>
+ *
+ * <p>
+ * N-F11: the admin's dialog defaulted to "My own booking" against a desk account whose
+ * balance is zero permanently by design (§8, "because it never plays"), so the first state
+ * of the modal on every slot, every time, was a refusal of the person who had just opened it.
+ * </p>
+ */
+describe("Schedule — the confirmation dialog opens on something useful", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const COURT = "11111111-1111-1111-1111-111111111111";
+  const THEM = "55555555-5555-5555-5555-555555555555";
+  const DATE = "2030-09-07";
+
+  const DAY = {
+    date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
+    dayStartMinute: 7 * 60, dayEndMinute: 20 * 60, advanceBookingDays: 14,
+    penaltyPct: 30, penaltyWindowMinutes: 15,
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    slots: [] as unknown[],
+  };
+
+  function open(opts: { isAdmin: boolean; balance: number }) {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: opts.isAdmin }) },
+      { path: "/api/v1/wallet", body: { balance_credits: opts.balance, entries: [] } },
+      { path: "/api/v1/admin/members/", body: [{ user_id: THEM, full_name: "Naledi Khumalo", balance_credits: 500 }] },
+      { path: "/api/v1/schedule", body: DAY },
+    ]);
+    renderPage(<SchedulePage />);
+  }
+
+  it("gives a short member a control to top up, not only advice to", async () => {
+    open({ isAdmin: false, balance: 20 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    await waitFor(() => expect(modal).toHaveTextContent(/That's more than you have/));
+    // The finding, measured: "Links inside the modal: zero."
+    expect(within(modal).getByRole("button", { name: "Top up" })).toBeInTheDocument();
+    expect(within(modal).getByRole("link", { name: "Top up" })).toHaveAttribute("href", "/wallet/topup");
+  });
+
+  it("tells a short member how far short they are, not what a refused booking would have left", async () => {
+    open({ isAdmin: false, balance: 20 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    await waitFor(() => expect(modal).toHaveTextContent(/That's more than you have/));
+    expect(modal).toHaveTextContent("Balance now");
+    expect(modal).toHaveTextContent("20.00 cr");
+    expect(modal).toHaveTextContent("Short by");
+    expect(modal).toHaveTextContent("30.00 cr");
+    // The hypothetical the member had no way to recognise as one.
+    expect(modal).not.toHaveTextContent("Balance after");
+    expect(modal).not.toHaveTextContent("-30.00 cr");
+  });
+
+  /** The fixture, varied: a member who CAN afford it still gets §5's six figures. */
+  it("still shows the balance a booking will leave when the booking can happen", async () => {
+    open({ isAdmin: false, balance: 200 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    await waitFor(() => expect(modal).toHaveTextContent("Balance after"));
+    expect(modal).toHaveTextContent("150.00 cr");
+    expect(modal).not.toHaveTextContent("Short by");
+    expect(within(modal).queryByRole("button", { name: "Top up" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeEnabled();
+  });
+
+  it("opens an admin on the member they are booking for, not on the desk's empty wallet", async () => {
+    open({ isAdmin: true, balance: 0 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    // Every slot used to open on "Balance now 0.00 cr · Balance after -50.00 cr" and
+    // "That's more than you have", with the Book button disabled, before the admin had done
+    // anything at all.
+    expect(screen.getByLabelText("Book this as")).toHaveValue("member");
+    expect(modal).not.toHaveTextContent(/That's more than you have/);
+    expect(within(modal).queryByRole("button", { name: "Top up" })).not.toBeInTheDocument();
+    // The member picker is there and nothing is chosen, so Book waits rather than refuses.
+    expect(screen.getByLabelText("Member")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeDisabled();
+
+    // …and "My own booking" is still reachable for an admin who does play.
+    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "self" } });
+    await waitFor(() => expect(modal).toHaveTextContent(/That's more than you have/));
+  });
+
+  it("opens a member on their own booking — the default only moves for an admin", async () => {
+    open({ isAdmin: false, balance: 200 });
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    expect(screen.queryByLabelText("Book this as")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeEnabled();
   });
 });
