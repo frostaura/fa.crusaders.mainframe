@@ -76,6 +76,10 @@ public static partial class TopUpEndpoints
             var memberClass = await MemberClassOfAsync(db, userId, ct);
             var rate = s.ConversionRateFor(memberClass);
 
+            // ...and the offer the member is looking at has to still be this one.
+            if (RefuseStaleQuote(req.QuotedConversionRate, rate, req.AmountZar, memberClass) is { } stale)
+                return stale;
+
             var pending = new PendingTopup
             {
                 TenantId = tenant.TenantId,
@@ -399,6 +403,47 @@ public static partial class TopUpEndpoints
         return Results.Ok(new { ok = true, credits, conversion_rate = rate });
     }
 
+    /// <summary>
+    /// The refusal for a quote the club has moved away from, or null when the screen and the
+    /// server still agree.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>/topup/options</c> is fetched once when the top-up screen mounts and never
+    /// revalidated, and the screen promises the member the rate beside the figure "is locked
+    /// in when you continue, so it can't change while you're paying". It was locked from the
+    /// POST onward and not before it, so the half of the window the member actually looks at
+    /// was unprotected: an admin changing that member's class, or editing
+    /// <c>credits_per_zar_*</c> for the whole club, moved the price under an open tab and the
+    /// member was handed to the gateway at the new one. Two independent testers reproduced it
+    /// on the same day — R100 offered at 240 credits, settled at 160.
+    /// </para>
+    /// <para>
+    /// The answer is a refusal rather than an honoured quote. The posted rate is a number the
+    /// client chose, so obeying it would let anyone name their own price; comparing it costs
+    /// the club nothing and keeps the promise, because the member either gets the figure they
+    /// were shown or is stopped and shown the new one. 409, not 400: nothing about the request
+    /// is malformed, the world moved.
+    /// </para>
+    /// <para>
+    /// Exact equality is the right test. Both sides come from the same
+    /// <c>ConversionRateFor</c> over the same numeric(*,4) setting, so a rate that has not been
+    /// edited round-trips identically through JSON; a tolerance here would silently accept
+    /// exactly the small edits (1.6 → 1.5999) this exists to catch.
+    /// </para>
+    /// </remarks>
+    internal static IResult? RefuseStaleQuote(decimal? quotedRate, decimal liveRate, decimal amountZar, MemberClass memberClass)
+    {
+        if (quotedRate is null || quotedRate.Value == liveRate) return null;
+        return Results.Json(new
+        {
+            error = "topup_rate_changed",
+            conversion_rate = liveRate,
+            quoted_credits = Convert(amountZar, liveRate),
+            member_class = memberClass.ToString(),
+        }, statusCode: StatusCodes.Status409Conflict);
+    }
+
     /// <summary>ZAR → credits at a given rate, rounded the way the column stores it.</summary>
     internal static decimal Convert(decimal amountZar, decimal rate)
         => Math.Round(amountZar * rate, 2, MidpointRounding.AwayFromZero);
@@ -531,4 +576,25 @@ public static partial class TopUpEndpoints
 /// PayFast is paid in rand; the credits are what comes back.
 /// </para>
 /// </summary>
-public sealed record TopUpRequest(decimal AmountZar);
+/// <param name="QuotedConversionRate">
+/// The rate the member was looking at when they pressed Continue, as
+/// <c>/topup/options</c> handed it to the screen.
+///
+/// <para>
+/// It exists so the club cannot take money at a rate the member was never shown. The screen
+/// says, in as many words, that the rate is locked in when you continue — and Continue
+/// registered the <b>live</b> rate, so an admin changing the member's class or editing
+/// <c>credits_per_zar_*</c> while the tab sat open sent a member who had been offered 240
+/// credits for R100 to the gateway for 160. There is no confirmation step between Continue
+/// and the card form, so nothing told her.
+/// </para>
+///
+/// <para>
+/// Honouring the posted number instead would let any client name its own price, so the
+/// server compares rather than trusts: equal and the offer stands, different and the
+/// request is refused with <c>topup_rate_changed</c> and the new figures, for the screen to
+/// show before the member commits. Nullable, because a client that sends nothing — an
+/// older build, or a script — gets the old behaviour rather than a 400.
+/// </para>
+/// </param>
+public sealed record TopUpRequest(decimal AmountZar, decimal? QuotedConversionRate = null);

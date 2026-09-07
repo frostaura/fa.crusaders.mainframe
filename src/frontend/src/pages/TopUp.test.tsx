@@ -89,7 +89,9 @@ describe("Top-up — what the checkout actually sends", () => {
 
     // The bug, exactly: `amountCredits` bound to nothing on the server, `AmountZar` came
     // through as 0, and the positivity guard rejected every top-up the product could make.
-    expect(post.body).toEqual({ amountZar: 200 });
+    // `quotedConversionRate` rides along so the server can refuse a stale offer rather than
+    // register the member at a rate the screen never showed them — see TopUp.rate-lock.test.tsx.
+    expect(post.body).toEqual({ amountZar: 200, quotedConversionRate: 1.6 });
     expect(post.raw).not.toContain("amountCredits");
   });
 

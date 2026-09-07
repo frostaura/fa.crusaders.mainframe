@@ -491,4 +491,146 @@ public sealed class TopUpFlowTests
         Assert.Equal("amount_exceeds_member_cap",
             (await overCap.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
     }
+
+    // ---- R3 L-F1 / N-F1 / K-F3: the rate on the screen is the rate registered ----
+
+    /// <summary>
+    /// The screen's own sentence, kept: <i>"This rate is locked in when you continue, so it
+    /// can't change while you're paying."</i>
+    ///
+    /// <para>
+    /// It was measured from the POST, and the member's figure came from a
+    /// <c>/topup/options</c> fetched once on mount and never revalidated — so the half of the
+    /// window the member actually looks at was unprotected. Two finders reproduced the same
+    /// thing on the same day from opposite directions: an admin changing that member's class,
+    /// and an admin editing <c>credits_per_zar_regular</c> for the whole club. A member offered
+    /// 240 credits for R100 pressed Continue and was registered for 160, with a card form as
+    /// the next thing she saw.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_topup_registers_at_exactly_the_rate_the_screen_quoted()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = MemberClient(factory, seeded);
+
+        var options = await client.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
+        var quoted = options.GetProperty("conversion_rate").GetDecimal();
+
+        var res = await client.PostAsJsonAsync(
+            "/api/v1/credit/topup", new { amountZar = 100m, quotedConversionRate = quoted });
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(quoted, body.GetProperty("conversion_rate").GetDecimal());
+        Assert.Equal(100m * quoted, body.GetProperty("quoted_credits").GetDecimal());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var pending = await db.PendingTopups.IgnoreQueryFilters()
+            .SingleAsync(x => x.UserId == seeded.MemberUserId);
+        Assert.Equal(quoted, pending.ConversionRate);
+    }
+
+    /// <summary>
+    /// <b>The money test.</b> The club moves the price under an open tab, and the member is
+    /// stopped and shown the new figure rather than sent to the gateway at it.
+    ///
+    /// <para>
+    /// Both triggers a finder used, because they are different code paths to the same lie: one
+    /// admin editing the club's own <c>credits_per_zar_regular</c> hits <b>every</b> member with
+    /// the screen open, and a per-member class change hits one. Neither reaches the tab, which
+    /// keeps saying 240 credits and "this rate is locked in".
+    /// </para>
+    ///
+    /// <para>
+    /// A refusal rather than an honoured quote: the posted rate is a number the client chose, so
+    /// obeying it would let anyone name their own price. And <b>no row is written</b> — a
+    /// pending top-up registered at a rate the member was never shown is the defect itself, not
+    /// a harmless artefact of it.
+    /// </para>
+    ///
+    /// <para>
+    /// Mutation-proved: making <see cref="Crusaders.Mainframe.Api.Endpoints.TopUpEndpoints.RefuseStaleQuote"/>
+    /// return null unconditionally puts both cases back to 200 with a 160.00-credit pending row
+    /// against a 240.00 quote, and this test fails on the status code. The two rows of the
+    /// theory vary the fixture as well as the rule — one moves the club rate down, the other
+    /// moves this member's class up — so a fixture that stopped discriminating in one direction
+    /// still fails in the other.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(true, 1.0)]   // an admin edits credits_per_zar_regular: 1.6 -> 1.0, for everyone
+    [InlineData(false, 2.4)]  // an admin moves this member to league/senior: 1.6 -> 2.4
+    public async Task A_quote_the_club_has_moved_away_from_is_refused_rather_than_silently_repriced(
+        bool moveTheClubRate, double newRate)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = MemberClient(factory, seeded);
+
+        var options = await client.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
+        var quoted = options.GetProperty("conversion_rate").GetDecimal();
+        Assert.Equal(1.6m, quoted);
+
+        // The club moves, while the member's tab sits on the quoted figure.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            if (moveTheClubRate)
+            {
+                var row = await db.TenantSettings.IgnoreQueryFilters().FirstAsync(x => x.TenantId == seeded.TenantId);
+                row.SettingsJson = SettingsJson(regularRate: (decimal)newRate);
+            }
+            else
+            {
+                var membership = await db.Memberships.IgnoreQueryFilters()
+                    .FirstAsync(m => m.UserId == seeded.MemberUserId);
+                membership.MemberClass = MemberClass.LeagueOrSenior;
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var res = await client.PostAsJsonAsync(
+            "/api/v1/credit/topup", new { amountZar = 100m, quotedConversionRate = quoted });
+
+        Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("topup_rate_changed", body.GetProperty("error").GetString());
+        // The new figures, so the screen can show them instead of the stale ones.
+        Assert.Equal((decimal)newRate, body.GetProperty("conversion_rate").GetDecimal());
+        Assert.Equal(100m * (decimal)newRate, body.GetProperty("quoted_credits").GetDecimal());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            Assert.Empty(await db.PendingTopups.IgnoreQueryFilters()
+                .Where(x => x.UserId == seeded.MemberUserId).ToListAsync());
+        }
+    }
+
+    /// <summary>
+    /// A client that quotes nothing gets the live rate, as before. The field is nullable so an
+    /// older build — or a script — is not answered with a 400 for omitting a field that did not
+    /// exist yesterday; only a quote that is present and stale is refused.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_request_carrying_no_quote_is_registered_at_the_live_rate()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = MemberClient(factory, seeded);
+
+        var body = await RegisterAsync(client, 100m);
+
+        Assert.Equal(1.6m, body.GetProperty("conversion_rate").GetDecimal());
+        Assert.Equal(160m, body.GetProperty("quoted_credits").GetDecimal());
+    }
 }
