@@ -519,7 +519,7 @@ export default function AdminMembersPage() {
           <p className="text-sm text-text-secondary">
             {resetResult.emailSentTo
               ? <>Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. </>
-              : <><strong className="text-text-primary">Not emailed</strong> — the mail server refused it, so this password only reaches the member if you pass it on. </>}
+              : <><strong className="text-text-primary">Not emailed</strong> — the send failed, so this password only reaches the member if you pass it on. </>}
             {TEMP_PASSWORD_SCOPE}
           </p>
           <div className="my-4 px-4 py-3 rounded-lg border border-border bg-bg-muted font-mono text-base tracking-wider text-center select-all">
@@ -717,9 +717,32 @@ const COLUMN_DISPLAY = {
  * </p>
  *
  * <p>
+ * <b>Balance is declared in <code>rem</code> and everything else in <code>px</code>, and that
+ * is deliberate.</b> Text scales with the reader's own font size and a <code>px</code> column
+ * does not, so at a 20px root font — Chrome's "Large", an ordinary accessibility setting —
+ * <code>98765432.19 cr</code> needed 133px of a 113px box and at 24px it needed 160 of 107.
+ * The money column elided silently at exactly the setting somebody turns on because they are
+ * finding it hard to read. In <code>rem</code> the column grows with the text and the balance
+ * stays whole at 16, 20 and 24px, measured. The 18px it takes at the default size, and the
+ * more it takes above that, comes out of Name, which is the auto column and already truncates
+ * with a hover title. The other columns hold badges, dates and buttons whose loss is cued;
+ * only this one holds a number whose prefix is a different plausible amount.
+ * </p>
+ *
+ * <p>
+ * A fixed-width column also cannot grow for its own HEADER, and until round 9 the header
+ * simply overflowed: at a 24px root font the <code>Member #</code> sort button painted over 3
+ * of 20 sample points of the <code>Status</code> header at 1024, 1280 and 1440, and the
+ * <code>Name</code> button over 5 and 9 of 20 at 640 and 768, with <code>regionOverflow</code>
+ * reporting 0 throughout. {@link SortHeader} now clips its own label with an ellipsis and a
+ * hover title instead, which is the same trade every other cell here makes.
+ * </p>
+ *
+ * <p>
  * Changing any number here means re-running <code>e2e/admin-members-layout.spec.ts</code>,
  * which measures the result in a real browser at four widths — and which now varies the
- * fixture's longest name, because a layout that only holds for one club's data is not fixed.
+ * fixture's longest name, because a layout that only holds for one club's data is not fixed,
+ * and the reader's root font size, because a layout that only holds at 16px is not either.
  * </p>
  */
 const COLUMN_WIDTH = {
@@ -728,7 +751,7 @@ const COLUMN_WIDTH = {
   status: "w-[118px]",
   memberClass: "w-[148px]",
   joined: "w-[100px]",
-  balance: "w-[126px]",
+  balance: "w-[9rem]",
   actions: "w-[200px]",
 } as const;
 
@@ -820,7 +843,11 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
         <span className="block truncate max-w-[220px] sm:max-w-full" title={m.email}>{m.email}</span>
       </Cell>
       <Cell label="Member #" display={COLUMN_DISPLAY.fromLg} className="font-mono text-xs text-text-secondary">
-        <span className="block truncate max-w-[180px] sm:max-w-full">{m.membership_number}</span>
+        {/* A club that prefixes its year issues numbers three times this column wide, and the
+            ellipsis was the only cue: measured at 245px of content in an 80px box, with no
+            title to recover it from. Elision here is a fair trade for a fixed column; an
+            unrecoverable one is not. */}
+        <span className="block truncate max-w-[180px] sm:max-w-full" title={m.membership_number}>{m.membership_number}</span>
       </Cell>
       {/*
         Status, and — under it — whether this member ever confirmed their address.
@@ -836,9 +863,11 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
         string opener and swallows the rest of the file — see memory/gotchas.md.)
 
         It belongs on Status because Status is drawn at every width, and because that is what
-        it is: a second fact about the standing of the account. Stacked rather than beside, so a
-        124px column holds both, and so the row grows by one short line only for the members
-        it applies to.
+        it is: a second fact about the standing of the account. Stacked rather than beside, so
+        COLUMN_WIDTH.status (118px, whatever that number becomes) holds both, and so the row
+        grows by one short line only for the members it applies to. The number used to be
+        written out here as 124px, which the code has never carried; a width quoted in a
+        comment beside the constant that contradicts it is worse than no number at all.
       */}
       <Cell label="Status">
         <div className="flex flex-col items-start gap-1">
@@ -865,8 +894,24 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
           clips exactly as silently as a pinned one covered — `123456.78 cr` reading as
           `12345`, with no ellipsis and no cue, is the misread this column was pinned for in
           the first place, and swapping the pin for a width would reproduce it for a bigger
-          number. 132px holds nine significant digits; anything past that is visibly elided
-          and readable in full on hover, rather than being a plausible smaller amount.
+          number.
+
+          The width is measured, not guessed, and the number here used to be neither. It said
+          "132px holds nine significant digits" beside a column declared at 126px, and the
+          round-8 verifier measured `98765432.19 cr` at scrollWidth 107 against clientWidth 101 at
+          640, 768, 1024, 1280, 1440 and 1920 — an admin read `98765432.1…` at EVERY width,
+          on the fixture the e2e spec calls a club buying credit in bulk. Measured in Chromium
+          on the production build with the bundled Figtree actually loaded:
+          `-99999999.99 cr` is 112.4px wide and `-123456789.50 cr` is 121.2px. 9rem of column
+          is 119px of content at the default root font, once the 24px of padding and the 1px
+          pin border are taken off, so every balance from -99 999 999.99 to 99 999 999.99 is
+          drawn in full and a ten-digit one elides with an ellipsis and a hover title rather
+          than reading as a plausible smaller amount. In `rem` rather than `px` so that holds
+          at a raised browser font size too — see COLUMN_WIDTH. The 18px comes off Name, which
+          is the auto column and already truncates with a title.
+
+          `e2e/admin-members-layout.spec.ts` measures scrollWidth against clientWidth on this
+          cell now, so this paragraph cannot go back to being a number nobody checked.
         */}
         <span
           title={formatCredits(m.balance_credits)}
@@ -1129,10 +1174,23 @@ function SortHeader({ label, k, sortKey, sortDir, onSort, className }: { label: 
   const active = sortKey === k;
   const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <th className={cn("text-left px-3 py-3 whitespace-nowrap", className)}>
-      <button type="button" onClick={() => onSort(k)} className={cn("inline-flex items-center gap-1 hover:text-text-primary", active && "text-text-primary")}>
-        <span>{label}</span>
-        <Icon size={12} className={cn(active ? "opacity-100" : "opacity-40")} />
+    <th className={cn("text-left px-3 py-3 whitespace-nowrap overflow-hidden", className)}>
+      {/* A header in a fixed-width column cannot grow for its own label, so the label has to
+          give way inside the column rather than paint over the next one. Without the clip the
+          nowrap sort button simply overflowed the th: measured in Chromium with a 24px root
+          font — an ordinary browser accessibility setting — the Member # button covered 3 of
+          20 sample points of the Status header at 1024, 1280 and 1440, and the Name button
+          covered 5 and 9 of 20 at 640 and 768, with the table itself reporting zero overflow.
+          A neighbouring column painted over is the silent loss this whole table was rebuilt to
+          remove; an ellipsised header with a hover title is a cued one. */}
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        title={label}
+        className={cn("inline-flex max-w-full items-center gap-1 hover:text-text-primary", active && "text-text-primary")}
+      >
+        <span className="truncate">{label}</span>
+        <Icon size={12} className={cn("shrink-0", active ? "opacity-100" : "opacity-40")} />
       </button>
     </th>
   );

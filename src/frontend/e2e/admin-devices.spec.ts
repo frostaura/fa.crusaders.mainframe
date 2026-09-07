@@ -350,13 +350,20 @@ test.describe("Taking a box out of service", () => {
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
 
     await page.getByRole("button", { name: "Take out of service" }).click();
-    // Arms first: a live box stops switching lights on the moment this lands.
-    await expect(page.getByRole("button", { name: /The box stops switching lights on/ })).toBeVisible();
+    // Arms first: a live box stops switching lights on the moment this lands. And the confirm
+    // names what this particular box strands — it is the only one in the club, so courts 1 and
+    // 2 have no check-in at all afterwards. It read the plain "the box stops switching lights
+    // on" until round 8 made the label per-court; this file was not updated with it and had
+    // been red at HEAD ever since.
+    const confirm = page.getByRole("button", {
+      name: "Out of service? Nothing else drives courts 1 and 2 — nobody can check in there and their no-shows stop being penalised.",
+    });
+    await expect(confirm).toBeVisible();
 
     await serveApi(page, routes([{ ...box, enabled: false }], [
       { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...box, enabled: false } },
     ]));
-    await page.getByRole("button", { name: /The box stops switching lights on/ }).click();
+    await confirm.click();
 
     // Exactly the one field: sending the name and courts alongside would rewrite whatever
     // another admin had just changed on this row.
@@ -368,8 +375,14 @@ test.describe("Taking a box out of service", () => {
     // the explanation below the row opens with "Out of service." — two matches, and a
     // strict-mode violation that reads as the badge being missing.
     await expect(page.getByText("out of service", { exact: true })).toBeVisible();
-    await expect(page.getByText(/The API refuses this box, so it switches nothing on/)).toBeVisible();
-    await expect(page.getByText(/A: court 1, B: court 2 are judged by whatever other boxes drive them/)).toBeVisible();
+    // Which courts are stranded, named per court, rather than the flat "judged by whatever
+    // other boxes drive them" — a sentence that named nothing in exactly the state that costs
+    // money. Read off the row notice specifically: the toast says the same thing, deliberately
+    // (one generator feeds both, so they cannot drift apart), and an unscoped match finds two.
+    const notice = page.getByText(/The API refuses this box, so it switches nothing on/);
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("No box in service drives courts 1 and 2, so nobody can check in there");
+    await expect(notice).toContainText("refunded in full with no no-show penalty until a box is back in service");
     await expect(page.getByRole("button", { name: "Put back in service" })).toBeVisible();
   });
 });
