@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
@@ -164,15 +165,35 @@ public static class ReportingEndpoints
         });
 
         // Daily revenue + activity buckets — shaped for line/bar charts.
-        admin.MapGet("/daily", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, CancellationToken ct) =>
+        //
+        // Two things about a row here, both of which it used to get wrong.
+        //
+        // FIRST, the day is the CLUB'S day. Both groupings bucketed on
+        // `DateOnly.FromDateTime(x.UtcDateTime)` while the club runs Africa/Johannesburg, so
+        // every movement between 00:00 and 02:00 local landed in the previous day's row —
+        // and on the 1st of a month, in the previous month's report. `reporting.md` has said
+        // "all reports honor the tenant's tenant_settings.timezone" since it was written.
+        //
+        // SECOND, a row deliberately carries TWO date bases and now says so. The money
+        // columns count the day the money moved (`CreatedAt`); `bookings` and `no_shows`
+        // count the day the court is played (`StartsAt`). They are different questions and
+        // the club wants both, but read as one row they contradict each other — "Charges
+        // 2300.00 cr, Bookings 6" at 50.00 cr a slice is 46 bookings, not 6 — because
+        // `advance_booking_days` is 14, so a fortnight of charges lands on days whose courts
+        // are played later, or beyond the window entirely. The screen names both clocks under the
+        // table now; nothing on the page said it before, and a reader had no way to know
+        // two were in play. The wire shape stays a flat array of days on purpose — it is
+        // what the charts, the client type and the browser fixtures all read.
+        admin.MapGet("/daily", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var (f, t) = ResolveRange(from, to);
+            var tz = ResolveTz((await settingsAccessor.GetAsync(ct)).Timezone);
             var entries = await db.LedgerEntries.Where(l => l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
             var bookings = await db.Bookings.Where(b => b.StartsAt >= f && b.StartsAt < t).ToListAsync(ct);
 
-            var allDays = EnumerateDays(f, t).ToList();
-            var ledgerByDay = entries.GroupBy(e => DateOnly.FromDateTime(e.CreatedAt.UtcDateTime)).ToDictionary(g => g.Key, g => g.ToList());
-            var bookingsByDay = bookings.GroupBy(b => DateOnly.FromDateTime(b.StartsAt.UtcDateTime)).ToDictionary(g => g.Key, g => g.ToList());
+            var allDays = EnumerateDays(f, t, tz).ToList();
+            var ledgerByDay = entries.GroupBy(e => LocalDay(e.CreatedAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
+            var bookingsByDay = bookings.GroupBy(b => LocalDay(b.StartsAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
 
             var rows = allDays.Select(d =>
             {
@@ -185,6 +206,12 @@ public static class ReportingEndpoints
                     booking_charges_credits = -le.Where(x => LedgerEntryTypes.Spend.Contains(x.Type)).Sum(x => x.AmountCredits),
                     refunds_credits = le.Where(x => LedgerEntryTypes.Refund.Contains(x.Type)).Sum(x => x.AmountCredits),
                     penalties_credits = -le.Where(x => LedgerEntryTypes.Penalty.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    // What the desk handed out or took back by hand. It was in the member's
+                    // own report and on Transactions and nowhere on the club's report — a
+                    // tenant with 2,525.50 credits of AdminAdjustment had no screen that
+                    // showed the figure at all, on the report whose job is where the money
+                    // went.
+                    adjustments_credits = le.Where(x => LedgerEntryTypes.Adjustment.Contains(x.Type)).Sum(x => x.AmountCredits),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
                     no_shows = bk.Count(b => b.Status == BookingStatus.NoShow),
                 };
@@ -193,16 +220,19 @@ public static class ReportingEndpoints
         });
 
         // Personal daily series (per-user wallet timeline) — drives the user's chart carousel.
-        me.MapGet("/daily", async (DateTimeOffset? from, DateTimeOffset? to, HttpContext ctx, MainframeDbContext db, CancellationToken ct) =>
+        me.MapGet("/daily", async (DateTimeOffset? from, DateTimeOffset? to, HttpContext ctx, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
             var (f, t) = ResolveRange(from, to);
+            // The club's day here too: a member topping up at 00:30 on the 1st saw it land
+            // in the previous month's report.
+            var tz = ResolveTz((await settingsAccessor.GetAsync(ct)).Timezone);
             var entries = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
             var bookings = await db.Bookings.Where(b => b.UserId == userId && b.StartsAt >= f && b.StartsAt < t).ToListAsync(ct);
 
-            var allDays = EnumerateDays(f, t).ToList();
-            var ledgerByDay = entries.GroupBy(e => DateOnly.FromDateTime(e.CreatedAt.UtcDateTime)).ToDictionary(g => g.Key, g => g.ToList());
-            var bookingsByDay = bookings.GroupBy(b => DateOnly.FromDateTime(b.StartsAt.UtcDateTime)).ToDictionary(g => g.Key, g => g.ToList());
+            var allDays = EnumerateDays(f, t, tz).ToList();
+            var ledgerByDay = entries.GroupBy(e => LocalDay(e.CreatedAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
+            var bookingsByDay = bookings.GroupBy(b => LocalDay(b.StartsAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
 
             decimal running = 0m;
             // Seed running balance with everything before the window so the chart line starts at the right value.
@@ -254,10 +284,32 @@ public static class ReportingEndpoints
         return e.AmountCredits < 0 ? -rand : rand;
     }
 
-    private static IEnumerable<DateOnly> EnumerateDays(DateTimeOffset from, DateTimeOffset to)
+    /// <summary>The club-local calendar day an instant falls on, per <c>reporting.md</c>.</summary>
+    private static DateOnly LocalDay(DateTimeOffset at, TimeZoneInfo tz)
     {
-        var d = DateOnly.FromDateTime(from.UtcDateTime);
-        var end = DateOnly.FromDateTime(to.UtcDateTime);
+        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(at, tz).DateTime);
+    }
+
+    /// <summary>
+    /// The tenant's zone, falling back to UTC on an id this machine does not carry.
+    ///
+    /// <para>
+    /// Same shape as <c>BookingService.ResolveTz</c> and for the same reason: a settings
+    /// document naming a zone the host has no tzdb entry for must not make every report
+    /// throw. A report an hour out is recoverable; a 500 on /reports is not.
+    /// </para>
+    /// </summary>
+    private static TimeZoneInfo ResolveTz(string id)
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
+        catch (TimeZoneNotFoundException) { return TimeZoneInfo.Utc; }
+        catch (InvalidTimeZoneException) { return TimeZoneInfo.Utc; }
+    }
+
+    private static IEnumerable<DateOnly> EnumerateDays(DateTimeOffset from, DateTimeOffset to, TimeZoneInfo tz)
+    {
+        var d = LocalDay(from, tz);
+        var end = LocalDay(to, tz);
         while (d <= end) { yield return d; d = d.AddDays(1); }
     }
 

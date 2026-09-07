@@ -29,8 +29,8 @@ describe("Reports — net daily buckets", () => {
   // Tuesday the sweep, Wednesday the box's upload landing and reversing it. Wednesday's
   // refund and penalty buckets are the reversal rows alone, and both are negative.
   const ADMIN_DAYS = [
-    { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, bookings: 3, no_shows: 1 },
-    { date: "2026-09-02", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: -8, penalties_credits: -2.4, bookings: 0, no_shows: 0 },
+    { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, adjustments_credits: 25.5, bookings: 3, no_shows: 1 },
+    { date: "2026-09-02", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: -8, penalties_credits: -2.4, adjustments_credits: 0, bookings: 0, no_shows: 0 },
   ];
   const ME_DAYS = [
     { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 136 },
@@ -83,8 +83,57 @@ describe("Reports — net daily buckets", () => {
     expect(table.queryByText(/NaN/)).not.toBeInTheDocument();
 
     // And the sentence that says what a negative day is.
-    expect(table.getByText(/Refunds and penalties are net/)).toBeInTheDocument();
+    expect(table.getByText(/Refunds, penalties and adjustments are net/)).toBeInTheDocument();
     expect(table.getByText(/opposite-sign row on the day it lands/)).toBeInTheDocument();
+  });
+
+  /**
+   * The club's own report, and the two things that were not on it.
+   *
+   * <p>
+   * There was no adjustments figure anywhere, tenant-wide — a club that had handed out
+   * 2,525.50 credits at the desk could read that number on a member's own report and on
+   * Transactions, and on no screen describing the club. And in the middle of the club-wide
+   * report sat "My wallet — totals": the ADMIN'S wallet, all zeros, permanently, because a
+   * desk account's balance is zero by design (`feature-spec.md` §8) — ending in the
+   * sentence "it is exactly what your balance moved by".
+   * </p>
+   */
+  it("gives the admin the club's money, including what the desk adjusted — and not their own empty wallet", async () => {
+    stubFetch(routes(true));
+    renderPage(<ReportsPage />);
+
+    // The card itself, not the page: the daily table below carries the same column labels.
+    const heading = await screen.findByRole("heading", { name: "Club money — totals" });
+    const card = heading.parentElement!;
+    const stats = within(card.querySelector("dl")!);
+
+    expect(stats.getByText("Adjustments")).toBeInTheDocument();
+    expect(stats.getByText("+25.50 cr")).toBeInTheDocument();
+    // 160 − 24 + 8 − 2.4 + 25.5, then the reversal day's −8 and +2.4: net +160.00 exactly.
+    expect(within(card).getByText("+160.00 cr")).toBeInTheDocument();
+    expect(within(card).getByText(/what the desk added or took back by hand/)).toBeInTheDocument();
+
+    // The desk's own wallet is gone from the club's report.
+    expect(screen.queryByRole("heading", { name: "My wallet — totals" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/is exactly what your balance moved by/)).not.toBeInTheDocument();
+  });
+
+  it("puts the desk's adjustments in the daily table and says which clock each column is on", async () => {
+    stubFetch(routes(true));
+    renderPage(<ReportsPage />);
+
+    const table = await tableUnder("Daily breakdown");
+    expect(table.getByRole("columnheader", { name: /Adjustments/ })).toBeInTheDocument();
+    expect(table.getByText("25.50 cr")).toBeInTheDocument();
+
+    // "Charges 2300.00 cr · Bookings 6" was one row about two different sets of bookings —
+    // money on the day it moved, courts on the day they are played — with nothing on the
+    // page saying so. The column is renamed and the consequence is spelled out.
+    expect(table.getByRole("columnheader", { name: /Courts played/ })).toBeInTheDocument();
+    expect(table.queryByRole("columnheader", { name: /^Bookings$/ })).not.toBeInTheDocument();
+    expect(table.getByText(/Two dates in one row, on purpose/)).toBeInTheDocument();
+    expect(table.getByText(/charged today and plays later/)).toBeInTheDocument();
   });
 
   it("does the same on the member's own daily breakdown", async () => {
