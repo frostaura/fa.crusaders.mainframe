@@ -48,6 +48,10 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
   // which is advice that can never work: the member refreshes, presses Book again, and gets the
   // same refusal with no way to learn why. The club is the only repair there is.
   member_suspended: "Your membership is suspended, so you can't book. Speak to the club to have it restored.",
+  // The same rule, for a membership the club has not approved or has turned down. It reads
+  // mostly to the DESK: a member in either state cannot sign in, so the screen this appears on
+  // is the admin's book-on-behalf dialog, where the fix is one click away on the Members page.
+  member_not_active: "That membership isn't active yet, so it can't be booked against. Approve it on the Members page first.",
   waive_reason_required: "Say why the penalty is being waived — the club's audit needs the reason, not just the tick.",
 };
 

@@ -50,9 +50,29 @@ public static class MembershipAccess
     /// subquery. The two must move together; this summary is where the reason lives.
     /// </para>
     /// </summary>
-    public static Task<bool> IsBarredFromCourtsAsync(
+    public static async Task<bool> IsBarredFromCourtsAsync(
+        MainframeDbContext db, Guid userId, CancellationToken ct)
+        => await StatusIfBarredAsync(db, userId, ct) is not null;
+
+    /// <summary>
+    /// The recorded status when the club has taken this member's court access away, or null
+    /// when it has not — the same test as <see cref="IsBarredFromCourtsAsync"/>, keeping the
+    /// reason so a caller can say WHICH refusal this is.
+    ///
+    /// <para>
+    /// The booking routes need that and the device routes do not. A box says "SEE THE DESK"
+    /// either way; a screen has to distinguish "your membership is suspended, speak to the
+    /// club" from "this applicant has not been approved yet", because those are two different
+    /// things for the desk to do next and the second is one click away.
+    /// </para>
+    /// </summary>
+    public static async Task<MembershipStatus?> StatusIfBarredAsync(
         MainframeDbContext db, Guid userId, CancellationToken ct)
     {
-        return db.Memberships.AnyAsync(m => m.UserId == userId && m.Status != MembershipStatus.Active, ct);
+        var status = await db.Memberships
+            .Where(m => m.UserId == userId)
+            .Select(m => (MembershipStatus?)m.Status)
+            .FirstOrDefaultAsync(ct);
+        return status == MembershipStatus.Active ? null : status;
     }
 }

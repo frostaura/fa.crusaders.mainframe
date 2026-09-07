@@ -21,8 +21,13 @@ public static class BookingEndpoints
             // court time is exactly what a club suspending a member for unpaid dues is
             // stopping. Checked here rather than inside BookingService because it is an
             // authorization question about the caller, not a rule about the slot.
-            if (await db.Memberships.AnyAsync(m => m.UserId == userId && m.Status == MembershipStatus.Suspended, ct))
-                return Results.Json(new { error = "member_suspended" }, statusCode: 403);
+            //
+            // Not-Active rather than Suspended, and the same test the box uses. This route
+            // read `== Suspended` while the device side read `!= Active`, so the two doors
+            // into the same money disagreed about Rejected and PendingApproval: the club sold
+            // the court and then would not open it.
+            var barred = await MembershipAccess.StatusIfBarredAsync(db, userId, ct);
+            if (barred is not null) return Refusal(barred.Value);
 
             var result = await svc.CreateAsync(req.CourtId, userId, userId, req.StartsAt, req.SliceCount, ct);
             return ToHttpResult(result, ctx);
@@ -53,8 +58,17 @@ public static class BookingEndpoints
         // it anyway unless the actor differs from the payer. The desk is expected to see the
         // ordinary 402 first, with the member's balance and the price in it, and to come
         // back having read them; nothing here makes the overdraft the default.
-        admin.MapPost("/", async (AdminBookingRequest req, HttpContext ctx, BookingService svc, CancellationToken ct) =>
+        admin.MapPost("/", async (AdminBookingRequest req, HttpContext ctx, BookingService svc, MainframeDbContext db, CancellationToken ct) =>
         {
+            // The PAYER is checked, not the desk. This route tested membership status not at
+            // all, so an admin could book on behalf of an applicant the club had not yet
+            // approved: the member was charged, the booking never reached the box roster,
+            // every courtside door refused it with `no_booking`, and the sweep then settled
+            // it as an ordinary no-show with the 30% penalty on top. Driven end to end by a
+            // verifier — 50 credits taken for a court that could not be opened.
+            var barred = await MembershipAccess.StatusIfBarredAsync(db, req.UserId, ct);
+            if (barred is not null) return Refusal(barred.Value);
+
             var actorId = ctx.User.Id() ?? Guid.Empty;
             var payer = new BookingPayer(req.UserId, actorId, req.AllowNegativeBalance);
             var result = await svc.CreateAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct);
@@ -141,6 +155,26 @@ public static class BookingEndpoints
     /// declaration order in <c>BookingService.cs</c> so the pair reads as one list.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The refusal for a member the club will not let onto a court, naming which kind it is.
+    ///
+    /// <para>
+    /// Two codes rather than one. `member_suspended` already has copy the member reads
+    /// ("speak to the club to have it restored") and that sentence is wrong for an applicant
+    /// nobody has approved yet — the desk's next action there is one click, not a
+    /// conversation. The status travels alongside so a screen can name it without mapping
+    /// the code back.
+    /// </para>
+    /// </summary>
+    private static IResult Refusal(MembershipStatus status)
+        => Results.Json(
+            new
+            {
+                error = status == MembershipStatus.Suspended ? "member_suspended" : "member_not_active",
+                status = status.ToString(),
+            },
+            statusCode: 403);
+
     private static IResult ToHttpResult(BookingResult result, HttpContext ctx) => result switch
     {
         BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
