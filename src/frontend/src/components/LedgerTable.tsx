@@ -104,7 +104,19 @@ export function LedgerTable({
                 </td>
               )}
               {columns.includes("comment") && (
-                <td className="px-2 sm:px-4 py-2 align-top text-xs text-text-secondary max-w-[140px] sm:max-w-[280px] truncate" title={r.comment}>
+                // On a phone this wraps; from `sm` up it truncates with a tooltip.
+                //
+                // It used to be capped at 140px and ellipsised at every width, so at 375px
+                // every row read "Booking Court 2 2…" / "No-show — booki…" — and the comment
+                // is the only column that says what a movement WAS, and for a top-up the only
+                // place the rand amount and the conversion rate appear at all. The container
+                // offered 30px of sideways travel against a 287px cell, so the sentence
+                // underneath ("scrolls sideways — there is more to see") was true of the table
+                // and false of this column, and the escape hatch was a `title` tooltip a touch
+                // device has no way to open. A promise the product could not keep.
+                //
+                // Wrapping costs row height on the one screen with the height to spare.
+                <td className="px-2 sm:px-4 py-2 align-top text-xs text-text-secondary break-words sm:max-w-[280px] sm:truncate" title={r.comment}>
                   {r.comment}
                 </td>
               )}
