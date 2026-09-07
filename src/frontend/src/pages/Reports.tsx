@@ -50,6 +50,12 @@ export default function ReportsPage() {
     }
   };
 
+  // The two dates the admin picked, as DAY MARKERS. The reports read `from` and `to` as
+  // the UTC calendar date each instant names, and build the club's own days from those two
+  // dates — which is why the marker must stay in UTC rather than being localised. Rendering
+  // the picker value through the browser's zone instead (`new Date(from).toISOString()` on a
+  // machine west of UTC) would name the day before, and the club would get a report starting
+  // a day early with no error anywhere.
   const load = async () => {
     const fIso = `${from}T00:00:00Z`;
     const tIso = `${to}T23:59:59Z`;
@@ -169,14 +175,16 @@ export default function ReportsPage() {
             <Stat label="Refunds (net)" value={formatSignedCredits(clubTotals.refunds)} />
             <Stat label="Penalties (net)" value={formatSignedCredits(-clubTotals.penalties)} />
             <Stat label="Adjustments" value={formatSignedCredits(clubTotals.adjustments)} />
+            <Stat label="Reversals" value={formatSignedCredits(clubTotals.reversals)} />
             <Stat label="Courts played" value={String(clubTotals.bookings)} />
             <Stat label="No-shows" value={String(clubTotals.noShows)} />
             <Stat label="Days" value={String(clubTotals.days)} />
           </dl>
           <p className="mt-3 text-xs text-text-muted">
             Credit held by members moved by <strong className="font-mono">{formatSignedCredits(clubTotals.net)}</strong> over
-            this period — top-ups − charges + refunds − penalties + adjustments, which is every ledger movement in the club
-            summed. <strong>Adjustments</strong> is what the desk added or took back by hand.
+            this period — top-ups − charges + refunds − penalties + adjustments + reversals, which is every ledger movement
+            in the club summed. <strong>Adjustments</strong> is what the desk added or took back by hand;{" "}
+            <strong>Reversals</strong> is a payment clawed back after the fact.
           </p>
         </Card>
       )}
@@ -274,8 +282,12 @@ export default function ReportsPage() {
               { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
               { key: "penalties_credits", header: "Penalties (net)", align: "right", cell: (r) => <NetCredits value={r.penalties_credits} />, sortValue: (r) => r.penalties_credits },
               { key: "adjustments_credits", header: "Adjustments", align: "right", cell: (r) => <NetCredits value={r.adjustments_credits} />, sortValue: (r) => r.adjustments_credits },
+              // Reversals were on no screen at all while the totals card above claimed to sum
+              // every movement in the club, so a day carrying a clawed-back payment could not
+              // be reconciled against that card by anyone reading this table.
+              { key: "reversals_credits", header: "Reversals", align: "right", cell: (r) => <NetCredits value={r.reversals_credits} />, sortValue: (r) => r.reversals_credits },
               // "Courts played", not "Bookings". These two columns count the day the court
-              // is USED; the four money columns to their left count the day the money MOVED.
+              // is USED; every money column to their left counts the day the money MOVED.
               // Under a 14-day advance window those are routinely different days, which is
               // how one row came to read "Charges 2300.00 cr · Bookings 6" — 46 slices' worth
               // of money beside six courts. The header says which clock it is on and the
@@ -290,7 +302,7 @@ export default function ReportsPage() {
             who books a fortnight ahead is charged today and plays later, so the two halves of a row are not about the
             same bookings. Days are the club's own, in its configured timezone.
           </p>
-          <NetNote what="Refunds, penalties and adjustments" />
+          <NetNote what="Refunds, penalties, adjustments and reversals" />
         </Card>
       )}
 
@@ -339,14 +351,21 @@ function sumDays(days: DailyAdminPoint[]) {
   const refunds = sum((d) => d.refunds_credits);
   const penalties = sum((d) => d.penalties_credits);
   const adjustments = sum((d) => d.adjustments_credits);
+  const reversals = sum((d) => d.reversals_credits);
   return {
-    topUps, charges, refunds, penalties, adjustments,
+    topUps, charges, refunds, penalties, adjustments, reversals,
     bookings: sum((d) => d.bookings),
     noShows: sum((d) => d.no_shows),
     days: days.length,
-    // The same arithmetic the member's own net line uses, so the two screens cannot
-    // disagree about what "net" means.
-    net: topUps - charges + refunds - penalties + adjustments,
+    // Summed from the server's own type-blind daily total, not re-derived from the five
+    // buckets above it. This line used to claim to be "the same arithmetic the member's own
+    // net line uses, so the two screens cannot disagree" while being a different sum: the
+    // member's `net_movement_credits` adds every ledger row whatever its type, and this
+    // added five named buckets that between them did not include `PaymentReversal`. The two
+    // screens therefore disagreed by exactly the reversals, and the card printed +555.00
+    // over a true movement of +395.00. Taking the server's total makes the sentence the code
+    // rather than a comment about it.
+    net: sum((d) => d.net_movement_credits),
   };
 }
 

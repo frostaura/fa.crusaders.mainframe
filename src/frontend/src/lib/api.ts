@@ -781,7 +781,18 @@ export type WalletReport = {
   minutes_on_court: number;
   count: number;
 };
-export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; adjustments_credits: number; bookings: number; no_shows: number };
+/**
+ * One club day on the admin report.
+ *
+ * `reversals_credits` and `net_movement_credits` are here because the row has to add up.
+ * `PaymentReversal` was in no bucket at all, under a card claiming the buckets were "every
+ * ledger movement in the club summed", so a clawed-back payment moved balances while being
+ * invisible on the club's own report. `net_movement_credits` is the day summed WITHOUT
+ * looking at the type — the same arithmetic the member's own `net_movement_credits` uses —
+ * so the club screen and the member screen cannot mean different things by "net", and a
+ * ledger type nobody bucketed still reaches the total.
+ */
+export type DailyAdminPoint = { date: string; top_ups_credits: number; booking_charges_credits: number; refunds_credits: number; penalties_credits: number; adjustments_credits: number; reversals_credits: number; net_movement_credits: number; bookings: number; no_shows: number };
 export type DailyMePoint = { date: string; top_ups_credits: number; spent_credits: number; refunds_credits: number; bookings: number; attended: number; minutes_on_court: number; balance_credits: number };
 /**
  * Club revenue over a window, in BOTH units, because they are not interchangeable.

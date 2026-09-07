@@ -28,9 +28,14 @@ describe("Reports — net daily buckets", () => {
 
   // Tuesday the sweep, Wednesday the box's upload landing and reversing it. Wednesday's
   // refund and penalty buckets are the reversal rows alone, and both are negative.
+  //
+  // Wednesday also carries a −160.00 PaymentReversal, which is the shape the verifier put on
+  // a live stack: `LedgerEntryType.PaymentReversal` reached no bucket of this row, so the
+  // totals card printed 161.50 — the five buckets it did have — under a sentence claiming it
+  // was "every ledger movement in the club summed". The true movement is 1.50.
   const ADMIN_DAYS = [
-    { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, adjustments_credits: 25.5, bookings: 3, no_shows: 1 },
-    { date: "2026-09-02", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: -8, penalties_credits: -2.4, adjustments_credits: 0, bookings: 0, no_shows: 0 },
+    { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: 24, refunds_credits: 8, penalties_credits: 2.4, adjustments_credits: 25.5, reversals_credits: 0, net_movement_credits: 167.1, bookings: 3, no_shows: 1 },
+    { date: "2026-09-02", top_ups_credits: 0, booking_charges_credits: 0, refunds_credits: -8, penalties_credits: -2.4, adjustments_credits: 0, reversals_credits: -160, net_movement_credits: -165.6, bookings: 0, no_shows: 0 },
   ];
   const ME_DAYS = [
     { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 136 },
@@ -83,7 +88,7 @@ describe("Reports — net daily buckets", () => {
     expect(table.queryByText(/NaN/)).not.toBeInTheDocument();
 
     // And the sentence that says what a negative day is.
-    expect(table.getByText(/Refunds, penalties and adjustments are net/)).toBeInTheDocument();
+    expect(table.getByText(/Refunds, penalties, adjustments and reversals are net/)).toBeInTheDocument();
     expect(table.getByText(/opposite-sign row on the day it lands/)).toBeInTheDocument();
   });
 
@@ -110,13 +115,81 @@ describe("Reports — net daily buckets", () => {
 
     expect(stats.getByText("Adjustments")).toBeInTheDocument();
     expect(stats.getByText("+25.50 cr")).toBeInTheDocument();
-    // 160 − 24 + 8 − 2.4 + 25.5, then the reversal day's −8 and +2.4: net +160.00 exactly.
-    expect(within(card).getByText("+160.00 cr")).toBeInTheDocument();
     expect(within(card).getByText(/what the desk added or took back by hand/)).toBeInTheDocument();
 
     // The desk's own wallet is gone from the club's report.
     expect(screen.queryByRole("heading", { name: "My wallet — totals" })).not.toBeInTheDocument();
     expect(screen.queryByText(/is exactly what your balance moved by/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The card's closing sentence, kept.
+   *
+   * <p>
+   * "top-ups − charges + refunds − penalties + adjustments, which is every ledger movement
+   * in the club summed" was false: `PaymentReversal` was in no bucket of the daily row, so a
+   * −160.00 clawback inside the window left the card printing +161.50 over a true movement
+   * of +1.50, and the member's own report — which sums every type — disagreed with it by
+   * exactly the reversals. The sentence is a promise; this is the promise being kept.
+   * </p>
+   */
+  it("sums every ledger movement in the club, reversals included, and says so truthfully", async () => {
+    stubFetch(routes(true));
+    renderPage(<ReportsPage />);
+
+    const heading = await screen.findByRole("heading", { name: "Club money — totals" });
+    const card = heading.parentElement!;
+    const stats = within(card.querySelector("dl")!);
+
+    // The bucket that was on no screen, with its sign.
+    expect(stats.getByText("Reversals")).toBeInTheDocument();
+    expect(stats.getByText("−160.00 cr")).toBeInTheDocument();
+
+    // The net, which is the whole point: 160 − 24 + 0 − 0 + 25.5 − 160.
+    expect(within(card).getByText("+1.50 cr")).toBeInTheDocument();
+    // And NOT the number the five-bucket sum produced. This is the assertion that fails if
+    // the reversal is dropped anywhere between the endpoint and this paragraph.
+    expect(within(card).queryByText("+161.50 cr")).not.toBeInTheDocument();
+
+    // The copy names the sixth term, so the arithmetic on the page can be checked by hand.
+    expect(within(card).getByText(/\+ reversals, which is every ledger movement in the club summed/)).toBeInTheDocument();
+    expect(within(card).getByText(/clawed back after the fact/)).toBeInTheDocument();
+  });
+
+  /**
+   * The window the page asks for, which is half of the boundary defect.
+   *
+   * <p>
+   * The reports read `from` and `to` as day markers — the UTC calendar date each instant
+   * names — and build the club's own days from them. A well-meaning "fix" that localises
+   * either marker (`new Date(from).toISOString()` on a machine west of UTC) names the day
+   * before, and the club silently gets a report starting a day early. So the exact shape is
+   * pinned, against the values in the two date inputs.
+   * </p>
+   */
+  it("asks for the two dates the admin picked, as UTC day markers", async () => {
+    const stub = stubFetch(routes(true));
+    renderPage(<ReportsPage />);
+
+    await screen.findByRole("heading", { name: "Club money — totals" });
+    const call = stub.calls.find((c) => c.path.includes("/admin/reports/daily"))!;
+    expect(call, "the daily report was never requested").toBeTruthy();
+
+    const dates = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/) as HTMLInputElement[];
+    const [fromDate, toDate] = dates.map((d) => d.value);
+    // Decoded, because the colons travel percent-encoded on the wire.
+    const query = decodeURIComponent(call.path);
+    expect(query).toContain(`from=${fromDate}T00:00:00Z`);
+    expect(query).toContain(`to=${toDate}T23:59:59Z`);
+  });
+
+  it("shows a reversal in the daily table too, so the table reconciles to the card", async () => {
+    stubFetch(routes(true));
+    renderPage(<ReportsPage />);
+
+    const table = await tableUnder("Daily breakdown");
+    expect(table.getByRole("columnheader", { name: /Reversals/ })).toBeInTheDocument();
+    expect(table.getByText("-160.00 cr")).toBeInTheDocument();
   });
 
   it("puts the desk's adjustments in the daily table and says which clock each column is on", async () => {
