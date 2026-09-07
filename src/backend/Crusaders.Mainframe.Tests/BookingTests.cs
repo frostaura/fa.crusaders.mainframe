@@ -280,4 +280,60 @@ public class BookingTests
         Assert.Equal(0m, cancelled.PenaltyCredits);
         Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
     }
+
+    /// <summary>
+    /// A court a club prices at zero posts no ledger row for the booking at all (I10).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Nothing exercised this branch, and it was writing a 0.00 <c>BookingCharge</c> — a row
+    /// that moves no money and reads on the member's statement as a movement that did not
+    /// happen, which is the harm I10 is written against, in the one place with no
+    /// idempotency reference to justify it. Free courts are not hypothetical: a club running
+    /// an open morning or a junior session sets <c>SlicePriceCredits</c> to zero and every
+    /// booking made in it left a phantom line.
+    /// </para>
+    /// <para>
+    /// The booking itself is unaffected — it is made, it holds the slot, and it is
+    /// cancellable. Only the row is gone. The flush that inserts it still happens inside the
+    /// same try that catches the overlap violation, so the slot race is decided exactly as
+    /// it is on a priced court; the second half of this test is that assertion.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_court_priced_at_zero_books_the_slot_and_posts_no_ledger_row()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var court = await db.Courts.FirstAsync(c => c.Id == host.Courts[0].Id);
+        court.SlicePriceCredits = 0m;
+        await db.SaveChangesAsync();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        var before = await db.LedgerEntries.CountAsync();
+
+        var startsAt = TestHost.BookableSlot(2);
+        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, sliceCount: 1, default));
+
+        Assert.Equal(BookingStatus.Booked, ok.Booking.Status);
+        Assert.Equal(0m, ok.Booking.AmountChargedCredits);
+        Assert.Equal(200m, ok.BalanceAfterCredits);
+
+        // The row, named rather than counted by balance: a 0.00 entry moves no balance, so
+        // asserting the balance alone would pass with the phantom line still there.
+        Assert.Equal(before, await db.LedgerEntries.CountAsync());
+        Assert.Empty(await db.LedgerEntries.Where(l => l.RelatedBookingId == ok.Booking.Id).ToListAsync());
+
+        // And the slot is genuinely held. The booking row flushes inside the try that
+        // catches the overlap violation, so a second booking on the same slice is refused
+        // here exactly as it is on a priced court — which is what would break if the
+        // insert were left to drift down to the SaveChanges after the audit row.
+        Assert.IsType<BookingResult.SlotTaken>(await booking.CreateAsync(
+            host.Courts[0].Id, host.LeaguePlayerUser.Id, host.LeaguePlayerUser.Id, startsAt, 1, default));
+    }
 }

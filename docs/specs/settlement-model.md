@@ -388,6 +388,23 @@ booking they replaced by re-booking the same slot themselves must not collide.
 posting can never be made under it, and reads on a member's statement as a movement that did
 not happen. A never-charged displaced booking was posting a zero-credit `CancellationRefund`.
 
+**The one exception, and what makes it one.** A posting *whose `ExternalReference` is the only
+record the transaction has* is written even at zero. That is the walk-up charge and nothing
+else: the box's nonce becomes the reference, `ReplayAsync` finds the purchase by reading that
+reference off the ledger, and no second posting is ever made under it — the undo uses a
+suffixed reference of its own. So the middle clause of the "why" above, which is the harm this
+invariant is named for, cannot arise; and on a court priced at zero, dropping the row costs a
+member their court. Measured, not argued: with the row suppressed, a box whose response was
+lost retries the same nonce, finds no purchase to replay, books again, collides with the
+member's own live booking and is answered **`court_in_use` — 409 where it should be 200**. The
+glass then reads COURT NOT FREE about a court the member has already bought and cannot get
+into, which is the H3 defect the nonce exists to prevent. Pinned in both directions by
+`WalkUpBookingTests.A_free_court_is_bought_once_and_replays_to_the_same_purchase` and
+`A_free_court_charges_nothing_and_still_leaves_a_record_of_the_purchase`.
+
+Everywhere else the invariant is absolute, and that includes the ordinary booking charge: a
+court priced at zero posts no `BookingCharge` row at all.
+
 ### I11 — Two rows, never a netted one, and never an edit
 
 A correction posts a new row of the **same type with the opposite sign**, tied to the booking
@@ -503,6 +520,7 @@ Recorded here rather than left for the next reviewer to rediscover.
 | Walk-up purchase, and its undo | `Services/BookingService.cs` — `CreateWalkUpAsync`, `VoidUnstartedWalkUpAsync`; `Endpoints/DeviceEventEndpoints.cs` — `WalkUpForDeviceAsync`, which decides between them and owns the ordering of the confirmation |
 | S5a | `Webhooks/NoShowWorker.cs` — `SweepOneAsync` (`courtWasDark`); `Services/DeviceOutageIndex.cs`; `Webhooks/PeripheralHealthWorker.cs` writes the evidence |
 | S6, I3, I8, I9, I10, I12 | `Services/BookingService.cs` — `ReverseNoShowAsync`, `SettledLegsAsync`, `DisplacementAsync`, `RestoreEnd`, `ReinstateDisplacedAsync` |
+| I10, the booking-charge half and its one exception | `Services/BookingService.cs` — `CommitAsync`, which posts nothing for a zero charge unless an `ExternalReference` makes the row the purchase's only record |
 | S7, I1, I6 | `Services/BookingService.cs` — `ChargeLitCancelledBookingAsync`, `SettleReleaseAsync`; `Endpoints/DeviceEventEndpoints.cs` — `LitWindow` |
 | S8, I5 | `Services/BookingService.cs` — `ChargeLitCancelledBookingAsync` guard, `ExpireCodes`; `Endpoints/DeviceEventEndpoints.cs` — displaced-collision audit |
 | §6 overdraft override | `Services/BookingService.cs` — `CreateAsync` (`BookingPayer.AllowNegativeBalance`) and `CommitAsync`, which must lift the same guard under the payer's lock; `Endpoints/BookingEndpoints.cs` — the admin booking route |
