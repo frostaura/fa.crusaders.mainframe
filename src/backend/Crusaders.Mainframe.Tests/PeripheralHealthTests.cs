@@ -865,26 +865,44 @@ public class PeripheralHealthTests
     }
 
     /// <summary>
-    /// The same court, with the one fixture field varied that the rule must NOT depend on: the
-    /// switched-off box was heard from twenty seconds ago.
+    /// <b>The same court and the same switched-off box as the test above, with the one field
+    /// varied that decides it: how long ago the club last heard from that box.</b>
     ///
     /// <para>
-    /// It is here because "all its boxes are dark" and "all its boxes are out of service" are
-    /// different facts and only the second one is being pinned. A box an admin switched off two
-    /// minutes ago is not silent at all — the previous test's box had been quiet for ninety
-    /// minutes, and a fix that read a disabled box as merely "silent" would pass that one and
-    /// fail this. What makes the court dark is that the API refuses the box, which is true from
-    /// the moment the switch is thrown and has nothing to do with heartbeats.
+    /// This test used to assert the opposite, under the name
+    /// <c>A_court_whose_only_box_was_just_switched_off_waives_the_penalty_too</c>, and it was the
+    /// fixture that baked a money defect in rather than the one that caught it. Its reasoning was
+    /// that the API refuses a disabled box "from the moment the switch is thrown", so the switch
+    /// alone makes the court dark and heartbeats have nothing to do with it. The half it left out
+    /// is that <c>Enabled</c> carries no history. The moment the switch is thrown is recorded in
+    /// no column, so "dark because the switch is thrown" was read by the code as "dark for as far
+    /// back as this board has existed": a board that ran perfectly for thirty days and was
+    /// switched off five minutes ago retroactively waived every unsettled deadline in the
+    /// lookback window, and the club lost penalty revenue it was owed on courts that were working
+    /// when the member failed to turn up. Any sweep landing after the click settled them — a
+    /// restart, a deploy, a backlog, or simply the next thirty-second tick.
     /// </para>
     ///
     /// <para>
-    /// It is also the shape a club actually produces: an admin takes a live box out of service
-    /// at 18:00 because it is behaving oddly, and the 18:05 booking on its court is settled
-    /// minutes later.
+    /// <b>What IS recorded is <c>LastSeenAt</c>, and it is not a weaker witness than a switch-off
+    /// column would be.</b> A disabled box is refused 403 on every courtside endpoint, so the
+    /// instant an admin throws the switch is the instant that box stops being heard from — a
+    /// heartbeat at <c>T</c> is proof the board was still in service at <c>T</c>, because a
+    /// board out of service cannot produce one. Here it called in twenty seconds ago and the
+    /// deadline is fifty-five minutes old, so the club had a working door on that court when the
+    /// member did not turn up. 97.60, penalty charged.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Two rules can carry this fixture and only one of them is the point</b>, so read it with
+    /// the theory below rather than alone. Drop the thirty-day <c>installedAt</c> and it still
+    /// passes — on the existence floor, because the board would then not have existed at the
+    /// deadline either. The theory below holds <c>installedAt</c> at thirty days in both rows, so
+    /// the floor cannot answer it and only the silence bound can.
     /// </para>
     /// </summary>
     [Fact]
-    public async Task A_court_whose_only_box_was_just_switched_off_waives_the_penalty_too()
+    public async Task A_court_whose_only_box_was_just_switched_off_still_charges_the_older_deadline()
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -901,10 +919,261 @@ public class PeripheralHealthTests
 
         await CreateNoShowWorker(host).TickAsync(default);
 
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Contains(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// <b>The pin the out-of-service clause did not have: one fixture, one field, and the field
+    /// is when the board went quiet.</b>
+    ///
+    /// <para>
+    /// Everything else is held identical — the same court, the same single board, switched off,
+    /// installed thirty days before the deadline, the same booking whose grace window closed
+    /// fifty-five minutes ago. Only <c>LastSeenAt</c> moves, and it is the recorded shadow of the
+    /// switch-off instant (a disabled board is refused 403, so it stops being heard from the
+    /// moment the switch is thrown). Ninety minutes of silence at the deadline is past
+    /// <c>offline_after_seconds</c>, so the door was already shut and the member owes nothing;
+    /// one minute of silence is inside it, so the board was in service and the member owes the
+    /// 30%.
+    /// </para>
+    ///
+    /// <para>
+    /// Nothing in the suite varied this field before, which is exactly how the regression got in:
+    /// the R8 pin beside it in `settlement-model.md` varied <c>installedAt</c> — a board CREATED
+    /// after the deadline — and was listed against a sentence about a board SWITCHED OFF after
+    /// it. Two different facts, one of them unpinned.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>What this theory does NOT discriminate, measured rather than assumed.</b> Flip its
+    /// <c>enabled: false</c> to true and both rows still pass: an enabled board silent for ninety
+    /// minutes is dark by the ordinary rule, and one heard from a minute ago is reachable by it,
+    /// so the theory pins the silence arithmetic without proving which branch answered. That the
+    /// out-of-service branch is the one carrying it is proved by mutation instead — delete the
+    /// branch and the <c>-90</c> row goes red — and by
+    /// <see cref="A_disabled_box_heard_from_seconds_ago_does_not_block_the_waiver"/>, which is
+    /// where <c>Enabled</c> itself moves money.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(-90, 100.00)]
+    [InlineData(-1, 97.60)]
+    public async Task A_switch_off_darkens_only_the_deadlines_the_board_had_already_gone_quiet_for(
+        int lastSeenMinutes, decimal expectedBalance)
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(lastSeenMinutes), enabled: false,
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(expectedBalance, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var rows = await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync();
+        Assert.Equal(expectedBalance == 97.60m, rows.Any(l => l.Type == LedgerEntryType.NoShowPenalty));
+    }
+
+    /// <summary>
+    /// The hardened form an independent verifier used to prove the regression: the board was
+    /// heard from on BOTH sides of the deadline, so no reading of the evidence puts it out of
+    /// service then.
+    ///
+    /// <para>
+    /// A recorded silence five days long that ended four hours before the deadline, and a
+    /// heartbeat twenty seconds ago. The board was demonstrably talking to the API before the
+    /// deadline and after it; it has since been switched off. The penalty stands.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_switched_off_board_heard_from_on_both_sides_of_the_deadline_does_not_waive_it()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20), enabled: false,
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+        await AddOutageAsync(host, db, box,
+            DateTimeOffset.UtcNow.AddDays(-5), endedAt: DateTimeOffset.UtcNow.AddHours(-4));
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.Contains(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// The other direction of the same rule, and the one that protects the member: a switch-off
+    /// must not DESTROY the evidence of a real outage either.
+    ///
+    /// <para>
+    /// The board was dark right across the deadline — a recorded silence that opened ten minutes
+    /// before the booking started and did not end until half an hour ago — and an admin has since
+    /// taken it out of service, which is exactly what an admin does about a box that has stopped
+    /// answering. Bounding the out-of-service clause by the board's own silence must keep that
+    /// waiver, or the fix for the regression would have created its own: a member locked out by a
+    /// genuine outage would lose the waiver the moment the club acted on the outage.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_board_dark_across_the_deadline_still_waives_it_after_an_admin_switches_it_off()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-30), enabled: false,
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+        await AddOutageAsync(host, db, box,
+            booking.StartsAt.AddMinutes(-10), endedAt: DateTimeOffset.UtcNow.AddMinutes(-30));
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
         Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
         Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
             .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
             l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// The board that was installed long before the deadline and has never once called in — the
+    /// case the silence bound must not swallow.
+    ///
+    /// <para>
+    /// There is no heartbeat to measure a silence from, so the arithmetic that judges every other
+    /// board has nothing to work with; the honest reading is that this board was never in service
+    /// at all, and its court has had no working door since the row appeared. Left unhandled it
+    /// would read as "not silent, therefore reachable, therefore the court was lit", which is the
+    /// same shape of wrong answer the existence floor exists to prevent, in the other direction.
+    /// It differs from
+    /// <see cref="A_box_switched_off_after_the_deadline_does_not_make_its_court_out_of_service"/>
+    /// only in the install date.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_board_installed_before_the_deadline_and_never_heard_from_waives_the_penalty()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        await AddBoxAsync(host, db, lastSeen: null, enabled: false,
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
+    }
+
+    /// <summary>
+    /// <b>Standard 4 on the out-of-service waiver: what the member is actually told.</b>
+    ///
+    /// <para>
+    /// The outage notice promises "the box uploads its record when it reconnects and the booking
+    /// settles as attended". For a board an admin has taken out of service that promise cannot be
+    /// kept — the API answers 403 on every courtside endpoint, including <c>/device/events</c>,
+    /// so nothing it holds will ever arrive and the refund is final. A member who did play and
+    /// who sits waiting for the reversal that sentence describes is being told to wait for
+    /// something that is not coming, which is the same class of defect as a false sentence.
+    /// </para>
+    ///
+    /// <para>
+    /// So the waiver mail names the state it was sent for. Break either branch and this goes red:
+    /// the out-of-service mail must say the box is out of service and that the refund is final,
+    /// and must not repeat the reconnect promise.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_out_of_service_waiver_mail_does_not_promise_a_box_that_will_never_reconnect()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), enabled: false,
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+        host.EmailService.Sent.Clear();
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        var notice = Assert.Single(host.EmailService.Sent, m => m.To == host.PlayerUser.Email);
+        Assert.Contains("out of service", notice.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("out of service", notice.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("this refund is final", notice.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("when it reconnects", notice.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("no-show", notice.HtmlBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The mirror of the test above, so the two branches discriminate rather than one of them
+    /// simply being reachable: a court whose ENABLED box was dark still gets the outage notice,
+    /// with the reconnect promise intact, because that box can and does come back.
+    /// </summary>
+    [Fact]
+    public async Task The_outage_waiver_mail_still_promises_the_upload_for_a_box_that_can_come_back()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90),
+            installedAt: DateTimeOffset.UtcNow.AddDays(-30));
+        await AddOutageAsync(host, db, box, booking.StartsAt.AddMinutes(-10), endedAt: null);
+        host.EmailService.Sent.Clear();
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        var notice = Assert.Single(host.EmailService.Sent, m => m.To == host.PlayerUser.Email);
+        Assert.Contains("offline", notice.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("when it reconnects", notice.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("out of service", notice.HtmlBody, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

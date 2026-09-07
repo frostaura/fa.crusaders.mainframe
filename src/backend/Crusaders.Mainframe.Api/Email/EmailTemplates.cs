@@ -701,6 +701,44 @@ public static class EmailTemplates
             </div>
             """);
 
+    /// <summary>
+    /// The same waiver, for the branch where the court's hardware is switched off rather than
+    /// merely quiet — <c>DeviceOutageIndex.CourtDarkness.OutOfService</c>.
+    ///
+    /// <para>
+    /// It exists because of one sentence the outage notice makes and this one cannot: "the box
+    /// uploads its record when it reconnects and the booking settles as attended". That is the
+    /// S6 reversal, and it is real while the board is in service. A board an admin has taken out
+    /// of service is refused 403 on every courtside endpoint, <c>/device/events</c> among them,
+    /// so nothing it is holding will ever be accepted and the settlement cannot be reversed by
+    /// the box. Repeating the promise here would tell a member who did get onto the court to
+    /// wait for a correction that is not coming, and send them to the desk a week later instead
+    /// of today.
+    /// </para>
+    ///
+    /// <para>
+    /// What the two mails share is the part that is true either way: the court could not be
+    /// released against their name, the charge is fully back, and no penalty was taken.
+    /// </para>
+    /// </summary>
+    public static EmailMessage BookingRefundedForOutOfServiceBox(
+        string to, string courtName, decimal refundedCredits, string clubName) => new(
+        To: to,
+        Subject: $"Refunded — the box on {courtName} is out of service",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">Your booking has been refunded in full</h2>
+              <p>No court box was answering on <strong>{System.Net.WebUtility.HtmlEncode(courtName)}</strong> at {System.Net.WebUtility.HtmlEncode(clubName)} during your booking, so the lights could not be released against your name. That court's box is out of service at the club.</p>
+              <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Refunded</td><td><strong>{Cr(refundedCredits)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Penalty</td><td><strong>None</strong></td></tr>
+              </table>
+              <p style="font-size:13px;color:#475569">You have not been marked down for missing it, and nothing has been deducted. Because that box is out of service it will not send the club anything further, so this refund is final — if you did get onto the court, please tell the desk rather than waiting for it to correct itself.</p>
+              {FooterHtml}
+            </div>
+            """);
+
     /// <summary>Court numbers, for a sentence. "court 3" reads better than "[3]".</summary>
     private static string Courts(IReadOnlyList<int> courtNumbers)
     {

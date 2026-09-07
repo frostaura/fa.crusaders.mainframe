@@ -92,6 +92,15 @@ public sealed class NoShowWorker : BackgroundService
     /// </para>
     ///
     /// <para>
+    /// <b>And there are two of those reasons, because only one of them can be undone.</b> The
+    /// outage notice tells the member the box uploads what it queued when it reconnects and the
+    /// booking then settles as attended (S6). A board an admin has taken out of service will not:
+    /// the API refuses it 403 on every courtside endpoint, <c>/device/events</c> included, so
+    /// nothing it holds will ever arrive and the refund is final. Sending the reconnect promise
+    /// on that branch tells a member who did play to wait for something that is not coming.
+    /// </para>
+    ///
+    /// <para>
     /// <paramref name="refundedCredits"/> is the <b>gross</b> <c>CancellationRefund</c> leg, not
     /// that leg less the penalty. This used to pass the net figure into the cancellation
     /// template's gross slot, so a member whose ledger held <c>+50.00</c> and <c>-15.00</c> — the
@@ -99,11 +108,26 @@ public sealed class NoShowWorker : BackgroundService
     /// in the ledger and which, read beside the penalty line, deducts the 15 twice.
     /// </para>
     /// </summary>
+    // Block body, not an expression body: lizard's C# parser loses scope at an expression-bodied
+    // member whose body contains braces — a `switch { … }` among them — and dumps the rest of the
+    // file into a *global* pseudo-function the length of the file, failing `-L 200` with a warning
+    // that names no real function. See memory/gotchas.md.
     private static EmailMessage Notice(
-        string to, string courtName, string clubName, decimal refundedCredits, decimal penalty, bool courtWasDark)
-        => courtWasDark
-            ? EmailTemplates.BookingRefundedForOutage(to, courtName, refundedCredits, clubName)
-            : EmailTemplates.BookingNoShow(to, courtName, refundedCredits, penalty);
+        string to, string courtName, string clubName, decimal refundedCredits, decimal penalty,
+        CourtDarkness darkness)
+    {
+        if (darkness == CourtDarkness.Unreachable)
+        {
+            return EmailTemplates.BookingRefundedForOutage(to, courtName, refundedCredits, clubName);
+        }
+
+        if (darkness == CourtDarkness.OutOfService)
+        {
+            return EmailTemplates.BookingRefundedForOutOfServiceBox(to, courtName, refundedCredits, clubName);
+        }
+
+        return EmailTemplates.BookingNoShow(to, courtName, refundedCredits, penalty);
+    }
 
     /// <summary>
     /// Reverses one no-show: refund, penalty, status, notification, event.
@@ -167,7 +191,13 @@ public sealed class NoShowWorker : BackgroundService
         // locked-out member for a loss the club's own hardware caused. The waiver is the chosen
         // side of that trade; the exception is recorded in settlement-model.md I2 and on the
         // go-live checklist rather than denied here.
-        var courtWasDark = sweep.Outages.CourtWasDark(b.CourtId, b.StartsAt.AddMinutes(tSettings.GraceWindowMinutes));
+        //
+        // A switched-off box counts here only from the point its own evidence had run past the
+        // threshold, for the same reason a row is not read as an object: `Enabled` carries no
+        // history, so treating the switch as retroactive re-priced deadlines that had already
+        // passed. See DeviceOutageIndex.DarknessAt.
+        var darkness = sweep.Outages.DarknessAt(b.CourtId, b.StartsAt.AddMinutes(tSettings.GraceWindowMinutes));
+        var courtWasDark = darkness != CourtDarkness.Lit;
 
         var penalty = PenaltyFor(b, tSettings, wasCharged, courtWasDark);
 
@@ -281,7 +311,7 @@ public sealed class NoShowWorker : BackgroundService
             try
             {
                 await email.SendAsync(
-                    Notice(user.Email, courtName, tenant.DisplayName, refundedCredits, penalty, courtWasDark), ct);
+                    Notice(user.Email, courtName, tenant.DisplayName, refundedCredits, penalty, darkness), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show email failed for {BookingId}", b.Id); }
         }

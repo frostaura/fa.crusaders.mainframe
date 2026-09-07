@@ -11,8 +11,11 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <para>
 /// The question is about the COURT, not about a box: a court is dark when every enabled box
 /// driving it was unreachable, or when the club's boxes on it have all been switched out of
-/// service — and a court the club has put no box on at all is never dark. See
-/// <see cref="CourtWasDark"/> for what each of those costs when it is got wrong.
+/// service AND had already stopped answering by that instant — and a court the club has put no
+/// box on at all is never dark. That last bound is load-bearing rather than pedantic: without
+/// it, flipping a box out of service today changed the price of deadlines that passed while it
+/// was working, which is the invariant in the sentence above. See <see cref="DarknessAt"/> for
+/// what each of those costs when it is got wrong.
 /// </para>
 ///
 /// <para>
@@ -87,6 +90,32 @@ namespace Crusaders.Mainframe.Api.Services;
 /// and a query per booking is a table scan per booking.
 /// </para>
 /// </summary>
+/// <summary>
+/// Why a court could or could not have been lit at a given instant. The distinction is not
+/// cosmetic: it decides which mail the member gets, and only one of the two states can be
+/// undone by the box coming back.
+/// </summary>
+public enum CourtDarkness
+{
+    /// <summary>A board that could have lit the court was reachable at that instant.</summary>
+    Lit = 0,
+
+    /// <summary>
+    /// Every board driving the court had been silent past <c>offline_after_seconds</c>. The
+    /// boards are still in service, so anything they queued arrives when they reconnect and the
+    /// sweep is reversed (S6).
+    /// </summary>
+    Unreachable = 1,
+
+    /// <summary>
+    /// No board in service drove the court, and the hardware that did had already stopped
+    /// answering by that instant. It is switched off now, so the API refuses it on every
+    /// courtside endpoint including <c>/device/events</c> — nothing it holds will ever arrive
+    /// and the settlement is final.
+    /// </summary>
+    OutOfService = 2,
+}
+
 public sealed class DeviceOutageIndex
 {
     /// <summary>
@@ -104,7 +133,7 @@ public sealed class DeviceOutageIndex
 
     private readonly Dictionary<Guid, int> _courtNumberById;
     private readonly Dictionary<int, List<Guid>> _deviceIdsByCourtNumber;
-    private readonly Dictionary<int, DateTimeOffset> _outOfServiceFromByCourtNumber;
+    private readonly Dictionary<int, List<Guid>> _outOfServiceIdsByCourtNumber;
     private readonly Dictionary<Guid, DateTimeOffset> _knownToExistFrom;
     private readonly List<Silence> _silences;
     private readonly TimeSpan _offlineAfter;
@@ -112,14 +141,14 @@ public sealed class DeviceOutageIndex
     private DeviceOutageIndex(
         Dictionary<Guid, int> courtNumberById,
         Dictionary<int, List<Guid>> deviceIdsByCourtNumber,
-        Dictionary<int, DateTimeOffset> outOfServiceFromByCourtNumber,
+        Dictionary<int, List<Guid>> outOfServiceIdsByCourtNumber,
         Dictionary<Guid, DateTimeOffset> knownToExistFrom,
         List<Silence> silences,
         TimeSpan offlineAfter)
     {
         _courtNumberById = courtNumberById;
         _deviceIdsByCourtNumber = deviceIdsByCourtNumber;
-        _outOfServiceFromByCourtNumber = outOfServiceFromByCourtNumber;
+        _outOfServiceIdsByCourtNumber = outOfServiceIdsByCourtNumber;
         _knownToExistFrom = knownToExistFrom;
         _silences = silences;
         _offlineAfter = offlineAfter;
@@ -143,13 +172,24 @@ public sealed class DeviceOutageIndex
     /// </para>
     ///
     /// <para>
-    /// <b>They are read for one thing only: whether the club has hardware on the court at all.</b>
-    /// A box the API refuses cannot light anything — <c>DeviceIdentity.ResolveAsync</c> answers
-    /// 403 on every courtside endpoint for <c>!device.IsActive</c> — so when the LAST box on a
-    /// court is switched off, that court has no working check-in at all and every no-show on it
-    /// was charged the full 30% for a door the club had closed. See <see cref="CourtWasDark"/>,
-    /// which is where the two halves are put back together, and
-    /// <c>A_court_whose_only_box_is_out_of_service_waives_the_penalty</c>.
+    /// <b>They are read for one thing: whether the club had hardware on the court that the API
+    /// had stopped accepting.</b> A box the API refuses cannot light anything —
+    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 on every courtside endpoint for
+    /// <c>!device.IsActive</c> — so when the LAST box on a court is switched off, that court has
+    /// no working check-in at all and every no-show on it was charged the full 30% for a door the
+    /// club had closed. See <see cref="DarknessAt"/>, which is where the two halves are put back
+    /// together, and <c>A_court_whose_only_box_is_out_of_service_waives_the_penalty</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Their silence is measured too, and that is what stops the switch re-pricing the past.</b>
+    /// A switched-off row still carries <see cref="Device.LastSeenAt"/> and its old
+    /// <see cref="DeviceOutage"/> rows, and because the API refuses a disabled board, that
+    /// evidence stops exactly when the switch was thrown. It is therefore the recorded switch-off
+    /// instant that <c>Enabled</c> itself does not carry, and a court is out of service only from
+    /// the point that evidence runs past the threshold. Without it, one click waived every
+    /// unsettled deadline back to the sweep's lookback floor — see <see cref="DarknessAt"/> and
+    /// <c>A_switch_off_darkens_only_the_deadlines_the_board_had_already_gone_quiet_for</c>.
     /// </para>
     ///
     /// <para>
@@ -174,7 +214,7 @@ public sealed class DeviceOutageIndex
     {
         // Read once and split, because the two halves answer different questions: the enabled
         // boxes carry the silence, and the switched-off ones only say whether the club has any
-        // hardware on the court at all (see OutOfServiceFrom).
+        // hardware on the court at all, and from when (see CourtIndex and DarknessAt).
         var allDevices = await db.Devices.AsNoTracking().ToListAsync(ct);
 
         // A box that has never called in is not silent, it is unborn — LastSeenAt is null only
@@ -190,38 +230,33 @@ public sealed class DeviceOutageIndex
             .Where(o => o.EndedAt == null || o.EndedAt >= since)
             .ToListAsync(ct);
 
-        // The relay mapping, inverted: which boxes drive each court. A device drives the courts
-        // named in its own list, so a silence bears on exactly those and nothing else — a club
-        // with a second box on the annex court keeps charging no-shows there while the main box
-        // is out — and a court with two boxes on it needs both of them before it is dark.
-        var deviceIdsByCourtNumber = new Dictionary<int, List<Guid>>();
-        foreach (var device in devices)
-        {
-            foreach (var court in device.CourtNumbers)
-            {
-                if (!deviceIdsByCourtNumber.TryGetValue(court, out var ids))
-                {
-                    ids = [];
-                    deviceIdsByCourtNumber[court] = ids;
-                }
+        // Every board whose silence is worth measuring: the enabled ones, because a court is
+        // dark only when all of them were past the threshold, and the switched-off ones,
+        // because a switched-off board only shuts the door from the moment it stopped being
+        // heard from. A board that has never called in at all carries no measurable silence
+        // and is handled separately below.
+        var heard = devices.Concat(outOfService.Where(d => d.LastSeenAt != null)).ToList();
+        var heardFrom = HeardFrom(heard, outages);
 
-                ids.Add(device.Id);
-            }
-        }
-
-        var heardFrom = HeardFrom(devices, outages);
-
-        var silences = new List<Silence>(devices.Count + outages.Count);
-        foreach (var device in devices)
+        var silences = new List<Silence>(heard.Count + outages.Count + outOfService.Count);
+        foreach (var device in heard)
         {
             // The stretch the box is in NOW, which is the one no outage row describes yet.
             silences.Add(SilenceFrom(device.Id, device.LastSeenAt!.Value, heardFrom[device.Id]));
         }
 
+        foreach (var device in outOfService.Where(d => d.LastSeenAt is null))
+        {
+            // Never heard from, so there is no heartbeat to measure a silence from and no
+            // instant at which it was reachable. It has been quiet since before time, which
+            // combines with the existence floor to mean "quiet for the whole of its life".
+            silences.Add(new Silence(device.Id, DateTimeOffset.MinValue, null));
+        }
+
         foreach (var outage in outages)
         {
-            // A row whose box is gone from the enabled set contributes nothing, in either
-            // direction — the same rule as the query above.
+            // A row whose box is in neither set contributes nothing, in either direction —
+            // the same rule as the query above.
             if (heardFrom.ContainsKey(outage.DeviceId))
             {
                 silences.Add(SilenceFrom(outage.DeviceId, outage.StartedAt, heardFrom[outage.DeviceId]));
@@ -232,53 +267,42 @@ public sealed class DeviceOutageIndex
             .ToDictionaryAsync(c => c.Id, c => c.CourtNumber, ct);
 
         return new DeviceOutageIndex(
-            courtNumberById, deviceIdsByCourtNumber, OutOfServiceFrom(outOfService),
-            KnownToExistFrom(devices, outages), silences,
+            courtNumberById, CourtIndex(devices), CourtIndex(outOfService),
+            KnownToExistFrom([.. devices, .. outOfService], outages), silences,
             TimeSpan.FromSeconds(offlineAfterSeconds));
     }
 
     /// <summary>
-    /// For each court, the earliest instant at which some box driving it is known to have been
-    /// installed and is now switched off.
+    /// The relay mapping, inverted: which boxes drive each court. A device drives the courts
+    /// named in its own list, so a silence bears on exactly those and nothing else — a club
+    /// with a second box on the annex court keeps charging no-shows there while the main box
+    /// is out — and a court with two boxes on it needs both of them before it is dark.
     ///
     /// <para>
-    /// It answers one question and only one: <i>did the club have hardware on this court that
-    /// the API will now refuse?</i> A switched-off box is not evidence about silence — see
-    /// <see cref="BuildAsync"/> — but it is proof that the club put a board on that court, and
-    /// <see cref="CourtWasDark"/> reads it only where no enabled box remains.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Existence is applied here for the same reason it is applied to an enabled board.</b>
-    /// <c>Enabled</c> carries no history — a box switched off this afternoon looks, in the table,
-    /// exactly like one that was off all week — so without a floor a board registered after the
-    /// deadline would retroactively declare a court out of service at an instant it did not
-    /// exist at. The floor is the earliest of the row's <c>CreatedAt</c> and its
-    /// <c>LastSeenAt</c>, the same two witnesses <see cref="KnownToExistFrom"/> takes.
-    /// <c>LastSeenAt</c> may be null here, unlike in the enabled set: a board that registered
-    /// and was switched off before it ever heart-beat is still hardware the club installed on
-    /// that court, and the question being asked is not about heartbeats.
+    /// Built twice over disjoint sets, because the two answer different questions: the enabled
+    /// boards decide whether the court was dark, and the switched-off ones decide whether the
+    /// club had a door there at all. Keyed by court number rather than by court id because that
+    /// is what <see cref="Device.CourtNumbers"/> holds.
     /// </para>
     /// </summary>
-    private static Dictionary<int, DateTimeOffset> OutOfServiceFrom(List<Device> outOfService)
+    private static Dictionary<int, List<Guid>> CourtIndex(List<Device> devices)
     {
-        var from = new Dictionary<int, DateTimeOffset>();
-        foreach (var device in outOfService)
+        var byCourtNumber = new Dictionary<int, List<Guid>>();
+        foreach (var device in devices)
         {
-            var existedFrom = device.LastSeenAt is { } seen && seen < device.CreatedAt
-                ? seen
-                : device.CreatedAt;
-
             foreach (var court in device.CourtNumbers)
             {
-                if (!from.TryGetValue(court, out var earliest) || existedFrom < earliest)
+                if (!byCourtNumber.TryGetValue(court, out var ids))
                 {
-                    from[court] = existedFrom;
+                    ids = [];
+                    byCourtNumber[court] = ids;
                 }
+
+                ids.Add(device.Id);
             }
         }
 
-        return from;
+        return byCourtNumber;
     }
 
     /// <summary>
@@ -376,7 +400,15 @@ public sealed class DeviceOutageIndex
     /// <summary>
     /// Whether <paramref name="courtId"/> had NO reachable box at <paramref name="instant"/> —
     /// which is the waiver `feature-spec.md` §6a and `settlement-model.md` S5a actually define,
-    /// and not "some box driving it was unreachable".
+    /// and not "some box driving it was unreachable". <see cref="DarknessAt"/> carries the same
+    /// answer with the reason attached, for the mail that has to explain it.
+    /// </summary>
+    public bool CourtWasDark(Guid courtId, DateTimeOffset instant)
+        => DarknessAt(courtId, instant) != CourtDarkness.Lit;
+
+    /// <summary>
+    /// Whether the court had a box that could have lit it at <paramref name="instant"/>, and if
+    /// not, which of the two ways it did not.
     ///
     /// <para>
     /// <b>Every box driving the court has to be dark, and at least one has to exist.</b> The
@@ -385,7 +417,7 @@ public sealed class DeviceOutageIndex
     /// were enough, every no-show on those courts would be waived for as long as that row sat
     /// there — a member who genuinely did not turn up keeps their 30% because of an admin's
     /// unfinished tidying, and nothing on any screen would say why. Switching the stale row off
-    /// removes it from the index entirely (see <see cref="BuildAsync"/>), but that is one act of
+    /// takes it out of the enabled set (see <see cref="BuildAsync"/>), but that is one act of
     /// housekeeping standing between the club and a permanent leak, so the rule cannot rest on
     /// it. The member is protected the moment there is nothing left that could have lit the
     /// court, which is exactly when they could not have checked in.
@@ -398,24 +430,46 @@ public sealed class DeviceOutageIndex
     /// </para>
     ///
     /// <para>
-    /// <b>A court whose boxes are all switched OFF is a different state, and it is dark.</b> This
-    /// is the money half of finding M-F3 and it used to be got wrong in the direction that
-    /// charges members. The out-of-service switch is what an admin uses on a box that is broken
-    /// or has been unplugged for good, and the API then refuses that box 403 on every courtside
-    /// endpoint — heartbeat, activate and walkup alike. Take the LAST box off a court and nobody
-    /// standing at it can check in by any means; the old rule read that court as "no enabled box,
-    /// therefore no evidence, therefore not dark" and settled its no-shows at the full 30%. The
-    /// member was billed a penalty for a door the club had closed, and neither the console nor
-    /// the spec said so. It is the same test as everywhere else — could the member have checked
-    /// in? — applied to the one state where the answer is no by an admin's own deliberate act.
+    /// <b>A court whose boxes are all switched OFF is a different state, and it is dark from the
+    /// moment that hardware stopped answering.</b> This is the money half of finding M-F3 and it
+    /// has now been got wrong in both directions. The out-of-service switch is what an admin uses
+    /// on a box that is broken or has been unplugged for good, and the API then refuses that box
+    /// 403 on every courtside endpoint — heartbeat, activate and walkup alike. Take the LAST box
+    /// off a court and nobody standing at it can check in by any means; the first rule read that
+    /// court as "no enabled box, therefore no evidence, therefore not dark" and settled its
+    /// no-shows at the full 30%, billing the member a penalty for a door the club had closed.
     /// </para>
     ///
     /// <para>
-    /// The two are distinguished by whether a row exists, not by a judgement about intent: a
-    /// club with nothing on the court has never asked anyone to check in there, while a club
-    /// with a switched-off board has taken a working door away. A disabled board that was never
-    /// on that court's relays does not appear here at all, because
-    /// <see cref="OutOfServiceFrom"/> is keyed by the courts each board actually drives.
+    /// <b>The second rule fixed that and broke the invariant at the top of this file instead.</b>
+    /// <c>Enabled</c> carries no history, so "dark because the switch is thrown" was read as
+    /// "dark for as far back as this board has existed": flipping the switch re-priced deadlines
+    /// that had already passed. A board that ran perfectly for thirty days and was switched off
+    /// five minutes ago darkened every unsettled deadline back to the sweep's lookback floor, and
+    /// the club lost penalty revenue it was owed on courts that were working at the time. It
+    /// needed no unusual timing — any sweep landing after the click settles them, including the
+    /// next thirty-second tick.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>So a switched-off board is judged by the same silence its enabled siblings are.</b> A
+    /// disabled board is refused 403 on every courtside endpoint, so the instant an admin throws
+    /// the switch is the instant that board stops being heard from: <see cref="Device.LastSeenAt"/>
+    /// on a switched-off row is the recorded shadow of the switch-off, and a heartbeat at
+    /// <c>T</c> is positive proof the board was still in service at <c>T</c>, because a board out
+    /// of service cannot produce one. The court is therefore out of service at
+    /// <paramref name="instant"/> only once that evidence has run past
+    /// <c>offline_after_seconds</c> — the same threshold, the same comparison, the same reading
+    /// of outage rows as everywhere else. A board that has never called in at all was never in
+    /// service, and is a closed door from the moment it existed.
+    /// </para>
+    ///
+    /// <para>
+    /// The two "not dark" cases are distinguished by whether a row exists, not by a judgement
+    /// about intent: a club with nothing on the court has never asked anyone to check in there,
+    /// while a club with a switched-off board has taken a working door away. A disabled board
+    /// that was never on that court's relays does not appear here at all, because
+    /// <see cref="CourtIndex"/> is keyed by the courts each board actually drives.
     /// </para>
     ///
     /// <para>
@@ -425,9 +479,9 @@ public sealed class DeviceOutageIndex
     /// another.
     /// </para>
     /// </summary>
-    public bool CourtWasDark(Guid courtId, DateTimeOffset instant)
+    public CourtDarkness DarknessAt(Guid courtId, DateTimeOffset instant)
     {
-        if (!_courtNumberById.TryGetValue(courtId, out var courtNumber)) return false;
+        if (!_courtNumberById.TryGetValue(courtId, out var courtNumber)) return CourtDarkness.Lit;
 
         var existed = 0;
         if (_deviceIdsByCourtNumber.TryGetValue(courtNumber, out var deviceIds))
@@ -441,18 +495,45 @@ public sealed class DeviceOutageIndex
                 if (_knownToExistFrom[deviceId] > instant) continue;
 
                 existed++;
-                if (!BoxWasUnreachable(deviceId, instant)) return false;
+                if (!BoxWasUnreachable(deviceId, instant)) return CourtDarkness.Lit;
             }
         }
 
         // Every box the club expects to hear from on this court was past the threshold.
-        if (existed > 0) return true;
+        if (existed > 0) return CourtDarkness.Unreachable;
 
-        // None of them existed yet, or there are none. The court is dark only if the club had
-        // hardware on it that an admin has switched off — a box the API refuses is a door that
-        // is shut, not an absence of evidence. See the summary.
-        return _outOfServiceFromByCourtNumber.TryGetValue(courtNumber, out var outOfServiceFrom)
-            && outOfServiceFrom <= instant;
+        // None of them existed yet, or there are none. See the summary.
+        return DoorWasShutAt(courtNumber, instant);
+    }
+
+    /// <summary>
+    /// The out-of-service half, asked only where no enabled board drove the court at that
+    /// instant: had the club put hardware on this court that had already stopped answering?
+    ///
+    /// <para>
+    /// The shape mirrors the enabled loop above deliberately — at least one board existed, and
+    /// every board that existed was past the threshold — because the question is the same one. A
+    /// club with two switched-off boards on a court, one of which was still heart-beating at the
+    /// deadline, had a working door there at the deadline.
+    /// </para>
+    /// </summary>
+    private CourtDarkness DoorWasShutAt(int courtNumber, DateTimeOffset instant)
+    {
+        if (!_outOfServiceIdsByCourtNumber.TryGetValue(courtNumber, out var deviceIds))
+        {
+            return CourtDarkness.Lit;
+        }
+
+        var existed = 0;
+        foreach (var deviceId in deviceIds)
+        {
+            if (_knownToExistFrom[deviceId] > instant) continue;
+
+            existed++;
+            if (!BoxWasUnreachable(deviceId, instant)) return CourtDarkness.Lit;
+        }
+
+        return existed > 0 ? CourtDarkness.OutOfService : CourtDarkness.Lit;
     }
 
     /// <summary>
