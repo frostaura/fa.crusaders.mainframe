@@ -455,6 +455,41 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
     });
   });
 
+  /**
+   * The two reason fields a screen reader could not name.
+   *
+   * <p>
+   * Suspend and Reject each carried a <code>&lt;label&gt;</code> with no
+   * <code>htmlFor</code> beside an <code>&lt;input&gt;</code> with no <code>id</code>, so
+   * <code>el.labels.length</code> was 0 and the field announced as an unlabelled edit box —
+   * for the one input on each dialog whose text is emailed verbatim to the person it is
+   * about. The adjust-credit modal a few lines further down the same file had done it
+   * correctly all along, so this was an inconsistency inside one screen rather than a
+   * house style.
+   * </p>
+   */
+  it("names the suspend reason field to a screen reader, not just to a sighted reader", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Suspend member" }));
+
+    const field = screen.getByLabelText("Reason (visible to the member)");
+    expect(field).toBe(screen.getByPlaceholderText(/Membership dues unpaid/));
+    expect((field as HTMLInputElement).labels).toHaveLength(1);
+  });
+
+  it("names the reject reason field too, which is the same dialog shape", async () => {
+    stubFetch(routes({ status: "PendingApproval", email_verified: true }));
+    renderPage(<AdminMembersPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
+
+    const field = screen.getByLabelText("Reason (visible to applicant)");
+    expect(field).toBe(screen.getByPlaceholderText(/Membership number not on file/));
+    expect((field as HTMLInputElement).labels).toHaveLength(1);
+  });
+
   it("offers reactivate — and only reactivate-shaped actions — on a suspended member", async () => {
     const stub = stubFetch(routes({ status: "Suspended" }, [
       { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, body: { reactivated: true } },

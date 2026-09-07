@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
 import { endpoints } from "../lib/api";
@@ -6,6 +6,7 @@ import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
 import { useProfile } from "../lib/profile";
 import { ScrollArea } from "./ScrollArea";
+import { pendingApplicationsVersion, subscribePendingApplications } from "../lib/pendingApplications";
 import { cn, formatCredits } from "../lib/utils";
 
 /**
@@ -20,13 +21,19 @@ import { cn, formatCredits } from "../lib/utils";
  * </p>
  *
  * <p>
- * Re-read on every navigation, which is what makes it correct after an approval: the console
- * patches its row in place without refetching, so the badge would otherwise still claim a
- * pending application the admin has just dealt with.
+ * Re-read on every navigation <b>and on every change to the pending set</b>. Navigation
+ * alone was not enough and the comment that used to sit here claimed the opposite: Approve
+ * and Reject are pressed <em>on</em> <code>/admin/members</code>, the console patches the
+ * row in place without refetching, and <code>location.pathname</code> does not change — so
+ * the badge went on counting an applicant the admin had just dealt with, beside that same
+ * screen's own "3 pending" summary. <code>lib/pendingApplications</code> is how the console
+ * says the set moved; the count itself still comes from the server, never from the console's
+ * optimistic view of it.
  * </p>
  */
 function usePendingApplicationCount(enabled: boolean, routeKey: string): number {
   const [count, setCount] = useState(0);
+  const changeVersion = useSyncExternalStore(subscribePendingApplications, pendingApplicationsVersion, pendingApplicationsVersion);
 
   useEffect(() => {
     if (!enabled) {
@@ -39,7 +46,7 @@ function usePendingApplicationCount(enabled: boolean, routeKey: string): number 
       .then((rows) => { if (!cancelled) setCount(rows.length); })
       .catch(() => { /* A badge is a cue, not a screen: a failed read shows nothing rather than an error. */ });
     return () => { cancelled = true; };
-  }, [enabled, routeKey]);
+  }, [enabled, routeKey, changeVersion]);
 
   return count;
 }
@@ -104,9 +111,19 @@ export default function Layout() {
     <div className="h-full flex flex-col">
       <header className="bg-bg-surface border-b border-border sticky top-0 z-30">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-4">
-          <NavLink to="/" className="font-semibold tracking-tight whitespace-nowrap">Crusaders Squash</NavLink>
+          <NavLink to="/" className="font-semibold tracking-tight whitespace-nowrap min-w-0 truncate">Crusaders Squash</NavLink>
           {auth.status === "authenticated" && (
-            <nav className="hidden md:flex items-center gap-1 text-sm">
+            // `lg`, not `md`. The inline nav switched on at 768 and the row it sits in needs
+            // 800: an admin has five tabs, and at 768 the header measured a 795px scrollWidth
+            // against a 768px viewport on all ten routes — 27px of whole-page sideways scroll
+            // with the gear button (`Open menu`, and the only route to Sign out) running from
+            // 751 to 795 and therefore sliced by the right edge. A member, with three tabs,
+            // was clean at every width, which is why it survived so long.
+            //
+            // Between 768 and 1023 the scrolling tab strip below takes over instead. It is
+            // the same nav, it announces its own overflow, and it is what a phone already
+            // gets — a strip that scrolls beats a gear you cannot press.
+            <nav className="hidden lg:flex items-center gap-1 text-sm min-w-0">
               <NavTab to="/schedule" label="Bookings" />
               <NavTab to="/court-code" label="Court code" />
               {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
@@ -114,7 +131,7 @@ export default function Layout() {
               <NavTab to="/reports" label="Reports" />
             </nav>
           )}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 shrink-0">
             {auth.status === "authenticated" && (
               <NavLink
                 to="/wallet"
@@ -204,12 +221,13 @@ export default function Layout() {
           </div>
         </div>
         {auth.status === "authenticated" && (
-          // The mobile tab strip scrolls sideways and used to hide its own scrollbar, so at 375px
+          // The compact tab strip — phones, and now every width below `lg`, because five admin
+          // tabs do not fit the header row until 1024. It scrolls sideways and used to hide its own scrollbar, so at 375px
           // the last tab ("Reports") was simply cut off at the edge with nothing to say it was
           // there. ScrollArea is the same container the wallet ledger uses: a fade at the edge for
           // anyone who can see it, a tab stop so the arrow keys can reach the rest, and a sentence
           // for a screen reader while there is more to reach.
-          <nav className="md:hidden border-t border-border" aria-label="Sections">
+          <nav className="lg:hidden border-t border-border" aria-label="Sections">
             <ScrollArea label="Section tabs">
               <div className="flex items-center gap-1 px-2 py-1 text-sm w-max">
               <NavTab to="/schedule" label="Bookings" />
@@ -222,7 +240,20 @@ export default function Layout() {
           </nav>
         )}
       </header>
-      <main className="flex-1 min-h-0 flex flex-col overflow-auto"><div className="max-w-5xl w-full mx-auto px-4 py-6 flex-1 min-h-0 flex flex-col">
+      {/*
+        The admin console gets the width the page already has.
+
+        Every route was capped at `max-w-5xl`, so the members table's scroll container
+        measured 990px at 1440px AND at 1920px — roughly 800px of screen sitting unused
+        beside a table that is 1079px wide and was therefore hiding a whole column
+        underneath its two pinned ones at every desktop width. Member-facing routes stay at
+        5xl on purpose: the booking grid, the wallet and the top-up flow are mobile-first
+        reading widths, and stretching them to 1280px makes them worse, not better.
+      */}
+      <main className="flex-1 min-h-0 flex flex-col overflow-auto"><div className={cn(
+        "w-full mx-auto px-4 py-6 flex-1 min-h-0 flex flex-col",
+        location.pathname.startsWith("/admin/") ? "max-w-7xl" : "max-w-5xl",
+      )}>
         <Outlet />
       </div></main>
     </div>
