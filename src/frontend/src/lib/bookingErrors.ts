@@ -30,12 +30,18 @@ import { formatCredits } from "./utils";
 const BOOKING_ERROR_TEXT: Record<string, string> = {
   past_time: "That slot has already started — pick a later one.",
   too_far_ahead: "That day isn't open for booking yet. Try a date closer to today.",
-  slot_taken: "Someone just took that slot. Refresh the schedule to see what's left.",
+  // These four used to end "Refresh the schedule", inside a modal that covered the only
+  // Refresh control on the page — a real click on it is intercepted by the dialog's own
+  // overlay — and beside a grid that went on offering the slot as Available for ever, since
+  // nothing polls. The app now refetches the day BEFORE the sentence renders (see
+  // `provesStaleGrid` below), so the sentence states what has happened rather than asking
+  // for something the member cannot do.
+  slot_taken: "Someone just took that slot. The schedule behind this is up to date now — pick another time.",
   insufficient_balance: "Not enough credits — top up your wallet and try again.",
-  court_not_found: "That court isn't available any more. Refresh the schedule.",
-  duplicate_request: "That booking already went through — refresh to see it.",
+  court_not_found: "That court isn't on the schedule any more. The schedule behind this is up to date now.",
+  duplicate_request: "That booking already went through — it's on the schedule behind this.",
   already_started: "That booking has already started, so it can't be cancelled.",
-  booking_not_found: "That booking is no longer there. Refresh the schedule.",
+  booking_not_found: "That booking is no longer there. The schedule behind this is up to date now.",
   block_not_found: "That block has already been lifted.",
   // A suspended membership is not a stale screen. Without this key the refusal fell through to
   // the schedule's fallback — "Couldn't make that booking. Refresh the schedule and try again." —
@@ -156,6 +162,40 @@ export function describeBookingError(e: unknown, fallback: string): string {
 
   if (e.code !== null && e.code in BOOKING_ERROR_TEXT) return BOOKING_ERROR_TEXT[e.code];
   return fallback;
+}
+
+/**
+ * Does this refusal prove the client's copy of the day is out of date?
+ *
+ * <p>
+ * L-F2. Every one of these is the server saying "what you are looking at is not what is
+ * there" — and the schedule did nothing about it. A finder booked a slot an admin had taken
+ * in another browser, got the refusal, and watched the grid go on showing that slot as
+ * <em>Available</em> for thirty seconds and indefinitely after: no refetch was issued, there
+ * is no polling, and the page's only Refresh control sits behind the modal's own
+ * <code>aria-modal</code> overlay, which intercepts the click. The <code>out_of_hours</code>
+ * variant is worse — an admin moving Monday's closing time to 09:00 leaves every slot from
+ * 09:00 to 19:15 still drawn as bookable until something reloads the day.
+ * </p>
+ *
+ * <p>
+ * So the callers refetch on these codes, and <em>await</em> the refetch before showing the
+ * sentence, which is what lets the sentences above say the schedule is up to date instead of
+ * asking the member to make it so. A refusal that is about the member rather than about the
+ * day — <code>insufficient_balance</code>, <code>per_day_cap_exceeded</code>,
+ * <code>peak_hours_league_only</code>, <code>member_suspended</code> — is deliberately not
+ * here: refetching would not change it, and a needless day-sized read on every refusal is
+ * how a mobile grid gets slow.
+ * </p>
+ */
+const STALE_GRID_CODES = new Set([
+  "slot_taken", "court_not_found", "duplicate_request",
+  "out_of_hours", "past_time", "too_far_ahead",
+  "booking_not_found", "block_not_found",
+]);
+
+export function provesStaleGrid(e: unknown): boolean {
+  return e instanceof ApiError && e.code !== null && STALE_GRID_CODES.has(e.code);
 }
 
 /**

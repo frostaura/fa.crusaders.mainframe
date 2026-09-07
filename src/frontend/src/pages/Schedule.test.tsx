@@ -852,3 +852,149 @@ describe("Schedule", () => {
     });
   });
 });
+
+/**
+ * L-F2 — after a refusal that proves the grid is wrong, the grid is still wrong.
+ *
+ * <p>
+ * A finder opened the confirmation on Court 3 at 12:00, had an admin book that slot from
+ * another browser, and pressed Book. The refusal was right — <em>"Someone just took that
+ * slot. Refresh the schedule to see what's left."</em> — and nothing else happened: no
+ * refetch went out, the grid behind the modal still said <em>12:00 Court 3 · Available</em>
+ * thirty seconds later (there is no polling), and the page's only Refresh control sits behind
+ * the dialog's own <code>aria-modal</code> overlay, which intercepts a real click. The
+ * sentence asked for the one thing the member could not do.
+ * </p>
+ *
+ * <p>
+ * The <code>out_of_hours</code> half is the same hole through a different door and is worse:
+ * an admin moving Monday's closing time to 09:00 left every slot from 09:00 to 19:15 still
+ * drawn as bookable, one modal at a time, until something reloaded the day.
+ * </p>
+ *
+ * <p>
+ * These assert the REFETCH and the redrawn grid, not the sentence: a screen can apologise
+ * perfectly while still offering the slot it has just refused.
+ * </p>
+ */
+describe("Schedule — a refusal that proves the grid is stale refetches it", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const COURT = "11111111-1111-1111-1111-111111111111";
+  const DATE = "2030-09-07";
+  const sast = (hh: number, mm = 0) => new Date(Date.UTC(2030, 8, 7, hh - 2, mm, 0)).toISOString();
+
+  const OPEN_DAY = {
+    date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
+    dayStartMinute: 7 * 60, dayEndMinute: 20 * 60, advanceBookingDays: 14,
+    penaltyPct: 30, penaltyWindowMinutes: 15,
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    slots: [] as unknown[],
+  };
+
+  /** The same day as the club now has it: somebody else owns 07:00. */
+  const TAKEN_DAY = {
+    ...OPEN_DAY,
+    slots: [{
+      courtId: COURT, courtNumber: 1, startsAtUtc: sast(7), endsAtUtc: sast(7, 15),
+      status: "booked", ownerUserId: "77777777-7777-7777-7777-777777777777",
+      ownerFirstName: "Sipho", ownerPhotoUrl: null, isMine: false,
+      bookingId: "88888888-8888-8888-8888-888888888888", blockLabel: null,
+      checkedIn: null, amountChargedCredits: null,
+    }],
+  };
+
+  /**
+   * The same day after an admin moved closing time to 09:00 on the Settings page.
+   *
+   * It keeps one 19:00 booking, exactly as the finder's club did: the grid is drawn to the
+   * club's hours UNION whatever range the day's bookings occupy, so the rows between 09:00
+   * and 19:15 still exist — which is what makes "still offered as Available" a thing that can
+   * be observed at all, rather than rows that simply vanish.
+   */
+  const SHORT_DAY = {
+    ...OPEN_DAY,
+    dayEndMinute: 9 * 60,
+    slots: [{
+      courtId: COURT, courtNumber: 1, startsAtUtc: sast(19), endsAtUtc: sast(19, 15),
+      status: "booked", ownerUserId: "77777777-7777-7777-7777-777777777777",
+      ownerFirstName: "Sipho", ownerPhotoUrl: null, isMine: false,
+      bookingId: "88888888-8888-8888-8888-888888888888", blockLabel: null,
+      checkedIn: null, amountChargedCredits: null,
+    }],
+  };
+
+  function drive(days: unknown[], refusal: unknown) {
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { balance_credits: 1635, entries: [] } },
+      { path: "/api/v1/schedule", body: null, sequence: days },
+      { method: "POST", path: "/api/v1/bookings/", status: 409, body: refusal },
+    ]);
+    renderPage(<SchedulePage />);
+    return stub;
+  }
+
+  const scheduleReads = (stub: { calls: { method: string; path: string }[] }) =>
+    stub.calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/v1/schedule")).length;
+
+  it("refetches the day when the slot was taken, and stops offering it", async () => {
+    const stub = drive([OPEN_DAY, TAKEN_DAY], { error: "slot_taken" });
+
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+    expect(scheduleReads(stub)).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    await waitFor(() => expect(modal).toHaveTextContent(/Someone just took that slot/));
+
+    // The refetch the page never issued.
+    expect(scheduleReads(stub)).toBe(2);
+    // And the grid behind the modal, which used to go on offering it for ever.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ })).not.toBeInTheDocument());
+    expect(screen.getByLabelText(/Court 1 at 07:00 — booked by Sipho/)).toBeInTheDocument();
+  });
+
+  it("redraws the day as closed when the club's hours moved under an open modal", async () => {
+    const stub = drive([OPEN_DAY, SHORT_DAY], { error: "out_of_hours", opens_at: "07:00", closes_at: "09:00" });
+
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 11:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    await waitFor(() => expect(modal).toHaveTextContent(/The club is open 07:00–09:00 that day/));
+
+    expect(scheduleReads(stub)).toBe(2);
+    // The finder counted every slot from 09:00 to 19:15 still drawn as bookable after this
+    // refusal; a press of the header Refresh redrew them all as Closed, so the API was right
+    // and only the un-refetched client was wrong.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Book Court 1 at 11:00/ })).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Court 1 at 11:00 — the club is closed")).toBeInTheDocument();
+    // 07:00–09:00 is still open, so this is a redraw and not a blanked grid.
+    expect(screen.getByRole("button", { name: /^Book Court 1 at 08:45/ })).toBeInTheDocument();
+  });
+
+  /**
+   * The fixture, varied. Every assertion above passes just as well if the page refetches on
+   * EVERY refusal — which would be a day-sized read on each press of a button a capped member
+   * cannot use, on a phone. A refusal about the member is not evidence about the day.
+   */
+  it("does not refetch on a refusal that says nothing about the day", async () => {
+    const stub = drive([OPEN_DAY, TAKEN_DAY], {
+      error: "per_day_cap_exceeded", cap_minutes: 60, already_booked_minutes: 60, attempted_minutes: 15,
+    });
+
+    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
+    fireEvent.click(cells[0]);
+    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
+    await waitFor(() => expect(modal).toHaveTextContent(/You already have 60 of your 60 minutes booked/));
+
+    expect(scheduleReads(stub)).toBe(1);
+  });
+});
