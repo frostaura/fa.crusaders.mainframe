@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
 import { formatCredits, formatSignedCredits } from "../lib/utils";
 import { Card } from "../components/Card";
-import { Input, Label } from "../components/Button";
+import { Button, Input, Label } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
 import { useToast } from "../components/Toast";
 
@@ -11,14 +12,67 @@ import { useToast } from "../components/Toast";
 // backend became unfilterable with nothing to warn anyone.
 const TYPES = LEDGER_ENTRY_TYPES;
 
+/**
+ * The filters live in the URL, because `reporting.md` § Filters says they do:
+ * <i>"Filter state lives in the URL query string so a report can be shared / bookmarked."</i>
+ *
+ * <p>
+ * They did not. Opening <code>/admin/ledger?userId=&lt;a member&gt;</code> returned all 73
+ * movements in the tenant rather than that member's 29, adding <code>&amp;type=TopUp</code>
+ * changed nothing, and the in-page controls — which filter correctly — never wrote anything
+ * back, so <code>p.url()</code> stayed <code>/admin/ledger</code> whatever was on screen. A
+ * report the admin could see and could not send to anybody.
+ * </p>
+ *
+ * <p>
+ * So the query string is the single source of truth here rather than a copy of it kept in
+ * sync: there is no `useState` for a filter, the inputs read the URL and write the URL, and
+ * <code>replace</code> keeps a debounced keystroke out of the history stack. The dates are
+ * written on arrival too — a bookmark saying "the last 30 days" resolves to a different
+ * period next week, which is not what sharing a report means.
+ * </p>
+ */
+const DEFAULT_FROM_DAYS = 30;
+
 export default function AdminLedgerPage() {
   const toast = useToast();
+  const [params, setParams] = useSearchParams();
   const [rows, setRows] = useState<LedgerRow[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const [from, setFrom] = useState(() => isoDate(daysAgo(30)));
-  const [to, setTo] = useState(() => isoDate(daysAgo(-1)));
-  const [type, setType] = useState("");
-  const [userQuery, setUserQuery] = useState("");
+
+  const from = params.get("from") ?? isoDate(daysAgo(DEFAULT_FROM_DAYS));
+  const to = params.get("to") ?? isoDate(daysAgo(-1));
+  const type = params.get("type") ?? "";
+  const userQuery = params.get("q") ?? "";
+  const userId = params.get("userId") ?? "";
+
+  const setFilter = (key: string, value: string) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      // An empty date input means UNBOUNDED and an empty select means "all types"; both are
+      // states worth being able to share, so they are written as an empty value rather than
+      // dropped, which would read back as "unset" and silently restore the default window.
+      if (value === "" && (key === "type" || key === "q" || key === "userId")) next.delete(key);
+      else next.set(key, value);
+      return next;
+    }, { replace: true });
+  };
+
+  // Pin the window the admin is actually looking at into the URL, once, so the link they
+  // copy means the same thing tomorrow.
+  const pinned = useRef(false);
+  useEffect(() => {
+    if (pinned.current) return;
+    pinned.current = true;
+    if (params.has("from") && params.has("to")) return;
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (!next.has("from")) next.set("from", from);
+      if (!next.has("to")) next.set("to", to);
+      return next;
+    }, { replace: true });
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -31,6 +85,7 @@ export default function AdminLedgerPage() {
         from: from ? `${from}T00:00:00Z` : undefined,
         to: to ? `${to}T23:59:59Z` : undefined,
         type: type || undefined,
+        userId: userId || undefined,
         limit: 1000,
       });
       setRows(r);
@@ -50,7 +105,7 @@ export default function AdminLedgerPage() {
     const h = window.setTimeout(load, 300);
     return () => window.clearTimeout(h);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [from, to, type]);
+  }, [from, to, type, userId]);
 
   const filtered = useMemo(() => {
     if (!rows) return [];
@@ -79,18 +134,19 @@ export default function AdminLedgerPage() {
       <Card className="space-y-4">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div>
-            <Label>From</Label>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <Label htmlFor="ledger-from">From</Label>
+            <Input id="ledger-from" type="date" value={from} onChange={(e) => setFilter("from", e.target.value)} />
           </div>
           <div>
-            <Label>To</Label>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <Label htmlFor="ledger-to">To</Label>
+            <Input id="ledger-to" type="date" value={to} onChange={(e) => setFilter("to", e.target.value)} />
           </div>
           <div>
-            <Label>Type</Label>
+            <Label htmlFor="ledger-type">Type</Label>
             <select
+              id="ledger-type"
               value={type}
-              onChange={(e) => setType(e.target.value)}
+              onChange={(e) => setFilter("type", e.target.value)}
               className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
             >
               <option value="">All types</option>
@@ -100,10 +156,24 @@ export default function AdminLedgerPage() {
         </div>
 
         <div>
-          <Label>Search (name)</Label>
-          <Input placeholder="Filter by member or admin name…" value={userQuery} onChange={(e) => setUserQuery(e.target.value)} />
+          <Label htmlFor="ledger-search">Search (name)</Label>
+          <Input id="ledger-search" placeholder="Filter by member or admin name…" value={userQuery} onChange={(e) => setFilter("q", e.target.value)} />
           {loading && <p className="text-xs text-text-muted mt-1">Refreshing…</p>}
         </div>
+
+        {userId && (
+          // `?userId=` is answered by the API and had no way in from the screen, so a link to
+          // one member's movements silently showed the whole club's. It is honoured now, and
+          // said out loud — an unexplained short list is the same defect wearing a filter.
+          <div className="flex items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-info-soft text-info-strong font-medium">
+              Showing one member’s movements
+            </span>
+            <Button variant="ghost" type="button" className="h-8 px-2 text-xs" onClick={() => setFilter("userId", "")}>
+              Show everyone
+            </Button>
+          </div>
+        )}
       </Card>
 
       <Card className="!p-0 flex flex-col flex-1 min-h-0">
