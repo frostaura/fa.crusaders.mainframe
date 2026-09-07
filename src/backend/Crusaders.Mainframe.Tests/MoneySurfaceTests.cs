@@ -444,7 +444,7 @@ public class MoneySurfaceTests
     /// and outcome are the same thing. A refuter drove the case where they are not, on a
     /// live stack, and got <c>{"waived": true, "waive_reason": null}</c> in the club's report
     /// beside a mail printing the reason and mentioning no waiver.
-    /// <see cref="A_waiver_that_did_not_happen_is_absent_from_the_audit_row_and_from_the_mail_alike"/>
+    /// <see cref="A_waiver_that_did_not_happen_is_absent_from_both_records_and_the_reason_still_travels"/>
     /// is that case, and it is the one that holds the rule up.
     /// </para>
     /// </summary>
@@ -487,7 +487,8 @@ public class MoneySurfaceTests
     /// <summary>
     /// An admin ticking "waive the penalty" on a cancellation that carries no penalty waives
     /// nothing — and the club's report and the member's mail must both say so, in the same
-    /// words, because they are the same two values.
+    /// words, because they are the same value. <b>The reason is a different fact and is
+    /// recorded anyway</b>, in both records, because the club still cancelled the court.
     ///
     /// <para>
     /// The refuted case, pinned. Outside the penalty window <c>SettleCancellation</c> charges
@@ -500,14 +501,23 @@ public class MoneySurfaceTests
     /// </para>
     ///
     /// <para>
-    /// Deliberately NOT reachable from the console — the waive control is rendered only when
-    /// the quote carries a penalty — so this drives the service directly, the way the refuter
-    /// drove the raw API. A route that grows the ability to send it is not a new defect
-    /// afterwards.
+    /// <b>The over-correction is pinned here too, and it is the second half of this test.</b>
+    /// Agreeing the two records by gating the REASON on the derived waiver as well deleted
+    /// the desk's own words from both at once — a club cancellation whose mail carried no
+    /// "Reason given by the club" line at all, against a §11 bullet that promises one. So
+    /// this asserts the pair in opposite directions: no waiver anywhere, reason everywhere.
+    /// </para>
+    ///
+    /// <para>
+    /// This particular shape — the tick outside the window — is not reachable from the
+    /// console, since the waive control renders only on a penalty-bearing quote, so it drives
+    /// the service directly the way the refuter drove the raw API.
+    /// <see cref="A_scan_in_between_the_quote_and_the_confirm_still_records_the_club_s_reason"/>
+    /// is the same collapse reached from the console, and that one a member can cause.
     /// </para>
     /// </summary>
     [Fact]
-    public async Task A_waiver_that_did_not_happen_is_absent_from_the_audit_row_and_from_the_mail_alike()
+    public async Task A_waiver_that_did_not_happen_is_absent_from_both_records_and_the_reason_still_travels()
     {
         const string reason = "Court double-booked by the desk";
 
@@ -540,9 +550,10 @@ public class MoneySurfaceTests
         var auditWaived = details.RootElement.GetProperty("waived").GetBoolean();
         var auditReason = details.RootElement.GetProperty("waive_reason");
 
-        // The club's report: no waiver, and no reason for one.
+        // The club's report: no waiver — and the reason the desk typed, kept, because the
+        // club did cancel this court and this row is the only place that survives.
         Assert.False(auditWaived);
-        Assert.Equal(System.Text.Json.JsonValueKind.Null, auditReason.ValueKind);
+        Assert.Equal(reason, auditReason.GetString());
 
         var mail = await PollMail(host, m => m.Subject.Contains("club", StringComparison.Ordinal));
         Assert.NotNull(mail);
@@ -557,9 +568,92 @@ public class MoneySurfaceTests
             mail.HtmlBody.Contains(reason, StringComparison.Ordinal));
 
         // Stated once more as literals, so a reader can see which way round the agreement
-        // fell without re-deriving it: nothing waived, nothing said about a waiver.
+        // fell without re-deriving it: nothing waived, nothing said about a waiver — and the
+        // reason present on both sides, under the words §11 promises it in.
         Assert.DoesNotContain("was waived", mail.HtmlBody);
-        Assert.DoesNotContain(reason, mail.HtmlBody);
+        Assert.Contains("Reason given by the club", mail.HtmlBody);
+        Assert.Contains(reason, mail.HtmlBody);
+    }
+
+    /// <summary>
+    /// The console-reachable collapse, and the one a MEMBER can cause: a scan-in landing
+    /// between the cancellation quote and the confirm.
+    ///
+    /// <para>
+    /// The desk opens the modal on a booking inside the penalty window, so the quote carries
+    /// a penalty and the waive control renders; the admin ticks it and types why. Before they
+    /// press Confirm the member scans in at the box. <c>SettleCancellation</c> now returns
+    /// <c>(0, 0)</c> whichever way it is asked — the lights have been on — so nothing is
+    /// refunded, nothing is charged and <c>waived</c> derives <b>false</b>, which is right:
+    /// the club gave nothing up. The reason is a different fact and must survive it.
+    /// </para>
+    ///
+    /// <para>
+    /// Gated on the waiver it did not survive, and the loss was total rather than partial:
+    /// <c>Booking.CancellationReason</c> is a mapped, migrated column that no service writes,
+    /// so the audit row is the only record there is, and the mail was the member's only
+    /// notice. A club that cancelled a court mid-session then held no answer to "why?" at
+    /// all.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_scan_in_between_the_quote_and_the_confirm_still_records_the_club_s_reason()
+    {
+        // No apostrophe in the reason on purpose: the template HTML-encodes it (an admin's
+        // free text lands in somebody else's mail), so a literal assertion on the raw string
+        // would fail on the encoding rather than on the rule this test is about.
+        const string reason = "Roof leak over court 1 — duty manager pulled it";
+
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        var created = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id,
+            TestHost.BookableSlot(2), sliceCount: 1, default));
+
+        // Inside the penalty window, which is the state the console requires before it will
+        // render the waive control at all — this is what the desk was quoted.
+        var row = await db.Bookings.FirstAsync(b => b.Id == created.Booking.Id);
+        var length = row.EndsAt - row.StartsAt;
+        row.StartsAt = TestHost.Storable(DateTimeOffset.UtcNow.AddMinutes(5));
+        row.EndsAt = row.StartsAt + length;
+        await db.SaveChangesAsync();
+
+        var quote = await bookings.QuoteCancellationAsync(row.Id, host.AdminUser.Id, actorIsAdmin: true, default);
+        Assert.NotNull(quote);
+        // The precondition for the whole race: the desk saw a penalty, so it saw the control.
+        Assert.True(quote!.PenaltyCredits > 0m);
+
+        // …and the member scans in at the box before Confirm is pressed.
+        row.CheckedInAt = TestHost.Storable(DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync();
+
+        var cancelled = await bookings.CancelAsync(
+            row.Id, host.AdminUser.Id, actorIsAdmin: true, waivePenalty: true, default, reason);
+        var ok = Assert.IsType<CancellationResult.Ok>(cancelled);
+
+        // The lights have been on: no refund, no penalty, and therefore nothing waived.
+        Assert.Equal(0m, ok.RefundedCredits);
+        Assert.Equal(0m, ok.PenaltyCredits);
+
+        var audit = await db.AuditLogs
+            .Where(a => a.Action == "booking.cancelled")
+            .OrderByDescending(a => a.CreatedAt)
+            .FirstAsync();
+        using var details = System.Text.Json.JsonDocument.Parse(audit.DetailsJson!);
+        Assert.False(details.RootElement.GetProperty("waived").GetBoolean());
+        // The club's only record of why it cancelled a court a member was standing on.
+        Assert.Equal(reason, details.RootElement.GetProperty("waive_reason").GetString());
+
+        var mail = await PollMail(host, m => m.Subject.Contains("club", StringComparison.Ordinal));
+        Assert.NotNull(mail);
+        Assert.Contains("Reason given by the club", mail!.HtmlBody);
+        Assert.Contains(reason, mail.HtmlBody);
+        Assert.DoesNotContain("was waived", mail.HtmlBody);
     }
 
     /// <summary>Waits for a background send rather than racing it.</summary>

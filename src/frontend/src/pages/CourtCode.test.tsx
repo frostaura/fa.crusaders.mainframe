@@ -348,6 +348,112 @@ describe("CourtCode", () => {
     // And not the generic connection sentence, which would send them to their WiFi
     // settings over a decision the club took.
     expect(screen.queryByText(/Check your connection/)).toBeNull();
+
+    // The one thing the card DOES offer: a way to ask again once the desk has acted. It
+    // is not a Refresh — there is no code on screen to refresh — and the sentence beside
+    // it has to say what it is for, or a member reads it as "try your luck".
+    expect(screen.getByRole("button", { name: /Check again/ })).toBeEnabled();
+    expect(screen.getByText(/If the desk has just sorted it out, check again/)).toBeInTheDocument();
+  });
+
+  /**
+   * The dead end, closed. This state used to be terminal for the life of the tab.
+   *
+   * <p>
+   * Dropping the code on a refusal also stops the only effect that ever re-fetches — its
+   * first guard is `if (!qr …) return` — so with no control on the card there was nothing
+   * left in the page that could ever ask again. Driven live in round 8: after the club
+   * restored the member to Active with the tab open, the page sat on the suspension
+   * sentence for ninety seconds and made ZERO further calls; only a reload brought the code
+   * back. A member standing at a court whose suspension has just been lifted at the desk
+   * had no control on screen at all.
+   * </p>
+   *
+   * <p>
+   * Both halves are asserted, because either alone is still a dead end: the button has to
+   * make the call, and a successful call has to clear the refusal card rather than fetch a
+   * perfectly good code underneath a page still saying the member is suspended.
+   * </p>
+   */
+  it("lets a member whose suspension was just lifted get their code back without reloading", async () => {
+    const stub = stubFetch([{
+      method: "POST",
+      path: "/api/v1/me/qr/generate",
+      // `body` is ignored while `sequence` is set; the route type still wants one.
+      body: {},
+      status: [403, 200],
+      sequence: [{ error: "member_suspended" }, IDENT],
+    }]);
+
+    renderPage(<CourtCodePage />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/membership is suspended/i);
+    expect(stub.calls.length).toBe(1);
+
+    // The club puts it right at the desk. The member presses the only control they have.
+    fireEvent.click(screen.getByRole("button", { name: /Check again/ }));
+
+    expect(await screen.findByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(stub.calls.length).toBe(2);
+    // The refusal is gone, not sitting behind the code.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/membership is suspended/i)).toBeNull();
+    // And the whole page is back, walk-up switch and all.
+    expect(screen.getByLabelText("Walk up / pay for someone")).toBeInTheDocument();
+  });
+
+  /**
+   * Still barred: the card stays, and the member is not told to check their WiFi over a
+   * decision the club took. The reason is re-read from the fresh refusal rather than left
+   * as the stale one, so a member who was suspended and is now merely not-yet-approved
+   * reads the sentence that is true now.
+   */
+  it("keeps the refusal card, and its reason current, when checking again is refused again", async () => {
+    const stub = stubFetch([{
+      method: "POST",
+      path: "/api/v1/me/qr/generate",
+      // `body` is ignored while `sequence` is set; the route type still wants one.
+      body: {},
+      status: 403,
+      sequence: [{ error: "member_suspended" }, { error: "member_not_active" }],
+    }]);
+
+    renderPage(<CourtCodePage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/membership is suspended/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /Check again/ }));
+
+    await waitFor(() => expect(stub.calls.length).toBe(2));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/isn't active yet/i));
+    expect(screen.queryByLabelText("Court code")).toBeNull();
+    expect(screen.queryByText(/Check your connection/)).toBeNull();
+    expect(screen.getByRole("button", { name: /Check again/ })).toBeInTheDocument();
+  });
+
+  /**
+   * A bad minute on the network while barred is a different thing from the bar, and the
+   * card has to say so rather than swallow it — otherwise pressing the button appears to
+   * do nothing at all, which is the dead end again wearing a button.
+   */
+  it("says so when checking again fails on the network, and keeps the refusal", async () => {
+    stubFetch([{
+      method: "POST",
+      path: "/api/v1/me/qr/generate",
+      // `body` is ignored while `sequence` is set; the route type still wants one.
+      body: {},
+      status: [403, 500],
+      sequence: [{ error: "member_suspended" }, { error: "boom" }],
+    }]);
+
+    renderPage(<CourtCodePage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/membership is suspended/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /Check again/ }));
+
+    expect(await screen.findByText(/Couldn't get a code/)).toBeInTheDocument();
+    // The club's decision still stands and still reads as the club's decision.
+    expect(screen.getByRole("alert")).toHaveTextContent(/membership is suspended/i);
+    expect(screen.queryByLabelText("Court code")).toBeNull();
   });
 
   /**

@@ -911,10 +911,27 @@ public sealed class BookingService
             SettleCancellation(booking, settings, insidePenaltyWindow, waivePenalty: false);
         var waived = penaltyWithoutWaiver > penaltyAmount;
 
-        // The reason belongs to the waiver, so it is recorded exactly when one happened: a
-        // reason attached to a cancellation that waived nothing would be noise in the one
-        // report — waived penalties, month end — this field exists to answer.
-        var waiveReasonRecorded = waived ? waiveReason?.Trim() : null;
+        // The reason is recorded whether or not a waiver turned out to be possible, and it
+        // is the same value the member's mail prints.
+        //
+        // It was briefly gated on `waived`, on the argument that a reason attached to a
+        // cancellation that waived nothing is noise in the month-end waiver report. That
+        // argument is wrong twice. `waived` is already the field that report filters on, so
+        // the reason costs it nothing. And this string is the ONLY record of why the club
+        // cancelled somebody's court: `Booking.CancellationReason` exists as a column and
+        // is written by nothing, so gating it here deletes the desk's own words outright.
+        //
+        // The path that proves it is not a raw-API curiosity. The console renders the waive
+        // control on any penalty-bearing quote; if the member scans in at the box between
+        // the quote and Confirm, SettleCancellation returns (0, 0) both ways, `waived`
+        // derives false — correctly, nothing was given up — and the gated version dropped
+        // the typed reason from the audit row and from the mail together. The club then has
+        // no record of a cancellation it made, and the member is told only that it happened.
+        //
+        // `waived` stays derived from the settlement itself (above), so the two values still
+        // answer two different questions from one place: what the club gave up, and why the
+        // club acted.
+        var waiveReasonRecorded = string.IsNullOrWhiteSpace(waiveReason) ? null : waiveReason.Trim();
 
         booking.CancellationPenaltyWaived = waived;
 
@@ -987,10 +1004,13 @@ public sealed class BookingService
         // DetailsJson above) and email is the only channel the member has — the grid just shows
         // the slot free again. Null on a self-cancellation, which keeps that mail as it was.
         //
-        // The two waiver values are the audit row's own, verbatim — see `waived` and
+        // The two values are the audit row's own, verbatim — see `waived` and
         // `waiveReasonRecorded` above. Quoting them rather than re-deriving them is the fix
         // for the round-7 defect where the mail and the audit row described one cancellation
         // two different ways; it is pinned by a test that reads both out of one cancellation.
+        // The reason travels on every club cancellation that carried one, waiver or not —
+        // feature-spec.md §11 says this mail "carries the reason the admin recorded", with
+        // no waiver condition on it, and the club's own audit row says exactly the same.
         var byClub = actorIsAdmin && actorId != booking.UserId
             ? new Email.ClubCancellation(waiveReasonRecorded, waived)
             : null;
