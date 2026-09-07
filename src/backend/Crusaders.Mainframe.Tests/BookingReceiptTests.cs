@@ -157,8 +157,28 @@ public sealed class BookingReceiptTests
     /// artefact a member keeps against a disputed charge. <c>reporting.md</c>'s implementation
     /// notes say reports honour <c>tenant_settings.timezone</c>, and "Starts" already did.
     /// </summary>
-    [Fact]
-    public async Task A_receipt_stamps_issued_in_the_same_clock_as_starts()
+    /// <remarks>
+    /// <para>
+    /// <b>Three zones, because one zone cannot tell the rule from a constant.</b> The pin this
+    /// replaces ran only against Africa/Johannesburg and compared the stamp with
+    /// <c>DateTimeOffset.UtcNow.UtcDateTime.AddHours(2)</c> — a hardcoded shift that reads no
+    /// setting at all — and that mutant passed it five tests to nil. So it proved "not UTC",
+    /// which is not the rule; the rule is "the clock <c>tenant_settings.timezone</c> names".
+    /// </para>
+    /// <para>
+    /// Kathmandu is the one that settles it: at +05:45 it is neither UTC nor a whole number of
+    /// hours from it, so nothing that adds a constant number of hours can render its wall
+    /// clock. New York is WEST of UTC, where a sign error passes every eastern fixture. And
+    /// each case also asserts the two WRONG renderings are absent — UTC, and the +02:00 the
+    /// old pin was accidentally measuring — which is what makes the mutant fail rather than
+    /// merely fail to be proven.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("Africa/Johannesburg")]
+    [InlineData("Asia/Kathmandu")]
+    [InlineData("America/New_York")]
+    public async Task A_receipt_stamps_issued_in_the_clock_the_club_configured(string timezone)
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -166,9 +186,9 @@ public sealed class BookingReceiptTests
 
         // The fixture runs the club at UTC, which is the one timezone in which this defect is
         // invisible — the same reason A_booking_charges_comment_is_in_the_clubs_wall_clock
-        // moves it. Africa/Johannesburg is what Crusaders actually runs on.
+        // moves it.
         var settingsRow = await db.TenantSettings.FirstAsync(x => x.TenantId == host.Tenant.Id);
-        settingsRow.SettingsJson = settingsRow.SettingsJson.Replace("\"timezone\":\"UTC\"", "\"timezone\":\"Africa/Johannesburg\"");
+        settingsRow.SettingsJson = settingsRow.SettingsJson.Replace("\"timezone\":\"UTC\"", $"\"timezone\":\"{timezone}\"");
         await db.SaveChangesAsync();
 
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
@@ -176,31 +196,40 @@ public sealed class BookingReceiptTests
         await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 200m, host.LeaguePlayerUser.Id), default);
 
         // Peak hours are evaluated in the CLUB's clock, so a UTC-chosen slot can land inside
-        // 16:00-19:00 SAST — and a league/senior member is exempt from that rule anyway, which
+        // 16:00-19:00 local — and a league/senior member is exempt from that rule anyway, which
         // is why this books as one rather than as the Regular player.
-        var clubTz = TimeZoneInfo.FindSystemTimeZoneById("Africa/Johannesburg");
+        var clubTz = TimeZoneInfo.FindSystemTimeZoneById(timezone);
         var startsAt = TestHost.BookableSlotFrom(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, clubTz), 2);
 
-        var before = TimeZoneInfo.ConvertTimeFromUtc(DateTimeOffset.UtcNow.UtcDateTime, clubTz);
+        var before = DateTimeOffset.UtcNow;
         Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id, host.LeaguePlayerUser.Id, host.LeaguePlayerUser.Id, startsAt, sliceCount: 1, default));
-        var after = TimeZoneInfo.ConvertTimeFromUtc(DateTimeOffset.UtcNow.UtcDateTime, clubTz);
+        var after = DateTimeOffset.UtcNow;
 
         var confirmation = await Poll(() => host.EmailService.Sent
             .FirstOrDefault(m => m.Subject.StartsWith("Booking confirmed", StringComparison.Ordinal)));
         Assert.NotNull(confirmation);
         var text = TextOf(Assert.Single(confirmation!.Attachments ?? []).Content);
 
-        const string Fmt = "ddd dd MMM yyyy HH:mm";
-        // One of the two, because the minute can tick between the call and the assertion.
+        // The stamp the club's OWN clock produces. One of the two instants, because the minute
+        // can tick between the call and the assertion.
         Assert.True(
-            text.Contains(before.ToString(Fmt, CultureInfo.InvariantCulture), StringComparison.Ordinal) ||
-            text.Contains(after.ToString(Fmt, CultureInfo.InvariantCulture), StringComparison.Ordinal),
-            "the Issued stamp is not the club's own wall clock");
+            text.Contains(StampIn(before, clubTz.GetUtcOffset(before)), StringComparison.Ordinal) ||
+            text.Contains(StampIn(after, clubTz.GetUtcOffset(after)), StringComparison.Ordinal),
+            $"the Issued stamp is not the wall clock of {timezone}");
 
-        // And the UTC rendering — two hours off, and the literal that labelled it — are gone.
+        // And every clock that is NOT the club's is absent — including the literal that
+        // labelled the old one.
         Assert.DoesNotContain("UTC", text, StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            DateTimeOffset.UtcNow.UtcDateTime.ToString(Fmt, CultureInfo.InvariantCulture), text, StringComparison.Ordinal);
+        foreach (var wrong in new[] { TimeSpan.Zero, TimeSpan.FromHours(2) })
+        {
+            if (wrong == clubTz.GetUtcOffset(before)) { continue; }
+            Assert.DoesNotContain(StampIn(before, wrong), text, StringComparison.Ordinal);
+            Assert.DoesNotContain(StampIn(after, wrong), text, StringComparison.Ordinal);
+        }
     }
+
+    /// <summary>The receipt's "Issued" rendering of an instant at a given offset.</summary>
+    private static string StampIn(DateTimeOffset at, TimeSpan offset) =>
+        at.ToOffset(offset).ToString("ddd dd MMM yyyy HH:mm", CultureInfo.InvariantCulture);
 }

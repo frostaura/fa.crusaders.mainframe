@@ -14,10 +14,10 @@ public static class ReportingEndpoints
     {
         var me = app.MapGroup("/api/v1/reports/me").RequireAuthorization();
 
-        me.MapGet("/wallet", async (DateTimeOffset? from, DateTimeOffset? to, HttpContext ctx, MainframeDbContext db, CancellationToken ct) =>
+        me.MapGet("/wallet", async (DateTimeOffset? from, DateTimeOffset? to, HttpContext ctx, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
-            var (f, t) = ResolveRange(from, to);
+            var (_, _, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
             var entries = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
             var attended = await db.Bookings
                 .Where(b => b.UserId == userId && b.StartsAt >= f && b.StartsAt < t && b.CheckedInAt != null)
@@ -29,26 +29,29 @@ public static class ReportingEndpoints
                 minutesOnCourt: attended.Sum(b => b.SliceMinutes * b.SliceCount)));
         });
 
-        me.MapGet("/wallet.csv", async (DateTimeOffset? from, DateTimeOffset? to, HttpContext ctx, MainframeDbContext db, CancellationToken ct) =>
+        me.MapGet("/wallet.csv", async (DateTimeOffset? from, DateTimeOffset? to, HttpContext ctx, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
-            var (f, t) = ResolveRange(from, to);
+            var (firstDay, lastDay, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
             var entries = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt >= f && l.CreatedAt < t).OrderBy(l => l.CreatedAt).ToListAsync(ct);
 
             // Named, per reporting.md's filename pattern. The browser cannot follow this URL
             // on its own — the endpoint needs an Authorization header, which is why the
             // "Download wallet CSV" link silently downloaded nothing — so the client fetches
             // it and saves the body; the header is what tells it what to call the file.
-            var name = $"crusaders-mainframe_wallet_{f:yyyy-MM-dd}-{t:yyyy-MM-dd}.csv";
+            // The club's own first and last day, not the UTC window's edges: the window
+            // ends at the START of the day after the last one, so formatting `t` would name
+            // a day the file does not contain.
+            var name = $"crusaders-mainframe_wallet_{firstDay:yyyy-MM-dd}-{lastDay:yyyy-MM-dd}.csv";
             ctx.Response.Headers.ContentDisposition = $"attachment; filename=\"{name}\"";
             return Results.Text(LedgerCsv(entries), "text/csv", Encoding.UTF8);
         });
 
         var admin = app.MapGroup("/api/v1/admin/reports").RequireAuthorization(p => p.RequireRole("admin"));
 
-        admin.MapGet("/revenue", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, CancellationToken ct) =>
+        admin.MapGet("/revenue", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
-            var (f, t) = ResolveRange(from, to);
+            var (_, _, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
             var rows = await db.LedgerEntries.Where(l => l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
             var funding = rows.Where(r => LedgerEntryTypes.Funding.Contains(r.Type)).ToList();
             var reversed = rows.Where(r => LedgerEntryTypes.Reversal.Contains(r.Type)).ToList();
@@ -76,9 +79,9 @@ public static class ReportingEndpoints
             });
         });
 
-        admin.MapGet("/utilisation", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, CancellationToken ct) =>
+        admin.MapGet("/utilisation", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
-            var (f, t) = ResolveRange(from, to);
+            var (_, _, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
             var bookings = await db.Bookings.Where(b => b.StartsAt >= f && b.StartsAt < t && b.Status != BookingStatus.Cancelled).ToListAsync(ct);
             var courts = await db.Courts.IgnoreQueryFilters().AsNoTracking()
                 .ToDictionaryAsync(c => c.Id, c => new { c.CourtNumber, c.Name }, ct);
@@ -121,9 +124,9 @@ public static class ReportingEndpoints
             return Results.Ok(new { from = f, to = t, by_court = byCourt });
         });
 
-        admin.MapGet("/no-shows", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, CancellationToken ct) =>
+        admin.MapGet("/no-shows", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
-            var (f, t) = ResolveRange(from, to);
+            var (_, _, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
 
             // The denominator is bookings that could have been shown up for: not
             // cancellations (a cancellation is not a no-show, per reporting.md's "% of
@@ -168,11 +171,14 @@ public static class ReportingEndpoints
         //
         // Two things about a row here, both of which it used to get wrong.
         //
-        // FIRST, the day is the CLUB'S day. Both groupings bucketed on
-        // `DateOnly.FromDateTime(x.UtcDateTime)` while the club runs Africa/Johannesburg, so
-        // every movement between 00:00 and 02:00 local landed in the previous day's row —
-        // and on the 1st of a month, in the previous month's report. `reporting.md` has said
-        // "all reports honor the tenant's tenant_settings.timezone" since it was written.
+        // FIRST, the day is the CLUB'S day — the buckets AND the window. Both groupings
+        // bucketed on `DateOnly.FromDateTime(x.UtcDateTime)` while the club runs
+        // Africa/Johannesburg, so every movement between 00:00 and 02:00 local landed in the
+        // previous day's row — and on the 1st of a month, in the previous month's report.
+        // Cutting the buckets in the tenant's zone while leaving the WINDOW in UTC then
+        // dropped that same band off the front of the report and imported a day off the back
+        // of it; `ResolveWindow` is where both ends are settled, and why. `reporting.md` has
+        // said "all reports honor the tenant's tenant_settings.timezone" since it was written.
         //
         // SECOND, a row deliberately carries TWO date bases and now says so. The money
         // columns count the day the money moved (`CreatedAt`); `bookings` and `no_shows`
@@ -186,12 +192,12 @@ public static class ReportingEndpoints
         // what the charts, the client type and the browser fixtures all read.
         admin.MapGet("/daily", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
-            var (f, t) = ResolveRange(from, to);
-            var tz = ResolveTz((await settingsAccessor.GetAsync(ct)).Timezone);
+            var tz = await ClubZoneAsync(settingsAccessor, ct);
+            var (firstDay, lastDay, f, t) = ResolveWindow(from, to, tz);
             var entries = await db.LedgerEntries.Where(l => l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
             var bookings = await db.Bookings.Where(b => b.StartsAt >= f && b.StartsAt < t).ToListAsync(ct);
 
-            var allDays = EnumerateDays(f, t, tz).ToList();
+            var allDays = EnumerateDays(firstDay, lastDay).ToList();
             var ledgerByDay = entries.GroupBy(e => LocalDay(e.CreatedAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
             var bookingsByDay = bookings.GroupBy(b => LocalDay(b.StartsAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
 
@@ -212,6 +218,26 @@ public static class ReportingEndpoints
                     // showed the figure at all, on the report whose job is where the money
                     // went.
                     adjustments_credits = le.Where(x => LedgerEntryTypes.Adjustment.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    // A payment clawed back after the fact. It was in NO bucket: this row
+                    // summed Funding, Spend, Refund, Penalty and Adjustment and stopped,
+                    // under a card that called those five "every ledger movement in the club
+                    // summed". A -160.00 reversal inside the window made the card print
+                    // +555.00 over a true movement of +395.00. The member's own report has
+                    // carried `reversals_credits` since it was made to reconcile; the club's
+                    // had not, so the two screens disagreed by exactly the reversals.
+                    reversals_credits = le.Where(x => LedgerEntryTypes.Reversal.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    // The day's movement, summed WITHOUT looking at the type — the same
+                    // arithmetic `net_movement_credits` uses on the member's own report, so
+                    // the two screens cannot mean different things by "net".
+                    //
+                    // It is also the guard. The six bucket columns above must add up to this
+                    // one, and `DailyReportTests` posts a row of EVERY member of
+                    // `LedgerEntryType` and asserts they do — so a type added to the enum and
+                    // left out of the buckets here goes red with the arithmetic in the
+                    // message, instead of quietly making the club's report stop summing to
+                    // its own total. `LedgerEntryTypeCoverageTests` asserts the bucket TABLE
+                    // is total; it cannot see whether an endpoint uses all of it.
+                    net_movement_credits = le.Sum(x => x.AmountCredits),
                     bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
                     no_shows = bk.Count(b => b.Status == BookingStatus.NoShow),
                 };
@@ -223,14 +249,15 @@ public static class ReportingEndpoints
         me.MapGet("/daily", async (DateTimeOffset? from, DateTimeOffset? to, HttpContext ctx, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
-            var (f, t) = ResolveRange(from, to);
-            // The club's day here too: a member topping up at 00:30 on the 1st saw it land
-            // in the previous month's report.
-            var tz = ResolveTz((await settingsAccessor.GetAsync(ct)).Timezone);
+            // The club's day here too, at both ends: a member topping up at 00:30 on the 1st
+            // saw it land in the previous month's report, and then — once the buckets moved
+            // to the club's clock but the window did not — vanish from the report entirely.
+            var tz = await ClubZoneAsync(settingsAccessor, ct);
+            var (firstDay, lastDay, f, t) = ResolveWindow(from, to, tz);
             var entries = await db.LedgerEntries.Where(l => l.UserId == userId && l.CreatedAt >= f && l.CreatedAt < t).ToListAsync(ct);
             var bookings = await db.Bookings.Where(b => b.UserId == userId && b.StartsAt >= f && b.StartsAt < t).ToListAsync(ct);
 
-            var allDays = EnumerateDays(f, t, tz).ToList();
+            var allDays = EnumerateDays(firstDay, lastDay).ToList();
             var ledgerByDay = entries.GroupBy(e => LocalDay(e.CreatedAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
             var bookingsByDay = bookings.GroupBy(b => LocalDay(b.StartsAt, tz)).ToDictionary(g => g.Key, g => g.ToList());
 
@@ -306,19 +333,78 @@ public static class ReportingEndpoints
         catch (InvalidTimeZoneException) { return TimeZoneInfo.Utc; }
     }
 
-    private static IEnumerable<DateOnly> EnumerateDays(DateTimeOffset from, DateTimeOffset to, TimeZoneInfo tz)
+    private static IEnumerable<DateOnly> EnumerateDays(DateOnly first, DateOnly last)
     {
-        var d = LocalDay(from, tz);
-        var end = LocalDay(to, tz);
-        while (d <= end) { yield return d; d = d.AddDays(1); }
+        for (var d = first; d <= last; d = d.AddDays(1)) { yield return d; }
     }
 
-    private static (DateTimeOffset, DateTimeOffset) ResolveRange(DateTimeOffset? from, DateTimeOffset? to)
+    /// <summary>
+    /// The club days a report covers, and the UTC window that holds exactly those days.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A report window is a run of the club's own calendar days, not a run of UTC
+    /// hours.</b> The day BUCKETS were cut in <c>tenant_settings.timezone</c> while the
+    /// WINDOW stayed in UTC, so the two disagreed at both ends. The page asks for
+    /// <c>from=2026-09-01T00:00:00Z&amp;to=2026-09-03T23:59:59Z</c>; against a club at UTC+2
+    /// that window opened two hours into 1 September local, dropping every movement between
+    /// 00:00 and 02:00 on the first day — the exact band the bucket fix was written for, now
+    /// missing from the report altogether rather than landing a day early — and it closed two
+    /// hours into 4 September local, so a FOURTH row appeared carrying money from a day the
+    /// admin had not asked about, and the totals card read "Days 4" for a three-day range.
+    /// </para>
+    /// <para>
+    /// So the two boundary parameters are read as <b>day markers</b>: the UTC calendar date
+    /// each instant names. That is what the date pickers send (<c>T00:00:00Z</c> and
+    /// <c>T23:59:59Z</c> on the two chosen dates) and what an admin means by "1 September to
+    /// 3 September" — and, unlike converting the marker through the club's zone, it names the
+    /// same two dates whether the club is east or west of UTC. Those dates are then converted
+    /// back into the one UTC window that contains exactly those club days, and every row
+    /// filter and the day enumeration are driven from it. A movement is in the report if and
+    /// only if it falls on a club day the report covers.
+    /// </para>
+    /// </remarks>
+    private static (DateOnly First, DateOnly Last, DateTimeOffset Start, DateTimeOffset End)
+        ResolveWindow(DateTimeOffset? from, DateTimeOffset? to, TimeZoneInfo tz)
     {
-        var t = to ?? DateTimeOffset.UtcNow;
-        var f = from ?? t.AddDays(-30);
-        return (f, t);
+        var last = to is { } t ? DateOnly.FromDateTime(t.UtcDateTime) : LocalDay(DateTimeOffset.UtcNow, tz);
+        var first = from is { } f ? DateOnly.FromDateTime(f.UtcDateTime) : last.AddDays(-30);
+        // An inverted range is one day rather than a negative one: `EnumerateDays` would
+        // yield nothing and every total would read zero, which looks like a quiet period.
+        if (last < first) { last = first; }
+        return (first, last, ClubDayStart(first, tz), ClubDayStart(last.AddDays(1), tz));
     }
+
+    /// <summary>
+    /// The instant a club day begins, as UTC.
+    /// </summary>
+    /// <remarks>
+    /// Midnight is not a safe assumption in either direction. Some zones move the clock AT
+    /// midnight — Santiago and Havana both do — so 00:00 either does not exist on the day
+    /// the clocks go forward, or happens twice on the day they go back. The first case is
+    /// stepped past; the second takes the EARLIER of the two instants, so the window covers
+    /// the whole of the club's day rather than silently dropping its first hour.
+    ///
+    /// <para>
+    /// Returned as UTC, and that is not cosmetic: Npgsql refuses to write or compare a
+    /// <c>DateTimeOffset</c> whose offset is not zero against a <c>timestamptz</c> column, so
+    /// a boundary still carrying the club's own <c>+02:00</c> throws out of the middle of the
+    /// report query rather than returning a wrong answer. Same instant, offset normalised.
+    /// </para>
+    /// </remarks>
+    private static DateTimeOffset ClubDayStart(DateOnly day, TimeZoneInfo tz)
+    {
+        var local = day.ToDateTime(TimeOnly.MinValue);
+        while (tz.IsInvalidTime(local)) { local = local.AddMinutes(1); }
+        var offset = tz.IsAmbiguousTime(local)
+            ? tz.GetAmbiguousTimeOffsets(local).Max()
+            : tz.GetUtcOffset(local);
+        return new DateTimeOffset(local, offset).ToUniversalTime();
+    }
+
+    /// <summary>The tenant's zone, read once per request.</summary>
+    private static async Task<TimeZoneInfo> ClubZoneAsync(TenantSettingsAccessor settings, CancellationToken ct)
+        => ResolveTz((await settings.GetAsync(ct)).Timezone);
 
     /// <summary>
     /// The member's own period summary.
