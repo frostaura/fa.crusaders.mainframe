@@ -121,14 +121,21 @@ public sealed class CourtActivationService
     /// The bookings on this court that an identification could activate right now.
     ///
     /// <para>
-    /// A <b>suspended</b> member's booking is not among them. A suspension takes access away
-    /// without touching money or bookings — the row, the ledger and every future slot stand,
-    /// and reactivating restores all of it — so it is enforced on the candidate set rather
-    /// than as a new <see cref="ActivationResult"/> case. That is what keeps it to one clause
-    /// with no caller changes: PIN, biometric, QR and the activation endpoints all answer
-    /// their existing "no booking", and no new refusal has to be routed through four screens.
+    /// A member the club has not approved — <b>suspended</b>, rejected, or still waiting —
+    /// has no booking among them. A suspension takes access away without touching money or
+    /// bookings — the row, the ledger and every future slot stand, and reactivating restores
+    /// all of it — so it is enforced on the candidate set rather than as a new
+    /// <see cref="ActivationResult"/> case. That is what keeps it to one clause with no
+    /// caller changes: PIN, biometric, QR and the activation endpoints all answer their
+    /// existing "no booking", and no new refusal has to be routed through four screens.
     /// The member was told why by email; a court box is not the place to explain it, and one
     /// that named the reason would be explaining it to whoever is standing there.
+    /// </para>
+    ///
+    /// <para>
+    /// The test is <c>!= Active</c>, not <c>== Suspended</c>. <see cref="MembershipAccess"/>
+    /// is where that rule and its blast radius are written down; this is its query-side
+    /// twin, inline because a captured expression does not translate inside a subquery.
     /// </para>
     /// </summary>
     public async Task<List<Booking>> CandidatesAsync(Guid courtId, DateTimeOffset now, CancellationToken ct)
@@ -139,12 +146,15 @@ public sealed class CourtActivationService
             .Where(b => b.CourtId == courtId
                         && b.Status == BookingStatus.Booked
                         && b.StartsAt < end && b.EndsAt > start
-                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Suspended))
+                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status != MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .ToListAsync(ct);
     }
 
-    /// <summary>This user's activatable booking on this court, if any.</summary>
+    /// <summary>
+    /// This user's activatable booking on this court, if any. Barred memberships are
+    /// excluded on the same clause as <see cref="CandidatesAsync"/> — see there.
+    /// </summary>
     public async Task<Booking?> FindForUserAsync(Guid courtId, Guid userId, DateTimeOffset now, CancellationToken ct)
     {
         var (start, end) = await WindowAsync(now, ct);
@@ -154,7 +164,7 @@ public sealed class CourtActivationService
                         && b.UserId == userId
                         && b.Status == BookingStatus.Booked
                         && b.StartsAt < end && b.EndsAt > start
-                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Suspended))
+                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status != MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .FirstOrDefaultAsync(ct);
     }

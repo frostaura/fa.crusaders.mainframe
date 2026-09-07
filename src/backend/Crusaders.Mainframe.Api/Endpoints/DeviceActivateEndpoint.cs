@@ -64,6 +64,22 @@ public static class DeviceActivateEndpoint
         var resolved = await services.Codes.ResolveAsync(req.Token, ct);
         if (resolved is null) return Refused("not_recognised");
 
+        // A member the club has barred opens nothing here (finding K-F1, second door). The
+        // ident-code branch below already answered "no booking" for one, because it searches
+        // through CourtActivationService.FindForUserAsync and that filters them out — but the
+        // BOOKING-code branch looks its booking up by id and never met that filter, so a
+        // suspended member's own booking code lit their court and charged them. Tested once
+        // here rather than in ForBookingCodeAsync so the two branches cannot drift again.
+        //
+        // "no_booking" rather than a named refusal, matching the ident branch and the
+        // reasoning CourtActivationService.CandidatesAsync records: the member was told why
+        // by email, and a box that named the reason would be announcing it to whoever is
+        // standing at the court.
+        if (await MembershipAccess.IsBarredFromCourtsAsync(services.Db, resolved.UserId, ct))
+        {
+            return Refused("no_booking");
+        }
+
         // A court named in the request narrows the search, and must be one of this box's.
         if (req.Court is { } narrowed && !device.CourtNumbers.Contains(narrowed)) return Refused("wrong_court");
 

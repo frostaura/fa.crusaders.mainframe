@@ -161,11 +161,13 @@ public static class DeviceRosterBuilder
                         && b.UserId != null
                         && b.StartsAt <= latestStart
                         && b.EndsAt >= now
-                        // A suspended member is not on the cached roster either. Without
-                        // this, suspension holds only while the box can reach the API — the
+                        // A member the club has not approved — suspended, rejected, or
+                        // still waiting — is not on the cached roster either. Without this,
+                        // suspension holds only while the box can reach the API, and the
                         // one window in which a club most wants it to hold is the one where
-                        // nobody is watching.
-                        && !db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Suspended))
+                        // nobody is watching. `!= Active` rather than `== Suspended`: see
+                        // MembershipAccess for why the rule is stated that way round.
+                        && !db.Memberships.Any(m => m.UserId == b.UserId && m.Status != MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .Take(RosterMaxEntries)
             .ToListAsync(ct);

@@ -286,6 +286,18 @@ public static class DeviceEventEndpoints
     /// offline for longer than the grace window uploads scans the sweep has already ruled
     /// on; see <see cref="SettleAsync"/> for what a settled no-show becomes.
     /// </para>
+    ///
+    /// <para>
+    /// <b>A barred membership is deliberately NOT a refusal here</b>, unlike on
+    /// <c>/walkup</c> and <c>/activate</c> (finding K-F1). Those two are the API deciding
+    /// whether lights come on; this is a report that they already did. The roster excludes a
+    /// barred member from every push, so the only way one reaches this handler is a box that
+    /// admitted them from a cache fetched before the club's decision — the member is on the
+    /// court and the relay has run. Refusing the attendance would not unlight anything; it
+    /// would make them a no-show, refund the court they played and charge the club a penalty
+    /// waiver. Recording it keeps the money matching the lights, which is the settlement
+    /// model's rule everywhere else too.
+    /// </para>
     /// </summary>
     private static async Task<ActivationOutcome> ActivationOutcomeAsync(
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
@@ -714,6 +726,34 @@ public static class DeviceEventEndpoints
 
         var userId = await identities.ResolveAsync(req.Method, req.Token, ct);
         if (userId is null) return Results.BadRequest(new { error = "not_recognised" });
+
+        // A member the club has barred cannot buy court time here (finding K-F1). This was
+        // the one door into the money with no membership test on it: the app's booking route
+        // refuses with `member_suspended`, and the activation paths and the cached roster
+        // both drop a barred member's bookings — but a walk-up CREATES its booking, so it
+        // never met a candidate set and never met a filter. A member suspended at the desk
+        // walked up, was charged fifty credits and had the court lit, twice, while the
+        // console's own suspend modal promised they could not "open a court at the box".
+        //
+        // Checked BEFORE CreateWalkUpAsync, not after: everything below this line commits
+        // money, and a refusal that arrives after the debit is a refund to write rather than
+        // a sale not made.
+        //
+        // Answered as `not_recognised` — the same refusal an unreadable code gets — for two
+        // reasons. It is the only walk-up refusal whose firmware row sets `recognised:false`
+        // (WalkUp.cpp kErrors), so the box arms no button window for a barred member, which
+        // is the behaviour wanted; and it puts SEE THE DESK on the glass, which is exactly
+        // what the member must do. Naming the suspension at the court would explain it to
+        // whoever happens to be standing there, which is the reasoning CourtActivationService
+        // already records for the pre-booked path.
+        //
+        // The REPLAY above is deliberately not gated. It is the box retrying a purchase
+        // already made and already paid for; refusing it leaves the member charged and the
+        // court dark, which is the H3 defect the nonce exists to prevent.
+        if (await MembershipAccess.IsBarredFromCourtsAsync(db, userId.Value, ct))
+        {
+            return Results.BadRequest(new { error = "not_recognised" });
+        }
 
         var created = await bookings.CreateWalkUpAsync(court.Id, userId.Value, userId.Value, req.Minutes, reference, ct);
 
