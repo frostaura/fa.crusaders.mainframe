@@ -36,8 +36,25 @@ export function pendingApplicationsVersion(): number {
 }
 
 /**
- * Call after any action that can add to or remove from the pending set: approve, reject,
- * and a members list that has just been loaded from the server.
+ * Call when the pending set has been re-read from the server — that is, from the members
+ * list loader, and from nowhere else.
+ *
+ * <p>
+ * This comment used to name three call sites: "approve, reject, and a members list that has
+ * just been loaded from the server". There were two, both in `AdminMembers.tsx`, and the
+ * third had never existed — a promise in a doc block that grep disproves in one command.
+ * It is now literally one, and it is the third one: the loader. Approve and reject reload
+ * the list, so notifying from the loader covers them and covers the cases they did not.
+ * </p>
+ *
+ * <p>
+ * Notifying from the loader rather than from each action is the load-bearing part, not a
+ * tidy-up. The badge and this screen's own "N pending" summary count the same applications
+ * from the same response, so bumping the version exactly when that response replaces the
+ * list is what makes the two numbers incapable of disagreeing. Bumped from the action
+ * handlers instead, they diverge on precisely the case that caused the original defect: a
+ * transition the server committed and the console was told had failed.
+ * </p>
  */
 export function notifyPendingApplicationsChanged(): void {
   version += 1;

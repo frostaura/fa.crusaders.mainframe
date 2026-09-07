@@ -71,7 +71,7 @@ export default function AdminMembersPage() {
   // it is the one input the admin has to change, and a toast that has faded says nothing.
   const [creditBookingError, setCreditBookingError] = useState<string | null>(null);
   const [resetFor, setResetFor] = useState<AdminMember | null>(null);
-  const [resetResult, setResetResult] = useState<{ tempPassword: string; emailSentTo: string } | null>(null);
+  const [resetResult, setResetResult] = useState<{ tempPassword: string; emailSentTo: string | null } | null>(null);
   const [suspendFor, setSuspendFor] = useState<AdminMember | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -88,6 +88,16 @@ export default function AdminMembersPage() {
       // Server filter only when status is specific; the rest filters/sorts client-side.
       const r = await endpoints.adminMembers(status === "all" ? undefined : status);
       setMembers(r);
+      // The one place the pending set is known to have moved, because this is the one place
+      // it is re-read from the server. The chrome's "Members N" badge counts the same
+      // applications this screen's "N pending" summary does, and it re-read itself only on
+      // navigation — which an approval pressed ON /admin/members does not cause, so the two
+      // numbers sat contradicting each other on one screen. Notifying from HERE rather than
+      // from the approve and reject handlers is what makes them agree in every case and not
+      // only the happy one: the badge moves exactly when the list it is counting is
+      // replaced, so a transition that half-failed cannot leave one number ahead of the
+      // other. See lib/pendingApplications.
+      notifyPendingApplicationsChanged();
     } catch { toast.push({ tone: "danger", text: "Couldn't load members." }); }
     finally { setLoading(false); }
   };
@@ -122,33 +132,48 @@ export default function AdminMembersPage() {
     else { setSortKey(k); setSortDir(k === "created_at" ? "desc" : "asc"); }
   };
 
+  /**
+   * Approve, then re-read the club from the server whatever happened.
+   *
+   * <p>
+   * The reload used to sit INSIDE the `try`, so anything that threw between the button and
+   * it left the screen frozen on the pre-approval club — the row still offering Approve, the
+   * summary still saying "N pending", the chrome badge still counting the applicant. That is
+   * survivable when the request genuinely failed and lethal when it did not: with SMTP
+   * refusing connections the API committed the approval and then threw, the admin read
+   * "Approval failed." about a member who was already Active, and pressing Approve again
+   * answered 404. The reload is therefore in `finally`: the screen shows what the server
+   * says, not what the console hoped, and the two numbers on it move together.
+   * </p>
+   */
   const approve = async (m: AdminMember) => {
     setBusyId(m.membership_id);
     try {
-      await endpoints.adminApprove(m.membership_id);
-      toast.push({ tone: "success", text: `${m.full_name} approved.` });
-      // The chrome's "Members N" badge counts the same applications this screen's "N pending"
-      // summary does, and it re-read itself only on navigation — which an approval pressed ON
-      // /admin/members does not cause. The two numbers sat contradicting each other on one
-      // screen until the admin left the route and came back. See lib/pendingApplications.
-      notifyPendingApplicationsChanged();
-      await load();
+      const r = await endpoints.adminApprove(m.membership_id);
+      // Two different true things. The transition is the status change; the welcome email is
+      // a consequence of it, and the API now says which of the two happened. "Approved" with
+      // no further comment, when nobody was told, is how a club leaves an active member
+      // waiting for a link that was never sent.
+      toast.push(r.member_notified
+        ? { tone: "success", text: `${m.full_name} approved.` }
+        : { tone: "warning", text: `${m.full_name} is approved, but the welcome email couldn't be sent. Their membership is active — tell them directly.` });
     }
     catch { toast.push({ tone: "danger", text: "Approval failed." }); }
-    finally { setBusyId(null); }
+    finally { setBusyId(null); await load(); }
   };
 
   const reject = async () => {
     if (!rejectFor || !rejectReason.trim()) return;
+    const name = rejectFor.full_name;
     setBusyId(rejectFor.membership_id);
     try {
-      await endpoints.adminReject(rejectFor.membership_id, rejectReason);
-      toast.push({ tone: "success", text: "Application rejected." });
+      const r = await endpoints.adminReject(rejectFor.membership_id, rejectReason);
+      toast.push(r.member_notified
+        ? { tone: "success", text: "Application rejected." }
+        : { tone: "warning", text: `${name}'s application is rejected, but the email couldn't be sent. Tell them directly — they'll be refused at sign-in until someone does.` });
       setRejectFor(null); setRejectReason("");
-      notifyPendingApplicationsChanged();
-      await load();
     } catch { toast.push({ tone: "danger", text: "Rejection failed." }); }
-    finally { setBusyId(null); }
+    finally { setBusyId(null); await load(); }
   };
 
   const closeCredit = () => {
@@ -204,7 +229,9 @@ export default function AdminMembersPage() {
     try {
       const r = await endpoints.adminResetMemberPassword(resetFor.membership_id);
       setResetResult({ tempPassword: r.temp_password, emailSentTo: r.email_sent_to });
-      toast.push({ tone: "success", text: `Password reset for ${resetFor.full_name}.` });
+      toast.push(r.member_notified
+        ? { tone: "success", text: `Password reset for ${resetFor.full_name}.` }
+        : { tone: "warning", text: `Password reset for ${resetFor.full_name}, but the email couldn't be sent. Read them the password below.` });
     } catch { toast.push({ tone: "danger", text: "Password reset failed." }); }
     finally { setBusyId(null); }
   };
@@ -238,22 +265,24 @@ export default function AdminMembersPage() {
     if (!suspendFor || !suspendReason.trim()) return;
     setBusyId(suspendFor.membership_id);
     try {
-      await endpoints.adminSuspend(suspendFor.membership_id, suspendReason);
-      toast.push({ tone: "success", text: `${suspendFor.full_name} suspended.` });
+      const r = await endpoints.adminSuspend(suspendFor.membership_id, suspendReason);
+      toast.push(r.member_notified
+        ? { tone: "success", text: `${suspendFor.full_name} suspended.` }
+        : { tone: "warning", text: `${suspendFor.full_name} is suspended, but the email couldn't be sent. They'll find out at the door unless you tell them.` });
       setSuspendFor(null); setSuspendReason("");
-      await load();
     } catch { toast.push({ tone: "danger", text: "Couldn't suspend this member." }); }
-    finally { setBusyId(null); }
+    finally { setBusyId(null); await load(); }
   };
 
   const reactivate = async (m: AdminMember) => {
     setBusyId(m.membership_id);
     try {
-      await endpoints.adminReactivate(m.membership_id);
-      toast.push({ tone: "success", text: `${m.full_name} is active again.` });
-      await load();
+      const r = await endpoints.adminReactivate(m.membership_id);
+      toast.push(r.member_notified
+        ? { tone: "success", text: `${m.full_name} is active again.` }
+        : { tone: "warning", text: `${m.full_name} is active again, but the email couldn't be sent. Tell them directly.` });
     } catch { toast.push({ tone: "danger", text: "Couldn't reactivate this member." }); }
-    finally { setBusyId(null); }
+    finally { setBusyId(null); await load(); }
   };
 
   /**
@@ -361,17 +390,17 @@ export default function AdminMembersPage() {
           <EmptyState loading={loading} hasFilters={search.trim().length > 0 || status !== "all"} />
         ) : (
           <ScrollArea label="Members table">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm sm:table-fixed">
               <thead className="hidden sm:table-header-group bg-bg-muted text-xs uppercase tracking-wide text-text-muted">
                 <tr>
                   <SortHeader label="Name" k="full_name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="sticky left-0 z-20 bg-bg-muted" />
-                  <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden xl:table-cell" />
-                  <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden lg:table-cell" />
-                  <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="hidden md:table-cell text-left px-3 py-3">Class</th>
-                  <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="hidden lg:table-cell" />
-                  <th className="text-right px-3 py-3 whitespace-nowrap sticky right-[200px] z-20 bg-bg-muted border-l border-border">Balance</th>
-                  <th className="text-right px-3 py-3 whitespace-nowrap sticky right-0 z-20 bg-bg-muted min-w-[200px] border-l border-border">Actions</th>
+                  <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn("hidden xl:table-cell", COLUMN_WIDTH.email)} />
+                  <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn("hidden lg:table-cell", COLUMN_WIDTH.memberNumber)} />
+                  <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={COLUMN_WIDTH.status} />
+                  <th className={cn("hidden md:table-cell text-left px-3 py-3", COLUMN_WIDTH.memberClass)}>Class</th>
+                  <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn("hidden lg:table-cell", COLUMN_WIDTH.joined)} />
+                  <th className={cn("text-right px-3 py-3 whitespace-nowrap sticky right-[200px] z-20 bg-bg-muted border-l border-border", COLUMN_WIDTH.balance)}>Balance</th>
+                  <th className={cn("text-right px-3 py-3 whitespace-nowrap sticky right-0 z-20 bg-bg-muted min-w-[200px] border-l border-border", COLUMN_WIDTH.actions)}>Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -488,7 +517,10 @@ export default function AdminMembersPage() {
       {resetFor && resetResult && (
         <Modal onClose={() => { setResetFor(null); setResetResult(null); }} title="Temporary password generated">
           <p className="text-sm text-text-secondary">
-            Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. {TEMP_PASSWORD_SCOPE}
+            {resetResult.emailSentTo
+              ? <>Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. </>
+              : <><strong className="text-text-primary">Not emailed</strong> — the mail server refused it, so this password only reaches the member if you pass it on. </>}
+            {TEMP_PASSWORD_SCOPE}
           </p>
           <div className="my-4 px-4 py-3 rounded-lg border border-border bg-bg-muted font-mono text-base tracking-wider text-center select-all">
             {resetResult.tempPassword}
@@ -615,17 +647,20 @@ type MemberRowActions = {
  * Three rounds tried to solve that by column ORDER, and order cannot solve it: the hidden
  * band is wherever the pins land, so every arrangement has a victim. The only overlap-free
  * states are "no overflow" or "no pinning", and pinning is what puts the row actions on
- * screen at all. So this removes the overflow instead: the container widened to `max-w-7xl`
- * for `/admin/*` (Layout.tsx), and below that the columns that do not fit are <b>not drawn</b>
- * rather than drawn underneath something. Below `sm` every field is still on screen, because
- * the row is a card there and nothing is a column at all.
+ * screen at all. So the overflow goes instead — in two halves. This table decides <b>which</b>
+ * columns exist at each width; {@link COLUMN_WIDTH} and `table-fixed` decide how wide they
+ * are, which is what makes "no overflow" a property of the CSS rather than of the club's
+ * longest name. A column that does not fit is <b>not drawn</b> rather than drawn underneath
+ * something. Below `sm` every field is still on screen, because the row is a card there and
+ * nothing is a column at all.
  * </p>
  *
  * <p>
- * The breakpoints come from measured column widths — Name 192 · Email 156 · Member # 103 ·
- * Status 81 · Class 157 · Joined 99 · Balance 90 · Actions 200 — against the container at
- * each one: 608 at `sm`, 734 at `md`, 992 at `lg`, 1248 at `xl`. Changing a width means
- * re-measuring these, which `e2e/admin-members-layout.spec.ts` does in a real browser.
+ * The breakpoints come from the declared widths in {@link COLUMN_WIDTH} against the
+ * container at each one — 606 at `sm`, 734 at `md`, 990 at `lg`, 1246 at `xl` and above,
+ * measured in Chromium — with `Name` taking whatever is left. Changing a width or a
+ * breakpoint means re-running `e2e/admin-members-layout.spec.ts`, which measures the result
+ * in a real browser at four widths against two clubs with different-length names.
  * </p>
  */
 const COLUMN_DISPLAY = {
@@ -637,6 +672,64 @@ const COLUMN_DISPLAY = {
   fromLg: "block sm:hidden lg:table-cell",
   /** Card field below `sm`; from 1280 up, where the full table finally fits its container. */
   fromXl: "block sm:hidden xl:table-cell",
+} as const;
+
+/**
+ * The width of every column except <b>Name</b>, which is deliberately the only `auto` one.
+ *
+ * <p>
+ * These are not cosmetic. The table is <code>table-fixed</code> from `sm` up, and that is
+ * what makes this layout a property of the breakpoints rather than of whichever club is
+ * loaded. Under the default <code>auto</code> algorithm a column is as wide as its widest
+ * cell wants to be, so the table's total width — and therefore how much of it overflows its
+ * container, and therefore how much of it the two pinned columns paint over — was a function
+ * of the longest member NAME in the club. The round that "removed the overflow" removed it
+ * for a seeded club whose longest name is 23 characters. Measured in Chromium: at 768px that
+ * fixture already overflowed by 61px with 8 of 20 sample points across the Class header
+ * covered, and a 25-character name ("Christopher van der Merwe") took it to 80px and 10 of
+ * 20. The e2e pin could not see either, because it sampled each header's centre point only
+ * and the centre happened to be clear.
+ * </p>
+ *
+ * <p>
+ * Fixed layout removes the mechanism instead of the symptom: a `w-full` fixed-layout table
+ * is exactly its container's width whatever the content, so <em>overflow cannot arise</em>
+ * and the pins have nothing to hide. Every column here is declared; Name takes the slack, so
+ * the club with the longest names gets a narrower name column and a truncated, hoverable
+ * name rather than a table that grows and slides a header under a pinned cell. Actions in
+ * particular must stay exactly 200px, because <code>Balance</code> is pinned at
+ * <code>right-[200px]</code> and the two numbers are one decision.
+ * </p>
+ *
+ * <p>
+ * <b>What the trade costs, stated rather than discovered.</b> Under the old auto layout no
+ * cell ever ellipsised — every column was as wide as its content — and the price was the
+ * overflow, and therefore the occlusion. A fixed column can clip where an auto one grew, so
+ * the numbers below are the measured content widths at 1280px (Name 238 · Email 208 ·
+ * Member # 107 · Status 95 · Class 163 · Joined 105 · Balance 122 · Actions 209, summing to
+ * 1247 against a 1246px container — the old layout fitted at `xl` by one pixel and by luck)
+ * with the slack moved to Name. Measured against the seeded club, nothing clips at 375, 640,
+ * 700, 767, 1023, 1100, 1279, 1280, 1440, 1600 or 1920. At 768 six names and at 1024 one
+ * name ellipsise — and at exactly those two widths the old layout overflowed by 61px and 9px
+ * with the `Class` and `Joined` headers partly under a pinned cell. A name cut with an
+ * ellipsis and a hover title is a cued loss; a header painted over by a pinned column is a
+ * silent one. That is the whole exchange.
+ * </p>
+ *
+ * <p>
+ * Changing any number here means re-running <code>e2e/admin-members-layout.spec.ts</code>,
+ * which measures the result in a real browser at four widths — and which now varies the
+ * fixture's longest name, because a layout that only holds for one club's data is not fixed.
+ * </p>
+ */
+const COLUMN_WIDTH = {
+  email: "w-[216px]",
+  memberNumber: "w-[104px]",
+  status: "w-[118px]",
+  memberClass: "w-[148px]",
+  joined: "w-[100px]",
+  balance: "w-[126px]",
+  actions: "w-[200px]",
 } as const;
 
 function Cell({ label, className, align = "left", display = COLUMN_DISPLAY.always, children }: { label: string; className?: string; align?: "left" | "right"; display?: string; children: React.ReactNode }) {
@@ -709,7 +802,7 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
           )}
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <p className="font-medium text-text-primary truncate max-w-[180px]" title={m.full_name}>{m.full_name}</p>
+              <p className="font-medium text-text-primary truncate max-w-[200px] sm:max-w-none" title={m.full_name}>{m.full_name}</p>
               {fingerprints > 0 ? (
                 <span
                   title={`${fingerprints} fingerprint(s) enrolled`}
@@ -719,23 +812,47 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
                 </span>
               ) : null}
             </div>
-            {m.rejection_reason && <p className="text-xs text-danger-strong truncate max-w-[260px]" title={m.rejection_reason}>{m.rejection_reason}</p>}
+            {m.rejection_reason && <p className="text-xs text-danger-strong truncate max-w-[220px] sm:max-w-none" title={m.rejection_reason}>{m.rejection_reason}</p>}
           </div>
         </div>
       </td>
-      <Cell label="Email" display={COLUMN_DISPLAY.fromXl} className="text-text-secondary sm:max-w-[200px]">
-        <span className="inline-block align-middle max-w-[200px] truncate" title={m.email}>{m.email}</span>
-        {m.email_verified === false && (
-          <span
-            title="This member never confirmed their email address, so they cannot sign in with a password."
-            className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-warning-soft text-warning-strong align-middle"
-          >
-            <MailWarning size={11} /> Unverified
-          </span>
-        )}
+      <Cell label="Email" display={COLUMN_DISPLAY.fromXl} className="text-text-secondary">
+        <span className="block truncate max-w-[220px] sm:max-w-full" title={m.email}>{m.email}</span>
       </Cell>
-      <Cell label="Member #" display={COLUMN_DISPLAY.fromLg} className="font-mono text-xs text-text-secondary">{m.membership_number}</Cell>
-      <Cell label="Status"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></Cell>
+      <Cell label="Member #" display={COLUMN_DISPLAY.fromLg} className="font-mono text-xs text-text-secondary">
+        <span className="block truncate max-w-[180px] sm:max-w-full">{m.membership_number}</span>
+      </Cell>
+      {/*
+        Status, and — under it — whether this member ever confirmed their address.
+
+        The "Unverified" marker used to live inside the Email cell, which is drawn only from
+        1280px up. Turning the marker on in the same round that stopped drawing Email below
+        `xl` made it invisible at 640-1279: an admin at 768 or 1024 could not see that a
+        member was unverified at all, on the screen whose whole job is answering "the app
+        will not let me in". It was READABLE at 1024-1279 before that round, so it was a
+        regression, not a pre-existing gap.
+
+        (No apostrophes in this comment on purpose: lizard reads a bare one in JSX text as a
+        string opener and swallows the rest of the file — see memory/gotchas.md.)
+
+        It belongs on Status because Status is drawn at every width, and because that is what
+        it is: a second fact about the standing of the account. Stacked rather than beside, so a
+        124px column holds both, and so the row grows by one short line only for the members
+        it applies to.
+      */}
+      <Cell label="Status">
+        <div className="flex flex-col items-start gap-1">
+          <Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge>
+          {m.email_verified === false && (
+            <span
+              title="This member never confirmed their email address, so they cannot sign in with a password."
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-warning-soft text-warning-strong"
+            >
+              <MailWarning size={11} /> Unverified
+            </span>
+          )}
+        </div>
+      </Cell>
       <Cell label="Class" display={COLUMN_DISPLAY.fromMd}>
         <MemberClassCell member={m} busy={busy} onChange={onClass} />
       </Cell>
@@ -743,7 +860,18 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
         {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
       </Cell>
       <Cell label="Balance" align="right" className="tabular-nums whitespace-nowrap sm:sticky sm:right-[200px] sm:z-10 bg-bg-surface sm:border-l sm:border-border">
-        <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
+        {/*
+          `truncate` and the title are the belt; the fixed column width is the braces. A column
+          clips exactly as silently as a pinned one covered — `123456.78 cr` reading as
+          `12345`, with no ellipsis and no cue, is the misread this column was pinned for in
+          the first place, and swapping the pin for a width would reproduce it for a bigger
+          number. 132px holds nine significant digits; anything past that is visibly elided
+          and readable in full on hover, rather than being a plausible smaller amount.
+        */}
+        <span
+          title={formatCredits(m.balance_credits)}
+          className={cn("block truncate font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}
+        >
           {formatCredits(m.balance_credits)}
         </span>
       </Cell>
@@ -882,7 +1010,7 @@ function MemberClassCell({ member, busy, onChange }: { member: AdminMember; busy
       disabled={busy}
       aria-label={`Member class for ${member.full_name}`}
       onChange={(e) => onChange(e.target.value as MemberClass)}
-      className="h-9 px-2 rounded-lg border border-border bg-bg-surface text-text-primary text-xs disabled:opacity-60"
+      className="h-9 px-2 w-full max-w-full rounded-lg border border-border bg-bg-surface text-text-primary text-xs disabled:opacity-60"
     >
       {MEMBER_CLASSES.map((c) => <option key={c} value={c}>{classLabel(c)}</option>)}
     </select>

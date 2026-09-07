@@ -727,6 +727,12 @@ describe("AdminDevices", () => {
     // one run in four: the interval sentence is rendered from first paint, while `Checked`
     // waits on `checkedAt`, so the find resolved against the pre-load render and the get
     // then ran against a paragraph still reading "Checking…".
+    //
+    // Two lanes fixed this flake independently in round 8. The other made both reads
+    // `findByText`, which also removes the race — but leaves them free to resolve against
+    // different elements at different moments, so it would still pass if the two sentences
+    // drifted into separate paragraphs. One element, found by the slower half, is the form
+    // that keeps proving what the test is named for.
     const status = await screen.findByText(/^Checked /);
     expect(status).toHaveTextContent(/re-reads the boxes every 15 seconds/);
 
