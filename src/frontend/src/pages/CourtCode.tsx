@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QrCode as QrIcon, RefreshCw } from "lucide-react";
 import { ApiError, endpoints, type MyQrCode, type MyQrKind } from "../lib/api";
+import { describeCourtCodeRefusal } from "../lib/bookingErrors";
 import { encodeQr, qrPath } from "../lib/qr";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
@@ -155,6 +156,38 @@ function secondsUntil(deadline: Deadline): number {
   return Math.max(0, Math.ceil(ms / 1000));
 }
 
+/**
+ * What a member the club has barred sees instead of a code.
+ *
+ * <p>
+ * The whole page, not a banner on it. Everything the normal page renders is a promise the
+ * box will not keep for this member — the subtitle says the code "switches the lights on
+ * and marks you as arrived", the walk-up switch offers to start on a free court or pay for
+ * someone, and the QR itself is an invitation to go and hold it up at a scanner. Round 7
+ * made the code inert at every box without changing any of that, so the only way to find
+ * out was to stand at a court.
+ * </p>
+ *
+ * <p>
+ * The page holds this separately from its `error` state because the two are not the same
+ * kind of thing: `error` is a bad minute on the network and the page goes on trying, this
+ * is a decision the club has taken and the page must stop making the offer.
+ * </p>
+ */
+function BarredCard({ reason }: { reason: string }) {
+  return (
+    <div className="max-w-xl mx-auto space-y-6">
+      <h1 className="text-xl font-semibold">Your court code</h1>
+      <Card className="space-y-2">
+        <p role="alert" className="text-sm text-danger-strong">{reason}</p>
+        <p className="text-sm text-text-secondary">
+          There is no code to show while that is the case, because a code would be turned away at the court.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
 // --- the page -------------------------------------------------------------------
 
 export default function CourtCodePage() {
@@ -165,6 +198,8 @@ export default function CourtCodePage() {
   const [error, setError] = useState<string | null>(null);
   /** On: ask for an ident code outright, whatever bookings the member has. */
   const [walkUp, setWalkUp] = useState(false);
+  /** The club has barred this member: no code to be had, and no point asking again. */
+  const [barred, setBarred] = useState<string | null>(null);
   const lastFetchAt = useRef(0);
   const inflight = useRef(false);
   /** The code a pre-fetch was last made for, so the same code is not pre-fetched over and over as it runs out. */
@@ -206,7 +241,15 @@ export default function CourtCodePage() {
       setSecondsLeft(next.expires_in_seconds);
       setError(null);
     } catch (e) {
-      if (mode === "replace") {
+      // Surfaced on BOTH modes. A pre-fetch is silent about every other failure, but a
+      // member suspended while this page was open must not go on holding a dead code.
+      const refused = describeCourtCodeRefusal(e);
+      if (refused !== null) {
+        setBarred(refused);
+        setQr(null);
+        setDeadline(null);
+        setError(null);
+      } else if (mode === "replace") {
         setError(
           e instanceof ApiError && e.status === 429
             ? "Too many refreshes. Give it a moment and try again."
@@ -271,6 +314,10 @@ export default function CourtCodePage() {
   }, [qr, loading, secondsLeft, walkUp, fetchCode]);
 
   const meaning = qr ? describeKind(qr) : null;
+
+  // Placed after every hook, so none is skipped. See BarredCard for why it replaces the
+  // whole page rather than sitting beside the code.
+  if (barred !== null) return <BarredCard reason={barred} />;
 
   return (
     <div className="max-w-xl mx-auto space-y-6">

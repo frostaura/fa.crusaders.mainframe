@@ -137,6 +137,22 @@ public static class QrEndpoints
         var userId = ctx.User.Id() ?? Guid.Empty;
         if (userId == Guid.Empty) return Results.Unauthorized();
 
+        // A member the club has barred gets no code at all.
+        //
+        // Round 7 made a barred member's code INERT at every box — the walk-up route, the
+        // activation paths and the cached roster all refuse them — so no money moved. This
+        // route went on minting one anyway, and the screen that shows it says the code will
+        // "start a walk-up on a free court, or pay for someone else's time". A promise
+        // nothing keeps is a defect in its own right, and the member's only way to discover
+        // it was to stand at a court and read SEE THE DESK.
+        //
+        // The same gate the booking routes use, and the same two codes, so one refusal has
+        // one sentence wherever it surfaces: `member_suspended` for a membership the club
+        // took away, `member_not_active` for one it has not granted. Refusing here without
+        // that mapping would be WORSE than minting the code, because a raw token on a
+        // member's screen tells them nothing — CourtCode.tsx carries the other half.
+        if (await BookingMembershipGate.RefuseIfBarredAsync(db, userId, ct) is { } barred) return barred;
+
         // Refused rather than silently treated as auto: a typo'd kind that quietly returned
         // a booking code is exactly the lockout this parameter was added to end.
         var requested = ctx.Request.Query["kind"].ToString();

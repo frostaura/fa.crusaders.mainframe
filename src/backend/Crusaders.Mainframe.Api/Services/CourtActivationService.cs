@@ -53,8 +53,18 @@ public abstract record ActivationResult
 /// session settled to free play with nothing to follow up. Charging happens <b>first</b>
 /// now, and nothing is stamped and no event is emitted unless it succeeded.
 /// </para>
+///
+/// <para>
+/// <b>Not sealed, and <see cref="ActivateAsync(ActivationRequest, CancellationToken)"/> is
+/// virtual, for one reason: the refusal branch is otherwise untestable.</b> Every refusal
+/// this returns to a walk-up is a race — the booking is decided between the debit and the
+/// activation — and no test can schedule that inside one call. The walk-up path now UNDOES
+/// the purchase on a refusal (money back, slot released, no confirmation), which is money
+/// code, and money code that nothing drives is money code nobody has read. A test double
+/// that returns a refusal is the seam; nothing else here is meant to be overridden.
+/// </para>
 /// </summary>
-public sealed class CourtActivationService
+public class CourtActivationService
 {
     private readonly MainframeDbContext _db;
     private readonly BookingService _bookings;
@@ -205,7 +215,7 @@ public sealed class CourtActivationService
     /// the server clock, because the relay timer the box runs is the box's own.
     /// </para>
     /// </summary>
-    public async Task<ActivationResult> ActivateAsync(ActivationRequest request, CancellationToken ct)
+    public virtual async Task<ActivationResult> ActivateAsync(ActivationRequest request, CancellationToken ct)
     {
         var (court, booking, identifiedUserId, payerOverrideUserId, method, when) = request;
         var now = DateTimeOffset.UtcNow;

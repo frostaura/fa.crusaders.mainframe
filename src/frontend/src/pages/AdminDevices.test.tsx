@@ -721,7 +721,10 @@ describe("AdminDevices", () => {
 
     // The sentence is a promise about behaviour, so it names the interval the page runs.
     expect(await screen.findByText(/re-reads the boxes every 15 seconds/)).toBeInTheDocument();
-    expect(screen.getByText(/^Checked /)).toBeInTheDocument();
+    // `find`, not `get`: the sentence above is static copy that is on screen before the
+    // first device read lands, so a synchronous query here raced the load and reddened
+    // this test roughly one run in four (round-7 verifier, reproduced in round 8).
+    expect(await screen.findByText(/^Checked /)).toBeInTheDocument();
 
     const atLoad = deviceReads(stub);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));

@@ -303,4 +303,78 @@ describe("CourtCode", () => {
     expect(await screen.findByText(/Couldn't get a code/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Try again/ })).toBeInTheDocument();
   });
+
+  /**
+   * The screen must not promise what the box will refuse.
+   *
+   * <p>
+   * Round 7 made a barred member's code inert at every box, so no money moves — and left
+   * this screen saying the code will "start a walk-up on a free court, or pay for someone
+   * else's time", with a switch inviting them to ask for exactly that. The member's only
+   * way to discover otherwise was to stand at a court and read SEE THE DESK.
+   * </p>
+   *
+   * <p>
+   * So: the reason, in a sentence, and nothing else on the page — no QR, no code, no
+   * countdown, no Refresh, and above all no walk-up switch. A code that cannot be used is
+   * not a smaller version of a code that can.
+   * </p>
+   */
+  it.each([
+    ["member_suspended", /membership is suspended/i, /restored/i],
+    ["member_not_active", /isn't active yet/i, /approve/i],
+  ])("shows no code and no walk-up offer to a member the club has barred (%s)", async (code, sentence, nextStep) => {
+    stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", status: 403, body: { error: code } }]);
+
+    renderPage(<CourtCodePage />);
+
+    // The refusal, announced — a member who was holding a code a moment ago needs to be
+    // told, not left to notice the QR has gone.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(sentence);
+    expect(alert).toHaveTextContent(nextStep);
+    // Never the raw token. The whole reason the backend guard could not ship alone.
+    expect(document.body.textContent).not.toContain(code);
+
+    // Nothing that offers the member a code, or implies one is coming.
+    expect(screen.queryByLabelText("Court code")).toBeNull();
+    expect(screen.queryByRole("img", { name: /QR code/ })).toBeNull();
+    expect(screen.queryByLabelText("Walk up / pay for someone")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Refresh/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Try again/ })).toBeNull();
+    expect(screen.queryByText(/start a walk-up on a free court/)).toBeNull();
+    expect(screen.queryByText(/switches the lights on/)).toBeNull();
+    expect(screen.queryByText(/Refreshes in/)).toBeNull();
+    // And not the generic connection sentence, which would send them to their WiFi
+    // settings over a decision the club took.
+    expect(screen.queryByText(/Check your connection/)).toBeNull();
+  });
+
+  /**
+   * Suspended between two codes. The pre-fetch is silent about every other failure —
+   * a dropped request is left for the expiry path — but a member holding a live QR when
+   * the desk suspends them must not go on holding it.
+   */
+  it("drops the code already on screen when the club bars the member mid-session", async () => {
+    fakeClock();
+    const stub = stubFetch([
+      { method: "POST", path: "/api/v1/me/qr/generate", body: IDENT, sequence: [IDENT] },
+    ]);
+    renderPage(<CourtCodePage />);
+    await advance(0);
+    expect(screen.getByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+
+    // The next answer is the refusal. Re-stubbing rather than sequencing, because the
+    // status changes and `sequence` carries bodies only.
+    stub.calls.length = 0;
+    stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", status: 403, body: { error: "member_suspended" } }]);
+
+    // Fifty seconds in, the silent pre-fetch fires — the path that used to swallow this.
+    await advanceSeconds(51);
+    await advance(0);
+
+    expect(screen.queryByLabelText("Court code")).toBeNull();
+    expect(screen.queryByLabelText("Walk up / pay for someone")).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent(/membership is suspended/i);
+  });
 });

@@ -345,6 +345,99 @@ public sealed class QrEndpointHttpTests
         Assert.True(json.GetProperty("matched").GetBoolean());
     }
 
+    /// <summary>
+    /// A member the club has barred is given no code, whichever kind they ask for — and the
+    /// refusal names which bar it is, so the screen can say something true.
+    ///
+    /// <para>
+    /// The code was already inert at every box after round 7: the walk-up route, the
+    /// activation paths and the cached roster all drop a barred member. This route went on
+    /// minting one, and the screen showing it tells the member it will "start a walk-up on a
+    /// free court, or pay for someone else's time". Nothing kept that promise, and the only
+    /// way to find out was to stand at a court.
+    /// </para>
+    ///
+    /// <para>
+    /// All three barred states, not just Suspended — the same widening the device routes
+    /// took, for the same reason: a club that has not said yes has not said yes. And 403
+    /// with the booking routes' own two codes, so the phone and the schedule refuse a
+    /// suspended member in the same words rather than inventing a second vocabulary.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(MembershipStatus.Suspended, "member_suspended", null)]
+    [InlineData(MembershipStatus.Suspended, "member_suspended", "ident")]
+    [InlineData(MembershipStatus.PendingApproval, "member_not_active", null)]
+    [InlineData(MembershipStatus.Rejected, "member_not_active", "ident")]
+    public async Task A_barred_member_is_given_no_court_code_at_all(
+        MembershipStatus status, string expectedError, string? kind)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var s = await SeedAsync(factory);
+
+        // A booking IN REACH, deliberately: the auto path would otherwise answer with an
+        // ident code and the guard would be proved on only one of the two branches. This is
+        // also the real shape — a member with a court booked, suspended at the desk after
+        // booking it.
+        await BookAsync(factory, s, DateTimeOffset.UtcNow.AddHours(1));
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var membership = await db.Memberships.IgnoreQueryFilters().SingleAsync(m => m.UserId == s.MemberId);
+            membership.Status = status;
+            await db.SaveChangesAsync();
+        }
+
+        var client = MemberClient(factory, s);
+        var path = kind is null ? GeneratePath : $"{GeneratePath}?kind={kind}";
+        var response = await client.PostAsync(path, null);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal(expectedError, json.GetProperty("error").GetString());
+        Assert.Equal(status.ToString(), json.GetProperty("status").GetString());
+
+        // Nothing was minted on the way to the refusal. A code in the table is a code the
+        // box would resolve, whether or not the member was ever shown it.
+        using var check = factory.Services.CreateScope();
+        var codes = check.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Empty(await codes.AccessCodes.IgnoreQueryFilters().Where(c => c.UserId == s.MemberId).ToListAsync());
+    }
+
+    /// <summary>
+    /// And the club restoring the membership restores the code — the same member, the same
+    /// booking, the one field moved. Without this the test above passes against a route that
+    /// refuses everyone.
+    /// </summary>
+    [SkippableFact]
+    public async Task Restoring_the_membership_restores_the_code()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var s = await SeedAsync(factory);
+        await BookAsync(factory, s, DateTimeOffset.UtcNow.AddHours(1));
+
+        async Task SetStatusAsync(MembershipStatus status)
+        {
+            using var scope = factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var membership = await db.Memberships.IgnoreQueryFilters().SingleAsync(m => m.UserId == s.MemberId);
+            membership.Status = status;
+            await db.SaveChangesAsync();
+        }
+
+        await SetStatusAsync(MembershipStatus.Suspended);
+        Assert.Equal(HttpStatusCode.Forbidden, (await MemberClient(factory, s).PostAsync(GeneratePath, null)).StatusCode);
+
+        await SetStatusAsync(MembershipStatus.Active);
+        var json = await GenerateAsync(MemberClient(factory, s));
+        Assert.Equal("booking", json.GetProperty("kind").GetString());
+    }
+
     private static string AdminToken(Seeded s)
     {
         var token = new JwtSecurityToken(
