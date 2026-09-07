@@ -1119,3 +1119,92 @@ describe("Schedule — the confirmation dialog opens on something useful", () =>
     expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeEnabled();
   });
 });
+
+/**
+ * N-F6 — 44 green, clickable "Available" cells a day that a Regular member could not book.
+ *
+ * <p>
+ * The finder counted them on 2026-09-10: every cell between 16:00 and 19:00 rendered with text
+ * "Available", background `rgb(220, 252, 231)` — the same green as a bookable slot — `cursor:
+ * pointer`, `disabled = false`, and `aria-label="Book Court 2 at 17:00 for 50.00 cr"`. Clicking
+ * one opened the confirmation, which quoted court, time, cost, balance now and balance after,
+ * as if the booking were going to happen; the refusal came only after Confirm. feature-spec §5
+ * defines `available` as "green, clickable", so roughly a quarter of the club's day was
+ * advertised in the one colour the grid uses for "you can have this" and then taken away one
+ * modal at a time.
+ * </p>
+ *
+ * <p>
+ * Driven through the page rather than through `peakRestricted` alone, because the arithmetic
+ * being right is not the same as the cell being drawn — and the assertions are on the aria
+ * labels, which are what a member tabbing the grid actually gets.
+ * </p>
+ */
+describe("Schedule — peak-hour slots a member cannot book are not offered as if they could", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const COURT = "11111111-1111-1111-1111-111111111111";
+  const DATE = "2030-09-09";
+
+  const PEAK_DAY = {
+    date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
+    dayStartMinute: 7 * 60, dayEndMinute: 20 * 60, advanceBookingDays: 14,
+    penaltyPct: 30, penaltyWindowMinutes: 15,
+    peakStartMinute: 16 * 60, peakEndMinute: 19 * 60,
+    peakAdvanceHoursForRegular: 1,
+    viewerMayBookPeak: false,
+    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    slots: [] as unknown[],
+  };
+
+  function openDay(day: unknown) {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: { balance_credits: 1635, entries: [] } },
+      { path: "/api/v1/schedule", body: day },
+    ]);
+    renderPage(<SchedulePage />);
+  }
+
+  it("draws a peak cell as reserved rather than as an offer a click would withdraw", async () => {
+    openDay(PEAK_DAY);
+    await screen.findByLabelText(/Court 1 at 07:00/);
+
+    // The cell that used to carry "Book Court 1 at 17:00 for 50.00 cr" and open a priced modal.
+    expect(screen.queryByRole("button", { name: /^Book Court 1 at 17:00/ })).not.toBeInTheDocument();
+    const cell = screen.getByLabelText(/Court 1 at 17:00 — reserved for league and senior members/);
+    expect(cell).toBeInTheDocument();
+    // Inert, like `out_of_hours`: rendered so the member can see the slot exists, not clickable.
+    expect(cell.tagName).not.toBe("BUTTON");
+  });
+
+  it("leaves every cell outside the window bookable, so it is a rule and not a blanked grid", async () => {
+    openDay(PEAK_DAY);
+
+    // [16:00, 19:00) on the slot's start — the same half-open window CheckPeakHoursRule uses.
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 15:45 for 50\.00 cr/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Book Court 1 at 19:00 for 50\.00 cr/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Book Court 1 at 18:45/ })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The fixture, varied on the one field that decides it. Everything above would pass just as
+   * well if the grid greyed peak cells out for everybody — which would stop the club booking
+   * its own league night (A.6/A.11: "admin always bypasses caps and peak-hour rules").
+   */
+  it("offers the same cells to a viewer the rule never refuses", async () => {
+    openDay({ ...PEAK_DAY, viewerMayBookPeak: true });
+
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00 for 50\.00 cr/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/reserved for league and senior members/)).not.toBeInTheDocument();
+  });
+
+  /** And an older payload that carries none of it must offer everything, not hide everything. */
+  it("offers the whole day when the payload says nothing about the rule", async () => {
+    const { peakStartMinute, peakEndMinute, peakAdvanceHoursForRegular, viewerMayBookPeak, ...bare } = PEAK_DAY;
+    void peakStartMinute; void peakEndMinute; void peakAdvanceHoursForRegular; void viewerMayBookPeak;
+    openDay(bare);
+
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00 for 50\.00 cr/ })).toBeInTheDocument();
+  });
+});

@@ -85,6 +85,38 @@ export function buildTimeSlices(day: ScheduleDay): TimeSlice[] {
 }
 
 /**
+ * Is this cell one the peak-hours rule would refuse THIS viewer, right now?
+ *
+ * <p>
+ * N-F6. Blueprint A.12 reserves the peak window for league and senior members until
+ * `peak_advance_hours_for_regular` before the slot starts, and until round 3 the rule lived
+ * only in `BookingService`. A Regular member's grid therefore drew 44 cells a day — counted,
+ * on 2026-09-10 — as green, clickable "Available", with the same cursor and the same
+ * "Book Court 2 at 17:00 for 50.00 cr" label as a slot they could actually have; the modal
+ * then quoted court, time, cost, balance now and balance after, and the refusal arrived only
+ * after Confirm. §5 defines `available` as "green, clickable", so a slot that is neither
+ * should not be wearing it.
+ * </p>
+ *
+ * <p>
+ * Mirrors `BookingService.CheckPeakHoursRule` exactly, including its boundaries: the window is
+ * `[start, end)` on the slot's START, and the allowance is a strict `hoursUntil > advance`, so
+ * a slot exactly on the allowance is bookable in both places. Every field is optional and every
+ * missing one answers `false`: the client must fail towards OFFERING a slot, because a grid
+ * that hid cells on an absent field would refuse bookings the club would take.
+ * </p>
+ */
+export function peakRestricted(day: ScheduleDay, minuteOfDay: number, cellStartMs: number, nowMs: number): boolean {
+  if (day.viewerMayBookPeak !== false) return false;
+  const start = day.peakStartMinute;
+  const end = day.peakEndMinute;
+  if (typeof start !== "number" || typeof end !== "number") return false;
+  if (minuteOfDay < start || minuteOfDay >= end) return false;
+  const advanceHours = day.peakAdvanceHoursForRegular ?? 0;
+  return (cellStartMs - nowMs) / 3_600_000 > advanceHours;
+}
+
+/**
  * The slot occupying one cell, if any.
  *
  * <p>

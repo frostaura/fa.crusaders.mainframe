@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Card } from "./Card";
 import type { ScheduleDay, ScheduleSlot } from "../lib/api";
 import { cn, formatCredits } from "../lib/utils";
-import { isSlotHead, slotAt, type TimeSlice } from "../lib/scheduleGrid";
+import { isSlotHead, peakRestricted, slotAt, type TimeSlice } from "../lib/scheduleGrid";
 
 type GridProps = {
   day: ScheduleDay;
@@ -82,6 +82,7 @@ export const ScheduleGrid = memo(function ScheduleGrid(props: GridProps) {
                 isHead={(s) => isSlotHead(s, cellStartMs, day.sliceMinutes, rowIndex === 0)}
                 isPast={isPast}
                 outOfHours={t.outOfHours}
+                leagueOnly={peakRestricted(day, t.minuteOfDay, cellStartMs, loadedAt)}
                 isAdmin={isAdmin}
                 priceCredits={c.slicePriceCredits}
                 onBook={() => onBook(c.id, c.name, t.utc, c.slicePriceCredits)}
@@ -148,6 +149,8 @@ type SlotCellProps = {
   isHead: (slot: ScheduleSlot) => boolean;
   isPast?: boolean;
   outOfHours?: boolean;
+  /** A.12's peak window, as it applies to this viewer: reserved, not free — see `peakRestricted`. */
+  leagueOnly?: boolean;
   isAdmin: boolean;
   priceCredits?: number;
   onBook: () => void;
@@ -156,9 +159,16 @@ type SlotCellProps = {
 };
 
 export function SlotCell(props: SlotCellProps) {
-  const { slot, isHead, isPast, outOfHours, isAdmin, priceCredits, where, onBook, onCancel, onLiftBlock } = props;
+  const { slot, isHead, isPast, outOfHours, leagueOnly, isAdmin, priceCredits, where, onBook, onCancel, onLiftBlock } = props;
 
-  if (!slot) return <EmptyCell isPast={isPast} outOfHours={outOfHours} priceCredits={priceCredits} where={where} onBook={onBook} />;
+  if (!slot) {
+    return (
+      <EmptyCell
+        isPast={isPast} outOfHours={outOfHours} leagueOnly={leagueOnly}
+        priceCredits={priceCredits} where={where} onBook={onBook}
+      />
+    );
+  }
 
   // Only the booking's first cell carries its name and controls. Every later cell of the
   // same booking is a continuation — which is what makes a 60-minute booking read as one
@@ -188,8 +198,9 @@ export function SlotCell(props: SlotCellProps) {
   return <OtherCell slot={slot} isAdmin={isAdmin} isPast={isPast} where={where} onCancel={onCancel} />;
 }
 
-function EmptyCell({ isPast, outOfHours, priceCredits, where, onBook }: {
-  isPast?: boolean; outOfHours?: boolean; priceCredits?: number; where: string; onBook: () => void;
+function EmptyCell({ isPast, outOfHours, leagueOnly, priceCredits, where, onBook }: {
+  isPast?: boolean; outOfHours?: boolean; leagueOnly?: boolean;
+  priceCredits?: number; where: string; onBook: () => void;
 }) {
   // Closed, not merely empty. §5's `out_of_hours` — rendered and inert, so a member can
   // see that the club is shut rather than seeing a grid that stops without explanation.
@@ -210,6 +221,21 @@ function EmptyCell({ isPast, outOfHours, priceCredits, where, onBook }: {
         aria-label={`${where} — past`}
       >
         Past
+      </div>
+    );
+  }
+  // N-F6: reserved, not free. A Regular member was shown 44 of these a day in the same green
+  // as a bookable cell, with the same cursor and the same "Book … for 50.00 cr" label, and
+  // found out only after reading a price and pressing Confirm. It is rendered and inert, like
+  // `out_of_hours` above it — the slot exists and the member can see it is not theirs yet, and
+  // it becomes an ordinary Available cell inside the advance window (§5, A.12).
+  if (leagueOnly) {
+    return (
+      <div
+        className="m-0.5 h-12 rounded-md bg-warning-soft/50 border border-dashed border-warning-strong/30 text-warning-strong flex items-center justify-center text-center text-[11px] leading-tight px-1"
+        aria-label={`${where} — reserved for league and senior members until closer to the time`}
+      >
+        League only
       </div>
     );
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ScheduleDay, ScheduleSlot } from "./api";
-import { buildTimeSlices, groupSlotsByCourt, isSlotHead, slotAt } from "./scheduleGrid";
+import { buildTimeSlices, groupSlotsByCourt, isSlotHead, peakRestricted, slotAt } from "./scheduleGrid";
 import { cancellationOutcome } from "./bookingErrors";
 
 /**
@@ -187,5 +187,75 @@ describe("cancellationOutcome — the message names what actually moved", () => 
     // pending." while the member lost the entire price and the court stayed lit.
     expect(cancellationOutcome(0, 0)).toBe(
       "Booking cancelled. Nothing was refunded — the lights had already been on.");
+  });
+});
+
+/**
+ * N-F6 — which cells the peak-hours rule would refuse THIS viewer.
+ *
+ * <p>
+ * Blueprint A.12 reserves the peak window for league and senior members until
+ * `peak_advance_hours_for_regular` before a slot starts, and the rule lived only in
+ * `BookingService`. A Regular member's grid therefore drew 44 cells a day as green, clickable
+ * "Available" — same colour, same cursor, same "Book Court 2 at 17:00 for 50.00 cr" label as a
+ * slot they could actually have — and the refusal arrived only after they had read a price and
+ * pressed Confirm.
+ * </p>
+ *
+ * <p>
+ * Pinned as arithmetic rather than as pixels, and against the boundaries
+ * `CheckPeakHoursRule` actually uses: the window is `[start, end)` on the slot's START and the
+ * allowance is a strict `hoursUntil > advance`, so a grid that disagreed at either edge would
+ * hide a slot the API would sell — the failure this fix must not introduce.
+ * </p>
+ */
+describe("peakRestricted — the peak window as one viewer sees it", () => {
+  /** 16:00–19:00 local, a Regular member, an hour's grace. The Crusaders seed's own numbers. */
+  const REGULAR = day({
+    peakStartMinute: 16 * 60, peakEndMinute: 19 * 60,
+    peakAdvanceHoursForRegular: 1, viewerMayBookPeak: false,
+  });
+  const NOW = Date.parse("2026-09-05T06:00:00Z");
+  const hoursAway = (h: number) => NOW + h * 3_600_000;
+
+  it("restricts a peak slot that is further away than the allowance", () => {
+    expect(peakRestricted(REGULAR, 17 * 60, hoursAway(5), NOW)).toBe(true);
+  });
+
+  it("frees the same slot once the member is inside the allowance", () => {
+    // A.12: "inside that window any class can book if free."
+    expect(peakRestricted(REGULAR, 17 * 60, hoursAway(0.5), NOW)).toBe(false);
+    // Exactly on the allowance is bookable, because the service's test is a strict `>`.
+    expect(peakRestricted(REGULAR, 17 * 60, hoursAway(1), NOW)).toBe(false);
+  });
+
+  it("uses the same half-open window the booking service does", () => {
+    // [16:00, 19:00). 15:45 and 19:00 are outside it; a client that closed the interval would
+    // hide a slot the API would sell.
+    expect(peakRestricted(REGULAR, 15 * 60 + 45, hoursAway(5), NOW)).toBe(false);
+    expect(peakRestricted(REGULAR, 16 * 60, hoursAway(5), NOW)).toBe(true);
+    expect(peakRestricted(REGULAR, 18 * 60 + 45, hoursAway(5), NOW)).toBe(true);
+    expect(peakRestricted(REGULAR, 19 * 60, hoursAway(5), NOW)).toBe(false);
+  });
+
+  it("restricts nothing for a viewer the rule never refuses", () => {
+    // A league/senior member, and an admin — A.6/A.11, "admin always bypasses".
+    const league = { ...REGULAR, viewerMayBookPeak: true };
+    expect(peakRestricted(league, 17 * 60, hoursAway(5), NOW)).toBe(false);
+  });
+
+  /**
+   * The fixture, varied towards ABSENCE. Every field is optional on the wire, and each missing
+   * one has to answer "not restricted": a grid that greyed cells out on an absent field would
+   * refuse bookings the club would take, which is a worse defect than the one being fixed.
+   */
+  it("offers the slot when the payload says nothing about the rule", () => {
+    expect(peakRestricted(day(), 17 * 60, hoursAway(5), NOW)).toBe(false);
+    expect(peakRestricted({ ...REGULAR, viewerMayBookPeak: undefined }, 17 * 60, hoursAway(5), NOW)).toBe(false);
+    // A club that runs no league nights: `peak_hours` is empty, so the window is null.
+    expect(peakRestricted({ ...REGULAR, peakStartMinute: null, peakEndMinute: null }, 17 * 60, hoursAway(5), NOW)).toBe(false);
+    // An advance allowance the payload omits reads as zero, not as "no rule": the window still
+    // applies, which is the stricter half and matches a club that set it to 0.
+    expect(peakRestricted({ ...REGULAR, peakAdvanceHoursForRegular: undefined }, 17 * 60, hoursAway(5), NOW)).toBe(true);
   });
 });

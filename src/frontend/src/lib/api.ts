@@ -358,6 +358,20 @@ export type ScheduleDay = {
   /** The club's opening and closing for THIS day, minutes past local midnight — per weekday, not a flat pair. */
   dayStartMinute: number; dayEndMinute: number; advanceBookingDays: number;
   penaltyPct: number; penaltyWindowMinutes: number;
+  /**
+   * The peak-hours league/senior rule (A.12), as it applies to THIS viewer.
+   *
+   * <p>
+   * Optional because the client must degrade towards showing a slot rather than hiding one: a
+   * payload without these fields is an older API, and a grid that greyed cells out on a missing
+   * field would refuse bookings the club would happily take. `peakStartMinute` / `peakEndMinute`
+   * are minutes past local midnight and are null when `peak_hours` is unset or malformed;
+   * `viewerMayBookPeak` is true for an admin and for a league/senior member — the two the rule
+   * never refuses.
+   * </p>
+   */
+  peakStartMinute?: number | null; peakEndMinute?: number | null;
+  peakAdvanceHoursForRegular?: number; viewerMayBookPeak?: boolean;
   courts: ScheduleCourt[]; slots: ScheduleSlot[]
 };
 
