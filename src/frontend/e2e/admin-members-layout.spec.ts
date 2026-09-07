@@ -123,9 +123,38 @@ async function measure(page: import("@playwright/test").Page) {
         return lines;
       },
     );
+    // Every column that is DRAWN but sits underneath another one at rest.
+    //
+    // A right-hand `position: sticky` cell is pulled left of its in-flow position by exactly
+    // the un-scrolled overflow, and whatever occupied that band is painted over. That is not
+    // a bug in the pin; it is the reason column ORDER cannot solve it, because the band is
+    // wherever the pins land and every arrangement has a victim. `Joined` was the victim: at
+    // 1440 AND at 1920 its header rendered as a bare glyph and each cell as a single "S",
+    // with roughly 800px of page beside a container capped at 990px.
+    //
+    // Read off the compositor with elementFromPoint rather than inferred from boxes:
+    // occlusion is invisible to a bounding rect, and occlusion is the whole defect.
+    const hiddenColumns = Array.from(document.querySelectorAll<HTMLElement>("thead th"))
+      .filter((th) => getComputedStyle(th).display !== "none")
+      .filter((th) => {
+        const r = th.getBoundingClientRect();
+        if (r.width === 0) return false;
+        const x = Math.min(Math.max(r.left + r.width / 2, box.left + 1), box.right - 1);
+        const top = document.elementFromPoint(x, r.top + r.height / 2);
+        return !(top === th || th.contains(top));
+      })
+      .map((th) => th.innerText.trim().replace(/\s+/g, " "));
+
+    // Which columns exist at this width at all, and whether Joined is one of them.
+    const drawnColumns = Array.from(document.querySelectorAll<HTMLElement>("thead th"))
+      .filter((th) => getComputedStyle(th).display !== "none")
+      .map((th) => th.innerText.trim().replace(/\s+/g, " "));
+
     return {
       controls: controls.length,
       outsideAtRest,
+      hiddenColumns,
+      drawnColumns,
       maxActionLines: Math.max(0, ...actionLines),
       maxRowHeight: Math.max(...rowHeights),
       regionOverflow: region.scrollWidth - region.clientWidth,
@@ -149,9 +178,21 @@ for (const width of [768, 1440]) {
       // The measurement that the whole argument was missing. Unpinned, this list is every
       // control in the table.
       expect(m.outsideAtRest, "row actions outside the scroller's box on arrival").toEqual([]);
-      // And the table really is wider than its card, so the assertion above is about the pin
-      // and not about a table that happens to fit today.
-      expect(m.regionOverflow).toBeGreaterThan(0);
+    });
+
+    test("draws no column underneath another one", async ({ page }) => {
+      await openMembers(page);
+      const m = await measure(page);
+
+      // This replaced an assertion that the table must be WIDER than its card. That was a
+      // guard on the pin doing work, and it was also the defect's home: the un-scrolled
+      // overflow is exactly the band the right-hand pins cover, so as long as it existed a
+      // whole column sat underneath them — 89px of overflow against a 99px `Joined` column,
+      // at 1440 and at 1920 alike. The fix removes the overflow (a wider container for
+      // /admin/*, and columns that are simply not drawn below the width at which they fit)
+      // rather than shuffling the order, so the honest property to assert is this one: every
+      // column the table draws a header for can be seen.
+      expect(m.hiddenColumns, "columns painted over by a pinned column at rest").toEqual([]);
     });
 
     test("never shows a member's balance as a smaller number than it is", async ({ page }) => {
@@ -208,6 +249,44 @@ for (const width of [768, 1440]) {
       expect(m.maxActionLines, "lines of controls in the widest action cell").toBe(1);
       // Kept as the coarse backstop it always was. Stacked: 164.5px. One line: 69px.
       expect(m.maxRowHeight).toBeLessThan(110);
+    });
+  });
+}
+
+// Where `Joined` — the column three rounds argued about — actually appears. Below the width
+// at which it fits it is absent rather than drawn under a pin, and the row is a card below
+// `sm`, where every field is on screen.
+for (const [width, drawn] of [[768, false], [1024, true], [1440, true], [1920, true]] as const) {
+  test.describe(`the Joined column at ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test(drawn ? "is drawn and readable" : "is not drawn at all, rather than drawn and covered", async ({ page }) => {
+      await openMembers(page);
+      const m = await measure(page);
+      expect(m.drawnColumns.includes("Joined")).toBe(drawn);
+      // Either way, nothing on screen is hiding behind the pins.
+      expect(m.hiddenColumns).toEqual([]);
+
+      if (!drawn) return;
+      // Drawn means legible: every glyph of the date inside the scroller's box and topmost.
+      const unreadable = await page.evaluate(() => {
+        const region = document.querySelector('[role="region"][aria-label="Members table"]') as HTMLElement;
+        region.scrollLeft = 0;
+        const box = region.getBoundingClientRect();
+        return Array.from(document.querySelectorAll<HTMLElement>('tbody td[data-label="Joined"]'))
+          .filter((cell) => {
+            const node = cell.firstChild;
+            if (!node || !node.textContent?.trim()) return false;
+            const r = document.createRange();
+            r.selectNodeContents(cell);
+            const rect = r.getBoundingClientRect();
+            const inBox = rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5;
+            const top = document.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+            return !(inBox && (top === cell || cell.contains(top)));
+          })
+          .map((cell) => cell.innerText.trim());
+      });
+      expect(unreadable, "join dates drawn outside the box or under a pinned column").toEqual([]);
     });
   });
 }
