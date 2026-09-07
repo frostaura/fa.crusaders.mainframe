@@ -103,7 +103,15 @@ public sealed class SettlementSpecPostureTests
         var settlement = SettlementModel().ReplaceLineEndings("\n").Replace("\n", " ");
         Assert.Contains("**How many boxes have to be dark: all of them.**", settlement);
         Assert.Contains("| S5a | `NoShow` — swept while the court had **no reachable box** |", settlement);
-        Assert.Contains("A court no enabled box drives is not dark", settlement);
+        Assert.Contains("A court the club has put no box on at all is not dark", settlement);
+
+        // The other half of the same sentence, added when taking the LAST box off a court was
+        // found to charge that court's members the full penalty (finding M-F3). The pin is here
+        // because the sentence it replaced was the one the code was written from, and a spec
+        // that says only "no enabled box, not dark" reads as a licence to put the defect back.
+        Assert.Contains(
+            "**A court whose boxes have ALL been switched out of service is a different state, and it IS dark.**",
+            settlement);
 
         var feature = FeatureSpec().ReplaceLineEndings("\n").Replace("\n", " ");
         Assert.Contains("applied to **every** enabled box that drives the court", feature);
