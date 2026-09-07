@@ -16,18 +16,12 @@ public static class BookingEndpoints
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
 
-            // A suspension revokes access, and sign-in already refuses one — but an access
-            // token minted before the suspension stays valid until it expires, and booking
-            // court time is exactly what a club suspending a member for unpaid dues is
-            // stopping. Checked here rather than inside BookingService because it is an
-            // authorization question about the caller, not a rule about the slot.
-            //
-            // Not-Active rather than Suspended, and the same test the box uses. This route
-            // read `== Suspended` while the device side read `!= Active`, so the two doors
-            // into the same money disagreed about Rejected and PendingApproval: the club sold
-            // the court and then would not open it.
-            var barred = await MembershipAccess.StatusIfBarredAsync(db, userId, ct);
-            if (barred is not null) return Refusal(barred.Value);
+            // Sign-in already refuses a barred member, but a token minted before the club
+            // changed its mind stays valid until it expires — and booking court time is
+            // exactly what a suspension is stopping. Here rather than in BookingService
+            // because it asks about the caller, not about the slot. The rule, and why it is
+            // not-Active rather than Suspended, is on BookingMembershipGate.
+            if (await BookingMembershipGate.RefuseIfBarredAsync(db, userId, ct) is { } refused) return refused;
 
             var result = await svc.CreateAsync(req.CourtId, userId, userId, req.StartsAt, req.SliceCount, ct);
             return ToHttpResult(result, ctx);
@@ -60,14 +54,11 @@ public static class BookingEndpoints
         // back having read them; nothing here makes the overdraft the default.
         admin.MapPost("/", async (AdminBookingRequest req, HttpContext ctx, BookingService svc, MainframeDbContext db, CancellationToken ct) =>
         {
-            // The PAYER is checked, not the desk. This route tested membership status not at
-            // all, so an admin could book on behalf of an applicant the club had not yet
-            // approved: the member was charged, the booking never reached the box roster,
-            // every courtside door refused it with `no_booking`, and the sweep then settled
-            // it as an ordinary no-show with the 30% penalty on top. Driven end to end by a
-            // verifier — 50 credits taken for a court that could not be opened.
-            var barred = await MembershipAccess.StatusIfBarredAsync(db, req.UserId, ct);
-            if (barred is not null) return Refusal(barred.Value);
+            // The PAYER, not the desk. This route tested membership status not at all, so an
+            // admin could book for an unapproved applicant: charged, absent from the box
+            // roster, refused `no_booking` at every courtside door, then swept as a no-show
+            // with the 30% penalty. Driven end to end — 50 credits for a court that cannot open.
+            if (await BookingMembershipGate.RefuseIfBarredAsync(db, req.UserId, ct) is { } refused) return refused;
 
             var actorId = ctx.User.Id() ?? Guid.Empty;
             var payer = new BookingPayer(req.UserId, actorId, req.AllowNegativeBalance);
@@ -155,26 +146,6 @@ public static class BookingEndpoints
     /// declaration order in <c>BookingService.cs</c> so the pair reads as one list.
     /// </para>
     /// </summary>
-    /// <summary>
-    /// The refusal for a member the club will not let onto a court, naming which kind it is.
-    ///
-    /// <para>
-    /// Two codes rather than one. `member_suspended` already has copy the member reads
-    /// ("speak to the club to have it restored") and that sentence is wrong for an applicant
-    /// nobody has approved yet — the desk's next action there is one click, not a
-    /// conversation. The status travels alongside so a screen can name it without mapping
-    /// the code back.
-    /// </para>
-    /// </summary>
-    private static IResult Refusal(MembershipStatus status)
-        => Results.Json(
-            new
-            {
-                error = status == MembershipStatus.Suspended ? "member_suspended" : "member_not_active",
-                status = status.ToString(),
-            },
-            statusCode: 403);
-
     private static IResult ToHttpResult(BookingResult result, HttpContext ctx) => result switch
     {
         BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
