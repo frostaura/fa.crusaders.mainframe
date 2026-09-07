@@ -116,4 +116,37 @@ public sealed class SettlementSpecPostureTests
         var feature = FeatureSpec().ReplaceLineEndings("\n").Replace("\n", " ");
         Assert.Contains("applied to **every** enabled box that drives the court", feature);
     }
+
+    /// <summary>
+    /// <b>The out-of-service clause is bounded in time, and both specs have to say so.</b>
+    ///
+    /// <para>
+    /// The clause above shipped unbounded and re-priced deadlines that had already been settled
+    /// on working hardware: `Enabled` carries no history, so "dark because it is switched off"
+    /// was read as "dark for as far back as this board has existed". This pin is here for the
+    /// same reason the one above it is — the unbounded sentence is what the code was written
+    /// from, and a spec that says only "a court whose boxes are all out of service is dark"
+    /// reads as a licence to put the retroactive version back.
+    /// </para>
+    ///
+    /// <para>
+    /// It also pins the row that made the defect invisible. The pin table listed "A board
+    /// switched off after the deadline does not speak for it" against a test that varies
+    /// `installedAt`, i.e. a board CREATED after the deadline — a different fact, so the
+    /// sentence was carried by nothing. The corrected row names the switch-off explicitly.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Both_specs_bound_the_out_of_service_waiver_by_the_boards_own_silence()
+    {
+        var settlement = SettlementModel().ReplaceLineEndings("\n").Replace("\n", " ");
+        Assert.Contains("**But the switch itself does not reach backwards", settlement);
+        Assert.Contains("**The switch-off instant IS recorded — as `LastSeenAt` on the switched-off row.**", settlement);
+        Assert.Contains("A board **registered** after the deadline does not speak for it", settlement);
+        Assert.DoesNotContain("| A board switched off after the deadline does not speak for it |", settlement);
+
+        var feature = FeatureSpec().ReplaceLineEndings("\n").Replace("\n", " ");
+        Assert.Contains("**The switch is not retroactive**", feature);
+        Assert.Contains("**That half is bounded by the same silence test, and the first version of it was not**", feature);
+    }
 }

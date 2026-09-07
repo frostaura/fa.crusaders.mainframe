@@ -144,18 +144,49 @@ one confirm-click away in the same change.
 
 The two are told apart by whether a board exists at all on that court, not by a judgement about
 intent: a club with nothing on the court has never asked anyone to check in there, while a club
-with a switched-off board has taken a working door away. `DeviceOutageIndex.CourtWasDark` therefore
-answers **dark** when every enabled box driving the court was past the threshold at the deadline,
-**or** when no enabled box drove it and at least one out-of-service board did; and **not dark**
-when a reachable enabled box drove it, or when the club has no board on it at all.
+with a switched-off board has taken a working door away.
 
-**A switched-off board only speaks for deadlines it existed at, exactly as an enabled one does —
-and the floor matters more here, because `Enabled` carries no history.** A board switched off this
-afternoon is indistinguishable in the table from one that was off all week, so without the floor,
-registering a board and parking it would retroactively declare its courts out of service at
-deadlines settled on working hardware. The floor is the earliest of the row's `CreatedAt` and its
-`LastSeenAt` — `LastSeenAt` may be null here, unlike in the enabled set, because a board that was
-switched off before it ever heart-beat is still hardware the club installed.
+**But the switch itself does not reach backwards, and the first version of this clause let it.**
+That version said a switched-off board darkens its court from the moment it existed, which read
+the *present* value of `Enabled` as though it had always held. `Enabled` carries no history, so a
+board that ran perfectly for thirty days and was switched off five minutes ago waived every
+unsettled deadline back to the sweep's lookback floor (`no_show_lookback_days`, default 7) —
+against the club, invisibly, on the next thirty-second tick. It is the same defect §6a rejects two
+earlier rules for: it made the price of a settled fact depend on something that happened
+afterwards, and priced identical facts two ways depending on whether an admin had clicked yet.
+
+**The switch-off instant IS recorded — as `LastSeenAt` on the switched-off row.** The API refuses a
+disabled board `403` on every courtside endpoint, so the moment the switch is thrown is the moment
+that board stops being heard from, and a heartbeat at `T` is positive proof the board was still in
+service at `T` (a board out of service cannot produce one). A switched-off board therefore shuts
+its court's door only from the point that evidence has run past `offline_after_seconds` — the same
+threshold, the same strictly-greater comparison, and the same reading of `DeviceOutage` rows that
+judges an enabled board. A board that has never called in at all was never in service, and shuts
+the door from the moment it existed.
+
+`DeviceOutageIndex.CourtWasDark` therefore answers **dark** when every enabled box driving the
+court was past the threshold at the deadline, **or** when no enabled box drove it and every
+out-of-service board that did was itself past the threshold then; and **not dark** when a reachable
+enabled box drove it, when the last board on it was still being heard from at that instant, or when
+the club has no board on it at all. `DeviceOutageIndex.DarknessAt` returns which of the two dark
+states it was, because they do not carry the same promise to the member (below).
+
+**A switched-off board only speaks for deadlines it existed at, exactly as an enabled one does.**
+The floor is the earliest of the row's `CreatedAt` and its `LastSeenAt` — `LastSeenAt` may be null
+here, unlike in the enabled set, because a board that was switched off before it ever heart-beat is
+still hardware the club installed. The floor and the silence bound close different holes and both
+are needed: the floor stops a board *registered* after the deadline from speaking for it, and the
+silence bound stops a board *switched off* after the deadline from speaking for it. Only the first
+of the two existed after finding M-F3, and the pin table below listed it against the second.
+
+**The waiver mail differs between the two dark states, and that is a settlement fact rather than
+copy.** S5a is reversible by S6 only while the board is in service: an outage ends, the board
+uploads what it queued, and the booking settles as attended. A board an admin has taken out of
+service is refused `403` on `/device/events` too, so nothing it holds will ever be accepted and the
+S5a settlement is final. The outage notice says the record arrives when the box reconnects; the
+out-of-service notice says the refund is final and sends the member to the desk. Pinned by
+`The_out_of_service_waiver_mail_does_not_promise_a_box_that_will_never_reconnect` and
+`The_outage_waiver_mail_still_promises_the_upload_for_a_box_that_can_come_back`.
 
 Pinned by `PeripheralHealthTests`, and each name pins the clause it is listed against rather than
 the section as a whole:
@@ -170,11 +201,26 @@ the section as a whole:
 | A board that did exist at it still is | `A_board_already_installed_at_the_deadline_still_blocks_the_waiver` |
 | The settlement is the same once the retired row is switched off | `A_decommissioned_box_left_in_the_table_does_not_waive_the_penalty` |
 | A court whose only box is out of service **is** dark | `A_court_whose_only_box_is_out_of_service_waives_the_penalty` |
-| …and that turns on the refusal, not on silence | `A_court_whose_only_box_was_just_switched_off_waives_the_penalty_too` |
+| …but only from the point that board went quiet | `A_switch_off_darkens_only_the_deadlines_the_board_had_already_gone_quiet_for` |
+| …so a board still heart-beating when it was switched off does not waive an older deadline | `A_court_whose_only_box_was_just_switched_off_still_charges_the_older_deadline` |
+| …not even hardened with a silence on both sides of it | `A_switched_off_board_heard_from_on_both_sides_of_the_deadline_does_not_waive_it` |
+| …and a real outage keeps its waiver once the club switches the board off | `A_board_dark_across_the_deadline_still_waives_it_after_an_admin_switches_it_off` |
+| A board never heard from was never in service | `A_board_installed_before_the_deadline_and_never_heard_from_waives_the_penalty` |
 | A court with no board of its own is still not dark | `A_court_with_no_box_of_its_own_pays_the_penalty_even_beside_an_out_of_service_box` |
-| A board switched off after the deadline does not speak for it | `A_box_switched_off_after_the_deadline_does_not_make_its_court_out_of_service` |
+| A board **registered** after the deadline does not speak for it | `A_box_switched_off_after_the_deadline_does_not_make_its_court_out_of_service` |
+| The out-of-service waiver mail does not promise a reconnect | `The_out_of_service_waiver_mail_does_not_promise_a_box_that_will_never_reconnect` |
+| The outage waiver mail still does | `The_outage_waiver_mail_still_promises_the_upload_for_a_box_that_can_come_back` |
 
-The last two are the ones this document previously over-claimed.
+**The row named "A board switched off after the deadline does not speak for it" was false, and it
+is the reason the regression above shipped.** Its pin varies `installedAt` — a board *created*
+after the deadline — which is a different fact from a board *switched off* after it, and nothing in
+the suite varied the second one at all. The row above it, "that turns on the refusal, not on
+silence", asserted the opposite of the corrected rule and its pin
+(`A_court_whose_only_box_was_just_switched_off_waives_the_penalty_too`) was the fixture that carried
+the defect; that test now runs the same fixture with the assertion inverted, under the name in the
+table. Two rows added by the same commit contradicting each other is the tell.
+
+The last two of the original rows are the ones this document previously over-claimed.
 `An_outage_on_a_box_that_drives_other_courts_does_not_waive_the_penalty` puts its only box on a
 court forty numbers away, so it passes through the *no box on this court* branch and never reaches
 the all-boxes loop at all; and the decommissioned test is carried by its healthy replacement, as
