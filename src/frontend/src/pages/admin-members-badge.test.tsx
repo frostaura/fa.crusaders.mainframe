@@ -56,7 +56,11 @@ function applicant(n: number): MemberRow {
 }
 
 /** The club, as the server would answer it — and as an approval changes it. */
-function stubClub(members: MemberRow[]) {
+/**
+ * @param commitButFail answers the approve POST with 500 AFTER applying it — the shape an
+ *   SMTP outage produced for real: the row is committed and the caller is told it was not.
+ */
+function stubClub(members: MemberRow[], commitButFail = false) {
   const state = { members: [...members] };
 
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -73,7 +77,15 @@ function stubClub(members: MemberRow[]) {
     if (method === "POST" && approve) {
       state.members = state.members.map((m) =>
         m.membership_id === approve[1] ? { ...m, status: "Active" } : m);
-      return ok({ approved: true });
+      if (commitButFail) {
+        return Promise.resolve({
+          ok: false, status: 500,
+          headers: { get: () => null },
+          text: () => Promise.resolve('{"error":"smtp"}'),
+          json: () => Promise.resolve({ error: "smtp" }),
+        } as unknown as Response);
+      }
+      return ok({ approved: true, member_notified: true });
     }
     if (path.startsWith("/api/v1/whoami")) return ok({ ...signIn({ isAdmin: true }), user_id: "u1" });
     if (path.startsWith("/api/v1/me/profile")) return ok(PROFILE);
@@ -144,6 +156,39 @@ describe("the pending-applications badge, after an approval on the same screen",
     await userEvent.click(approveButtons[0]);
 
     // The screen's own summary line, and the chrome, now say the same thing.
+    await waitFor(() => expect(summaryLine("1 pending")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("1 membership application awaiting review").length).toBeGreaterThan(0));
+    expect(screen.queryByLabelText("2 membership applications awaiting review")).not.toBeInTheDocument();
+  });
+
+  /**
+   * The same two numbers, on the path that actually broke them.
+   *
+   * <p>
+   * An SMTP outage made <code>POST /approve</code> commit the approval and then answer 500.
+   * The console's reload and its badge notification both sat inside the <code>try</code>, so
+   * on that path neither ran: the row went on offering Approve, the summary went on saying
+   * "2 pending", and the chrome's badge went on counting an applicant who was already a
+   * member — the exact symptom this file was written for, restored in full by a failure mode
+   * nobody had tried. The repair is that the reload happens in <code>finally</code> and the
+   * badge is notified by the loader, so the two numbers move together with the server's
+   * answer rather than with the console's optimism.
+   * </p>
+   */
+  it("agrees with the counter beside it even when the approval reports failure", async () => {
+    signIn({ isAdmin: true });
+    stubClub([applicant(1), applicant(2)], true);
+
+    renderConsole();
+
+    await waitFor(() => expect(screen.getAllByLabelText("2 membership applications awaiting review").length).toBeGreaterThan(0));
+
+    await userEvent.click((await screen.findAllByRole("button", { name: "Approve" }))[0]);
+
+    // The admin is correctly told the call failed...
+    expect(await screen.findByText("Approval failed.")).toBeInTheDocument();
+    // ...and both numbers still tell them what is actually true of the club.
     await waitFor(() => expect(summaryLine("1 pending")).toBeInTheDocument());
     await waitFor(() =>
       expect(screen.getAllByLabelText("1 membership application awaiting review").length).toBeGreaterThan(0));

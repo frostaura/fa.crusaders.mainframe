@@ -18,6 +18,20 @@ namespace Crusaders.Mainframe.Api.Services;
 /// programmatic mirror CLAUDE.md promises had nothing to mirror for the half of the system
 /// a club actually operates by hand.
 /// </para>
+///
+/// <para>
+/// <b>The transition is the status change. Mail and the webhook are consequences of it, and
+/// neither may undo it.</b> Approve and reject used to await the mail bare, after
+/// <c>SaveChangesAsync</c> had already committed — so with SMTP refusing connections
+/// <c>POST /admin/members/{id}/approve</c> committed the approval and then threw
+/// <c>SmtpException</c> out of this file, the caller got HTTP 500, and the console said
+/// "Approval failed." about a member who was already Active. An admin who believes that
+/// sentence presses Approve again on an approved member; the second press answers 404,
+/// which reads as a broken console. Suspend, reactivate and the registration announcement
+/// were already guarded — the two transitions a club uses most were not. Both now report
+/// whether the member was actually told, rather than choosing between lying and 500ing:
+/// see <see cref="TransitionReport"/>.
+/// </para>
 /// </summary>
 public sealed class MemberApprovalService
 {
@@ -33,10 +47,11 @@ public sealed class MemberApprovalService
         IEventBus bus, ILogger<MemberApprovalService> logger)
     { _db = db; _tenant = tenant; _email = email; _config = config; _bus = bus; _logger = logger; }
 
-    public async Task<bool> ApproveAsync(Guid memberId, Guid actorId, CancellationToken ct)
+    public async Task<TransitionReport> ApproveAsync(Guid memberId, Guid actorId, CancellationToken ct)
     {
         var membership = await _db.Memberships.FirstOrDefaultAsync(m => m.Id == memberId, ct);
-        if (membership is null || membership.Status != MembershipStatus.PendingApproval) return false;
+        if (membership is null || membership.Status != MembershipStatus.PendingApproval)
+            return TransitionReport.Refused(MembershipTransition.NotFound);
 
         var user = await _db.Users.FirstAsync(u => u.Id == membership.UserId, ct);
         membership.Status = MembershipStatus.Active;
@@ -64,15 +79,17 @@ public sealed class MemberApprovalService
 
         var clubName = await ClubNameAsync(ct);
         var url = $"{_config["App:PublicBaseUrl"] ?? "http://localhost:8088"}/welcome/{magicLinkPlain}";
-        await _email.SendAsync(EmailTemplates.MembershipApproved(user.Email, url, clubName), ct);
+        var notified = await SendOrLogAsync(
+            EmailTemplates.MembershipApproved(user.Email, url, clubName), $"approval notice for {user.Email}", ct);
         await EmitAsync("member.approved", membership, actorId, null, ct);
-        return true;
+        return new TransitionReport(MembershipTransition.Ok, notified);
     }
 
-    public async Task<bool> RejectAsync(Guid memberId, Guid actorId, string reason, CancellationToken ct)
+    public async Task<TransitionReport> RejectAsync(Guid memberId, Guid actorId, string reason, CancellationToken ct)
     {
         var membership = await _db.Memberships.FirstOrDefaultAsync(m => m.Id == memberId, ct);
-        if (membership is null || membership.Status != MembershipStatus.PendingApproval) return false;
+        if (membership is null || membership.Status != MembershipStatus.PendingApproval)
+            return TransitionReport.Refused(MembershipTransition.NotFound);
 
         var user = await _db.Users.FirstAsync(u => u.Id == membership.UserId, ct);
         membership.Status = MembershipStatus.Rejected;
@@ -92,9 +109,10 @@ public sealed class MemberApprovalService
         await _db.SaveChangesAsync(ct);
 
         var clubName = await ClubNameAsync(ct);
-        await _email.SendAsync(EmailTemplates.MembershipRejected(user.Email, reason, clubName), ct);
+        var notified = await SendOrLogAsync(
+            EmailTemplates.MembershipRejected(user.Email, reason, clubName), $"rejection notice for {user.Email}", ct);
         await EmitAsync("member.rejected", membership, actorId, reason, ct);
-        return true;
+        return new TransitionReport(MembershipTransition.Ok, notified);
     }
 
     /// <summary>
@@ -114,12 +132,12 @@ public sealed class MemberApprovalService
     /// emailed it, and a club that cannot say why it locked somebody out will be asked.
     /// </para>
     /// </summary>
-    public async Task<MembershipTransition> SuspendAsync(Guid memberId, Guid actorId, string reason, CancellationToken ct)
+    public async Task<TransitionReport> SuspendAsync(Guid memberId, Guid actorId, string reason, CancellationToken ct)
     {
         var membership = await _db.Memberships.FirstOrDefaultAsync(m => m.Id == memberId, ct);
-        if (membership is null) return MembershipTransition.NotFound;
-        if (membership.Status == MembershipStatus.Suspended) return MembershipTransition.AlreadyInState;
-        if (membership.Status != MembershipStatus.Active) return MembershipTransition.WrongStatus;
+        if (membership is null) return TransitionReport.Refused(MembershipTransition.NotFound);
+        if (membership.Status == MembershipStatus.Suspended) return TransitionReport.Refused(MembershipTransition.AlreadyInState);
+        if (membership.Status != MembershipStatus.Active) return TransitionReport.Refused(MembershipTransition.WrongStatus);
 
         var user = await _db.Users.FirstAsync(u => u.Id == membership.UserId, ct);
         membership.Status = MembershipStatus.Suspended;
@@ -137,9 +155,9 @@ public sealed class MemberApprovalService
         await _db.SaveChangesAsync(ct);
 
         var clubName = await ClubNameAsync(ct);
-        await SendOrLogAsync(EmailTemplates.MembershipSuspended(user.Email, membership.FullName, reason, clubName), $"suspension notice for {user.Email}", ct);
+        var notified = await SendOrLogAsync(EmailTemplates.MembershipSuspended(user.Email, membership.FullName, reason, clubName), $"suspension notice for {user.Email}", ct);
         await EmitAsync("member.suspended", membership, actorId, reason, ct);
-        return MembershipTransition.Ok;
+        return new TransitionReport(MembershipTransition.Ok, notified);
     }
 
     /// <summary>
@@ -147,12 +165,12 @@ public sealed class MemberApprovalService
     /// rejected application is a different decision with a different remedy, and turning
     /// one into an active member from this route would skip the approval the club owes it.
     /// </summary>
-    public async Task<MembershipTransition> ReactivateAsync(Guid memberId, Guid actorId, CancellationToken ct)
+    public async Task<TransitionReport> ReactivateAsync(Guid memberId, Guid actorId, CancellationToken ct)
     {
         var membership = await _db.Memberships.FirstOrDefaultAsync(m => m.Id == memberId, ct);
-        if (membership is null) return MembershipTransition.NotFound;
-        if (membership.Status == MembershipStatus.Active) return MembershipTransition.AlreadyInState;
-        if (membership.Status != MembershipStatus.Suspended) return MembershipTransition.WrongStatus;
+        if (membership is null) return TransitionReport.Refused(MembershipTransition.NotFound);
+        if (membership.Status == MembershipStatus.Active) return TransitionReport.Refused(MembershipTransition.AlreadyInState);
+        if (membership.Status != MembershipStatus.Suspended) return TransitionReport.Refused(MembershipTransition.WrongStatus);
 
         var user = await _db.Users.FirstAsync(u => u.Id == membership.UserId, ct);
         membership.Status = MembershipStatus.Active;
@@ -169,9 +187,9 @@ public sealed class MemberApprovalService
         await _db.SaveChangesAsync(ct);
 
         var clubName = await ClubNameAsync(ct);
-        await SendOrLogAsync(EmailTemplates.MembershipReactivated(user.Email, membership.FullName, clubName), $"reactivation notice for {user.Email}", ct);
+        var notified = await SendOrLogAsync(EmailTemplates.MembershipReactivated(user.Email, membership.FullName, clubName), $"reactivation notice for {user.Email}", ct);
         await EmitAsync("member.reactivated", membership, actorId, null, ct);
-        return MembershipTransition.Ok;
+        return new TransitionReport(MembershipTransition.Ok, notified);
     }
 
     /// <summary>
@@ -216,15 +234,33 @@ public sealed class MemberApprovalService
     private Task<string> ClubNameAsync(CancellationToken ct) =>
         _db.Tenants.IgnoreQueryFilters().Where(t => t.Id == _tenant.TenantId).Select(t => t.DisplayName).FirstAsync(ct);
 
-    private async Task SendOrLogAsync(EmailMessage message, string what, CancellationToken ct)
+    /// <summary>
+    /// Sends, and answers whether it went. The bool is not decoration: the caller is a
+    /// transition that has already committed, and the only two honest things it can do with
+    /// a dead mail server are carry on and say so. Swallowing the failure silently would put
+    /// a club in the position of believing a member was told when nobody was.
+    /// </summary>
+    private async Task<bool> SendOrLogAsync(EmailMessage message, string what, CancellationToken ct)
     {
-        try { await _email.SendAsync(message, ct); }
-        catch (Exception ex) { _logger.LogWarning(ex, "Email failed: {What}", what); }
+        try { await _email.SendAsync(message, ct); return true; }
+        catch (Exception ex) { _logger.LogWarning(ex, "Email failed: {What}", what); return false; }
     }
 
     /// <summary>
     /// One shape for every <c>member.*</c> event, so a template written against one works
     /// against the others. Block body for lizard's benefit — see memory/gotchas.md.
+    ///
+    /// <para>
+    /// Guarded on the same terms as the mail. The in-process bus is an unbounded channel and
+    /// does not throw today, but this runs on the far side of <c>SaveChangesAsync</c> exactly
+    /// as the mail does, and it is that SHAPE — a post-commit side effect allowed to unwind
+    /// its own caller — that turned a committed approval into an HTTP 500. The guard lives
+    /// inside this method rather than in a differently-named wrapper on purpose:
+    /// <c>RepositoryPostureTests.EmittedEventTypes</c> reads the event catalogue by scanning
+    /// for <c>EmitAsync(</c> call sites, so renaming them hides the whole member lifecycle
+    /// from the picker- and blueprint-agreement tests. That is not a hypothetical; it is what
+    /// the first draft of this fix did, and those two tests caught it.
+    /// </para>
     /// </summary>
     private async Task EmitAsync(string type, Membership membership, Guid actorId, string? reason, CancellationToken ct)
     {
@@ -239,16 +275,20 @@ public sealed class MemberApprovalService
         };
         if (reason is not null) data["reason"] = reason;
 
-        await _bus.EmitAsync(new DomainEvent(
-            Id: $"evt_{Guid.NewGuid():N}",
-            Type: type,
-            TenantId: _tenant.TenantId,
-            TenantSlug: _tenant.TenantSlug,
-            OccurredAt: DateTimeOffset.UtcNow,
-            ActorUserId: actorId == Guid.Empty ? null : actorId,
-            ActorIsAdmin: actorId != membership.UserId,
-            SubjectUserId: membership.UserId,
-            Data: data), ct);
+        try
+        {
+            await _bus.EmitAsync(new DomainEvent(
+                Id: $"evt_{Guid.NewGuid():N}",
+                Type: type,
+                TenantId: _tenant.TenantId,
+                TenantSlug: _tenant.TenantSlug,
+                OccurredAt: DateTimeOffset.UtcNow,
+                ActorUserId: actorId == Guid.Empty ? null : actorId,
+                ActorIsAdmin: actorId != membership.UserId,
+                SubjectUserId: membership.UserId,
+                Data: data), ct);
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Event emit failed: {Type}", type); }
     }
 }
 
@@ -262,4 +302,25 @@ public enum MembershipTransition
     NotFound,
     AlreadyInState,
     WrongStatus,
+}
+
+/// <summary>
+/// What a lifecycle transition did, and whether the member was actually told about it.
+///
+/// <para>
+/// Two facts rather than one, because they can genuinely differ and the console has to be
+/// able to say so. A transition that succeeded with the mail server down is <b>not</b> a
+/// failure — the row is committed, the audit line is written and the member's status has
+/// really changed — but it is also not the same event as one the member received an email
+/// about, and an admin who is told only "approved" will not think to pick up the phone.
+/// </para>
+/// </summary>
+/// <param name="Result">Whether the status changed, and if not, why not.</param>
+/// <param name="MemberNotified">Whether the notification email left the building.</param>
+public readonly record struct TransitionReport(MembershipTransition Result, bool MemberNotified)
+{
+    /// <summary>A transition that never happened, so there was nothing to notify anyone about.</summary>
+    public static TransitionReport Refused(MembershipTransition result) => new(result, false);
+
+    public bool Ok => Result == MembershipTransition.Ok;
 }

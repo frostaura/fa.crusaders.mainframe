@@ -903,8 +903,17 @@ export const endpoints = {
   adminUnblock: (blockId: string) => api.del<void>(`/api/v1/admin/blocks/${blockId}`),
 
   adminMembers: (status?: string) => api.get<AdminMember[]>(`/api/v1/admin/members/${status ? `?status=${status}` : ""}`),
-  adminApprove: (memberId: string) => api.post<{ approved: boolean }>(`/api/v1/admin/members/${memberId}/approve`),
-  adminReject: (memberId: string, reason: string) => api.post<{ rejected: boolean }>(`/api/v1/admin/members/${memberId}/reject`, { reason }),
+  /**
+   * The four member-lifecycle transitions all answer `member_notified`.
+   *
+   * The status change commits before the notification email is attempted, so the two can
+   * genuinely differ — and they did so silently until an SMTP outage turned a committed
+   * approval into an HTTP 500 and the console said "Approval failed." about a member who
+   * was already Active. `member_notified: false` means the transition happened and nobody
+   * was told; the console has to be able to say that rather than pick one of the two.
+   */
+  adminApprove: (memberId: string) => api.post<{ approved: boolean; member_notified: boolean }>(`/api/v1/admin/members/${memberId}/approve`),
+  adminReject: (memberId: string, reason: string) => api.post<{ rejected: boolean; member_notified: boolean }>(`/api/v1/admin/members/${memberId}/reject`, { reason }),
 
   /**
    * Suspend / reactivate (spec §8) — the status a club reaches for when dues lapse.
@@ -914,9 +923,9 @@ export const endpoints = {
    * was. A reason is required because the member is emailed it.
    */
   adminSuspend: (memberId: string, reason: string) =>
-    api.post<{ suspended: boolean }>(`/api/v1/admin/members/${memberId}/suspend`, { reason }),
+    api.post<{ suspended: boolean; member_notified: boolean }>(`/api/v1/admin/members/${memberId}/suspend`, { reason }),
   adminReactivate: (memberId: string) =>
-    api.post<{ reactivated: boolean }>(`/api/v1/admin/members/${memberId}/reactivate`),
+    api.post<{ reactivated: boolean; member_notified: boolean }>(`/api/v1/admin/members/${memberId}/reactivate`),
 
   /**
    * A manual credit movement. `relatedBookingId` is optional and OMITTED when not given:
@@ -936,7 +945,7 @@ export const endpoints = {
       ...(idempotencyKey ? { idempotencyKey } : {}),
     }),
   adminResetMemberPassword: (memberId: string) =>
-    api.post<{ temp_password: string; email_sent_to: string; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
+    api.post<{ temp_password: string; email_sent_to: string | null; member_notified: boolean; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
 
   // Phase 8.1 — class assignment (Regular / LeagueOrSenior). Drives the credits-per-rand top-up rate
   // and the peak-hours league exclusivity rule.

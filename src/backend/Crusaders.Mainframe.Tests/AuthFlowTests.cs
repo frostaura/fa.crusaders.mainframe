@@ -45,8 +45,11 @@ public class AuthFlowTests
         {
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             var membership = await db.Memberships.FirstAsync(m => m.UserId == newUserId);
-            var ok = await scope.ServiceProvider.GetRequiredService<MemberApprovalService>().ApproveAsync(membership.Id, host.AdminUser.Id, default);
-            Assert.True(ok);
+            var approval = await scope.ServiceProvider.GetRequiredService<MemberApprovalService>().ApproveAsync(membership.Id, host.AdminUser.Id, default);
+            Assert.True(approval.Ok);
+            // The stub mail server accepts, so the member really was told. The two facts are
+            // separate on purpose — see TransitionReport.
+            Assert.True(approval.MemberNotified);
         }
 
         // Login
