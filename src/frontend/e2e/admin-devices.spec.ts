@@ -382,8 +382,57 @@ test.describe("Taking a box out of service", () => {
     const notice = page.getByText(/The API refuses this box, so it switches nothing on/);
     await expect(notice).toBeVisible();
     await expect(notice).toContainText("No box in service drives courts 1 and 2, so nobody can check in there");
-    await expect(notice).toContainText("refunded in full with no no-show penalty until a box is back in service");
+    // "bookings on them", agreeing with the "their" in the confirm the admin just pressed.
+    // The plural arm of that pronoun had never been executed anywhere: round 9's verifier
+    // forced it to "it" always and watched vitest stay at 485/485 and this suite at 194/194,
+    // so the screen could disagree with itself one line apart with everything green.
+    await expect(notice).toContainText("bookings on them are refunded in full with no no-show penalty until a box is back in service");
     await expect(page.getByRole("button", { name: "Put back in service" })).toBeVisible();
+  });
+
+  /**
+   * The number of boxes to walk to, in a real browser, because that is where round 9's
+   * verifier read the wrong one off the production build.
+   *
+   * <p>
+   * The clause counted COURTS while naming BOXES, so one quiet box driving two courts said
+   * "the other boxes that drive them have gone quiet" and two quiet boxes driving one court
+   * said "the other box that drives it has gone quiet" — wrong in both directions, on the
+   * screen whose entire job is telling an admin which hardware to go and look at. Both arms
+   * are here; the exhaustive word-by-word matrix is in `src/lib/deviceCoverage.test.ts`.
+   * </p>
+   */
+  test("counts the quiet boxes an admin has to walk to, not the courts they drive", async ({ page }) => {
+    const quiet = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    const out = { ...FRESH, name: "Cupboard box", auto_registered: false, enabled: false };
+
+    // One quiet box, two courts: ONE box to walk to.
+    await openDevices(page, [
+      { ...out, court_numbers: [1, 2] },
+      { ...FRESH, id: "33333333-3333-3333-3333-333333333333", device_code: "box-d4e5f6",
+        name: "Courts 1 and 2 spare", auto_registered: false, court_numbers: [1, 2], last_seen_at: quiet },
+    ]);
+
+    await expect(page.getByText(/The API refuses this box, so it switches nothing on/)).toContainText(
+      "Nothing in service is reporting on courts 1 and 2 — the other box that drives them has gone"
+      + " quiet — so bookings on them are refunded in full with no no-show penalty until one calls in again.",
+    );
+
+    // Two quiet boxes, one court: TWO boxes to walk to. An admin who fixed the one box this
+    // used to name would have left the court dark and been told the screen was satisfied.
+    await serveApi(page, routes([
+      { ...out, court_numbers: [1] },
+      { ...FRESH, id: "33333333-3333-3333-3333-333333333333", device_code: "box-d4e5f6",
+        name: "Court 1 spare", auto_registered: false, court_numbers: [1], last_seen_at: quiet },
+      { ...FRESH, id: "44444444-4444-4444-4444-444444444444", device_code: "box-g7h8i9",
+        name: "Court 1 second spare", auto_registered: false, court_numbers: [1], last_seen_at: quiet },
+    ]));
+    await page.reload();
+
+    await expect(page.getByText(/The API refuses this box, so it switches nothing on/)).toContainText(
+      "Nothing in service is reporting on court 1 — the other boxes that drive it have gone quiet"
+      + " — so bookings on it are refunded in full with no no-show penalty until one calls in again.",
+    );
   });
 });
 
