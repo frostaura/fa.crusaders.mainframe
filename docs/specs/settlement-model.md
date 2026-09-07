@@ -380,6 +380,17 @@ expired **in the same save** as the displacement. A late activation naming it is
 nothing. **Why:** the club took the court away from that member and told them so by email;
 billing them pro rata for the collision charges two members for one court (finding 16).
 
+**The column is a closed marker with one owner, not a note field and not dead schema.**
+`bookings.cancellation_reason` holds `ResoldTailRefunded` or null, written only by the
+displacement path and cleared only by the reinstatement that reverses it; the two readers
+above compare it against that one constant. No other path writes it — in particular an
+admin cancelling on a member's behalf does not, and must not: the reason a desk types is
+recorded on the `booking.cancelled` audit row (`feature-spec.md` §11), and putting free text
+here would leave a money discriminator carrying prose. **Why this is spelled out:** a round-9
+fix read the admin path's silence as "a column nothing writes", wrote that into
+`feature-spec.md` §11, and its own hand-off proposed the column as dead schema someone could
+clean up — which would have deleted the discriminator this invariant is defined by.
+
 ### I6 — The lit window is bounded three ways, and measured when the measurement arrives
 
 `litEnd = min(scan + grant, OriginalEndsAt, scan + heldMs when the release has landed)`, and

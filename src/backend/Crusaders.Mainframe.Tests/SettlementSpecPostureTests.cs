@@ -149,4 +149,74 @@ public sealed class SettlementSpecPostureTests
         Assert.Contains("**The switch is not retroactive**", feature);
         Assert.Contains("**That half is bounded by the same silence test, and the first version of it was not**", feature);
     }
+
+    /// <summary>
+    /// <b>The two specs agree about what <c>bookings.cancellation_reason</c> is, and §11's
+    /// reason-is-not-the-waiver rule cannot be quietly reverted.</b>
+    ///
+    /// <para>
+    /// Two separate failures, one pin, because they were the same paragraph. §11 was amended
+    /// to say the reason and the waiver are separate facts — overturning an earlier rule that
+    /// gated the reason on the waiver and so deleted the desk's own words from the audit row
+    /// and the mail together. The four tests written with it pin the CODE. Nothing pinned the
+    /// TEXT: a verifier replaced the new clause with the exact wording it was written to
+    /// overturn and both suites stayed green, so a later reader could restore the rule the
+    /// round was spent removing with every gate passing.
+    /// </para>
+    ///
+    /// <para>
+    /// The same amendment justified itself with "<c>bookings.cancellation_reason</c> is a
+    /// column nothing writes", which is false and was written into the money domain. The
+    /// column is <see cref="BookingService.ResoldTailRefunded"/> or null — written by the
+    /// displacement path, cleared by the reinstatement, and read back by
+    /// <c>ChargeLitCancelledBookingAsync</c> and <c>SettleReleaseAsync</c> as the
+    /// discriminator this model defines the Displaced state by at S8 and I5. So the two specs
+    /// contradicted each other about a money field, and the hand-off invited a follow-up to
+    /// remove it as dead schema. The constant is interpolated here rather than spelled out, so
+    /// renaming it reds this until both specs are rewritten to the truth.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Both_specs_agree_what_the_cancellation_reason_column_is()
+    {
+        var feature = FeatureSpec().ReplaceLineEndings("\n").Replace("\n", " ");
+        var settlement = SettlementModel().ReplaceLineEndings("\n").Replace("\n", " ");
+
+        // §11's rule, in the words the code was written from.
+        Assert.Contains(
+            "**The reason and the waiver are two separate facts and are not gated on each other**",
+            feature);
+        // The rule it overturned does not come back. This is the mutation that stayed green.
+        Assert.DoesNotContain(
+            "The reason belongs to the waiver and is recorded only when one actually happened",
+            feature);
+
+        // The false premise does not come back either, in either spec.
+        Assert.DoesNotContain("is a column nothing writes", feature);
+        Assert.DoesNotContain("is a column nothing writes", settlement);
+        Assert.DoesNotContain("no service writes", feature);
+        Assert.DoesNotContain("no service writes", settlement);
+
+        // What §11 says instead, tied to the constant the money path compares against.
+        Assert.Contains(
+            "**`bookings.cancellation_reason` is not a second copy of it, and it is not free text**",
+            feature);
+        Assert.Contains(
+            $"the resale path writes `{BookingService.ResoldTailRefunded}` into it and "
+                + "`settlement-model.md` I5/S8 read it back",
+            feature);
+        Assert.Contains("the admin-cancel path writes nothing to it at all", feature);
+
+        // And the money oracle still defines the Displaced state by that same constant, in
+        // all three places §11 now points at.
+        Assert.Contains($"`CancellationReason == \"{BookingService.ResoldTailRefunded}\"`", settlement);
+        Assert.Contains($"| S8 | **Displaced** (`{BookingService.ResoldTailRefunded}`) | `0`, unconditionally |", settlement);
+        Assert.Contains($"`CancellationReason == {BookingService.ResoldTailRefunded}` ⇒ `Owed = 0`", settlement);
+
+        // The invitation to treat it as removable is closed off from the money side too.
+        Assert.Contains(
+            "**The column is a closed marker with one owner, not a note field and not dead schema.**",
+            settlement);
+        Assert.Contains("an admin cancelling on a member's behalf does not, and must not", settlement);
+    }
 }

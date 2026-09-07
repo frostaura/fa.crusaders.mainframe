@@ -241,6 +241,41 @@ export function describeCourtCodeRefusal(e: unknown): string | null {
 }
 
 /**
+ * What the court-code screen says when a fetch failed for a reason that is NOT the club
+ * barring the member — i.e. every case {@link describeCourtCodeRefusal} answers null for.
+ *
+ * <p>
+ * `screen` is which of the page's two cards is asking, and it exists because one of these
+ * sentences names a control. The code card has "Refresh" on it and a code to refresh; the
+ * barred card has neither — its only control is "Check again", and that card's test asserts
+ * no control named Refresh is on it at all. A single shared string told a barred member
+ * "Too many refreshes" on a card showing no code and offering no refresh; reproduced in a
+ * real browser, not only in jsdom.
+ * </p>
+ *
+ * <p>
+ * The rate limit is reachable on both. `POST /me/qr/generate` sits behind the API's auth
+ * bucket, which is shared with login, and neither button paces itself — `MIN_REFRESH_GAP_MS`
+ * paces only the automatic pre-fetch. A member pressing the barred card's button while the
+ * desk sorts their membership out is precisely who hits it.
+ * </p>
+ *
+ * <p>
+ * A plain function beside the copy it belongs with, for the reason the refusals above are:
+ * a test can call it without rendering a page, and the two sentences stay where a reader
+ * comparing them will find them together.
+ * </p>
+ */
+export function describeCourtCodeFetchFailure(e: unknown, screen: "code" | "barred"): string {
+  if (e instanceof ApiError && e.status === 429) {
+    return screen === "barred"
+      ? "That's a lot of checking at once. Give it a moment, then check again."
+      : "Too many refreshes. Give it a moment and try again.";
+  }
+  return "Couldn't get a code. Check your connection and try again.";
+}
+
+/**
  * The message after a cancellation, naming what actually moved.
  *
  * <p>

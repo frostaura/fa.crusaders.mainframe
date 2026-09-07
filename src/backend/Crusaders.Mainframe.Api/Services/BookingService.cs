@@ -939,8 +939,17 @@ public sealed class BookingService
         // cancellation that waived nothing is noise in the month-end waiver report. That
         // argument is wrong twice. `waived` is already the field that report filters on, so
         // the reason costs it nothing. And this string is the ONLY record of why the club
-        // cancelled somebody's court: `Booking.CancellationReason` exists as a column and
-        // is written by nothing, so gating it here deletes the desk's own words outright.
+        // cancelled somebody's court, so gating it here deletes the desk's own words outright.
+        //
+        // `Booking.CancellationReason` is NOT a second copy of them, and it is not free text.
+        // It is the system's own displacement marker: `DisplacementAsync` writes
+        // `ResoldTailRefunded` into it, `ReinstateAsync` clears it back to null, and
+        // `ChargeLitCancelledBookingAsync` and `SettleReleaseAsync` read it back as the money
+        // discriminator that `settlement-model.md` defines the Displaced state by (I5 / S8:
+        // `CancellationReason == ResoldTailRefunded` ⇒ `Owed = 0`). This path writes nothing
+        // to it and must not start: the two readers compare it against one constant, so an
+        // admin's prose in that field is a money discriminator carrying arbitrary text. It is
+        // live schema with one owner, not dead schema looking for a use.
         //
         // The path that proves it is not a raw-API curiosity. The console renders the waive
         // control on any penalty-bearing quote; if the member scans in at the box between
