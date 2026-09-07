@@ -325,3 +325,77 @@ test.describe("Deleting a box", () => {
     await expect(page.getByText("New — check court numbers")).toBeVisible();
   });
 });
+
+test.describe("Taking a box out of service", () => {
+  /**
+   * The control the API, the health sweep and the settlement model were all written
+   * around and that no screen offered (finding M-F3). `PeripheralHealthWorker` filters on
+   * `Enabled`, so a box that is broken or unplugged for good alerted the club every thirty
+   * seconds about a silence nobody could stop; and `DeviceOutageIndex` builds its silence
+   * index from enabled boxes alone, so a court whose only box is dead-but-enabled is
+   * "dark" for ever and every no-show on it is refunded with no penalty. The only lever
+   * the page had was Delete, which the page itself describes as a reset.
+   *
+   * <p>
+   * In a real browser rather than jsdom, because the interaction is a two-step confirm and
+   * because what an admin can actually reach on this row is the whole finding.
+   * </p>
+   */
+  test("is a real control, sends only that field, and says what it costs", async ({ page }) => {
+    const box = { ...FRESH, name: "Cupboard box", auto_registered: false, court_numbers: [1, 2] };
+    await openDevices(page, [box], [
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...box, enabled: false } },
+    ]);
+
+    const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
+
+    await page.getByRole("button", { name: "Take out of service" }).click();
+    // Arms first: a live box stops switching lights on the moment this lands.
+    await expect(page.getByRole("button", { name: /The box stops switching lights on/ })).toBeVisible();
+
+    await serveApi(page, routes([{ ...box, enabled: false }], [
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...box, enabled: false } },
+    ]));
+    await page.getByRole("button", { name: /The box stops switching lights on/ }).click();
+
+    // Exactly the one field: sending the name and courts alongside would rewrite whatever
+    // another admin had just changed on this row.
+    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ enabled: false });
+
+    // Not "offline" — nobody expects it to call in — and the row says what the club has
+    // just given up: alerts about this box, and its courts' outage waiver.
+    // Exact, because Playwright's default text match is a case-insensitive substring and
+    // the explanation below the row opens with "Out of service." — two matches, and a
+    // strict-mode violation that reads as the badge being missing.
+    await expect(page.getByText("out of service", { exact: true })).toBeVisible();
+    await expect(page.getByText(/The API refuses this box, so it switches nothing on/)).toBeVisible();
+    await expect(page.getByText(/A: court 1, B: court 2 are judged by whatever other boxes drive them/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Put back in service" })).toBeVisible();
+  });
+});
+
+test.describe("The walk-up cap the buttons are held to", () => {
+  /**
+   * Finding M-F1. The editor validated against the 90-minute relay hard cap and nothing
+   * else, so a club that lowered `walk_up_max_minutes` to 20 left every box advertising
+   * 15/30/45/60 while the API refused three of the four presses — the club's own
+   * configuration change, blamed on the member at a court with nobody at the desk. The
+   * string "walk-up" did not appear on this page at all.
+   */
+  test("is named on the page that sets the buttons, and names the buttons it will refuse", async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, [
+      ...routes([{ ...FRESH, auto_registered: false }]).filter((r) => r.path !== "/api/v1/admin/settings/"),
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS, walk_up_max_minutes: 20 } },
+    ]);
+    await page.goto("/admin/devices");
+
+    // The club map's buttons 6 and 7 are 30 and 45; button 8 is "off" and grants nothing.
+    await expect(page.getByText(/Buttons 6, 7 grant more than this club's walk-up maximum of 20 minutes/)).toBeVisible();
+    await expect(page.getByText(/Raise Walk-up maximum \(minutes\) under Admin settings/)).toBeVisible();
+
+    // A warning, not a refusal: the cap can be raised afterwards, and blocking the save
+    // would deadlock this screen against the Settings screen.
+    await expect(page.getByRole("button", { name: "Save button map" })).toBeEnabled();
+  });
+});
