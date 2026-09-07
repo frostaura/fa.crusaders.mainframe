@@ -87,13 +87,25 @@ public sealed class ReportWindowTests
     /// <c>/admin/reports/daily</c>: the last day is a row, it carries the money, and the day
     /// after it is not a row at all.
     /// </summary>
-    [SkippableFact]
-    public async Task An_exclusive_midnight_to_takes_in_the_whole_of_the_day_it_names()
+    /// <remarks>
+    /// Four zones rather than the club's own, because the one fixture field that could be
+    /// carrying this result is the timezone and a single-zone probe cannot tell "the club's
+    /// days" from "a constant shift". UTC is the control; Johannesburg is what Crusaders
+    /// runs on; New York is WEST of UTC, where the last day's 10:00 probe sits at 15:00Z on
+    /// the very date <c>to</c> names; Kathmandu is +05:45, so nothing working in whole hours
+    /// can pass. All four were run before this remark was written.
+    /// </remarks>
+    [SkippableTheory]
+    [InlineData("UTC")]
+    [InlineData(ClubZone)]
+    [InlineData("America/New_York")]
+    [InlineData("Asia/Kathmandu")]
+    public async Task An_exclusive_midnight_to_takes_in_the_whole_of_the_day_it_names(string timezone)
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
         await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
-        var seed = await SeedAsync(factory);
+        var seed = await SeedAsync(factory, timezone);
         using var client = Client(factory, seed, admin: true);
 
         using var doc = await GetJsonAsync(client, $"/api/v1/admin/reports/daily?{Range}");
@@ -125,6 +137,14 @@ public sealed class ReportWindowTests
         Assert.Equal(
             FirstInstantCredits + LastDayCredits,
             rows.Sum(r => r.GetProperty("adjustments_credits").GetDecimal()));
+
+        // And the sentence reporting.md makes out of all this: the two shapes of `to` a
+        // caller can write for the same date name the SAME window. The page sends the
+        // second one, so without this the two readings could drift apart with only the
+        // unused half going red.
+        using var inclusive = await GetJsonAsync(
+            client, $"/api/v1/admin/reports/daily?from={First:yyyy-MM-dd}T00:00:00Z&to={Last:yyyy-MM-dd}T23:59:59Z");
+        Assert.Equal(doc.RootElement.GetRawText(), inclusive.RootElement.GetRawText());
     }
 
     /// <summary>
@@ -350,9 +370,9 @@ public sealed class ReportWindowTests
     }
 
     /// <summary>The instant a club wall-clock time falls on, as UTC.</summary>
-    private static DateTimeOffset ClubTime(DateOnly day, int hour, int minute)
+    private static DateTimeOffset ClubTime(DateOnly day, int hour, int minute, string timezone)
     {
-        var tz = TimeZoneInfo.FindSystemTimeZoneById(ClubZone);
+        var tz = TimeZoneInfo.FindSystemTimeZoneById(timezone);
         var local = day.ToDateTime(new TimeOnly(hour, minute));
         return new DateTimeOffset(local, tz.GetUtcOffset(local)).ToUniversalTime();
     }
@@ -367,7 +387,7 @@ public sealed class ReportWindowTests
         return client;
     }
 
-    private static async Task<Seed> SeedAsync(TestWebAppFactory factory)
+    private static async Task<Seed> SeedAsync(TestWebAppFactory factory, string timezone = ClubZone)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -380,7 +400,7 @@ public sealed class ReportWindowTests
         {
             TenantId = tenant.Id,
             SettingsJson =
-                $$"""{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"timezone":"{{ClubZone}}"}""",
+                $$"""{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"timezone":"{{timezone}}"}""",
         });
 
         var admin = new User { TenantId = tenant.Id, Email = $"a-{slug}@test.local", PasswordHash = "x", EmailVerified = true, IsAdmin = true };
@@ -418,19 +438,19 @@ public sealed class ReportWindowTests
         // Outside, on the `from` side. It is also what seeds the member report's running
         // balance, so its absence from the rows and its presence in the opening figure are
         // asserted by the same number.
-        Adjustment(ClubTime(First.AddDays(-1), 10, 0), DayBeforeCredits, DayBeforeReason);
+        Adjustment(ClubTime(First.AddDays(-1), 10, 0, timezone), DayBeforeCredits, DayBeforeReason);
         // The first instant of the first club day — 00:00 local, which is 22:00Z the evening
         // before and is the edge the `from` half of the fix was written for.
-        Adjustment(ClubTime(First, 0, 0), FirstInstantCredits, FirstInstantReason);
+        Adjustment(ClubTime(First, 0, 0, timezone), FirstInstantCredits, FirstInstantReason);
         // The day `to` names, loaded. This is the whole point of the file: the two
         // pre-existing tests that send this URL seed nothing here.
-        Adjustment(ClubTime(Last, 10, 0), LastDayCredits, LastDayReason);
-        TopUp(ClubTime(Last, 10, 30), LastDayTopUpCredits, LastDayTopUpZar, LastDayReason + " (top-up)");
-        Booking(ClubTime(Last, 9, 0), BookingStatus.NoShow);
+        Adjustment(ClubTime(Last, 10, 0, timezone), LastDayCredits, LastDayReason);
+        TopUp(ClubTime(Last, 10, 30, timezone), LastDayTopUpCredits, LastDayTopUpZar, LastDayReason + " (top-up)");
+        Booking(ClubTime(Last, 9, 0, timezone), BookingStatus.NoShow);
         // The day after, which must be in nothing.
-        Adjustment(ClubTime(Last.AddDays(1), 10, 0), DayAfterCredits, DayAfterReason);
-        TopUp(ClubTime(Last.AddDays(1), 10, 30), DayAfterTopUpCredits, DayAfterTopUpZar, DayAfterReason + " (top-up)");
-        Booking(ClubTime(Last.AddDays(1), 9, 0), BookingStatus.Booked);
+        Adjustment(ClubTime(Last.AddDays(1), 10, 0, timezone), DayAfterCredits, DayAfterReason);
+        TopUp(ClubTime(Last.AddDays(1), 10, 30, timezone), DayAfterTopUpCredits, DayAfterTopUpZar, DayAfterReason + " (top-up)");
+        Booking(ClubTime(Last.AddDays(1), 9, 0, timezone), BookingStatus.Booked);
 
         await db.SaveChangesAsync();
         return new Seed(tenant.Id, slug, admin.Id, member.Id);
