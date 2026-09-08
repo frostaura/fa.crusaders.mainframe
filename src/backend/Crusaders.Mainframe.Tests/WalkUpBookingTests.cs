@@ -202,6 +202,49 @@ public class WalkUpBookingTests
     /// helper's own promise rather than one caller's consequence is what makes those visible.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The same promise, made through <b>the wrapper every fixture actually calls</b>.
+    ///
+    /// <para>
+    /// The sweep below pins <see cref="TestHost.BookableSlotFrom(DateTimeOffset, double,
+    /// TimeZoneInfo?)"/> — the arithmetic. <see cref="TestHost.BookableSlotAt"/> is what
+    /// <c>Fixture.BookableSlot</c> calls, and it was unpinned: rewriting its body to pass
+    /// <c>club: null</c>, which is precisely the defect the whole fix exists to remove, left
+    /// every test in this class green when run at 02:31 UTC. A wrapper that reads its own clock
+    /// is catchable only at the unlucky hours, which is the same trap one layer up — so the
+    /// wrapper now takes the clock and this sweeps it.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void The_wrapper_the_fixtures_call_keeps_the_same_promise_at_every_minute()
+    {
+        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        for (var minute = 0; minute < 24 * 60; minute++)
+        {
+            var now = midnight.AddMinutes(minute);
+            var zoneId = TestHost.DayZoneFor(now, RelayHardCap.Minutes);
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(zoneId);
+
+            foreach (var hoursAhead in new[] { 2d, 3d })
+            {
+                var slot = TestHost.BookableSlotAt(zoneId, hoursAhead, now);
+                var local = TimeZoneInfo.ConvertTime(slot, zone);
+                var where = $"(UTC {now:HH:mm} + {hoursAhead}h -> {slot:HH:mm}Z, {zoneId} local {local:HH:mm})";
+
+                Assert.True(
+                    local.Hour is < 15 or >= 19,
+                    $"the slot is inside the club's own 16:00-19:00 peak window {where}");
+                Assert.True(local.Hour != 23, $"the slot runs into the club's own midnight {where}");
+                Assert.True(slot > now, $"a bookable slot is in the future {where}");
+
+                // …and it is the zone-aware answer, not merely an out-of-peak one. Without this
+                // the wrapper could satisfy the three assertions above by any route that happens
+                // to dodge peak, rather than by asking in the club's clock.
+                Assert.Equal(TestHost.BookableSlotFrom(now, hoursAhead, zone), slot);
+            }
+        }
+    }
+
     [Fact]
     public void A_slot_picked_for_a_moved_club_is_never_inside_that_clubs_peak_or_its_last_hour()
     {

@@ -236,9 +236,19 @@ public sealed class TestHost : IAsyncDisposable
     /// window by moving the club is how you create the next one.
     /// </para>
     /// </summary>
-    public static DateTimeOffset BookableSlotAt(string clubTimezone, double hoursAhead = 2)
+    /// <param name="now">
+    /// The clock, so this method — and not only the arithmetic underneath it — can be swept
+    /// over a whole day. The sweeps beside it pinned <see cref="BookableSlotFrom(DateTimeOffset,
+    /// double, TimeZoneInfo?)"/> and left THIS wrapper unpinned, which is one layer below where
+    /// every fixture actually enters: rewriting the body to pass <c>club: null</c> — the exact
+    /// defect the paragraph above describes — left all forty tests in the walk-up class green at
+    /// 02:31 UTC, because a wrapper that reads its own clock can only be caught at the unlucky
+    /// hours. Threading the clock through is what makes it catchable at all of them.
+    /// </param>
+    public static DateTimeOffset BookableSlotAt(
+        string clubTimezone, double hoursAhead = 2, DateTimeOffset? now = null)
         => BookableSlotFrom(
-            DateTimeOffset.UtcNow, hoursAhead, TimeZoneInfo.FindSystemTimeZoneById(clubTimezone));
+            now ?? DateTimeOffset.UtcNow, hoursAhead, TimeZoneInfo.FindSystemTimeZoneById(clubTimezone));
 
     /// <summary>
     /// The same rule with the clock passed in, so the fix for a time-dependent test can
