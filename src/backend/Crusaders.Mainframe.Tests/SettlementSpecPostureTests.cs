@@ -282,4 +282,94 @@ public sealed class SettlementSpecPostureTests
             settlement);
         Assert.Contains("an admin cancelling on a member's behalf does not, and must not", settlement);
     }
+
+    /// <summary>
+    /// The §11 admin-cancellation bullet, as one string. Its whole rule is a single markdown
+    /// list item on a single line, so the paragraph can be asserted on as a paragraph rather
+    /// than against the whole document — which matters for the negatives below, where a phrase
+    /// that would be fine elsewhere in the spec is a reversion here.
+    /// </summary>
+    private static string AdminCancellationBullet()
+    {
+        const string opener = "- **Cancellation made by the club on a member's behalf**";
+        var line = FeatureSpec().ReplaceLineEndings("\n").Split('\n')
+            .SingleOrDefault(l => l.StartsWith(opener, StringComparison.Ordinal));
+
+        Assert.True(line is not null,
+            $"feature-spec.md §11 no longer has exactly one line opening \"{opener}\". "
+            + "That bullet is the rule this class pins; find where it went before deleting this test.");
+        return line!;
+    }
+
+    /// <summary>
+    /// <b>§11's reason-is-not-the-waiver rule is pinned as a RULE, not as a heading.</b>
+    ///
+    /// <para>
+    /// <see cref="Both_specs_agree_what_the_cancellation_reason_column_is"/> pins the bold
+    /// header and asserts the exact prior wording absent, and that is genuinely a pin — the
+    /// round-9 verifier's mutation reds it. It is also not enough, and a round-10 verifier
+    /// showed how in one edit: they left the header <i>verbatim</i> and inverted only the
+    /// operative clause after the colon, to "the reason travels only when the settlement
+    /// actually waived a penalty, and is dropped otherwise". Five of five in this class stayed
+    /// green and so did the whole backend suite. §11 then asserted a rule in its header and the
+    /// opposite of that rule in its very next clause, and every gate passed.
+    /// </para>
+    ///
+    /// <para>
+    /// So the operative clause is pinned in its own words, and the reversion is excluded by
+    /// SHAPE rather than by remembering one phrasing of it — an `Assert.DoesNotContain` on a
+    /// sentence somebody has already written cannot catch the paraphrase somebody writes next.
+    /// The shape of every reversion is the same: the reason made conditional on the waiver. The
+    /// justification that carried both the round-8 original and the round-10 paraphrase is
+    /// excluded by name for the same reason the withdrawn "few minutes" claim is.
+    /// </para>
+    ///
+    /// <para>
+    /// The last assertion is a different unpinned sentence in the same bullet, found by the same
+    /// verifier: replacing "the desk's typed words live in the audit row or nowhere, and the
+    /// column is neither dead schema nor somewhere to start putting them" with its exact inverse
+    /// left the suite at 1009 green. That sentence is what forecloses BOTH follow-ups the money
+    /// oracle forbids — writing the desk's free text into the column, and deleting the column as
+    /// dead schema — so it is the one sentence in the paragraph that has to survive a rewrite.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void The_reason_is_not_re_gated_on_the_waiver_by_any_wording()
+    {
+        var bullet = AdminCancellationBullet();
+
+        // The rule, in the operative clause rather than in the header above it.
+        Assert.Contains(
+            "the reason travels whenever the desk typed one, including when the settlement waived "
+                + "nothing in the end",
+            bullet);
+        // And the two cases that make it concrete. Without them the clause reads as an
+        // abstraction and a later reader narrows it back to the waiver without noticing.
+        Assert.Contains("an admin ticking the box outside the penalty window", bullet);
+        Assert.Contains("a member who scanned in between the quote and the confirm", bullet);
+
+        // The reversion by shape: the reason conditional on the waiver, in either word order,
+        // within one sentence of each other. Both the round-8 original and the round-10
+        // paraphrase match this; neither matched anything the class asserted before.
+        foreach (var pattern in new[] { @"reason[^.]{0,160}only when", @"only when[^.]{0,160}reason" })
+        {
+            Assert.False(
+                System.Text.RegularExpressions.Regex.IsMatch(bullet, pattern),
+                $"§11 gates the reason on the waiver again (matched /{pattern}/). The rule is that "
+                + "they are two separate facts: gating the reason deleted it from the mail AND from "
+                + "the audit row at once, and the audit row is the club's only record of why it "
+                + "cancelled somebody's court.");
+        }
+
+        // The justification both versions of the overturned rule carried. It is the sentence a
+        // reverter keeps even when they reword everything around it.
+        Assert.DoesNotContain("noise in the month-end report", bullet);
+        Assert.DoesNotContain("is dropped otherwise", bullet);
+
+        // And the sentence that forecloses the two follow-ups, which was itself unpinned.
+        Assert.Contains(
+            "So the desk's typed words live in the audit row or nowhere, and the column is neither "
+                + "dead schema nor somewhere to start putting them.",
+            bullet);
+    }
 }
