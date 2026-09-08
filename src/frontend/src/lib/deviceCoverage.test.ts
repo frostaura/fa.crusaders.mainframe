@@ -49,13 +49,82 @@ describe("listCourts", () => {
 describe("outOfServiceConsequences — the shut-door sentence", () => {
   it("agrees with the number of courts", () => {
     expect(outOfServiceConsequences(shutOnly([1]))).toEqual([
-      "No box in service drives court 1, so nobody can check in there: bookings on it are refunded"
-      + " in full with no no-show penalty until a box is back in service.",
+      "No box in service drives court 1, so the API turns that hardware away: no scan, walk-up"
+      + " or activation from it reaches the club. The courtside PIN, QR and fingerprint terminal"
+      + " is a different machine and still checks members in there. Bookings on it nobody checks"
+      + " in on are refunded in full with no no-show penalty, from the instant the switch was"
+      + " thrown until a box is back in service.",
     ]);
     expect(outOfServiceConsequences(shutOnly([1, 2]))).toEqual([
-      "No box in service drives courts 1 and 2, so nobody can check in there: bookings on them are"
-      + " refunded in full with no no-show penalty until a box is back in service.",
+      "No box in service drives courts 1 and 2, so the API turns that hardware away: no scan,"
+      + " walk-up or activation from it reaches the club. The courtside PIN, QR and fingerprint"
+      + " terminal is a different machine and still checks members in there. Bookings on them"
+      + " nobody checks in on are refunded in full with no no-show penalty, from the instant the"
+      + " switch was thrown until a box is back in service.",
     ]);
+  });
+
+  /**
+   * <b>It does not say nobody can check in there, because that was never true.</b>
+   *
+   * <p>
+   * The claim shipped for three rounds and read as the whole point of the branch. The 403 it
+   * rested on is `DeviceIdentity.ResolveAsync`'s, which guards the four `/api/v1/device/`
+   * routes and nothing else; the three `/api/v1/court/` match routes resolve
+   * `Courts.CourtNumber` and never read a `Device` row, and the match they make runs
+   * `CourtActivationService.ActivateAsync`, which charges the member and stamps `CheckedInAt`.
+   * So an admin who believed this sentence had no way to understand a member being charged at
+   * a court the screen had told them was closed.
+   * </p>
+   *
+   * <p>
+   * Asserted as an absence over every arm rather than left implicit in the equality above,
+   * because the equality goes red on any edit at all and says nothing about which edit
+   * mattered. This one names the sentence that must not come back.
+   * </p>
+   */
+  it("does not tell an admin nobody can check in there", () => {
+    for (const courts of [[1], [1, 2], [1, 2, 4]]) {
+      const [sentence] = outOfServiceConsequences(shutOnly(courts));
+      expect(sentence).not.toContain("nobody can check in");
+      expect(sentence).not.toContain("no one can check in");
+      expect(outOfServiceConfirm(shutOnly(courts))).not.toContain("check in there");
+      // And it says who still can, or the qualifier on the money clause reads as pedantry
+      // rather than as the reason it is there.
+      expect(sentence).toContain("courtside PIN, QR and fingerprint terminal");
+    }
+  });
+
+  /**
+   * <b>The waiver is dated from the switch, and the sentence has to say so.</b>
+   *
+   * <p>
+   * Round 9 shipped this promise unqualified while `DoorWasShutFor` read the switched-off
+   * board's last heartbeat as the switch-off instant, so the ledger delivered it
+   * `offline_after_seconds` later — 180 s at the shipped 60 s cadence. A grace deadline in
+   * that window was charged the 30% the screen had just said it would not be. The backend now
+   * records `devices.OutOfServiceSince` and answers from it; this pins the console's half of
+   * the same fact, so the sentence cannot go back to being silent about when.
+   * </p>
+   */
+  it("dates the waiver from the switch rather than leaving it to be assumed", () => {
+    for (const courts of [[1], [1, 2]]) {
+      expect(outOfServiceConsequences(shutOnly(courts))[0])
+        .toContain("from the instant the switch was thrown until a box is back in service");
+      expect(outOfServiceConfirm(shutOnly(courts))).toContain("from that instant");
+    }
+  });
+
+  /**
+   * The refund is for the bookings nobody checked in on — `NoShowWorker` sweeps
+   * `b.CheckedInAt == null` and nothing else — so the promise is qualified rather than flat.
+   * Flat, it is false for exactly the member who used the courtside terminal and was charged.
+   */
+  it("promises the refund only for the bookings nobody checks in on", () => {
+    expect(outOfServiceConsequences(shutOnly([1]))[0])
+      .toContain("Bookings on it nobody checks in on are refunded in full");
+    expect(outOfServiceConsequences(shutOnly([1, 2]))[0])
+      .toContain("Bookings on them nobody checks in on are refunded in full");
   });
 });
 
@@ -133,8 +202,11 @@ describe("outOfServiceConsequences — all three at once", () => {
     expect(outOfServiceConsequences({
       shut: [1], unattested: [2], covered: [3], quietBoxes: 1, reportingBoxes: 1,
     })).toEqual([
-      "No box in service drives court 1, so nobody can check in there: bookings on it are refunded"
-      + " in full with no no-show penalty until a box is back in service.",
+      "No box in service drives court 1, so the API turns that hardware away: no scan, walk-up"
+      + " or activation from it reaches the club. The courtside PIN, QR and fingerprint terminal"
+      + " is a different machine and still checks members in there. Bookings on it nobody checks"
+      + " in on are refunded in full with no no-show penalty, from the instant the switch was"
+      + " thrown until a box is back in service.",
       "Nothing in service is reporting on court 2 — the other box that drives it has gone quiet —"
       + " so bookings on it are refunded in full with no no-show penalty until one calls in again.",
       "Another box is still reporting on court 3, so its no-shows are judged as normal.",
@@ -153,11 +225,11 @@ describe("outOfServiceConfirm", () => {
 
   it("agrees with the number of courts on the shut clause", () => {
     expect(outOfServiceConfirm(shutOnly([1])))
-      .toBe("Out of service? Nothing else drives court 1 — nobody can check in there and its"
-        + " no-shows stop being penalised.");
+      .toBe("Out of service? Nothing else drives court 1 — the API stops taking anything from"
+        + " that box, and from that instant its no-shows stop being penalised.");
     expect(outOfServiceConfirm(shutOnly([1, 2])))
-      .toBe("Out of service? Nothing else drives courts 1 and 2 — nobody can check in there and"
-        + " their no-shows stop being penalised.");
+      .toBe("Out of service? Nothing else drives courts 1 and 2 — the API stops taking anything"
+        + " from that box, and from that instant their no-shows stop being penalised.");
   });
 
   it("agrees with the number of courts on the quiet clause", () => {
@@ -182,16 +254,16 @@ describe("outOfServiceConfirm", () => {
   it('adds " too" only when it is the second clause', () => {
     expect(outOfServiceConfirm({
       shut: [1], unattested: [2], covered: [], quietBoxes: 1, reportingBoxes: 0,
-    })).toBe("Out of service? Nothing else drives court 1 — nobody can check in there and its"
-      + " no-shows stop being penalised. No other box on court 2 is reporting, so its no-shows"
-      + " stop being penalised too.");
+    })).toBe("Out of service? Nothing else drives court 1 — the API stops taking anything from"
+      + " that box, and from that instant its no-shows stop being penalised. No other box on"
+      + " court 2 is reporting, so its no-shows stop being penalised too.");
   });
 
   it("says nothing about the courts that stay covered", () => {
     expect(outOfServiceConfirm({
       shut: [1], unattested: [], covered: [2, 3], quietBoxes: 0, reportingBoxes: 2,
-    })).toBe("Out of service? Nothing else drives court 1 — nobody can check in there and its"
-      + " no-shows stop being penalised.");
+    })).toBe("Out of service? Nothing else drives court 1 — the API stops taking anything from"
+      + " that box, and from that instant its no-shows stop being penalised.");
   });
 });
 

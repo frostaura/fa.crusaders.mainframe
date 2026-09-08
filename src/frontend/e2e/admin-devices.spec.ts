@@ -351,12 +351,13 @@ test.describe("Taking a box out of service", () => {
 
     await page.getByRole("button", { name: "Take out of service" }).click();
     // Arms first: a live box stops switching lights on the moment this lands. And the confirm
-    // names what this particular box strands — it is the only one in the club, so courts 1 and
-    // 2 have no check-in at all afterwards. It read the plain "the box stops switching lights
-    // on" until round 8 made the label per-court; this file was not updated with it and had
-    // been red at HEAD ever since.
+    // names what this particular box strands — it is the only one in the club, so from the
+    // click the API takes nothing from it and courts 1 and 2 stop being penalised. It read the
+    // plain "the box stops switching lights on" until round 8 made the label per-court; this
+    // file was not updated with it and had been red at HEAD ever since.
     const confirm = page.getByRole("button", {
-      name: "Out of service? Nothing else drives courts 1 and 2 — nobody can check in there and their no-shows stop being penalised.",
+      name: "Out of service? Nothing else drives courts 1 and 2 — the API stops taking anything from that box,"
+        + " and from that instant their no-shows stop being penalised.",
     });
     await expect(confirm).toBeVisible();
 
@@ -381,12 +382,21 @@ test.describe("Taking a box out of service", () => {
     // (one generator feeds both, so they cannot drift apart), and an unscoped match finds two.
     const notice = page.getByText(/The API refuses this box, so it switches nothing on/);
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText("No box in service drives courts 1 and 2, so nobody can check in there");
+    await expect(notice).toContainText("No box in service drives courts 1 and 2, so the API turns that hardware away");
+    // Not "nobody can check in there", which is what this said for three rounds. The 403 is
+    // DeviceIdentity's and covers the four /api/v1/device/ routes; /api/v1/court/{n}/pin,
+    // /qr/match and /biometric/match never read a Device row and do check a member in, which
+    // is why the refund clause below is qualified rather than flat.
+    await expect(notice).not.toContainText("nobody can check in there");
+    await expect(notice).toContainText(
+      "The courtside PIN, QR and fingerprint terminal is a different machine and still checks members in there");
     // "bookings on them", agreeing with the "their" in the confirm the admin just pressed.
     // The plural arm of that pronoun had never been executed anywhere: round 9's verifier
     // forced it to "it" always and watched vitest stay at 485/485 and this suite at 194/194,
     // so the screen could disagree with itself one line apart with everything green.
-    await expect(notice).toContainText("bookings on them are refunded in full with no no-show penalty until a box is back in service");
+    await expect(notice).toContainText(
+      "Bookings on them nobody checks in on are refunded in full with no no-show penalty, from the"
+      + " instant the switch was thrown until a box is back in service");
     await expect(page.getByRole("button", { name: "Put back in service" })).toBeVisible();
   });
 
@@ -433,6 +443,62 @@ test.describe("Taking a box out of service", () => {
       "Nothing in service is reporting on court 1 — the other boxes that drive it have gone quiet"
       + " — so bookings on it are refunded in full with no no-show penalty until one calls in again.",
     );
+  });
+
+  /**
+   * The reassuring arm of the same sentence, in a real browser, at every one of its four cells.
+   *
+   * <p>
+   * Round 10 changed this clause — it named boxes in the plural at every count, so the
+   * commonest shape in a four-box club, one spare still reporting, told an admin there were
+   * several — and pinned the change in jsdom only. Standard 3 says a jsdom test does not
+   * settle what a page does, and the asymmetry was the point: the quiet clause beside it got a
+   * browser test in the same commit and this one did not, so the arm an admin is most likely
+   * to act on was the arm no browser had read.
+   * </p>
+   *
+   * <p>
+   * Both numbers vary independently — the boxes that are reporting and the courts they cover —
+   * so all four cells are here rather than the one a single fixture happens to produce. Each
+   * runs at both project widths, mobile and desktop, because that is the whole reason this
+   * suite exists in two projects.
+   * </p>
+   */
+  test("names one covering box as one and several as several, at every count", async ({ page }) => {
+    const out = { ...FRESH, name: "Cupboard box", auto_registered: false, enabled: false };
+    const spare = (id: string, code: string, name: string, courts: number[]) => ({
+      ...FRESH, id, device_code: code, name, auto_registered: false, court_numbers: courts,
+      last_seen_at: new Date().toISOString(),
+    });
+    const b = (courts: number[]) => spare("33333333-3333-3333-3333-333333333333", "box-d4e5f6", "Spare one", courts);
+    const c = (courts: number[]) => spare("44444444-4444-4444-4444-444444444444", "box-g7h8i9", "Spare two", courts);
+
+    const cells: { courts: number[]; others: number[][]; reads: string }[] = [
+      { courts: [1], others: [[1]],
+        reads: "Another box is still reporting on court 1, so its no-shows are judged as normal." },
+      { courts: [1, 2], others: [[1, 2]],
+        reads: "Another box is still reporting on courts 1 and 2, so their no-shows are judged as normal." },
+      { courts: [1], others: [[1], [1]],
+        reads: "Other boxes are still reporting on court 1, so its no-shows are judged as normal." },
+      { courts: [1, 2], others: [[1, 2], [1, 2]],
+        reads: "Other boxes are still reporting on courts 1 and 2, so their no-shows are judged as normal." },
+    ];
+
+    for (const [index, cell] of cells.entries()) {
+      const siblings = [b(cell.others[0]), ...(cell.others[1] ? [c(cell.others[1])] : [])];
+      const list = [{ ...out, court_numbers: cell.courts }, ...siblings];
+      if (index === 0) await openDevices(page, list);
+      else {
+        await serveApi(page, routes(list));
+        await page.reload();
+      }
+
+      const notice = page.getByText(/The API refuses this box, so it switches nothing on/);
+      await expect(notice).toContainText(cell.reads);
+      // And nothing from the two arms that cost money — this court is covered, so neither the
+      // shut-door sentence nor the gone-quiet one belongs on it.
+      await expect(notice).not.toContainText("refunded in full");
+    }
   });
 });
 

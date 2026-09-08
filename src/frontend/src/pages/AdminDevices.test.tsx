@@ -772,10 +772,10 @@ describe("AdminDevices", () => {
     expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
 
     // And the confirm names the consequence an admin cannot see from the row: this is the
-    // only box on court 1, so afterwards nobody can check in there at all and the sweep
-    // stops charging the no-show penalty on it (settlement-model.md S5a). The confirm used
-    // to say only "the box stops switching lights on", which is the half that costs the
-    // CLUB nothing.
+    // only box on court 1, so afterwards the API takes nothing from it and the sweep stops
+    // charging the no-show penalty on that court from the instant of the click
+    // (settlement-model.md S5a). The confirm used to say only "the box stops switching
+    // lights on", which is the half that costs the CLUB nothing.
     const confirm = await screen.findByRole("button", { name: /Nothing else drives court 1/ });
     expect(confirm).toHaveAccessibleName(/no-shows stop being penalised/);
     fireEvent.click(confirm);
@@ -809,11 +809,24 @@ describe("AdminDevices", () => {
     // money moves.
     const notice = screen.getByText(/The API refuses this box, so it switches nothing on/);
     expect(notice).toHaveTextContent("not alerted about its silence");
-    expect(notice).toHaveTextContent("No box in service drives courts 1 and 2, so nobody can check in there");
+    expect(notice).toHaveTextContent(
+      "No box in service drives courts 1 and 2, so the API turns that hardware away");
+    // Not "nobody can check in there", which this sentence claimed for three rounds. The 403
+    // behind it is DeviceIdentity's and reaches the four /api/v1/device/ routes only; the
+    // courtside PIN, QR and biometric match routes never read a Device row and do check a
+    // member in. See lib/deviceCoverage.test.ts, which pins the absence over every arm.
+    expect(notice).not.toHaveTextContent("nobody can check in there");
+    expect(notice).toHaveTextContent(
+      "The courtside PIN, QR and fingerprint terminal is a different machine and still checks members in there");
     // "them", not "it". The plural arm of this pronoun had never been executed by any test in
     // this repo — round 9's verifier forced the helper to return "it" always and both suites
     // stayed green, so the row could read "bookings on it" under a confirm reading "their".
-    expect(notice).toHaveTextContent("bookings on them are refunded in full with no no-show penalty");
+    expect(notice).toHaveTextContent("Bookings on them nobody checks in on are refunded in full with no no-show penalty");
+    // And when. Round 9 promised this from the click while the ledger delivered it
+    // offline_after_seconds later — 180 s at the shipped 60 s cadence — so a grace deadline in
+    // that window paid the 30% the screen had just waived. DoorWasShutFor now answers from
+    // devices.OutOfServiceSince, and the sentence says so instead of leaving it to be assumed.
+    expect(notice).toHaveTextContent("from the instant the switch was thrown until a box is back in service");
     expect(notice).not.toHaveTextContent("judged as normal");
 
     // Restoring is not a decision anyone regrets, so it is one tap.
@@ -849,8 +862,8 @@ describe("AdminDevices", () => {
     renderPage(<AdminDevicesPage />);
 
     const notice = await screen.findByText(/The API refuses this box, so it switches nothing on/);
-    expect(notice).toHaveTextContent("No box in service drives court 1, so nobody can check in there");
-    expect(notice).toHaveTextContent("bookings on it are refunded in full with no no-show penalty");
+    expect(notice).toHaveTextContent("No box in service drives court 1, so the API turns that hardware away");
+    expect(notice).toHaveTextContent("Bookings on it nobody checks in on are refunded in full with no no-show penalty");
     // And the court that is covered is named as covered, rather than swept into the same
     // sentence as the one that is not.
     // "still reporting on", not "still drive": a box that is in service but has gone quiet
@@ -920,8 +933,11 @@ describe("AdminDevices", () => {
 
     expect(await screen.findByText(
       "Court 1 box is out of service. It switches nothing on, and the club is not alerted about its silence."
-      + " No box in service drives court 1, so nobody can check in there: bookings on it are refunded in full"
-      + " with no no-show penalty until a box is back in service.",
+      + " No box in service drives court 1, so the API turns that hardware away: no scan, walk-up or"
+      + " activation from it reaches the club. The courtside PIN, QR and fingerprint terminal is a"
+      + " different machine and still checks members in there. Bookings on it nobody checks in on are"
+      + " refunded in full with no no-show penalty, from the instant the switch was thrown until a box"
+      + " is back in service.",
     )).toBeInTheDocument();
   });
 
@@ -947,8 +963,9 @@ describe("AdminDevices", () => {
     const confirms = await screen.findAllByRole("button", { name: "Take out of service" });
     fireEvent.click(confirms[0]);
     expect(await screen.findByRole("button", {
-      name: "Out of service? Nothing else drives court 1 — nobody can check in there and its no-shows stop being"
-        + " penalised. No other box on court 2 is reporting, so its no-shows stop being penalised too.",
+      name: "Out of service? Nothing else drives court 1 — the API stops taking anything from that box, and"
+        + " from that instant its no-shows stop being penalised. No other box on court 2 is reporting, so"
+        + " its no-shows stop being penalised too.",
     })).toBeInTheDocument();
   });
 
@@ -1116,8 +1133,8 @@ describe("AdminDevices", () => {
 
   /**
    * One word, read live off the stack by round 8's verifier: the confirm did not pluralise
-   * where the row notice did — "Nothing else drives courts 1 and 2 — nobody can check in there
-   * and ITS no-shows stop being penalised."
+   * where the row notice did — "Nothing else drives courts 1 and 2 — … and ITS no-shows stop
+   * being penalised."
    */
   it("agrees with itself about number when a box strands two courts", async () => {
     stubFetch(withDevices([deviceFixture({ court_numbers: [1, 2] })]));
@@ -1126,7 +1143,8 @@ describe("AdminDevices", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
     expect(await screen.findByRole("button", {
-      name: "Out of service? Nothing else drives courts 1 and 2 — nobody can check in there and their no-shows stop being penalised.",
+      name: "Out of service? Nothing else drives courts 1 and 2 — the API stops taking anything from that box,"
+        + " and from that instant their no-shows stop being penalised.",
     })).toBeInTheDocument();
   });
 
@@ -1149,8 +1167,11 @@ describe("AdminDevices", () => {
 
     expect(await screen.findByText(
       "Court 1 box is out of service. It switches nothing on, and the club is not alerted about its silence."
-      + " No box in service drives courts 1 and 2, so nobody can check in there: bookings on them are refunded"
-      + " in full with no no-show penalty until a box is back in service.",
+      + " No box in service drives courts 1 and 2, so the API turns that hardware away: no scan, walk-up"
+      + " or activation from it reaches the club. The courtside PIN, QR and fingerprint terminal is a"
+      + " different machine and still checks members in there. Bookings on them nobody checks in on are"
+      + " refunded in full with no no-show penalty, from the instant the switch was thrown until a box"
+      + " is back in service.",
     )).toBeInTheDocument();
   });
 

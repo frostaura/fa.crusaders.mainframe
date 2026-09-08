@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Cpu, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { Cpu, Wifi, WifiOff } from "lucide-react";
 import { endpoints, type AdminCourt, type AdminDevice, type AdminSettings } from "../lib/api";
 import { describeDeviceError } from "../lib/deviceErrors";
 import {
@@ -9,6 +9,7 @@ import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { ButtonMapEditor, buttonMapWithinCap, MAX_GRANT_MINUTES, RELAYS } from "../components/ButtonMapEditor";
+import { ClubButtonMapCard, WalkUpCapNotice } from "../components/ClubButtonMapCard";
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
 import { useToast } from "../components/Toast";
 
@@ -92,60 +93,6 @@ const MISSED_BEATS_BEFORE_OFFLINE = 3;
  * </p>
  */
 const REFRESH_MS = 15_000;
-
-/** The grant a `minutes:N` button makes, or null for any other action. */
-function grantMinutes(wire: string): number | null {
-  const text = wire.trim().toLowerCase();
-  if (!text.startsWith("minutes:")) return null;
-  const minutes = Number(text.slice(8) || "15");
-  return Number.isFinite(minutes) ? minutes : null;
-}
-
-/** The 1-based button numbers in this map that grant more than `cap` minutes. */
-function buttonsOverCap(map: string[], cap: number): number[] {
-  const over: number[] = [];
-  map.forEach((wire, index) => {
-    const minutes = grantMinutes(wire);
-    if (minutes !== null && minutes > cap) over.push(index + 1);
-  });
-  return over;
-}
-
-/**
- * Says which minute buttons the club's own walk-up maximum will refuse.
- *
- * <p>
- * The editor validates against the relay hard cap of 90 and nothing else, so lowering
- * `walk_up_max_minutes` to 20 left every box still advertising 15/30/45/60 while the API
- * refused three of the four presses with `minutes_out_of_range` — the club's own
- * configuration change, blamed on the member, at a court with nobody at the desk
- * (finding M-F1). The word "walk-up" did not appear on this page at all.
- * </p>
- *
- * <p>
- * A warning rather than a refusal: the cap can be raised afterwards, and a button map that
- * anticipates that is not wrong. Blocking the save would also deadlock the two screens
- * against each other.
- * </p>
- */
-function WalkUpCapNotice({ map, cap }: { map: string[]; cap: number | null }) {
-  if (cap === null) return null;
-  const over = buttonsOverCap(map, cap);
-  if (over.length === 0) return null;
-
-  const one = over.length === 1;
-  return (
-    <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
-      {/* The possessive is an expression, not JSX text: lizard reads a lone apostrophe in JSX
-          text as a string opener and swallows the rest of the file, which is why this file
-          reported a 166-NLOC WalkUpCapNotice nobody wrote. Rendered output is identical. */}
-      {one ? `Button ${over[0]} grants` : `Buttons ${over.join(", ")} grant`} more than {"this club's "}
-      walk-up maximum of {cap} minutes, so the box refuses {one ? "that press" : "those presses"} and
-      sends the member to the desk. Raise <b>Walk-up maximum (minutes)</b> under Admin settings, or
-      lower {one ? "the button" : "the buttons"}.
-    </p>
-  );
-}
 
 /** How long since the last beat before this box counts as offline, seconds. */
 function offlineAfterSeconds(device: AdminDevice, tenantSeconds: number | null): number {
@@ -446,19 +393,28 @@ function DeviceRow({
 
       {/* What "out of service" actually means, said on the rows where it is in force
           rather than buried in a tooltip. Every sentence is something the code does:
-          DeviceIdentity refuses a disabled box 403 on every endpoint,
-          PeripheralHealthWorker filters `d.Enabled`, DeviceOutageIndex builds its silence
+          DeviceIdentity answers 403 for `!device.IsActive`, and the routes it guards are the
+          four under `/api/v1/device/` (heartbeat, events, walkup, activate);
+          PeripheralHealthWorker filters `d.Enabled`; DeviceOutageIndex builds its silence
           index from the enabled boxes alone — and a court whose enabled boxes are all silent,
-          or all switched off, is dark, so its no-shows are refunded in full with no penalty.
+          or all switched off, is dark, so the no-shows on it are refunded in full with no
+          penalty, from the instant `devices.OutOfServiceSince` records.
 
-          The last clause is the one this notice has now got wrong twice. It said flatly that
-          the box's courts "are judged by whatever other boxes drive them", which names nothing
-          in exactly the state that costs money; the round that fixed that then said the
-          opposite in the state where the covering box is in service but has gone quiet, which
-          the settlement calls dark. See outOfServiceConsequences in lib/deviceCoverage, which
-          both this and the toast read, so the two cannot disagree again — and which is where
-          every word that varies with number is now decided, over one test matrix, because three
-          rounds running shipped a sentence that disagreed with the one beside it. */}
+          The last clause is the one this notice has now got wrong three times. It said flatly
+          that the box's courts "are judged by whatever other boxes drive them", which names
+          nothing in exactly the state that costs money; the round that fixed that then said
+          the opposite in the state where the covering box is in service but has gone quiet,
+          which the settlement calls dark; and the round that fixed THAT promised the waiver
+          from the click while the ledger still waited out `offline_after_seconds`. See
+          outOfServiceConsequences in lib/deviceCoverage, which both this and the toast read,
+          so the two cannot disagree again — and which is where every word that varies with
+          number is now decided, over one test matrix, because three rounds running shipped a
+          sentence that disagreed with the one beside it.
+
+          Note what this comment used to say and no longer does: "refuses a disabled box 403 on
+          every endpoint". DeviceIdentity is not on the courtside match routes at all — see the
+          shut bullet on coverageWithout — and reading it that way is where the page's own
+          "nobody can check in there" came from. */}
       {!device.enabled && (
         <p className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
           Out of service. The API refuses this box, so it switches nothing on, and the club is not
@@ -574,10 +530,13 @@ function useDeviceActions(reload: () => Promise<void>) {
           tone: "success",
           // Every clause is a consequence the code actually has: the health sweep filters
           // on Enabled, the silence index the no-show waiver reads does too, and a court
-          // left with no box in service is dark, so its no-shows are waived rather than
-          // charged. The last of those is what this toast used to say the opposite of, by
-          // promising the box's courts were "judged by whatever other boxes drive them"
-          // in the very state where there are none.
+          // left with no box in service is dark from the instant this PATCH lands, because
+          // DeviceRegistryService.UpdateAsync stamps `OutOfServiceSince` on the transition
+          // and DoorWasShutFor answers from it. The last of those is what this toast used to
+          // say the opposite of, by promising the box's courts were "judged by whatever
+          // other boxes drive them" in the very state where there are none — and what it
+          // then promised too EARLY, for the `offline_after_seconds` the ledger used to wait
+          // out before honouring the same sentence.
           text: enabled
             ? `${device.name} is back in service. It works again on its next call, and the club is alerted if it goes quiet.`
             : [`${device.name} is out of service. It switches nothing on, and the club is not alerted about its silence.`,
@@ -615,7 +574,6 @@ export function AdminDevicesPage() {
   const [courts, setCourts] = useState<AdminCourt[]>([]);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [buttonMap, setButtonMap] = useState<string[]>([]);
-  const [savingMap, setSavingMap] = useState(false);
   const [loading, setLoading] = useState(true);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -710,44 +668,6 @@ export function AdminDevicesPage() {
   /** The club's declared heartbeat, for boxes that do not carry their own. */
   const tenantHeartbeat = settings?.heartbeat_seconds ?? null;
 
-  async function saveButtonMap() {
-    if (!settings) return;
-    setSavingMap(true);
-    try {
-      // The button map, and the eight booking fields the API requires on every PUT.
-      // Nothing else.
-      //
-      // This used to spread the whole settings document read at mount — and "present as
-      // read" is not a no-op, it is a write of a value that may be minutes stale. An
-      // admin raising the code lifetime in another tab had it reverted the moment this
-      // screen saved a remapped button, silently, and the comment here claimed the
-      // opposite (review finding 23). Re-GETting immediately before the PUT would only
-      // narrow that window, not close it — the race moves into the gap between the two
-      // calls — and it still writes twenty keys this screen does not own. Sending only
-      // what this screen owns cannot revert anything, because the API reads an absent
-      // key as unchanged. The eight below are not optional on the API and are the
-      // booking form's, not this one's; they are the price of there being no PATCH.
-      await endpoints.adminSettingsSave({
-        slice_minutes: settings.slice_minutes,
-        slice_price_credits: settings.slice_price_credits,
-        advance_booking_days: settings.advance_booking_days,
-        day_start_minute: settings.day_start_minute,
-        day_end_minute: settings.day_end_minute,
-        penalty_pct: settings.penalty_pct,
-        grace_window_minutes: settings.grace_window_minutes,
-        penalty_window_minutes: settings.penalty_window_minutes,
-        button_map: buttonMap,
-      });
-      toast.push({ tone: "success", text: "Button map saved. Boxes pick it up on their next heartbeat." });
-    } catch (e) {
-      // The server checks the map against every box's court list and names the one
-      // that cannot honour it. That sentence is the whole point of the refusal.
-      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not save the button map."), durationMs: 8000 });
-    } finally {
-      setSavingMap(false);
-    }
-  }
-
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4">
       <h1 className="text-2xl font-bold">Devices</h1>
@@ -799,28 +719,10 @@ export function AdminDevicesPage() {
         )}
       </Card>
 
-      <Card className="p-5">
-        <div className="mb-1 flex items-center gap-2">
-          <RefreshCw className="h-5 w-5 text-slate-400" />
-          <h2 className="text-lg font-semibold">Button map</h2>
-        </div>
-        <p className="mb-4 text-sm text-slate-500">
-          What each of the eight buttons on a court box does. The wiring never changes — button 1 is always
-          the same physical button — so you can swap courts around here without anyone touching the hardware.
-          "Court A" means whatever court is on relay A of the box being pressed. Boxes pick up a change on their
-          next heartbeat. A box given its own map above ignores this one.
-        </p>
-
-        <ButtonMapEditor value={buttonMap} onChange={setButtonMap} disabled={savingMap || loading} />
-
-        <WalkUpCapNotice map={buttonMap} cap={walkUpCap} />
-
-        <div className="mt-4">
-          <Button onClick={() => void saveButtonMap()} disabled={savingMap || loading || !buttonMapWithinCap(buttonMap)}>
-            {savingMap ? "Saving…" : "Save button map"}
-          </Button>
-        </div>
-      </Card>
+      <ClubButtonMapCard
+        settings={settings} value={buttonMap} onChange={setButtonMap}
+        loading={loading} walkUpCap={walkUpCap}
+      />
     </div>
   );
 }

@@ -74,10 +74,20 @@ export type ReportingPredicate = (device: AdminDevice) => boolean;
  * </p>
  *
  * <ul>
- *   <li><b>shut</b> — no other box drives the court while in service at all. The API refuses a
- *       disabled box 403 on every courtside endpoint, so nobody can check in there by any
- *       means. That is a door the club has closed, and it is the only branch entitled to say
- *       so.</li>
+ *   <li><b>shut</b> — no other box drives the court while in service at all. What that costs
+ *       is measured, not assumed: <c>DeviceIdentity.ResolveAsync</c> answers 403 for
+ *       <c>!device.IsActive</c>, and every route it guards is under <c>/api/v1/device/</c> —
+ *       heartbeat, events, walkup, activate — so nothing the box would have sent reaches the
+ *       club. It is <b>not</b> a court nobody can check in on, which is what this branch said
+ *       for three rounds: <c>/api/v1/court/{n}/pin|qr|biometric</c> resolve
+ *       <c>Courts.CourtNumber</c> and never read a <c>Device</c> row at all (grep <c>Enabled|
+ *       IsActive|Devices</c> over those three files: no hits), and the match they make runs
+ *       <c>CourtActivationService.ActivateAsync</c>, which charges the member and stamps
+ *       <c>CheckedInAt</c>. That terminal is the club's own on-site kiosk, not the box
+ *       (<c>feature-spec.md</c> §6a, <c>BiometricEndpoints.cs</c>: "`admin` is what the shared
+ *       courtside kiosk runs as"). So the waiver below is for the bookings nobody checked in
+ *       on — <c>NoShowWorker</c> sweeps <c>b.CheckedInAt == null</c> and nothing else — and
+ *       the copy says that rather than promising a refund it cannot keep.</li>
  *   <li><b>unattested</b> — another box in service does drive the court, but nothing has been
  *       heard from it for longer than the offline threshold. The settlement calls that court
  *       dark and waives the penalty; the door may well still work, and this page cannot know,
@@ -176,7 +186,23 @@ export function outOfServiceConsequences(c: CourtCoverage): string[] {
   if (c.shut.length > 0) {
     // "No box in service drives …" is a negative quantifier and is correct at any number of
     // boxes, because there are none. Do not pluralise it.
-    out.push(`No box in service drives ${listCourts(c.shut)}, so nobody can check in there: bookings on ${pronoun(c.shut)} are refunded in full with no no-show penalty until a box is back in service.`);
+    //
+    // Three clauses, and each of the three replaced a sentence that was false:
+    //
+    // 1. What actually stops. "Nobody can check in there" was the claim, and it never held —
+    //    the 403 is DeviceIdentity's, so it reaches the four `/api/v1/device/` routes and
+    //    nothing else. See the shut bullet on coverageWithout for the greps.
+    // 2. Who can still check in. It has to be said, or the qualifier on the money clause
+    //    reads as pedantry: a member CAN be checked in at the courtside terminal while the
+    //    box is out, and that check-in charges them and takes them out of the sweep.
+    // 3. WHEN the waiver starts. This sentence promised the waiver from the click while the
+    //    ledger delivered it `offline_after_seconds` later — 180 s at the shipped 60 s
+    //    cadence — because DoorWasShutFor read the switched-off board's last heartbeat as
+    //    the switch-off. The board now records the instant (`devices.OutOfServiceSince`,
+    //    stamped in DeviceRegistryService.UpdateAsync) and DoorWasShutFor answers from it,
+    //    so the promise is kept — and the sentence now says so out loud rather than leaving
+    //    a reader to assume it, because the assumption is what was wrong before.
+    out.push(`No box in service drives ${listCourts(c.shut)}, so the API turns that hardware away: no scan, walk-up or activation from it reaches the club. The courtside PIN, QR and fingerprint terminal is a different machine and still checks members in there. Bookings on ${pronoun(c.shut)} nobody checks in on are refunded in full with no no-show penalty, from the instant the switch was thrown until a box is back in service.`);
   }
   if (c.unattested.length > 0) {
     // Two independent numbers inside one clause, and keying both on one of them is the defect
@@ -204,14 +230,22 @@ export function outOfServiceConsequences(c: CourtCoverage): string[] {
  * true of this box: an admin taking a spare out beside a reporting box gets the plain
  * sentence, because for them none of the rest is true. It also agrees with itself — the row
  * notice pluralised "its" and this label did not, so a two-court box confirmed with "Nothing
- * else drives courts 1 and 2 — nobody can check in there and ITS no-shows stop being
- * penalised."
+ * else drives courts 1 and 2 — … and ITS no-shows stop being penalised."
+ * </p>
+ *
+ * <p>
+ * A confirm has room for one clause per outcome and no more, so the two corrections the row
+ * notice carries in full are compressed rather than dropped: "nobody can check in there" is
+ * gone because it was never true (see the shut bullet on {@link coverageWithout}), and "from
+ * that instant" is in because the waiver used to arrive up to <c>offline_after_seconds</c>
+ * after the click and now does not. The label must not out-promise the notice the click
+ * produces — they were written at different call sites and disagreed twice.
  * </p>
  */
 export function outOfServiceConfirm(c: CourtCoverage): string {
   const parts: string[] = [];
   if (c.shut.length > 0) {
-    parts.push(`Nothing else drives ${listCourts(c.shut)} — nobody can check in there and ${possessive(c.shut)} no-shows stop being penalised.`);
+    parts.push(`Nothing else drives ${listCourts(c.shut)} — the API stops taking anything from that box, and from that instant ${possessive(c.shut)} no-shows stop being penalised.`);
   }
   if (c.unattested.length > 0) {
     // "No other box … is reporting" is a negative quantifier and stays singular however many
