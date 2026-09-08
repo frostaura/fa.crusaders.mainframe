@@ -417,4 +417,56 @@ public sealed class SettlementSpecPostureTests
         Assert.DoesNotContain("out_of_service_since", feature);
         Assert.DoesNotContain("out_of_service_since", SettlementModel());
     }
+
+    /// <summary>
+    /// <b>Every test the settlement model's pin tables name is a test that exists.</b>
+    ///
+    /// <para>
+    /// This document holds its rules together with tables of the form
+    /// <c>| clause | `Test_name` |</c>, and it has already shipped a row whose pin was a test
+    /// about a different fact — "A board switched off after the deadline does not speak for it",
+    /// pinned against a test that varies <c>installedAt</c>. That one was a wrong pin rather than
+    /// a missing one, which no mechanical check can catch. A pin that names a test which no
+    /// longer exists CAN be caught, and it is the cheaper half of the same failure: a rename in
+    /// the test project leaves the table pointing at nothing, silently, with every gate green,
+    /// and the next reader concludes the clause is unguarded — or worse, that it is guarded.
+    /// </para>
+    ///
+    /// <para>
+    /// Only table rows are read, not the prose: the narrative deliberately quotes WITHDRAWN test
+    /// names when it explains what a rule used to be, and those must not resolve. The count
+    /// assertion is there because a regex that stops matching is a gate that always passes, which
+    /// this repository has shipped three times.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Every_test_the_settlement_models_pin_tables_name_exists()
+    {
+        var cited = new SortedSet<string>();
+        foreach (var row in SettlementModel().ReplaceLineEndings("\n").Split('\n')
+                     .Where(l => l.StartsWith('|')))
+        {
+            foreach (System.Text.RegularExpressions.Match m in
+                     System.Text.RegularExpressions.Regex.Matches(
+                         row, "`([A-Z][A-Za-z0-9]*(?:_[A-Za-z0-9]+){3,})`"))
+            {
+                cited.Add(m.Groups[1].Value);
+            }
+        }
+
+        // A gate that reads nothing is a gate that cannot fail. The tables carried 26 names when
+        // this was written; the floor is deliberately loose so removing a clause does not red it.
+        Assert.True(cited.Count >= 20, $"only {cited.Count} pins were read out of the tables");
+
+        var declared = typeof(SettlementSpecPostureTests).Assembly.GetTypes()
+            .SelectMany(t => t.GetMethods(
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly))
+            .Select(m => m.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var missing = cited.Where(n => !declared.Contains(n)).ToList();
+        Assert.True(missing.Count == 0,
+            "settlement-model.md pins tests that do not exist: " + string.Join(", ", missing));
+    }
 }

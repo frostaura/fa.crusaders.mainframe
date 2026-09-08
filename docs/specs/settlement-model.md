@@ -301,13 +301,16 @@ the section as a whole:
 | A court whose only box is out of service **is** dark | `A_court_whose_only_box_is_out_of_service_waives_the_penalty` |
 | …from the instant the switch was thrown, with no waiting period | `A_court_is_out_of_service_from_the_instant_the_switch_was_thrown`, row `-90` |
 | …and not one second before it: a deadline already past when the switch was thrown keeps its price | the same theory, row `-30` |
+| …and not one TICK before it: a deadline landing exactly on `S` is on the near side | `A_deadline_exactly_on_the_recorded_switch_off_instant_is_judged_by_the_silence_test` |
 | …and the member inside that window gets the waiver mail, not the no-show notice | `The_member_inside_that_window_gets_the_waiver_mail_and_not_the_no_show_notice` |
 | The instant is stamped on the switch and cleared on the way back in | `Taking_a_board_out_of_service_records_the_instant_and_returning_it_clears_it` |
+| …and a repeated `enabled:false` on an already-disabled board does not move it | the same test, its fourth step |
 | A switched-off row with no recorded instant falls back to its silence alone | `A_switched_off_row_with_no_recorded_instant_is_judged_by_its_silence_alone` |
 | Deadlines before the switch are judged by the board's silence, both ways | `A_switch_off_darkens_only_the_deadlines_the_board_had_already_gone_quiet_for` |
 | …so a board still heart-beating when it was switched off does not waive an older deadline | `A_court_whose_only_box_was_just_switched_off_still_charges_the_older_deadline` |
 | …not even hardened with a silence on both sides of it | `A_switched_off_board_heard_from_on_both_sides_of_the_deadline_does_not_waive_it` |
 | …and a real outage keeps its waiver once the club switches the board off | `A_board_dark_across_the_deadline_still_waives_it_after_an_admin_switches_it_off` |
+| A FINISHED off-period is covered by the outage row the board's own return writes | `A_finished_off_period_is_covered_by_the_outage_row_the_boards_return_writes` |
 | A board never heard from was never in service | `A_board_installed_before_the_deadline_and_never_heard_from_waives_the_penalty` |
 | A court with no board of its own is still not dark | `A_court_with_no_box_of_its_own_pays_the_penalty_even_beside_an_out_of_service_box` |
 | A board **registered** after the deadline does not speak for it | `A_box_switched_off_after_the_deadline_does_not_make_its_court_out_of_service` |
