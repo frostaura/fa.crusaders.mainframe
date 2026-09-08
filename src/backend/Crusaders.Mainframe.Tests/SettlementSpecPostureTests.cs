@@ -475,7 +475,9 @@ public sealed class SettlementSpecPostureTests
         var missing = cited.Where(n => !declared.Contains(n)).ToList();
         Assert.True(missing.Count == 0,
             "settlement-model.md pins tests that do not exist: " + string.Join(", ", missing));
+    }
 
+    /// <summary>
     /// The §11 admin-cancellation bullet, as one string. Its whole rule is a single markdown
     /// list item on a single line, so the paragraph can be asserted on as a paragraph rather
     /// than against the whole document — which matters for the negatives below, where a phrase
