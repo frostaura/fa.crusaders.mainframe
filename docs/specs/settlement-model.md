@@ -174,8 +174,7 @@ direction as every other clause in S5a.
 Those two states — a court the club has put no box on, and a court whose boxes are all switched off
 — are told apart by whether a board exists at all on that court, not by a judgement about intent: a
 club with nothing on the court has never asked anyone to check in there, while a club with a
-switched-off board has taken a working door away. (Three paragraphs now sit between this sentence
-and the pair it refers to, so they are named rather than pointed at.)
+switched-off board has taken a working door away.
 
 **But the switch itself does not reach backwards, and the first version of this clause let it.**
 That version said a switched-off board darkens its court from the moment it existed, which read
