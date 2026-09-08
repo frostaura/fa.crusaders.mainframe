@@ -83,6 +83,22 @@ public static class AdminDeviceEndpoints
         };
     }
 
+    /// <summary>
+    /// The admin PATCH. <c>enabled</c> is the one field here that moves money after the fact, and
+    /// it is <b>idempotent on purpose</b>: <c>DeviceRegistryService.UpdateAsync</c> stamps
+    /// <see cref="Device.OutOfServiceSince"/> only on the TRANSITION, so sending
+    /// <c>{"enabled": false}</c> to a board that is already out of service changes nothing.
+    ///
+    /// <para>
+    /// Without that guard a repeat of a request that says nothing new would move the recorded
+    /// switch-off instant forward to now, which pushes every unsettled deadline between the real
+    /// switch-off and the repeat out of <c>DoorWasShutFor</c>'s "dark at once" branch and back
+    /// into the silence test — reopening the <c>offline_after_seconds</c> hole the column was
+    /// added to close, across the sweep's whole lookback. The console happens to send only the
+    /// fields it changed, but this is a documented surface and callers repeat requests. Pinned by
+    /// <c>Taking_a_board_out_of_service_records_the_instant_and_returning_it_clears_it</c>.
+    /// </para>
+    /// </summary>
     private static async Task<IResult> UpdateAsync(
         Guid id, UpdateDeviceRequest req, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
         HttpContext ctx, CancellationToken ct)

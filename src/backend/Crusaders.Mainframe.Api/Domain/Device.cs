@@ -120,11 +120,19 @@ public sealed class Device : ITenantScoped
     ///
     /// <para>
     /// <b>It exists because <see cref="Enabled"/> carries no history, and the money needs one.</b>
-    /// Taking the last board off a court shuts that court's door for good: the API answers 403 on
-    /// every courtside endpoint for a disabled board, so nobody standing there can check in by
-    /// heartbeat, activation, walk-up, PIN, QR or biometric, and
+    /// Taking the last board off a court takes that court's own door away for good:
+    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 for a disabled board on all four
+    /// <c>/api/v1/device/*</c> routes — <c>/heartbeat</c>, <c>/activate</c>, <c>/walkup</c> and
+    /// <c>/events</c> — so the box admits nobody, is no longer sent the roster that says which
+    /// bookings it may open, and can never report anyone who played, and
     /// <c>settlement-model.md</c> S5a waives the no-show penalty for the bookings that fall after
-    /// it. Deciding that from <see cref="Enabled"/> alone answers "was this court shut at <c>T</c>?"
+    /// it. <b>It is the box that is shut, not the court, and this comment said otherwise for two
+    /// rounds</b> — it enumerated "heartbeat, activation, walk-up, PIN, QR or biometric" and the
+    /// last three of those are <c>/api/v1/court/{n}/…</c> routes on the shared courtside terminal,
+    /// which resolve a <c>Courts.CourtNumber</c>, never look at a <see cref="Device"/> row and
+    /// still set <c>CheckedInAt</c>. Why the waiver survives that correction, and what it costs, is
+    /// argued in <c>settlement-model.md</c> S5a rather than asserted here.
+    /// Deciding that from <see cref="Enabled"/> alone answers "was this court shut at <c>T</c>?"
     /// with today's value of a boolean, so one click re-priced every unsettled deadline behind it.
     /// Deciding it from <see cref="LastSeenAt"/> instead — the board's last heartbeat — is not the
     /// same instant: the switch is thrown some seconds or minutes AFTER the last heartbeat, and

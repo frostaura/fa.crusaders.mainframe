@@ -110,9 +110,9 @@ public enum CourtDarkness
 
     /// <summary>
     /// No board in service drove the court, and the hardware that did had already stopped
-    /// answering by that instant. It is switched off now, so the API refuses it on every
-    /// courtside endpoint including <c>/device/events</c> — nothing it holds will ever arrive
-    /// and the settlement is final.
+    /// answering by that instant. It is switched off now, so the API refuses it on all four
+    /// <c>/api/v1/device/*</c> routes, <c>/events</c> included — nothing it holds will ever
+    /// arrive and the settlement is final.
     /// </summary>
     OutOfService = 2,
 }
@@ -178,11 +178,15 @@ public sealed class DeviceOutageIndex
     /// <para>
     /// <b>They are read for one thing: whether the club had hardware on the court that the API
     /// had stopped accepting.</b> A box the API refuses cannot light anything —
-    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 on every courtside endpoint for
-    /// <c>!device.IsActive</c> — so when the LAST box on a court is switched off, that court has
-    /// no working check-in at all and every no-show on it was charged the full 30% for a door the
-    /// club had closed. See <see cref="DarknessAt"/>, which is where the two halves are put back
-    /// together, and <c>A_court_whose_only_box_is_out_of_service_waives_the_penalty</c>.
+    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 for <c>!device.IsActive</c> on all four
+    /// <c>/api/v1/device/*</c> routes — so when the LAST box on a court is switched off, that
+    /// court has no check-in of its own left and every no-show on it was charged the full 30% for
+    /// a door the club had closed. (The shared courtside terminal's own
+    /// <c>/api/v1/court/{n}/…</c> routes are NOT refused — they never resolve a device — which is
+    /// why the waiver is argued in <c>settlement-model.md</c> S5a from what the box can no longer
+    /// do, rather than from a claim that nobody could check in.) See <see cref="DarknessAt"/>,
+    /// which is where the two halves are put back together, and
+    /// <c>A_court_whose_only_box_is_out_of_service_waives_the_penalty</c>.
     /// </para>
     ///
     /// <para>
@@ -445,9 +449,9 @@ public sealed class DeviceOutageIndex
     /// moment that hardware stopped answering.</b> This is the money half of finding M-F3 and it
     /// has now been got wrong in both directions. The out-of-service switch is what an admin uses
     /// on a box that is broken or has been unplugged for good, and the API then refuses that box
-    /// 403 on every courtside endpoint — heartbeat, activate and walkup alike. Take the LAST box
-    /// off a court and nobody standing at it can check in by any means; the first rule read that
-    /// court as "no enabled box, therefore no evidence, therefore not dark" and settled its
+    /// 403 on all four of its own routes — heartbeat, activate, walkup and events alike. Take the
+    /// LAST box off a court and that court has no check-in of its own left; the first rule read
+    /// that court as "no enabled box, therefore no evidence, therefore not dark" and settled its
     /// no-shows at the full 30%, billing the member a penalty for a door the club had closed.
     /// </para>
     ///
@@ -468,8 +472,8 @@ public sealed class DeviceOutageIndex
     /// <see cref="Device.LastSeenAt"/> on a switched-off row as the recorded shadow of the
     /// switch-off — so the court became out of service only once that evidence had run past
     /// <c>offline_after_seconds</c>. The last heartbeat is not the click: the click lands some
-    /// seconds or minutes after it, and for that whole gap the court read Lit while every
-    /// courtside endpoint already answered <c>403</c>. A booking whose grace deadline fell in it
+    /// seconds or minutes after it, and for that whole gap the court read Lit while the board
+    /// itself was already answering <c>403</c>. A booking whose grace deadline fell in it
     /// was settled as an ordinary no-show, penalty and all, and mailed the plain "Missed booking"
     /// notice — for a door an admin had closed a minute earlier.
     /// </para>
@@ -484,7 +488,7 @@ public sealed class DeviceOutageIndex
     /// <c>LastSeenAt</c> instead — the obvious alternative, and the one this file used to
     /// argue for — puts the retroactive switch back for every deadline in
     /// <c>(LastSeenAt, LastSeenAt + offline_after_seconds)</c>. See
-    /// <see cref="DoorWasShutFor"/>, which is where all three parts live. A board that has never
+    /// <see cref="DoorWasShutFor"/>, which is where both parts live. A board that has never
     /// called in at all was never in service, and is a closed door from the moment it existed.
     /// </para>
     ///
@@ -567,11 +571,25 @@ public sealed class DeviceOutageIndex
     ///
     /// <para>
     /// <b>After the switch was thrown, the door is shut, full stop.</b> The club has declared it:
-    /// from that instant the API answers <c>403</c> on every courtside endpoint for this board,
-    /// so nobody standing at the court can check in by any means, and there is nothing left to
-    /// wait <c>offline_after_seconds</c> for. Waiting anyway is not neutral — it charged the
-    /// member the full 30% for a door the club had shut up to three minutes earlier, which is the
-    /// exact direction §6a exists to prevent.
+    /// from that instant the API answers <c>403</c> for this board on all four
+    /// <c>/api/v1/device/*</c> routes, so it admits nobody, is told nothing and reports nothing,
+    /// and there is nothing left to wait <c>offline_after_seconds</c> for. Waiting anyway is not
+    /// neutral — it charged the member the full 30% for a door the club had shut up to three
+    /// minutes earlier, which is the exact direction §6a exists to prevent. The comparison is
+    /// strictly greater-than, so a deadline landing exactly ON the recorded instant is judged by
+    /// the branch below rather than by this one; pinned by
+    /// <c>A_deadline_exactly_on_the_recorded_switch_off_instant_is_judged_by_the_silence_test</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>What that 403 does NOT cover, because this comment claimed it did for two rounds.</b>
+    /// The three <c>/api/v1/court/{n}/…</c> routes — PIN, QR and biometric at the shared courtside
+    /// terminal — resolve a <c>Courts.CourtNumber</c>, never look at a <see cref="Device"/> row,
+    /// and still set <c>CheckedInAt</c>. So a member at a court whose every box is out of service
+    /// can still identify at the terminal, and the sentence "nobody standing at the court can
+    /// check in by any means" was false. The rule below is unchanged by that correction — the
+    /// sweep only ever reaches bookings nobody checked into — but its justification is, and it is
+    /// argued out in <c>settlement-model.md</c> S5a rather than asserted here.
     /// </para>
     ///
     /// <para>
@@ -580,9 +598,15 @@ public sealed class DeviceOutageIndex
     /// service: had it been silent longer than the threshold at that instant. This half is what
     /// keeps the click from re-pricing the past — every deadline that had already passed when the
     /// admin clicked keeps the answer it had before the click, because the same
-    /// <see cref="BoxWasUnreachable"/> call answers it on both sides of the switch. A deadline at
-    /// or before the board's last heartbeat is Lit either way; a deadline the board had genuinely
-    /// gone quiet across is dark either way.
+    /// <see cref="BoxWasUnreachable"/> call answers it on both sides of the switch. A deadline the
+    /// board was answering across is Lit either way; a deadline it had genuinely gone quiet across
+    /// is dark either way — <b>including one that falls BEFORE the board's most recent
+    /// heartbeat</b>, because <see cref="BoxWasUnreachable"/> scans every silence recorded for the
+    /// board, closed <see cref="DeviceOutage"/> rows included, not only the stretch since
+    /// <see cref="Device.LastSeenAt"/>. This comment used to say the opposite — "a deadline at or
+    /// before the board's last heartbeat is Lit either way" — and
+    /// <c>A_board_dark_across_the_deadline_still_waives_it_after_an_admin_switches_it_off</c> was
+    /// green against it the whole time.
     /// </para>
     ///
     /// <para>
