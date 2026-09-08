@@ -166,8 +166,9 @@ chose to make the only route when it threw the switch. And the club holds no evi
 it cannot tell a member who arrived, found a dead box and left from one who never came — while
 S5a's whole direction is that the club carries the cost of its own hardware decision instead of
 billing it at 30%. **The cost of that choice, stated rather than implied:** a member who genuinely
-did not turn up to a court whose boxes are all out of service is waived, because the terminal was
-open to them and the club cannot show they ignored it. It is bounded — it needs *every* box on the
+did not turn up to a court whose boxes are all out of service is waived all the same. The terminal
+was open to them; the club simply has no record of who tried it and who never came, and this rule
+resolves that silence towards the member. It is bounded — it needs *every* box on the
 court switched off, and it reaches only bookings nobody checked into — and it errs in the same
 direction as every other clause in S5a.
 
