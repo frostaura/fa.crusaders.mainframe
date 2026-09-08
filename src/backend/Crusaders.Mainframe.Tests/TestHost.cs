@@ -206,9 +206,39 @@ public sealed class TestHost : IAsyncDisposable
     /// Tests about peak hours should still construct their own times — the point of this is
     /// that tests about <i>anything else</i> stop depending on what time the suite runs.
     /// </para>
+    ///
+    /// <para>
+    /// <b>Only for a club that is still at UTC.</b> The stepping happens on the offset of the
+    /// instant handed in, and <c>UtcNow</c>'s is zero — so a fixture that has moved its club
+    /// (every caller of <see cref="ClearOfClosingAsync"/>) must ask
+    /// <see cref="BookableSlotAt"/> instead, or it is measuring the club's windows on the
+    /// runner's clock.
+    /// </para>
     /// </summary>
     public static DateTimeOffset BookableSlot(double hoursAhead = 2)
         => BookableSlotFrom(DateTimeOffset.UtcNow, hoursAhead);
+
+    /// <summary>
+    /// The same rule for a club that is <b>not</b> at UTC — every window this helper steps
+    /// around is a window in the club's own clock, not in the runner's.
+    ///
+    /// <para>
+    /// <b>This is the second half of the closing-time fix, and leaving it out was a defect
+    /// of its own.</b> <see cref="ClearOfClosingAsync"/> moves a walk-up fixture's club out
+    /// of UTC so a purchase made now is not truncated at local midnight. From that moment
+    /// the club's peak window and the club's midnight are somewhere else in UTC, and a slot
+    /// picked by the overload above — which steps on the offset of the instant it is given,
+    /// zero for <c>UtcNow</c> — lands wherever it lands:
+    /// <c>WalkUpBookingTests.A_walk_up_is_a_lights_purchase_and_a_booked_slot_is_a_booking_charge</c>
+    /// asked for a slot three hours out at 23:50 UTC, got 02:50 UTC — plainly outside
+    /// 16:00–19:00 — and was refused <c>PeakHoursLeagueOnly</c>, because its own fixture had
+    /// just moved the club to UTC+14 and 02:50 UTC is 16:50 there. Fixing one wall-clock
+    /// window by moving the club is how you create the next one.
+    /// </para>
+    /// </summary>
+    public static DateTimeOffset BookableSlotAt(string clubTimezone, double hoursAhead = 2)
+        => BookableSlotFrom(
+            DateTimeOffset.UtcNow, hoursAhead, TimeZoneInfo.FindSystemTimeZoneById(clubTimezone));
 
     /// <summary>
     /// The same rule with the clock passed in, so the fix for a time-dependent test can
@@ -216,13 +246,30 @@ public sealed class TestHost : IAsyncDisposable
     /// happens to run.
     /// </summary>
     public static DateTimeOffset BookableSlotFrom(DateTimeOffset now, double hoursAhead)
+        => BookableSlotFrom(now, hoursAhead, club: null);
+
+    /// <summary>
+    /// <see cref="BookableSlotFrom(DateTimeOffset, double)"/> with both the clock and the
+    /// club passed in — the form the every-minute sweep drives.
+    ///
+    /// <para>
+    /// <paramref name="club"/> <c>null</c> means <b>the offset the value already carries</b>,
+    /// which is the two-argument overload's long-standing contract and one that
+    /// <c>MoneySurfaceTests.A_booking_charges_comment_is_in_the_clubs_wall_clock</c> depends
+    /// on by name: it hands in <c>ConvertTime(UtcNow, Africa/Johannesburg)</c> precisely so
+    /// the stepping happens in SAST. Forcing <see cref="TimeZoneInfo.Utc"/> there instead
+    /// would have measured a SAST club's peak window on the runner's clock — the very defect
+    /// the zone-aware overload exists to remove, reintroduced one file away.
+    /// </para>
+    /// </summary>
+    public static DateTimeOffset BookableSlotFrom(DateTimeOffset now, double hoursAhead, TimeZoneInfo? club)
     {
         var slot = now.AddHours(hoursAhead);
 
         // Step past the window rather than clamping to its edge: a slot starting at 15:59
         // can still END inside peak, and while the rule is evaluated on the start, the
         // intent here is to stay clear of it entirely.
-        while (slot.Hour is >= 15 and < 19) slot = slot.AddHours(1);
+        while (LocalHour(slot, club) is >= 15 and < 19) slot = slot.AddHours(1);
 
         // And clear of the END of the club's day, for the same reason and by the same
         // mistake made once already.
@@ -242,9 +289,16 @@ public sealed class TestHost : IAsyncDisposable
         // book up to four slices (an hour) on one slot and the headroom has to cover the
         // longest of them. One step is always enough: 23:xx + 1h is 00:xx, which is
         // neither peak nor the end of a day.
-        if (slot.Hour == 23) slot = slot.AddHours(1);
+        if (LocalHour(slot, club) == 23) slot = slot.AddHours(1);
         return slot;
     }
+
+    /// <summary>
+    /// The hour <paramref name="at"/> reads as on <paramref name="club"/>'s wall clock, or on
+    /// its own offset when no club is given.
+    /// </summary>
+    private static int LocalHour(DateTimeOffset at, TimeZoneInfo? club)
+        => club is null ? at.Hour : TimeZoneInfo.ConvertTime(at, club).Hour;
 
     /// <summary>
     /// A tenant timezone in which <b>now</b> is comfortably mid-day, so a purchase made AT
@@ -298,14 +352,26 @@ public sealed class TestHost : IAsyncDisposable
     /// <summary>
     /// Moves a club into <see cref="DayZoneFor"/> so a walk-up bought right now is not
     /// truncated at closing time. Everything else about the settings document is untouched.
+    ///
+    /// <para>
+    /// <b>It hands the zone back, and callers are expected to keep it.</b> A club that is no
+    /// longer at UTC has its peak window and its midnight somewhere else in UTC too, so
+    /// every other wall-clock choice the same fixture makes — <see cref="BookableSlotAt"/>,
+    /// an operating-hours window written as a minute-of-day — has to be made in this zone
+    /// rather than in the runner's. Returning it is what lets a caller hold one value
+    /// instead of re-deriving it and getting a different answer a minute later.
+    /// </para>
     /// </summary>
-    public static async Task ClearOfClosingAsync(MainframeDbContext db, Guid tenantId, int minutesNeeded)
+    /// <returns>The tzdb id written to the tenant's settings.</returns>
+    public static async Task<string> ClearOfClosingAsync(MainframeDbContext db, Guid tenantId, int minutesNeeded)
     {
         var row = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(s => s.TenantId == tenantId);
         var settings = JsonNode.Parse(row.SettingsJson)!.AsObject();
-        settings["timezone"] = DayZoneFor(DateTimeOffset.UtcNow, minutesNeeded);
+        var zone = DayZoneFor(DateTimeOffset.UtcNow, minutesNeeded);
+        settings["timezone"] = zone;
         row.SettingsJson = settings.ToJsonString();
         await db.SaveChangesAsync();
+        return zone;
     }
 
     /// <summary>

@@ -34,7 +34,23 @@ public class WalkUpBookingTests
 
     private sealed record Fixture(
         TestHost Host, IServiceScope Scope, BookingService Bookings,
-        LedgerService Ledger, MainframeDbContext Db);
+        LedgerService Ledger, MainframeDbContext Db, string ClubZone)
+    {
+        /// <summary>
+        /// A slot this club will actually sell, chosen in <b>this club's</b> clock.
+        ///
+        /// <para>
+        /// It is a method on the fixture rather than a call to
+        /// <see cref="TestHost.BookableSlot"/> for the reason
+        /// <see cref="TestHost.NowClearOfClosingAsync"/> gives about its own return value: a
+        /// test that picks a slot in one statement and moves the club in another can lose
+        /// the second and still compile. <see cref="CreateAsync"/> moves this club to
+        /// <see cref="ClubZone"/>, and a slot cannot be got from here without it.
+        /// </para>
+        /// </summary>
+        public DateTimeOffset BookableSlot(double hoursAhead = 2) =>
+            TestHost.BookableSlotAt(ClubZone, hoursAhead);
+    }
 
     private static async Task<Fixture> CreateAsync(decimal topUpCredits = 200m)
     {
@@ -56,13 +72,18 @@ public class WalkUpBookingTests
         // three tests in this class assert 60 or 90 minutes and get whatever is left of the
         // local day — green for twenty-three hours out of twenty-four and red for the last
         // one. See TestHost.DayZoneFor.
-        await TestHost.ClearOfClosingAsync(db, host.Tenant.Id, RelayHardCap.Minutes);
+        //
+        // The zone travels on the Fixture because moving the club moves its peak window and
+        // its midnight too: any BOOKING this class makes has to be placed in the club's
+        // clock from here on. Fixture.BookableSlot is that, and it is the only way to ask.
+        var clubZone = await TestHost.ClearOfClosingAsync(db, host.Tenant.Id, RelayHardCap.Minutes);
 
         return new Fixture(
             host, scope,
             scope.ServiceProvider.GetRequiredService<BookingService>(),
             ledger,
-            db);
+            db,
+            clubZone);
     }
 
     /// <summary>
@@ -144,6 +165,102 @@ public class WalkUpBookingTests
                     minuteOfDay + RelayHardCap.Minutes <= 24 * 60,
                     $"a {RelayHardCap.Minutes}-minute walk-up runs past local midnight {where}");
             }
+        }
+    }
+
+    /// <summary>
+    /// The other half of that promise, and the half that was missing: once the club has been
+    /// moved, a <b>booking</b> made by the same fixture has to be placed in the club's clock
+    /// too.
+    ///
+    /// <para>
+    /// <c>A_walk_up_is_a_lights_purchase_and_a_booked_slot_is_a_booking_charge</c> asked
+    /// <see cref="TestHost.BookableSlot"/> for a slot three hours out and was refused
+    /// <c>PeakHoursLeagueOnly</c> — reproduced on the base commit at 23:50 UTC on
+    /// 2026-09-07. 23:50 + 3h is 02:50 UTC, which no UTC peak window contains; but
+    /// <see cref="CreateAsync"/> had moved this club to UTC+14 to keep the walk-up clear of
+    /// closing, and 02:50 UTC is 16:50 there. The club's own peak window is where the slot
+    /// has to be measured, and <see cref="TestHost.DayZoneFor"/> chooses a different zone
+    /// every few hours, so the offending combination arrives and leaves on its own.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>This one is not the thirty-minute window the other five share, and it is worth
+    /// saying so because <c>memory/gotchas.md</c> lists all six together.</b> Driven at every
+    /// hour with a synthetic clock, the base commit is red at 23:0x, 00:0x and 01:0x and
+    /// green at the other twenty-one — three whole hours, because at UTC+14 those are the
+    /// UTC hours whose three-hour-ahead slot lands in 16:00–19:00 local. It is a different
+    /// mechanism (the club's peak window) from the other five (the club's midnight), and it
+    /// arrives and leaves as <see cref="TestHost.DayZoneFor"/> changes zone.
+    /// </para>
+    ///
+    /// <para>
+    /// Every minute rather than every hour, and both distances the class asks for, because
+    /// the helper's second clause is wider than the rule it protects: it steps out of local
+    /// hour 23 entirely, and the violations of THAT clause sit at 06:00–10:00 UTC where a
+    /// 15-minute booking still fits before midnight and nothing goes red. Sweeping the
+    /// helper's own promise rather than one caller's consequence is what makes those visible.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void A_slot_picked_for_a_moved_club_is_never_inside_that_clubs_peak_or_its_last_hour()
+    {
+        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        for (var minute = 0; minute < 24 * 60; minute++)
+        {
+            var now = midnight.AddMinutes(minute);
+            var zoneId = TestHost.DayZoneFor(now, RelayHardCap.Minutes);
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(zoneId);
+
+            foreach (var hoursAhead in new[] { 2d, 3d })
+            {
+                var slot = TestHost.BookableSlotFrom(now, hoursAhead, zone);
+                var local = TimeZoneInfo.ConvertTime(slot, zone);
+                var where = $"(UTC {now:HH:mm} + {hoursAhead}h -> {slot:HH:mm}Z, {zoneId} local {local:HH:mm})";
+
+                Assert.True(
+                    local.Hour is < 15 or >= 19,
+                    $"the slot is inside the club's own 16:00-19:00 peak window {where}");
+
+                // Callers book up to an hour on one slot, so the last local hour is out for
+                // the same reason the club-less overload keeps out of it.
+                Assert.True(local.Hour != 23, $"the slot runs into the club's own midnight {where}");
+
+                Assert.True(slot > now, $"a bookable slot is in the future {where}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The two-argument <see cref="TestHost.BookableSlotFrom(DateTimeOffset, double)"/> steps
+    /// clear of peak <b>in whatever offset it is handed</b>, and that contract has a caller.
+    ///
+    /// <para>
+    /// <c>MoneySurfaceTests.A_booking_charges_comment_is_in_the_clubs_wall_clock</c> moves its
+    /// club to Africa/Johannesburg and hands this helper
+    /// <c>ConvertTime(UtcNow, Africa/Johannesburg)</c> for exactly that reason — its own
+    /// comment says a UTC-chosen slot is peak at a SAST club and cost it two red hours a day.
+    /// Nothing pinned the contract, so adding the zone-aware overload beside it was one line
+    /// away from measuring a SAST club's peak window on the runner's clock and re-creating
+    /// that flake in a file nobody was looking at. This is that pin, swept over every minute
+    /// of the day so it is red at any hour rather than at the unlucky ones.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void A_slot_chosen_in_a_clubs_own_offset_stays_out_of_that_clubs_peak()
+    {
+        var club = TimeZoneInfo.FindSystemTimeZoneById("Africa/Johannesburg");
+        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+
+        for (var minute = 0; minute < 24 * 60; minute++)
+        {
+            var clubNow = TimeZoneInfo.ConvertTime(midnight.AddMinutes(minute), club);
+            var slot = TestHost.BookableSlotFrom(clubNow, 2);
+            var local = TimeZoneInfo.ConvertTime(slot, club);
+            var where = $"(UTC {midnight.AddMinutes(minute):HH:mm} -> SAST {local:HH:mm})";
+
+            Assert.True(local.Hour is < 15 or >= 19, $"the slot is inside the club's peak window {where}");
+            Assert.True(local.Hour != 23, $"the slot runs into the club's own midnight {where}");
         }
     }
 
@@ -437,7 +554,7 @@ public class WalkUpBookingTests
 
         var booked = Assert.IsType<BookingResult.Ok>(await f.Bookings.CreateAsync(
             f.Host.Courts[1].Id, f.Host.PlayerUser.Id, f.Host.PlayerUser.Id,
-            TestHost.BookableSlot(3), sliceCount: 1, default));
+            f.BookableSlot(3), sliceCount: 1, default));
 
         var walkUpEntry = Assert.Single(await f.Db.LedgerEntries
             .Where(l => l.RelatedBookingId == walkUp.Booking.Id).ToListAsync());
@@ -486,7 +603,7 @@ public class WalkUpBookingTests
 
         var refused = Assert.IsType<BookingResult.InvalidDuration>(await f.Bookings.CreateAsync(
             f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.PlayerUser.Id,
-            TestHost.BookableSlot(3), sliceCount, default));
+            f.BookableSlot(3), sliceCount, default));
 
         Assert.Equal(sliceCount, refused.RequestedSlices);
         Assert.Empty(await f.Db.Bookings.ToListAsync());
@@ -506,7 +623,7 @@ public class WalkUpBookingTests
 
         var refused = Assert.IsType<BookingResult.InvalidDuration>(await f.Bookings.CreateAsync(
             f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.AdminUser.Id,
-            TestHost.BookableSlot(3), sliceCount: 97, default));
+            f.BookableSlot(3), sliceCount: 97, default));
 
         Assert.Equal(96, refused.MaxSlices);
         Assert.Empty(await f.Db.Bookings.ToListAsync());

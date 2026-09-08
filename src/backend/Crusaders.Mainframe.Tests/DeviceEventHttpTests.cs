@@ -44,27 +44,50 @@ public sealed class DeviceEventHttpTests
     private const string ActivatePath = "/api/v1/device/activate";
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
 
+    /// <param name="Timezone">
+    /// The tzdb id <see cref="SeedAsync"/> put this club in. It is <b>not</b> UTC, so
+    /// anything in this class that reasons about a minute-of-day has to convert through it
+    /// rather than reading the runner's clock — <see cref="CloseTheClubAsync"/> is the one
+    /// place that does, and it carries the measurement of how much that currently matters.
+    /// </param>
     private sealed record Box(
         Guid DeviceId, string Mac, string ApiKey, Guid TenantId, string Slug, Guid CourtId, Guid MemberId,
-        IReadOnlyDictionary<int, Guid> CourtIds);
-
-    /// <summary>Moves a seeded club clear of its own closing time; see <see cref="TestHost.DayZoneFor"/>.</summary>
-    private static async Task ClearOfClosingAsync(TestWebAppFactory factory, Guid tenantId, int minutesNeeded)
-    {
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        await TestHost.ClearOfClosingAsync(db, tenantId, minutesNeeded);
-    }
+        IReadOnlyDictionary<int, Guid> CourtIds, string Timezone);
 
     private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
 
-    /// <summary>A tenant, a funded member, and a claimed box driving <paramref name="courtNumbers"/> (court 1 alone by default).</summary>
+    /// <summary>
+    /// A tenant, a funded member, and a claimed box driving <paramref name="courtNumbers"/>
+    /// (court 1 alone by default).
+    ///
+    /// <para>
+    /// <b>The club is seeded into a zone where its own day still has room, not into UTC.</b>
+    /// A walk-up is sold from <c>BookingService</c>'s own <c>UtcNow</c> and truncated at the
+    /// club's closing time, which every fixture here puts at local midnight — so a club at
+    /// UTC sells whatever is left of the UTC day instead of the thirty minutes asked for, and
+    /// five tests in this class went red together at 23:50 UTC on 2026-09-07 on an untouched
+    /// base commit (eight minutes granted for 4.27 credits, a minute later, against the 30
+    /// and 16.00 they assert). Moving the club is the only lever: the purchase happens now and cannot
+    /// be moved. <see cref="TestHost.DayZoneFor"/> picks a zone that leaves the whole relay
+    /// hard cap plus an hour at each end, so no walk-up this class can ask for reaches
+    /// closing time at any hour of any day.
+    /// </para>
+    ///
+    /// <para>
+    /// It is done <b>here</b>, in the one place every club in this class is built (the only
+    /// <c>db.Tenants.Add</c> in the file), rather than test by test: <b>four of the five that
+    /// failed never read a clock at all</b> — only
+    /// <c>A_walk_up_is_truncated_at_the_next_booking_and_charged_pro_rata</c> names
+    /// <c>UtcNow</c> — and the next walk-up test written would not have named one either.
+    /// </para>
+    /// </summary>
     private static async Task<Box> SeedAsync(TestWebAppFactory factory, decimal topUpCredits = 200m, int[]? courtNumbers = null)
     {
         courtNumbers ??= [1];
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await db.Database.MigrateAsync();
+        var timezone = TestHost.DayZoneFor(DateTimeOffset.UtcNow, RelayHardCap.Minutes);
 
         var slug = $"box-{Guid.NewGuid():N}"[..20];
         var tenant = new Tenant
@@ -78,7 +101,7 @@ public sealed class DeviceEventHttpTests
         db.TenantSettings.Add(new TenantSettings
         {
             TenantId = tenant.Id,
-            SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"grace_window_minutes":5,"timezone":"UTC","peak_hours":"16:00-19:00"}""",
+            SettingsJson = $$"""{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"grace_window_minutes":5,"timezone":"{{timezone}}","peak_hours":"16:00-19:00"}""",
         });
 
         var courts = courtNumbers
@@ -127,7 +150,7 @@ public sealed class DeviceEventHttpTests
         await db.SaveChangesAsync();
 
         return new Box(device.Id, mac, tenant.DeviceApiKey!, tenant.Id, slug, courts[0].Id, member.Id,
-            courts.ToDictionary(c => c.CourtNumber, c => c.Id));
+            courts.ToDictionary(c => c.CourtNumber, c => c.Id), timezone);
     }
 
     /// <summary>
@@ -430,6 +453,179 @@ public sealed class DeviceEventHttpTests
         // exists on the server rather than on the box.
         Assert.Equal(20, body.GetProperty("granted_minutes").GetInt32());
         Assert.Equal(10.67m, body.GetProperty("amount_credits").GetDecimal());
+    }
+
+    /// <summary>
+    /// The zone <see cref="SeedAsync"/> puts a club in is the whole reason the walk-up tests
+    /// in this class are not a lottery, and nothing asserted that it happens.
+    ///
+    /// <para>
+    /// It is written to fail at <b>every</b> hour rather than only at the unlucky ones, the
+    /// same way <c>WalkUpBookingTests.Clearing_the_club_of_closing_actually_writes_the_zone</c>
+    /// is: the old seed wrote the literal <c>"UTC"</c> and
+    /// <see cref="TestHost.DayZoneFor"/> never returns that string — its zero-offset answer
+    /// is the tzdb id <c>Etc/UTC</c>. So a revert to the old literal is red at noon, not
+    /// just at ten to midnight, which is the difference between a pin and a coin toss.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_seeded_club_sits_where_a_full_walk_up_still_fits_before_it_closes()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var written = JsonNode
+            .Parse((await db.TenantSettings.IgnoreQueryFilters().SingleAsync(t => t.TenantId == box.TenantId))
+                .SettingsJson)!["timezone"]!.GetValue<string>();
+
+        Assert.NotEqual("UTC", written);
+        Assert.Equal(box.Timezone, written);
+
+        // Read back through the tzdb, not through DayZoneFor's own arithmetic: Etc/GMT+n is
+        // UTC MINUS n, and a helper with that sign inverted would agree with itself.
+        var local = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(written));
+        var minuteOfDay = (local.Hour * 60) + local.Minute;
+        Assert.InRange(minuteOfDay, 60, (24 * 60) - RelayHardCap.Minutes - 60);
+    }
+
+    /// <summary>
+    /// Closing time truncates a walk-up and the price follows it, pinned on purpose instead
+    /// of being met once a day by accident.
+    ///
+    /// <para>
+    /// <b>The rule had a test; the money did not.</b>
+    /// <c>OperatingHoursTests.A_walk_up_is_truncated_at_closing_time_rather_than_selling_the_night</c>
+    /// proves the truncation at the service level, in a window of "roughly ten minutes", with
+    /// <c>Assert.InRange(minutes, 1, 11)</c> and no assertion about price at all. What was
+    /// untested is the pair the box actually receives — <c>granted_minutes</c> and
+    /// <c>amount_credits</c> together, over HTTP, against a named closing instant. Five tests
+    /// in this class met that pair by accident: they asserted a
+    /// figure and got what was left of the club's day instead, for the last half-hour of
+    /// every UTC day. At 23:51 UTC on 2026-09-07 the box sold eight minutes for 4.27 credits,
+    /// and the failures read as four unrelated bugs: a balance of 195.73 against an expected
+    /// 184, a grant of 8 against 30, a grant of 8 against 20, and a member with 5 credits
+    /// being SOLD a court the test expects to be refused — because 4.27 is inside 5.00. Not
+    /// one of them named closing time. <see cref="SeedAsync"/> now keeps
+    /// them away from closing time, so this is the test that says what happens when a
+    /// purchase genuinely does reach it, and it says so at every hour: the club's closing
+    /// minute is set relative to the club's own current minute, so "closes in twenty
+    /// minutes" means that whenever the suite runs.
+    /// </para>
+    ///
+    /// <para>
+    /// The granted figure is allowed one minute of width because the boundary is sub-minute
+    /// and <c>day_end_minute</c> can only be a whole minute: the sale is floored to whole
+    /// minutes and closing time lands part-way through one, so a window of twenty grants
+    /// nineteen or twenty depending on where in the minute the request arrives. The <b>price
+    /// is not</b> — it is asserted exactly against the minutes actually granted, which is
+    /// where the money is, and against the closing instant the booking was cut to.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The expectation is measured, not assumed, and that is the second time this fixture
+    /// taught the same lesson.</b> Written against the <c>closesInMinutes</c> constant, this
+    /// test went red once in a twenty-four-run synthetic-clock sweep — the (30, 60) case, on
+    /// a loaded machine, granted 28 because more than a minute of wall clock passed between
+    /// <see cref="CloseInAsync"/> setting the window and the request reaching the handler. It
+    /// was green because the machine was fast, which is the same defect as being green
+    /// because of the hour. It now reads the clock immediately before the request and expects
+    /// what was actually left at that instant.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(150, 90)]   // the whole hard cap fits: nothing is truncated
+    [InlineData(120, 30)]
+    [InlineData(31, 30)]    // one minute of headroom: still the full sale
+    [InlineData(30, 60)]    // 16.00 credits
+    [InlineData(20, 60)]    // 10.67 — the figure the pro-rata tests above assert
+    [InlineData(7, 30)]     // 3.73
+    public async Task A_walk_up_is_truncated_at_closing_time_and_charged_pro_rata(int closesInMinutes, int requestedMinutes)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var closesAt = await CloseInAsync(factory, box, closesInMinutes);
+        var client = factory.CreateClient();
+        var payload = WalkUp(await QrCodeAsync(factory, box), minutes: requestedMinutes);
+
+        // Everything slow is now behind us; whatever is left of the window at THIS instant is
+        // what the sale may be worth.
+        var askedAt = DateTimeOffset.UtcNow;
+        var response = await client.SendAsync(FromBox(box, WalkUpPath, payload));
+
+        var windowMinutes = (int)Math.Floor((closesAt - askedAt).TotalMinutes);
+        Assert.True(
+            windowMinutes >= 1,
+            $"the fixture took longer to set up than the {closesInMinutes}-minute window it was setting up");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var granted = body.GetProperty("granted_minutes").GetInt32();
+        var truncated = windowMinutes <= requestedMinutes;
+
+        if (truncated)
+        {
+            Assert.InRange(granted, windowMinutes - 1, windowMinutes);
+        }
+        else
+        {
+            Assert.Equal(requestedMinutes, granted);
+        }
+
+        // 8 credits per 15 minutes, rounded the way the ledger rounds.
+        Assert.Equal(
+            Math.Round(8m * granted / 15m, 2, MidpointRounding.AwayFromZero),
+            body.GetProperty("amount_credits").GetDecimal());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var booking = await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.UserId == box.MemberId);
+
+        // Cut to CLOSING TIME specifically, not merely to something short: a booking that
+        // ended anywhere else would satisfy the minute count above just as well.
+        if (truncated)
+        {
+            Assert.InRange(booking.EndsAt, closesAt.AddMinutes(-1), closesAt);
+        }
+        else
+        {
+            Assert.True(booking.EndsAt < closesAt, "an untruncated sale still ends before the club closes");
+        }
+    }
+
+    /// <summary>
+    /// Shuts the club <paramref name="minutes"/> from now, measured on the CLUB's clock, and
+    /// hands back the instant it will shut at.
+    ///
+    /// <para>
+    /// Closing time is the lever rather than the timezone because it moves in whole minutes:
+    /// a zone can only place the club on the hour, and the sub-minute distance to closing is
+    /// exactly what the truncation arithmetic is about.
+    /// </para>
+    /// </summary>
+    private static async Task<DateTimeOffset> CloseInAsync(TestWebAppFactory factory, Box box, int minutes)
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(box.Timezone);
+        var local = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone);
+        var closeMinute = (local.Hour * 60) + local.Minute + minutes;
+        Assert.InRange(closeMinute, 1, 24 * 60);   // SeedAsync's zone is what guarantees this
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var row = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(t => t.TenantId == box.TenantId);
+        var settings = JsonNode.Parse(row.SettingsJson)!.AsObject();
+        settings["day_end_minute"] = closeMinute;
+        row.SettingsJson = settings.ToJsonString();
+        await db.SaveChangesAsync();
+
+        var midnightUtc = TimeZoneInfo.ConvertTimeToUtc(
+            DateTime.SpecifyKind(local.Date, DateTimeKind.Unspecified), zone);
+        return new DateTimeOffset(midnightUtc, TimeSpan.Zero).AddMinutes(closeMinute);
     }
 
     /// <summary>
@@ -1637,12 +1833,11 @@ public sealed class DeviceEventHttpTests
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
         await using var factory = CreateFactory();
+        // This test buys a full hour from the service's own UtcNow, and the club's day ends
+        // at local midnight — so it needs the room SeedAsync's zone leaves in front of it
+        // (RelayHardCap.Minutes plus an hour of slack). It used to ask for that separately,
+        // which was the only place in this class that did.
         var box = await SeedAsync(factory);
-        // The club's day ends at local midnight, and this test buys a full hour from the
-        // service's own UtcNow — so run it in a zone where that hour fits. See
-        // TestHost.DayZoneFor: without it this asserts 60 granted minutes and gets whatever
-        // was left of the local day, for the last hour of every day.
-        await ClearOfClosingAsync(factory, box.TenantId, 60);
         var client = factory.CreateClient();
         var nonce = Guid.NewGuid().ToString("N")[..16];
         var request = WalkUp(await QrCodeAsync(factory, box), minutes: 60, court: 1, nonce: nonce);
@@ -2238,10 +2433,33 @@ public sealed class DeviceEventHttpTests
     /// which the operating-hours rule cannot express anyway. Returns what the API should
     /// quote back.
     /// </para>
+    ///
+    /// <para>
+    /// <b>The minute-of-day is the CLUB's, not the runner's.</b> <c>day_start_minute</c> and
+    /// <c>day_end_minute</c> are read against <c>settings.timezone</c>, and
+    /// <see cref="SeedAsync"/> no longer leaves that at UTC — so a window chosen from
+    /// <c>DateTimeOffset.UtcNow</c> is chosen against the wrong day the moment the two clocks
+    /// disagree. That is the trap <c>memory/gotchas.md</c> names: every fixture that pinned
+    /// <c>"timezone":"UTC"</c> has to move with the club.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It is not, today, a live defect, and the honest reason is worth writing down.</b>
+    /// Substituting the runner's clock back in was run as a mutation and
+    /// <c>A_walk_up_at_a_closed_club_is_refused_with_the_opening_hours</c> stayed green — because
+    /// <see cref="SeedAsync"/>'s zone pins the club's local minute-of-day between 60 and
+    /// <c>1440 - RelayHardCap.Minutes - 60</c> = 1290, and both candidate windows (0–60 and
+    /// 1380–1440) sit outside that band, so the club comes out shut either way. The club is
+    /// therefore closed by the band's arithmetic rather than by this method's, and the band is
+    /// a number someone will change; measuring the club's own clock is what makes it not
+    /// depend on that. No test goes red if this line is reverted — see the residue.
+    /// </para>
     /// </summary>
     private static async Task<(string OpensAt, string ClosesAt)> CloseTheClubAsync(TestWebAppFactory factory, Box box)
     {
-        var minuteOfDay = (DateTimeOffset.UtcNow.Hour * 60) + DateTimeOffset.UtcNow.Minute;
+        var local = TimeZoneInfo.ConvertTime(
+            DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(box.Timezone));
+        var minuteOfDay = (local.Hour * 60) + local.Minute;
         var (open, close) = minuteOfDay >= 720 ? (0, 60) : (1380, 1440);
 
         using var scope = factory.Services.CreateScope();
