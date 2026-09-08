@@ -405,8 +405,13 @@ public sealed class SettlementSpecPostureTests
     public void The_feature_spec_names_the_switch_off_column_the_way_the_schema_does()
     {
         var feature = FeatureSpec().ReplaceLineEndings("\n").Replace("\n", " ");
-        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(
-            feature, System.Text.RegularExpressions.Regex.Escape("`devices.OutOfServiceSince`")).Count);
+        // Anchored on each site's own surrounding words rather than on a count, so a third
+        // mention added later does not red this spuriously — the claim is "both places name it
+        // correctly", not "it appears exactly twice".
+        Assert.Contains(
+            "recorded in its own column** (`devices.OutOfServiceSince`, stamped by " +
+            "`DeviceRegistryService.UpdateAsync`", feature);
+        Assert.Contains("recorded on the row as `devices.OutOfServiceSince`", feature);
         Assert.DoesNotContain("out_of_service_since", feature);
         Assert.DoesNotContain("out_of_service_since", SettlementModel());
     }
