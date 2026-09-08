@@ -386,7 +386,9 @@ public sealed class SettlementSpecPostureTests
     {
         var settlement = SettlementModel().ReplaceLineEndings("\n").Replace("\n", " ");
         Assert.Contains("`DeviceSilenceLog.NoteHeartbeat`", settlement);
-        Assert.Contains("So the recorded silence is **wider** than the off-period", settlement);
+        Assert.Contains(
+            "So the recorded silence is **never narrower than the off-period, and normally wider**",
+            settlement);
         Assert.Contains(
             "`A_finished_off_period_is_covered_by_the_outage_row_the_boards_return_writes`",
             settlement);

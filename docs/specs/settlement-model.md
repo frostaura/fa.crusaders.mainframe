@@ -232,8 +232,10 @@ has ended. Something else does, and this paragraph argued from the opposite prem
 `DeviceSilenceLog.NoteHeartbeat` writes a closed `DeviceOutage` on the first heartbeat after the
 board is switched back on, whenever that heartbeat lands more than `offline_after_seconds` after
 `LastSeenAt` — and `LastSeenAt` is still the last heartbeat *before* the switch was thrown, because
-a disabled board was refused in between. So the recorded silence is **wider** than the off-period:
-it starts at that last pre-switch heartbeat and ends when the board came back.
+a disabled board was refused in between. So the recorded silence is **never narrower than the
+off-period, and normally wider**: it starts at that last pre-switch heartbeat rather than at the
+click — the two coincide only if the switch was thrown on a heartbeat — and it ends when the board
+came back.
 
 An unsettled deadline inside a *finished* off-period is therefore judged by that recorded silence,
 exactly as an enabled board's would be, and the gap this leaves is narrower than "off-periods
