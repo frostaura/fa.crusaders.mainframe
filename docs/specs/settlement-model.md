@@ -134,17 +134,48 @@ phrase literally would waive every no-show at a club that has not installed a bo
 **A court whose boxes have ALL been switched out of service is a different state, and it IS dark.**
 This sentence used to read "a court no enabled box drives is not dark", full stop, and in that
 form it cost members money. `Enabled` is not a filter on evidence when it is the last box on the
-court: the API refuses a disabled box `403` on every courtside endpoint (`DeviceIdentity.ResolveAsync`
-on `!device.IsActive`), so once an admin takes the last box off a court, nobody standing at that
-court can check in by heartbeat, activation, walk-up, PIN, QR or biometric — and the sweep settled
-those bookings as ordinary no-shows carrying the full `penalty_pct`. That is a member billed 30%
-for a door the club shut, which is the exact direction S5a exists to prevent. The out-of-service
-switch reached a screen for the first time in finding M-F3, so the state went from unreachable to
-one confirm-click away in the same change.
+court: `DeviceIdentity.ResolveAsync` refuses a disabled board `403` on all four
+`/api/v1/device/*` routes — `/heartbeat`, `/activate`, `/walkup` and `/events` — so once an admin
+takes the last box off a court, that box admits nobody, is no longer sent the roster that says
+which bookings it may open, and can never hand the club what it is holding. The sweep nevertheless
+settled those bookings as ordinary no-shows carrying the full `penalty_pct`. That is a member
+billed 30% for a door the club shut, which is the exact direction S5a exists to prevent. The
+out-of-service switch reached a screen for the first time in finding M-F3, so the state went from
+unreachable to one confirm-click away in the same change.
 
-The two are told apart by whether a board exists at all on that court, not by a judgement about
-intent: a club with nothing on the court has never asked anyone to check in there, while a club
-with a switched-off board has taken a working door away.
+**The door is not shut everywhere, and this document said for two rounds that it was.** The
+withdrawn claim was that *every courtside endpoint* answers `403` from the click, and one grep
+disproves it: `grep -rn '"/api/v1/court' src/backend/Crusaders.Mainframe.Api --include="*.cs"`
+returns `PinEndpoints.cs`, `QrEndpoints.cs` and `BiometricEndpoints.cs`, and none of those three
+files mentions `Devices`, `Enabled` or `IsActive` at all. `/api/v1/court/{n}/pin/match`,
+`/api/v1/court/{n}/qr/match` and `/api/v1/court/{n}/biometric/match` resolve a `Courts.CourtNumber`,
+authenticate as the shared courtside terminal's `admin` role rather than as a box, and set
+`CheckedInAt` through `CourtActivationService.ActivateAsync` exactly as they did before the switch
+was thrown. `feature-spec.md` §6a puts the biometric reader on the on-site machine, not on the
+board. **So three of the six ways in survive the switch**, and the enumeration "heartbeat,
+activation, walk-up, PIN, QR or biometric" that this document, `Device.cs` and the waiver mail all
+carried was wrong in its last three terms.
+
+**The waiver still stands, and this is the argument rather than the assertion.** The sweep only
+reaches bookings with `CheckedInAt == null` (`NoShowWorker`'s due predicate), so the question is
+never "could this member have checked in somewhere" but "nobody did, and who carries it". Three
+things decide it for the member. The club has taken the door away *at the court*: the box's
+buttons, its scan, its walk-up and its `/activate` are all refused, and it is not even told which
+bookings exist any more. What is left is a different machine in a different place, which the club
+chose to make the only route when it threw the switch. And the club holds no evidence either way —
+it cannot tell a member who arrived, found a dead box and left from one who never came — while
+S5a's whole direction is that the club carries the cost of its own hardware decision instead of
+billing it at 30%. **The cost of that choice, stated rather than implied:** a member who genuinely
+did not turn up to a court whose boxes are all out of service is waived all the same. The terminal
+was open to them; the club simply has no record of who tried it and who never came, and this rule
+resolves that silence towards the member. It is bounded — it needs *every* box on the
+court switched off, and it reaches only bookings nobody checked into — and it errs in the same
+direction as every other clause in S5a.
+
+Those two states — a court the club has put no box on, and a court whose boxes are all switched off
+— are told apart by whether a board exists at all on that court, not by a judgement about intent: a
+club with nothing on the court has never asked anyone to check in there, while a club with a
+switched-off board has taken a working door away.
 
 **But the switch itself does not reach backwards, and the first version of this clause let it.**
 That version said a switched-off board darkens its court from the moment it existed, which read
@@ -164,38 +195,61 @@ The switch lands some seconds or minutes *after* the board's last heartbeat, and
 it is up to a heartbeat cadence wide, and a grace deadline inside it is priced one way if the gap
 is read as "still in service" and the other way if it is read as "already switched off".
 
-**So the rule is three parts, and each is answered from evidence that existed at the instant asked
-about.** For a switched-off board and a deadline `D`, with the switch thrown at `S`:
+**So the rule is two parts, one on each side of the click, and each is answered from evidence that
+existed at the instant asked about.** For a switched-off board and a deadline `D`, with the switch
+thrown at `S`:
 
 | | |
 | --- | --- |
-| `D` at or before the board's last heartbeat | **Lit.** The board answered the API then; there is positive proof it was in service. |
-| `D` after that heartbeat but at or before `S` | **Judged by `offline_after_seconds`**, the same test, the same strictly-greater comparison and the same reading of `DeviceOutage` rows an *enabled* board gets. The board was in service at `D`; the click had not happened. |
-| `D` after `S` | **Out of service, at once.** The club has declared the door shut — every courtside endpoint answers `403` from that instant — so there is no ambiguity left to wait `offline_after_seconds` for. |
+| `D` at or before `S` | **Judged by `offline_after_seconds`**, the same test, the same strictly-greater comparison and the same reading of `DeviceOutage` rows an *enabled* board gets. The board was in service at `D`; the click had not happened. |
+| `D` after `S` | **Out of service, at once.** The club has declared the door shut and the board itself is refused `403` on all four `/api/v1/device/*` routes from that instant, so there is no ambiguity left to wait `offline_after_seconds` for. Strictly greater-than: a deadline landing exactly on `S` is on the near side and is judged by the row above. |
 
-The middle row is the whole of "the switch does not reach backwards": the same `BoxWasUnreachable`
+**The first row is not "Lit", and an earlier version of this table said it was.** That version split
+it in two and called everything at or before the board's last heartbeat Lit — "positive proof it
+was in service". There is no such proof. `BoxWasUnreachable` reads *every* silence recorded for the
+board, closed `DeviceOutage` rows included, so a deadline the board was genuinely dark across is
+dark here even when it falls before the board's most recent heartbeat: that is exactly what
+`A_board_dark_across_the_deadline_still_waives_it_after_an_admin_switches_it_off` sets up (last
+heartbeat 30 minutes ago, a recorded outage from 70 to 30 minutes ago, a deadline at 55 minutes
+ago) and it asserts a full refund with no penalty. The rule has one test on each side of the click
+and no third case; the last heartbeat is an input to that test, not a case of its own.
+
+The first row is the whole of "the switch does not reach backwards": the same `BoxWasUnreachable`
 call answers a past deadline on both sides of the click, so throwing the switch cannot change a
-price that had already been decided. The bottom row is the half that was missing. Bounding the
+price that had already been decided. The second row is the half that was missing. Bounding the
 branch by the board's silence instead — the rule that shipped — left the court reading **Lit** for
-up to `offline_after_seconds` (180 s at the shipped default) after the click, while every courtside
-endpoint already refused it: a member standing at a court the club had switched off a minute
-earlier was charged the full `penalty_pct` and mailed the plain no-show notice. Bounding it at
+up to `offline_after_seconds` (180 s at the shipped default) after the click, while the board
+itself was already refused on every route it calls: a member whose court the club had switched off
+a minute earlier was charged the full `penalty_pct` and mailed the plain no-show notice. Bounding it at
 `LastSeenAt` exactly — the other obvious candidate — closes that and reopens the retroactive
 switch for every deadline in `(LastSeenAt, LastSeenAt + offline_after_seconds)`. Both were run: with
 the second rule in place a sixty-second-old deadline moved from `97.60` to `100.00` on the click
 alone and the whole backend suite stayed green. Only the recorded instant answers both.
 
 **What the column cannot carry, stated rather than implied.** It is one instant, not a history.
-Putting a board back in service clears it, so an off-period that has ended leaves no record of when
-it began — and `PeripheralHealthWorker` does not alert on a disabled board, so no `DeviceOutage`
-row covers it either. An unsettled deadline inside a *finished* off-period is therefore judged by
-the board's silence across it, which reads dark whenever that period exceeded
-`offline_after_seconds` and Lit when it did not. That is a known gap in the club's favour for
-off-periods shorter than the threshold, and it is the price of one column instead of a table.
+Putting a board back in service clears it, so *the column* leaves no record of an off-period that
+has ended. Something else does, and this paragraph argued from the opposite premise for a round:
+`PeripheralHealthWorker` never opens a row for a disabled board, but the board's own return does.
+`DeviceSilenceLog.NoteHeartbeat` writes a closed `DeviceOutage` on the first heartbeat after the
+board is switched back on, whenever that heartbeat lands more than `offline_after_seconds` after
+`LastSeenAt` — and `LastSeenAt` is still the last heartbeat *before* the switch was thrown, because
+a disabled board was refused in between. So the recorded silence is **never narrower than the
+off-period, and normally wider**: it starts at that last pre-switch heartbeat rather than at the
+click — the two coincide only if the switch was thrown on a heartbeat — and it ends when the board
+came back.
+
+An unsettled deadline inside a *finished* off-period is therefore judged by that recorded silence,
+exactly as an enabled board's would be, and the gap this leaves is narrower than "off-periods
+shorter than the threshold". What still reads Lit is a deadline less than `offline_after_seconds`
+after the board's **last pre-switch heartbeat** — which covers the whole of a short off-period, and
+covers a longer one only in its opening minutes, or entirely if the board came back before the
+total silence crossed the threshold at all, in which case no row is written. It is a known gap in
+the club's favour and it is the price of one column instead of a table. Pinned by
+`A_finished_off_period_is_covered_by_the_outage_row_the_boards_return_writes`.
 
 `DeviceOutageIndex.CourtWasDark` therefore answers **dark** when every enabled box driving the
 court was past the threshold at the deadline, **or** when no enabled box drove it and every
-out-of-service board that did had its door shut then by the three-part rule above; and **not dark**
+out-of-service board that did had its door shut then by the two-part rule above; and **not dark**
 when a reachable enabled box drove it, when the last board on it was still in service and being
 heard from at that instant, or when the club has no board on it at all.
 `DeviceOutageIndex.DarknessAt` returns which of the two dark states it was, because they do not
@@ -221,10 +275,14 @@ out-of-service notice says the refund is final and sends the member to the desk.
 **The out-of-service notice no longer opens "No court box was answering", and recording the
 switch-off instant is what made that sentence false.** A court is out of service from the click,
 so the board this mail is sent about may have been answering perfectly a minute before the grace
-window closed — it was simply switched off. What holds in both halves of the state is that no
-check-in on that court could have reached the club: before the click because the board had gone
-quiet past the threshold, after it because the API refuses the board outright. That is what the
-sentence says now. Every sentence in both mails is pinned to the letter by
+window closed — it was simply switched off. What holds in both halves of the state is a claim
+about the **box**, not about the court: it could not open the court and it will never report
+anyone who played — before the click because it had gone quiet past the threshold, after it
+because the API refuses it outright. That is what the sentence says now, and it is deliberately
+narrower than the sentence it replaced, which said that no check-in on that court could have
+reached the club. That one was false: the courtside terminal is not the box and was never refused
+(see "The door is not shut everywhere" above), so a mail claiming it was told a member something
+untrue about what they could have done. Every sentence in both mails is pinned to the letter by
 `Every_sentence_of_the_out_of_service_waiver_mail` and `Every_sentence_of_the_outage_waiver_mail`,
 because a verifier inverted four of this template's five sentences — "Penalty: None" to "Penalty:
 30% of the booking" among them — with the whole backend suite green.
@@ -244,13 +302,16 @@ the section as a whole:
 | A court whose only box is out of service **is** dark | `A_court_whose_only_box_is_out_of_service_waives_the_penalty` |
 | …from the instant the switch was thrown, with no waiting period | `A_court_is_out_of_service_from_the_instant_the_switch_was_thrown`, row `-90` |
 | …and not one second before it: a deadline already past when the switch was thrown keeps its price | the same theory, row `-30` |
+| …and not one TICK before it: a deadline landing exactly on `S` is on the near side | `A_deadline_exactly_on_the_recorded_switch_off_instant_is_judged_by_the_silence_test` |
 | …and the member inside that window gets the waiver mail, not the no-show notice | `The_member_inside_that_window_gets_the_waiver_mail_and_not_the_no_show_notice` |
 | The instant is stamped on the switch and cleared on the way back in | `Taking_a_board_out_of_service_records_the_instant_and_returning_it_clears_it` |
+| …and a repeated `enabled:false` on an already-disabled board does not move it | the same test, its fourth step |
 | A switched-off row with no recorded instant falls back to its silence alone | `A_switched_off_row_with_no_recorded_instant_is_judged_by_its_silence_alone` |
 | Deadlines before the switch are judged by the board's silence, both ways | `A_switch_off_darkens_only_the_deadlines_the_board_had_already_gone_quiet_for` |
 | …so a board still heart-beating when it was switched off does not waive an older deadline | `A_court_whose_only_box_was_just_switched_off_still_charges_the_older_deadline` |
 | …not even hardened with a silence on both sides of it | `A_switched_off_board_heard_from_on_both_sides_of_the_deadline_does_not_waive_it` |
 | …and a real outage keeps its waiver once the club switches the board off | `A_board_dark_across_the_deadline_still_waives_it_after_an_admin_switches_it_off` |
+| A FINISHED off-period is covered by the outage row the board's own return writes | `A_finished_off_period_is_covered_by_the_outage_row_the_boards_return_writes` |
 | A board never heard from was never in service | `A_board_installed_before_the_deadline_and_never_heard_from_waives_the_penalty` |
 | A court with no board of its own is still not dark | `A_court_with_no_box_of_its_own_pays_the_penalty_even_beside_an_out_of_service_box` |
 | A board **registered** after the deadline does not speak for it | `A_box_switched_off_after_the_deadline_does_not_make_its_court_out_of_service` |

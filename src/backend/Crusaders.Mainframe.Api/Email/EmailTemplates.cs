@@ -709,8 +709,8 @@ public static class EmailTemplates
     /// It exists because of one sentence the outage notice makes and this one cannot: "the box
     /// uploads its record when it reconnects and the booking settles as attended". That is the
     /// S6 reversal, and it is real while the board is in service. A board an admin has taken out
-    /// of service is refused 403 on every courtside endpoint, <c>/device/events</c> among them,
-    /// so nothing it is holding will ever be accepted and the settlement cannot be reversed by
+    /// of service is refused 403 on all four <c>/api/v1/device/*</c> routes, <c>/events</c> among
+    /// them, so nothing it is holding will ever be accepted and the settlement cannot be reversed by
     /// the box. Repeating the promise here would tell a member who did get onto the court to
     /// wait for a correction that is not coming, and send them to the desk a week later instead
     /// of today.
@@ -722,15 +722,26 @@ public static class EmailTemplates
     /// </para>
     ///
     /// <para>
-    /// <b>The opening sentence used to say "No court box was answering on {court} during your
-    /// booking", and recording the switch-off instant made that false.</b> A court is now out of
-    /// service from the click, not from the point the board's silence passed
-    /// <c>offline_after_seconds</c> — so the board this mail is sent about may have been
-    /// answering perfectly a minute before the grace window closed, and was simply switched off.
-    /// What holds in both cases is that no check-in on that court could have reached the club:
-    /// before the click because the board had gone quiet past the threshold, after it because
-    /// the API refuses the board outright. That is what the sentence says now. See
-    /// <c>DeviceOutageIndex.DoorWasShutFor</c>, and
+    /// <b>The opening sentence has now been wrong twice, in two different ways, and this is the
+    /// second correction.</b> It first said "No court box was answering on {court} during your
+    /// booking", which recording the switch-off instant made false: a court is out of service from
+    /// the click, not from the point the board's silence passed <c>offline_after_seconds</c>, so
+    /// the board this mail is sent about may have been answering perfectly a minute before the
+    /// grace window closed and was simply switched off. Its replacement said that <i>no check-in
+    /// on that court could have reached the club</i>, and that is false too: the three
+    /// <c>/api/v1/court/{n}/…</c> routes — PIN, QR and biometric at the shared courtside terminal
+    /// — resolve a <c>Courts.CourtNumber</c>, never look at a device row, and still set
+    /// <c>CheckedInAt</c>. Telling a member that nothing they did could have reached the club is
+    /// telling them something untrue about their own evening.
+    /// </para>
+    ///
+    /// <para>
+    /// So the sentence now claims only what is true of the BOX, which is the thing the club
+    /// actually switched off: it could not open the court, and it will never report anyone who
+    /// played. Both halves are the same 403 on the four <c>/api/v1/device/*</c> routes, and the
+    /// second is what earns the "this refund is final" sentence below. Why the waiver is right
+    /// even though the terminal stayed open is argued in <c>settlement-model.md</c> S5a, not here.
+    /// See <c>DeviceOutageIndex.DoorWasShutFor</c>, and
     /// <c>Every_sentence_of_the_out_of_service_waiver_mail</c>, which pins each sentence here.
     /// </para>
     /// </summary>
@@ -742,7 +753,7 @@ public static class EmailTemplates
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">Your booking has been refunded in full</h2>
-              <p>Nobody checked in on <strong>{System.Net.WebUtility.HtmlEncode(courtName)}</strong> at {System.Net.WebUtility.HtmlEncode(clubName)} during your booking, and no check-in on that court could have reached the club if they had: its box is out of service.</p>
+              <p>Nobody checked in on <strong>{System.Net.WebUtility.HtmlEncode(courtName)}</strong> at {System.Net.WebUtility.HtmlEncode(clubName)} during your booking, and the box on that court is out of service — it could not open the court, and it will never send the club a record of anyone who played.</p>
               <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Refunded</td><td><strong>{Cr(refundedCredits)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Penalty</td><td><strong>None</strong></td></tr>

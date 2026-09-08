@@ -864,13 +864,17 @@ public class PeripheralHealthTests
     /// switch could not ship with the copy it shipped with.
     ///
     /// <para>
-    /// A disabled box is refused 403 on every courtside endpoint —
+    /// A disabled box is refused 403 on all four <c>/api/v1/device/*</c> routes —
     /// <c>DeviceIdentity.ResolveAsync</c> on <c>!device.IsActive</c>, with
-    /// <c>Device.IsActive =&gt; Enabled</c> — so once the only box on a court is switched off
-    /// nobody standing at that court can check in by heartbeat, activation, walk-up, PIN, QR or
-    /// biometric. There is no path left. The sweep nevertheless read the court as "no enabled
-    /// box, therefore no evidence, therefore not dark" and settled the booking as an ordinary
-    /// no-show: refunded, less the full 30%.
+    /// <c>Device.IsActive =&gt; Enabled</c> — so once the only box on a court is switched off that
+    /// court has no check-in of its own left: the box admits nobody, is no longer sent the roster
+    /// that says which bookings it may open, and can never report anyone who played. (It is the
+    /// BOX that is shut, not the court: the shared courtside terminal's own
+    /// <c>/api/v1/court/{n}/…</c> PIN, QR and biometric routes never resolve a device row and are
+    /// not refused. This comment said otherwise for two rounds; why the waiver survives that
+    /// correction is argued in <c>settlement-model.md</c> S5a.) The sweep nevertheless read the
+    /// court as "no enabled box, therefore no evidence, therefore not dark" and settled the
+    /// booking as an ordinary no-show: refunded, less the full 30%.
     /// </para>
     ///
     /// <para>
@@ -1158,8 +1162,8 @@ public class PeripheralHealthTests
     /// <para>
     /// The outage notice promises "the box uploads its record when it reconnects and the booking
     /// settles as attended". For a board an admin has taken out of service that promise cannot be
-    /// kept — the API answers 403 on every courtside endpoint, including <c>/device/events</c>,
-    /// so nothing it holds will ever arrive and the refund is final. A member who did play and
+    /// kept — the API answers 403 on all four <c>/api/v1/device/*</c> routes, <c>/events</c>
+    /// included, so nothing it holds will ever arrive and the refund is final. A member who did play and
     /// who sits waiting for the reversal that sentence describes is being told to wait for
     /// something that is not coming, which is the same class of defect as a false sentence.
     /// </para>
@@ -1489,9 +1493,9 @@ public class PeripheralHealthTests
     /// deadline fell one minute ago — sixty seconds of silence, well inside
     /// <c>offline_after_seconds</c> (180 s at the shipped default). The rule this replaces
     /// bounded the out-of-service branch at that threshold, so a court an admin had switched off
-    /// read <b>Lit</b> for up to three minutes after the click while every courtside endpoint
-    /// already answered 403. A member standing at that court could not check in by heartbeat,
-    /// activation, walk-up, PIN, QR or biometric, and was charged the full 30% and mailed the
+    /// read <b>Lit</b> for up to three minutes after the click while the board itself already
+    /// answered 403 on all four of its own routes. A member at that court could not check in at
+    /// the box by any means, and was charged the full 30% and mailed the
     /// plain "Missed booking" notice for it — the exact direction <c>feature-spec.md</c> §6a
     /// exists to prevent, and proved end to end on a live stack before this test existed.
     /// </para>
@@ -1647,8 +1651,148 @@ public class PeripheralHealthTests
         await registry.UpdateAsync(box, new UpdateDeviceCommand("Renamed", null, null), host.AdminUser.Id, default);
         Assert.Equal(stamped, box.OutOfServiceSince);
 
+        // And so does a REPEAT of the switch-off itself, which is the guard
+        // (`enabled != device.Enabled`) rather than the stamp. The step above cannot see it:
+        // it sends `Enabled = null`, so the guard is never reached. Removing the guard leaves
+        // the whole suite green while an idempotent `PATCH {"enabled": false}` on an already
+        // disabled board re-stamps the instant to now — which moves every unsettled deadline
+        // between the real switch-off and the repeat out of the "dark at once" branch and back
+        // into the silence test, reopening the `offline_after_seconds` hole this column exists
+        // to close, across the sweep's whole lookback. The console happens not to send a
+        // redundant `enabled`, but the admin API is a documented surface.
+        await Task.Delay(5);
+        await registry.UpdateAsync(box, new UpdateDeviceCommand(null, false, null), host.AdminUser.Id, default);
+        Assert.Equal(stamped, box.OutOfServiceSince);
+
         await registry.UpdateAsync(box, new UpdateDeviceCommand(null, true, null), host.AdminUser.Id, default);
         Assert.Null(box.OutOfServiceSince);
+    }
+
+    /// <summary>
+    /// <b>The boundary the whole out-of-service rule turns on, one tick wide.</b>
+    /// <c>DoorWasShutFor</c> compares <c>instant &gt; switchedOffAt</c>, strictly — so a deadline
+    /// landing EXACTLY on the recorded switch-off instant is on the near side of the click and is
+    /// judged by the board's own silence, and a deadline one tick later is out of service at once.
+    ///
+    /// <para>
+    /// It is here because weakening that comparison to <c>&gt;=</c> reddened nothing: an
+    /// independent verifier ran the mutation across the whole backend suite and only the
+    /// pre-existing wall-clock flake failed. One instant is a small amount of money, but it is the
+    /// boundary both specs state ("strictly greater-than: a deadline landing exactly on `S` is on
+    /// the near side"), and an unpinned boundary is how a strictly-greater comparison quietly
+    /// becomes an inclusive one.
+    /// </para>
+    ///
+    /// <para>
+    /// Both rows sit sixty seconds after the board's last heartbeat, well inside
+    /// <c>offline_after_seconds</c>, so the silence test alone answers "reachable" for both and
+    /// the only thing that moves the price is which side of the switch the deadline falls on.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(0, 97.60)]    // the deadline IS the switch-off instant — near side, penalty stands
+    [InlineData(-1, 100.00)]  // one tick later than the switch — out of service, waived
+    public async Task A_deadline_exactly_on_the_recorded_switch_off_instant_is_judged_by_the_silence_test(
+        long switchTicksBeforeDeadline, decimal expectedBalance)
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        var now = DateTimeOffset.UtcNow;
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+
+        var booking = await AddDueBookingAsync(host, db, startsAt: now.AddMinutes(-6));
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // The instant the sweep will ask about, computed the way the sweep computes it.
+        var deadline = booking.StartsAt.AddMinutes(settings.GraceWindowMinutes);
+
+        await AddBoxAsync(host, db, now.AddMinutes(-2), enabled: false,
+            installedAt: now.AddDays(-30), outOfServiceSince: deadline.AddTicks(switchTicksBeforeDeadline));
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(expectedBalance, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var rows = await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync();
+        Assert.Equal(expectedBalance == 97.60m, rows.Any(l => l.Type == LedgerEntryType.NoShowPenalty));
+    }
+
+    /// <summary>
+    /// <b>A FINISHED off-period does leave a record, and <c>settlement-model.md</c> S5a argued the
+    /// opposite for a round.</b> That paragraph said "putting a board back in service clears the
+    /// column, and <c>PeripheralHealthWorker</c> does not alert on a disabled board, so no
+    /// <c>DeviceOutage</c> row covers it either". The first half is true and the second is not:
+    /// the health sweep cannot open a row for a disabled board, but the board's own RETURN writes
+    /// one. <c>DeviceSilenceLog.NoteHeartbeat</c> records a closed outage whenever the first
+    /// heartbeat back lands more than <c>offline_after_seconds</c> after <c>LastSeenAt</c> — and
+    /// <c>LastSeenAt</c> is still the last heartbeat BEFORE the switch was thrown, because the
+    /// board was refused in between.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// So the recorded silence is WIDER than the off-period: it starts at that last pre-switch
+    /// heartbeat, not at the click. What that leaves uncovered is narrower than the spec used to
+    /// claim — not "off-periods shorter than the threshold" but "deadlines less than
+    /// <c>offline_after_seconds</c> after the last pre-switch heartbeat" — and the paragraph now
+    /// says so. This test is what makes it a claim anything can fail on.
+    /// </para>
+    /// <para>
+    /// The board is back IN service by the time the sweep runs, and <c>OutOfServiceSince</c> is
+    /// null, so nothing in the out-of-service branch is answering here: the waiver is carried by
+    /// the outage row alone. Fixture variation that says so — move the recorded silence's start to
+    /// after the deadline and the member pays the 30% instead.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_finished_off_period_is_covered_by_the_outage_row_the_boards_return_writes()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var registry = scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
+        var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        var offlineAfter = HeartbeatCadence.OfflineAfterSeconds(settings.HeartbeatSeconds);
+        var now = DateTimeOffset.UtcNow;
+
+        // The deadline sits 55 minutes ago, inside the off-period below.
+        var deadline = now.AddMinutes(-55);
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(
+            host, db, startsAt: deadline.AddMinutes(-settings.GraceWindowMinutes));
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // Last heard from 70 minutes ago; the admin then takes it out of service and, later,
+        // puts it back. The column carries nothing about the finished off-period afterwards.
+        var box = await AddBoxAsync(host, db, now.AddMinutes(-70), installedAt: now.AddDays(-30));
+        await registry.UpdateAsync(box, new UpdateDeviceCommand(null, false, null), host.AdminUser.Id, default);
+        await registry.UpdateAsync(box, new UpdateDeviceCommand(null, true, null), host.AdminUser.Id, default);
+        Assert.Null(box.OutOfServiceSince);
+        Assert.Empty(await db.DeviceOutages.IgnoreQueryFilters().ToListAsync());
+
+        // The board calls in again. This is the whole of the correction: the row is written now,
+        // for a period during which the board was switched off, by the heartbeat that ends it.
+        DeviceSilenceLog.NoteHeartbeat(db, box, now, offlineAfter);
+        await db.SaveChangesAsync();
+
+        var recorded = Assert.Single(await db.DeviceOutages.IgnoreQueryFilters().ToListAsync());
+        Assert.Equal(now.AddMinutes(-70), recorded.StartedAt);
+        Assert.Equal(now, recorded.EndedAt);
+        Assert.True(recorded.StartedAt < deadline && deadline < recorded.EndedAt,
+            "the recorded silence must span the deadline inside the finished off-period");
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        Assert.DoesNotContain(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == booking.Id).ToListAsync(),
+            l => l.Type == LedgerEntryType.NoShowPenalty);
     }
 
     // ----- the two waiver mails, sentence by sentence ----------------------------------
@@ -1684,9 +1828,20 @@ public class PeripheralHealthTests
         Assert.Contains("Your booking has been refunded in full", mail.HtmlBody);
         Assert.Contains(
             "Nobody checked in on <strong>Court 4</strong> at Crusaders Squash Club during your " +
-            "booking, and no check-in on that court could have reached the club if they had: its " +
-            "box is out of service.",
+            "booking, and the box on that court is out of service — it could not open the court, " +
+            "and it will never send the club a record of anyone who played.",
             mail.HtmlBody);
+
+        // The claim this sentence is NOT allowed to make any more, asserted absent as well as
+        // replaced. Its two predecessors both said something false about the COURT rather than
+        // about the box — "No court box was answering", then "no check-in on that court could
+        // have reached the club" — and the second survived a whole round pinned to the letter,
+        // which made the false sentence harder to remove rather than easier. The courtside
+        // terminal's PIN, QR and biometric routes never resolve a device row and are not refused,
+        // so a member at a court whose every box is out of service CAN still identify; the waiver
+        // is argued from what the box can no longer do (settlement-model.md S5a).
+        Assert.DoesNotContain("could have reached the club", mail.HtmlBody);
+        Assert.DoesNotContain("No court box was answering", mail.HtmlBody);
         Assert.Contains(">Refunded</td><td><strong>8.00 credits</strong>", mail.HtmlBody);
         Assert.Contains(">Penalty</td><td><strong>None</strong>", mail.HtmlBody);
         Assert.Contains(

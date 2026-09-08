@@ -157,18 +157,31 @@ public sealed class SettlementSpecPostureTests
     /// switched-off row" — was the one the shipped code was written from, and it was false in a
     /// way that cost members money: the switch lands after the board's last heartbeat, not on it,
     /// so bounding the branch by the board's silence left the court reading Lit for up to
-    /// `offline_after_seconds` after the click while every courtside endpoint already answered
-    /// 403. Restoring that sentence would authorise the defect again, so it is asserted absent as
+    /// `offline_after_seconds` after the click while the board itself was already answering 403 on
+    /// every route it calls. Restoring that sentence would authorise the defect again, so it is asserted absent as
     /// well as replaced — the same shape as
     /// <see cref="The_withdrawn_few_minutes_claim_does_not_come_back"/>.
     /// </para>
     ///
     /// <para>
-    /// The three-part rule is pinned row by row rather than as a summary, because the middle row
-    /// is the one a reader is most likely to drop as redundant and it is the whole of "the switch
-    /// does not reach backwards": bounding at the recorded instant ALONE, with no silence test
-    /// behind it, re-prices every deadline in `(LastSeenAt, LastSeenAt + offline_after_seconds)`
-    /// on the click.
+    /// The rule is pinned row by row rather than as a summary, because the first row is the one a
+    /// reader is most likely to drop as redundant and it is the whole of "the switch does not
+    /// reach backwards": bounding at the recorded instant ALONE, with no silence test behind it,
+    /// re-prices every deadline in `(LastSeenAt, LastSeenAt + offline_after_seconds)` on the
+    /// click.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The table had three rows for a round and one of them was false.</b> It split the first
+    /// row in two and called everything at or before the board's last heartbeat "Lit — positive
+    /// proof it was in service". The code does not do that: `DoorWasShutFor` falls through to
+    /// `BoxWasUnreachable`, which scans every recorded silence including closed `DeviceOutage`
+    /// rows earlier than `LastSeenAt`, and
+    /// `A_board_dark_across_the_deadline_still_waives_it_after_an_admin_switches_it_off` is a
+    /// green test in this repository whose deadline sits before its board's last heartbeat and
+    /// which asserts a full refund. The spec said Lit, the ledger said dark, and both were green
+    /// because nothing read that row. The withdrawn wording is asserted absent as well as
+    /// replaced.
     /// </para>
     /// </summary>
     [Fact]
@@ -181,6 +194,27 @@ public sealed class SettlementSpecPostureTests
             "**It is not `LastSeenAt`, and this document said for one round that it was.**", settlement);
         Assert.Contains("**Judged by `offline_after_seconds`**", settlement);
         Assert.Contains("**Out of service, at once.**", settlement);
+
+        // Two rows, one on each side of the click — not three, and the first one is not "Lit".
+        Assert.Contains(
+            "**So the rule is two parts, one on each side of the click", settlement);
+        Assert.Contains(
+            "**The first row is not \"Lit\", and an earlier version of this table said it was.**",
+            settlement);
+        Assert.Contains(
+            "`A_board_dark_across_the_deadline_still_waives_it_after_an_admin_switches_it_off`",
+            settlement);
+        Assert.DoesNotContain("**So the rule is three parts", settlement);
+        Assert.DoesNotContain(
+            "| `D` at or before the board's last heartbeat | **Lit.**", settlement);
+        Assert.DoesNotContain("there is positive proof it was in service", settlement);
+
+        // The boundary the rule turns on, stated in the spec because the comparison itself was
+        // unguarded: weakening `instant > switchedOffAt` to `>=` reddened nothing until
+        // A_deadline_exactly_on_the_recorded_switch_off_instant_is_judged_by_the_silence_test.
+        Assert.Contains(
+            "a deadline landing exactly on `S` is on the near side and is judged by the row above",
+            settlement);
 
         // The withdrawn sentence. It reads as a settled fact and is the one the shipped defect
         // was written from.
@@ -281,5 +315,160 @@ public sealed class SettlementSpecPostureTests
             "**The column is a closed marker with one owner, not a note field and not dead schema.**",
             settlement);
         Assert.Contains("an admin cancelling on a member's behalf does not, and must not", settlement);
+    }
+
+    /// <summary>
+    /// <b>The waiver's justification, which was false in both specs and in the mail it explains.</b>
+    ///
+    /// <para>
+    /// Three documents and one user-visible sentence claimed that once the last box on a court is
+    /// switched off "every courtside endpoint answers 403" and "nobody standing there can check in
+    /// by heartbeat, activation, walk-up, PIN, QR or biometric". One grep disproves it:
+    /// <c>grep -rn '"/api/v1/court' src/backend/Crusaders.Mainframe.Api --include="*.cs"</c>
+    /// returns <c>PinEndpoints.cs</c>, <c>QrEndpoints.cs</c> and <c>BiometricEndpoints.cs</c>, and
+    /// none of the three mentions <c>Devices</c>, <c>Enabled</c> or <c>IsActive</c> — they resolve
+    /// a <c>Courts.CourtNumber</c>, authenticate as the shared courtside terminal's admin role and
+    /// still set <c>CheckedInAt</c>. Three of the six named ways in survive the switch.
+    /// </para>
+    ///
+    /// <para>
+    /// The rule did not change; its justification did, and a money oracle that argues from a false
+    /// premise is what the next fixer re-derives the rule from. So the spec now narrows the claim
+    /// to the four <c>/api/v1/device/*</c> routes, states plainly that the door is not shut
+    /// everywhere, and ARGUES the waiver instead of asserting it — including the cost of keeping
+    /// it. This pins all three, and asserts the withdrawn claims absent so they cannot be restored
+    /// with every gate green, which is exactly what happened to their predecessor.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Both_specs_narrow_the_403_claim_to_the_boxs_own_routes_and_argue_the_waiver()
+    {
+        var settlement = SettlementModel().ReplaceLineEndings("\n").Replace("\n", " ");
+        Assert.Contains(
+            "**The door is not shut everywhere, and this document said for two rounds that it was.**",
+            settlement);
+        Assert.Contains(
+            "**The waiver still stands, and this is the argument rather than the assertion.**",
+            settlement);
+        Assert.Contains("**The cost of that choice, stated rather than implied:**", settlement);
+        Assert.Contains("`/api/v1/court/{n}/pin/match`", settlement);
+        Assert.Contains("`CheckedInAt == null`", settlement);
+
+        // The withdrawn claims. Both read as settled fact and both were pinned to the letter
+        // while being false, which made them harder to remove rather than easier.
+        Assert.DoesNotContain(
+            "every courtside endpoint answers `403` from that instant", settlement);
+        Assert.DoesNotContain(
+            "nobody standing at that court can check in by heartbeat, activation, walk-up, PIN, " +
+            "QR or biometric", settlement);
+
+        var feature = FeatureSpec().ReplaceLineEndings("\n").Replace("\n", " ");
+        Assert.Contains("**It is the box that is shut, not the court**", feature);
+        Assert.DoesNotContain(
+            "on every courtside endpoint and nobody standing there can check in by any means",
+            feature);
+        Assert.DoesNotContain("nobody standing there can check in by any means", feature);
+    }
+
+    /// <summary>
+    /// <b>What a finished off-period leaves behind, which this spec argued backwards.</b> The
+    /// paragraph said "`PeripheralHealthWorker` does not alert on a disabled board, so no
+    /// `DeviceOutage` row covers it either". The premise is true and the conclusion does not
+    /// follow: <c>DeviceSilenceLog.NoteHeartbeat</c> writes a closed row on the board's first
+    /// heartbeat AFTER it is put back in service, starting at the last heartbeat before the switch
+    /// — so the recorded silence is wider than the off-period, and the gap the paragraph described
+    /// is narrower than it stated. Pinned in behaviour by
+    /// <c>A_finished_off_period_is_covered_by_the_outage_row_the_boards_return_writes</c>; this is
+    /// the pin on the sentence, which had none of its own.
+    /// </summary>
+    [Fact]
+    public void The_settlement_model_says_what_actually_records_a_finished_off_period()
+    {
+        var settlement = SettlementModel().ReplaceLineEndings("\n").Replace("\n", " ");
+        Assert.Contains("`DeviceSilenceLog.NoteHeartbeat`", settlement);
+        Assert.Contains(
+            "So the recorded silence is **never narrower than the off-period, and normally wider**",
+            settlement);
+        Assert.Contains(
+            "`A_finished_off_period_is_covered_by_the_outage_row_the_boards_return_writes`",
+            settlement);
+        Assert.DoesNotContain("so no `DeviceOutage` row covers it either", settlement);
+    }
+
+    /// <summary>
+    /// <b>The column the spec names is the column that exists.</b> §8b called it
+    /// <c>out_of_service_since</c> — a name that, before this fix, appeared exactly once in the
+    /// whole repository: in that sentence. (Grep it today and the only hits are in this file,
+    /// which asserts it absent from both specs.) The column is <c>OutOfServiceSince</c>,
+    /// PascalCase like every other column on
+    /// <c>devices</c>, and the same document had it right eighty lines earlier at §6a, where it was
+    /// pinned. A spec identifier nothing reads is one a reader cannot resolve and a fixer will
+    /// "correct" the code towards.
+    /// </summary>
+    [Fact]
+    public void The_feature_spec_names_the_switch_off_column_the_way_the_schema_does()
+    {
+        var feature = FeatureSpec().ReplaceLineEndings("\n").Replace("\n", " ");
+        // Anchored on each site's own surrounding words rather than on a count, so a third
+        // mention added later does not red this spuriously — the claim is "both places name it
+        // correctly", not "it appears exactly twice".
+        Assert.Contains(
+            "recorded in its own column** (`devices.OutOfServiceSince`, stamped by " +
+            "`DeviceRegistryService.UpdateAsync`", feature);
+        Assert.Contains("recorded on the row as `devices.OutOfServiceSince`", feature);
+        Assert.DoesNotContain("out_of_service_since", feature);
+        Assert.DoesNotContain("out_of_service_since", SettlementModel());
+    }
+
+    /// <summary>
+    /// <b>Every test the settlement model's pin tables name is a test that exists.</b>
+    ///
+    /// <para>
+    /// This document holds its rules together with tables of the form
+    /// <c>| clause | `Test_name` |</c>, and it has already shipped a row whose pin was a test
+    /// about a different fact — "A board switched off after the deadline does not speak for it",
+    /// pinned against a test that varies <c>installedAt</c>. That one was a wrong pin rather than
+    /// a missing one, which no mechanical check can catch. A pin that names a test which no
+    /// longer exists CAN be caught, and it is the cheaper half of the same failure: a rename in
+    /// the test project leaves the table pointing at nothing, silently, with every gate green,
+    /// and the next reader concludes the clause is unguarded — or worse, that it is guarded.
+    /// </para>
+    ///
+    /// <para>
+    /// Only table rows are read, not the prose: the narrative deliberately quotes WITHDRAWN test
+    /// names when it explains what a rule used to be, and those must not resolve. The count
+    /// assertion is there because a regex that stops matching is a gate that always passes, which
+    /// this repository has shipped three times.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Every_test_the_settlement_models_pin_tables_name_exists()
+    {
+        var cited = new SortedSet<string>();
+        foreach (var row in SettlementModel().ReplaceLineEndings("\n").Split('\n')
+                     .Where(l => l.StartsWith('|')))
+        {
+            foreach (System.Text.RegularExpressions.Match m in
+                     System.Text.RegularExpressions.Regex.Matches(
+                         row, "`([A-Z][A-Za-z0-9]*(?:_[A-Za-z0-9]+){3,})`"))
+            {
+                cited.Add(m.Groups[1].Value);
+            }
+        }
+
+        // A gate that reads nothing is a gate that cannot fail. The tables carried 26 names when
+        // this was written; the floor is deliberately loose so removing a clause does not red it.
+        Assert.True(cited.Count >= 20, $"only {cited.Count} pins were read out of the tables");
+
+        var declared = typeof(SettlementSpecPostureTests).Assembly.GetTypes()
+            .SelectMany(t => t.GetMethods(
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly))
+            .Select(m => m.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var missing = cited.Where(n => !declared.Contains(n)).ToList();
+        Assert.True(missing.Count == 0,
+            "settlement-model.md pins tests that do not exist: " + string.Join(", ", missing));
     }
 }
