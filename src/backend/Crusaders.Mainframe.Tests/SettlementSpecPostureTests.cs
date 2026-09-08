@@ -397,8 +397,10 @@ public sealed class SettlementSpecPostureTests
 
     /// <summary>
     /// <b>The column the spec names is the column that exists.</b> §8b called it
-    /// <c>out_of_service_since</c> — a name that appeared exactly once in the whole repository, in
-    /// that sentence. The column is <c>OutOfServiceSince</c>, PascalCase like every other column on
+    /// <c>out_of_service_since</c> — a name that, before this fix, appeared exactly once in the
+    /// whole repository: in that sentence. (Grep it today and the only hits are in this file,
+    /// which asserts it absent from both specs.) The column is <c>OutOfServiceSince</c>,
+    /// PascalCase like every other column on
     /// <c>devices</c>, and the same document had it right eighty lines earlier at §6a, where it was
     /// pinned. A spec identifier nothing reads is one a reader cannot resolve and a fixer will
     /// "correct" the code towards.
