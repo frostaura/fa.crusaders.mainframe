@@ -7,7 +7,7 @@ last_verified: 2026-09-11
 
 # Gotchas — this machine and this iCloud checkout
 
-Verified on the founder's Mac 2026-09-11: system `python3` is 3.9.6, `/bin/bash` is 3.2, `uv` and a system `dotnet` are present, and `src/iot/.venv/bin/pio` exists.
+Verified on the founder's Mac 2026-09-11: the system `python3` is below gcovr's 3.10 floor, `uv` and a system `dotnet` are present, and `src/iot/.venv/bin/pio` exists.
 - **A checkout under a dot-directory boots the API with no `appsettings.json`, and re-breaks
   mid-run.** Every file in a `.claude/worktrees/<name>` worktree inherits the BSD `hidden` flag from
   `.claude/`, and .NET's `PhysicalFileProvider` silently excludes hidden files — so the API dies on
@@ -40,11 +40,11 @@ Verified on the founder's Mac 2026-09-11: system `python3` is 3.9.6, `/bin/bash`
   iCloud path — the sources carry the protected `com.apple.provenance` xattr, and MSBuild's copy is
   denied on *create* but succeeds on *overwrite*. Recovery: `cp` the two files into each project's
   `bin/Debug/net10.0/` once, then rerun. Plain `cp` and CI on ubuntu are unaffected.
-- **`make install` dies here on the system python.** `gcovr` needs ≥3.10 and system `python3` is 3.9
-  (so is Xcode's), so the venv is created and the requirements install fails, leaving no `pio`.
+- **`make install` dies here on the system python.** `gcovr` needs ≥3.10 and the system `python3` is below that
+  floor (so is Xcode's), so the venv is created and the requirements install fails, leaving no `pio`.
   Recovery: `rm -rf src/iot/.venv && uv venv --python 3.12 src/iot/.venv`, then install the pinned
   requirements into it. CI uses setup-python 3.12 and is unaffected.
-- **`tools/strict_compile.sh` cannot run on macOS at all** — `/bin/bash` is 3.2 (no `mapfile`) and
+- **`tools/strict_compile.sh` cannot run on macOS at all** — macOS's `/bin/bash` predates `mapfile`, and
   Apple clang flags dozens of *untouched* headers the GNU-calibrated gate does not. Discharge it by
   hand-compiling each touched `lib/` file with the script's exact flag set; **the CI `iot` job is
   the real gate.** Do not "fix" it for clang — that is still not the compiler it was calibrated on.

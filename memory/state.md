@@ -42,11 +42,14 @@ is written anywhere. Image-build and Portainer jobs are gated on `push` to `main
 pull-request run skips them: **the release half of the chain has never executed once.** Docker Hub
 credentials are set; the four Portainer secrets are not ([`watch.md`](watch.md)).
 
-**The launch bar (working set, agreed 2026-07-24 and never revised).** 100% of bookings through the system within
-60 days of launch, no parallel WhatsApp or paper · ≥95% of lights-on events matching a valid booking, <2% disputed
-penalties · ≥70% of active members holding positive credit · a second club onboarded end to end in under 2
-operator-hours · ≥99.5% uptime in club hours with graceful biometric degradation. Acceptance is social — *"the
-committee says 'this is now how we run the courts.'"* Nothing instruments any of it yet.
+**The launch bar** — working set, agreed 2026-07-24 and never revised. Nothing instruments any of it yet:
+
+- 100% of bookings through the system within 60 days of launch, with no parallel WhatsApp or paper
+- ≥95% of lights-on events matching a valid booking, and <2% disputed penalties
+- ≥70% of active members holding positive credit
+- a second club onboarded end to end in under two operator-hours
+- ≥99.5% uptime in club hours, degrading gracefully when biometrics are unavailable
+- acceptance is social: *"the committee says 'this is now how we run the courts.'"*
 
 **What stands between here and a lit court at Crusaders** is founder and committee work, not code: the relay safety
 question ([`safety-relays.md`](safety-relays.md)), committee sign-off on charge-at-booking, PayFast production
