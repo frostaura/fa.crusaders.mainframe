@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-state
-description: "Product work on claude/e2e-fix-programme is pushed and its last CI run (2026-09-08) passed; the unpushed tip deletes four tracked docs. PR #2 is a draft, so the release half has never executed. No hardware, no deploy, no paying club."
+description: "Product work on claude/e2e-fix-programme is pushed and its last CI run (2026-09-08) passed; the unpushed context tip deletes tracked docs. PR #2 is a draft, so the release half has never executed. No hardware, no deploy, no paying club."
 type: state
 last_verified: 2026-09-11
 ---
@@ -11,9 +11,9 @@ Verified 2026-09-11 against the repository, `ci.yml`, the GitHub run history and
 
 **The build.** All of it lives on `claude/e2e-fix-programme`, ahead-only against its own upstream
 with a clean tree — no product work exists only on this Mac. **The unpushed tip is context work and
-it deletes four tracked documents**: three superseded review reports under `docs/reviews/` and the
-`system-blueprint` memory topic. All four are deliberate ([`decisions-method.md`](decisions-method.md)),
-but read the range before pushing rather than assuming an empty one. `main` is far behind and the
+it deletes tracked documents**: superseded review reports under `docs/reviews/`, plus memory topics
+folded into this one. All of it is deliberate ([`decisions-method.md`](decisions-method.md)), but
+enumerate the range with `git diff --name-status @{u}..HEAD` before assuming an empty one. `main` is far behind and the
 outstanding act is the merge: **PR #2 is still a draft** (PR #1 merged 2026-08-24). Delivery is one
 branch, one PR by founder decision.
 
