@@ -44,8 +44,10 @@ back. The ESP's own decision logic (`lib/bridgelogic`) is covered by the host te
 
 ## The steps and what each pins
 
-The finding ids are those of `docs/reviews/e2e-adversarial-review-2026-08-24.md`; `R<n>` ids are
-§3 of `docs/reviews/closing-rereview-2026-09-04.md`.
+The finding ids are those of `docs/reviews/adversarial-e2e-review.md`. `R<n>` ids came from the
+2026-09-04 closing re-review, whose report is no longer kept — every finding it raised was closed
+or superseded by the device-contract simplification, so those ids name the assertion below and
+nothing else.
 
 | Step | Finding | Assertion, in one line |
 |---|---|---|

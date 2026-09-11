@@ -1,8 +1,8 @@
 # Go-live checklist
 
-The 2026-08-24 adversarial E2E review ([`reviews/e2e-adversarial-review-2026-08-24.md`](reviews/e2e-adversarial-review-2026-08-24.md))
+The 2026-08-24 adversarial E2E review ([`reviews/adversarial-e2e-review.md`](reviews/adversarial-e2e-review.md))
 found the end-to-end path unbuilt; this checklist is valid only at the tip of the fix
-programme's branch/PR, and the code-complete claim returns only when the closing re-review
+programme's branch/PR, and the code-complete claim returns only when a closing re-review
 passes. **Nothing here is code.** Each item
 needs physical access, a live credential, or a person's decision — and each one, left
 undone, breaks the club in a specific way that is written next to it.
@@ -33,14 +33,14 @@ the API. The box has no readback and cannot even detect it.
 
 ---
 
-## 2. Deploy secrets — six unset
+## 2. Deploy secrets — the Portainer four are unset
 
 The release chain builds multi-arch images, pushes to Docker Hub and redeploys through
-Portainer. It has never run, because the repository secrets are unset and
+Portainer. It has never run, because the Portainer secrets are unset and
 `workflow_dispatch` cannot trigger a deploy — only a real push to `main`.
 
-- [ ] `DOCKERHUB_USERNAME`
-- [ ] `DOCKERHUB_TOKEN`
+- [x] `DOCKERHUB_USERNAME` — set 2026-09-05
+- [x] `DOCKERHUB_TOKEN` — set 2026-09-05
 - [ ] `PORTAINER_URL`
 - [ ] `PORTAINER_TOKEN`
 - [ ] `PORTAINER_STACK_ID`

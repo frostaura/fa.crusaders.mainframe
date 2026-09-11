@@ -56,9 +56,10 @@ Makefile        The entry point for every task — there is no scripts/ director
 
 Every phase is built and the suites are green — which is not the same as done, and this
 repository has the receipts: three adversarial passes have each found real defects in code
-that was already passing. The open ledger is in
-**[`docs/reviews/`](./docs/reviews/)**, newest first; read the latest before assuming a
-path works.
+that was already passing. The one kept on disk as evidence is
+**[`docs/reviews/adversarial-e2e-review.md`](./docs/reviews/adversarial-e2e-review.md)** —
+its finding ids are what the device end-to-end suite and this checklist decode against. What
+each later round established lives in the memory store, not in a report.
 
 What remains beyond that needs physical access, a live credential, or a person's decision —
 including one **safety** question about whether the relays switch a contactor or the

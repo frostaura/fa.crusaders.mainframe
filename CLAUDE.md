@@ -52,7 +52,7 @@ State these honestly rather than repeating the aspiration:
 - **SSRF guard with a deliberate carve-out:** production rejects RFC1918 webhook destinations *unless* the endpoint is on an internal-LAN allow-list. That carve-out exists for legitimate LAN consumers a club points a webhook at — the court box itself is pull-only and never a webhook destination — do not close it.
 - **Webhook delivery:** HMAC-SHA256 in `X-Crusaders-Signature`, timestamp in `X-Crusaders-Timestamp`, per-endpoint queue, backoff 1m/5m/30m/2h/12h/24h, auto-disable after 6 failures plus an email to the owner. A missing template variable is a **config error, not a retryable failure**.
 - **Docker device passthrough:** the .NET service runs in a container but must reach a USB/serial biometric device on the host — needs `--device` passthrough or `privileged: true` with the specific device path.
-- Deploy follows the standard FrostAura pattern and this repo's own `.github/workflows/ci.yml` now carries the full chain (multi-arch → Docker Hub → `deploy-portainer`); it is the reference to keep in sync, not `fa.startup`'s. The JWT + WebAuthn auth pattern was lifted from `fa.startup` — note that repo pins `Fido2.AspNet` 4.x while this one uses the base `Fido2` 3.0.1 package, so controller code is not portable either way.
+- Deploy follows the standard FrostAura pattern and this repo's own `.github/workflows/ci.yml` carries the full chain (multi-arch → Docker Hub → `deploy-portainer`); it is the reference to keep in sync, not `fa.startup`'s. The JWT + WebAuthn auth pattern was lifted from `fa.startup` — note that repo pins `Fido2.AspNet` 4.x while this one uses the base `Fido2` 3.0.1 package, so controller code is not portable either way.
 
 ## Build / test / run
 
@@ -71,10 +71,13 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 
 ## Where docs live
 
-- `docs/specs/` — `feature-spec.md` · `multi-tenancy.md` · `biometric-abstraction.md` · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
+- `docs/specs/` — `feature-spec.md` · `settlement-model.md` (the authority on how the ledger settles) · `multi-tenancy.md` · `biometric-abstraction.md` · `device-serial-protocol.md` · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
 - `docs/specs/client-blueprints/` — the verbatim client artifact plus its `.md` transcription. **The blueprint is the customer's word and outranks internal specs on economics.**
 - `docs/specs/client-blueprint-deltas.md` — line-by-line reconciliation of blueprint requirements against the build. The most reliable economics reference in the repo.
 - `docs/development-plan.md` — phased build sequence and parking-lot decisions. **Its status column understates reality; trust code over the plan** — see `MEMORY.md`.
+- `docs/go-live-checklist.md` — everything between the code and a lit court at Crusaders, ordered by what stops go-live first, each item carrying the consequence of skipping it. None of it is code.
+- `docs/system-blueprint.html` — a self-contained interactive one-page design of the whole system (topology, wiring and DIP modes, firmware split, serial protocol with a live frame builder, the device API, backend invariants, ERD, deploy chain). Regenerate it when specs or decisions change and republish to the same hosted artifact URL so the link stays stable.
+- `docs/reviews/adversarial-e2e-review.md` — the one adversarial review kept as evidence. Its finding ids are the dictionary `test/e2e-device/` and the go-live checklist decode against. **`docs/reviews/` is not an archive**: a review's durable content is promoted into `MEMORY.md`'s topic store and the report deleted.
 - `docs/charter.md` — project charter.
 
 ## Never do this
@@ -83,11 +86,11 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 - **Never introduce a stored balance field**, however tempting for query performance.
 - **Never merge a change touching a tenant-scoped table without a cross-tenant injection test.**
 - **Never commit `.env`.** It holds live SMTP credentials.
-- **Never add a ledger field whose name implies one unit while the column holds another.** That bug already exists once; do not add a second.
+- **Never add a ledger field whose name implies one unit while the column holds another.** That bug has been shipped here once and cost a rename across the schema, every wire key and the UI. A field mixing credits and rand is a money-correctness defect, not a naming preference.
 
 ## Skills
 
-From the installed Gaia plugins this repo draws the mandated-stack baseline it deviates from (e.g. `fa-engineering-default-tech-stack`) — read it before arguing the deviations are fine; the UI-engineering capability for the hand-rolled primitive set (e.g. `fa-engineering-ui`); the formal-testing capability for the layers behind the red gate (e.g. `fa-engineering-testing`); the implementation capability for delivery (e.g. `fa-engineering-implementation`); and the **deploy-chain activation** capability for the secrets-then-stack ordering this repo is blocked on (e.g. `fa-engineering-deploy-chain`), backed by the watch list.
+From the installed Gaia plugins this repo draws the mandated-stack baseline it deviates from (e.g. `fa-engineering-default-tech-stack`) — read it before arguing the deviations are fine; the UI-engineering capability for the hand-rolled primitive set (e.g. `fa-engineering-ui`); the formal-testing capability for the money, tenancy and device layers (e.g. `fa-engineering-testing`); the implementation capability for delivery (e.g. `fa-engineering-implementation`); and the **deploy-chain activation** capability for the secrets-then-stack ordering this repo's release chain depends on (e.g. `fa-engineering-deploy-chain`).
 
 **Reference a capability by what it does, naming the current skill only as an example — never as the identifier, never by path.** Plugin skills are not files in this repo, so a rename breaks nothing visibly and a bare name simply stops resolving. Whether the named skill is installed today is a `MEMORY.md` question.
 

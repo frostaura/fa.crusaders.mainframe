@@ -1,96 +1,52 @@
 ---
 name: crusaders-mainframe-decisions
-description: "Court-hardware programme agreed 2026-08-22: charge AT BOOKING (supersedes charge-on-lights-on), PayFast not Peach, brains on the ESP8266, walk-ups create bookings, gates parked; blueprint Rev 2 economics otherwise stand; 2026-08-24: no-show settlement releases the court via EndsAt truncation; 2026-09-04: late attendance evidence reverses a settled no-show (two new rows, balance may go negative), offline scans judged at scan time; hardening wave 2026-09-04/05: EndsAt restored and the resold tail displaced, 30-day event bound, manual compensation recognised, auth before the limiter, booking codes never a buyer, cancelled-then-lit charged pro rata, https advertised URLs refuse to start, legacy serial refused in production, !AUTH only on recognised scans"
+description: "Product and economics: blueprint Rev 2 is the customer's word and outranks internal specs; credits are the unit of account; charge AT BOOKING supersedes charge-on-lights-on and still needs committee sign-off; PayFast replaced Peach."
 type: decision
-last_verified: 2026-09-05
+last_verified: 2026-09-11
 ---
 
-# Live decisions
+# Live decisions — product and economics
 
-## 2026-09-05/06 — the simplification, and how quality is now proven
+Blueprint **Rev 2**, received 2026-05-09 from the Crusaders committee and filed at
+`docs/specs/client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md` (plus the verbatim `.xlsx`), is
+the current economics and supersedes anything older. **It is the customer's own word and outranks
+internal specs on economics** — a conflict is resolved in the blueprint's favour or escalated, never
+decided in the repo. Line-by-line reconciliation lives in `docs/specs/client-blueprint-deltas.md`.
 
-- **The device contract is hobby-grade by founder decision.** No OTA, no image signing, no runtime
-  credential store, no HMAC device auth, no discovery, no claim codes, no per-device keys, no device
-  clock. One per-tenant API key in `secrets.h`; a box auto-registers on its first heartbeat.
-  *Why:* the hardware and the backend share a LAN, only the frontend is public, and this is one club
-  with one box. The security machinery was defending a threat model that does not exist here, and it
-  was the largest single source of firmware complexity and flashing ceremony.
-- **Flashing is the Arduino IDE**, from generated sketches in `src/iot/arduino/`. PlatformIO remains
-  the tested build and the sketches are proven byte-identical for `court_mega`. *Why:* the founder
-  flashes these boards, and a Makefile target is not how that gets done at a squash club.
-- **Quality is proven by refutation, not by a passing suite.** Every fixer is followed by an
-  independent agent whose job is to disprove the fixer's own report, mutating each fix to prove its
-  test pins anything. This has caught, among others, a cross-member privacy leak, six false "this is
-  impossible" sentences written into specs by fixers, and a money rule whose test had stopped
-  discriminating it. *Why:* three separate audits have now found real defects in suites of hundreds
-  of passing tests; the suite measures the tests, not the code.
-- **Rounds repeat until two consecutive ones find nothing critical or high** — the founder's
-  instruction, 2026-09-06: "repeat this loop till youre happy, no matter how many rounds". Five have
-  run. *Why:* each round of fixes changes the product, and the changed product has its own defects —
-  five of round 2's nine highs were regressions introduced by round 1's fixes.
-
-Blueprint **Rev 2** (received 2026-05-09 from the Crusaders committee, filed at `docs/specs/client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md` in both `.md` and `.xlsx`) is the current economics and supersedes anything older.
-
-- **Credits, not rand, are the unit of account.** R100 → **160 credits (Regular)** / **240 credits (League or 65+)**. The club wanted class-based value without class-based pricing on the court.
-- **Two member classes:** `Regular` and `LeagueOrSenior`, assigned by an admin at approval time.
-- **Charge on lights-on, not on booking.** Booking creates a hold only; the lights-on event posts the debit — cancellation before lights-on then needs no refund at all, removing an entire class of ledger complexity and dispute.
-- **15-minute slices** (Crusaders default changed 30 → 15). **2-week booking horizon. 1 hour per member per day**, relaxed same-day if courts are free.
-- **Top-ups in R100 blocks, max R1000 per member**; admin credit unlimited.
-- **Peak-hours league exclusivity 16:00–19:00** — Regular members take a peak slot only inside the last hour before start, and only if still empty. Admins bypass.
-- **At-court payer override** — a different identified player can press "I'll pay"; the booking records `booked_by_user_id` and `paid_by_user_id`, both audit-logged and emailed.
-- **Identification triple-stack:** biometric + PIN + QR (60s signed token, courtside webcam scan). Face recognition deferred. Stated goal: "do away with cards."
-- **Unfunded accounts cannot book** — 402 InsufficientBalance.
+- **Credits are the unit of account, not rand.** R100 buys **160 credits (Regular)** or **240
+  (League or 65+)**. *Why:* the club wanted class-based value without class-based pricing visible on
+  the court. ZAR survives only on `PendingTopup` for reconciliation.
+- **Two member classes**, `Regular` and `LeagueOrSenior`, assigned by an admin at approval.
+- **Charge at booking, not at lights-on.** A booking debits the full slot cost immediately; a
+  no-show keeps a configurable penalty and refunds the rest. *Why:* it collapses hold-then-charge
+  into one movement and makes a lost-slot race unable to leave a member paying for a court they
+  never got. **This deliberately contradicts blueprint A.9**, is recorded as deviation **D-1**, and
+  **is not the repo's decision to close** — the committee must sign it off before go-live
+  ([`watch.md`](watch.md)). The ledger consequences are in
+  [`decisions-settlement.md`](decisions-settlement.md).
+- **15-minute slices** (Crusaders moved 30 → 15) · **2-week booking horizon** · **1 hour per member
+  per day**, relaxed same-day when courts are free · **top-ups in R100 blocks, R1000 cap per
+  member**, admin credit unlimited · **unfunded accounts cannot book** (402).
+- **Peak-hours league exclusivity 16:00–19:00.** A Regular member takes a peak slot only inside the
+  last hour before start and only if still empty; admins bypass.
+- **At-court payer override.** Another identified player presses "I'll pay"; the booking carries
+  `booked_by_user_id` and `paid_by_user_id`, both audit-logged and emailed.
+- **Identification is biometric + PIN + code**, stated goal "do away with cards". Face recognition
+  deferred. The token grammar is in [`decisions-device.md`](decisions-device.md).
+- **Walk-ups create real bookings.** Buying light time at the pad produces a booking in the buyer's
+  name, visible online immediately. *Why:* one money path and one data model rather than two. A
+  walk-up is born activated and can never be a no-show; it is truncated at the next booking and
+  charged pro rata.
+- **PayFast replaced PeachPayments.** The `IPaymentProvider` seam survived; the branding did not.
+  PayFast signs MD5 over a PHP-`urlencode`-compatible string (spaces as `+`, uppercase hex) which
+  .NET's escaping does not reproduce — budget real time for signature parity.
+- **Biometrics are soft on the critical path.** Booking, top-up and cancellation all work without
+  them and v1.0 can fall back to an admin "mark as no-show", so the physical install does not gate
+  the SaaS launch.
 - **2-year retention** of usage history via a nightly anonymisation worker.
-- **POPI compliance is deliberately out of scope.** Founder direction, 2026-05-06: "forget about legislation for now." A decision, not an oversight — but revisit before any club other than Crusaders onboards.
-- **Biometrics are soft on the critical path.** Booking, top-up and cancellation all work without them; v1.0 can fall back to a manual admin "mark as no-show". The physical install is off the SaaS launch critical path.
-- **New repos are private by default** (founder, 2026-07-24) — this was the first under that rule. Created private and pushed 2026-08-21 on the founder's instruction.
-- **Lint gate kept strict; loader idiom carries documented per-site disables** (2026-08-21). The 31 react-hooks v7 errors were fixed for real where the rule caught genuine impurity (render-time `Date.now`, refs read in render, sync state init), and the recurring fetch-on-mount loader idiom got `eslint-disable-next-line` with a stated reason at each site rather than downgrading the rule in config. Rationale: a config downgrade would silence the rule for all future code in a money-handling product; per-site disables keep it enforcing while acknowledging the existing house idiom.
-- **The 6 red backend tests stay red on purpose** (2026-08-21). 5 BookingTests assert pre-Rev-2 economics and HealthEndpointTests trips EF pending-model-changes — both are the credits-rename + missing-migrations money bug. Editing tests or suppressing the EF validation to green the gate would hide the exact defect the gate exists to catch; they go green when the credits work lands.
-- **The Foundation squash program was killed 2026-07-24.** The standing rationale survives: commercial club software and any future philanthropic squash program stay decoupled unless root decides otherwise. Kill record in `Foundation/projects/MEMORY.md`.
-
-## Court-hardware programme (founder, 2026-08-22)
-
-Agreed across a working session with the founder. These supersede earlier entries where they conflict.
-
-- **Charge at booking, not at lights-on.** A booking debits the full slot cost immediately; a no-show keeps a configurable penalty and refunds the remainder. **This directly supersedes the charge-on-lights-on invariant** in `CLAUDE.md`, which forbids exactly this. The invariant is rewritten in the same commit as the code, not before — the codebase must never contradict its own charter. Not yet implemented; the charge still happens at activation.
-- **No refund once the lights have been on.** Partial use is not refunded. Note the current cancel path refunds the unused fraction whenever `ChargedAt` is set, and under charge-at-booking that branch becomes the path *every* cancellation takes — it must be rewritten in the same phase.
-- **One configurable penalty period** governs both ends: cancel before it, full refund; miss it, no-show and the court is released. Maps onto the existing `penalty_window_minutes` and `penalty_pct`.
-- **PayFast replaces PeachPayments.** The `IPaymentProvider` seam survives intact; the branding does not. PayFast signs with MD5 over a PHP-`urlencode`-compatible parameter string — spaces as `+`, uppercase hex — which .NET's escaping does not reproduce. Budget a day for signature parity.
-- **The brains move to the ESP8266.** The ATmega2560 cannot be flashed over WiFi (its ESP sits on Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET), and **the wiring cannot change**. So the Mega becomes a thin I/O layer with an independent auto-off timer, and everything volatile lives on the ESP, which OTAs. Rationale: it makes USB-only flashing of the Mega a non-event rather than a recurring trip to the club.
-- **The LCD stays 16×2** even though the fitted panel is a 20×4 (silkscreened 2004A). Safety over screen real estate; the geometry is a compile-time constant.
-- **Walk-ups create real bookings.** A member buying light time at the terminal produces a booking in their name, visible online immediately — so there is one money path and one data model, not two. A walk-up booking is born activated and can never be a no-show.
-- **A walk-up is truncated at the next booking** and charged pro rata. Note this needs new arithmetic: `sliceCount` is an integer and price is a flat multiple of it, so no fractional path exists.
-- **Buttons are remappable from the admin panel** — any physical button to any action, including which court it drives. Free, because the Mega already reports raw keypresses and lets the brain decide.
-- **Gates are parked.** Hardware undecided, possibly a plain ESP per gate. The device model stays open so they slot in later without redesign.
-- **Delivery is one branch, one PR** (`claude/squash-booking-system-design-dt7ja6`, PR #1). Do not split it.
-- **Fix everything found, related or not**, with adversarial QA rounds rather than a fixed number of passes.
-
-## No-show slot release (2026-08-24, review H5)
-
-- **A settled no-show releases the court.** `NoShowWorker.SweepOneAsync` truncates the row's `EndsAt` to the sweep's clock in the same save as the status change and the money, so the row keeps only its elapsed portion. Why this shape: the GiST exclusion constraint and every overlap predicate exempt only Cancelled, and adding a NoShow exemption to each would let a fresh no-show be overwritten *before* settlement; truncation frees the tail without touching either, and the "penalty period ends → court is released" rule agreed 2026-08-22 finally has a mechanism. Before it, a swept no-show blocked its whole slot until the original EndsAt — refund paid, court dark, slot unsellable.
-- **No "un-no-show" admin endpoint.** A wrongly-swept member is compensated through the existing admin ledger adjustment surface; reconstituting the booking row (and un-truncating a slot that may since have been resold) is not worth the conflict surface it creates. *Narrowed 2026-09-04, below: the one automatic exception is a box's own late attendance evidence.* **Manual compensation and the automatic reversal compose (2026-09-04, closing re-review lead):** an admin adjustment that names the booking (`relatedBookingId`, positive `AdminAdjustment`) is recognised by `ReverseNoShowAsync` — the money legs are skipped, `manual_compensation` is recorded on the reversal audit row, and attendance is still restored. Name the booking when compensating a wrongly-swept member; an adjustment without it is invisible to the reversal and the member is corrected twice.
-
-## Late attendance evidence reverses a settled no-show (2026-09-04, review C6 residual)
-
-- **A settled no-show is reversed when a box uploads an activation the sweep beat.** Grace is 5 min; a box offline longer than that lights the court from its roster and queues the scan, and by the time WiFi returns `NoShowWorker` has refunded (charged − penalty), posted the penalty and set `Status=NoShow`. The upload used to resolve to `not_chargeable` — the member who played kept the refund and paid the penalty. `BookingService.ReverseNoShowAsync` now posts **two new rows, never an edit**: a debit reversing the refund and a credit reversing the penalty, each read back off the ledger (not recomputed from settings that may have changed), each with a reason and its own reference (`noshow-reversal:{booking}:{refund|penalty}`, unique-indexed as a backstop), and each **the same type as the row it reverses with the opposite sign** — so every report bucket (`Refund`, `Penalty`) nets back to the truth and the `BookingCharge` stands as the one thing paid. Why not new `LedgerEntryType` members: they would need the enum, the pinned coverage test and the TypeScript union edited together and would leave the buckets showing a refund and a penalty that, net, never happened; revisit if reporting ever needs to count reversals separately. Audit `booking.no_show_reversed`, event `booking.no_show_reversed` (mirrors `booking.no_show`), email to the member, actor `Guid.Empty` (the device/system actor every device-originated row already uses). `/events` audits the outcome as `device.activation_reversed_no_show`; `not_chargeable` keeps its old meaning (cancelled, blocked).
-- ~~**`EndsAt` stays truncated.** The sweep released the tail and it may since have been resold; the lights already ran from the box's own timer. The reversal repairs attendance and money, not the calendar.~~ **Superseded 2026-09-04 (closing re-review #12).** Leaving the row truncated while the box's timer kept the lights on to the original end left the tail sellable — online, and at the box as a walk-up — while the court was lit, and the second buyer was then swept as a no-show for a court someone else was playing on. `ReverseNoShowAsync` now **restores `EndsAt`** to the original end (`SliceMinutes × SliceCount` from `StartsAt`; the sweep only ever moved `EndsAt`), or to the start of the earliest *surviving* overlap. Every later booking on that court overlapping `[truncated EndsAt, original EndsAt]` that nobody checked in on is **displaced**: cancelled with the full charge back (a Booked row) or the no-show penalty returned (a row the sweep already refunded), reason `ResoldTailRefunded`, its own reference (`noshow-reversal:{reversed}:displaced:{displaced}`), an audit row, an email and a `booking.displaced` event. A booking somebody *did* check in on survives and is named on the reversal audit row as a collision — two people cannot both have played and the ledger does not guess which. Displaced rows are saved first, then the end is restored over them, because the slot exclusion constraint is checked per statement.
-- **The reversal posts whatever the balance.** It is a correction, not a purchase: a member who spent the refund before the evidence arrived goes negative, which is the honest state (they owe the court they played on) and is what the balance guard on the next booking collects. No balance check, deliberately.
-- **Idempotent and race-safe by the same mechanism as the sweep.** Status, `CheckedInAt`, audit row and both movements in one save under the payer lock; a second upload of the same evidence finds the row `Booked` and checked in and takes the ordinary `AlreadyActive` path; a concurrent one loses on the concurrency token (or the reference index), writes nothing, re-reads and lands on the same idempotent path.
-- **Offline scans are judged at scan time, not upload time.** `CourtActivationService.ActivateAsync(ActivationRequest)` takes an `OccurredAt`; the cue gate and `CheckedInAt` use it, the `booking.lights_on` duration still measures from the server clock. `/events` derives it from uptime arithmetic and also resolves the roster code's liveness at that instant (`AccessCodeService.ResolveAsync(code, at)`) — the code expires at slot end + grace, and a box offline past that is exactly the box whose evidence matters. The six positional-argument overload is unchanged so every courtside caller keeps its behaviour.
-- **A wild `occurredAt` is clamped to the upload with an audit row (`device.event_time_clamped`) — and "wild" is a 30-day sanity bound, not the roster's six hours.** *Revised 2026-09-04 (closing re-review #2).* The original six-hour clamp (`MaxEventAge`, sized to the roster's trust window) re-created the C6 outcome for every outage longer than six hours: the scan time was replaced with the upload time, the roster code was judged expired at that instant, the event resolved to nothing, and the member who played stayed refunded and penalised — with an audit row saying the box's counter was broken when it was not. The roster window bounds roster-fetch-to-scan; the event age bounds scan-to-upload, which is the length of the outage — the very thing the queue exists to survive (the queue is RAM-resident and uptime arithmetic is exact within a boot, so the "persisted across a power blink" justification was false). Now: only a *future* `occurredAt` (the queue outlived a reboot) or one past **30 days** is clamped and audited; everything else is believed, and the roster code's liveness is judged at that scan time. `RetentionWorker` purges booking-activation codes at `MaxEventAge + 24 h` so a code stays resolvable for the whole horizon; member-ident codes keep their 24 h grave.
-
-## Hardening wave (2026-09-04/05, closing re-review)
-
-Each of these is a rule the code now enforces; the why is recorded so the next agent who sees only its cost does not reverse it.
-
-- **Authentication runs before the rate limiter, and the auth policy partitions per member.** The Court Code page refreshes its ident code on a timer for every member who has it open, and behind the always-present nginx gateway the whole club shared one 10/min auth bucket keyed on the proxy's address — ten Court Code opens in a minute took down login, PIN and board provisioning club-wide. Now `UseForwardedHeaders` (trusted only from `Gateway:TrustedProxies`) → `UseAuthentication` → `UseRateLimiter`; the auth partition is `user:{id}` when a token is present, else the forwarded client address. An unauthenticated flood is still refused first and cheaply: a request with no token costs the JWT handler nothing, one with a bad token costs one HMAC, and neither reaches the database.
-- **Booking-activation codes never identify a buyer or a payer.** `IdentificationResolver` returns a user only for `MemberIdent` codes; a `BookingActivation` code is usable only via `/activate` for its own booking. A roster code travels in clear on the LAN and sits in box RAM for hours, and it was accepted as a global identity for walk-up purchases and the "I'll pay" override — so anyone who read one could buy court time on that member's credits at any box. The stolen-box threat model recorded on go-live item 10 ("nothing it holds is a member's identity") is true again.
-- **A cancelled booking lit offline is charged pro rata for the lit minutes.** Cancelling never expired the code, so a box on its roster during a WiFi drop lit the court for a booking that had been refunded in full, and the late event was audited `not_chargeable` with nothing recovering the money. `ChargeLitCancelledBookingAsync` posts a device-actor charge for the minutes the relay ran (`booking.cancelled_lights_charged`, an email, one reference per booking). "Nothing back once the lights have been on" is the standing invariant; this is the same rule applied to a refund that had already been paid out.
-- **An https `Discovery:AdvertisedBaseUrl` or `Ota:*:Url` refuses to start; a partial `Ota:*` section refuses to start.** The box fetches with a plain `WiFiClient` and has no heap for a TLS context, so an https base hands every box provisioning and OTA URLs it can never open, and the backend suite pinned that URL as correct. `Discovery:DowngradeHttpsAdvertisedBaseUrl=true` rewrites the scheme with a startup warning for a deployment that genuinely has a TLS name in front. A half-configured `Ota:Stable`/`Ota:Canary` used to be discarded silently and the fleet offered the baked image the override existed to hold back; now it is a startup error, all three keys or none.
-- **Every URL a box is handed is gateway-true.** nginx forwards `X-Forwarded-Host: $http_host` (host *and* port) and proxies `/firmware/`; the API rebuilds scheme/host/client address from `X-Forwarded-*` only from `Gateway:TrustedProxies` (default loopback + `172.16.0.0/12`). A box behind `:8088` otherwise got `api_base_url` and OTA URLs on port 80 and looped UPDATING / UPDATE FAILED. `/firmware/` is rate-limited per address (`RateLimits:FirmwarePerMinute`) because it is an anonymous download.
-- **The legacy single-byte serial dialect is refused on the production Mega.** `court_mega` constructs its decoder with `LegacyDialect::Refuse`; the simulator opts into `Accept`. The bare `A` was the one message that closed a relay with no checksum, on a UART that receives the ESP's 74880-baud boot banner at every ESP reset — a phantom ninety-minute lighting with no booking. The codec and corpus keep the dialect for the bench.
-- **`!AUTH` arms only on a recognised scan and a grant binds the window to the court it lit** (`bridgelogic::AuthPolicy`). Arming on every scan let any barcode open thirty seconds of buttons — with a mapped OFF button, a stranger could dark a league match — while disarming on every grant meant the paying member could never press OFF. Now an unknown token arms nothing; a grant keeps the window open for the same TTL, release-only, for that court, and an OFF for another court is refused with `NOT YOUR COURT`.
-- **The WiFi credential lives in the box's flash store, and the CI image carries none.** A CI-signed OTA release built where `secrets.h` cannot exist would have put an empty-SSID image on every box; the credential is persisted on first join (from `secrets.h` or a `!WIFI` line over USB) and every later image inherits it. The store's value cap went 32 → 128 bytes, which is also what lets a WPA2 passphrase and a DNS-named API base be stored at all; an over-long URL is refused (`API URL TOO LONG`), never truncated.
-- **A claim against a MAC the club already holds re-keys that row** (bumped `KeyVersion`, un-revoked, the claim's name/courts/override, fresh grant) — the claim code off the LCD is proof of physical presence. Key rotation and revoke are delivered through this same re-claim; `board_already_registered` no longer exists.
-- **The Mega runs a 2 s watchdog and a `Wire` bus timeout.** A wedged I2C bus under the LCD froze `loop()` and with it the independent auto-off, leaving a lit court on until a power cycle. A stall now ends in a reset that re-runs `setup()` and opens every relay first; MCUSR is cleared in `.init3` so the firmware never contributes to a WDT boot loop. Whether the club's bootloader survives a WDT reset is a bench check (go-live item 8).
-- **The button map is a per-device override with the club map as default, validated per box.** One tenant-wide map validated against every box's court count meant a fleet with mixed court counts had no valid configuration. `Device.ButtonMapJson` (nullable; null = club default); the heartbeat sends the effective map.
+- **POPI compliance is deliberately out of scope** (founder, 2026-05-06: "forget about legislation
+  for now"). A decision, not an oversight — **revisit before any club other than Crusaders
+  onboards.**
+- **This repo is private**, as the first project under the 2026-07-24 private-by-default rule.
+- **Commercial club software and any philanthropic squash programme stay decoupled** unless root
+  decides otherwise; the Foundation squash programme was killed 2026-07-24.
