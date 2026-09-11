@@ -76,7 +76,7 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 - `docs/specs/client-blueprint-deltas.md` — line-by-line reconciliation of blueprint requirements against the build. The most reliable economics reference in the repo.
 - `docs/development-plan.md` — phased build sequence and parking-lot decisions. **Its status column understates reality; trust code over the plan** — see `MEMORY.md`.
 - `docs/go-live-checklist.md` — everything between the code and a lit court at Crusaders, ordered by what stops go-live first, each item carrying the consequence of skipping it. None of it is code.
-- `docs/system-blueprint.html` — a self-contained interactive one-page design of the whole system (topology, wiring and DIP modes, firmware split, serial protocol with a live frame builder, the device API, backend invariants, ERD, deploy chain). Regenerate it when specs or decisions change and republish to the same hosted artifact URL so the link stays stable.
+- `docs/system-blueprint.html` — a self-contained interactive one-page design of the whole system (topology, wiring and DIP modes, firmware split, serial protocol with a live frame builder, the device API, backend invariants, ERD, deploy chain). Regenerate it when specs or decisions change and republish to the same hosted artifact URL so the link stays stable — the URL itself is recorded in `MEMORY.md`'s state topic.
 - `docs/reviews/adversarial-e2e-review.md` — the one adversarial review kept as evidence. Its finding ids are the dictionary `test/e2e-device/` and the go-live checklist decode against. **`docs/reviews/` is not an archive**: a review's durable content is promoted into `MEMORY.md`'s topic store and the report deleted.
 - `docs/charter.md` — project charter.
 

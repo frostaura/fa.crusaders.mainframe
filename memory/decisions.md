@@ -50,3 +50,7 @@ decided in the repo. Line-by-line reconciliation lives in `docs/specs/client-blu
 - **This repo is private**, as the first project under the 2026-07-24 private-by-default rule.
 - **Commercial club software and any philanthropic squash programme stay decoupled** unless root
   decides otherwise; the Foundation squash programme was killed 2026-07-24.
+- **This repo carries no local `.claude/skills/` and must not reacquire one.** The vendored Gaia
+  toolkit was removed 2026-08-21 and that removal is committed here. *Why:* generic procedure
+  belongs upstream in a plugin, not forked into a product repo — the evidence that settled it is the
+  division's [`vendored-skills-verdict.md`](../../../memory/vendored-skills-verdict.md).
