@@ -52,6 +52,6 @@ last_verified: 2026-09-11
   or superseded by the device-contract simplification, and their durable content is in these topics.
   **A report is not a memory** — promote the finding, then delete the file.
 - **This repo carries no local `.claude/skills/` and must not reacquire one.** The vendored Gaia
-  toolkit removed 2026-08-21 was a superseded naming generation whose frontmatter was malformed, so
-  almost none of its skills could fire at all — a local copy stops receiving fixes, which is how it
-  rotted. Generic procedure belongs upstream in a plugin.
+  toolkit was removed 2026-08-21 and that removal is committed here. Generic procedure belongs
+  upstream in a plugin; the evidence that settled it is the division's
+  [`vendored-skills-verdict.md`](../../../memory/vendored-skills-verdict.md).

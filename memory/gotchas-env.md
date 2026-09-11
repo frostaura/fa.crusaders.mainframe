@@ -52,9 +52,5 @@ Verified on the founder's Mac 2026-09-11: system `python3` is 3.9.6, `/bin/bash`
   indefinitely and have cost several agents real time. Nothing needs it: a test Postgres listens
   directly on **5439** (homebrew `psql` reaches it) and a throwaway Python SMTP sink on 1025 stands
   in for MailHog. Kill a wedged `docker` process rather than waiting on it.
-- **`dotnet` and `pio` are absent from a *fresh remote* session** — install the .NET 10 SDK and the
-  pinned iot requirements before trusting any result there. A Postgres starts without Docker from
-  the distro's `postgresql/16/bin`; the superuser on a locally-initialised cluster here is
-  **`crusaders`**, not `postgres`, and `pg_ctl` refuses to run as root.
 - **Frontend `node_modules` on this path loses rollup's native optional dependency** (the build
   fails on a missing `rollup/dist/native.js`). Recovery: `rm -rf node_modules && npm ci`.
