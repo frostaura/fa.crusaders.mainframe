@@ -32,8 +32,12 @@ and Arduino-compile gates are all real, and **the most recent CI run on the bran
 passed every job**, device e2e and Playwright included. Nor is a green suite evidence the system
 works: three adversarial passes each found live defects in already-green suites
 ([`decisions-method.md`](decisions-method.md)). **The suite is also flaky against the wall clock**
-and cannot pass in the last half-hour of a UTC day, which is what the intermittent red `Backend`
-jobs are; see [`gotchas.md`](gotchas.md) before re-running anything.
+and cannot pass in the last half-hour of a UTC day ([`gotchas.md`](gotchas.md)) — but that is *not*
+what the two red `Backend` runs on this branch were. Read from `gh run view <id> --log-failed` on
+2026-09-11: the 2026-09-08 02:35Z run failed to compile at all (`error CS1513` in
+`SettlementSpecPostureTests.cs`), and the 00:07Z run failed two named tests outside the midnight
+window, with `-v q` suppressing the assertions — **that cause is unattributed**, and re-running it
+needs `-v n`.
 
 **Nothing has ever touched real hardware, nothing is deployed, and no money has moved through
 PayFast in production.** Crusaders Squash Club is a named, committed pilot that **pays nothing** —
