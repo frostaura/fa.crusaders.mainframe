@@ -43,6 +43,13 @@ decided in the repo. Line-by-line reconciliation lives in `docs/specs/client-blu
 - **Biometrics are soft on the critical path.** Booking, top-up and cancellation all work without
   them and v1.0 can fall back to an admin "mark as no-show", so the physical install does not gate
   the SaaS launch.
+- **Free-tier-first on external data — and only the tzdb half is built.** Confirmed 2026-09-16:
+  `TimeZoneInfo.FindSystemTimeZoneById` is real (`Services/BookingService.cs`, `ScheduleService.cs`,
+  `Endpoints/ReportingEndpoints.cs`), and SMTP + PayFast are the only paid third parties. The rest of
+  `docs/development-plan.md`'s item 5 — libphonenumber, a Gravatar avatar fallback, MX-based email
+  validation — is **unbuilt**: no package, no phone field, no MX lookup, and the single `Dns.` call
+  in the API is the SSRF guard. `en-ZA` is deliberately *not* used for money; PayFast rejects its
+  comma decimal, so signing formats with `InvariantCulture`. The plan is not the build.
 - **2-year retention** of usage history via a nightly anonymisation worker.
 - **POPI compliance is deliberately out of scope** (founder, 2026-05-06: "forget about legislation
   for now"). A decision, not an oversight — **revisit before any club other than Crusaders

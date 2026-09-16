@@ -25,6 +25,11 @@ and none of it is blocked on engineering.
 - **Crusaders' existing member-data migration** — to be settled with the committee.
 - **Does the club go live this quarter, or is the project formally parked with a date?** This is
   the division's leading cash-engine candidate, so the answer is portfolio-relevant, not local.
+- **Why does a private repo ship an MIT `LICENSE`?** Confirmed 2026-09-16: `LICENSE` is MIT and
+  `README.md` says so, while this repo is private by the 2026-07-24 default
+  ([`decisions.md`](decisions.md)). Not a contradiction under an opt-in OSS posture, but licensing
+  is **parent-controlled**, the same shape as the licence question open on `fa.lifeos`, and nobody
+  has decided it here. Confirm MIT or replace it before any customer or second tenant sees the repo.
 
 **Deferred by decision — listed so they are not rediscovered as questions:** recurring bookings
 (out of scope for v1) · multi-sport (the column exists, the UI is squash-only) · partner/two-player

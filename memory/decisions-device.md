@@ -18,6 +18,9 @@ club's old working sketches exactly. Any fix that needs a wire moved is the wron
   one club with one box, and the security machinery was defending a threat model that does not
   exist here while being the largest single source of firmware complexity and flashing ceremony.
   Everything it removed had been built and tested; deleting working code was the point, not a loss.
+  **`lib/devcrypto` survives as a hex codec only** (`src/Hex.cpp`, `include/devcrypto/Hex.h`,
+  confirmed 2026-09-16) — the library name is residual, so a grep for "crypto" here finds a hit that
+  means nothing. Rename it if you are in that tree anyway; do not read it as surviving device auth.
 - **Flashing is the Arduino IDE**, from the generated sketches in `src/iot/arduino/`; PlatformIO
   stays the tested build and `court_mega` compiles byte-identical between the two. *Why:* the
   founder flashes these boards, and a Makefile target is not how that happens at a squash club.
