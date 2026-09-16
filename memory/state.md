@@ -1,22 +1,22 @@
 ---
 name: crusaders-mainframe-state
-description: "Product work on claude/e2e-fix-programme is pushed and its last CI run (2026-09-08) passed; the unpushed context tip deletes tracked docs. PR #2 is a draft, so the release half has never executed. No hardware, no deploy, no paying club."
+description: "The whole build sits on claude/e2e-fix-programme, pushed 2026-09-16 and in sync; main is far behind it and the merge is the open act, with PR #2 still a draft, so the release half has never executed. No hardware, no deploy, no paying club."
 type: state
-last_verified: 2026-09-11
+last_verified: 2026-09-16
 ---
 
 # Current state
 
-Verified 2026-09-11 against the repository, `ci.yml`, `gh run list` and `gh secret list`. **Two
-claims below decay on their own and must be re-measured, never inherited: the result of the latest
-CI run on the branch, and the Actions secrets inventory.**
+Verified 2026-09-11 against the repository, `ci.yml`, `gh run list` and `gh secret list`; the git
+topology was re-measured 2026-09-16 after the branch was pushed. **Two claims below decay on their
+own and must be re-measured, never inherited: the result of the latest CI run on the branch, and the
+Actions secrets inventory. Neither was re-run on 2026-09-16.**
 
-**The build.** All of it lives on `claude/e2e-fix-programme`, ahead-only against its own upstream
-with a clean tree — no product work exists only on this Mac. **The unpushed tip is context work that
-deletes tracked documents**: superseded review reports under `docs/reviews/`, plus memory topics
-folded into this one — deliberate ([`decisions-method.md`](decisions-method.md)), but enumerate the
-range with `git diff --name-status @{u}..HEAD` before assuming an empty one. `main` is far behind and
-the outstanding act is the merge: **PR #2 is still a draft** (PR #1 merged 2026-08-24). Delivery is
+**The build.** All of it lives on `claude/e2e-fix-programme`, which was **pushed on 2026-09-16 and
+now matches its upstream exactly**, on a clean tree — **nothing in this repository exists only on
+this Mac**, including the context work that deleted the superseded review reports under
+`docs/reviews/` (deliberate — [`decisions-method.md`](decisions-method.md)). `main` is far behind the
+branch and the outstanding act is the merge: **PR #2 is still a draft** (PR #1 merged 2026-08-24). Delivery is
 one branch, one PR by founder decision.
 
 **What the product does now.** The headline flow — book online, scan at the box, lights on —
@@ -28,16 +28,16 @@ merely disabled — no `lib/otacore`, no `lib/discovery`, no `Security/Discovery
 `OTA_PRIVATE_KEY` in `ci.yml`. Why: [`decisions-device.md`](decisions-device.md).
 
 **What the suites prove.** Backend, frontend, firmware host, ASAN/UBSAN, corpus, complexity, lint
-and Arduino-compile gates are all real, and **the most recent CI run on the branch — 2026-09-08 —
-passed every job**, device e2e and Playwright included. Nor is a green suite evidence the system
-works: three adversarial passes each found live defects in already-green suites
-([`decisions-method.md`](decisions-method.md)). **The suite is also flaky against the wall clock**
-and cannot pass in the last half-hour of a UTC day ([`gotchas.md`](gotchas.md)) — but that is *not*
-what the two red `Backend` runs on this branch were. Read from `gh run view <id> --log-failed` on
-2026-09-11: the 2026-09-08 02:35Z run failed to compile at all (`error CS1513` in
-`SettlementSpecPostureTests.cs`), and the 00:07Z run failed two named tests outside the midnight
-window, with `-v q` suppressing the assertions — **that cause is unattributed**, and re-running it
-needs `-v n`.
+and Arduino-compile gates are all real, and the last run anyone recorded a result for — **2026-09-08
+— passed every job**, device e2e and Playwright included. **That run is no longer the branch tip:**
+the 2026-09-16 push moved it and its run went **red on `Security Scan` alone** — `npm audit
+--audit-level=high` tripped on advisories published since 2026-09-08 against an unchanged frontend,
+every other job green. The lockfile was refreshed (non-breaking `npm audit fix`; lint, all unit
+tests and the build re-run locally) and pushed the same evening; take the result of that re-run from
+`gh run list`, do not inherit it from here. Nor is a green suite evidence the system works:
+three adversarial passes each found live defects in already-green suites
+([`decisions-method.md`](decisions-method.md)), and the suite cannot pass in the last half-hour of a
+UTC day, so read any red run against that before blaming a diff ([`gotchas.md`](gotchas.md)).
 
 **Nothing has ever touched real hardware, nothing is deployed, and no money has moved through
 PayFast in production.** Crusaders Squash Club is a named, committed pilot that **pays nothing** —
@@ -61,7 +61,7 @@ credentials, the Portainer secrets, and one supervised bench session with the re
 `docs/go-live-checklist.md` is that list in order, each item carrying the consequence of skipping it.
 
 **`docs/system-blueprint.html`**, the one-page interactive design, was last **regenerated
-2026-09-06**, after the 2026-09-05 headed-browser round that checked its device-facing claims
-against the running API (a context pass edited one paragraph on 2026-09-11); it goes stale the
-moment a spec or decision changes. The hosted copy is republished to the same URL so the link stays
-stable: `https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44c81ccb4`.
+2026-09-06**, after the headed-browser round that checked its device-facing claims against the
+running API; it goes stale the moment a spec or decision changes. The hosted copy is republished to
+the same URL so the link stays stable:
+`https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44c81ccb4`.
