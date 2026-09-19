@@ -89,7 +89,7 @@ export const NEW_GATE_BADGE = "New — name this door";
  */
 export function unnamedGateOfflineNotice(): string {
   return "Until you name this door it only works while it can reach the server: an unnamed door is"
-    + " sent an empty roster, so it opens nothing at all while it is offline.";
+    + " sent an empty list, so it opens nothing at all while it is offline.";
 }
 
 /**
@@ -142,10 +142,10 @@ export function unnamedGateOfflineNotice(): string {
  * </p>
  */
 export function doorShutNotice(): string {
-  return "The club is not alerted about its silence, and the API refuses every scan at this door"
-    + " from the instant the switch is thrown. A door that can still reach the API hears that"
-    + " refusal and opens for nobody, with no fall back to its roster. A door that has also lost"
-    + " the network never hears it, and keeps admitting members with a booking from the roster it"
+  return "The club is not alerted about its silence, and the club's system refuses every scan at"
+    + " this door from the instant the switch is thrown. A door that can still reach the club hears"
+    + " that refusal and opens for nobody, with no fall back to its saved list. A door that has also"
+    + " lost the network never hears it, and keeps admitting members with a booking from the list it"
     + " last downloaded until that goes stale, which takes up to six hours. Bookings, refunds and"
     + " no-show penalties are untouched either way, and a door marks nobody as having arrived.";
 }
@@ -177,7 +177,7 @@ export const DOOR_REOPEN_LABEL = "Reopen this door";
  * </p>
  */
 export function doorShutConfirm(): string {
-  return `${DOOR_SHUT_LABEL}? A door that can reach the API opens for nobody from this click. One`
+  return `${DOOR_SHUT_LABEL}? A door that can reach the club opens for nobody from this click. One`
     + " that has also lost the network keeps admitting booked members from the list it last"
     + " downloaded for up to six hours. No booking and no no-show penalty changes, and a door marks"
     + " nobody as having arrived.";
@@ -198,8 +198,17 @@ export function doorShutConfirm(): string {
  * list, so nothing changes there and the reopen is not news to it.
  * </p>
  */
-export function doorReopenConfirm(): string {
-  return `${DOOR_REOPEN_LABEL}? A door that can reach the API opens for members again from the very`
+export function doorReopenConfirm(online = true): string {
+  // C5. This promised "from the very next scan" to every door, including one nobody can
+  // reach — which is a promise about a machine that is not listening. The reachable arm is
+  // unchanged because it was right; the unreachable arm now says what is actually true of
+  // THIS door rather than describing the pair in the abstract.
+  if (!online) {
+    return `${DOOR_REOPEN_LABEL}? Nothing can reach this door, so it will not know it is open again`
+      + " until it calls in. It has been admitting booked members from its cached list all along,"
+      + " and that does not change today.";
+  }
+  return `${DOOR_REOPEN_LABEL}? A door that can reach the club opens for members again from the very`
     + " next scan — there is no wait. A door that has lost the network has been admitting booked"
     + " members from its cached list all along, and nothing changes there.";
 }
@@ -225,11 +234,24 @@ export function doorFleetShutConfirm(count: number): string {
     + " it last downloaded for up to six hours. No booking and no no-show penalty changes.";
 }
 
-/** Reopening every door the club shut together. Same inversion as {@link doorReopenConfirm}. */
-export function doorFleetReopenConfirm(count: number): string {
-  return `Reopen ${allDoors(count)}? Every door that can reach the club's server opens for members`
-    + " again from the very next scan. A door that has lost the network has been admitting booked"
-    + " members from its cached list all along.";
+/**
+ * Reopening the doors the club shut TOGETHER. Same inversion as {@link doorReopenConfirm}.
+ *
+ * <p>
+ * C1: the count is the number this request will actually reopen, never the club's total, and
+ * any door that will stay shut is named in the same breath — the previous label read "Reopen
+ * all 3" over a request that reopened none of them.
+ * </p>
+ */
+export function doorFleetReopenConfirm(count: number, staying: string[] = []): string {
+  const stays = doorsStayShutNotice(staying);
+  const head = count === 1
+    ? "Reopen the one door that was shut together?"
+    : `Reopen the ${count} doors that were shut together?`;
+  const body = " Every one of them that can reach the club's server opens for members again from the"
+    + " very next scan. Any that has lost the network has been admitting booked members from its"
+    + " cached list all along.";
+  return stays ? `${head}${body} ${stays}` : `${head}${body}`;
 }
 
 /**
@@ -347,9 +369,95 @@ export function doorShutStandingNotice(name: string, since: string | null): stri
  * overstatement that teaches admins to ignore the banner.
  * </p>
  */
-export function doorsShutBanner(shut: number, total: number): string {
-  const head = `${shut} of ${total} ${total === 1 ? "door" : "doors"} ${shut === 1 ? "is" : "are"} shut.`;
-  return shut >= total ? `${head} Members can't get in.` : head;
+/** One shut door, as the banner and the fleet confirm both need to name it. */
+export type ShutDoorFact = { id: string; name: string; online: boolean; shutByFleet: boolean };
+
+/**
+ * The club-wide banner, stating BOTH halves of what "shut" means right now (C2).
+ *
+ * <p>
+ * <b>The sentence this replaces was false.</b> It read "3 of 3 doors are shut. Members can't
+ * get in." — flatly, whatever the doors were doing. A shut door that the club cannot reach
+ * has not heard the refusal: it goes on admitting members with a booking from the list it
+ * last downloaded, for up to six hours. So on the one screen a volunteer trusts in an
+ * incident, the product asserted a lockdown it had not achieved, which is P1 and P6 broken
+ * in the same eight words. Two reviewers reached it independently and it is the reason
+ * <b>"can't get in" appears nowhere in this module any more</b> — there is a matrix test
+ * that says so.
+ * </p>
+ *
+ * <p>
+ * <b>Confirmed and not-confirmed are counted separately and the not-confirmed ones are
+ * NAMED</b>, because "1 not yet" sends nobody anywhere and "Side door" does. The
+ * not-confirmed clause states what that door may still be doing rather than leaving the
+ * reader to remember the six-hour rule.
+ * </p>
+ */
+export function doorsShutBannerLine(shut: ShutDoorFact[], total: number): string {
+  if (shut.length === 0 || total === 0) return "";
+  const silent = shut.filter((d) => !d.online);
+  const head = `${shut.length} of ${total} ${total === 1 ? "door" : "doors"} shut`;
+  if (silent.length === 0) {
+    return `${head} — every one of them confirmed. A shut door that the club can reach opens for`
+      + " nobody. Getting out is mechanical and unchanged.";
+  }
+  const names = silent.map((d) => d.name).join(", ");
+  const confirmed = shut.length - silent.length;
+  const counted = confirmed === 0
+    ? `none of them confirmed yet`
+    : `${confirmed} confirmed, ${silent.length} not yet`;
+  return `${head} — ${counted}: ${names} ${silent.length === 1 ? "has" : "have"} not been heard from, so`
+    + ` ${silent.length === 1 ? "it" : "they"} may still admit booked members from the saved list for up`
+    + " to six hours.";
+}
+
+/**
+ * What the banner says when the doors were shut ONE AT A TIME (C1's third bullet).
+ *
+ * A fleet Reopen would not touch them — `reopen-all` reopens only what a shut-all shut — so
+ * offering one here is offering a control that does nothing, which is exactly the "0 doors
+ * reopened" dead end the ruling exists to close. The banner links to each door instead.
+ */
+export function doorsShutIndividuallyBanner(shut: ShutDoorFact[], total: number): string {
+  const names = shut.map((d) => d.name).join(", ");
+  const head = `${shut.length} of ${total} ${total === 1 ? "door" : "doors"} shut`;
+  return `${head}, ${shut.length === 1 ? "one at a time" : "each on its own"}: ${names}.`
+    + ` Reopen ${shut.length === 1 ? "it" : "each of them"} from ${shut.length === 1 ? "its" : "their"} own page —`
+    + " reopening the doors shut together would not touch these.";
+}
+
+/**
+ * The fleet Reopen control's label, counting what it will ACTUALLY reopen (C1).
+ *
+ * It used to read "Reopen all 3" from `doors.length` — the club's total — while the request
+ * reopens only the doors a shut-all shut. An admin who had shut one door on its own and then
+ * pressed it got `{"doors": []}` and the words "0 doors reopened", with nothing saying why.
+ */
+export function doorFleetReopenLabel(count: number): string {
+  return count === 1 ? "Reopen the door shut together" : `Reopen the ${count} doors shut together`;
+}
+
+/** Named, not counted: the doors a fleet reopen will leave shut, said before it is pressed. */
+export function doorsStayShutNotice(names: string[]): string | null {
+  if (names.length === 0) return null;
+  if (names.length === 1) {
+    return `${names[0]} stays shut — it was shut on its own. Reopen it from its page.`;
+  }
+  return `${names.join(", ")} stay shut — each was shut on its own. Reopen them from their own pages.`;
+}
+
+/**
+ * A fleet result that changed nothing, said with its reason (C1).
+ *
+ * "0 doors reopened" with no explanation is the exact dead end the ruling names. A
+ * zero-change result never prints without the sentence that says why it was zero.
+ */
+export function doorFleetNoChangeNotice(action: "shut" | "reopen"): string {
+  if (action === "reopen") {
+    return "No doors were reopened, because none of them were shut together. A door shut on its own"
+      + " stays shut until it is reopened from its own page.";
+  }
+  return "No doors were shut, because every door was already shut.";
 }
 
 /**
@@ -364,7 +472,29 @@ export function doorsShutBanner(shut: number, total: number): string {
  * </p>
  */
 export function gateDeleteConfirm(): string {
-  return "Delete? The door re-registers on its next heartbeat with no name.";
+  return "Delete this door? Everything written down about it goes — its name, where the board is,"
+    + " and what the lock does with no power. The board still has the club's key, so it reappears"
+    + " here as a new door with nothing filled in the next time it calls in. Unplug it if you meant"
+    + " to retire it.";
+}
+
+/**
+ * Delete's consequence at REST, beside the control, as a statement (A8 / A12 / C10).
+ *
+ * <p>
+ * The confirm above is a question, and a question printed permanently beside a button reads
+ * as a control mid-ask. This says the same three facts flatly. It also says them in a
+ * volunteer's words: the old sentence was "The door re-registers on its next heartbeat with
+ * no name", which is three of our nouns in a row and does not mention that the location note
+ * and the power-cut answer are destroyed — the two facts on the card an admin most recently
+ * took the trouble to write down.
+ * </p>
+ */
+export function gateDeleteStandingNotice(name: string): string {
+  return `Deleting ${name} throws away everything written down about it — its name, where the board`
+    + " is, and what the lock does with no power. It does not lock the board out: it still has the"
+    + " club's key, so it reappears here as a new door with nothing filled in the next time it calls"
+    + " in. Unplug it if you meant to retire it.";
 }
 
 /** What each access policy is called on the settings screen. */
@@ -428,7 +558,7 @@ export function describeGatePolicy(policy: GateAccessPolicy, earlyEntryMinutes: 
       + ` ${earlyEntryMinutes} ${earlyEntryMinutes === 1 ? "minute" : "minutes"}, and whose code`
       + ` for that booking is still live — on any court. Anyone else is turned away. Arriving late`
       + ` is not a lockout: the no-show sweep does not take that code away. Club admins always pass`
-      + ` this booking check, but only at a door that can still reach the API — an offline door`
+      + ` this booking check, but only at a door that can still reach the club — an offline door`
       + ` holds bookings, not admins; a suspended, pending or rejected membership still turns`
       + ` anyone away, admin or not.`;
   }
@@ -548,10 +678,10 @@ export function describeDoorBookingHorizon(minutes: number): string {
  * </p>
  */
 export function gateOfflineFallbackNotice(): string {
-  return "When a door cannot reach the API it falls back to the roster it last downloaded, and"
-    + " that roster holds bookings and nothing else. So while a door is offline, only members"
+  return "When a door cannot reach the club it falls back to the list of bookings it last"
+    + " downloaded, and that list holds bookings and nothing else. So while a door is offline, only members"
     + " with an upcoming or running booking can get in — whichever policy is set below. That list"
     + ` holds at most ${GATE_ROSTER_MAX_ENTRIES} bookings, taken in start order, so on a busy night`
     + " the latest-starting bookings beyond that cannot get in while the door is offline. A door"
-    + " nobody has named yet is sent no roster at all, so it opens nothing while it is offline.";
+    + " nobody has named yet is sent no list at all, so it opens nothing while it is offline.";
 }

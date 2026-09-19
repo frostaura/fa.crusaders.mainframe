@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import Layout from "../Layout";
 import HomePage from "../../pages/Home";
 import { ProfileProvider } from "../../lib/profile";
@@ -51,22 +51,36 @@ function chromeWithFailedDoors(route = "/admin/settings") {
 
 describe("the Doors entry in the gear menu", () => {
   /**
-   * <b>The gear, not a sixth tab.</b> `Layout.tsx` already carries the cost of the
-   * alternative in its own nav comment: five admin tabs measured a 795 px scrollWidth
-   * against a 768 px viewport, which is why the inline nav switches at `lg` rather than
-   * `md`. A sixth tab re-buys that defect.
+   * <b>First in the menu, above Devices.</b> Ordered by urgency of use rather than
+   * alphabetically — Doors is opened standing in a club with a member waiting, Webhooks
+   * twice a year.
    */
-  it("is first in the menu, above Devices, and adds no tab", async () => {
+  it("is first in the menu, above Devices", async () => {
     chrome([doorFixture()]);
 
     fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
     const items = screen.getAllByRole("menuitem").map((i) => i.textContent);
     expect(items[0]).toContain("Doors");
     expect(items[1]).toContain("Devices");
-    // The tab strips, inline and scrolling, are unchanged.
-    for (const nav of screen.getAllByRole("navigation")) {
-      expect(nav.textContent).not.toContain("Doors");
-    }
+  });
+
+  /**
+   * <b>A20, and the constraint it had to be measured against.</b>
+   *
+   * Nothing on an admin's landing screen said "Doors": a 6 px dot on a cog was the only cue,
+   * and a volunteer never found the surface. The obvious fix — a sixth tab — is the one this
+   * file's own nav comment warns about: five admin tabs already measured a 795 px
+   * `scrollWidth` against a 768 px viewport, which is why the inline nav switches at `lg`
+   * rather than `md`. So the tab exists, and `e2e/narrow-viewport.spec.ts` holds it to no
+   * horizontal page scroll at every width it renders at. This test pins that the entry is
+   * reachable from BOTH places rather than from the gear alone.
+   */
+  it("is reachable without opening the gear", async () => {
+    chrome([doorFixture()]);
+
+    const inNav = (await screen.findAllByRole("link", { name: /Doors/ }))
+      .some((link) => link.getAttribute("href") === "/admin/doors");
+    expect(inNav).toBe(true);
   });
 
   /**
@@ -95,7 +109,72 @@ describe("the Doors entry in the gear menu", () => {
     chrome([doorFixture({ last_seen_at: ago(3600) })]);
 
     fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
-    expect(screen.getByLabelText("1 door needs attention")).toHaveTextContent("1");
+    // The gear carries the same sentence, so scope to the menu rather than the document.
+    const badge = within(screen.getByRole("menu")).getByLabelText("1 door needs attention");
+    expect(badge).toHaveTextContent("1");
+  });
+
+  /**
+   * <b>A3 — the finding this cue was blind to.</b>
+   *
+   * A door flagged "Refusing a lot" or "May not be releasing" was never counted here, never
+   * named in the doors page's banner, and — same predicate — sorted below the fold. A
+   * reviewer found a front door turning away thirty scans in twenty minutes by scrolling
+   * past three healthy ones. A2.6 keeps signals off admin HOME, which is a different screen
+   * with a different reader; it never said anything about the gear that is the only route
+   * to Doors.
+   */
+  it("counts a door that is turning people away", async () => {
+    const whoami = signIn({ isAdmin: true });
+    const server = doorsServer([doorFixture({ name: "Front door" })], {
+      rows: {
+        "99999999-9999-9999-9999-999999999999": {
+          signals: [{ kind: "refusal_spike", since: ago(1200), until: ago(0), scans: 30 }],
+        },
+      },
+    });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+      { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
+      { path: "/api/v1/admin/members", body: [] },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      ...server.routes,
+    ]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/admin/settings"] });
+
+    expect(await screen.findByRole("button", { name: "Open menu — 1 door needs attention" }))
+      .toBeInTheDocument();
+  });
+
+  /**
+   * A silent door outranks a signalling one: "has not been heard from" sends somebody to the
+   * right board, and a cue that names the least urgent of two sends them to the wrong one.
+   */
+  it("names the silent door first when a door is also signalling", async () => {
+    const whoami = signIn({ isAdmin: true });
+    const server = doorsServer([
+      doorFixture({ name: "Front door" }),
+      doorFixture({ id: "99999999-9999-9999-9999-99999999aaaa", name: "Side door", gate_key: "side", last_seen_at: ago(3600) }),
+    ], {
+      rows: {
+        "99999999-9999-9999-9999-999999999999": {
+          signals: [{ kind: "refusal_spike", since: ago(1200), until: ago(0), scans: 30 }],
+        },
+      },
+    });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+      { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
+      { path: "/api/v1/admin/members", body: [] },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      ...server.routes,
+    ]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/admin/settings"] });
+
+    expect(await screen.findByRole("button", { name: "Open menu — 2 doors need attention" }))
+      .toBeInTheDocument();
   });
 
   /** Counted: silent, shut, unnamed. Not counted: a door that is simply reporting. */
@@ -128,32 +207,59 @@ describe("the club-wide shut banner", () => {
     chrome([doorFixture({ enabled: false })], "/admin/settings");
 
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("1 of 1 door is shut.");
-    expect(banner).toHaveTextContent("Members can't get in.");
-  });
-
-  /** The second sentence is true only when EVERY door is shut, so it appears only then. */
-  it("does not claim members cannot get in while one door is open", async () => {
-    chrome([
-      doorFixture({ enabled: false }),
-      doorFixture({ id: "99999999-9999-9999-9999-99999999aaaa", name: "Front door", gate_key: "front-door" }),
-    ]);
-
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("1 of 2 doors is shut.");
-    expect(banner).not.toHaveTextContent("Members can't get in");
+    expect(banner).toHaveTextContent("1 of 1 door shut");
   });
 
   /**
-   * It LINKS rather than reopening: a reopen has to show its own per-door result — which
-   * doors confirmed and which may still be admitting booked members — and a one-line banner
-   * is not where a result belongs.
+   * <b>C2 — the sentence that was simply false.</b>
+   *
+   * It read "3 of 3 doors are shut. Members can't get in." whatever the doors were doing.
+   * A shut door the club CANNOT reach has not heard the refusal: it goes on admitting
+   * members with a booking from the list it last downloaded, for up to six hours. On the one
+   * screen a volunteer trusts during an incident, the product asserted a lockdown it had not
+   * achieved — P1 and P6 broken in eight words. The phrase is now banned outright, and the
+   * banner states both halves and names the doors that have not confirmed.
    */
-  it("links to Doors rather than reopening from the banner", async () => {
-    chrome([doorFixture({ enabled: false })]);
+  it("never says members cannot get in, even with every door shut", async () => {
+    chrome([doorFixture({ enabled: false, last_seen_at: ago(3600) })], "/admin/settings");
 
-    expect(await screen.findByRole("link", { name: "Reopen all doors" }))
-      .toHaveAttribute("href", "/admin/doors");
+    const banner = await screen.findByRole("alert");
+    expect(banner.textContent?.toLowerCase()).not.toContain("can't get in");
+    expect(banner.textContent?.toLowerCase()).not.toContain("cannot get in");
+  });
+
+  it("says a shut door that is not reporting may still be admitting booked members", async () => {
+    // `shut_by_shut_all_at` present ⇒ shut TOGETHER, which is the state the fleet banner is
+    // about. A door shut on its own takes the other arm, two tests below.
+    chrome([doorFixture({
+      name: "Side door", enabled: false, last_seen_at: ago(3600),
+      shut_by_shut_all_at: ago(120),
+    })], "/admin/settings");
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("none of them confirmed yet");
+    // Named, because "1 not yet" sends nobody anywhere.
+    expect(banner).toHaveTextContent("Side door");
+    expect(banner).toHaveTextContent("may still admit booked members");
+  });
+
+  /**
+   * <b>C1 — a fleet Reopen that would reopen nothing is not offered at all.</b>
+   *
+   * `reopen-all` reopens only the doors a shut-all shut. With a door shut ON ITS OWN, the
+   * banner used to offer "Reopen all doors", which answered `{"doors":[]}` and printed
+   * "0 doors reopened" with no explanation.
+   */
+  it("offers no fleet reopen when the doors were shut one at a time, and links to each", async () => {
+    chrome([doorFixture({ name: "Side door", enabled: false })], "/admin/settings");
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("one at a time");
+    expect(banner).toHaveTextContent("would not touch these");
+    expect(screen.queryByRole("link", { name: /Reopen the/ })).toBeNull();
+    // The way back is the door's own page, which is never a dead link.
+    expect(screen.getByRole("link", { name: "Side door" }))
+      .toHaveAttribute("href", "/admin/doors/99999999-9999-9999-9999-999999999999");
   });
 
   it("is absent while every door is open", async () => {
@@ -171,11 +277,35 @@ describe("the club-wide shut banner", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("stays off a member route", async () => {
+  /**
+   * <b>C8.</b> It was gated on the path starting `/admin/`, and an admin LANDS on
+   * `/schedule`. A1.5 says every admin route; the reader is what makes a route an admin one,
+   * not its URL.
+   */
+  it("follows the ADMIN rather than the route, so it shows on Bookings", async () => {
     chrome([doorFixture({ enabled: false })], "/schedule");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("1 of 1 door shut");
+  });
+
+  it("stays away from a member entirely", async () => {
+    const whoami = signIn({ isAdmin: false });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+      { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
+    ]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
 
     await screen.findByRole("button", { name: /Open menu/ });
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  /** B14 — it printed across the top of the door card that goes on a wall, Reopen and all. */
+  it("is hidden from print", async () => {
+    chrome([doorFixture({ enabled: false })], "/admin/settings");
+
+    expect((await screen.findByRole("alert")).className).toContain("print:hidden");
   });
 });
 

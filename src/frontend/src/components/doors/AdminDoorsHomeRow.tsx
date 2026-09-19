@@ -27,8 +27,11 @@ import { doorsAttentionSummary } from "../../lib/doorsCopy";
  */
 export function AdminDoorsHomeRow() {
   const location = useLocation();
-  const { attention } = useDoorsChrome(true, location.pathname);
-  const hint = doorsAttentionSummary(attention);
+  // `homeAttention`, NOT `attention`. A2.6 keeps signals off this screen specifically, and
+  // A3 put them on every other doors cue — so the narrowing is a named field on the one
+  // shut-state source rather than a filter this component re-derives.
+  const { homeAttention } = useDoorsChrome(true, location.pathname);
+  const hint = doorsAttentionSummary(homeAttention);
   if (hint === null) return null;
   return (
     <Link

@@ -5,7 +5,9 @@ import {
   describeGate, describeGatePolicy, doorConfirmedLine, doorExitIsMechanical,
   doorFleetReopenConfirm, doorFleetShutConfirm, doorNotConfirmedLine, doorPowerLossLine,
   doorPowerLossUnknownFooter, doorReopenConfirm, doorShutConfirm, doorShutNotice,
-  doorShutStandingNotice, doorsShutBanner, gateDeleteConfirm, gateOfflineFallbackNotice,
+  doorFleetNoChangeNotice, doorFleetReopenLabel, doorShutStandingNotice, doorsShutBannerLine,
+  doorsShutIndividuallyBanner, doorsStayShutNotice, gateDeleteConfirm, gateDeleteStandingNotice,
+  gateOfflineFallbackNotice, type ShutDoorFact,
   unnamedGateOfflineNotice,
 } from "./gateCopy";
 import { GATE_ACCESS_POLICIES } from "./api";
@@ -78,10 +80,10 @@ describe("NEW_GATE_BADGE", () => {
 describe("doorShutNotice", () => {
   it("is exactly this", () => {
     expect(doorShutNotice()).toBe(
-      "The club is not alerted about its silence, and the API refuses every scan at this door"
-      + " from the instant the switch is thrown. A door that can still reach the API hears that"
-      + " refusal and opens for nobody, with no fall back to its roster. A door that has also lost"
-      + " the network never hears it, and keeps admitting members with a booking from the roster it"
+      "The club is not alerted about its silence, and the club's system refuses every scan at"
+      + " this door from the instant the switch is thrown. A door that can still reach the club hears"
+      + " that refusal and opens for nobody, with no fall back to its saved list. A door that has also"
+      + " lost the network never hears it, and keeps admitting members with a booking from the list it"
       + " last downloaded until that goes stale, which takes up to six hours. Bookings, refunds and"
       + " no-show penalties are untouched either way, and a door marks nobody as having arrived.",
     );
@@ -126,12 +128,12 @@ describe("doorShutNotice", () => {
   it("says both what a reachable door does and what a cut-off one does", () => {
     const notice = doorShutNotice();
     // The reachable board: refused, and explicitly NOT falling back.
-    expect(notice).toContain("can still reach the API hears that refusal and opens for nobody");
-    expect(notice).toContain("with no fall back to its roster");
+    expect(notice).toContain("can still reach the club hears that refusal and opens for nobody");
+    expect(notice).toContain("with no fall back to its saved list");
     // The cut-off board: never hears it, and the bound on how long that lasts. Without the
     // bound the caveat reads as "out of service does nothing".
     expect(notice).toContain("has also lost the network never hears it");
-    expect(notice).toContain("roster it last downloaded");
+    expect(notice).toContain("list it last downloaded");
     expect(notice).toContain("up to six hours");
     // And neither half stated flatly, with no condition attached to it.
     expect(notice).not.toContain("The door opens for nobody.");
@@ -167,7 +169,7 @@ describe("doorShutNotice", () => {
 describe("doorShutConfirm", () => {
   it("is exactly this", () => {
     expect(doorShutConfirm()).toBe(
-      "Shut this door? A door that can reach the API opens for nobody from this click. One that"
+      "Shut this door? A door that can reach the club opens for nobody from this click. One that"
       + " has also lost the network keeps admitting booked members from the list it last downloaded"
       + " for up to six hours. No booking and no no-show penalty changes, and a door marks nobody"
       + " as having arrived.",
@@ -176,7 +178,7 @@ describe("doorShutConfirm", () => {
 
   it("carries all three halves the notice carries, compressed rather than dropped", () => {
     const confirm = doorShutConfirm();
-    expect(confirm).toContain("can reach the API opens for nobody");
+    expect(confirm).toContain("can reach the club opens for nobody");
     expect(confirm).toContain("the list it last downloaded");
     expect(confirm).toContain("up to six hours");
     expect(confirm).toContain("No booking and no no-show penalty changes");
@@ -227,20 +229,34 @@ describe("doorShutConfirm", () => {
  * </p>
  */
 describe("doorReopenConfirm", () => {
-  it("is exactly this", () => {
-    expect(doorReopenConfirm()).toBe(
-      "Reopen this door? A door that can reach the API opens for members again from the very next"
+  it("is exactly this, for a door the club can reach", () => {
+    expect(doorReopenConfirm(true)).toBe(
+      "Reopen this door? A door that can reach the club opens for members again from the very next"
       + " scan — there is no wait. A door that has lost the network has been admitting booked"
       + " members from its cached list all along, and nothing changes there.",
     );
   });
 
   it("states both halves, and the reachable half has no wait in it", () => {
-    const confirm = doorReopenConfirm();
+    const confirm = doorReopenConfirm(true);
     expect(confirm).toContain("from the very next scan — there is no wait");
     expect(confirm).toContain("has lost the network has been admitting booked members");
     // The one thing a reopen must never imply: that anything was delivered to a board.
     expect(confirm.toLowerCase()).not.toContain("heartbeat");
+  });
+
+  /**
+   * C5. This promised "from the very next scan" to every door, including one nothing can
+   * reach — a promise about a machine that is not listening, on the control an admin presses
+   * when they are already worried about that door.
+   */
+  it("promises nothing about the very next scan at a door that is not reporting", () => {
+    const confirm = doorReopenConfirm(false);
+    expect(confirm).not.toContain("very next scan");
+    expect(confirm).toContain("Nothing can reach this door");
+    expect(confirm).toContain("will not know it is open again until it calls in");
+    // And the half that IS true of it today, so the sentence is not only a refusal.
+    expect(confirm).toContain("admitting booked members from its cached list all along");
   });
 });
 
@@ -253,19 +269,30 @@ describe("the fleet confirms", () => {
     );
   });
 
-  it("name the count and both halves, reopening", () => {
-    expect(doorFleetReopenConfirm(4)).toBe(
-      "Reopen all 4 doors? Every door that can reach the club's server opens for members again from"
-      + " the very next scan. A door that has lost the network has been admitting booked members"
-      + " from its cached list all along.",
+  /**
+   * C1. The reopen confirm counted the club's TOTAL doors — "Reopen all 3" — over a request
+   * that reopens only what a shut-all shut. An admin who had shut one door on its own read
+   * "all 3", pressed it, and got `{"doors": []}` and the words "0 doors reopened".
+   */
+  it("name the count they will actually reopen, reopening", () => {
+    expect(doorFleetReopenConfirm(2)).toBe(
+      "Reopen the 2 doors that were shut together? Every one of them that can reach the club's"
+      + " server opens for members again from the very next scan. Any that has lost the network has"
+      + " been admitting booked members from its cached list all along.",
     );
+  });
+
+  it("names the doors that will stay shut, before the tap rather than after", () => {
+    const confirm = doorFleetReopenConfirm(2, ["Front door"]);
+    expect(confirm).toContain("Front door stays shut");
+    expect(confirm).toContain("Reopen it from its page");
   });
 
   /** A club with one door reads a sentence about its door, not "all 1 doors". */
   it("do not say 'all 1 doors' to a club with one door", () => {
     expect(doorFleetShutConfirm(1)).toContain("the club's one door");
     expect(doorFleetShutConfirm(1)).not.toContain("all 1");
-    expect(doorFleetReopenConfirm(1)).toContain("the club's one door");
+    expect(doorFleetReopenConfirm(1)).toContain("the one door that was shut together");
     expect(doorFleetReopenConfirm(1)).not.toContain("all 1");
   });
 });
@@ -380,16 +407,125 @@ describe("doorShutStandingNotice", () => {
   });
 });
 
-describe("doorsShutBanner", () => {
-  it("says how many of how many, singular and plural both", () => {
-    expect(doorsShutBanner(1, 4)).toBe("1 of 4 doors is shut.");
-    expect(doorsShutBanner(2, 4)).toBe("2 of 4 doors are shut.");
+/**
+ * C2 — the banner, which asserted a lockdown the product had not achieved.
+ *
+ * <p>
+ * It read "3 of 3 doors are shut. Members can't get in." whatever the doors were doing. A
+ * shut door the club cannot reach has not heard the refusal: it goes on admitting members
+ * with a booking from the list it last downloaded, for up to six hours. On the one screen a
+ * volunteer trusts during an incident, that is P1 and P6 broken in eight words — and two
+ * reviewers reached it independently.
+ * </p>
+ */
+describe("doorsShutBannerLine", () => {
+  const door = (name: string, online: boolean): ShutDoorFact =>
+    ({ id: name, name, online, shutByFleet: true });
+
+  it("never says members cannot get in — the phrase is banned outright", () => {
+    const every = [
+      doorsShutBannerLine([door("Front door", true)], 3),
+      doorsShutBannerLine([door("Front door", true), door("Side door", true)], 2),
+      doorsShutBannerLine([door("Front door", false)], 3),
+      doorsShutBannerLine([door("Front door", false), door("Side door", false)], 2),
+      doorsShutBannerLine([door("Front door", true), door("Side door", false)], 2),
+      doorsShutIndividuallyBanner([door("Front door", true)], 3),
+    ];
+    for (const line of every) {
+      expect(line.toLowerCase()).not.toContain("can't get in");
+      expect(line.toLowerCase()).not.toContain("cannot get in");
+    }
   });
 
-  /** The second sentence is only true when EVERY door is shut, so it only appears then. */
-  it("adds that members cannot get in only when every door is shut", () => {
-    expect(doorsShutBanner(4, 4)).toBe("4 of 4 doors are shut. Members can't get in.");
-    expect(doorsShutBanner(3, 4)).not.toContain("Members can't get in");
+  it("states BOTH halves when a shut door is not reporting, and names it", () => {
+    const line = doorsShutBannerLine([door("Front door", true), door("Side door", false)], 3);
+    expect(line).toContain("2 of 3 doors shut");
+    expect(line).toContain("1 confirmed, 1 not yet");
+    // Named, because "1 not yet" sends nobody anywhere.
+    expect(line).toContain("Side door");
+    expect(line).toContain("may still admit booked members");
+    expect(line).toContain("six hours");
+  });
+
+  it("says every one confirmed only when every shut door is reporting", () => {
+    const line = doorsShutBannerLine([door("Front door", true), door("Side door", true)], 3);
+    expect(line).toContain("every one of them confirmed");
+    expect(line).not.toContain("not yet");
+    // The exit is the question an admin actually has when they read this.
+    expect(line).toContain("Getting out is mechanical");
+  });
+
+  it("says none confirmed rather than '0 confirmed'", () => {
+    const line = doorsShutBannerLine([door("Front door", false)], 3);
+    expect(line).toContain("none of them confirmed yet");
+    expect(line).not.toContain("0 confirmed");
+  });
+
+  it("is empty when nothing is shut, so the banner has nothing to render", () => {
+    expect(doorsShutBannerLine([], 3)).toBe("");
+    expect(doorsShutBannerLine([door("Front door", true)], 0)).toBe("");
+  });
+});
+
+/**
+ * C1 — the doors shut one at a time, where a fleet Reopen would do nothing at all.
+ */
+describe("doorsShutIndividuallyBanner", () => {
+  const door = (name: string): ShutDoorFact => ({ id: name, name, online: true, shutByFleet: false });
+
+  it("names each door and sends the reader to its own page", () => {
+    const line = doorsShutIndividuallyBanner([door("Front door"), door("Side door")], 3);
+    expect(line).toContain("2 of 3 doors shut");
+    expect(line).toContain("Front door, Side door");
+    expect(line).toContain("from their own page");
+    // The whole point: it says why the club-wide control is not the way back.
+    expect(line).toContain("would not touch these");
+  });
+
+  it("reads for one door without saying 'each of them'", () => {
+    const line = doorsShutIndividuallyBanner([door("Front door")], 3);
+    expect(line).toContain("one at a time");
+    expect(line).toContain("Reopen it from its own page");
+  });
+});
+
+/** C1 — the label counts what the request will ACTUALLY reopen, never the club's total. */
+describe("doorFleetReopenLabel", () => {
+  it("counts the doors shut together", () => {
+    expect(doorFleetReopenLabel(2)).toBe("Reopen the 2 doors shut together");
+    expect(doorFleetReopenLabel(1)).toBe("Reopen the door shut together");
+  });
+});
+
+/** C1 — a zero-change result never prints without the reason it was zero. */
+describe("doorFleetNoChangeNotice", () => {
+  it("explains a reopen that reopened nothing", () => {
+    const notice = doorFleetNoChangeNotice("reopen");
+    expect(notice).toContain("none of them were shut together");
+    expect(notice).toContain("stays shut until it is reopened from its own page");
+  });
+
+  it("explains a shut that shut nothing", () => {
+    expect(doorFleetNoChangeNotice("shut")).toContain("already shut");
+  });
+});
+
+/** C1 — the doors a fleet reopen will leave behind, named before and after it is pressed. */
+describe("doorsStayShutNotice", () => {
+  it("is silent when nothing stays shut", () => {
+    expect(doorsStayShutNotice([])).toBeNull();
+  });
+
+  it("names one door and says where to reopen it", () => {
+    expect(doorsStayShutNotice(["Front door"])).toBe(
+      "Front door stays shut — it was shut on its own. Reopen it from its page.",
+    );
+  });
+
+  it("names every door when there is more than one", () => {
+    const notice = doorsStayShutNotice(["Front door", "Side door"])!;
+    expect(notice).toContain("Front door, Side door");
+    expect(notice).toContain("each was shut on its own");
   });
 });
 
@@ -399,14 +535,42 @@ describe("doorsShutBanner", () => {
  * door's name is what is actually lost and has to be redone.
  */
 describe("gateDeleteConfirm", () => {
-  it("says the door comes straight back, and comes back unnamed", () => {
-    expect(gateDeleteConfirm()).toBe("Delete? The door re-registers on its next heartbeat with no name.");
+  it("says the door comes straight back, and comes back with nothing filled in", () => {
+    const confirm = gateDeleteConfirm();
+    expect(confirm).toContain("reappears here as a new door with nothing filled in");
+    expect(confirm).toContain("Unplug it if you meant to retire it");
+  });
+
+  /**
+   * C10. The confirm listed the name and stopped, so the two facts an admin had most
+   * recently taken the trouble to write down — where the board is, and what the lock does
+   * with no power — were destroyed without being mentioned.
+   */
+  it("names everything it destroys, not only the door's name", () => {
+    const confirm = gateDeleteConfirm().toLowerCase();
+    expect(confirm).toContain("its name");
+    expect(confirm).toContain("where the board is");
+    expect(confirm).toContain("what the lock does with no power");
   });
 
   it("does not read as a revocation", () => {
     const confirm = gateDeleteConfirm().toLowerCase();
     expect(confirm).not.toContain("really delete");
-    expect(confirm).toContain("re-registers");
+    expect(confirm).toContain("still has the club's key");
+  });
+
+  /**
+   * A12. Delete's consequence was printed permanently while Shut's was hidden until armed,
+   * so the two destructive controls on one card taught opposite lessons about where to look.
+   * Both are visible at rest now — and the resting one is a STATEMENT, because a question
+   * printed beside a button reads as a control that is already mid-ask.
+   */
+  it("has a resting form that states rather than asks, and names the door", () => {
+    const standing = gateDeleteStandingNotice("Front door");
+    expect(standing).toContain("Front door");
+    expect(standing).not.toContain("?");
+    expect(standing).toContain("where the board is");
+    expect(standing).toContain("what the lock does with no power");
   });
 });
 
@@ -450,7 +614,7 @@ describe("describeGatePolicy", () => {
     const strict = describeGatePolicy("booking_window", 30);
     const sentence = strict.split(". ").find((s) => s.includes("Club admins always pass"))!;
     expect(sentence).toBeTruthy();
-    expect(sentence).toContain("can still reach the API");
+    expect(sentence).toContain("can still reach the club");
     expect(sentence).toContain("an offline door holds bookings, not admins");
   });
 
@@ -716,12 +880,12 @@ describe("GATE_POLICY_LABELS", () => {
 describe("gateOfflineFallbackNotice", () => {
   it("says the offline fallback is bookings only, whichever policy is set", () => {
     expect(gateOfflineFallbackNotice()).toBe(
-      "When a door cannot reach the API it falls back to the roster it last downloaded, and"
-      + " that roster holds bookings and nothing else. So while a door is offline, only members"
+      "When a door cannot reach the club it falls back to the list of bookings it last"
+      + " downloaded, and that list holds bookings and nothing else. So while a door is offline, only members"
       + " with an upcoming or running booking can get in — whichever policy is set below. That list"
       + " holds at most 48 bookings, taken in start order, so on a busy night the latest-starting"
       + " bookings beyond that cannot get in while the door is offline. A door nobody has named yet"
-      + " is sent no roster at all, so it opens nothing while it is offline.",
+      + " is sent no list at all, so it opens nothing while it is offline.",
     );
   });
 
@@ -735,7 +899,7 @@ describe("gateOfflineFallbackNotice", () => {
    * "falls back to the roster it last downloaded" is flatly untrue of an unnamed door.
    */
   it("excepts the unnamed door, which has no roster to fall back to", () => {
-    expect(gateOfflineFallbackNotice()).toContain("nobody has named yet is sent no roster at all");
+    expect(gateOfflineFallbackNotice()).toContain("nobody has named yet is sent no list at all");
   });
 
   /**
@@ -783,7 +947,7 @@ describe("unnamedGateOfflineNotice", () => {
   it("is exactly this", () => {
     expect(unnamedGateOfflineNotice()).toBe(
       "Until you name this door it only works while it can reach the server: an unnamed door is"
-      + " sent an empty roster, so it opens nothing at all while it is offline.",
+      + " sent an empty list, so it opens nothing at all while it is offline.",
     );
   });
 
@@ -795,7 +959,7 @@ describe("unnamedGateOfflineNotice", () => {
     const notice = unnamedGateOfflineNotice();
     expect(notice).toContain("Until you name this door");
     expect(notice).toContain("only works while it can reach the server");
-    expect(notice).toContain("sent an empty roster");
+    expect(notice).toContain("sent an empty list");
     expect(notice).toContain("opens nothing at all while it is offline");
   });
 
