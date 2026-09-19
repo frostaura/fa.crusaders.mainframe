@@ -352,6 +352,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("LocationNote")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<string>("MacAddress")
                         .IsRequired()
                         .HasMaxLength(12)
@@ -369,9 +373,15 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("OutOfServiceSince")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("PowerLossBehaviour")
+                        .HasColumnType("integer");
+
                     b.Property<string>("RunningVersion")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset?>("ShutByShutAllAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");

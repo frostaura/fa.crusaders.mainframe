@@ -56,6 +56,84 @@ public static class DeviceKinds
     }
 }
 
+/// <summary>
+/// What a door's lock does when the power is off.
+///
+/// <para>
+/// <b>Admin-entered, never inferred.</b> Nothing the firmware reports bears on this: the
+/// relay's polarity flags say what the board drives while it is running, and a board with no
+/// power drives nothing at all. <c>door-gate.md</c> §11 makes the point in those words —
+/// whether the lock falls open or falls shut is a property of the lock, not of this software
+/// — and <c>memory/watch-doors.md</c> carries it as an open debt against a real building.
+/// So this column records an answer a person gave after standing in front of the door with
+/// the breaker off, and it says so when nobody has.
+/// </para>
+/// </summary>
+public enum DoorPowerLossBehaviour
+{
+    /// <summary>
+    /// Nobody has measured it. The default, and the honest state of every door in the field
+    /// today — which is why it is <c>0</c>: a migration that backfilled anything else would
+    /// be inventing a measurement.
+    /// </summary>
+    NotEstablished = 0,
+
+    /// <summary>The lock releases and the door can be pushed open. What the owner expects and nobody has confirmed.</summary>
+    Released = 1,
+
+    /// <summary>The lock holds and the door stays shut from outside. Egress stays mechanical either way — see §11.</summary>
+    Locked = 2,
+}
+
+/// <summary>
+/// <see cref="DoorPowerLossBehaviour"/> on the wire, snake_case.
+///
+/// <para>
+/// Mapped here rather than by <c>ToString()</c> for the reason <see cref="DeviceKinds"/>
+/// gives: renaming the C# member must not silently be an API change, and the closed set has
+/// to be validated on the way in from a console that could otherwise invent a fourth answer.
+/// </para>
+/// </summary>
+public static class DoorPowerLoss
+{
+    public const string NotEstablished = "not_established";
+    public const string Released = "released";
+    public const string Locked = "locked";
+
+    /// <summary>Every value, for validation and for the admin screen.</summary>
+    public static readonly string[] All = [NotEstablished, Released, Locked];
+
+    /// <summary>The wire name of a behaviour.</summary>
+    public static string Wire(DoorPowerLossBehaviour value) => value switch
+    {
+        DoorPowerLossBehaviour.Released => Released,
+        DoorPowerLossBehaviour.Locked => Locked,
+        _ => NotEstablished,
+    };
+
+    /// <summary>
+    /// The behaviour this wire value names, or false when it names none.
+    ///
+    /// <para>
+    /// Strict, including on <c>not_established</c>: a console SETTING a door back to
+    /// unmeasured is a real instruction — somebody rewired the lock and the old answer is no
+    /// longer known — so it is accepted rather than treated as "leave it alone". Absence is
+    /// what leaves it alone, and absence never reaches here.
+    /// </para>
+    /// </summary>
+    public static bool TryParse(string? wire, out DoorPowerLossBehaviour value)
+    {
+        value = DoorPowerLossBehaviour.NotEstablished;
+        switch (wire)
+        {
+            case NotEstablished: return true;
+            case Released: value = DoorPowerLossBehaviour.Released; return true;
+            case Locked: value = DoorPowerLossBehaviour.Locked; return true;
+            default: return false;
+        }
+    }
+}
+
 public enum DeviceHardware
 {
     /// <summary>ATmega2560 — thin I/O layer, USB-flashed.</summary>
@@ -144,6 +222,63 @@ public sealed class Device : ITenantScoped
     /// whose name is silently truncated is a door nobody can find in the audit trail.
     /// </summary>
     public const int GateKeyMaxLength = 64;
+
+    /// <summary>
+    /// Where this door physically is, in a sentence somebody wrote down. Null until they did,
+    /// and null on a court box.
+    ///
+    /// <para>
+    /// <b>It is not <see cref="GateKey"/> and it is not a second name.</b> The gate key is a
+    /// short machine-ish label that appears in every audit row a club will ever read back and
+    /// is what a firmware-facing roster is keyed by; this is prose for the person who has to
+    /// walk to the door — "Reception, left of the desk", "service yard, behind the bins" —
+    /// and it exists because <c>gate-0a1b2c</c> on a printed card tells a locksmith nothing.
+    /// W1.4 puts it on the printable door card beside the device code, the MAC and the club's
+    /// contact details, which is the one artefact that leaves this system on paper.
+    /// </para>
+    ///
+    /// <para>
+    /// Two-valued on the PATCH exactly like <see cref="GateKey"/>: an empty string clears it,
+    /// absent leaves it alone. Bounded by the caller, where there is a person to refuse,
+    /// rather than truncated at the column — a location silently shortened is a location
+    /// somebody follows to the wrong end of a corridor.
+    /// </para>
+    /// </summary>
+    public string? LocationNote { get; set; }
+
+    /// <summary>
+    /// Longest <see cref="LocationNote"/> accepted, matching the column. Named once for the
+    /// same reason <see cref="GateKeyMaxLength"/> is.
+    /// </summary>
+    public const int LocationNoteMaxLength = 200;
+
+    /// <summary>
+    /// What this door's lock does with no power, as an admin recorded it. See
+    /// <see cref="DoorPowerLossBehaviour"/> — it is measured, never inferred.
+    /// </summary>
+    public DoorPowerLossBehaviour PowerLossBehaviour { get; set; } = DoorPowerLossBehaviour.NotEstablished;
+
+    /// <summary>
+    /// When this door was shut by a club-wide "shut all doors", or null.
+    ///
+    /// <para>
+    /// <b>It is what makes "reopen all" an undo rather than an unlock.</b> Without it the
+    /// only state a reopen could read is <see cref="Enabled"/>, and reopening every disabled
+    /// gate would silently reverse a decision an admin made about ONE door for a reason this
+    /// system knows nothing about — a broken scanner, a lock being replaced, a door the club
+    /// has closed for the season. A door an admin shut individually has to stay shut through
+    /// a fleet reopen, and the only way to tell the two apart is to record which of them this
+    /// software did.
+    /// </para>
+    ///
+    /// <para>
+    /// Cleared whenever the door goes back INTO service, by either route, because the column
+    /// says what is true of this row now: a door that is open was not shut by anything. It is
+    /// deliberately not a history — one column cannot hold one — and nothing settles on it,
+    /// unlike <see cref="OutOfServiceSince"/>, which the money reads.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? ShutByShutAllAt { get; set; }
 
     /// <summary>
     /// This box's own button map, as the eight-entry wire array (<c>ButtonMap.ToWire()</c>)

@@ -92,6 +92,22 @@ public static class AdminConfigEndpoints
                 // cannot render rather than a page that falls back.
                 device_alert_cooldown_minutes = GetInt(
                     doc, "device_alert_cooldown_minutes", defaults.DeviceAlertCooldownMinutes),
+
+                // The five Wave 1 door settings, always present for the same reason the
+                // cooldown above is: the console's settings type carries no client-side
+                // default, so an omitted key is a page that cannot render rather than one that
+                // falls back.
+                //
+                // Rendered from the CLAMPED values, not echoed from the stored document, on
+                // the same argument operating_hours and gate_access_policy already make here:
+                // a settings screen reads a value, shows it to a person and PUTs back whatever
+                // it was shown, so showing a number the engine does not honour would let the
+                // page report a retention the worker is not deleting against.
+                door_log_retention_days = DoorSettings.LogRetentionDays(defaults),
+                door_refusal_spike_count = DoorSettings.RefusalSpikeCount(defaults),
+                door_refusal_spike_minutes = DoorSettings.RefusalSpikeMinutes(defaults),
+                club_contact_phone = DoorSettings.ContactPhone(defaults) ?? "",
+                club_contact_email = DoorSettings.ContactEmail(defaults) ?? "",
             });
         });
 
@@ -165,6 +181,9 @@ public static class AdminConfigEndpoints
             var gateError = ValidateGateSettings(req);
             if (gateError is not null) return Results.BadRequest(new { error = gateError });
 
+            var doorError = ValidateDoorSettings(req);
+            if (doorError is not null) return Results.BadRequest(new { error = doorError });
+
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
             {
@@ -236,6 +255,7 @@ public static class AdminConfigEndpoints
             WriteOptionalEconomics(doc, req);
             WriteOptionalDeviceNumbers(doc, req);
             WriteOptionalGateSettings(doc, req);
+            WriteOptionalDoorSettings(doc, req);
             row.SettingsJson = JsonSerializer.Serialize(doc);
             // The column was written once, at construction, and never again — a dead audit
             // field on the one table that governs money and lights. Nothing reads it today,
@@ -431,6 +451,63 @@ public static class AdminConfigEndpoints
         return null;
     }
 
+    /// <summary>
+    /// Bounds on the five Wave 1 door settings.
+    ///
+    /// <para>
+    /// Kept apart from <see cref="ValidateGateSettings"/> for the same reason that one is kept
+    /// apart from <see cref="ValidateDeviceNumbers"/>: those three answer "who may open a
+    /// door", these five answer "what the club may read back about its doors and how a refused
+    /// member reaches a person". The bounds are <see cref="DoorSettings"/>' own constants, so
+    /// the number an admin is refused at and the number the reader clamps to cannot drift —
+    /// and the retention one is the sharpest case of that rule in the tree, because the number
+    /// it names is the cutoff a worker DELETES audit rows against.
+    /// </para>
+    ///
+    /// <para>
+    /// The two strings may be EMPTY, and emptiness is a real instruction: it is how a club
+    /// takes a contact down. What is refused is a value past the length the reader will show,
+    /// because a silently truncated phone number is a number a member dials wrong.
+    /// </para>
+    /// </summary>
+    private static string? ValidateDoorSettings(UpdateSettingsRequest req)
+    {
+        if (req.EffectiveDoorLogRetentionDays is { } retention
+            && (retention < DoorSettings.MinLogRetentionDays || retention > DoorSettings.MaxLogRetentionDays))
+        {
+            return "door_log_retention_days_out_of_range";
+        }
+        if (req.EffectiveDoorRefusalSpikeCount is { } count
+            && (count < DoorSettings.MinRefusalSpikeCount || count > DoorSettings.MaxRefusalSpikeCount))
+        {
+            return "door_refusal_spike_count_out_of_range";
+        }
+        if (req.EffectiveDoorRefusalSpikeMinutes is { } minutes
+            && (minutes < DoorSettings.MinRefusalSpikeMinutes || minutes > DoorSettings.MaxRefusalSpikeMinutes))
+        {
+            return "door_refusal_spike_minutes_out_of_range";
+        }
+        if (req.EffectiveClubContactPhone is { } phone && phone.Trim().Length > DoorSettings.MaxContactPhoneLength)
+        {
+            return "club_contact_phone_too_long";
+        }
+        if (req.EffectiveClubContactEmail is { } email && email.Trim().Length > DoorSettings.MaxContactEmailLength)
+        {
+            return "club_contact_email_too_long";
+        }
+        return null;
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the five door settings.</summary>
+    private static void WriteOptionalDoorSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.EffectiveDoorLogRetentionDays is { } retention) doc["door_log_retention_days"] = ToElement(retention);
+        if (req.EffectiveDoorRefusalSpikeCount is { } count) doc["door_refusal_spike_count"] = ToElement(count);
+        if (req.EffectiveDoorRefusalSpikeMinutes is { } minutes) doc["door_refusal_spike_minutes"] = ToElement(minutes);
+        if (req.EffectiveClubContactPhone is { } phone) doc["club_contact_phone"] = ToElement(phone.Trim());
+        if (req.EffectiveClubContactEmail is { } email) doc["club_contact_email"] = ToElement(email.Trim());
+    }
+
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the gate block.</summary>
     private static void WriteOptionalGateSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
@@ -597,7 +674,25 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("gate_unlock_seconds")] int? GateUnlockSecondsSnake = null,
     [property: JsonPropertyName("gate_access_policy")] string? GateAccessPolicySnake = null,
     [property: JsonPropertyName("gate_early_entry_minutes")] int? GateEarlyEntryMinutesSnake = null,
-    [property: JsonPropertyName("device_alert_cooldown_minutes")] int? DeviceAlertCooldownMinutesSnake = null)
+    [property: JsonPropertyName("device_alert_cooldown_minutes")] int? DeviceAlertCooldownMinutesSnake = null,
+
+    // ---- The five Wave 1 door settings, under both spellings ----
+    //
+    // Same asymmetry, same cost, same remedy as the four above. These five are read by the
+    // club log, by the tile's signals, by the member's page and by the retention worker, and
+    // the one a silent no-op would hurt most is door_log_retention_days: an admin who narrows
+    // it from 90 days to 30 and is answered {"saved": true} believes the club has stopped
+    // holding a record it is still holding.
+    int? DoorLogRetentionDays = null,
+    int? DoorRefusalSpikeCount = null,
+    int? DoorRefusalSpikeMinutes = null,
+    string? ClubContactPhone = null,
+    string? ClubContactEmail = null,
+    [property: JsonPropertyName("door_log_retention_days")] int? DoorLogRetentionDaysSnake = null,
+    [property: JsonPropertyName("door_refusal_spike_count")] int? DoorRefusalSpikeCountSnake = null,
+    [property: JsonPropertyName("door_refusal_spike_minutes")] int? DoorRefusalSpikeMinutesSnake = null,
+    [property: JsonPropertyName("club_contact_phone")] string? ClubContactPhoneSnake = null,
+    [property: JsonPropertyName("club_contact_email")] string? ClubContactEmailSnake = null)
 {
     /// <summary>The release the club asked for, under either spelling, or null when neither arrived.</summary>
     public int? EffectiveGateUnlockSeconds => GateUnlockSeconds ?? GateUnlockSecondsSnake;
@@ -610,6 +705,21 @@ public sealed record UpdateSettingsRequest(
 
     /// <summary>The alert cooldown the club asked for, under either spelling.</summary>
     public int? EffectiveDeviceAlertCooldownMinutes => DeviceAlertCooldownMinutes ?? DeviceAlertCooldownMinutesSnake;
+
+    /// <summary>The door-log retention the club asked for, under either spelling.</summary>
+    public int? EffectiveDoorLogRetentionDays => DoorLogRetentionDays ?? DoorLogRetentionDaysSnake;
+
+    /// <summary>The refusal-spike threshold the club asked for, under either spelling.</summary>
+    public int? EffectiveDoorRefusalSpikeCount => DoorRefusalSpikeCount ?? DoorRefusalSpikeCountSnake;
+
+    /// <summary>The refusal-spike window the club asked for, under either spelling.</summary>
+    public int? EffectiveDoorRefusalSpikeMinutes => DoorRefusalSpikeMinutes ?? DoorRefusalSpikeMinutesSnake;
+
+    /// <summary>The club's contact phone as asked for, under either spelling. An empty string clears it.</summary>
+    public string? EffectiveClubContactPhone => ClubContactPhone ?? ClubContactPhoneSnake;
+
+    /// <summary>The club's contact email as asked for, under either spelling. An empty string clears it.</summary>
+    public string? EffectiveClubContactEmail => ClubContactEmail ?? ClubContactEmailSnake;
 }
 
 /// <summary>

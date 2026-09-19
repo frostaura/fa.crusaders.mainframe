@@ -53,7 +53,12 @@ public sealed class RetentionWorker : BackgroundService
         }
     }
 
-    private async Task TickAsync(CancellationToken ct)
+    /// <summary>
+    /// One sweep over every tenant. Public so the suite can drive the real worker rather than a
+    /// copy of its arithmetic, the way <c>NoShowWorker</c> already is — a retention rule proved
+    /// against a re-implementation proves nothing about the rule that deletes rows in production.
+    /// </summary>
+    public async Task TickAsync(CancellationToken ct)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -67,6 +72,15 @@ public sealed class RetentionWorker : BackgroundService
             var settings = await settingsAccessor.GetAsync(ct);
             var cutoff = DateTimeOffset.UtcNow.AddYears(-settings.RetentionYears);
             var totalAnonymised = 0;
+
+            // The door trail, DELETED, before anything below anonymises anything.
+            //
+            // W1.9, and the residual door-gate.md §6 wrote down and left open. Anonymising is
+            // enough for a booking and is NOT enough for a door: the row still says which door,
+            // at what minute, and a racquet club's membership is small enough that a pattern is
+            // a person. The club's own page states the number this deletes against, so a row
+            // surviving past it would make that sentence false.
+            await PurgeDoorTrailAsync(db, tenant, settings, ct);
 
             // Bookings — anonymise the user link on completed/no-show/cancelled rows older than the cutoff.
             var oldBookings = await db.Bookings
@@ -141,5 +155,54 @@ public sealed class RetentionWorker : BackgroundService
                 _logger.LogInformation("Retention swept tenant {Slug}: anonymised {Count} records older than {Cutoff:o}", tenant.Slug, totalAnonymised, cutoff);
             }
         }
+    }
+
+    /// <summary>
+    /// Deletes one club's door rows and door receipts past their own, shorter horizons.
+    ///
+    /// <para>
+    /// <b>Two cutoffs, and the second is deliberately the later of two numbers.</b> The audit
+    /// rows go at <c>door_log_retention_days</c> — clamped on read, because a hand-edited column
+    /// is not a PUT and this is the sharpest case of that rule in the tree: the number decides
+    /// what gets DELETED. The receipts go at <c>max(that, MaxEventAge)</c>, because a receipt is
+    /// what makes an upload idempotent: a board may upload an event, lose the link before
+    /// reading the response, and upload it again, and a receipt purged inside the event horizon
+    /// turns that ordinary retry into a second row for one scan. A club on the seven-day minimum
+    /// therefore still keeps its door receipts for thirty days, holding nothing but a device id,
+    /// a sequence number and a kind.
+    /// </para>
+    ///
+    /// <para>
+    /// Both reads are tenant-filtered by the context's global query filter, which the caller has
+    /// already set for this tenant — the isolation is structural rather than a comparison here.
+    /// </para>
+    /// </summary>
+    private async Task PurgeDoorTrailAsync(
+        MainframeDbContext db, Domain.Tenant tenant, TenantSettingsView settings, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var retentionDays = DoorSettings.LogRetentionDays(settings);
+        var rowCutoff = now.AddDays(-retentionDays);
+        var receiptCutoff = now.AddDays(-Math.Max(retentionDays, Endpoints.DeviceEventEndpoints.MaxEventAge.TotalDays));
+
+        var rows = await db.AuditLogs
+            .Where(DoorTrail.IsPurgeableRow)
+            .Where(a => a.CreatedAt < rowCutoff)
+            .ToListAsync(ct);
+        if (rows.Count > 0) db.AuditLogs.RemoveRange(rows);
+
+        var receipts = await db.DeviceEventReceipts
+            .Where(r => (r.Kind == Endpoints.DeviceEventEndpoints.GateOpenKind
+                         || r.Kind == Endpoints.DeviceEventEndpoints.UnknownScanKind)
+                        && r.OccurredAt < receiptCutoff)
+            .ToListAsync(ct);
+        if (receipts.Count > 0) db.DeviceEventReceipts.RemoveRange(receipts);
+
+        if (rows.Count == 0 && receipts.Count == 0) return;
+
+        await db.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            "Retention purged {Rows} door rows and {Receipts} door receipts for tenant {Slug}",
+            rows.Count, receipts.Count, tenant.Slug);
     }
 }

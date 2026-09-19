@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-watch-doors
-description: "What the door gates leave owed: no-power behaviour unmeasured and two facts owed by Carl, no gate has run on hardware, a court box's roster is an unnamed door key, device receipts and audit rows are never purged."
+description: "What the door gates leave owed: no-power behaviour unmeasured and two facts owed by Carl, no gate has run on hardware, a court box's roster is an unnamed door key, and everything that is NOT a door row still grows for ever."
 type: watch
 last_verified: 2026-09-19
 ---
@@ -37,15 +37,21 @@ was decided and why is [`decisions-door-gate.md`](decisions-door-gate.md) and
    and a club can hold at most 16 unacknowledged rows — but the roster itself is unchanged.
    *Should an auto-registered court box also get no roster?* Founder's call. It belongs in
    [`questions.md`](questions.md), where the G2 lane was to record it — **check that it landed**.
-4. **Nothing ever purges `device_event_receipts` or `audit_log`, and the doors now depend on
-   both.** `RetentionWorker` anonymises a member's identity on old rows and deletes nothing, so a
-   club's tables grow for the life of the deployment. It matters more since G3: the activity
-   reader (`GET /admin/devices/{id}/activity`) matches a board by a `device_id` inside
-   `details_json`, there is **no index** on that column, and a door's trail is the only record it
-   leaves. A purge is not a plain delete — the receipts are what make an event upload idempotent,
-   so anything removed must be older than a board could still be retrying (`MaxEventAge`, thirty
-   days). **Capacity and cost, not correctness**, which is why G3 stated it in §6 rather than
-   fixing it.
+4. **The DOOR half of this is closed; everything else still grows for ever.** Wave 1's
+   `RetentionWorker` hard-deletes `gate.*`, `device.gate_open` and `device.unknown_scan` rows past
+   `door_log_retention_days` (default 90), and the `gate_open`/`unknown_scan` receipts past
+   `max(that, MaxEventAge)` — the receipts outlive the rows because they are what makes an upload
+   idempotent, and a purged one turns an ordinary re-upload into a second row for one scan. What
+   is **still unpurged**: every other `audit_log` row (anonymised at `retention_years`, never
+   deleted) and every court-box receipt (`activation`, `release`), which the settlement reads. A
+   club's tables still grow for the life of the deployment, just not with doors in them.
+   **Capacity and cost, not correctness.**
+   The jsonb `device_id` match is still unindexed and that is now a **measured** decision rather
+   than an omission: on 400 000 rows across 20 tenants every Wave 1 read plans as an index scan on
+   `IX_audit_log_TenantId_CreatedAt` (0.02–0.21 ms) with the containment as a cheap recheck, so a
+   GIN index on `details_json` would buy nothing and cost write amplification on the hottest table
+   in the product. The numbers are in `door-gate.md` §13. Revisit if a club's door outgrows a
+   day's rows per page.
 5. **Republishing `docs/system-blueprint.html` to its hosted artifact is owed.** Both founder-
    facing pages were regenerated on 2026-09-19 for the doors; the hosted copy is still the
    2026-09-06 revision and knows nothing about them. Republish to the **same URL** recorded in

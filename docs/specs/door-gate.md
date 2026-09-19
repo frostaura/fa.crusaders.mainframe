@@ -1345,3 +1345,191 @@ new sentence above with no row is the defect this table exists to expose.
   guarantee, and a test cannot pin an absence of a guarantee. They are here so that nobody
   infers the guarantee from the surrounding text.
 - §10a's cleartext-HTTP posture, which is a deployment fact rather than a behaviour.
+
+---
+
+## 13. Doors in the console
+
+Wave 1 gave the door trail a reader, a club-wide log, an export, a fleet control, two derived
+signals and a member-facing half. **Nothing here is a new device route.** Every route below is
+admin or member JWT, and `/api/v1/device/*` is untouched — which is load-bearing rather than
+tidy: §7 and `DeviceForbiddenMeansOutOfServiceTests` pin in both directions that a `403` on
+that group can mean one thing only, and a single admin route mounted under it would make the
+firmware's authoritative signal ambiguous.
+
+### The surfaces
+
+| Route | Answers |
+|---|---|
+| `GET /api/v1/admin/doors` | every gate, its day, its signals, and whether a club-wide shut is in force |
+| `GET /api/v1/admin/doors/activity` | the club's door log across all doors — door, time, outcome, reason |
+| `GET /api/v1/admin/doors/activity.csv` | the same filters as a file, formula-safe, audited |
+| `POST /api/v1/admin/doors/shut-all` · `/reopen-all` | the 403 path at fleet scale, one unit of work |
+| `PATCH /api/v1/admin/devices/{id}` | gains `location_note` and `power_loss_behaviour` (gates only) |
+| `GET /api/v1/me/door` | what a member standing at a door is told |
+| `GET /api/v1/me/door/history` | that member's own door rows, and nobody else's |
+
+### The rules that are not obvious from the shapes
+
+**Four actions are a door scan, and two of them released a lock.** `gate.opened` and
+`gate.denied_<reason>` are decisions the server made (§5); `device.gate_open` and
+`device.unknown_scan` are things a board did while the link was down (§6). `DoorTrail` states
+that set once, because six readers ask it and a fifth action added later must not become five
+different subsets of the truth. A `device.registered` or a `device.updated` is the BOARD's
+story and belongs in §9's per-board feed — it is not in the club log, not in the counts and not
+in a member's history, because nobody stood at the door.
+
+**Today is the CLUB's day.** The count is taken in `timezone` on the server and the boundary is
+on the wire, so the page names it rather than asserting one. A zone the platform does not know
+is a day that cannot be established: `today` is then `null` for every door and never `0`,
+because a zero on a failed read is a number an admin will quote in a committee meeting.
+
+**Two numbers per door, never one, and no sort control.** One headline on a list of doors is a
+footfall ranking by accident — the exact shape §1 exists to prevent.
+
+**A signal carries no member, no fingerprint and no code.** The rows it is derived from name
+members; the payload has nowhere to put one, which is cheaper than a convention. The unit is
+**scans** — one person trying four times is four — and the subject of every signal is the door.
+
+**The log filters by door, time and outcome, and by nothing else.** There is no member
+parameter and no per-member admin history anywhere in this product; a member's history belongs
+to the member. Unknown query parameters are ignored rather than refused, because a refusal
+would confirm which names the server recognises.
+
+**The range is clamped to `door_log_retention_days`, not merely defaulted to it.** The page
+states that number and the rows survive on disk between nightly sweeps, so a read answering
+past it would make the page's own sentence false.
+
+**The export defuses before it quotes.** A cell beginning `=`, `+`, `-` or `@` is a formula in
+a spreadsheet, and a door's name, a member's name and a gate key are all club-entered strings.
+The value is kept intact and prefixed with an apostrophe, so the log stays readable and cannot
+execute; quoting first would leave it a formula the moment a reader stripped the quotes.
+
+**`shut-all` is one unit of work and `reopen-all` is an undo, not an unlock.** The console's
+"nothing was shut, every door is exactly as it was" is true only because of the single save. A
+door an admin took out of service individually stays shut through a fleet reopen — they did it
+for a reason this system knows nothing about — and `Device.ShutByShutAllAt` is the only thing
+that can tell the two apart.
+
+**The door card is measured, never inferred.** `power_loss_behaviour` defaults to
+`not_established` because that is the honest state of every door in the field, and no firmware
+flag bears on it: a board with no power drives nothing at all (§11).
+
+**The trail is DELETED past `door_log_retention_days`, not anonymised**, which closes §6's
+residual. Anonymising is enough for a booking and is not enough for a door: the row still says
+which door at what minute, and a club's membership is small enough that a pattern is a person.
+Receipts outlive it by `max(door_log_retention_days, MaxEventAge)`, because a purged receipt
+turns an ordinary re-upload into a second row for one scan.
+
+### Wave 1 tenant settings
+
+| Key | Default | Range | Meaning |
+|---|---|---|---|
+| `door_log_retention_days` | 90 | 7–730 | how long a club keeps its door rows — the number the sweep DELETES against |
+| `door_refusal_spike_count` | 8 | 3–100 | refusals at one door that raise the spike flag |
+| `door_refusal_spike_minutes` | 20 | 5–240 | the window those refusals are counted in |
+| `club_contact_phone` | *(empty)* | ≤32 chars | who a refused member rings; empty means the club has set none |
+| `club_contact_email` | *(empty)* | ≤254 chars | who a refused member writes to |
+
+All five bind **camelCase and snake_case** on the PUT and are **clamped again on read**, per
+§8's rule — the PUT is not the only way a value reaches that column, and this is the sharpest
+case of that rule in the tree, because one of the five decides what gets deleted.
+
+Two numbers are deliberately **not** settings: a credential granted **3** times within **60
+seconds** raises "may not be releasing". A club does not tune those to its traffic — three is
+the smallest count at which "scanned, walked away, came back" stops being the likelier story
+than "the lock did not release" — and the flag's own copy states both, so a club reading the
+notice is reading the rule that produced it.
+
+### No new index, and what was measured
+
+`audit_log` has carried `IX_audit_log_TenantId_CreatedAt` since `InitialCreate`, so the index
+W1.3 asked for already exists and no migration adds one. Measured on Postgres 15 against
+**400 000 rows across 20 tenants** (66 MB table, 28 MB index), every Wave 1 read plans as an
+index scan on it:
+
+| Read | Plan | Execution |
+|---|---|---|
+| club log, default 24 h window, page of 50 | Index Scan Backward + Incremental Sort | 0.03 ms |
+| club log at the 730-day retention ceiling | Index Scan Backward + Incremental Sort | 0.03 ms |
+| doors overview, a club day (838 rows matched) | Bitmap Index Scan | 0.21 ms |
+| club log filtered to one door (`@>` on `device_id`) | Index Scan Backward, jsonb as a filter | 0.02 ms |
+
+**The jsonb containment is a filter rather than an index, and that is the right trade at this
+volume.** A GIN index on `DetailsJson` would serve the per-door filter, but the range predicate
+has already narrowed the scan to one club's day before the recheck runs — so it buys nothing
+measurable here and costs write amplification on the hottest table in the product. Revisit it
+if a club's door ever outgrows a day's rows per page, which at a racquet club it will not.
+
+### What is pinned, and where
+
+| Sentence | Pinned by |
+|---|---|
+| The door card starts unmeasured, and every device view carries all three fields | `AdminDoorCardHttpTests.A_door_card_starts_empty_and_says_nothing_has_been_established`, `…A_court_box_carries_the_door_fields_and_they_are_empty` |
+| `location_note` and `power_loss_behaviour` bind under either spelling | `AdminDoorCardHttpTests.The_location_note_binds_under_either_spelling`, `…The_power_loss_behaviour_binds_under_either_spelling` |
+| `location_note`: `""` clears, absent leaves it alone, over-length is refused | `AdminDoorCardHttpTests.An_empty_location_note_clears_it_and_an_absent_one_leaves_it`, `…A_location_note_longer_than_the_column_is_refused_rather_than_truncated` |
+| `power_loss_behaviour` is a closed set; a null, an empty string and a number are all refused | `AdminDoorCardHttpTests.A_power_loss_behaviour_outside_the_closed_set_is_refused` (four values) |
+| A door field sent to a court box is `door_fields_on_a_court_box`, and the refusal writes nothing | `AdminDoorCardHttpTests.The_door_card_fields_are_refused_on_a_court_box`, `…A_refused_door_card_patch_writes_nothing` |
+| The three columns exist in the MIGRATED schema, not only in the model | `AdminDoorCardHttpTests.The_three_columns_exist_in_the_migrated_schema` |
+| `out_of_service_since` appears on the switch and clears on the way back | `AdminDoorCardHttpTests.Shutting_a_door_surfaces_the_instant_on_the_device_view` |
+| A court box is not on the doors list | `AdminDoorsOverviewHttpTests.A_court_box_is_not_on_the_doors_list` |
+| Order is name ascending, stable, with no sort parameter | `AdminDoorsOverviewHttpTests.The_doors_are_ordered_by_name_ascending_and_stably` |
+| Today's counts are taken in the club's timezone against the stated boundary | `AdminDoorsOverviewHttpTests.Todays_counts_are_taken_in_the_clubs_own_timezone` |
+| The counts carry both halves of the door's day, and no non-scan row | `AdminDoorsOverviewHttpTests.The_counts_carry_both_halves_of_the_doors_day` |
+| The counts are door-scoped | `AdminDoorsOverviewHttpTests.The_counts_are_scoped_to_their_own_door` |
+| A day that cannot be established yields `null`, and a quiet door yields `0` | `AdminDoorsOverviewHttpTests.A_day_that_cannot_be_established_yields_null_counts_and_never_zero`, `…A_door_with_no_scans_today_counts_zero_rather_than_null` |
+| The spike fires at the club's own count, inside the club's own window, and states it | `AdminDoorsOverviewHttpTests.A_run_of_refusals_at_one_door_raises_a_spike_and_states_its_own_window`, `…A_run_one_short_of_the_clubs_threshold_raises_nothing`, `…Refusals_older_than_the_window_do_not_raise_a_spike` |
+| "May not be releasing" is ONE credential three times in a minute, not three people | `AdminDoorsOverviewHttpTests.One_credential_granted_three_times_in_a_minute_flags_the_door`, `…Three_different_credentials_in_a_minute_flag_nothing` |
+| A signal payload carries no member, no name, no id and no fingerprint | `AdminDoorsOverviewHttpTests.A_signal_payload_carries_no_member_and_no_fingerprint` (serialises the payload and greps it) |
+| `shut_all_active` is the fleet's state and not "some door is shut" | `AdminDoorsOverviewHttpTests.Shut_all_active_is_false_until_a_fleet_shut_and_true_after_one`, `…One_door_shut_by_hand_does_not_raise_the_club_wide_banner` |
+| Another club's doors and rows never appear, even naming this club's device id | `AdminDoorsOverviewHttpTests.Another_clubs_doors_and_rows_never_appear_here` |
+| The log defaults to the last 24 h, newest first, and carries the retention number | `AdminDoorLogHttpTests.The_default_window_is_the_last_day_newest_first` |
+| Every row names its door, and an unnamed door's `gate_key` is null rather than absent | `AdminDoorLogHttpTests.Every_row_names_the_door_it_happened_at`, `…A_row_from_an_unnamed_door_carries_a_null_gate_key_rather_than_vanishing` |
+| The filters are door, outcome (a closed set of three) and reason (both vocabularies) | `AdminDoorLogHttpTests.The_door_filter_narrows_to_one_board`, `…The_outcome_filter_is_a_closed_set_of_three`, `…An_outcome_outside_the_closed_set_is_refused`, `…The_reason_filter_reaches_both_vocabularies` |
+| **There is no member filter, under any spelling** | `AdminDoorLogHttpTests.No_parameter_named_after_a_member_changes_anything` (five names, by id and by name, byte-identical answers) |
+| The cursor walks the range once, stops, and does not promise a page that is not there | `AdminDoorLogHttpTests.The_cursor_walks_the_whole_range_once_and_stops`, `…The_last_page_carries_no_cursor` |
+| The limit is clamped to 1–200 rather than refused | `AdminDoorLogHttpTests.The_limit_is_clamped_rather_than_refused` |
+| A range wider than retention is clamped, and the retention is clamped on read | `AdminDoorLogHttpTests.A_range_wider_than_retention_is_clamped_and_the_response_says_by_how_much`, `…A_retention_outside_its_bounds_is_clamped_on_read` |
+| The club log and the per-board feed are one projection, and the feed is still six keys | `AdminDoorLogHttpTests.A_club_log_row_and_a_board_feed_row_agree_on_every_shared_key` |
+| A registration and an admin edit are not in the club log | `AdminDoorLogHttpTests.Rows_that_are_not_scans_are_not_in_the_club_log` |
+| Another club's rows never appear, and its door id answers nothing | `AdminDoorLogHttpTests.Another_clubs_rows_never_appear_in_this_clubs_log` |
+| The CSV's header, media type and filename are as stated | `AdminDoorLogHttpTests.The_csv_carries_the_stated_header_and_is_an_attachment` |
+| A cell a spreadsheet would execute is defused, and separators stay in their cell | `AdminDoorLogHttpTests.A_cell_that_a_spreadsheet_would_treat_as_a_formula_is_defused` (four), `…A_name_full_of_separators_stays_in_its_own_cell` |
+| An export writes one audit row naming the actor, the filters and the count | `AdminDoorLogHttpTests.An_export_writes_one_audit_row_naming_the_actor_the_filters_and_the_count` |
+| The export stops at ten thousand rows and says it truncated | `AdminDoorLogHttpTests.The_export_is_bounded_and_says_so_when_it_truncated` |
+| A fleet shut shuts every open door, stamps the instant, and touches no court box | `AdminDoorFleetHttpTests.A_fleet_shut_shuts_every_open_door_and_stamps_the_instant`, `…A_fleet_shut_does_not_touch_a_court_box` |
+| The result carries what the per-door confirmation needs, including a door never heard from | `AdminDoorFleetHttpTests.Each_door_in_the_result_carries_what_the_confirmation_needs`, `…A_door_that_has_never_called_in_is_still_shut_and_carries_a_null_last_seen` |
+| **Reopen-all leaves a door an admin shut individually shut** | `AdminDoorFleetHttpTests.Reopen_all_leaves_a_door_an_admin_shut_individually_shut` |
+| Reopening one door by hand takes it out of the fleet reopen | `AdminDoorFleetHttpTests.Reopening_one_door_by_hand_takes_it_out_of_the_fleet_reopen` |
+| A fleet shut does not re-stamp a door that is already out of service | `AdminDoorFleetHttpTests.A_fleet_shut_does_not_re_stamp_a_door_that_is_already_shut` |
+| Each direction writes exactly one audit row, with no subject | `AdminDoorFleetHttpTests.A_fleet_shut_writes_exactly_one_audit_row` |
+| A fleet shut reaches no other club's doors | `AdminDoorFleetHttpTests.A_fleet_shut_never_reaches_another_clubs_doors` |
+| A door shut by the fleet is 403 on its own device routes, and reopens | `AdminDoorFleetHttpTests.A_door_shut_by_the_fleet_is_refused_403_on_its_own_device_routes` |
+| The five settings are served with their defaults, bind under either spelling, are bounded on the PUT and clamped on read | `DoorSettingsHttpTests` (11 tests, including `A_hand_edited_number_is_clamped_on_the_way_out` and `A_hand_edited_contact_is_cut_to_the_bound_on_the_way_out`) |
+| A refused save writes nothing, an omitted key is unchanged, an empty contact clears it | `DoorSettingsHttpTests.A_refused_door_setting_writes_nothing`, `…Omitting_a_door_setting_leaves_it_alone`, `…An_empty_contact_clears_it` |
+| **Door rows past retention are DELETED, not anonymised** | `DoorRetentionTests.A_door_row_past_the_clubs_retention_is_deleted_and_not_anonymised` |
+| A row inside retention survives untouched, and a non-door row is left to `retention_years` | `DoorRetentionTests.A_door_row_inside_the_clubs_retention_survives_untouched`, `…A_row_that_is_not_a_door_row_is_left_to_the_years_long_retention` |
+| The cutoff is the club's own number, clamped | `DoorRetentionTests.The_cutoff_is_the_clubs_own_setting`, `…A_retention_below_the_floor_does_not_purge_a_weeks_worth_of_doors` |
+| Door receipts outlive a short retention by the event horizon; a court box's receipt is not a door's | `DoorRetentionTests.Door_receipts_outlive_a_short_retention_by_the_event_horizon`, `…A_court_boxs_receipt_is_not_a_door_receipt` |
+| The purge never crosses a tenant boundary | `DoorRetentionTests.The_purge_never_crosses_a_tenant_boundary` |
+| `doors: false` for a club with no door, or whose only door is out of service | `MeDoorHttpTests.A_club_with_no_door_says_so_and_the_page_stays_silent`, `…A_club_whose_only_door_is_out_of_service_has_no_doors` |
+| Membership is three-valued, with the club's recorded status beside it, and no membership row is `none` | `MeDoorHttpTests.The_membership_state_is_reported_in_three_values`, `…The_membership_detail_is_the_clubs_own_recorded_status`, `…A_user_with_no_membership_row_is_none_rather_than_not_active` |
+| The next booking's window is the one the door will honour | `MeDoorHttpTests.The_next_booking_carries_the_window_the_door_will_actually_honour` |
+| `early_entry_minutes` is the clamped value the door reads | `MeDoorHttpTests.The_early_entry_minutes_are_the_clamped_value_the_door_uses` |
+| **`is_club_admin` agrees with what the door really does under `booking_window`** | `MeDoorHttpTests.The_admin_flag_agrees_with_what_the_door_really_does_under_booking_window` (drives the real `/device/gate` for both people) |
+| The club contact is whatever the club set, and null when it set none | `MeDoorHttpTests.The_club_contact_is_whatever_the_club_has_set_and_null_when_it_has_set_none` |
+| The last decision is this member's newest row inside the 120-second fetch window | `MeDoorHttpTests.The_last_decision_is_this_members_newest_row_inside_the_fetch_window`, `…A_decision_older_than_the_fetch_window_is_not_returned` |
+| An offline open is this member's decision and says it was offline | `MeDoorHttpTests.An_offline_open_is_this_members_decision_and_says_it_was_offline` |
+| Only `too_early` carries an instant, and only when a booking is behind it | `MeDoorHttpTests.A_too_early_refusal_carries_the_instant_the_door_would_open`, `…A_refusal_that_is_not_about_time_carries_no_instant`, `…A_too_early_refusal_with_no_booking_behind_it_carries_no_instant` |
+| **Another member of the same club's row is never this member's** | `MeDoorHttpTests.Another_members_decision_at_this_club_is_never_this_members` |
+| A row that names nobody is nobody's history | `MeDoorHttpTests.An_unknown_scan_that_names_nobody_is_nobodys_history` |
+| The history is own rows, newest first, stopping at the club's retention, paged | `MeDoorHttpTests.The_history_is_this_members_own_rows_newest_first_with_the_retention_number`, `…The_history_stops_at_the_clubs_retention`, `…The_history_cursor_walks_the_whole_range_once` |
+| Another club's rows never reach this member's history | `MeDoorHttpTests.Another_clubs_rows_never_reach_this_members_history` |
+| The member surface carries no fingerprint, device id, device code or MAC | `MeDoorHttpTests.The_member_surface_carries_nothing_of_the_trails_own_shape` |
+| Both member routes need a session | `MeDoorHttpTests.Both_routes_need_a_session` |
+
+**What is deliberately not pinned here.** The console's copy, its three-state reads and its
+chip vocabulary are the frontend lanes' and are pinned there — this table covers the API half
+only. And no test pins that `/api/v1/device/*` gained nothing: that is an absence, and it is
+held by `DeviceForbiddenMeansOutOfServiceTests`' existing forward and reverse pair over the
+five device routes, which would go red the moment an admin route joined that group.
