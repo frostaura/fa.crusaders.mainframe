@@ -11,11 +11,11 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
 - **`src/backend/Crusaders.Mainframe.Api`** — .NET 10 Minimal APIs, EF Core, PostgreSQL 16. Folder-layered (`Endpoints/ Domain/ Services/ Persistence/ Security/ Webhooks/ Biometric/ Multitenancy/ Payments/ Email/ Lights/ Workers/ Migrations/`) inside a **single flat project**. Auth is JWT HS256 + WebAuthn passkeys (Fido2). The email invariant below is implemented in `Email/`, not in `Services/` — look there first.
 - **`src/backend/Crusaders.Mainframe.Tests`** — xUnit, in-process `TestHost`. Cross-tenant injection tests are part of the suite and are non-negotiable.
 - **`src/frontend`** — React 19 + TypeScript + Vite 7 + Tailwind, mobile-first PWA. **Figtree** font, Monday.com-style soft palette. State is React context (`lib/auth.tsx`, `lib/profile.tsx`, `lib/balance.tsx`).
-- **`src/iot`** — the firmware tree: one PlatformIO project per device plus a `shared/` project that builds for no board and carries the device-agnostic libraries (`timebase hal hal_fakes devcrypto fwversion devapi eventq roster devlink`) every firmware compiles. A firmware project reaches them with `lib_extra_dirs = ../shared/lib` — no package, no pin, one source compiled per target. Today the only device project is **`src/iot/court-box`**, the court light box: a WeMos Mega 2560 + onboard ESP8266.
+- **`src/iot`** — the firmware tree: one PlatformIO project per device plus a `shared/` project that builds for no board and carries the device-agnostic libraries (`timebase hal hal_fakes devcrypto fwversion devapi eventq roster devlink`) every firmware compiles. A firmware project reaches them with `lib_extra_dirs = ../shared/lib` — no package, no pin, one source compiled per target. The device projects are **`src/iot/court-box`**, the court light box (a WeMos Mega 2560 + onboard ESP8266), and **`src/iot/door-gate`**, the door controller (one ESP32 per door: QR scanner, one relay on the lock, one LED — pull-only, behaviour in `docs/specs/door-gate.md`). The next three sentences describe the court box.
   The **Mega is a thin I/O layer** (buttons, scanner, relays, LCD, plus an *independent* auto-off timer) and
   **all volatile logic lives on the ESP8266**, because the ATmega cannot be flashed over WiFi — its ESP sits
   on Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET. Everything under either `lib/`
-  except `arduino_hal/` and `posix_hal/` is free of Arduino headers so it compiles for the host test runner.
+  except the hardware layers (`arduino_hal/`, `posix_hal/`, the gate's `esp32_hal/`) is free of Arduino headers so it compiles for the host test runner.
   **A module belongs in `shared/lib` only if a second, unrelated device would want it unchanged** — anything
   that knows a relay, a DIP switch, a court or the Mega↔ESP dialect stays in the device's own project, and
   where the two sides must agree on a constant the `static_assert` lives on the device side
@@ -74,7 +74,7 @@ make lint           # dotnet format + eslint/tsc
 make build          # lint, then build both
 make test           # unit
 make test-integration
-make arduino-export # regenerate src/iot/court-box/arduino/ from the PlatformIO sources
+make arduino-export # regenerate every firmware project's arduino/ from the PlatformIO sources
 make arduino-check  # regenerate and fail if the committed sketches are stale
 make up / make down / make down-reset / make clean
 ```
@@ -83,7 +83,7 @@ MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `
 
 ## Where docs live
 
-- `docs/specs/` — `feature-spec.md` · `settlement-model.md` (the authority on how the ledger settles) · `multi-tenancy.md` · `biometric-abstraction.md` · `device-serial-protocol.md` · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
+- `docs/specs/` — `feature-spec.md` · `settlement-model.md` (the authority on how the ledger settles) · `multi-tenancy.md` · `biometric-abstraction.md` · `device-serial-protocol.md` · `door-gate.md` (the door controller's behaviour oracle, with its sentence→test table) · `lights-controller.md` · `payments-payfast.md` (`payments-peachpayments.md` is superseded) · `webhooks.md` · `design-system.md` · `reporting.md` · `deployment.md`.
 - `docs/specs/client-blueprints/` — the verbatim client artifact plus its `.md` transcription. **The blueprint is the customer's word and outranks internal specs on economics.**
 - `docs/specs/client-blueprint-deltas.md` — line-by-line reconciliation of blueprint requirements against the build. The most reliable economics reference in the repo.
 - `docs/development-plan.md` — phased build sequence and parking-lot decisions. **Its status column understates reality; trust code over the plan** — see `MEMORY.md`.

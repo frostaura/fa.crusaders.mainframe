@@ -134,7 +134,7 @@ phrase literally would waive every no-show at a club that has not installed a bo
 **A court whose boxes have ALL been switched out of service is a different state, and it IS dark.**
 This sentence used to read "a court no enabled box drives is not dark", full stop, and in that
 form it cost members money. `Enabled` is not a filter on evidence when it is the last box on the
-court: `DeviceIdentity.ResolveAsync` refuses a disabled board `403` on all four
+court: `DeviceIdentity.ResolveAsync` refuses a disabled board `403` on all five
 `/api/v1/device/*` routes — `/heartbeat`, `/activate`, `/walkup` and `/events` — so once an admin
 takes the last box off a court, that box admits nobody, is no longer sent the roster that says
 which bookings it may open, and can never hand the club what it is holding. The sweep nevertheless
@@ -202,7 +202,7 @@ thrown at `S`:
 | | |
 | --- | --- |
 | `D` at or before `S` | **Judged by `offline_after_seconds`**, the same test, the same strictly-greater comparison and the same reading of `DeviceOutage` rows an *enabled* board gets. The board was in service at `D`; the click had not happened. |
-| `D` after `S` | **Out of service, at once.** The club has declared the door shut and the board itself is refused `403` on all four `/api/v1/device/*` routes from that instant, so there is no ambiguity left to wait `offline_after_seconds` for. Strictly greater-than: a deadline landing exactly on `S` is on the near side and is judged by the row above. |
+| `D` after `S` | **Out of service, at once.** The club has declared the door shut and the board itself is refused `403` on all five `/api/v1/device/*` routes from that instant, so there is no ambiguity left to wait `offline_after_seconds` for. Strictly greater-than: a deadline landing exactly on `S` is on the near side and is judged by the row above. |
 
 **The first row is not "Lit", and an earlier version of this table said it was.** That version split
 it in two and called everything at or before the board's last heartbeat Lit — "positive proof it

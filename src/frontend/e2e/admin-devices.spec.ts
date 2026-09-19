@@ -261,11 +261,11 @@ test.describe("The club's device API key", () => {
 
     // Regenerating bricks every box until it is reflashed, so the control arms first.
     await page.getByRole("button", { name: "Regenerate key" }).click();
-    await expect(page.getByRole("button", { name: /Reflash every box after this/ })).toBeVisible();
-    await page.getByRole("button", { name: /Reflash every box after this/ }).click();
+    await expect(page.getByRole("button", { name: /Reflash every board after this/ })).toBeVisible();
+    await page.getByRole("button", { name: /Reflash every board after this/ }).click();
 
     await expect(page.getByRole("status")).toContainText("New key issued.");
-    await expect(page.getByRole("status")).toContainText("every box has to be reflashed with this one");
+    await expect(page.getByRole("status")).toContainText("has to be reflashed with this one");
     // And the panel now holds the new key, not the one that just stopped working.
     await page.getByRole("button", { name: "Reveal device API key" }).click();
     await expect(page.getByLabel("Device API key", { exact: true })).toHaveText("cmk_NEWNEWNEWNEW1234");

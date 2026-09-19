@@ -95,15 +95,15 @@ function KeyLine({ apiKey }: { apiKey: string }) {
 function PairingNote() {
   return (
     <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
-      <h3 className="mb-2 font-semibold text-slate-800">How to pair a box</h3>
+      <h3 className="mb-2 font-semibold text-slate-800">How to pair a board</h3>
       <ol className="list-decimal space-y-1 pl-5">
-        <li>Copy this key, and the club WiFi name and password, into <code className="font-mono text-xs">secrets.h</code> on the board.</li>
-        <li>Plug the board in and run <code className="font-mono text-xs">make flash-bridge</code>.</li>
-        <li>Power it on. It appears under Connected boards by itself on its first heartbeat, named <code className="font-mono text-xs">box-xxxxxx</code> — then give it a name and its courts.</li>
+        <li>Copy this key, and the club WiFi name and password, into that firmware’s <code className="font-mono text-xs">secrets.h</code> — a court box and a door gate each have their own.</li>
+        <li>Flash it. A court box: <code className="font-mono text-xs">make flash-bridge</code>, or its sketch in the Arduino IDE. A door gate: the <code className="font-mono text-xs">door_gate</code> sketch in the Arduino IDE, board “ESP32 Dev Module”.</li>
+        <li>Power it on. It appears under Connected boards by itself on its first heartbeat, named <code className="font-mono text-xs">box-xxxxxx</code> or <code className="font-mono text-xs">gate-xxxxxx</code> — then give a box its name and courts, or a door its name.</li>
       </ol>
       <p className="mt-2 text-xs">
-        The box and the backend both sit on the club LAN; the member app reaches that same backend from outside
-        through the tunnel. Being on the network is therefore not an identity, which is why the box carries this key.
+        Every board and the backend sit on the club LAN; the member app reaches that same backend from outside
+        through the tunnel. Being on the network is therefore not an identity, which is why each board carries this key.
       </p>
     </div>
   );
@@ -131,7 +131,7 @@ export function DeviceApiKeyPanel() {
       setKey(await endpoints.adminDeviceApiKeyRegenerate());
       toast.push({
         tone: "success",
-        text: "New key issued. The old one stopped working immediately — every box has to be reflashed with this one before it can call in again.",
+        text: "New key issued. The old one stopped working immediately — every board, court boxes and door gates alike, has to be reflashed with this one before it can call in again.",
         durationMs: 10000,
       });
     } catch (e) {
@@ -149,7 +149,7 @@ export function DeviceApiKeyPanel() {
       </div>
 
       <p className="mb-3 text-sm text-slate-500">
-        One key for the whole club. Every box carries it, and a box that presents it with a device code this club has
+        One key for the whole club. Every court box and door gate carries it, and a board that presents it with a device code this club has
         not seen registers itself on its first heartbeat.
       </p>
 
@@ -167,13 +167,13 @@ export function DeviceApiKeyPanel() {
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <ConfirmButton
               idleLabel="Regenerate key"
-              confirmLabel="Reflash every box after this — regenerate?"
+              confirmLabel="Reflash every board after this — regenerate?"
               onConfirm={regenerate}
               idleClassName="bg-danger-soft text-danger-strong hover:bg-danger-soft/70"
               className="h-9 px-3"
             />
             <span className="text-xs text-slate-500">
-              The old key stops working immediately. Every box has to be reflashed with the new one before it can call in.
+              The old key stops working immediately. Every board — court boxes and door gates — has to be reflashed with the new one before it can call in, and until then a door gate opens only for members with a booking on the list it last received, for at most six hours.
             </span>
           </div>
 

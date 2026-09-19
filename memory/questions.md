@@ -16,11 +16,13 @@ and none of it is blocked on engineering.
   collision charges the wrong member.** Six digits with a blocklist, or keep four and accept it?
 - **Which biometric vendor SDK?** The abstraction is complete and a null device plus a simulator
   ship with it, so this blocks only the physical install — but no evaluation exists at all.
-- **Gate policy vocabulary.** "Per-gate and admin-configurable" settles the shape, not the
-  predicates: active membership, time of day, member class, a booking within N minutes? Needed
-  before gates are built, and gates are parked until it is answered.
-- **How long may a revoked card still open a gate**, given devices cache and may be offline? A
-  policy call, not a technical one.
+- **Should a door's rules ever differ per door?** Gates shipped (2026-09-19) with one club-wide
+  policy (`active_member` | `booking_window`) and one roster for every door; `gate_key` names a
+  door and is not an access-control input. Time-of-day or member-class rules would be a design
+  change — see [`decisions-gate.md`](decisions-gate.md).
+- **Is six hours the right ceiling for a cut-off door?** A board that cannot reach the API admits
+  rostered bookings until its roster goes stale (`ROSTER_MAX_AGE_MS`), including a member
+  suspended or a booking cancelled since the last push. A policy call, not a technical one.
 - **SaaS pricing from tenant #2 onward.** Crusaders is free; nothing else is decided.
 - **Crusaders' existing member-data migration** — to be settled with the committee.
 - **Does the club go live this quarter, or is the project formally parked with a date?** This is

@@ -113,9 +113,9 @@ describe("AdminDevices", () => {
     // First click arms, and sends nothing.
     fireEvent.click(regenerate);
     expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(0);
-    expect(await screen.findByRole("button", { name: /Reflash every box after this/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Reflash every board after this/ })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Reflash every box after this/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reflash every board after this/ }));
 
     await waitFor(() => {
       const post = stub.calls.find((c) => c.method === "POST");
@@ -124,7 +124,7 @@ describe("AdminDevices", () => {
 
     // The panel shows the NEW key, masked, without a reload.
     await waitFor(() => expect(screen.getByLabelText("Device API key")).toHaveTextContent("crsd••••••••aaaa"));
-    expect(await screen.findByText(/New key issued/)).toHaveTextContent(/every box has to be reflashed/i);
+    expect(await screen.findByText(/New key issued/)).toHaveTextContent(/every board, court boxes and door gates alike, has to be reflashed/i);
   });
 
   it("explains a refused regeneration instead of silently keeping the old key on screen", async () => {
@@ -136,7 +136,7 @@ describe("AdminDevices", () => {
     renderPage(<AdminDevicesPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Regenerate key/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /Reflash every box after this/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Reflash every board after this/ }));
 
     // The failure mode this stops: a silent refusal, an admin who believes the key
     // rotated, and a fleet flashed with a key the API never issued.
@@ -154,14 +154,14 @@ describe("AdminDevices", () => {
 
     expect(await screen.findByText(/Could not read the club's device key/)).toBeInTheDocument();
     // No pairing instructions without a key to paste into them.
-    expect(screen.queryByText(/How to pair a box/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/How to pair a board/)).not.toBeInTheDocument();
   });
 
   it("tells an admin how to pair a box, including why a key is needed at all", async () => {
     stubFetch(baseRoutes());
     renderPage(<AdminDevicesPage />);
 
-    expect(await screen.findByText(/How to pair a box/)).toBeInTheDocument();
+    expect(await screen.findByText(/How to pair a board/)).toBeInTheDocument();
     expect(screen.getByText(/secrets\.h/)).toBeInTheDocument();
     expect(screen.getByText(/make flash-bridge/)).toBeInTheDocument();
     expect(screen.getByText(/box-xxxxxx/)).toBeInTheDocument();

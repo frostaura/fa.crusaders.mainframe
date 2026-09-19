@@ -223,7 +223,7 @@ ul.tight li{margin:5px 0}
 <section id="overview">
   <div class="eyebrow">System · End to end</div>
   <h2>Topology — from tap to relay coil</h2>
-  <p class="lede">Everything runs on one on-prem machine at the club behind a Cloudflare tunnel; the court box is the only other computer. The API never dials the box — every call is box → API, carrying the club’s single device API key as <span class="mono">Authorization: Bearer</span> and the box’s MAC in the body. A scan asks <span class="mono">POST /api/v1/device/activate</span> first and is decided from the heartbeat-pushed roster only when the API could not be asked; the mains-side safety timer lives one hop further down, on the Mega itself.</p>
+  <p class="lede">Everything runs on one on-prem machine at the club behind a Cloudflare tunnel; the court box and one small ESP32 controller per door are the only other computers. The API never dials the box — every call is box → API, carrying the club’s single device API key as <span class="mono">Authorization: Bearer</span> and the box’s MAC in the body. A scan asks <span class="mono">POST /api/v1/device/activate</span> first and is decided from the heartbeat-pushed roster only when the API could not be asked; the mains-side safety timer lives one hop further down, on the Mega itself.</p>
   <div class="card pad scroll">
   <figure style="margin:0">
   <svg viewBox="0 0 1240 620" role="img" aria-label="System topology: member PWA through Cloudflare tunnel to the on-prem Docker stack (gateway, frontend, backend API, PostgreSQL), and across the club LAN to the court box, where an ESP8266 bridge talks over Serial3 to an ATmega2560 driving four relays, LCD, buttons and QR scanner" style="min-width:1000px;max-width:100%;height:auto">
@@ -379,7 +379,7 @@ ul.tight li{margin:5px 0}
     <text x="1064" y="371" class="m" font-size="9.5" fill="var(--red)" text-anchor="middle">230 VAC</text>
     <text x="1064" y="418" font-size="9.5" fill="var(--red)" text-anchor="middle">via contactor? — open</text>
   </svg>
-  <figcaption>One machine runs the whole SaaS; the court box is the only peripheral computer. Amber paths are club-LAN hardware traffic, and every HTTP call on them is <em>outbound from the box</em>: activation and walk-up questions, the drained event queue, and the heartbeat that brings back the box's court list, its roster and its button map. There is no inbound path to the box and no broadcast on the LAN — the box learns nothing it was not compiled with or handed in a heartbeat reply. The red hop is mains voltage — its contactor question is the top item on the <a href="#risks">watch list</a>.</figcaption>
+  <figcaption>One machine runs the whole SaaS; the court box is the peripheral computer drawn here; each door's gate controller (<span class="mono">src/iot/door-gate</span>, specified in <span class="mono">docs/specs/door-gate.md</span>) talks to the same API the same way and is not drawn. Amber paths are club-LAN hardware traffic, and every HTTP call on them is <em>outbound from the box</em>: activation and walk-up questions, the drained event queue, and the heartbeat that brings back the box's court list, its roster and its button map. There is no inbound path to the box and no broadcast on the LAN — the box learns nothing it was not compiled with or handed in a heartbeat reply. The red hop is mains voltage — its contactor question is the top item on the <a href="#risks">watch list</a>.</figcaption>
   </figure>
   </div>
 

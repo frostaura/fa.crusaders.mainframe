@@ -1227,7 +1227,7 @@ export const endpoints = {
 
   // Admin: the club's one device API key.
   adminDeviceApiKey: () => api.get<DeviceApiKey>("/api/v1/admin/devices/api-key"),
-  /** The old key stops working immediately, so every box has to be reflashed with this one. */
+  /** The old key stops working immediately, so every board, box or gate, has to be reflashed with this one. */
   adminDeviceApiKeyRegenerate: () => api.post<DeviceApiKey>("/api/v1/admin/devices/api-key/regenerate", {}),
 
   // Admin: courts
