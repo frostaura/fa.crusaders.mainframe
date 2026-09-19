@@ -128,22 +128,31 @@ that is open for that window. **This is a bench check, not a claim** — it is i
 the go-live checklist beside the dead-board row, and it is measured with a meter
 and an audible lock, not reasoned about.
 
-### Which wiring gives "the door is released when there is no power"
+### "The door is released when there is no power"
 
-The owner's stated requirement is that the door is **open when there is no
-power**. That needs a **fail-safe lock** — one that is held shut by current and
-releases when the current stops, such as a fail-safe electric strike or a
-magnetic lock — fed through the relay's **normally-CLOSED** contact, with
-`GATE_UNLOCK_ENERGISES_RELAY=0`. In that wiring the board energises the coil to
-*hold the door locked* and de-energises it to release, so a power cut, a blown
-fuse, a pulled plug and a board in reset all release the door.
+That is the owner's stated expectation, and two different failures hide inside it.
+Keep them apart:
 
-**Carl's board is wired the other way** (`GATE_UNLOCK_ENERGISES_RELAY=1`): the
-coil is energised to release, so a power cut leaves the door **locked**. That is
-the default in `platformio.ini` because it is what is on the wall today, not
-because it is what the owner asked for. Changing it is a lock change and a
-rewire, not a flag change — flipping the flag alone, on hardware wired for `1`,
-inverts the firmware's whole idea of the door.
+- **A power cut takes the lock's own supply with it.** What the door does then is
+  decided by the **lock**, not by this board and not by either flag: a fail-safe
+  lock (a magnetic lock, a fail-safe strike — held shut by current) releases; a
+  fail-secure one stays shut.
+- **A dead, unplugged or resetting board while the lock's supply is still up**
+  de-energises the relay coil and nothing else. That is the truth table's last
+  column, and `GATE_UNLOCK_ENERGISES_RELAY` alone decides it.
+
+The defaults are Carl's own sketch, which he has run on the real door: the coil
+is energised to release, for three seconds. **Which lock is fitted, and which
+relay contact it is fed through, are not recorded anywhere in this repository**,
+so nothing here claims what that door does in either failure. It is measured on
+the go-live bench (§12) with the real lock — pull the mains, then separately pull
+only the board — and the answer is written down beside the owner's expectation.
+
+The wiring is fixed. If a measurement disagrees with what the owner wants, that is
+a conversation between the owner and Carl about the lock; the only thing this
+repository offers is the flag, and the flag must match the wiring that exists —
+setting it to describe a wiring that is not on the wall inverts the firmware's
+whole idea of the door.
 
 Firmware cannot create this property. What this firmware guarantees is only the
 three things it can: the locked level is asserted before the pin drives anything,

@@ -351,21 +351,24 @@ fallback, the whole loop including its watchdog and blocking-call budget, all fi
 contract vectors — and none of that is the same as a board on a wall with a lock on the
 other end of it. Every item below needs the board, the lock and a person.
 
-**The owner's stated requirement is that the door is released when there is no power.**
-That is a property of the LOCK and its supply, not of software: it needs a **fail-safe**
-lock (held shut by current) fed through the relay's **normally-CLOSED** contact, with
-`GATE_UNLOCK_ENERGISES_RELAY=0`. **Carl's board is wired the other way**
-(`GATE_UNLOCK_ENERGISES_RELAY=1`, the firmware default because it is what is on the wall
-today), so as installed a power cut leaves the door **locked**. Reconciling the two is a
-lock change and a rewire, not a flag change — flipping the flag alone, on hardware wired
-the other way, inverts the firmware's whole idea of the door.
+**The owner's stated expectation is that the door is released when there is no power.**
+Two different failures hide inside that sentence. A **power cut** takes the lock's own
+supply with it, and what the door does then is decided by the LOCK — a fail-safe lock
+(held shut by current) releases, a fail-secure one stays shut — whatever the firmware
+flags say. A **dead or resetting board with the lock's supply still up** only
+de-energises the relay coil, and `GATE_UNLOCK_ENERGISES_RELAY` decides that case alone.
+The firmware defaults are Carl's own sketch, which he has run on the real door. Which
+lock is fitted and which relay contact feeds it are **not recorded anywhere**, so this
+list measures instead of assuming. The wiring is fixed; nothing here asks for a rewire.
 `src/iot/door-gate/README.md` carries the truth table.
 
-- [ ] A decision is recorded, by the owner, on which of the two the club actually wants —
-      fail-safe (released on power loss, needs the lock and the rewire) or fail-secure
-      (locked on power loss, what is fitted). Written into `MEMORY.md`, not left in a chat.
-- [ ] If fail-safe is chosen: the lock is replaced with a fail-safe unit, fed through the
-      NC contact, and the firmware is rebuilt with `-DGATE_UNLOCK_ENERGISES_RELAY=0`.
+- [ ] Carl has said which lock is fitted (fail-safe or fail-secure) and which relay contact
+      (NO or NC) feeds it, and it is written into `MEMORY.md`, not left in a chat.
+- [ ] **Mains pulled, door locked:** the door does what the owner expects — released. If it
+      does not, that is the owner's and Carl's conversation about the lock; record the
+      outcome either way.
+- [ ] **Board power pulled only, lock supply left on:** record what the door does. This is
+      the truth table's last column for the flags as built.
 - [ ] **Bench-proved with a meter and the real lock, before the board goes on the wall**:
       power the board, confirm the door is LOCKED at idle; pull the board's power with the
       door locked and confirm the door does what the row above says it should.
