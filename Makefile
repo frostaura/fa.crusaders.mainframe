@@ -213,13 +213,33 @@ test-iot-asan: sweep-icloud
 test-integration:
 	cd src/backend && dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
 
-# Regenerate the corpus-baked headers and fail if the committed copies are stale.
-# Nothing else runs the generators, so an edited cases.json with a forgotten
-# regeneration leaves the C++ suite green against the old vectors.
+# Regenerate everything generated from the wire contract and fail if a committed
+# copy is stale. Nothing else runs these generators, so an edited generator with
+# a forgotten regeneration leaves both suites green against the old vectors.
+#
+# TWO generators, because the two families are generated in opposite directions.
+# The court box's bakes cases.json into a C++ header, so the header is the
+# derived file. The gate's WRITES cases.json and manifest.json from shapes in
+# Python — the corpus itself is the derived file — and its C++ suite reads them
+# at run time. This target covered only the first of the two for as long as the
+# gate family has existed, so an edited gen_cases.py that nobody ran was a
+# corpus that agreed with neither side.
+#
+# Both diffs are evaluated before the target fails, so one stale family does not
+# hide the other.
+CORPUS_GENERATED = $(IOT_DIR)/court-box/test/test_protocol/corpus_generated.h \
+	src/contracts/device-protocol/gate/cases.json \
+	src/contracts/device-protocol/gate/manifest.json
+
 corpus-check:
 	$(PY) $(IOT_TOOLS)/gen_corpus.py
-	git diff --exit-code -- $(IOT_DIR)/court-box/test/test_protocol/corpus_generated.h \
-	  || (echo "generated corpus headers are stale — rerun the generators and commit" && exit 1)
+	$(PY) src/contracts/device-protocol/gate/gen_cases.py
+	@git diff --exit-code --stat -- $(CORPUS_GENERATED) \
+	  || (echo "generated corpus files are stale — rerun the generators and commit" && exit 1)
+	@untracked="$$(git ls-files --others --exclude-standard -- $(CORPUS_GENERATED))"; \
+	if [ -n "$$untracked" ]; then \
+	  echo "a generator produced files that are not committed:"; echo "$$untracked"; exit 1; \
+	fi
 
 # Regenerate the Arduino IDE sketch folders from the PlatformIO sources.
 #

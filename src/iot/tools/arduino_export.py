@@ -801,22 +801,21 @@ def render_door_gate_readme(project: Project, results: list[dict]) -> str:
         raise SystemExit(f"[env:{gate['env']}] does not define {name}; the README template expects it")
 
     def version_part(name: str) -> str:
-        """A FW_VERSION_* part, allowing for the one PlatformIO removes entirely.
+        """A FW_VERSION_* part, which must now be PRESENT.
 
-        `build_unflags` deletes EVERY token that matches, and `[env:door_gate]`
-        unflags `-DFW_VERSION_MINOR=0` while also setting `-DFW_VERSION_MINOR=0`
-        — the same token — so both go and the define reaches the compiler on
-        neither build. Verified on the real `pio run -v` compile line, which
-        carries `-DFW_VERSION_MAJOR=1` and no MINOR or PATCH at all.
-        `fwversion/Version.h`'s `#ifndef` fallback then supplies 0 in the sketch
-        exactly as it does in the PlatformIO build, so both report 1.0.0. The
-        fallback is 0 there, so it is 0 here.
+        It used to be allowed to be absent. `[env:door_gate]` inherited
+        `[common]`'s 2.0.0 and unflagged it — and `build_unflags` deletes EVERY
+        token that matches, including the environment's own, so
+        `-DFW_VERSION_MINOR=0` was added and then removed and the define reached
+        the compiler on neither build route. The image reported 1.0.0 only
+        because `fwversion/Version.h`'s `#ifndef` fallback is also 0.
+
+        The environment sets all three directly now and inherits `[common]` not
+        at all, so a missing one is a real defect — a sketch that would report a
+        version the PlatformIO build does not — and this raises rather than
+        quietly substituting a zero that happens to be right.
         """
-        for d in gate["defines"]:
-            key, _, value = d.partition("=")
-            if key == name:
-                return value
-        return "0"
+        return define(name)
 
     return f"""# Flashing a door gate from the Arduino IDE
 
@@ -855,7 +854,7 @@ Copy `secrets.h.example` to `secrets.h` — in **this** folder, beside
 | Value | What it is |
 |---|---|
 | `WIFI_SSID` / `WIFI_PASSWORD` | The club WiFi. The board takes a DHCP lease; there is no static-IP option. |
-| `API_BASE_URL` | The backend's **LAN** address and port, no trailing slash — e.g. `http://192.168.1.10:8088`. Not the public tunnel hostname: that sends every scan out to Cloudflare and back while somebody stands at the door. |
+| `API_BASE_URL` | The backend's **LAN IPv4 ADDRESS** and port, `http://` only, no trailing slash — e.g. `http://192.168.1.10:8088`. The sketch `static_assert`s all of that and will not compile otherwise. A **hostname** is an unbounded DNS wait (16 s, then 15 s) that no HTTP timeout covers, so every heartbeat would reset the board; `https://` is accepted by the HTTP client and then sent in **cleartext** to port 443; a trailing slash produces `//api/v1/...` and a 404 that reads at the door as an outage. Not the public tunnel hostname either: that sends every scan out to Cloudflare and back while somebody stands at the door. |
 | `DEVICE_API_KEY` | The tenant's device API key, from the admin Devices page. Goes out as `Authorization: Bearer <key>`. |
 
 Regenerating the key on the Devices page invalidates the old one
@@ -863,9 +862,10 @@ Regenerating the key on the Devices page invalidates the old one
 it and has to be planned as one.
 
 **The same four values go on every door.** Nothing per-gate is compiled in: a
-door is named in the admin console (`gate_key`) and learns its own name from the
-heartbeat, so two doors run byte-identical images and a spare board is a spare
-board rather than a board for one particular door.
+door is named in the admin console (`gate_key`), the API keys that name to the
+board's MAC, and the board never needs to know it — it does not read `gate_key`
+and has no field to keep one in. Two doors run byte-identical images and a spare
+board is a spare board rather than a board for one particular door.
 
 ## Flash
 
@@ -907,9 +907,17 @@ and re-run `make arduino-export`.**
 | `HEARTBEAT_INTERVAL_MS` | {define("HEARTBEAT_INTERVAL_MS")} | Starting cadence. The tenant's own is adopted from the first response. |
 | `ROSTER_MAX_AGE_MS` | {define("ROSTER_MAX_AGE_MS")} | 6 h. A roster older than this admits **nobody**, however good the match looks. |
 
-Leave alone: `FW_VERSION_*` (the heartbeat reports it, and the sketch
-`static_assert`s the major number), `TARGET_DOOR_GATE`, `GATE_MAX_TOKEN_LEN`
-(asserted equal to the roster's) and `EVENTQ_SLOTS`.
+Leave alone: `FW_VERSION_*` (the heartbeat reports it, and the sketch `#error`s
+unless all three parts are present and are the gate's), `TARGET_DOOR_GATE`,
+`GATE_MAX_TOKEN_LEN` (asserted equal to the roster's) and `EVENTQ_SLOTS`.
+
+`GATE_WATCHDOG_SECONDS` is in the table above but is **not** a free choice: the
+sketch `static_assert`s that it exceeds one worst-case blocking HTTP call —
+connect **plus** response, which a single call can spend both of — with room for
+a whole pass on top. Lower it and the build fails, which is the point: a
+watchdog no longer than the call it is timing resets the board before the call
+can return, every time the API host goes quiet, so the board reset-loops and
+admits nobody.
 
 A value outside its range is a **compile error**, not a surprise on a wall. The
 sketch asserts that the pins are output-capable (GPIO 34–39 on an ESP32 are
@@ -986,13 +994,15 @@ gate's own version is set by unflagging and replacing rather than by editing
 because the IDE cannot pass a build flag and a target guard like
 `#ifdef TARGET_DOOR_GATE` has to be true in files the `.ino` never includes.
 
-> You will not find `FW_VERSION_MINOR` or `FW_VERSION_PATCH` in
-> `build_config.h`, and that is correct. `build_unflags` removes **every**
-> token that matches, and this environment unflags `-DFW_VERSION_MINOR=0` while
-> also setting `-DFW_VERSION_MINOR=0` — the same token — so both are removed
-> and `src/fwversion/Version.h`'s `#ifndef` fallback of 0 supplies the value.
-> The PlatformIO build does exactly the same thing; its compile line carries
-> `-DFW_VERSION_MAJOR=1` and neither of the other two.
+> All three of `FW_VERSION_MAJOR`, `FW_VERSION_MINOR` and `FW_VERSION_PATCH`
+> are in `build_config.h`, and the sketch `#error`s unless all three are
+> defined **and** are the gate's. They used not to be: `[env:door_gate]`
+> inherited `[common]`'s 2.0.0 and unflagged it, and `build_unflags` removes
+> **every** token that matches — including the environment's own — so
+> `-DFW_VERSION_MINOR=0` was added and then deleted, on both build routes, and
+> `src/fwversion/Version.h`'s `#ifndef` fallback of 0 supplied the value. The
+> image reported 1.0.0 by luck. The environment no longer inherits `[common]`
+> at all; it spells out `-std=gnu++17` and sets its own version.
 
 Two flags are deliberately **not** mirrored: `-Wall -Wextra` (warnings are not
 behaviour; `make lint-iot` is the gate) and `-std=gnu++17` (the ESP32 core

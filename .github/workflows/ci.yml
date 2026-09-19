@@ -283,9 +283,12 @@ jobs:
             exit 1
           fi
 
-      - name: Generated corpus headers are current
-        # One copy of the gate: the Makefile target owns the generator and file
-        # lists; CI only overrides PY since the pinned toolchain is on PATH here.
+      - name: Generated corpus files are current
+        # One copy of the gate: the Makefile target owns the generators and the
+        # file list; CI only overrides PY since the pinned toolchain is on PATH
+        # here. BOTH families are covered — the court box's baked header and the
+        # gate's cases.json/manifest.json, which are generated in the opposite
+        # direction and were checked by nothing until round G1.
         run: make corpus-check PY=python3
 
       # BOTH projects. `shared` carries the device-agnostic libraries every
