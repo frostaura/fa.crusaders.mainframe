@@ -339,3 +339,92 @@ any *other* legitimate LAN consumer the club points a webhook at.
 
 **If skipped:** any webhook pointed at a LAN address is refused by the SSRF guard — which
 is the correct default, and only wrong if the club actually has such a consumer.
+
+---
+
+## 12. Door gates — the lock, the wiring, and what a power cut does
+
+The door-gate firmware (`src/iot/door-gate`) is new and **has never run on hardware**.
+Everything it decides is proven on the host — the two polarity flags in all four
+combinations, the release window and its hard cap, the online-first flow and its roster
+fallback, all fourteen contract vectors — and none of that is the same as a board on a wall
+with a lock on the other end of it. Every item below needs the board, the lock and a person.
+
+**The owner's stated requirement is that the door is released when there is no power.**
+That is a property of the LOCK and its supply, not of software: it needs a **fail-safe**
+lock (held shut by current) fed through the relay's **normally-CLOSED** contact, with
+`GATE_UNLOCK_ENERGISES_RELAY=0`. **Carl's board is wired the other way**
+(`GATE_UNLOCK_ENERGISES_RELAY=1`, the firmware default because it is what is on the wall
+today), so as installed a power cut leaves the door **locked**. Reconciling the two is a
+lock change and a rewire, not a flag change — flipping the flag alone, on hardware wired
+the other way, inverts the firmware's whole idea of the door.
+`src/iot/door-gate/README.md` carries the truth table.
+
+- [ ] A decision is recorded, by the owner, on which of the two the club actually wants —
+      fail-safe (released on power loss, needs the lock and the rewire) or fail-secure
+      (locked on power loss, what is fitted). Written into `MEMORY.md`, not left in a chat.
+- [ ] If fail-safe is chosen: the lock is replaced with a fail-safe unit, fed through the
+      NC contact, and the firmware is rebuilt with `-DGATE_UNLOCK_ENERGISES_RELAY=0`.
+- [ ] **Bench-proved with a meter and the real lock, before the board goes on the wall**:
+      power the board, confirm the door is LOCKED at idle; pull the board's power with the
+      door locked and confirm the door does what the row above says it should.
+- [ ] **Boot-glitch check, ten times**: with the lock connected and audible, power-cycle the
+      board and confirm the lock does **not** click or release on the way up. The firmware
+      writes the locked level into the pin's output register before `pinMode(OUTPUT)`
+      precisely for this, and it is the one safety property no host test can confirm against
+      real hardware.
+- [ ] The same check after a **watchdog** reset, not just a power cycle.
+
+**If skipped:** a door that is unlocked whenever the software believes it is locked, or one
+that pulses open on every reset. There is no readback on this board — nothing in the
+software can detect either, and nobody will find out until somebody walks in.
+
+### Fire egress is mechanical and is not this board's job
+
+- [ ] Confirmed with the club — and, where the door is on an escape route, with whoever
+      signs off the building's fire compliance — that **every** door this board controls
+      opens from the inside by pushing it, with no power, no relay and no firmware
+      involved: a panic bar or a mechanical handle.
+
+**If skipped:** people could be shut inside a building by a failed relay, a dead board or a
+flat supply. Nothing in this repository is a life-safety device, nothing here is rated or
+certified as one, and no combination of the build flags turns it into one.
+
+### The board, the network and the roster
+
+- [ ] `src/iot/door-gate/src/common/secrets.h` created from the `.example` on the flashing
+      machine, with all four values. It is gitignored, and the build `#error`s on a missing
+      one and `static_assert`s on an empty one — there is no way to produce an image with a
+      blank in it.
+- [ ] Flashed with `pio run -d src/iot/door-gate -e door_gate -t upload`. **There is no
+      Arduino IDE sketch folder for this board**, unlike the court box's — so the person who
+      flashes a gate needs the PlatformIO toolchain, which the court box's technician does
+      not. If Carl is to flash gates, the exporter has to be generalised first; what that
+      takes is in `src/iot/README.md`.
+- [ ] The board appears on the admin **Devices** page by itself within one heartbeat, as
+      `Kind=Gate`, with `DeviceCode` `gate-<last six of MAC>` — auto-registered, nothing
+      claimed or provisioned.
+- [ ] A `gate_key` set on it in the admin console. Until it has one the row is a door nobody
+      has named, which is legal and reads as `null` on the wire.
+- [ ] **Scan a real member's code and watch the LED**: solid while the lock is released,
+      three fast blinks on a refusal, slow 1 Hz while the radio is down. That lamp is the
+      board's entire user interface and the only feedback a member gets.
+- [ ] **Offline test, done deliberately**: pull the AP, wait for the slow blink, and confirm
+      a member **with a rostered booking** still gets in and a member **without one** does
+      not. That is the stated degraded mode and it is narrower than the court box's — a
+      walk-up member's 60-second code can never be in a roster.
+- [ ] **Stale-roster test**: leave the board offline past `ROSTER_MAX_AGE_MS` (6 h) and
+      confirm it then admits **nobody**, including the member who got in an hour earlier.
+- [ ] After the link comes back, the offline opens appear in the audit trail as
+      `device.gate_open` — and **no** booking shows a `CheckedInAt` from them. Walking
+      through a door is not attendance, and a gate that posted attendance would let somebody
+      lose their refund by walking past a door.
+
+**If skipped:** a door that works on the bench and refuses every member the first time the
+WiFi drops, or one that keeps admitting people from a roster a week out of date.
+
+### One firmware, many doors
+
+- [ ] A second board flashed with the **same image**, given its own `gate_key` in the admin
+      console, and confirmed to behave as its own door. Nothing per-gate is compiled in, and
+      a spare board must be a spare board rather than a board for one particular door.
