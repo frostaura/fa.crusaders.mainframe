@@ -648,6 +648,48 @@ public sealed class AdminSettingsHttpTests
     }
 
     /// <summary>
+    /// <c>device_alert_cooldown_minutes</c>: both spellings bind, it round-trips through the
+    /// GET, omitting it leaves it alone, and the GET answers it whether or not the club has
+    /// ever set one.
+    ///
+    /// <para>
+    /// The always-present half is not decoration. The console's settings type requires this
+    /// key and carries no client-side default, so a conditional projection would be a page
+    /// that cannot render rather than a page that falls back — and the settings screen is
+    /// where a club goes when its boards are already misbehaving.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("deviceAlertCooldownMinutes")]
+    [InlineData("device_alert_cooldown_minutes")]
+    public async Task The_alert_cooldown_binds_under_either_spelling_and_is_always_served(string field)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        // Served before anybody has set one, at the documented default.
+        var before = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+        Assert.Equal(
+            TenantSettingsView.DefaultDeviceAlertCooldownMinutes,
+            before.GetProperty("device_alert_cooldown_minutes").GetInt32());
+
+        var body = Baseline();
+        body[field] = 15;
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, body)).StatusCode);
+
+        Assert.Equal(15, (await EngineAsync(factory, seeded)).DeviceAlertCooldownMinutes);
+        Assert.Equal(15, (await client.GetFromJsonAsync<JsonElement>(SettingsPath))
+            .GetProperty("device_alert_cooldown_minutes").GetInt32());
+
+        // Omitted means unchanged, like every other optional key on this endpoint.
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, Baseline())).StatusCode);
+        Assert.Equal(15, (await EngineAsync(factory, seeded)).DeviceAlertCooldownMinutes);
+    }
+
+    /// <summary>
     /// The bounds. The unlock range is <c>GateAccess</c>'s own clamp, named once so the
     /// number an admin is refused at and the number the door is held open for cannot drift;
     /// the policy is refused rather than coerced, which is what lets the READ side treat an
@@ -660,6 +702,11 @@ public sealed class AdminSettingsHttpTests
     [InlineData("gateUnlockSeconds", 86400, "gate_unlock_seconds_out_of_range")]
     [InlineData("gateEarlyEntryMinutes", -1, "gate_early_entry_minutes_out_of_range")]
     [InlineData("gateEarlyEntryMinutes", 241, "gate_early_entry_minutes_out_of_range")]
+    [InlineData("deviceAlertCooldownMinutes", 4, "device_alert_cooldown_minutes_out_of_range")]
+    [InlineData("deviceAlertCooldownMinutes", 0, "device_alert_cooldown_minutes_out_of_range")]
+    [InlineData("deviceAlertCooldownMinutes", -1, "device_alert_cooldown_minutes_out_of_range")]
+    [InlineData("deviceAlertCooldownMinutes", 1441, "device_alert_cooldown_minutes_out_of_range")]
+    [InlineData("device_alert_cooldown_minutes", 1441, "device_alert_cooldown_minutes_out_of_range")]
     public async Task A_gate_number_outside_its_bounds_is_refused(string field, int value, string expected)
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");

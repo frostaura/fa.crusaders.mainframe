@@ -464,6 +464,321 @@ public class PeripheralHealthTests
         Assert.Equal(false, evt.Data["peripheral_outage"]);
     }
 
+    // ----- how often a board may mail the club about itself ----------------------------
+
+    /// <summary>
+    /// Writes <c>device_alert_cooldown_minutes</c> into the tenant's settings document, the
+    /// way the admin PUT would. Merged rather than replaced, so a test that varies this one
+    /// number is varying one number.
+    /// </summary>
+    private static async Task SetCooldownAsync(MainframeDbContext db, TestHost host, int minutes)
+    {
+        var row = await db.TenantSettings.FirstAsync(s => s.TenantId == host.Tenant.Id);
+        using var doc = System.Text.Json.JsonDocument.Parse(
+            string.IsNullOrWhiteSpace(row.SettingsJson) ? "{}" : row.SettingsJson);
+
+        var merged = doc.RootElement.EnumerateObject()
+            .ToDictionary(p => p.Name, p => System.Text.Json.JsonSerializer.Deserialize<object?>(p.Value.GetRawText()));
+        merged["device_alert_cooldown_minutes"] = minutes;
+
+        row.SettingsJson = System.Text.Json.JsonSerializer.Serialize(merged);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// <b>A board flapping on a bad uplink is one message, not a hundred.</b>
+    ///
+    /// <para>
+    /// The sweep had no cooldown and no minimum outage: every transition mailed every admin.
+    /// A board on a marginal link going down and up every few minutes filled the club's
+    /// mailboxes with "not reporting" and "back online" until somebody muted the sender — and
+    /// an alert nobody reads is worse than no alert, because the club believes it has one.
+    /// </para>
+    ///
+    /// <para>
+    /// This drives the REAL worker across six simulated hours with an injected clock, which is
+    /// the only way the behaviour is visible at all: the bug is not in any single tick.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_flapping_board_mails_the_club_once_per_cooldown_and_not_once_per_flap()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var worker = CreateWorker(host);
+
+        var start = DateTimeOffset.UtcNow.AddHours(-6);
+        var box = await AddBoxAsync(host, db, start, enabled: true, installedAt: start.AddDays(-30));
+        host.EmailService.Sent.Clear();
+
+        // Six flaps at nine-minute intervals, so every detection lands inside one
+        // sixty-minute cooldown of the first — the first is detected at +4 and the last at
+        // +49. Each flap is a real outage: silent past the threshold, then a heartbeat.
+        const int Flaps = 6;
+        for (var i = 0; i < Flaps; i++)
+        {
+            var quiet = start.AddMinutes(i * 9);
+            var back = quiet.AddMinutes(5);
+
+            await worker.TickAsync(quiet.AddMinutes(4), default);     // past offline_after_seconds
+            box.LastSeenAt = back;
+            await db.SaveChangesAsync();
+            await worker.TickAsync(back.AddSeconds(1), default);      // the all-clear
+        }
+
+        // Every flap wrote its row — the Devices page still has the history.
+        var outages = await db.DeviceOutages.IgnoreQueryFilters().Where(o => o.DeviceId == box.Id).ToListAsync();
+        Assert.Equal(Flaps, outages.Count);
+        Assert.True(
+            outages.Max(o => o.DetectedAt) - outages.Min(o => o.DetectedAt)
+                < TimeSpan.FromMinutes(TenantSettingsView.DefaultDeviceAlertCooldownMinutes),
+            "the fixture must keep every flap inside ONE cooldown, or this tests nothing");
+
+        // The club heard about the first one and nothing else inside the hour: one alert and
+        // its all-clear. Not ten of each.
+        Assert.Equal(2, host.EmailService.Sent.Count);
+        Assert.Single(host.EmailService.Sent, m => m.Subject.Contains("not reporting", StringComparison.Ordinal));
+        Assert.Single(host.EmailService.Sent, m => m.Subject.Contains("back online", StringComparison.Ordinal));
+
+        // …and the cooldown is a cooldown, not a mute: past it the club is told again.
+        var later = start.AddMinutes(200);
+        await worker.TickAsync(later, default);
+        Assert.Equal(3, host.EmailService.Sent.Count);
+    }
+
+    /// <summary>
+    /// The cooldown is the club's setting, and it is read rather than assumed. Five minutes
+    /// through the same ten-minute flaps means every flap is heard about; the probe is the
+    /// same fixture with one number changed.
+    /// </summary>
+    [Fact]
+    public async Task The_cooldown_is_the_clubs_setting()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var worker = CreateWorker(host);
+
+        await SetCooldownAsync(db, host, 5);
+
+        var start = DateTimeOffset.UtcNow.AddHours(-6);
+        var box = await AddBoxAsync(host, db, start, enabled: true, installedAt: start.AddDays(-30));
+        host.EmailService.Sent.Clear();
+
+        for (var i = 0; i < 3; i++)
+        {
+            var quiet = start.AddMinutes(i * 10);
+            await worker.TickAsync(quiet.AddMinutes(4), default);
+            box.LastSeenAt = quiet.AddMinutes(5);
+            await db.SaveChangesAsync();
+            await worker.TickAsync(quiet.AddMinutes(5).AddSeconds(1), default);
+        }
+
+        // Three alerts and three all-clears: with a five-minute cooldown, ten minutes apart is
+        // outside it. The same fixture on the default sixty gets two mails in total.
+        Assert.Equal(6, host.EmailService.Sent.Count);
+    }
+
+    /// <summary>
+    /// <b>A door nobody has named mails nobody.</b>
+    ///
+    /// <para>
+    /// Auto-registration is unbounded: anything holding the club's device key can heartbeat
+    /// with an invented MAC and <c>kind: "gate"</c> and a row appears. Before this, each of
+    /// those rows could then mail every admin of the club on every transition — a mail flood
+    /// available on demand to whoever had the key. It is the same capability D3 took the
+    /// roster away for, and naming the door is the same acknowledgement.
+    /// </para>
+    ///
+    /// <para>
+    /// The row and the event are still written: the Devices page is where an admin looks at a
+    /// board on purpose, and what is withheld is the interruption, not the record.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_gate_no_admin_has_named_alerts_nobody_and_still_records_its_outage()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var unnamed = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1), gateKey: null);
+        host.EmailService.Sent.Clear();
+
+        await CreateWorker(host).TickAsync(default);
+
+        Assert.Empty(host.EmailService.Sent);
+        Assert.Single(await db.DeviceOutages.IgnoreQueryFilters().Where(o => o.DeviceId == unnamed.Id).ToListAsync());
+        Assert.Single(Drain(host), e => e.Type == "peripheral.unhealthy");
+
+        // It comes back while still unnamed: closed silently, because a recovery mail for an
+        // alarm nobody was given is noise about an event the club never heard of.
+        unnamed.LastSeenAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        await CreateWorker(host).TickAsync(default);
+        Assert.Empty(host.EmailService.Sent);
+
+        // The probe: ONE field. The same board, now named by an admin, goes dark again and
+        // the club hears about it.
+        unnamed.GateKey = "side-door";
+        unnamed.LastSeenAt = DateTimeOffset.UtcNow.AddHours(-1);
+        await db.SaveChangesAsync();
+        await CreateWorker(host).TickAsync(DateTimeOffset.UtcNow.AddHours(3), default);
+        Assert.Single(host.EmailService.Sent, m => m.Subject.Contains("not reporting", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// <b>Re-enabling a long-disabled board must not mail "back after 43 200 minutes".</b>
+    ///
+    /// <para>
+    /// The sweep skips disabled rows, so an outage open when an admin threw the switch stayed
+    /// open for as long as the board was out of service. Switch it back on, let it report, and
+    /// the first tick closed a row that had been open for a month and mailed the whole club an
+    /// all-clear for an outage they had themselves created.
+    /// </para>
+    ///
+    /// <para>
+    /// The row is closed at the switch instant instead — the same instant
+    /// <c>OutOfServiceSince</c> records, and therefore the last moment the club was
+    /// accountable for this board.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Taking_a_board_out_of_service_closes_its_outage_silently()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var registry = scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
+
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1));
+        host.EmailService.Sent.Clear();
+
+        await CreateWorker(host).TickAsync(default);
+        var outage = Assert.Single(await db.DeviceOutages.IgnoreQueryFilters().Where(o => o.DeviceId == box.Id).ToListAsync());
+        Assert.Null(outage.EndedAt);
+        Assert.Single(host.EmailService.Sent);
+        host.EmailService.Sent.Clear();
+
+        // The admin takes it out of service.
+        await registry.UpdateAsync(box, new UpdateDeviceCommand(null, false, null, null, null), host.AdminUser.Id, default);
+
+        await db.Entry(outage).ReloadAsync();
+        Assert.NotNull(outage.EndedAt);
+        Assert.Equal(box.OutOfServiceSince, outage.EndedAt);
+        Assert.Empty(host.EmailService.Sent);
+
+        // A month later it goes back into service and reports. Nothing is mailed about the
+        // month the club had it switched off.
+        box.Enabled = true;
+        box.OutOfServiceSince = null;
+        box.LastSeenAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        await CreateWorker(host).TickAsync(default);
+        Assert.Empty(host.EmailService.Sent);
+    }
+
+    /// <summary>
+    /// <b>…and it still darkens no court once somebody has put a court number on it.</b>
+    ///
+    /// <para>
+    /// The test above passes for the wrong reason, and flipping one fixture field is what
+    /// shows it: <c>DeviceOutageIndex</c> read every device row with no filter on kind at all,
+    /// and a gate was left out of the court index only because auto-registration gives it an
+    /// empty <c>CourtNumbers</c>. That is not a rule, it is a coincidence of the default —
+    /// exactly the class of defect <c>memory/gotchas.md</c> records ("a test can be green
+    /// because of its FIXTURE"), and exactly the sentence <c>GateAccess.NotACourtBox</c> was
+    /// written for: a rule enforced by the emptiness of an unrelated list is not enforced.
+    /// </para>
+    ///
+    /// <para>
+    /// The court number is written <b>directly to the row</b>, because the product refuses to
+    /// put one there: <c>PATCH /admin/devices/{id}</c> answers <c>court_fields_on_a_gate</c>.
+    /// That is the point. Nothing stops a restore, a fixture or a later migration producing
+    /// this row, and the money consequence is immediate in both directions — a silent door
+    /// waiving penalties on a court it does not drive, and a healthy door vetoing the §6a
+    /// waiver on a court whose box is genuinely dark.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_silent_gate_carrying_a_court_number_still_darkens_no_court()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
+        var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1));
+
+        // The one field. Written straight to the row: the API refuses to do this.
+        gate.CourtNumbers = [host.Courts[0].CourtNumber];
+        await db.SaveChangesAsync();
+
+        await CreateWorker(host).TickAsync(default);
+        Drain(host);
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
+        Assert.Equal(2.40m, evt.Data["penalty_credits"]);
+        Assert.Equal(false, evt.Data["peripheral_outage"]);
+    }
+
+    /// <summary>
+    /// The mirror, and the one that costs the MEMBER rather than the club: a HEALTHY door with
+    /// a court number on it must not vote a genuinely dark court back into the light.
+    ///
+    /// <para>
+    /// This is the direction the empty-list coincidence never protected against at all, and it
+    /// is the one §6a exists to prevent — the club billing a member 30% for its own outage.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_healthy_gate_carrying_a_court_number_does_not_block_the_waiver()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // The instants matter and are stated. The booking started an hour ago, so its grace
+        // deadline — the instant the waiver is judged at — is 55 minutes ago. The box had been
+        // silent for over two hours by then; the door had been heard from a minute before it,
+        // so at that instant the door was REACHABLE and would have voted the court Lit.
+        //
+        // The door's last heartbeat is deliberately not "twenty seconds ago": a board is only
+        // evidence about an instant it existed at (DeviceOutageIndex.KnownToExistFrom), and a
+        // board first heard from after the deadline is skipped rather than counted — which
+        // would make this test pass without discriminating anything.
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddHours(-3));
+        var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-56));
+        gate.CourtNumbers = [host.Courts[0].CourtNumber];
+        await db.SaveChangesAsync();
+
+        await CreateWorker(host).TickAsync(default);
+        Drain(host);
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        // Refunded in full, no penalty: §6a. A door is not a court's evidence either way.
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
+        Assert.Equal(0m, evt.Data["penalty_credits"]);
+        Assert.Equal(true, evt.Data["peripheral_outage"]);
+    }
+
     // ----- money: §6a's "auto-credited (no penalty)" -----------------------------------
 
     private static async Task<Booking> AddDueBookingAsync(

@@ -42,6 +42,19 @@ public sealed class AccessCodeService
     /// Idempotent. A live code already on this booking — in the database or already
     /// staged on this context — is returned rather than duplicated.
     /// </para>
+    ///
+    /// <para>
+    /// <b>The code's user is the booking's user, and there is no second candidate.</b> This
+    /// used to fall back to <c>BookedByUserId</c> when <c>UserId</c> was null, which made
+    /// "the person the code identifies" and "the person the booking belongs to" two
+    /// potentially different people — and two rules elsewhere then disagreed about which one
+    /// they bind: the cached roster's barred filter keys on the booking's user while the
+    /// online door check keys on the code's. The fallback reached nothing. The only booking
+    /// in this product with a null <c>UserId</c> is an <see cref="BookingStatus.AdminBlock"/>
+    /// (<c>AdminBlockService</c>), which stages no code because there is no member to let in.
+    /// So the state is refused outright rather than papered over, and the agreement becomes
+    /// a property of the type instead of a coincidence of the call sites.
+    /// </para>
     /// </summary>
     public async Task<AccessCode> StageForBookingAsync(Booking booking, TimeSpan grace, CancellationToken ct)
     {
@@ -63,7 +76,7 @@ public sealed class AccessCodeService
             TenantId = _tenant.TenantId,
             Code = NewCode(),
             Purpose = AccessCodePurpose.BookingActivation,
-            UserId = booking.UserId ?? booking.BookedByUserId ?? throw new InvalidOperationException("A booking without a user cannot carry an access code."),
+            UserId = booking.UserId ?? throw new InvalidOperationException("A booking without a user cannot carry an access code."),
             BookingId = booking.Id,
             ExpiresAt = booking.EndsAt.Add(grace),
         };

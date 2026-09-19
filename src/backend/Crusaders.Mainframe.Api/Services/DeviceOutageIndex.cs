@@ -110,7 +110,7 @@ public enum CourtDarkness
 
     /// <summary>
     /// No board in service drove the court, and the hardware that did had already stopped
-    /// answering by that instant. It is switched off now, so the API refuses it on all four
+    /// answering by that instant. It is switched off now, so the API refuses it on all five
     /// <c>/api/v1/device/*</c> routes, <c>/events</c> included — nothing it holds will ever
     /// arrive and the settlement is final.
     /// </summary>
@@ -178,7 +178,7 @@ public sealed class DeviceOutageIndex
     /// <para>
     /// <b>They are read for one thing: whether the club had hardware on the court that the API
     /// had stopped accepting.</b> A box the API refuses cannot light anything —
-    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 for <c>!device.IsActive</c> on all four
+    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 for <c>!device.IsActive</c> on all five
     /// <c>/api/v1/device/*</c> routes — so when the LAST box on a court is switched off, that
     /// court has no check-in of its own left and every no-show on it was charged the full 30% for
     /// a door the club had closed. (The shared courtside terminal's own
@@ -220,10 +220,21 @@ public sealed class DeviceOutageIndex
     public static async Task<DeviceOutageIndex> BuildAsync(
         MainframeDbContext db, DateTimeOffset since, int offlineAfterSeconds, CancellationToken ct)
     {
+        // COURT BOXES, stated. This read had no filter on kind at all, and a gate was left out
+        // only because auto-registration gives it an empty CourtNumbers list — so it fell out
+        // of CourtIndex by accident rather than by rule. `PATCH /admin/devices/{id}` refuses
+        // court numbers on a gate row today, but nothing stops a fixture, a restore or a
+        // future migration putting one there, and the moment one appears a silent DOOR starts
+        // waiving no-show penalties on a court it does not drive and a healthy door starts
+        // vetoing the §6a waiver on a court whose box is genuinely dark. Neither is a door's
+        // business: a gate lights nothing, stamps no attendance, and §1 says walking through a
+        // door is not playing a court. A rule enforced by the emptiness of an unrelated list
+        // is not enforced — the same sentence GateAccess.NotACourtBox is written for.
+        //
         // Read once and split, because the two halves answer different questions: the enabled
         // boxes carry the silence, and the switched-off ones only say whether the club has any
         // hardware on the court at all, and from when (see CourtIndex and DarknessAt).
-        var allDevices = await db.Devices.AsNoTracking().ToListAsync(ct);
+        var allDevices = await db.Devices.AsNoTracking().Where(d => d.Kind == DeviceKind.CourtBox).ToListAsync(ct);
 
         // A box that has never called in is not silent, it is unborn — LastSeenAt is null only
         // between auto-registration and the first save, and in seeded fixtures. Same rule the
@@ -449,7 +460,7 @@ public sealed class DeviceOutageIndex
     /// moment that hardware stopped answering.</b> This is the money half of finding M-F3 and it
     /// has now been got wrong in both directions. The out-of-service switch is what an admin uses
     /// on a box that is broken or has been unplugged for good, and the API then refuses that box
-    /// 403 on all four of its own routes — heartbeat, activate, walkup and events alike. Take the
+    /// 403 on all five of its own routes — heartbeat, activate, walkup, events and gate alike. Take the
     /// LAST box off a court and that court has no check-in of its own left; the first rule read
     /// that court as "no enabled box, therefore no evidence, therefore not dark" and settled its
     /// no-shows at the full 30%, billing the member a penalty for a door the club had closed.
@@ -571,7 +582,7 @@ public sealed class DeviceOutageIndex
     ///
     /// <para>
     /// <b>After the switch was thrown, the door is shut, full stop.</b> The club has declared it:
-    /// from that instant the API answers <c>403</c> for this board on all four
+    /// from that instant the API answers <c>403</c> for this board on all five
     /// <c>/api/v1/device/*</c> routes, so it admits nobody, is told nothing and reports nothing,
     /// and there is nothing left to wait <c>offline_after_seconds</c> for. Waiting anyway is not
     /// neutral — it charged the member the full 30% for a door the club had shut up to three

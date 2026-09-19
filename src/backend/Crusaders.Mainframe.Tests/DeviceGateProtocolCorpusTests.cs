@@ -125,6 +125,15 @@ public class DeviceGateProtocolCorpusTests
         Assert.Equal(86400000, heartbeat.UptimeMs);
         Assert.Equal(DeviceKinds.Gate, heartbeat.Kind);
 
+        // Absent means absent, not zero: a board on an older build reports no counter at all,
+        // and a null is what tells the server that rather than "everything is fine".
+        Assert.Null(heartbeat.NoPush);
+
+        var diagnostic = JsonSerializer.Deserialize<HeartbeatRequest>(
+            Body("requests", "gate-heartbeat-request-no-push"))!;
+        Assert.Equal(4, diagnostic.NoPush);
+        Assert.Equal(DeviceKinds.Gate, diagnostic.Kind);
+
         var scan = JsonSerializer.Deserialize<GateScanRequest>(Body("requests", "gate-scan-request"))!;
         Assert.Equal("5ccf7f0a1b2c", scan.Mac);
         Assert.Equal("qr", scan.Method);

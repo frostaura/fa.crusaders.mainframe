@@ -54,6 +54,7 @@ public static class DeviceEndpoints
         HeartbeatRequest req,
         [AsParameters] HeartbeatServices services,
         HttpContext ctx,
+        ILoggerFactory logs,
         CancellationToken ct)
     {
         var (db, tenant, settings, registry, codes) = services;
@@ -82,6 +83,16 @@ public static class DeviceEndpoints
         // says why the health sweep alone cannot see this case.
         DeviceSilenceLog.NoteHeartbeat(db, device!, now, HeartbeatCadence.OfflineAfterSeconds(s.HeartbeatSeconds));
 
+        // The board's own diagnostic counter, to the log and no further. Warning rather than
+        // information: a board that could not push a heartbeat, or could not arm its
+        // watchdog, is a board somebody has to look at — and nobody at the door can see it.
+        if (req.NoPush is > 0 and { } noPush)
+        {
+            logs.CreateLogger(typeof(DeviceEndpoints)).LogWarning(
+                "Device {DeviceCode} reports {NoPush} heartbeat(s) it could not push since the last one it could",
+                device!.DeviceCode, noPush);
+        }
+
         device!.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
         if (req.EffectiveRunningVersion is { } running) device.RunningVersion = running;
         if (!string.IsNullOrWhiteSpace(req.MegaVersion)) device.MegaVersion = req.MegaVersion.Trim();
@@ -102,10 +113,21 @@ public static class DeviceEndpoints
             // one call used to be answered with the club's live access codes for every
             // booking in the roster window, each of which opens every door in the club for
             // the length of its booking. Naming the door is the admin's acknowledgement that
-            // the board is one of theirs, and it is the cheapest possible gate on the only
-            // call that hands a caller OTHER MEMBERS' live codes in bulk. (/me/qr/generate
-            // hands a member their own, one at a time, authenticated as them — a different
-            // thing, and not this risk.)
+            // the board is one of theirs, and it is the cheapest possible gate available.
+            //
+            // IT IS NOT, HOWEVER, THE ONLY CALL THAT HANDS OUT OTHER MEMBERS' CODES IN BULK,
+            // and this comment said it was. A `kind`-less heartbeat from the same invented MAC
+            // auto-registers a COURT BOX on the club's first four courts, with no naming step
+            // at all, and is answered with up to sixteen live booking codes for those courts —
+            // and after the gate shipped, every one of those codes opens every door in the club
+            // inside its own booking's window. The gate's naming step therefore narrows this
+            // surface rather than closing it. Whether an auto-registered, never-acknowledged
+            // COURT BOX should also get no roster is a live product question, recorded in
+            // memory/questions.md and stated in the spec's threat model (§10a) rather than
+            // quietly fixed here: taking a box's roster away until an admin names it changes
+            // the court-box install story and the offline lighting path, which is a decision
+            // the founder owns. (/me/qr/generate hands a member their own code, one at a time,
+            // authenticated as them — a different thing, and not this risk.)
             //
             // Online scans are unaffected, so an install stays plug-and-play: what waits for
             // the admin is the OFFLINE fallback. The list is still always present and still
@@ -218,7 +240,29 @@ public sealed record HeartbeatRequest(
     /// sends today; an unrecognised string is a 400 rather than a silent court box. See
     /// <see cref="DeviceIdentity.ResolveOrRegisterAsync"/>.
     /// </summary>
-    [property: JsonPropertyName("kind")] string? Kind = null)
+    [property: JsonPropertyName("kind")] string? Kind = null,
+    /// <summary>
+    /// How many heartbeats the board could not push since it last reported one, plus its
+    /// watchdog-arm failures. Optional, additive, and a DIAGNOSTIC — a board that sends
+    /// nothing is a board reporting zero.
+    ///
+    /// <para>
+    /// A door has one LED and a boot log, and the two failures it needs to report are ones a
+    /// member must never be shown: a heartbeat body that did not fit the board's buffer or
+    /// arrived incomplete, and a watchdog that would not arm. A distinct LED cue for either
+    /// means nothing to the person standing at the door, so they ride the request instead.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It is logged and not stored.</b> A column on <see cref="Device"/> would be an EF
+    /// migration for a counter nothing decides anything on, and this repository's rule is
+    /// that a schema change needs one; the log line carries the device code, which is what a
+    /// technician searches by. It changes nothing about the response, and a negative value is
+    /// ignored rather than refused — a diagnostic must not be able to take a door out of
+    /// service. Corpus vector <c>gate-heartbeat-request-no-push</c>.
+    /// </para>
+    /// </summary>
+    [property: JsonPropertyName("no_push")] int? NoPush = null)
 {
     /// <summary>The reported version under either name, trimmed — or null when neither was sent.</summary>
     public string? EffectiveRunningVersion

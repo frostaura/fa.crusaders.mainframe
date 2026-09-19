@@ -197,7 +197,33 @@ public sealed class DeviceRegistryService
         // Cleared on the way back in: a board in service is not out of service since anything.
         if (cmd.Enabled is { } enabled && enabled != device.Enabled)
         {
-            device.OutOfServiceSince = enabled ? null : DateTimeOffset.UtcNow;
+            var switchedAt = DateTimeOffset.UtcNow;
+            device.OutOfServiceSince = enabled ? null : switchedAt;
+
+            // Taking a board OUT of service closes whatever outage it is in, silently.
+            //
+            // PeripheralHealthWorker skips disabled rows — an admin who switches a box off has
+            // said it is not expected to call in — so an outage open at that moment stayed open
+            // for as long as the board was out of service, which can be months. Switch it back
+            // on and the first heartbeat closed it: "Door gate is back after 43 200 minutes",
+            // to every admin, about a board the club itself had unplugged. The row is the
+            // once-per-outage guard, and a guard nobody can clear is a guard that eventually
+            // lies.
+            //
+            // Closed at the SWITCH instant rather than at the board's last heartbeat, which is
+            // the same instant OutOfServiceSince records and therefore the last moment the club
+            // was accountable for this board. That matters to the settlement: DeviceOutageIndex
+            // reads a closed outage's EndedAt as a witness that the API heard from the board,
+            // and every instant after the switch is decided by OutOfServiceSince instead (see
+            // DoorWasShutFor), so no deadline is re-priced by this close. No mail either way —
+            // the club is doing this on purpose and is looking at the screen.
+            if (!enabled)
+            {
+                var open = await _db.DeviceOutages
+                    .Where(o => o.DeviceId == device.Id && o.EndedAt == null)
+                    .ToListAsync(ct);
+                foreach (var outage in open) outage.EndedAt = switchedAt;
+            }
         }
 
         if (cmd.Enabled is not null) device.Enabled = cmd.Enabled.Value;

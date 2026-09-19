@@ -107,6 +107,56 @@ public static class DeviceEventEndpoints
     public const string GateOpenKind = "gate_open";
 
     /// <summary>
+    /// The event kind a gate queues when it refused a scan while offline — a token its cached
+    /// roster did not carry. It names no member it could resolve, by construction.
+    /// </summary>
+    public const string UnknownScanKind = "unknown_scan";
+
+    /// <summary>
+    /// Longest <c>kind</c> this endpoint will store. The receipt's column, and — through
+    /// <see cref="AuditKind"/> — what bounds the audit row's <c>Action</c>.
+    /// </summary>
+    public const int MaxKindLength = 32;
+
+    /// <summary>
+    /// The outcome for an event whose <c>kind</c> is missing, empty, or longer than
+    /// <see cref="MaxKindLength"/>.
+    ///
+    /// <para>
+    /// <b>It is an outcome and not a 4xx, which is the entire fix.</b> A JSON null in
+    /// <c>kind</c> dereferenced straight into <c>e.Kind.Length</c> and answered 500; a kind of
+    /// 200 characters overflowed <c>AuditLog.Action</c> (128) and answered 500 from the save.
+    /// Either one pinned the board's queue for ever: the firmware drains up to
+    /// <c>accepted_through</c> and re-posts the rest, so one malformed event at the head of a
+    /// ring stopped every event behind it from ever arriving — including the activations the
+    /// no-show sweep is waiting on. A board cannot edit what it has already queued, so the
+    /// only exit is a receipt.
+    /// </para>
+    /// </summary>
+    public const string Malformed = "malformed";
+
+    /// <summary>Whether this <c>kind</c> is one this endpoint can store at all.</summary>
+    private static bool Unusable(string? kind) =>
+        string.IsNullOrWhiteSpace(kind) || kind.Trim().Length > MaxKindLength;
+
+    /// <summary>
+    /// The <c>kind</c> as it is safe to write: trimmed, <c>unknown</c> when there was none,
+    /// and cut to <see cref="MaxKindLength"/>.
+    ///
+    /// <para>
+    /// A literal rather than an empty string for the missing case, because the audit action is
+    /// <c>device.{kind}</c> and <c>device.</c> is a row nobody can search for. Cutting rather
+    /// than refusing, because the row's value is that the event was received at all.
+    /// </para>
+    /// </summary>
+    private static string AuditKind(string? kind)
+    {
+        var trimmed = kind?.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return "unknown";
+        return trimmed.Length > MaxKindLength ? trimmed[..MaxKindLength] : trimmed;
+    }
+
+    /// <summary>
     /// Records a batch of events and reports the highest sequence number accepted.
     ///
     /// <para>
@@ -163,10 +213,10 @@ public static class DeviceEventEndpoints
             // is what lets the box release it and move on.
             if (!alreadyRecorded.Contains(e.Seq))
             {
-                var time = TimeOf(batch, e, now);
+                var time = TimeOf(batch, e, now) with { Kind = AuditKind(e.Kind) };
 
                 // Attendance BEFORE the receipt. See the summary for why this order.
-                var outcome = e.Kind switch
+                var outcome = Unusable(e.Kind) ? new ActivationOutcome(Malformed, null, time.Kind) : e.Kind switch
                 {
                     // A door reporting a court event. Refused explicitly rather than left to
                     // fail the relay-index check against an empty court list — see
@@ -226,10 +276,23 @@ public static class DeviceEventEndpoints
     public static readonly TimeSpan MaxEventAge = TimeSpan.FromDays(30);
 
     /// <summary>
-    /// When an event happened, and — if the box's arithmetic could not be believed — the
-    /// value it claimed. <see cref="ClampedFrom"/> is null for an ordinary event.
+    /// What the server could establish about one uploaded event before deciding anything:
+    /// when it happened, whether the box's arithmetic had to be overruled to say so, and the
+    /// kind as it is safe to store. <see cref="ClampedFrom"/> is null for an ordinary event.
+    ///
+    /// <para>
+    /// <see cref="Kind"/> is here rather than a seventh parameter on <c>RecordAsync</c>, which
+    /// is where the complexity gate caps a signature — and the right pressure, because the
+    /// three of these are one question. An init property rather than a positional parameter
+    /// so <see cref="TimeOf"/>, which answers only the first two, is not asked to invent the
+    /// third.
+    /// </para>
     /// </summary>
-    private sealed record EventTime(DateTimeOffset OccurredAt, DateTimeOffset? ClampedFrom);
+    private sealed record EventFacts(DateTimeOffset OccurredAt, DateTimeOffset? ClampedFrom)
+    {
+        /// <summary>The event's <c>kind</c>, trimmed, bounded and never empty — see <see cref="AuditKind"/>.</summary>
+        public string Kind { get; init; } = "unknown";
+    }
 
     /// <summary>
     /// The event's time from uptime arithmetic: the box's uptime at upload minus its uptime
@@ -241,12 +304,12 @@ public static class DeviceEventEndpoints
     /// clamped to the upload instant and the claimed value is kept on the audit row
     /// (<c>device.event_time_clamped</c>) so the desk can see the counter is broken.
     /// </summary>
-    private static EventTime TimeOf(DeviceEventBatch batch, DeviceEventDto e, DateTimeOffset now)
+    private static EventFacts TimeOf(DeviceEventBatch batch, DeviceEventDto e, DateTimeOffset now)
     {
         var claimed = now.AddMilliseconds(-(double)(batch.UptimeMs - e.UptimeMs));
         return claimed > now || now - claimed > MaxEventAge
-            ? new EventTime(now, claimed)
-            : new EventTime(claimed, null);
+            ? new EventFacts(now, claimed)
+            : new EventFacts(claimed, null);
     }
 
     /// <summary>
@@ -648,7 +711,7 @@ public static class DeviceEventEndpoints
     /// request got there first.
     /// </summary>
     private static async Task<bool> RecordAsync(
-        DeviceEventServices services, Device device, DeviceEventDto e, EventTime time,
+        DeviceEventServices services, Device device, DeviceEventDto e, EventFacts time,
         ActivationOutcome? outcome, CancellationToken ct)
     {
         var (db, tenant, _, _, _, _) = services;
@@ -658,7 +721,7 @@ public static class DeviceEventEndpoints
             TenantId = tenant.TenantId,
             DeviceId = device.Id,
             Seq = e.Seq,
-            Kind = e.Kind.Length > 32 ? e.Kind[..32] : e.Kind,
+            Kind = time.Kind,
             OccurredAt = time.OccurredAt,
 
             // The relay and the booking are on the receipt so a later `release` — which
@@ -674,10 +737,10 @@ public static class DeviceEventEndpoints
             device_id = device.Id,
             device_code = device.DeviceCode,
             seq = e.Seq,
-            kind = e.Kind,
+            kind = time.Kind,
             court = e.Court,
             method = e.Method,
-            subject = e.Subject,
+            subject = SubjectFor(e),
             duration_ms = e.DurationMs,
             occurred_at = time.OccurredAt,
             occurred_at_clamped_from = time.ClampedFrom,
@@ -695,11 +758,11 @@ public static class DeviceEventEndpoints
 
         var rows = new List<AuditLog>(3)
         {
-            new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{e.Kind}", DetailsJson = detailsJson },
+            new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{time.Kind}", DetailsJson = detailsJson },
         };
         if (outcome is not null && outcome.Code != ActivationOutcome.Ok)
         {
-            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{outcome.Kind}_{outcome.Code}", DetailsJson = detailsJson });
+            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{AuditKind(outcome.Kind)}_{outcome.Code}", DetailsJson = detailsJson });
         }
         if (time.ClampedFrom is not null)
         {
@@ -722,6 +785,49 @@ public static class DeviceEventEndpoints
             foreach (var row in rows) db.Entry(row).State = EntityState.Detached;
             return false;
         }
+    }
+
+    /// <summary>
+    /// What the audit row may say about the token a door event carried: a short fingerprint,
+    /// never the token.
+    ///
+    /// <para>
+    /// <b>A live access code in a trail an admin can read is a credential in a log.</b> The
+    /// online path has said so since it shipped — §5 of the spec leaves the token out of
+    /// <c>gate.opened</c> on purpose — and the OFFLINE path wrote it in full. A
+    /// <c>gate_open</c> or an <c>unknown_scan</c> carries the bytes the member held up at the
+    /// door, and those bytes open every door in the club for the length of that booking's
+    /// window; <c>RetentionWorker</c> anonymises a row's SUBJECT and never touches its
+    /// <c>DetailsJson</c>, so they stayed readable for as long as the row did. Any admin, any
+    /// console session, any database dump.
+    /// </para>
+    ///
+    /// <para>
+    /// The fingerprint is the first eight hex characters of SHA-256 over the normalised code,
+    /// which keeps the one property the field was worth having for: <b>two scans of one code
+    /// still correlate</b>, so "the same badge tried the side door eleven times" is still a
+    /// question the trail answers. It is not reversible, and it is not a lookup key — the
+    /// identity lives on <c>SubjectUserId</c>, which the resolved gate-open path sets.
+    /// </para>
+    ///
+    /// <para>
+    /// Keyed on the KIND rather than on the row's kind, which is wider than the finding asked
+    /// for and deliberately so: a court box posting <c>gate_open</c> is refused
+    /// <c>not_a_gate</c>, but the token it posted is just as live, and a guard that depended
+    /// on the sender being honest about itself is not a guard. A court box's own
+    /// <c>activation</c> events are untouched — that token is the roster token for a booking
+    /// the receipt already names, and narrowing it is a separate decision about the court-box
+    /// trail rather than a door fix smuggled in here.
+    /// </para>
+    /// </summary>
+    private static string? SubjectFor(DeviceEventDto e)
+    {
+        if (e.Kind is not (GateOpenKind or UnknownScanKind)) return e.Subject;
+        if (string.IsNullOrWhiteSpace(e.Subject)) return null;
+
+        var digest = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(e.Subject.Trim().ToUpperInvariant()));
+        return Convert.ToHexString(digest)[..8].ToLowerInvariant();
     }
 
     /// <summary>

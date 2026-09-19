@@ -126,7 +126,11 @@ public static class DeviceGateRosterBuilder
         MainframeDbContext db, AccessCodeService codes, TenantSettingsView settings,
         DateTimeOffset now, CancellationToken ct)
     {
-        var earlyEntry = TimeSpan.FromMinutes(settings.GateEarlyEntryMinutes);
+        // Clamped on read, through the one function the online decision reads it with. An
+        // unclamped roster is the worse half of an unclamped door: it would admit from the
+        // cache what the API refuses online, which is the asymmetry BookingCodeWindow's max
+        // exists to prevent, in the direction nobody can see.
+        var earlyEntry = TimeSpan.FromMinutes(BookingCodeWindow.EntryWindowMinutes(settings));
 
         // [StartsAt − early, EndsAt] ∩ [now, now + roster] ≠ ∅  ⇔
         // StartsAt ≤ now + roster + early  ∧  EndsAt ≥ now — two constants the provider can

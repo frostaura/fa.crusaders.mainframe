@@ -226,17 +226,141 @@ public static class GateAccess
     private static async Task<string?> BookingCodeScopeAsync(
         MainframeDbContext db, GateContext context, ResolvedAccessCode resolved, CancellationToken ct)
     {
+        var outside = await OutsideItsOwnWindowAsync(db, context, resolved, ct);
+        if (outside is null) return null;
+
+        // The credential is out of scope; the MEMBER may not be. See the summary above.
+        return await HoldsALiveBookingAsync(
+            db, context, resolved.UserId, BookingCodeWindow.DoorHorizonMinutes(context.Settings), ct)
+            ? null
+            : outside;
+    }
+
+    /// <summary>
+    /// Why this code's OWN booking does not admit it right now, or null when it does — the
+    /// question about the CREDENTIAL.
+    ///
+    /// <para>
+    /// <b>There is no upper-edge test here, and its absence is the rule rather than an
+    /// omission.</b> The window's top is <b>the code's own liveness</b>:
+    /// <c>AccessCodeService.ResolveAsync</c> is the only way this decision reaches a
+    /// <see cref="ResolvedAccessCode"/> at all and it refuses anything that is not
+    /// <c>IsLiveAt(now)</c>, so a code that is here is a code that is live. Testing
+    /// <c>booking.EndsAt</c> as well was a SECOND upper edge, lower than the first and wrong
+    /// in two directions at once: the no-show sweep truncates <c>EndsAt</c> to its own clock
+    /// five minutes into a slot, and a member whose court simply ran to its end was refused
+    /// for the grace window during which the product was still showing them that code.
+    /// </para>
+    ///
+    /// <para>
+    /// Nothing in this product extends a booking. The two writers of <c>EndsAt</c> after a
+    /// mint — the no-show sweep and <c>BookingService</c>'s reversal narrowing — only shorten
+    /// it or restore it toward the end it was sold to, so a code's <c>ExpiresAt</c> (minted
+    /// from the sold end plus the grace window) is never behind the row. If an extend-booking
+    /// feature ever lands, the mint path has to move with it or this edge silently narrows.
+    /// </para>
+    ///
+    /// <para>
+    /// Whether the MEMBER may come in anyway is a different question and is deliberately not
+    /// asked here. It is asked once, in <see cref="HoldsALiveBookingAsync"/>, by the caller.
+    /// Asking it in both places was measurably the same thing twice: a mutant that put this
+    /// method back to its pre-G2 behaviour changed no outcome, because the caller's fallback
+    /// already covered every case it had gained.
+    /// </para>
+    /// </summary>
+    private static async Task<string?> OutsideItsOwnWindowAsync(
+        MainframeDbContext db, GateContext context, ResolvedAccessCode resolved, CancellationToken ct)
+    {
         var booking = resolved.BookingId is { } id
             ? await db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == id, ct)
             : null;
 
         if (booking is null || booking.Status != BookingStatus.Booked) return NotRecognised;
-        if (context.Now > booking.EndsAt) return NotRecognised;
 
         var latestStart = BookingCodeWindow.LatestStart(
             context.Now, BookingCodeWindow.DoorHorizonMinutes(context.Settings));
 
         return booking.StartsAt <= latestStart ? null : TooEarly;
+    }
+
+    /// <summary>
+    /// Whether this member holds any booking whose door window contains
+    /// <see cref="GateContext.Now"/> — the one query behind both questions a door asks about
+    /// bookings, asked with a different horizon each time.
+    ///
+    /// <para>
+    /// <b>The horizon is the caller's because the two questions are different.</b> Step 6 —
+    /// the <c>booking_window</c> policy — asks "is this member due on a court?", and the
+    /// answer is the club's entry window. Step 5's relief asks "is this member entitled to be
+    /// in the building at all?", and the answer there is the door's own horizon, which under
+    /// <c>active_member</c> is wider. Sharing the query rather than the number is what keeps
+    /// the <c>NoShow</c> rule above from having to be written twice.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>A booking the sweep has written off still counts, and that is the whole of B2.</b>
+    /// The no-show sweep sets <c>Status = NoShow</c> and truncates <c>EndsAt</c> to its own
+    /// clock five minutes after a slot starts, and both of those read at a door as "this
+    /// person has no reason to be here": a member six minutes late was refused
+    /// <c>not_recognised</c> on their booking QR and <c>no_booking</c> on their ident QR,
+    /// <b>outside the building</b> — while the product's own remedy for a wrong no-show is
+    /// that member scanning at the court box inside it. A door that enforces a penalty by
+    /// making it impossible to undo is the worst possible place for that rule to live, and a
+    /// door settles no money in any case.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The end is the instant that booking's own code dies</b> —
+    /// <c>StartsAt + SliceMinutes × SliceCount + grace_window_minutes</c>, which is exactly
+    /// what <c>AccessCodeService.StageForBookingAsync</c> mints <c>ExpiresAt</c> as. It is
+    /// written as arithmetic rather than read off the code row because a booking is lazily
+    /// minted and may not have one yet, and it is measured from the slot as SOLD because the
+    /// sweep truncates <c>EndsAt</c> and nothing else. So the door's upper edge is one
+    /// sentence — <i>while the member's code for that booking is still live</i> — whether the
+    /// code in their hand is that booking's or another's. <c>Cancelled</c>, <c>Completed</c>
+    /// and <c>AdminBlock</c> admit nobody: those are decisions about the BOOKING, where a
+    /// no-show is a bet against attendance that the member at the door is in the middle of
+    /// losing.
+    /// </para>
+    ///
+    /// <para>
+    /// The grace window is the CURRENT setting rather than the one in force when the code was
+    /// minted, so a club that shortens it narrows this edge for codes already in members'
+    /// hands. The code's own row is exact (<c>ResolveAsync</c> checks it); this arithmetic is
+    /// the club's present rule applied to a booking whose code nobody has asked for yet, and
+    /// the two agree except across a settings change.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>StartsAt − horizon ≤ now</c> is rearranged to <c>StartsAt ≤ now + horizon</c> for
+    /// the provider. There is no admin carve-out here: this is the query, and the carve-out
+    /// belongs to the policy step that uses it.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The booking is matched on its member and on nothing else.</b> It used to also match
+    /// <c>b.Id == resolved.BookingId</c>, justified by a booking an admin made on a member's
+    /// behalf carrying a different <c>UserId</c> from the code's — a state no mint path
+    /// produces. <c>AccessCodeService.StageForBookingAsync</c> now takes the booking's own
+    /// user and refuses a booking without one, so the code's user and the booking's user are
+    /// the same person by construction, and the disjunct matched nothing it could reach. It
+    /// also silently widened the query past the barred check: the cached roster's membership
+    /// filter keys on the BOOKING's user, so a disjunct that could admit a booking belonging
+    /// to somebody else would have let the two rules disagree about whom a suspension binds.
+    /// </para>
+    /// </summary>
+    private static async Task<bool> HoldsALiveBookingAsync(
+        MainframeDbContext db, GateContext context, Guid userId, int horizonMinutes, CancellationToken ct)
+    {
+        var latestStart = BookingCodeWindow.LatestStart(context.Now, horizonMinutes);
+        var tail = context.Settings.GraceWindowMinutes;
+
+        return await db.Bookings.AnyAsync(
+            b => b.UserId == userId
+                 && (b.Status == BookingStatus.Booked || b.Status == BookingStatus.NoShow)
+                 && b.StartsAt <= latestStart
+                 && b.StartsAt.AddMinutes((b.SliceMinutes * b.SliceCount) + tail) >= context.Now,
+            ct);
     }
 
     /// <summary>
@@ -254,6 +378,16 @@ public static class GateAccess
     /// <b>Club admins always pass.</b> A club that switches to <c>booking_window</c> must not
     /// thereby lock its own staff out of the building, and staff do not hold bookings for the
     /// hours they are working.
+    /// </para>
+    ///
+    /// <para>
+    /// The window's top is the same one step 5 uses — the instant that booking's own code
+    /// dies, i.e. the sold end plus the grace window — rather than the slot's bare end. One
+    /// upper edge for the whole door, so "while your code for that booking is still live" is
+    /// literally true whichever policy the club runs and whichever credential is presented.
+    /// It also matches the sweep: the grace window is precisely how long the product waits
+    /// before deciding somebody did not come, and refusing them at the door inside it is the
+    /// product contradicting itself.
     /// </para>
     ///
     /// <para>
@@ -279,20 +413,10 @@ public static class GateAccess
     {
         if (await db.Users.AnyAsync(u => u.Id == resolved.UserId && u.IsAdmin, ct)) return true;
 
-        // `StartsAt − early ≤ now` rearranged to `StartsAt ≤ now + early`: two constants the
-        // provider can translate, the same rearrangement DeviceRosterBuilder uses.
-        var latestStart = context.Now.AddMinutes(context.Settings.GateEarlyEntryMinutes);
-
-        // `b.Id == resolved.BookingId` is not redundant with the UserId match. A booking-
-        // activation code names the booking it was minted for, and a booking an admin made on
-        // a member's behalf can carry a different UserId from the code's; the code is the
-        // member's proof that this slot is theirs to walk in for.
-        return await db.Bookings.AnyAsync(
-            b => (b.UserId == resolved.UserId || b.Id == resolved.BookingId)
-                 && b.Status == BookingStatus.Booked
-                 && b.StartsAt <= latestStart
-                 && b.EndsAt >= context.Now,
-            ct);
+        // The club's entry window, clamped to the range its own PUT declares — see
+        // BookingCodeWindow.EntryWindowMinutes.
+        return await HoldsALiveBookingAsync(
+            db, context, resolved.UserId, BookingCodeWindow.EntryWindowMinutes(context.Settings), ct);
     }
 
     /// <summary>

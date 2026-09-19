@@ -331,6 +331,77 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// <b>The barred-member filter, on real Postgres, on BOTH roster builders.</b>
+    ///
+    /// <para>
+    /// Both builders carry the same inline membership subquery —
+    /// <c>!db.Memberships.Any(m =&gt; m.UserId == b.UserId &amp;&amp; m.Status != Active)</c> — written out
+    /// longhand rather than as the captured <c>MembershipAccess</c> expression, because a
+    /// captured expression does not translate inside a subquery. That is a provider-shaped
+    /// workaround, and every test that exercised it ran against the EF <b>in-memory</b>
+    /// provider, which evaluates the whole predicate in C# and would have been perfectly happy
+    /// with the captured form too. So the one thing the longhand exists for — that Npgsql can
+    /// translate it — was pinned nowhere.
+    /// </para>
+    ///
+    /// <para>
+    /// A filter that throws, or that silently degrades to a client evaluation, is a suspension
+    /// that holds only while the gate can reach the API — and the window in which a club most
+    /// wants it to hold is the one where nobody is watching. Driven through the real heartbeat
+    /// route, with the member Active first, so an empty roster cannot be an empty fixture.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_barred_members_booking_is_filtered_out_on_real_postgres(bool gate)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+
+        var mac = gate
+            ? await GateAsync(factory, club, client, "front-door")
+            : await CourtBoxAsync(club, client);
+
+        await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(20));
+
+        // The control: while the membership is Active the code is pushed, so the assertion
+        // below is the filter and not an empty club.
+        var kind = gate ? DeviceKinds.Gate : null;
+        var whileActive = await RosterAsync(client, club, mac, kind);
+        Assert.Single(whileActive);
+
+        await SuspendAsync(factory, club);
+
+        Assert.Empty(await RosterAsync(client, club, mac, kind));
+
+        // …and the code itself still exists. The roster dropped it; nothing revoked it, which
+        // is what keeps a court box deciding offline from a roster fetched beforehand honest.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.NotNull(await db.AccessCodes.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.TenantId == club.TenantId && c.Code == whileActive[0].Split('|')[0]));
+    }
+
+    private static async Task<List<string>> RosterAsync(
+        HttpClient client, Club club, string mac, string? kind)
+    {
+        var json = await BodyAsync(await client.SendAsync(Heartbeat(club.Key, mac, kind)));
+        return json.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!).ToList();
+    }
+
+    /// <summary>Registers a court box the ordinary way — by heartbeating — and hands back its MAC.</summary>
+    private static async Task<string> CourtBoxAsync(Club club, HttpClient client)
+    {
+        var mac = NewMac();
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+        return mac;
+    }
+
+    /// <summary>
     /// <b>A board nobody has named gets no roster.</b> Online scans work from its first
     /// heartbeat, so the install stays plug-and-play; the offline fallback starts when an
     /// admin names the door.
@@ -903,6 +974,50 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// <b>The TOP edge, through both routes: the door is never narrower than the phone.</b>
+    ///
+    /// <para>
+    /// The test above is the bottom edge; this is the other end, and the two are not
+    /// symmetric. The phone stops offering a booking's code at <c>EndsAt</c>; the door goes on
+    /// accepting it until the code itself expires, which is <c>EndsAt</c> plus the grace
+    /// window. A member whose court has just finished is therefore still holding a code that
+    /// works on the way out and back in — and, critically, so is a member the no-show sweep is
+    /// about to write off, since the grace window is precisely how long the product waits
+    /// before deciding somebody did not come.
+    /// </para>
+    ///
+    /// <para>
+    /// Narrower would be the product refusing a credential it minted and has not yet expired.
+    /// The DIRECTION is what is asserted rather than the exact gap, because the gap is the
+    /// club's own <c>grace_window_minutes</c>.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_door_still_opens_on_a_code_the_phone_has_stopped_offering()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", SharedHorizonSettings);
+        var device = factory.CreateClient();
+        var mac = await GateAsync(factory, club, device, "front-door");
+        var phone = MemberClient(factory, club);
+
+        // A court that ended two minutes ago, against a five-minute grace window.
+        var over = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-17), minutes: 15);
+        var code = await BookingCodeAsync(factory, club, over);
+
+        // The phone has moved on: it offers an ident code, not this booking's.
+        var screen = await GenerateAsync(phone);
+        Assert.Equal("ident", screen.GetProperty("kind").GetString());
+        Assert.NotEqual(code, screen.GetProperty("code").GetString());
+
+        // The door has not. The code the club minted is still live, so it still opens.
+        Assert.True((await BodyAsync(await device.SendAsync(Scan(club.Key, mac, code))))
+            .GetProperty("opened").GetBoolean());
+    }
+
+    /// <summary>
     /// The default policy with the two horizon inputs stated rather than defaulted, because
     /// this is the one test whose arithmetic they decide: 120 + 10 = 130 minutes, against a
     /// thirty-minute entry window that the max leaves behind.
@@ -921,6 +1036,100 @@ public sealed class DeviceGateHttpTests
     /// <summary>The club member's own JWT — the principal the Court Code page runs as.</summary>
     private static HttpClient MemberClient(TestWebAppFactory factory, Club club) =>
         ClientFor(factory, club, club.MemberId, role: null);
+
+    /// <summary>
+    /// The four-hour ceiling over the wire, at a club whose own phone horizon is two days.
+    ///
+    /// <para>
+    /// <c>roster_window_minutes</c> and <c>activation_cue_window_minutes</c> are both at the
+    /// maximum the settings PUT allows, which is a settings document an admin can produce
+    /// through the console without touching the database. Before the clamp that summed to
+    /// 2880 minutes and every booking code in the building was a forty-eight-hour door key,
+    /// while <c>GateAccess.MaxEarlyEntryMinutes</c>, this spec and the console all said four
+    /// hours.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_door_reaches_four_hours_however_wide_the_clubs_own_horizon_is()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", TwoDayHorizonSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client, "front-door");
+
+        var beyond = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(250), minutes: 15);
+        await AssertRefusedAsync(
+            client, Scan(club.Key, mac, await BookingCodeAsync(factory, club, beyond)), GateAccess.TooEarly);
+
+        // …and inside the ceiling the same club's door opens, so the refusal above is the
+        // ceiling and not a door that has stopped working.
+        var inside = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(230), minutes: 15);
+        Assert.True((await BodyAsync(await client.SendAsync(
+            Scan(club.Key, mac, await BookingCodeAsync(factory, club, inside))))).GetProperty("opened").GetBoolean());
+    }
+
+    /// <summary>The widest horizon the settings PUT will accept: a day of roster and a day of cue.</summary>
+    private const string TwoDayHorizonSettings =
+        """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","roster_window_minutes":1440,"activation_cue_window_minutes":1440,"activation_forward_window_minutes":1440,"gate_early_entry_minutes":30,"gate_access_policy":"active_member"}""";
+
+    /// <summary>
+    /// <b>The member walking back in for their next court, on the code from their last one.</b>
+    ///
+    /// <para>
+    /// Over real Postgres rather than only against the in-memory provider, and that is not
+    /// ceremony: the entitlement query bounds a booking by the slot it was SOLD —
+    /// <c>StartsAt + SliceMinutes × SliceCount</c>, because the no-show sweep truncates
+    /// <c>EndsAt</c> — and an expression the in-memory provider evaluates in C# is an
+    /// expression Npgsql still has to translate to SQL. A query that throws at a door is
+    /// indistinguishable from a door that does not work.
+    /// </para>
+    ///
+    /// <para>
+    /// The club runs a generous grace window, which is what keeps the earlier booking's code
+    /// alive past its own slot: the row lives until <c>EndsAt</c> plus grace. That is the
+    /// real shape of the complaint — a phone still showing the 17:00 QR at 18:50.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_spent_booking_code_opens_the_door_for_a_member_whose_next_court_is_due()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", SharedHorizonSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client, "front-door");
+
+        // A court that ended ten minutes ago and has been promoted to `Completed` — which is
+        // what `LightsCueWorker` does to an attended-and-over booking, so this is the shape a
+        // member who PLAYED is left holding — and the next one starting in twenty. One court,
+        // so they must not overlap: the exclusion constraint is real here. The code outlives
+        // the promotion because nothing revokes one.
+        var now = DateTimeOffset.UtcNow;
+        var spentBooking = await BookAsync(factory, club, now.AddMinutes(-70), minutes: 60);
+        var spent = await BookingCodeAsync(factory, club, spentBooking);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.AccessCodes.IgnoreQueryFilters().SingleAsync(c => c.Code == spent);
+            Assert.True(row.IsLiveAt(now), "the fixture must present a LIVE code, or this tests plain expiry");
+
+            var played = await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.Id == spentBooking.Id);
+            played.Status = BookingStatus.Completed;
+            await db.SaveChangesAsync();
+        }
+
+        // Without the next booking the code is exactly as dead as it was.
+        await AssertRefusedAsync(client, Scan(club.Key, mac, spent), GateAccess.NotRecognised);
+
+        await BookAsync(factory, club, now.AddMinutes(20), minutes: 45);
+
+        Assert.True((await BodyAsync(await client.SendAsync(Scan(club.Key, mac, spent))))
+            .GetProperty("opened").GetBoolean());
+    }
 
     // ---- What a gate may not do on the court-box routes -----------------------
 
@@ -1107,6 +1316,209 @@ public sealed class DeviceGateHttpTests
         // And nothing was settled.
         Assert.Null((await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.Id == booking.Id)).CheckedInAt);
         Assert.Empty(await db.LedgerEntries.IgnoreQueryFilters().Where(l => l.TenantId == club.TenantId).ToListAsync());
+    }
+
+    /// <summary>
+    /// <b>The offline trail must not carry the code itself.</b>
+    ///
+    /// <para>
+    /// §5 leaves the token out of <c>gate.opened</c> on purpose — a live access code in a
+    /// trail an admin can read is a credential in a log — and the OFFLINE path wrote it in
+    /// full, under <c>subject</c>, for a <c>gate_open</c> and an <c>unknown_scan</c> alike.
+    /// Those are the bytes the member held up at the door: they open every door in the club
+    /// for the length of that booking's window, and <c>RetentionWorker</c> anonymises a row's
+    /// SUBJECT while never touching its <c>DetailsJson</c>, so they stayed readable for as
+    /// long as the row did.
+    /// </para>
+    ///
+    /// <para>
+    /// A fingerprint rather than nothing, because the field was worth something: two scans of
+    /// one code still correlate, so "the same badge tried the side door eleven times" remains
+    /// answerable. The identity lives on <c>SubjectUserId</c>, which is asserted here too so
+    /// the fix cannot be read as having thrown the identity away with the token.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(DeviceEventEndpoints.GateOpenKind)]
+    [InlineData(DeviceEventEndpoints.UnknownScanKind)]
+    public async Task An_offline_door_event_fingerprints_the_token_instead_of_logging_it(string kind)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        // The same code twice, so the correlation property is asserted rather than assumed.
+        var upload = await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(
+                DoorEvent(11, kind, token), DoorEvent(12, kind, token)),
+        }));
+        Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var rows = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == $"device.{kind}")
+            .ToListAsync();
+        Assert.Equal(2, rows.Count);
+
+        var fingerprints = new List<string>();
+        foreach (var row in rows)
+        {
+            Assert.DoesNotContain(token, row.DetailsJson, StringComparison.OrdinalIgnoreCase);
+
+            var subject = JsonDocument.Parse(row.DetailsJson!).RootElement.GetProperty("subject").GetString()!;
+            Assert.Equal(8, subject.Length);
+            Assert.DoesNotContain(subject, token, StringComparison.OrdinalIgnoreCase);
+            fingerprints.Add(subject);
+        }
+
+        // Two scans of one code still correlate, which is the only reason to keep the field.
+        Assert.Equal(fingerprints[0], fingerprints[1]);
+
+        // …and a DIFFERENT code fingerprints differently, so the field still discriminates.
+        var other = await BookingCodeAsync(
+            factory, club, await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-200)));
+        await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(DoorEvent(13, kind, other)),
+        }));
+
+        var third = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == $"device.{kind}")
+            .OrderBy(a => a.CreatedAt).ToListAsync();
+        Assert.Equal(3, third.Count);
+        Assert.DoesNotContain(
+            JsonDocument.Parse(third[^1].DetailsJson!).RootElement.GetProperty("subject").GetString(),
+            fingerprints);
+
+        // The identity was not thrown away with the token: a resolvable gate_open still names
+        // its member on the row itself.
+        if (kind == DeviceEventEndpoints.GateOpenKind) Assert.Equal(club.MemberId, rows[0].SubjectUserId);
+    }
+
+    private static JsonObject DoorEvent(long seq, string kind, string token) => new()
+    {
+        ["seq"] = seq,
+        ["uptime_ms"] = 600_000,
+        ["kind"] = kind,
+        ["court"] = -1,
+        ["method"] = "qr",
+        ["subject"] = token,
+        ["duration_ms"] = 3000,
+    };
+
+    /// <summary>
+    /// <b>One malformed event must not pin the board's queue for ever.</b>
+    ///
+    /// <para>
+    /// A JSON null in <c>kind</c> went straight into <c>e.Kind.Length</c> and answered 500; a
+    /// kind of 200 characters overflowed <c>AuditLog.Action</c> (128) and answered 500 from
+    /// the save. Either one is permanent: the firmware drains only up to
+    /// <c>accepted_through</c> and re-posts the rest, so a malformed event at the head of a
+    /// ring stops every event behind it from ever arriving — including the activations the
+    /// no-show sweep is waiting on, which is real money. A board cannot edit what it has
+    /// already queued, so the only exit is a receipt.
+    /// </para>
+    ///
+    /// <para>
+    /// The second event in each batch is a good one, and the assertion that it was recorded is
+    /// what says the batch got PAST the bad one rather than merely surviving it.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("gate_open_but_very_much_longer_than_the_column_will_take_and_then_some_more_again")]
+    public async Task A_malformed_event_kind_is_receipted_rather_than_five_hundred(string? kind)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        var bad = DoorEvent(21, DeviceEventEndpoints.GateOpenKind, token);
+        bad["kind"] = kind is null ? null : JsonValue.Create(kind);
+
+        var upload = await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(bad, DoorEvent(22, DeviceEventEndpoints.GateOpenKind, token)),
+        }));
+
+        Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+        // Acknowledged THROUGH the good event behind it: this is the assertion that says the
+        // queue drains rather than stalls.
+        var body = await BodyAsync(upload);
+        Assert.Equal(22, body.GetProperty("accepted_through").GetInt64());
+        Assert.Equal(2, body.GetProperty("recorded").GetInt32());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var receipt = await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .SingleAsync(r => r.TenantId == club.TenantId && r.Seq == 21);
+        Assert.True(receipt.Kind.Length <= DeviceEventEndpoints.MaxKindLength);
+        Assert.False(string.IsNullOrEmpty(receipt.Kind));
+
+        // Its own audit row, so the desk can see a board is sending rubbish rather than
+        // inferring it from a gap in the sequence numbers.
+        var malformed = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action.EndsWith($"_{DeviceEventEndpoints.Malformed}"))
+            .ToListAsync();
+        Assert.Single(malformed);
+        Assert.All(malformed, a => Assert.True(a.Action.Length <= 128));
+    }
+
+    /// <summary>
+    /// The board's diagnostic counter is accepted, changes nothing, and cannot take a door out
+    /// of service — including when it arrives negative, which is not a counter.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(4)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task A_no_push_counter_is_accepted_and_changes_nothing(int noPush)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = NewMac();
+
+        var body = new JsonObject
+        {
+            ["mac"] = mac,
+            ["firmware_version"] = "1.0.0",
+            ["uptime_ms"] = 60000,
+            ["kind"] = DeviceKinds.Gate,
+            ["no_push"] = noPush,
+        };
+
+        var json = await BodyAsync(await client.SendAsync(Signed(club.Key, HeartbeatPath, body)));
+
+        Assert.Equal(DeviceKinds.Gate, json.GetProperty("kind").GetString());
+        Assert.Equal(3, json.GetProperty("gate").GetProperty("unlock_seconds").GetInt32());
+        Assert.False(json.TryGetProperty("no_push", out _));
     }
 
     /// <summary>
