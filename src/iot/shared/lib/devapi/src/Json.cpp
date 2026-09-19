@@ -250,5 +250,50 @@ bool nextUnsignedElement(const char* body, size_t len, size_t& at, uint32_t& out
   return readUnsigned(body, len, at, out);
 }
 
+bool isCompleteObject(const char* body, size_t len) {
+  if (body == nullptr) {
+    return false;
+  }
+  size_t at = skipSpace(body, len, 0U);
+  if (at >= len || body[at] != '{') {
+    return false;
+  }
+
+  uint32_t depth = 0U;
+  size_t past = 0U;
+  bool closed = false;
+  while (at < len && !closed) {
+    if (body[at] == '"') {
+      // Through endOfString, the one authority on where a string ends, so a
+      // brace inside a value — or an escaped quote — cannot be miscounted here
+      // in a way the field readers would not miscount.
+      const size_t end = endOfString(body, len, at);
+      if (end == kNotFound) {
+        return false; // unterminated: the body was cut inside a string
+      }
+      at = end + 1U;
+      continue;
+    }
+    if (body[at] == '{' || body[at] == '[') {
+      ++depth;
+    } else if (body[at] == '}' || body[at] == ']') {
+      if (depth == 0U) {
+        return false; // a closer with nothing open
+      }
+      --depth;
+      if (depth == 0U) {
+        past = at + 1U;
+        closed = true;
+      }
+    }
+    ++at;
+  }
+
+  // Nothing after the outermost `}` but whitespace. A second document, or any
+  // trailing byte, is a buffer this reader does not understand — and the caller
+  // asking is about to replace something with it.
+  return closed && skipSpace(body, len, past) >= len;
+}
+
 } // namespace json
 } // namespace devapi

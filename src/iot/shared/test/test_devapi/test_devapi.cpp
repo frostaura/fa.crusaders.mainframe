@@ -372,6 +372,59 @@ void test_string_field_refuses_an_unterminated_value() {
   TEST_ASSERT_FALSE(devapi::json::stringField(body, len(body), "gate_key", gateKey, sizeof(gateKey)));
 }
 
+// -------------------------------------------------------------------------
+// isCompleteObject — the question a caller asks before REPLACING something
+// -------------------------------------------------------------------------
+
+void test_is_complete_object_accepts_a_whole_document() {
+  const char* whole[] = {
+      "{}",
+      "  {\"a\":1}  \n",
+      "{\"roster\":[\"TOKALICE|1|0|3600\",\"TOKBOB|2|0|3600\"]}",
+      "{\"config\":{\"button_map\":[\"court:A\"]},\"gate\":{\"unlock_seconds\":3}}",
+      // Braces and brackets inside a VALUE are bytes, not structure.
+      "{\"reason\":\"}]}{\"}",
+      // ...including behind an escape, which is what endOfString is for.
+      "{\"reason\":\"he said \\\"}\\\"\"}",
+  };
+  for (const char* body : whole) {
+    TEST_ASSERT_TRUE_MESSAGE(devapi::json::isCompleteObject(body, len(body)), body);
+  }
+}
+
+void test_is_complete_object_refuses_anything_the_transport_may_have_cut() {
+  const char* cut[] = {
+      "",
+      "{",
+      "{\"roster\":[",
+      "{\"roster\":[\"TOKALICE|1|0|3600\"",  // inside the array
+      "{\"roster\":[\"TOKALICE|1|0|3600\"]", // after the array, before the brace
+      "{\"roster\":[\"TOKALICE|1|0|36",      // inside a string
+      "{\"config\":{\"button_map\":[]}",     // one level short
+      "{\"gate_key\":\"front-do",            // the unterminated-string case
+      "{\"a\":1}{\"b\":2}",                  // two documents: not one object
+      "{\"a\":1} trailing",                  // a trailing byte is not whitespace
+      "[\"TOKALICE|1|0|3600\"]",             // an array is not an object
+      "}",                                   // a closer with nothing open
+      "null",
+  };
+  for (const char* body : cut) {
+    TEST_ASSERT_FALSE_MESSAGE(devapi::json::isCompleteObject(body, len(body)), body);
+  }
+
+  TEST_ASSERT_FALSE(devapi::json::isCompleteObject(nullptr, 0U));
+}
+
+/// The length governs, not a NUL. A caller holding a 4608-byte buffer with a
+/// 4096-byte response in it passes the response's length, and a body that
+/// happens to sit in a longer buffer must not be read past what arrived.
+void test_is_complete_object_reads_only_the_length_it_is_given() {
+  const char body[] = "{\"a\":1}{\"b\":2}";
+  TEST_ASSERT_TRUE(devapi::json::isCompleteObject(body, 7U));
+  TEST_ASSERT_FALSE(devapi::json::isCompleteObject(body, 6U));
+  TEST_ASSERT_FALSE(devapi::json::isCompleteObject(body, len(body)));
+}
+
 } // namespace
 
 void setUp() {
@@ -408,6 +461,10 @@ int main(int, char**) {
   RUN_TEST(test_string_field_runs_to_the_real_closing_quote_across_an_escape);
   RUN_TEST(test_string_field_refuses_a_value_that_does_not_fit_across_an_escape);
   RUN_TEST(test_string_field_refuses_an_unterminated_value);
+
+  RUN_TEST(test_is_complete_object_accepts_a_whole_document);
+  RUN_TEST(test_is_complete_object_refuses_anything_the_transport_may_have_cut);
+  RUN_TEST(test_is_complete_object_reads_only_the_length_it_is_given);
 
   return UNITY_END();
 }

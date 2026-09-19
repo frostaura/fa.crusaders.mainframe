@@ -52,9 +52,15 @@ namespace devlink {
 /// Relays a box drives, and therefore the longest `court_numbers` array.
 inline constexpr uint8_t kMaxCourts = 4U;
 
-/// The contract's cap on roster entries per heartbeat. A roster sized to this
-/// holds every entry the API will ever send; anything past it is dropped and
-/// counted by the roster itself.
+/// THE COURT BOX's roster capacity, and nothing wider. It is not "the
+/// contract's cap": the contract's cap is per DEVICE KIND, the door gate's is
+/// 48 (`gatelogic::kGateRosterEntries`), and a shared library cannot speak for
+/// a device it has never heard of. The name survives because the court box's
+/// sources and the backend's `DeviceRosterBuilder` both cite it; what changed
+/// is the sentence, which used to claim a universality it never had and would
+/// have sized a gate's roster to a third of what the API sends it.
+///
+/// Anything past a roster's own capacity is dropped and counted by that roster.
 inline constexpr uint8_t kMaxRosterEntries = 16U;
 
 /// What one heartbeat did to the roster.
@@ -110,10 +116,22 @@ bool nextStringSpan(const char* body, size_t len, size_t& at, size_t& start, siz
 /// "everything was cancelled" has to be expressible too. Malformed elements are
 /// skipped and counted; the remainder is still committed.
 ///
+/// A body that is not a COMPLETE JSON document is left alone entirely, exactly
+/// like an absent key. A short read, a response longer than the caller's
+/// buffer, a connection dropped mid-body: the element walk stops at the last
+/// closing quote it saw and the shorter roster looks perfectly well formed, so
+/// committing it would silently discard every booking whose bytes never arrived
+/// — and re-stamp the cache fresh, refusing those members for the whole
+/// staleness window. The old roster and its real age are what survive instead.
+///
 /// Entry times are relative to `nowMs`, the moment this box accepted the push.
 template <class RosterT>
 SyncResult applyRoster(const char* body, size_t len, RosterT& target, uint32_t nowMs) {
   SyncResult result;
+
+  if (!devapi::json::isCompleteObject(body, len)) {
+    return result;
+  }
 
   size_t at = devapi::json::findArray(body, len, "roster");
   if (at == devapi::json::kNotFound) {

@@ -251,6 +251,38 @@ void test_apply_roster_one_bad_element_does_not_cost_the_good_ones() {
   TEST_ASSERT_TRUE(cache.decide("BROKEN", 0U, kBaseMid + 1U).verdict == roster::Verdict::Unknown);
 }
 
+/// MUTATION-PROVED. A response body that does not END in a complete JSON
+/// document is a TRUNCATED push, not a shorter roster — the transport cut it,
+/// the server did not cancel anything. Committing what arrived replaces a
+/// sixteen-entry roster with the eleven that fit AND re-stamps it fresh, so the
+/// five members whose bytes were lost are refused for a full six hours with
+/// nothing anywhere saying why. Delete the completeness check and this goes red.
+void test_apply_roster_a_truncated_body_never_replaces_the_roster() {
+  const char* truncated[] = {
+      // Cut mid-element: the walk ends on an unterminated string.
+      "{\"roster\":[\"TOKALICE|1|0|3600\",\"TOKBOB|2|0|3600\",\"TOKCA",
+      // Cut after a complete element, before the closing bracket.
+      "{\"roster\":[\"TOKALICE|1|0|3600\",\"TOKBOB|2|0|3600\"",
+      // Cut after the bracket, before the closing brace.
+      "{\"roster\":[\"TOKALICE|1|0|3600\"]",
+  };
+
+  for (const char* body : truncated) {
+    Cache cache(kSixHoursMs);
+    const roster::Entry entries[] = {booking("TOKZARA", 1U, 0U, kHourMs)};
+    loadRoster(cache, kBaseMid, entries, 1U);
+
+    const devlink::SyncResult r = devlink::applyRoster(body, strlen(body), cache, kBaseMid + 30000U);
+
+    TEST_ASSERT_FALSE_MESSAGE(r.replaced, body);
+    // The OLD roster is still there, still serving, and still ageing from the
+    // load that filled it — a truncated push is not a heartbeat.
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, cache.size(), body);
+    TEST_ASSERT_TRUE(cache.decide("TOKZARA", 1U, kBaseMid + 60000U).verdict == roster::Verdict::Allow);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(60000U, cache.ageMs(kBaseMid + 60000U), body);
+  }
+}
+
 void test_apply_roster_every_accepted_heartbeat_resets_staleness_across_the_wrap() {
   for (size_t i = 0U; i < kBaseCount; ++i) {
     const uint32_t base = kBases[i];
@@ -566,6 +598,7 @@ int main(int, char**) {
   RUN_TEST(test_apply_roster_fills_the_cache_from_the_wire_shape);
   RUN_TEST(test_apply_roster_keeps_the_contracts_sixteen_and_reports_the_rest);
   RUN_TEST(test_apply_roster_one_bad_element_does_not_cost_the_good_ones);
+  RUN_TEST(test_apply_roster_a_truncated_body_never_replaces_the_roster);
   RUN_TEST(test_apply_roster_every_accepted_heartbeat_resets_staleness_across_the_wrap);
 
   RUN_TEST(test_court_numbers_are_read_by_relay_position);
