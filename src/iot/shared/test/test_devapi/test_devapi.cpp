@@ -8,7 +8,8 @@
 // and returned the first hit, so a quoted string that was a VALUE counted as a
 // key. A gate heartbeat response opens `{"kind":"gate",…}` and carries a
 // `"gate":{…}` object later, so the first `"gate"` in every single response was
-// the value of `kind`. Reading from there passed all fourteen contract vectors,
+// the value of `kind`. Reading from there passed every contract vector then in
+// the gate family,
 // because the only `unlock_seconds` in those documents is the right one — and
 // would have driven a lock for somebody else's number the moment a field was
 // added between the two.
