@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ApiError, endpoints, errorCode } from "../lib/api";
+import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useToast } from "../components/Toast";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
+import { describeFailure } from "../lib/errors";
 
 /**
  * The API's refusal codes, as sentences. A member never sees a code, and never sees the same
@@ -47,10 +48,7 @@ export function ChangePasswordForm({ onDone, forced }: { onDone?: () => void; fo
       toast.push({ tone: "success", text: "Password changed." });
       onDone?.();
     } catch (err) {
-      const code = errorCode(err);
-      if (code && MESSAGES[code]) setError(MESSAGES[code]);
-      else if (err instanceof ApiError && err.status === 429) setError("Too many attempts. Wait a minute, then try again.");
-      else setError("Couldn't change your password. Check your connection and try again.");
+      setError(describeFailure(err, { codes: MESSAGES, action: "change your password" }));
     } finally {
       setSaving(false);
     }
@@ -81,7 +79,9 @@ export function ChangePasswordForm({ onDone, forced }: { onDone?: () => void; fo
         />
       </div>
       {error && <p className="text-sm text-danger-strong">{error}</p>}
-      <Button type="submit" disabled={saving} className="w-full">{saving ? "Saving…" : "Change password"}</Button>
+      <Button type="submit" variant="primary" loading={saving} className="w-full">
+        {saving ? "Saving…" : "Change password"}
+      </Button>
     </form>
   );
 }
@@ -122,7 +122,12 @@ export default function ChangePasswordPage() {
         */}
         <p className="text-sm text-text-secondary mb-5">
           {forced
-            ? "An admin has reset your password, so the one on your account is a temporary one they issued. Choose your own to carry on — the temporary one stops working the moment you do."
+            // Deliberately does NOT say "an admin has reset your password". That is false for
+            // the first person who ever signs in to a club: ProductionBootstrap creates the
+            // opening admin account from the compose file with must-change-password set, and
+            // nobody reset anything — they ARE the admin. The forced change has exactly one
+            // meaning the screen can rely on, which is that the current password is temporary.
+            ? "Your account is on a temporary password. Choose your own to carry on — the temporary one stops working the moment you do."
             : "You'll need your current password to set a new one."}
         </p>
         <ChangePasswordForm forced={forced} onDone={() => nav(forced ? "/schedule" : "/profile")} />

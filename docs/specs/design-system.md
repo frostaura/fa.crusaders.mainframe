@@ -38,7 +38,13 @@ Soft, low-saturation. Hex values are starting points; finalise after a brand-pas
 | `accent` | `#E0F2FE` (sky-100) | `#0369A1` (sky-700) | Brand accent, primary CTAs (per-tenant overridable) |
 
 ### Per-tenant brand accent
-The `accent` family is themed per tenant via CSS variables set on `<html>` from `tenant.brand_accent_hex`. Default for Crusaders: a soft court-green (`#7AB07A` strong / a tint thereof for soft).
+The `accent` family is defined in `src/frontend/src/index.css` as RGB channels — `--accent-strong-rgb` / `--accent-soft-rgb` — which the Tailwind tokens consume through `<alpha-value>`. **Crusaders' accent is the club's own crest blue `#00498D`, with `#E4EDF7` as its soft tint.** Both measured in `src/frontend/src/tokens.test.ts`: 8.98:1 on white.
+
+> **Do not use `#7AB07A`.** This document called it "the Crusaders green" and the seeder wrote it into `tenant_settings`, but it measures **2.52:1 on white** — it can carry neither body text nor a focus ring (3:1 floor), and it cannot be a fill under white text. `tokens.test.ts` now pins it as failing so it cannot be adopted on the strength of this file. The club's real colours, sampled from the Northwood Crusaders crest, are blue `#00498D`, red `#CF2E30` and white.
+
+> **The channel form is load-bearing.** These tokens used to be `var(--accent-soft, #E0F2FE)`, and Tailwind cannot inject alpha into an opaque `var()` — so every `/opacity` modifier on them emitted **no CSS at all**. `ring-accent-strong/30` and `hover:border-accent-strong/60` were dead in the shipped stylesheet. Anything hex-valued is unaffected.
+
+> **`brand_accent_hex` is not read by anything.** The seeder and `ProductionBootstrap` write it, and no code in `src/frontend/src` fetches it or calls `setProperty`. Per-tenant theming is a hook that is not yet wired; the values above are what every tenant actually renders.
 
 ## Spacing & rhythm
 - **Spacing scale:** Tailwind defaults (`1` = 4px). Use multiples of 4. Avoid arbitrary values.

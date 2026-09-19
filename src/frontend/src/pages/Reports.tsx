@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { endpoints, type WalletReport, type RevenueReport, type DailyAdminPoint, type DailyMePoint, type UtilisationRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Card } from "../components/Card";
-import { Button } from "../components/Button";
+import { Button, fieldClassName } from "../components/Button";
 import { useToast } from "../components/Toast";
 import { Carousel, type CarouselSlide } from "../components/Carousel";
 import { DataTable, type DataColumn } from "../components/DataTable";
@@ -118,11 +118,11 @@ export default function ReportsPage() {
       <div className="flex flex-wrap items-end gap-2">
         <div>
           <p className="text-xs text-text-muted mb-1">From</p>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-11 px-3 rounded-lg border border-border bg-bg-surface" />
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={fieldClassName} />
         </div>
         <div>
           <p className="text-xs text-text-muted mb-1">To</p>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-11 px-3 rounded-lg border border-border bg-bg-surface" />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={fieldClassName} />
         </div>
         {/* Phase 8.7 — monthly presets per client blueprint C.4 */}
         <div className="flex gap-1">

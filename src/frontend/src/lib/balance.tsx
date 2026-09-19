@@ -2,6 +2,26 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { ApiError, endpoints, STREAM_SILENCE_MS, tokenStore } from "./api";
 import { useAuth } from "./auth";
 
+/** How low a balance has to be before the chip warns, in credits. Mirrors the amber threshold. */
+export const LOW_BALANCE_CREDITS = 50;
+
+/**
+ * What a screen reader says for the wallet chip.
+ *
+ * <p>
+ * Spelled out rather than reusing `formatCredits`, whose "cr" is an abbreviation a screen
+ * reader reads as letters. And the amber low-balance state is spoken, because it is otherwise
+ * carried entirely by the chip's colour.
+ * </p>
+ */
+export function walletLabel(balance: number | null, loading: boolean): string {
+  if (balance === null) return loading ? "Wallet balance, loading" : "Wallet balance unavailable";
+  const amount = `${balance.toFixed(2)} credits`;
+  return balance < LOW_BALANCE_CREDITS
+    ? `Wallet balance ${amount}, running low. Tap to top up.`
+    : `Wallet balance ${amount}. Tap to top up.`;
+}
+
 type BalanceState = {
   balance: number | null;
   loading: boolean;

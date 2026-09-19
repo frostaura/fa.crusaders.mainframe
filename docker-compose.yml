@@ -70,6 +70,18 @@ services:
       WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-http://localhost:8088,http://localhost:4173}
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
       WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-Crusaders Mainframe}
+      # First-run bootstrap. Defaults to FALSE here: in Development the Seeder below already
+      # creates the tenant, and turning both on would have the bootstrap win the race for the
+      # courts and price them at its own rate rather than the seeder's. Set BOOTSTRAP_ENABLED=true
+      # in .env when running this stack with ASPNETCORE_ENVIRONMENT=Production locally, which is
+      # the configuration the club actually runs and the one worth rehearsing before a deploy.
+      Bootstrap__Enabled: ${BOOTSTRAP_ENABLED:-false}
+      Bootstrap__TenantSlug: ${BOOTSTRAP_TENANT_SLUG:-crusaders}
+      Bootstrap__TenantDisplayName: ${BOOTSTRAP_TENANT_DISPLAY_NAME:-Crusaders Squash Club}
+      Bootstrap__AdminEmail: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      Bootstrap__AdminPassword: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      Bootstrap__Courts: ${BOOTSTRAP_COURTS:-4}
+      Bootstrap__SlicePriceCredits: ${BOOTSTRAP_SLICE_PRICE_CREDITS:-8}
       Smtp__Host: ${SMTP_HOST:-mailhog}
       Smtp__Port: ${SMTP_PORT:-1025}
       Smtp__User: ${SMTP_USER:-}

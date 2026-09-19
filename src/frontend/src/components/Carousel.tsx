@@ -66,7 +66,7 @@ export function Carousel({ slides, className }: { slides: CarouselSlide[]; class
             type="button"
             aria-label="Previous"
             onClick={() => goTo(Math.max(0, active - 1))}
-            className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-bg-surface border border-border shadow-sm items-center justify-center text-text-secondary hover:text-text-primary disabled:opacity-30"
+            className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-bg-surface border border-control shadow-sm items-center justify-center text-text-secondary hover:text-text-primary disabled:opacity-30"
             disabled={active === 0}
           >
             <ChevronLeft size={18} />
@@ -75,7 +75,7 @@ export function Carousel({ slides, className }: { slides: CarouselSlide[]; class
             type="button"
             aria-label="Next"
             onClick={() => goTo(Math.min(slides.length - 1, active + 1))}
-            className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-bg-surface border border-border shadow-sm items-center justify-center text-text-secondary hover:text-text-primary disabled:opacity-30"
+            className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-bg-surface border border-control shadow-sm items-center justify-center text-text-secondary hover:text-text-primary disabled:opacity-30"
             disabled={active === slides.length - 1}
           >
             <ChevronRight size={18} />

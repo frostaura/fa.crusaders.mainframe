@@ -221,11 +221,27 @@ public sealed class MemberApprovalService
             .Select(u => u.Email)
             .ToListAsync(ct);
 
+        // DISPATCHED, not awaited — the one call site in this class that must not block.
+        //
+        // The four notices above are raised by an admin acting at the desk, and each USES the
+        // returned bool to tell that admin whether the member was actually reached; waiting is
+        // correct there. This one is different in both respects: it is raised by a member's own
+        // registration request, and its result is discarded. Awaiting it put SMTP on the
+        // applicant's critical path — once per admin, in a loop — so a club with three admins
+        // and a slow mail server spent three SMTP round trips before the browser heard
+        // anything. The browser gives up at twenty seconds, on an account that was committed
+        // before the first send, and the retry then tells the applicant their membership number
+        // belongs to somebody else.
+        //
+        // The comment above this method already promised a dead SMTP host "must not turn a
+        // successful registration into a 500". A slow one turned it into a timeout, which from
+        // the applicant's side is the same thing.
         foreach (var to in adminEmails)
         {
-            await SendOrLogAsync(
+            EmailDispatch.InBackground(
+                _email, _logger,
                 EmailTemplates.AdminNewRegistration(to, membership.FullName, user.Email, membership.MembershipNumber, clubName, consoleUrl),
-                $"new-registration notice to {to}", ct);
+                $"new-registration notice to {to}");
         }
 
         await EmitAsync("member.registered", membership, actorId: userId, reason: null, ct);

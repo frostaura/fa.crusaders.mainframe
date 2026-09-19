@@ -87,6 +87,21 @@ declare module "lucide-react" {
   export const Ban: LucideIcon;
   export const MailWarning: LucideIcon;
   export const RotateCcw: LucideIcon;
-  // Fall-through for anything else — any other icon name resolves to LucideIcon.
-  const _fallback: { [icon: string]: LucideIcon };
+  export const CalendarDays: LucideIcon;
+  export const Facebook: LucideIcon;
+  export const Instagram: LucideIcon;
+  export const MapPin: LucideIcon;
 }
+
+// NOTE FOR THE NEXT PERSON WHO ADDS AN ICON: you have to add it above.
+//
+// This file used to end with
+//
+//   // Fall-through for anything else — any other icon name resolves to LucideIcon.
+//   const _fallback: { [icon: string]: LucideIcon };
+//
+// which does nothing at all. `const` inside an ambient module without `export` declares a local,
+// and TypeScript has no way to express "any named export" for a module anyway. So the promised
+// fall-through never existed, and importing an icon that is not listed above fails with
+// "has no exported member" — pointing at lucide-react, which exports it perfectly well, rather
+// than at this file, which is the thing actually refusing. That misdirection cost real time.

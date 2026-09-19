@@ -105,3 +105,53 @@ test("a control marked .no-lift really does not lift, and one that is not marked
   // not opting out of the affordance.
   expect(marked.cursor).toBe("pointer");
 });
+
+/**
+ * The focus ring's colour, read off a real focused control.
+ *
+ * <p>
+ * <b>The defect.</b> <code>index.css</code> set the ring to
+ * <code>2px solid var(--accent-strong, #0369A1)</code>, and <code>--accent-strong</code> has
+ * never been defined — the variable this product declares is <code>--accent-strong-rgb</code>,
+ * in channels. So the fallback was not a fallback, it was the value: every focus ring on every
+ * control in the product rendered <code>#0369A1</code>, the sky-blue the palette was moved off
+ * when the club's crest colours landed. It was also the one accent surface a per-tenant override
+ * could never have reached, because it was not reading the variable an override sets.
+ * </p>
+ *
+ * <p>
+ * <b>Why it has to be a browser test.</b> An undefined custom property resolves silently to its
+ * fallback; no build step, linter or type checker sees a difference between a var() that hits
+ * and a var() that misses. <code>src/tokens.test.ts</code> can assert the text of the rule and
+ * that every <code>--accent*</code> name it references is one the module declares — which is
+ * what stops the typo recurring — but only an engine can report the colour that was painted.
+ * </p>
+ */
+test("the focus ring is the product's accent, not an undefined variable's fallback", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_MEMBER },
+    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/me/profile", body: { full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null, membership_number: "P-1", member_class: "Regular" } },
+  ]);
+
+  await page.goto("/wallet");
+
+  // Keyboard focus specifically: the rule is :focus-visible, which a mouse click does not match.
+  const focused = page.locator("button:visible").first();
+  await expect(focused).toBeVisible();
+  await focused.evaluate((el: HTMLElement) => el.focus());
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+
+  const ring = await focused.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { color: s.outlineColor, width: s.outlineWidth, style: s.outlineStyle };
+  });
+
+  // #00498D. Chromium reports outline-color resolved, so a var() that missed would report
+  // rgb(3, 105, 161) here — which is exactly what it did before the fix.
+  expect(ring.color, "the focus ring is painting a colour that is not the accent token").toBe("rgb(0, 73, 141)");
+  expect(ring.style).toBe("solid");
+  expect(ring.width).toBe("2px");
+});

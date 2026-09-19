@@ -32,6 +32,22 @@ public sealed class SmtpEmailService : IEmailService
             DeliveryMethod = SmtpDeliveryMethod.Network,
             UseDefaultCredentials = false,
             Credentials = string.IsNullOrEmpty(user) ? null : new NetworkCredential(user, pass),
+            // SmtpClient defaults to 100 SECONDS, and that default was in force here.
+            //
+            // A club's mail provider that stops answering therefore held a request open for a
+            // minute and a half per message. Registration sends three, so a single bad SMTP day
+            // could pin a request for four and a half minutes — while the browser gives up at
+            // twenty seconds (REQUEST_TIMEOUT_MS) and tells the member their application failed.
+            // It had not: the account was already committed before the first send. They try
+            // again and are told their membership number belongs to somebody else, which is
+            // their own invisible account.
+            //
+            // Observed, not theorised: a registration against a real SMTP host timed out in the
+            // browser while the row landed in the database.
+            //
+            // Fifteen seconds is generous for an EHLO plus a small message, and bounds the
+            // damage even where a send is still awaited.
+            Timeout = (int)TimeSpan.FromSeconds(15).TotalMilliseconds,
         };
 
         using var mail = new MailMessage

@@ -128,6 +128,11 @@ public class MemberAuthRegressionTests
             await Auth(scope).RegisterAsync("applicant@test.local", "Pass1234!", "New Applicant", "NEW-1", null, default);
         }
 
+        // The club's desk is notified via EmailDispatch.InBackground, so that the applicant's
+        // request is not held open for one SMTP round trip per admin. Wait for it rather than
+        // reading the list the instant RegisterAsync returns — asserted synchronously, this
+        // test failed four runs in six.
+        Assert.NotNull(await host.EmailService.WaitFor(m => m.To == host.AdminUser.Email));
         var toAdmin = host.EmailService.Sent.Where(m => m.To == host.AdminUser.Email).ToList();
         Assert.NotEmpty(toAdmin);
         Assert.Contains(toAdmin, m => m.Subject.Contains("New membership application", StringComparison.OrdinalIgnoreCase));
@@ -193,9 +198,15 @@ public class MemberAuthRegressionTests
             await Auth(scope).ResendVerificationAsync(host.PlayerUser.Email, default);
         }
 
-        Assert.Single(host.EmailService.Sent, m => m.To == "resend@test.local" && m.Subject.Contains("Verify"));
-        Assert.DoesNotContain(host.EmailService.Sent, m => m.To == "nobody-at-all@test.local");
-        Assert.DoesNotContain(host.EmailService.Sent, m => m.To == host.PlayerUser.Email && m.Subject.Contains("Verify"));
+        // Wait for the one that SHOULD arrive before asserting the two that should not.
+        // AuthService dispatches mail in the background, so an immediate absence check would
+        // pass for the wrong reason — nothing has been sent yet either way. Once the expected
+        // message is in, the unwanted ones have had exactly the same opportunity.
+        Assert.NotNull(await host.EmailService.WaitFor(m => m.To == "resend@test.local" && m.Subject.Contains("Verify")));
+        var afterResend = host.EmailService.Sent;
+        Assert.Single(afterResend, m => m.To == "resend@test.local" && m.Subject.Contains("Verify"));
+        Assert.DoesNotContain(afterResend, m => m.To == "nobody-at-all@test.local");
+        Assert.DoesNotContain(afterResend, m => m.To == host.PlayerUser.Email && m.Subject.Contains("Verify"));
     }
 
     /// <summary>A second resend retires the first link, so one account never has two live ones.</summary>
@@ -329,6 +340,8 @@ public class MemberAuthRegressionTests
             Assert.True(await Auth(scope).ResetPasswordAsync(token, "ResetByMe12!", default));
         }
 
+        Assert.NotNull(await host.EmailService.WaitFor(
+            m => m.To == host.PlayerUser.Email && m.Subject.Contains("password was changed", StringComparison.OrdinalIgnoreCase)));
         Assert.Single(
             host.EmailService.Sent,
             m => m.To == host.PlayerUser.Email && m.Subject.Contains("password was changed", StringComparison.OrdinalIgnoreCase));

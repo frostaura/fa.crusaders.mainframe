@@ -52,6 +52,9 @@ dist-ssr/
 
 # Frontend env (real env files committed only as .env.example)
 .env
+# The conventional local-secrets escape hatch for compose. It was NOT ignored, so the first
+# person to use it for a real SMTP password or tunnel token would have committed it.
+docker-compose.override.yml
 .env.local
 .env.development.local
 .env.test.local
@@ -93,7 +96,12 @@ Thumbs.db
 # Database / media
 *.sqlite
 *.sqlite3
-/media/
+# Unanchored on purpose. This was `/media/`, which only ever matched a media directory at the
+# repository root — and the one that actually fills up is
+# src/backend/Crusaders.Mainframe.Api/media/, written by any local run of the API. It held real
+# uploaded member photographs and was fully tracked-eligible, so a `git add -A` would have
+# committed members' faces.
+media/
 
 # Secrets — defensive (never commit local secrets even if named oddly)
 *.pem

@@ -40,7 +40,7 @@ All "configurable" knobs from the brief live here. Default values are the Crusad
 | `advance_booking_days` | int | 14 | How far ahead players can book. |
 | `operating_hours` | json | `{mon-sun: 06:00-22:00}` | Per-weekday open/close. |
 | `brand_logo_url` | string | tenant default | Used in app + emails + receipts. |
-| `brand_accent_hex` | string | `#7AB07A` (Crusaders green) | Drives accent color in shadcn theme tokens. |
+| `brand_accent_hex` | string | `#00498D` (Crusaders crest blue) | **Not currently read by anything.** Intended to drive the accent tokens, but nothing in the frontend fetches it — see the accent note in `design-system.md`. The previous default `#7AB07A` measures 2.52:1 on white and is unusable for text or focus rings. |
 | `peach_account_id` | string | — | Required before top-ups can be enabled. |
 | `webhook_signing_secret` | string | auto-generated | Rotatable. |
 

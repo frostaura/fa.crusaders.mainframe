@@ -692,7 +692,7 @@ function DeviceRow({
           idleLabel="Delete"
           confirmLabel={isBox ? "Delete? The box re-registers on its next heartbeat." : gateDeleteConfirm()}
           onConfirm={actions.remove}
-          idleClassName="bg-danger-soft text-danger-strong hover:bg-danger-soft/70"
+          tone="danger"
           className="h-8 px-3"
         />
       </div>

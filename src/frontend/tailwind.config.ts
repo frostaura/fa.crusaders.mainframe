@@ -1,10 +1,21 @@
 import type { Config } from "tailwindcss";
+import { palette, themeableTailwindValue } from "./src/lib/tokens";
 
 /**
- * Crusaders Mainframe — design tokens.
- * Reflects docs/specs/design-system.md: Figtree typography, soft palette,
- * functional accents (success/info/warning/danger), per-tenant brand accent
- * driven by CSS variable so the same build serves every tenant.
+ * Crusaders Mainframe — the Tailwind theme.
+ *
+ * <p>
+ * This file holds no colour values. It used to hold the whole palette as literal hex, which made
+ * it the second of three copies — `src/index.css` had the variables and `src/components/Charts.tsx`
+ * had eight more constants — and they had already drifted apart from each other. Every value now
+ * comes from `src/lib/tokens.ts`, which is the one place a colour is written down; the doc
+ * comments explaining *why* each value is what it is moved there with them.
+ * </p>
+ *
+ * <p>
+ * Typography, radii, shadows and durations stay here: they have exactly one consumer, which is
+ * Tailwind itself, so routing them through a module would add an indirection and remove nothing.
+ * </p>
  */
 const config: Config = {
   darkMode: ["class"],
@@ -17,38 +28,25 @@ const config: Config = {
         mono: ["JetBrains Mono", "ui-monospace", "monospace"],
       },
       colors: {
-        bg: {
-          app: "#F8FAFC",
-          surface: "#FFFFFF",
-          muted: "#F1F5F9",
-        },
-        border: { DEFAULT: "#E2E8F0" },
-        text: {
-          primary: "#0F172A",
-          secondary: "#475569",
-          /**
-           * Muted, not invisible.
-           *
-           * Was #94A3B8, which measures 2.56:1 on white and 2.34:1 on bg-muted — well under
-           * the 4.5:1 body-text floor docs/specs/design-system.md commits to, at the 11-12px
-           * sizes this token is actually used at. The worst case was the booking grid's row
-           * labels: the ONLY thing on that screen that says what time a slot is, and the least
-           * readable text on the page. This value clears 4.5:1 against every background token
-           * in this palette, including the soft chips, and stays visibly lighter than
-           * text-secondary so the hierarchy the token exists for survives.
-           *
-           * tokens.test.ts measures every text/background pair here, so a future "let's lighten
-           * this a bit" fails a test rather than a user.
-           */
-          muted: "#5B6879",
-        },
-        success: { soft: "#DCFCE7", strong: "#15803D" },
-        info:    { soft: "#DBEAFE", strong: "#1D4ED8" },
-        warning: { soft: "#FEF9C3", strong: "#A16207" },
-        danger:  { soft: "#FEE2E2", strong: "#B91C1C" },
+        bg: palette.bg,
+        border: { DEFAULT: palette.border },
+        // The 3:1 boundary for controls — see `control` in tokens.ts.
+        control: { DEFAULT: palette.control },
+        text: palette.text,
+        success: palette.success,
+        info: palette.info,
+        warning: palette.warning,
+        danger: palette.danger,
+        brand: palette.brand,
+        armed: palette.armed,
+        /**
+         * The per-tenant pair, as RGB channels through `<alpha-value>` — never `var(--x, #hex)`,
+         * which makes every opacity modifier on the token emit no CSS at all. The reasoning, and
+         * the three live classes it silently deleted, are on `themeable` in tokens.ts.
+         */
         accent: {
-          soft: "var(--accent-soft, #E0F2FE)",
-          strong: "var(--accent-strong, #0369A1)",
+          soft: themeableTailwindValue("accent-soft"),
+          strong: themeableTailwindValue("accent-strong"),
         },
       },
       borderRadius: { lg: "0.5rem", xl: "0.75rem" },

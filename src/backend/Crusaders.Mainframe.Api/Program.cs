@@ -45,7 +45,10 @@ builder.Services.AddCors(options =>
 });
 
 // ---- JWT ----
-var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is required.");
+// Not a null check. The committed placeholder meant this was never null, so a production
+// deployment that forgot Jwt__Secret booted clean and signed tokens with a value that is in
+// the repository. See JwtSecretPolicy.
+var jwtSecret = JwtSecretPolicy.Resolve(builder.Configuration, builder.Environment);
 // The same two constants the issuer uses. They were duplicated as literals here and absent
 // there, so an API with no Jwt:Issuer configured minted tokens this middleware then refused.
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? JwtIssuer.DefaultIssuer;
@@ -351,6 +354,22 @@ if (builder.Configuration.GetValue<bool>("Database:AutoMigrateOnStartup"))
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
     await db.Database.MigrateAsync();
+}
+
+// ---- First-run bootstrap ----
+//
+// Runs in EVERY environment, gated on Bootstrap:Enabled rather than on the environment name.
+// That distinction is the whole point: the Seeder below is dev-only, so a production stack came
+// up against an empty database with no tenant row and answered 404 tenant_not_found to every
+// request — no register, no sign-in, no product. See ProductionBootstrap for why it is a separate
+// type rather than the seeder with the environment check taken off.
+//
+// Deliberately NOT wrapped in try/catch. A bootstrap that cannot do its job leaves the API in
+// exactly the unusable state it exists to prevent, and a warning in a Portainer log nobody is
+// reading is how that goes unnoticed for a week. Failing here stops the container instead.
+{
+    var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Bootstrap");
+    await ProductionBootstrap.RunAsync(app.Services, builder.Configuration, logger);
 }
 
 // Bring back the sign-outs that are still inside their token's lifetime.

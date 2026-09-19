@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
 import { formatCredits, formatSignedCredits } from "../lib/utils";
 import { Card } from "../components/Card";
-import { Button, Input, Label } from "../components/Button";
+import { Button, Input, Label, fieldClassName } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
 import { useToast } from "../components/Toast";
 
@@ -147,7 +147,7 @@ export default function AdminLedgerPage() {
               id="ledger-type"
               value={type}
               onChange={(e) => setFilter("type", e.target.value)}
-              className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+              className={fieldClassName}
             >
               <option value="">All types</option>
               {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}

@@ -169,7 +169,7 @@ export function DeviceApiKeyPanel() {
               idleLabel="Regenerate key"
               confirmLabel="Reflash every board after this — regenerate?"
               onConfirm={regenerate}
-              idleClassName="bg-danger-soft text-danger-strong hover:bg-danger-soft/70"
+              tone="danger"
               className="h-9 px-3"
             />
             <span className="text-xs text-slate-500">
