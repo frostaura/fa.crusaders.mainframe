@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""Generates this directory's cases.json and manifest.json. Run it as
+`python3 src/contracts/device-protocol/gate/gen_cases.py` from anywhere in the repo.
+
+The bodies are written as SHAPES here, never as hand-typed hex, so a field added
+or renamed below is one edit rather than a transcription exercise. Two properties
+have to hold for the output to be usable as a contract at all, and both are
+enforced by `DeviceGateProtocolCorpusTests` on the .NET side rather than trusted
+here:
+
+  * byte-identity with what System.Text.Json actually emits for the server's own
+    response records and anonymous shapes — so `separators` is the compact form
+    and key order below is DECLARATION order in the C#, not alphabetical; and
+  * executed == declared, which is why `manifest.json` is written from the same
+    run and not maintained by hand.
+"""
+import json
+import pathlib
+
+MAC = "5ccf7f0a1b2c"
+API_KEY = "k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU"
+BEARER = f"Bearer {API_KEY}"
+SERVER_TIME = "2023-11-14T22:13:20+00:00"
+
+# Crockford base32 minus I, L, O and U — the alphabet AccessCodeService mints from.
+ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def compact(obj: dict) -> str:
+    """System.Text.Json's default: no whitespace anywhere."""
+    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+
+
+def body_hex(obj: dict) -> str:
+    return compact(obj).encode("utf-8").hex()
+
+
+def token(n: int) -> str:
+    """A deterministic twelve-character code. Deterministic so a regeneration is a
+    no-op diff — a corpus that churns on every run teaches reviewers to skip it."""
+    out = []
+    state = (n + 1) * 6364136223846793005 + 1442695040888963407
+    for _ in range(12):
+        state = (state * 6364136223846793005 + 1442695040888963407) & ((1 << 64) - 1)
+        out.append(ALPHABET[(state >> 33) % len(ALPHABET)])
+    return "".join(out)
+
+
+def entry(tok: str, opens_in: int, closes_in: int) -> str:
+    """The roster element. The relay field is always 0 on a gate: the grammar is
+    shared with the court box so the firmware's parser is, and a door has one lock."""
+    return f"{tok}|0|{opens_in}|{closes_in}"
+
+
+def heartbeat(device_code: str, gate_key, roster, unlock_seconds: int = 3,
+              tenant_slug: str = "crusaders") -> dict:
+    """Key order is the declaration order of the anonymous object in
+    DeviceEndpoints.HeartbeatAsync's gate branch. Changing one without the other
+    is what the byte-identity test exists to catch."""
+    return {
+        "server_time": SERVER_TIME,
+        "tenant_slug": tenant_slug,
+        "device_code": device_code,
+        "kind": "gate",
+        "gate_key": gate_key,
+        "heartbeat_seconds": 60,
+        "gate": {"unlock_seconds": unlock_seconds},
+        "roster": roster,
+    }
+
+
+def scan(opened: bool, reason: str, unlock_seconds: int) -> dict:
+    return {"opened": opened, "reason": reason, "unlock_seconds": unlock_seconds}
+
+
+requests = [
+    {
+        "id": "gate-heartbeat-request",
+        "note": (
+            "the one field the court box's heartbeat does not carry: `kind`. It is a HINT, "
+            "honoured only when the MAC is unknown — a board cannot re-kind a row that already "
+            "exists. Absent or \"court_box\" is today's behaviour exactly; anything else is 400 "
+            "kind_unknown."
+        ),
+        "method": "POST",
+        "path_and_query": "/api/v1/device/heartbeat",
+        "authorization": BEARER,
+        "body_hex": body_hex({
+            "mac": MAC,
+            "firmware_version": "1.0.0",
+            "uptime_ms": 86400000,
+            "kind": "gate",
+        }),
+    },
+    {
+        "id": "gate-scan-request",
+        "note": (
+            "a scan the gate could not answer from its roster, or chose not to. Same three "
+            "fields as /device/activate minus `court` — a door is not on a court, and the row's "
+            "gate_key is the server's business, not the board's."
+        ),
+        "method": "POST",
+        "path_and_query": "/api/v1/device/gate",
+        "authorization": BEARER,
+        "body_hex": body_hex({"mac": MAC, "method": "qr", "token": "7Q3F9KM2XZ8B"}),
+    },
+    {
+        "id": "gate-events-request-gate-open",
+        "note": (
+            "an open the gate decided from its own roster while offline. `court` is -1 because "
+            "there is no relay bank to index; `duration_ms` is how long the lock was released. "
+            "The API already knows about online opens, so this kind is queued for offline ones only."
+        ),
+        "method": "POST",
+        "path_and_query": "/api/v1/device/events",
+        "authorization": BEARER,
+        "body_hex": body_hex({
+            "mac": MAC,
+            "uptime_ms": 86400000,
+            "events": [{
+                "seq": 7,
+                "uptime_ms": 86390000,
+                "kind": "gate_open",
+                "court": -1,
+                "method": "qr",
+                "subject": "7Q3F9KM2XZ8B",
+                "duration_ms": 3000,
+            }],
+        }),
+    },
+]
+
+# The WORST case this response can be, not a representative one. A budget pinned by a
+# comfortable vector is not pinned: every field here is at the widest the server can
+# actually emit — a 64-character tenant slug and gate key (the column bound in
+# MainframeDbContext), the long `gate-<full mac>` device code auto-registration falls
+# back to on a collision, twelve-character tokens (AccessCode.Length), and relative
+# seconds at the far end of the six-digit range a 1440-minute roster window allows.
+WIDE_SLUG = "w" * 64
+WIDE_GATE_KEY = "g" * 64
+WIDE_DEVICE_CODE = f"gate-{MAC}"
+full_roster = [
+    entry(token(i), -86400 + i * 137, 899000 + i * 137) for i in range(48)
+]
+
+responses = [
+    {
+        "id": "gate-heartbeat-response-empty-roster",
+        "kind": "heartbeat",
+        "note": (
+            "`roster` is present and empty rather than absent. The firmware replaces its cache "
+            "wholesale on every push, so an omitted key would leave a stale roster live — a "
+            "cancelled booking is expressed by its absence from the NEXT push."
+        ),
+        "body_hex": body_hex(heartbeat("gate-0a1b2c", "front-door", [])),
+        "expect": {
+            "kind": "gate",
+            "gate_key": "front-door",
+            "roster": [],
+            "heartbeat_seconds": 60,
+            "gate": {"unlock_seconds": 3},
+        },
+    },
+    {
+        "id": "gate-heartbeat-response-null-gate-key",
+        "kind": "heartbeat",
+        "note": (
+            "a gate nobody has named yet — auto-registration leaves gate_key null and an admin "
+            "sets it. The key is still PRESENT on the wire as null: a firmware that reads an "
+            "absent key as an empty string and a null one as an error would diverge here."
+        ),
+        "body_hex": body_hex(heartbeat("gate-0a1b2c", None, [])),
+        "expect": {"kind": "gate", "gate_key": None, "roster": []},
+    },
+    {
+        "id": "gate-heartbeat-response-roster-single",
+        "kind": "heartbeat",
+        "note": (
+            "one rostered booking, 30 minutes from its early-entry window opening and 90 minutes "
+            "from its slot ending. Same TOKEN|relay|opens_in|closes_in grammar as the court box "
+            "so devlink::parseRosterElement and roster::Roster are reused unchanged; the relay "
+            "field is always 0."
+        ),
+        "body_hex": body_hex(heartbeat("gate-0a1b2c", "front-door", [entry("7Q3F9KM2XZ8B", 1800, 5400)])),
+        "expect": {"kind": "gate", "roster": ["7Q3F9KM2XZ8B|0|1800|5400"]},
+    },
+    {
+        "id": "gate-heartbeat-response-roster-negative-opens",
+        "kind": "heartbeat",
+        "note": (
+            "opens_in is SIGNED and goes negative once the early-entry window is open — this "
+            "member may already come in. A firmware that parsed it unsigned would read -900 as "
+            "an enormous positive wait and lock out somebody whose court starts in five minutes."
+        ),
+        "body_hex": body_hex(heartbeat("gate-0a1b2c", "front-door", [entry("K4TQ8N2ZV7BM", -900, 2700)])),
+        "expect": {"kind": "gate", "roster": ["K4TQ8N2ZV7BM|0|-900|2700"]},
+    },
+    {
+        "id": "gate-heartbeat-response-roster-full",
+        "kind": "heartbeat",
+        "note": (
+            "GateRosterMaxEntries = 48 is a CONTRACT CONSTANT, not a tenant setting: it bounds "
+            "Roster<48> on the board and, through it, the 4608-byte static response buffer the "
+            "gate has to hold this in. max_bytes is the budget for the WHOLE body, not the roster "
+            "alone, and every field in this vector is at the widest the server can emit — a "
+            "64-character slug and gate key, the long device_code auto-registration falls back to, "
+            "and six-digit relative seconds. A budget pinned by a comfortable vector is not pinned."
+        ),
+        "body_hex": body_hex(
+            heartbeat(WIDE_DEVICE_CODE, WIDE_GATE_KEY, full_roster, tenant_slug=WIDE_SLUG)),
+        "expect": {
+            "kind": "gate",
+            "gate_key": WIDE_GATE_KEY,
+            "roster": full_roster,
+            "max_bytes": 4096,
+        },
+    },
+    {
+        "id": "gate-scan-response-ok",
+        "kind": "gate",
+        "note": (
+            "unlock_seconds is what goes on the lock's release timer — the tenant's "
+            "gate_unlock_seconds clamped to [1, 30]. Never 0 on an open: a zero-second release "
+            "is a door that clicks and stays shut."
+        ),
+        "body_hex": body_hex(scan(True, "ok", 3)),
+        "expect": {"opened": True, "reason": "ok", "unlock_seconds": 3},
+    },
+    {
+        "id": "gate-scan-response-denied-not-recognised",
+        "kind": "gate",
+        "note": (
+            "unknown, expired, or another club's code — one reason for all three on purpose, "
+            "because telling them apart at a door turns it into an oracle for which codes are real. "
+            "200, not 4xx: a refusal the firmware can act on must never look like an outage it "
+            "should fall back from."
+        ),
+        "body_hex": body_hex(scan(False, "not_recognised", 0)),
+        "expect": {"opened": False, "reason": "not_recognised", "unlock_seconds": 0},
+    },
+    {
+        "id": "gate-scan-response-denied-member-not-active",
+        "kind": "gate",
+        "note": (
+            "the club has suspended, rejected or not yet approved this member. Named rather than "
+            "collapsed into not_recognised because a door has no LCD to explain itself and the "
+            "distinction is what the desk needs from the audit row afterwards."
+        ),
+        "body_hex": body_hex(scan(False, "member_not_active", 0)),
+        "expect": {"opened": False, "reason": "member_not_active", "unlock_seconds": 0},
+    },
+    {
+        "id": "gate-scan-response-denied-no-booking",
+        "kind": "gate",
+        "note": (
+            "policy booking_window only: an active member with nothing booked inside "
+            "[StartsAt - gate_early_entry_minutes, EndsAt]. Unreachable under the default "
+            "active_member policy, which is why the policy is a tenant setting and this is a vector."
+        ),
+        "body_hex": body_hex(scan(False, "no_booking", 0)),
+        "expect": {"opened": False, "reason": "no_booking", "unlock_seconds": 0},
+    },
+    {
+        "id": "gate-scan-response-denied-method-not-supported",
+        "kind": "gate",
+        "note": (
+            "anything but qr or code. A PIN against the whole membership roll is an oracle rather "
+            "than an identification, and a door has no candidate set to check one against."
+        ),
+        "body_hex": body_hex(scan(False, "method_not_supported", 0)),
+        "expect": {"opened": False, "reason": "method_not_supported", "unlock_seconds": 0},
+    },
+    {
+        "id": "gate-scan-response-denied-not-a-gate",
+        "kind": "gate",
+        "note": (
+            "the MAC resolved to a CourtBox row. 200 with opened:false rather than a 404 or a 400, "
+            "so a misconfigured board shows a refusal and stops rather than retrying an endpoint "
+            "that will never answer it differently."
+        ),
+        "body_hex": body_hex(scan(False, "not_a_gate", 0)),
+        "expect": {"opened": False, "reason": "not_a_gate", "unlock_seconds": 0},
+    },
+]
+
+cases = {
+    "device_api_key": API_KEY,
+    "device_mac": MAC,
+    "requests": requests,
+    "responses": responses,
+}
+
+manifest = {
+    "description": (
+        "Door-gate HTTP request and response body shapes: the heartbeat's `kind` hint and its "
+        "gate-shaped answer, the scan decision, and the offline gate_open event."
+    ),
+    "authority": (
+        "docs/specs/door-gate.md — the behaviour oracle; "
+        "src/backend/Crusaders.Mainframe.Api/Endpoints/DeviceGateEndpoint.cs and the gate branch "
+        "of DeviceEndpoints.cs are the reference implementation the firmware must match."
+    ),
+    "case_count": {"requests": len(requests), "responses": len(responses)},
+}
+
+here = pathlib.Path(__file__).resolve()
+root = None
+for parent in here.parents:
+    if (parent / "src" / "contracts" / "device-protocol").is_dir():
+        root = parent
+        break
+if root is None:
+    raise SystemExit(
+        "src/contracts/device-protocol was not found above this script. Run it from inside "
+        "the repository: a generator that guesses at a path would silently write the corpus "
+        "into the wrong checkout."
+    )
+
+out = root / "src" / "contracts" / "device-protocol" / "gate"
+out.mkdir(parents=True, exist_ok=True)
+(out / "cases.json").write_text(json.dumps(cases, indent=2, ensure_ascii=False) + "\n")
+(out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+full_bytes = len(compact(
+    heartbeat(WIDE_DEVICE_CODE, WIDE_GATE_KEY, full_roster, tenant_slug=WIDE_SLUG)).encode())
+print(f"wrote {out}")
+print(f"requests={len(requests)} responses={len(responses)}")
+print(f"roster-full body = {full_bytes} bytes (budget 4096)")

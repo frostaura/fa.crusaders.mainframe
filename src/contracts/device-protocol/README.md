@@ -21,10 +21,28 @@ months. A shared corpus is the cheapest thing that would have caught it.
 | `serial/` | the line protocol between the ATmega2560 and the ESP8266 over Serial3 @ 9600 | C++ only — both ends of that link are firmware |
 | `http/` | the request and response BODIES of the device API, and the bearer header every request carries | **C++ and C#** — the firmware renders, the server parses |
 | `buttonmap/` | the button-map token grammar and the relay hard cap it is pinned to (`relay_hard_cap_minutes`) | **C++ and C#** — the server validates what an admin saves, the firmware parses what the heartbeat hands it |
+| `gate/` | the door gate's three bodies: the heartbeat's `kind` hint and its gate-shaped answer, the `/api/v1/device/gate` scan decision, and the offline `gate_open` event | **C++ and C#** — the gate firmware renders, the server parses |
 
 `http/` is the one that matters most. A body the firmware renders one field
 differently from the way the server reads it is a 400 with no diagnostic, on a
 board in an electrical cupboard, and costs a trip to the club to discover.
+
+**`gate/` is a separate family rather than more cases in `http/`, deliberately.**
+The court box's C++ suite executes every case in the family it reads and asserts
+the count, so a gate vector added to `http/` would make that suite red on a board
+that has no gate code in it at all — and the gate's own suite would be counting
+the court box's vectors. Separate families keep each side's `executed == declared`
+assertion about its own device. The two share the roster element grammar on
+purpose (`TOKEN|relay|opens_in|closes_in`, with the relay always `0` on a gate)
+so `devlink::parseRosterElement` and `roster::Roster` are reused unchanged, and
+that reuse is what makes the shared grammar worth pinning twice.
+
+`gate/cases.json` and `gate/manifest.json` are **generated**, by
+`gate/gen_cases.py` beside them: the bodies are written there as shapes and the
+hex falls out, so a renamed field is one edit rather than a transcription
+exercise. Edit the generator and re-run it; a hand-edited `body_hex` is a hand-
+edited byte string, which is exactly the class of mistake this corpus exists to
+catch.
 
 It used to hold the canonical signing string and the HMAC of every request as
 well. Firmware 2.0.0 replaced request signing with one static per-tenant key in
