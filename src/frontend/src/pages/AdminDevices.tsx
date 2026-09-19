@@ -400,10 +400,16 @@ function GateDetailsEditor({
       </div>
       <div>
         <Label htmlFor={keyId}>Door name</Label>
+        {/* NOT "the only thing that tells one door from another": a gate decision is audited
+            with the board's device code as well as its gate key, and the code is per board.
+            What is true, and what an admin needs, is that the code is a fragment of a MAC
+            address — so without a name here the audit trail identifies the door by something
+            nobody can match to a corridor without walking to it. */}
         <p className="mb-2 text-xs text-slate-500">
           Which door this board is on. Every door runs the same firmware and nothing is
-          compiled in per door, so this is the only thing that tells one from another in the
-          audit trail. Leave it empty to take the name away again.
+          compiled in per door, so this is how the audit trail names the door. Without it a
+          scan is recorded against the board code alone. Leave it empty to take the name away
+          again.
         </p>
         <Input
           id={keyId}
@@ -462,7 +468,8 @@ function DeviceRowHeader({ device, online }: { device: AdminDevice; online: bool
             all and no door name, so telling its admin to "check court numbers" would send
             them looking for an editor this row does not have and must not have. What a
             new door needs is a name — until it has one, every audit row for a scan at it
-            carries a null gate_key and no club can tell its doors apart. */}
+            carries a null gate_key and names the door only by its board code, which is a
+            fragment of a MAC address. */}
         {device.auto_registered && (
           <Badge tone="warning">{isBox ? "New — check court numbers" : NEW_GATE_BADGE}</Badge>
         )}

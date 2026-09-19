@@ -48,7 +48,8 @@ export function describeGate(gateKey: string | null): string {
  * and is meaningless on a door: a gate registers with `CourtNumbers = []` and the API
  * refuses court numbers on it outright. What a new door actually needs is a name, because
  * there is one firmware for every door, nothing per-gate is compiled in, and until somebody
- * names it the audit rows for every scan at it carry a null `gate_key`.
+ * names it the audit rows for every scan at it carry a null `gate_key` — leaving the door
+ * identified by its `device_code` alone, which is `gate-` plus six hex digits of a MAC.
  * </p>
  */
 export const NEW_GATE_BADGE = "New — name this door";
