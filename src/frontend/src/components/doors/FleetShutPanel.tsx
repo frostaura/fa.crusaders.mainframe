@@ -3,7 +3,7 @@ import { Card } from "../Card";
 import { Alert } from "../Alert";
 import { ConfirmButton } from "../ConfirmButton";
 import { FleetResultPanel, type FleetResultState } from "./FleetResultPanel";
-import { doorFleetReopenConfirm, doorFleetShutConfirm, doorExitIsMechanical } from "../../lib/gateCopy";
+import { doorFleetReopenConfirm, doorFleetShutConfirm } from "../../lib/gateCopy";
 import { describeDeviceError } from "../../lib/deviceErrors";
 import { doorEndpoints, type AdminDoorDevice } from "../../lib/api";
 
@@ -85,8 +85,8 @@ export function FleetShutPanel({ doors, loading, failed, reload, onRetry }: {
             <p className="text-sm text-text-secondary">
               Shutting every door takes effect at the club's server at once. Each door finds out the next
               time it reaches the server; a door that has lost the network never finds out, and keeps
-              admitting booked members from the list it last downloaded for up to six hours.{" "}
-              {doorExitIsMechanical()}
+              admitting booked members from the list it last downloaded for up to six hours. Getting
+              out of the building is mechanical and none of this touches it.
             </p>
             {error && <Alert tone="danger">{error}</Alert>}
             <div className="space-y-2">

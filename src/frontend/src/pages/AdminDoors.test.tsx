@@ -361,7 +361,7 @@ describe("the doors surface", () => {
       });
 
       expect(await screen.findByText("Offline")).toBeInTheDocument();
-      expect(screen.getByText(/Opened while offline/)).toBeInTheDocument();
+      expect(screen.getByText(/Lock released while offline/)).toBeInTheDocument();
       const feed = screen.getByRole("region", { name: "Scans at this door" });
       const when = within(feed).getByText(/ago$/);
       expect(when).toHaveAttribute("datetime", at);
@@ -680,9 +680,12 @@ describe("the doors surface", () => {
       const notConfirmed = screen.getByText(/NOT CONFIRMED — last heard/);
       expect(notConfirmed).toHaveTextContent("It may still admit booked members from its cached list for up to six hours.");
       expect(screen.getByText("With no power this door is: released.")).toBeInTheDocument();
-      // Twice on screen: the fleet panel says it before the click and the receipt says it
-      // after, which is deliberate — it is the sentence an admin most needs at both moments.
-      expect(screen.getAllByText(/Getting out is mechanical/).length).toBeGreaterThanOrEqual(2);
+      // The receipt carries the full sentence. The panel above it says the short form before
+      // the click — two full copies on one 1280 screen read as a rendering fault, which is
+      // what a look at the built page showed.
+      expect(screen.getByText(/Getting out is mechanical and none of this touches it: the doors open/))
+        .toBeInTheDocument();
+      expect(screen.getByText(/Getting out of the building is mechanical/)).toBeInTheDocument();
     });
 
     /** Not-confirmed is a warning, not a danger: the action succeeded. */

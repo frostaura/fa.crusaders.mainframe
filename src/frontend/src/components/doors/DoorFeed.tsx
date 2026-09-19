@@ -40,7 +40,12 @@ function FeedBody({ read, clock }: { read: FeedRead; clock: FeedClock }) {
           <DoorFeedRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} now={clock.now} />
         ))}
       </ul>
-      <p className="text-xs text-text-muted">{`Showing the ${DEVICE_ACTIVITY_LIMIT} most recent.`}</p>
+      {/* Only when the read came back FULL. "Showing the 50 most recent" over four rows is
+          a sentence that is not true, and the one it is standing in for — "there may be more
+          than this" — is exactly what an admin needs to know only when there are. */}
+      {entries.length >= DEVICE_ACTIVITY_LIMIT && (
+        <p className="text-xs text-text-muted">{`Showing the ${DEVICE_ACTIVITY_LIMIT} most recent.`}</p>
+      )}
     </>
   );
 }

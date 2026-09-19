@@ -1575,7 +1575,7 @@ describe("AdminDevices", () => {
       renderPage(<AdminDevicesPage />);
       fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
-      expect(await screen.findByText(/Opened while offline/)).toBeInTheDocument();
+      expect(await screen.findByText(/Lock released while offline/)).toBeInTheDocument();
       expect(screen.getByText("Door opened")).toBeInTheDocument();
     });
 

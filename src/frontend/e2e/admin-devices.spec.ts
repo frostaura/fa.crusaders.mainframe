@@ -567,191 +567,47 @@ test.describe("The walk-up cap the buttons are held to", () => {
 });
 
 /**
- * A door gate on the same screen as the boxes.
+ * A door, on the Devices page, read-only (A2.5 / D5).
  *
  * <p>
- * In a real browser rather than only in jsdom, and at both project widths, because both
- * halves of what this row does are things a jsdom test cannot settle. The interactions are
- * two-step confirms whose armed labels are the copy itself; and the row carries the two
- * widest tokens on the page — a device name and a 64-character door name — on a screen that
- * has pushed itself wider than a phone on a long name before (R2 I-F6). Standard 3 here is
- * that a jsdom test does not settle what a page does.
+ * <b>Every door-editing spec that used to live here has moved to `e2e/admin-doors.spec.ts`</b>
+ * — naming a door, clearing its name for real against a server that applies the API's own
+ * rule, the out-of-service copy, the delete confirm and the 64-character overflow test. None
+ * was dropped; each has an equivalent on the surface that now owns the control.
+ * </p>
+ *
+ * <p>
+ * What is left is what this page still does with a gate: shows it, says how long ago it
+ * called in, and links to it. The load-bearing assertion is the absence of every control.
  * </p>
  */
 test.describe("A door gate", () => {
-  test("reads as a door, offers only the door's own editor, and names the door on save", async ({ page }) => {
-    await openDevices(page, [GATE], [
-      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false } },
-    ]);
-
-    // What it is, and which door — including the unnamed state every door in the club is
-    // actually in the first time an admin opens this screen.
-    await expect(page.getByText("gate-0a1b2c · Door gate · no door name yet · 5ccf7f0a1b2c")).toBeVisible();
-    // The badge asks for the job a door has, not the one a box has.
-    await expect(page.getByText("New — name this door")).toBeVisible();
-    await expect(page.getByText("New — check court numbers")).toHaveCount(0);
-
-    // Neither court editor nor button editor, and no kind selector. The API refuses court
-    // fields on a Gate row and has no member for kind at all, so an editor for either would
-    // be a form whose save can only fail.
-    await expect(page.getByRole("button", { name: "Edit name and courts" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Edit buttons" })).toHaveCount(0);
-
-    await page.getByRole("button", { name: "Edit name and door" }).click();
-    await expect(page.getByLabel("box-a1b2c3 relay A court")).toHaveCount(0);
-
-    await page.getByLabel("Name", { exact: true }).fill("Front door");
-    await page.getByLabel("Door name", { exact: true }).fill("front-door");
-
-    const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
-    await serveApi(page, routes([{ ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false }], [
-      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false } },
-    ]));
-    await page.getByRole("button", { name: "Save door" }).click();
-
-    // Name and door key in one call, and no court_numbers — the API refuses that field here.
-    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ name: "Front door", gate_key: "front-door" });
-    await expect(page.getByRole("status")).toContainText("Front door is the front-door door.");
-    await expect(page.getByText("New — name this door")).toBeHidden();
-  });
-
-  /**
-   * The out-of-service copy, which is the door's own and shares nothing with the box's.
-   *
-   * <p>
-   * The middle clause is the one a shorter sentence gets wrong, and the one this test exists
-   * for — and it is now a PAIR of clauses rather than one. A 403 is authoritative for a gate:
-   * a board that reaches the API and is refused denies the scan with no roster fallback, and
-   * a 403 on its heartbeat commits an empty roster, so a door that is merely out of service
-   * on a working network really does open for nobody. A board that has ALSO lost the network
-   * never hears any of it and keeps admitting booked members from its cache for up to six
-   * hours. Either half stated alone is a sentence an admin cannot reconcile with what they
-   * will see, which is the same class of falsehood as the box side's "nobody can check in
-   * there" — that one survived three rounds and was read off a production build.
-   * </p>
-   */
-  test("says what taking a DOOR out of service costs, and none of what it costs a box", async ({ page }) => {
+  test("is a read-only row with a link, and no control on the page touches it", async ({ page }) => {
     const door = { ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false };
-    await openDevices(page, [door], [
-      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...door, enabled: false } },
-    ]);
+    await openDevices(page, [door]);
 
-    const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
+    await expect(page.getByRole("heading", { name: "Doors" })).toBeVisible();
+    await expect(page.getByText("Front door")).toBeVisible();
+    await expect(page.getByText("front-door · gate-0a1b2c")).toBeVisible();
+    // The doors surface's liveness word, not the box list's: this product knows the board
+    // answered N seconds ago and nothing more.
+    await expect(page.getByText("Reporting")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Manage on Doors" }))
+      .toHaveAttribute("href", `/admin/doors/${GATE.id}`);
+    await expect(page.getByText("Doors are set up and shut under Doors.")).toBeVisible();
 
-    await page.getByRole("button", { name: "Take out of service" }).click();
-    const confirm = page.getByRole("button", {
-      name: "Out of service? A door that can reach the API opens for nobody from this click. One that"
-        + " has also lost the network keeps admitting booked members from its cached roster for up to"
-        + " six hours. No booking, check-in or no-show penalty changes.",
-    });
-    await expect(confirm).toBeVisible();
-    // Never the box's, which promises a court's no-shows stop being penalised.
-    await expect(page.getByRole("button", { name: /Nothing else drives/ })).toHaveCount(0);
-
-    await serveApi(page, routes([{ ...door, enabled: false }], [
-      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...door, enabled: false } },
-    ]));
-    await confirm.click();
-
-    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ enabled: false });
-
-    // Read off the row notice specifically: the toast says the same thing, deliberately —
-    // one generator feeds both — and an unscoped match on the shared half finds two, which
-    // is a strict-mode violation reading as the notice being absent. Anchored at the start,
-    // where the two differ: the row opens "Out of service.", the toast "<name> is out of
-    // service." Written unanchored first, and this run is what caught it.
-    const notice = page.getByText(/^Out of service\. The club is not alerted/);
-    await expect(notice).toBeVisible();
-    await expect(notice).toContainText("the API refuses every scan at this door");
-    // Both halves — the reachable door that opens for nobody, and the cut-off one that does
-    // not hear the refusal and keeps admitting booked members until its roster goes stale.
-    await expect(notice).toContainText("can still reach the API hears that refusal and opens for nobody");
-    await expect(notice).toContainText("has also lost the network never hears it");
-    await expect(notice).toContainText("roster it last downloaded");
-    await expect(notice).toContainText("up to six hours");
-    await expect(notice).toContainText(
-      "Bookings, check-ins, refunds and no-show penalties are untouched either way");
-    // And none of the court-box copy, which is about courts going dark and penalties being
-    // waived and is false of a door in every clause.
-    await expect(notice).not.toContainText("refunded in full");
-    await expect(notice).not.toContainText("No box in service drives");
-    await expect(page.getByText(/The API refuses this box/)).toHaveCount(0);
-
-    // Deleting a door loses its name, which is what the label has to say.
-    await page.getByRole("button", { name: "Delete", exact: true }).click();
-    await expect(page.getByRole("button", {
-      name: "Delete? The door re-registers on its next heartbeat with no name.",
-    })).toBeVisible();
-  });
-
-  /**
-   * <b>Clearing a door's name, against a server that behaves like the API.</b>
-   *
-   * <p>
-   * The screen sent `gate_key: null`, which `DeviceRegistryService.UpdateAsync` reads as
-   * "leave it alone" — it applies the field only <code>if (cmd.GateKey is not null)</code>,
-   * and <code>Length == 0</code> is what stores a null. So the clear was a silent no-op that
-   * reported success, and neither this spec nor the unit test could see it: both answered
-   * the PATCH with an already-cleared row whatever they were handed.
-   * </p>
-   *
-   * <p>
-   * The route below applies the API's own rule to whatever arrives, and the list route
-   * serves what it produced, so the assertion is on the OUTCOME rather than on the wire text
-   * alone. Sending null leaves the row reading "front-door" after the reload — which is
-   * exactly what an admin saw.
-   * </p>
-   */
-  test("clears a door name for real, rather than reporting a save the API discards", async ({ page }) => {
-    let row: Record<string, unknown> = {
-      ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false,
-    };
-    const gateKeyAware: ApiRoute[] = [
-      { path: "/api/v1/admin/devices/", respond: () => [row] },
-      {
-        method: "PATCH",
-        path: "/api/v1/admin/devices/",
-        respond: (request) => {
-          const patch = (request.body ?? {}) as Record<string, unknown>;
-          // The API's rule, verbatim: null is an absence, "" is the clear.
-          if (typeof patch.name === "string") row = { ...row, name: patch.name };
-          if (typeof patch.gate_key === "string") {
-            const trimmed = patch.gate_key.trim();
-            row = { ...row, gate_key: trimmed === "" ? null : trimmed };
-          }
-          return row;
-        },
-      },
-    ];
-
-    await signIn(page);
-    await serveApi(page, [...routes([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...gateKeyAware]);
-    await page.goto("/admin/devices");
-    await expect(page.getByRole("heading", { name: "Devices" })).toBeVisible();
-    await expect(page.getByText("Door gate · front-door")).toBeVisible();
-
-    const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
-    await page.getByRole("button", { name: "Edit name and door" }).click();
-    await page.getByLabel("Door name", { exact: true }).fill("   ");
-    await page.getByRole("button", { name: "Save door" }).click();
-
-    // The wire value the API honours, and then the row it actually produced.
-    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ name: "Front door", gate_key: "" });
-    await expect(page.getByText("Door gate · no door name yet")).toBeVisible();
-    await expect(page.getByText("Door gate · front-door")).toHaveCount(0);
-
-    // And what the club has just given up, which is no longer only the audit trail: an
-    // unnamed door is sent an empty roster, so it has no offline fallback at all.
-    await expect(page.getByRole("status")).toContainText("only works while it can reach the server");
-    await expect(page.getByText(/^Until you name this door/)).toBeVisible();
+    for (const name of ["Edit name and door", "Save door", "Take out of service", "Shut this door", "Delete"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+    }
+    await expect(page.getByLabel("Door name", { exact: true })).toHaveCount(0);
   });
 
   /**
    * <b>The row must not widen the page.</b> A 64-character door name is the longest
    * unbreakable token this screen can be asked to render, and the mobile project is 412 px
    * wide. Measured as a horizontal overflow of the document rather than as a class name,
-   * because the class is what a jsdom test can already see and the overflow is what an
-   * admin actually experiences.
+   * because the class is what a jsdom test can already see and the overflow is what an admin
+   * actually experiences.
    */
   test("does not push the page sideways on a 64-character door name", async ({ page }) => {
     const longKey = "back-staircase-changing-room-corridor-door-by-the-fire-exit-0123";
@@ -785,10 +641,11 @@ test.describe("A door gate", () => {
     // The filter is on kind, so this changes nothing.
     await openDevices(page, [box, { ...GATE, auto_registered: false, court_numbers: [1] }]);
 
-    await expect(page.getByText("Door gate · no door name yet")).toBeVisible();
     await expect(page.getByText("box-a1b2c3 · A: court 1 · 5ccf7f1a2b3c")).toBeVisible();
 
-    await page.getByRole("button", { name: "Take out of service" }).first().click();
+    // One control, because only the box has one now.
+    await expect(page.getByRole("button", { name: "Take out of service" })).toHaveCount(1);
+    await page.getByRole("button", { name: "Take out of service" }).click();
     await expect(page.getByRole("button", { name: /Nothing else drives court 1/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /The box stops switching lights on/ })).toHaveCount(0);
   });
@@ -798,23 +655,25 @@ test.describe("A door gate", () => {
  * A board's own trail.
  *
  * <p>
- * The door wrote an audit row for every scan from the day it shipped and no screen read
- * one, so the answer to "why did the front door not let me in last night" was a database
- * query. These run in the mobile project first, because the panel's whole risk is width: a
- * fifty-row list carrying member names and reasons, on a phone held in a corridor.
+ * The board wrote an audit row for every decision from the day it shipped and no screen read
+ * one. A2.5 moved the DOOR's half of this to /admin/doors/:id, where the feed is open on
+ * arrival and chip-first; what is left here is the panel a court box still has, and every
+ * claim below is one the panel makes whatever kind of board it is reading. These run in the
+ * mobile project first, because the panel's whole risk is width: a fifty-row list carrying
+ * member names and reasons, on a phone held in a corridor.
  * </p>
  */
 test.describe("A board's activity", () => {
   const MEMBER = { id: "00000000-0000-0000-0000-0000000000aa", name: "Ada Lovelace" };
-  const NAMED_GATE = { ...GATE, auto_registered: false, gate_key: "front-door" };
-  const ACTIVITY_PATH = `/api/v1/admin/devices/${GATE.id}/activity`;
+  const NAMED_BOX = { ...FRESH, auto_registered: false, name: "Court 1 box", court_numbers: [1] };
+  const ACTIVITY_PATH = `/api/v1/admin/devices/${FRESH.id}/activity`;
 
   function activityRoute(items: unknown[]): ApiRoute {
     return { path: ACTIVITY_PATH, body: { items } };
   }
 
   test("is shut until asked for, then says who, why and when in words", async ({ page }) => {
-    await openDevices(page, [NAMED_GATE], [activityRoute([
+    await openDevices(page, [NAMED_BOX], [activityRoute([
       {
         at: new Date(Date.now() - 4 * 60_000).toISOString(),
         action: "gate.denied_too_early",
@@ -833,7 +692,7 @@ test.describe("A board's activity", () => {
       },
     ])]);
 
-    const toggle = page.getByRole("button", { name: "Door activity" });
+    const toggle = page.getByRole("button", { name: "Box activity" });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     // Nothing fetched and nothing rendered until an admin asks.
     await expect(page.getByText("Ada Lovelace")).toHaveCount(0);
@@ -849,12 +708,12 @@ test.describe("A board's activity", () => {
     await expect(page.getByText(/the door cannot say who/)).toBeVisible();
   });
 
-  test("says nothing is recorded yet for a door nobody has been through", async ({ page }) => {
-    await openDevices(page, [NAMED_GATE], [activityRoute([])]);
+  test("says nothing is recorded yet for a board nobody has used", async ({ page }) => {
+    await openDevices(page, [NAMED_BOX], [activityRoute([])]);
 
-    await page.getByRole("button", { name: "Door activity" }).click();
+    await page.getByRole("button", { name: "Box activity" }).click();
 
-    await expect(page.getByText("Nothing recorded for this door yet.")).toBeVisible();
+    await expect(page.getByText("Nothing recorded for this box yet.")).toBeVisible();
   });
 
   /**
@@ -875,8 +734,8 @@ test.describe("A board's activity", () => {
       fingerprint: "1f2e3d4c",
     }));
 
-    await openDevices(page, [NAMED_GATE], [activityRoute(rows)]);
-    await page.getByRole("button", { name: "Door activity" }).click();
+    await openDevices(page, [NAMED_BOX], [activityRoute(rows)]);
+    await page.getByRole("button", { name: "Box activity" }).click();
     await expect(page.getByText(longName).first()).toBeVisible();
 
     const overflow = await page.evaluate(() => ({

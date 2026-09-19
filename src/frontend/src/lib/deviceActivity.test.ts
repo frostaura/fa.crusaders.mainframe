@@ -124,7 +124,7 @@ describe("describeActivityReason", () => {
    */
   it("says an offline open was the board's own decision", () => {
     const words = describeActivityReason(entry({ action: "device.gate_open", reason: null, offline: true }));
-    expect(words).toBe("Opened while offline");
+    expect(words).toBe("Lock released while offline");
   });
 
   /**

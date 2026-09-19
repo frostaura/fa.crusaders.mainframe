@@ -90,8 +90,17 @@ export const DOOR_OUTCOME_CHIPS: Record<string, string> = {
   not_a_gate: "Wrong board",
 };
 
-/** What an OFFLINE open reads as: the board decided, and uploaded the row afterwards. */
-const OFFLINE_OPENED = "Opened while offline";
+/**
+ * What an OFFLINE grant reads as: the board decided, and uploaded the row afterwards.
+ *
+ * <p>
+ * It said "Opened while offline" and sat directly beside a chip reading "Lock released" —
+ * one row saying two different things about one decision, and the half A1.2 rules against.
+ * P2 is the reason: there is no sensor on any door, so the strongest true statement is that
+ * the board released the lock.
+ * </p>
+ */
+const OFFLINE_OPENED = "Lock released while offline";
 
 /**
  * What an offline refusal reads as.
