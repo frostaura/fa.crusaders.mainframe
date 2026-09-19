@@ -1008,6 +1008,93 @@ export type RevenueReport = {
   net_credits: number;
 };
 
+// --- doors: member ---------------------------------------------------------------
+//
+// ONE endpoint for the member's whole door picture, and one for their own history.
+// Wave-1 wire shapes, verbatim. The reason a single response carries both the standing
+// facts and the last decision is honesty rather than economy: a stale standing line
+// rendered beside a fresh refusal is a screen arguing with itself — "your court at 19:00
+// opens the door from 18:30" above "the door turned you away: no booking" — and with two
+// requests that state is reachable on every partial failure. One response, one instant,
+// one truth.
+
+/** Which rule this club's doors apply. Fails closed on the API side; the page never guesses. */
+export type MemberDoorPolicy = "active_member" | "booking_window";
+
+/**
+ * What the club has this member's membership as.
+ *
+ * <p>
+ * Three values, not the five the admin console knows. Suspended, pending and rejected are
+ * one state from where the member is standing — the club has to change it and there is
+ * nothing to do on the phone — and collapsing them here is what keeps the page from
+ * naming a status the response cannot distinguish.
+ * </p>
+ */
+export type MemberDoorMembership = "active" | "not_active" | "none";
+
+/** The booking that bounds a door window, when there is one. UTC instants. */
+export type MemberDoorBooking = {
+  starts_at: string;
+  /** When this booking starts opening a door: `starts_at − H`, the horizon the DOOR applies. */
+  door_opens_at: string | null;
+  /** When it stops: the code's own expiry — the booking's end plus the club's grace window. */
+  door_closes_at: string | null;
+};
+
+/** Who to call or write to when a door will not open. Either half may be unset at a club. */
+export type MemberDoorContact = { phone: string | null; email: string | null };
+
+/**
+ * This member's own newest door decision, within the server's 120-second fetch window.
+ *
+ * <p>
+ * `reason` is a string rather than a union for the reason `DeviceActivityEntry.reason`
+ * is: a token this build has not heard of must reach a sentence, not a crash. The closed
+ * set and its fallback live in `lib/memberDoorCopy.ts`.
+ * </p>
+ *
+ * <p>
+ * `door_name` is the club's `gate_key`, or null for a door nobody has named yet. Never a
+ * device id, never a MAC, never a fingerprint, never a token.
+ * </p>
+ */
+export type MemberDoorDecision = {
+  /** The SCAN's own time, never the upload's. UTC. */
+  at: string;
+  door_name: string | null;
+  released: boolean;
+  reason: string;
+};
+
+export type MemberDoor = {
+  /** False, or absent on an older API, means the page says NOTHING about doors. */
+  doors: boolean;
+  policy: MemberDoorPolicy;
+  membership: MemberDoorMembership;
+  next_booking: MemberDoorBooking | null;
+  contact: MemberDoorContact;
+  last_decision: MemberDoorDecision | null;
+};
+
+/** One row of the member's own door history. `offline` — the door decided from its own list. */
+export type MemberDoorHistoryRow = {
+  at: string;
+  door_name: string | null;
+  released: boolean;
+  reason: string;
+  offline: boolean;
+};
+
+export type MemberDoorHistory = {
+  items: MemberDoorHistoryRow[];
+  next_cursor: string | null;
+  /** How long the club keeps these, so the page states a number it was given. */
+  retention_days: number;
+};
+
+// --- end doors: member -----------------------------------------------------------
+
 export async function uploadPhoto(file: File): Promise<{ url: string }> {
   const fd = new FormData();
   fd.append("file", file);
@@ -1409,6 +1496,29 @@ export const endpoints = {
       from: params.from, to: params.to, userId: params.userId, type: params.type,
       limit: params.limit !== undefined ? String(params.limit) : undefined,
     })}`),
+
+  // --- doors: member -------------------------------------------------------------
+  /**
+   * Everything this member needs to know about their club's doors, in one read.
+   *
+   * <p>
+   * Polled while the page is visible. `last_decision` is this member's own newest
+   * `gate.*` row inside the server's fetch window, tenant- and subject-scoped both —
+   * never another member's row and never another club's.
+   * </p>
+   */
+  meDoor: () => api.get<MemberDoor>("/api/v1/me/door"),
+  /**
+   * The member's own door history, paged by cursor. Own rows only.
+   *
+   * <p>
+   * Never polled: it is read on mount and on Show more, because a member scanning back
+   * through their own record should control every fetch.
+   * </p>
+   */
+  meDoorHistory: (params: { cursor?: string; limit?: number } = {}) =>
+    api.get<MemberDoorHistory>(`/api/v1/me/door/history${qs({ cursor: params.cursor, limit: params.limit })}`),
+  // --- end doors: member ---------------------------------------------------------
 };
 
 function qs(o: Record<string, string | number | undefined>) {

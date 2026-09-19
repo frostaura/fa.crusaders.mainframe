@@ -69,6 +69,27 @@ export function secondsUntil(deadline: Deadline): number {
  * by somebody holding a phone in one hand in the dark.
  * </p>
  */
+/**
+ * A clock time, in the viewer's own locale, on a 24-hour face.
+ *
+ * <p>
+ * One definition, because the alternative is what this repo already found once: a
+ * hand-built `${h}:${m}` beside an `Intl` one, disagreeing about midnight and about every
+ * locale that does not write a colon. `hourCycle: "h23"` so 00:15 is not `24:15`.
+ * </p>
+ */
+export function formatClock(utc: string): string {
+  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .format(new Date(utc));
+}
+
+/** A date and a clock time — `Fri 19 Sep · 06:04` — for a row in a member's own record. */
+export function formatDayAndClock(utc: string): string {
+  const day = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "2-digit", month: "short" })
+    .format(new Date(utc));
+  return `${day} · ${formatClock(utc)}`;
+}
+
 export function formatCountdown(seconds: number): string {
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
   if (seconds >= 60) return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { deadlineAt, deadlineFor, formatCountdown, secondsUntil } from "./countdown";
+import { deadlineAt, deadlineFor, formatClock, formatCountdown, formatDayAndClock, secondsUntil } from "./countdown";
 
 /**
  * The clock that every countdown on the member's surfaces reads from.
@@ -105,6 +105,37 @@ describe("countdown", () => {
     it("returns null for an instant it cannot read, rather than a countdown to 1970", () => {
       expect(deadlineAt(null)).toBeNull();
       expect(deadlineAt("not a date")).toBeNull();
+    });
+  });
+
+  /**
+   * The clock face. The hour is the VIEWER's, so only the shape is pinned — the same
+   * convention every existing test of this product's clock times uses.
+   */
+  describe("formatClock", () => {
+    it("renders a 24-hour clock time", () => {
+      expect(formatClock("2026-09-19T06:04:00Z")).toMatch(/^\d{2}:\d{2}$/);
+    });
+
+    /** `h23`, not `h24`: a club that opens at midnight must not read as `24:15`. */
+    it("writes midnight as 00, not 24", () => {
+      const midnight = formatClock(new Date(2026, 8, 19, 0, 15).toISOString());
+      expect(midnight).toBe("00:15");
+    });
+  });
+
+  describe("formatDayAndClock", () => {
+    /**
+     * The weekday and month ORDER is the viewer's locale, so it is not pinned — only
+     * that all four parts are present and the clock is on the far side of the separator.
+     * A member scanning their own record needs the day, because two rows an hour apart on
+     * different days are otherwise indistinguishable.
+     */
+    it("renders a weekday, a date and a clock time for a row in a member's own record", () => {
+      const rendered = formatDayAndClock(new Date(2026, 8, 19, 6, 4).toISOString());
+      expect(rendered).toMatch(/^\D*\w{3}\D*19\D*· 06:04$/);
+      expect(rendered).toContain("19");
+      expect(rendered).toMatch(/· 06:04$/);
     });
   });
 });
