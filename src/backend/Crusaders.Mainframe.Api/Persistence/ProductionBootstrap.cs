@@ -147,7 +147,34 @@ public static class ProductionBootstrap
 
         var admin = await db.Users.IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.TenantId == tenant.Id && u.Email == adminEmail);
-        if (admin is null)
+
+        // Does the club already have an admin under some OTHER address?
+        //
+        // This is the case that crashed the container. The lookup above is by email, so
+        // changing Bootstrap__AdminEmail — correcting a typo, moving to a shared committee
+        // mailbox — found nothing and fell through to creating a second admin, whose
+        // membership row carried the same hardcoded ADMIN-0001. That collides with the unique
+        // index on (TenantId, MembershipNumber), the exception escapes startup, and the stack
+        // then fails to boot on EVERY restart. An operator fixing a typo bricked their club,
+        // and the only way back was to edit the database or guess the old address.
+        //
+        // Standing up the club's first admin is this type's whole job. A second one is the
+        // admin console's, so say so and carry on rather than half-creating one.
+        var existingAdmin = admin is null
+            ? await db.Users.IgnoreQueryFilters()
+                .Where(u => u.TenantId == tenant.Id && u.IsAdmin)
+                .Select(u => u.Email)
+                .FirstOrDefaultAsync()
+            : null;
+
+        if (admin is null && existingAdmin is not null)
+        {
+            logger.LogWarning(
+                "Bootstrap: Bootstrap__AdminEmail is '{Wanted}' but this club already has an admin, '{Existing}'. " +
+                "Leaving it alone — add or change admins from Admin → Members, not from the compose file.",
+                adminEmail, existingAdmin);
+        }
+        else if (admin is null)
         {
             admin = new User
             {
@@ -168,7 +195,10 @@ public static class ProductionBootstrap
                 TenantId = tenant.Id,
                 UserId = admin.Id,
                 FullName = displayName + " Admin",
-                MembershipNumber = "ADMIN-0001",
+                // Defence in depth behind the check above. The number only has to be unique
+                // within the tenant and is not meaningful to anybody, so take the first free
+                // one rather than asserting that ADMIN-0001 must be available.
+                MembershipNumber = await FreeAdminNumberAsync(db, tenant.Id),
                 Status = MembershipStatus.Active,
             });
             await db.SaveChangesAsync();
@@ -207,6 +237,27 @@ public static class ProductionBootstrap
                 "then set Bootstrap__Enabled=false.",
                 string.Join(", ", created), adminEmail);
         }
+    }
+
+    /// <summary>
+    /// The first ADMIN-nnnn membership number not already taken in this tenant.
+    /// </summary>
+    private static async Task<string> FreeAdminNumberAsync(MainframeDbContext db, Guid tenantId)
+    {
+        var taken = await db.Memberships.IgnoreQueryFilters()
+            .Where(m => m.TenantId == tenantId && m.MembershipNumber.StartsWith("ADMIN-"))
+            .Select(m => m.MembershipNumber)
+            .ToListAsync();
+
+        for (var i = 1; i <= 999; i++)
+        {
+            var candidate = $"ADMIN-{i:D4}";
+            if (!taken.Contains(candidate)) return candidate;
+        }
+
+        throw new InvalidOperationException(
+            "Bootstrap could not find a free ADMIN-nnnn membership number, which means this club has 999 of them. " +
+            "That is not a situation the first-run bootstrap should be resolving.");
     }
 
     /// <summary>

@@ -257,6 +257,66 @@ public class ProductionBootstrapTests
         Assert.DoesNotContain("payfast", json, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Changing Bootstrap__AdminEmail on a club that is already up must not take the stack down.
+    ///
+    /// <para>
+    /// The admin lookup is by email, so a corrected typo or a move to a shared committee
+    /// mailbox found nothing and fell through to creating a SECOND admin — whose membership row
+    /// carried the same hardcoded ADMIN-0001, colliding with the unique index on
+    /// (TenantId, MembershipNumber). The exception escaped startup, so the container then failed
+    /// to boot on every restart, and the only way back was to edit the database or remember the
+    /// old address. Found by changing the address during manual testing.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Changing_the_admin_email_afterwards_does_not_crash_the_stack()
+    {
+        var sp = await EmptyAsync();
+        await RunAsync(sp, Config());
+
+        await RunAsync(sp, Config(("Bootstrap:AdminEmail", "someone.else@crusaders.example")));
+
+        // The original admin is untouched and no second one was invented.
+        var admins = await Db(sp).Users.IgnoreQueryFilters().Where(u => u.IsAdmin).ToListAsync();
+        Assert.Single(admins);
+        Assert.Equal("committee@crusaders.example", admins[0].Email);
+        Assert.Single(await Db(sp).Memberships.IgnoreQueryFilters().ToListAsync());
+    }
+
+    /// <summary>
+    /// Defence in depth behind the check above: even asked to create an admin into a tenant
+    /// where ADMIN-0001 is already spoken for, the number must not collide.
+    /// </summary>
+    [Fact]
+    public async Task An_admin_membership_number_is_chosen_rather_than_assumed()
+    {
+        var sp = await EmptyAsync();
+        using (var scope = sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var tenant = new Api.Domain.Tenant { Slug = "crusaders", DisplayName = "Crusaders Squash Club" };
+            db.Tenants.Add(tenant);
+            // A non-admin member who happens to hold the number, and NO admin — so the
+            // existing-admin guard does not fire and creation really is attempted.
+            var user = new Api.Domain.User { TenantId = tenant.Id, Email = "member@crusaders.example", Status = "active" };
+            db.Users.Add(user);
+            db.Memberships.Add(new Api.Domain.Membership
+            {
+                TenantId = tenant.Id, UserId = user.Id, FullName = "Holder",
+                MembershipNumber = "ADMIN-0001", Status = Api.Domain.MembershipStatus.Active,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await RunAsync(sp, Config());
+
+        var db2 = Db(sp);
+        var adminUser = await db2.Users.IgnoreQueryFilters().SingleAsync(u => u.IsAdmin);
+        var adminMembership = await db2.Memberships.IgnoreQueryFilters().SingleAsync(m => m.UserId == adminUser.Id);
+        Assert.Equal("ADMIN-0002", adminMembership.MembershipNumber);
+    }
+
     // ---- Refusing to start ----
 
     [Theory]
