@@ -128,10 +128,18 @@ private:
 
 /// gatelogic::IHttpPort on HTTPClient.
 ///
-/// Blocking, bounded by a timeout, and reading the response into a caller
-/// buffer rather than a String: the ESP32's heap is shared with the network
-/// stack, and a call four times a minute that allocates is a heap that
-/// fragments over a season in a cupboard.
+/// Blocking, bounded by a deadline, and reading the response into the caller's
+/// buffer rather than a String.
+///
+/// IT USED TO SAY THAT AND CALL `http.getString()`, which heap-allocates the
+/// WHOLE body — sized by whatever the peer chooses to send — before any of the
+/// caller's bounds are applied, and then truncated it into `out` and handed the
+/// result up with a 200 on it. The ESP32's heap is shared with the network
+/// stack, and `{"opened":true,` cut after the comma is a door that opens. The
+/// body is read a byte at a time into the caller's buffer now, through
+/// `gatelogic::readBody`, which is pure and host-tested; a body that does not
+/// fit or does not arrive is reported as status 0 — a transport failure, which
+/// sends a scan to the roster — and never as a short body.
 class Esp32HttpPort final : public gatelogic::IHttpPort {
 public:
   /// `baseUrl` and `authorization` are compiled-in and outlive every call; they
@@ -139,16 +147,27 @@ public:
   ///
   /// The two timeouts are SEPARATE because the core applies them separately —
   /// one bounds the TCP connect, the other bounds waiting for bytes — and a
-  /// call can spend both. `gatelogic::kWorstBlockingCallMs` is their sum and is
-  /// what the watchdog period is asserted against.
-  Esp32HttpPort(const char* baseUrl, const char* authorization)
-      : baseUrl_(baseUrl), authorization_(authorization) {}
+  /// call can spend both. `gatelogic::kWorstBlockingCallMs` is their sum.
+  ///
+  /// The CLOCK is here because the body phase takes an absolute deadline
+  /// computed from the instant the whole call started: `setTimeout` is an
+  /// inter-byte timeout and a peer that dribbles resets it on every byte, so a
+  /// body read bounded by it is not bounded at all.
+  ///
+  /// WHAT IS STILL NOT BOUNDED: HTTPClient's own header loop, inside `POST()`,
+  /// uses that same inter-byte timeout and cannot be interrupted from here. A
+  /// peer that dribbles HEADERS can hold one call past kWorstBlockingCallMs.
+  /// That case is the watchdog's, deliberately, and it is the one precondition
+  /// on the release-overrun bound in `gatelogic/GateApp.h`.
+  Esp32HttpPort(const char* baseUrl, const char* authorization, hal::IClock& clock)
+      : baseUrl_(baseUrl), authorization_(authorization), clock_(clock) {}
 
   uint16_t post(const char* path, const char* body, char* out, size_t outCap) override;
 
 private:
   const char* baseUrl_;
   const char* authorization_;
+  hal::IClock& clock_;
 };
 
 /// gatelogic::ILink on WiFi.status().
@@ -179,10 +198,22 @@ public:
   /// because "the watchdog is eight seconds" was assumed once already and the
   /// effective value was five.
   ///
+  /// RETRIED, kMaxArmAttempts times, before it gives up. The TWDT is shared
+  /// state the core set up on another task's schedule, and a single refusal is
+  /// not evidence that it will refuse again — a board that accepted one and ran
+  /// for a season under the core's five seconds is a board whose watchdog
+  /// assert was about an intention.
+  ///
   /// False means the board is running under a watchdog it did not choose. It is
-  /// reported on the boot log line; there is nothing else on this board to
-  /// report it to.
+  /// reported on the boot log line AND, for as long as it is false, by the
+  /// lamp's 4 Hz fault blink — the boot log has scrolled past by the time
+  /// anybody is standing at the door. The DOOR is unaffected: refusing to open
+  /// for a missing watchdog would be a door that admits nobody, which is far
+  /// worse than one running on five seconds instead of twelve.
   bool begin(uint8_t seconds);
+
+  /// How many times begin() asks before reporting failure.
+  static constexpr uint8_t kMaxArmAttempts = 3U;
 
   /// Restart the countdown. From the orchestration and never from inside a
   /// driver, where it would hide the stall it exists to end.

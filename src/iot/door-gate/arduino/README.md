@@ -168,10 +168,9 @@ that never associated: check `WIFI_SSID` and `WIFI_PASSWORD` in `secrets.h`.
 `build_unflags` applied by exact token, exactly as PlatformIO applies it. That
 is what makes the firmware version in here
 **1.0.0** rather than the 2.0.0 that `[common]` pins for the
-court box — those two blocks are kept byte-identical across all three firmware
-projects because the shared libraries are compiled by all of them, so this
-gate's own version is set by unflagging and replacing rather than by editing
-`[common]`. `build_config.h` is included first in every file of the sketch,
+court box — this environment does not inherit `[common]` at all and spells its
+own version out, which is what stopped `build_unflags` deleting the tokens it
+had just been given. `build_config.h` is included first in every file of the sketch,
 because the IDE cannot pass a build flag and a target guard like
 `#ifdef TARGET_DOOR_GATE` has to be true in files the `.ino` never includes.
 
@@ -187,9 +186,17 @@ because the IDE cannot pass a build flag and a target guard like
 
 Two flags are deliberately **not** mirrored: `-Wall -Wextra` (warnings are not
 behaviour; `make lint-iot` is the gate) and `-std=gnu++17` (the ESP32 core
-appends `-std=gnu++11` and a sketch cannot override it — which is fine here,
-because unlike the court box nothing in this firmware has to be C++11-clean for
-a second toolchain; the PlatformIO build unflags it and gets C++17).
+appends `-std=gnu++11` and a sketch cannot override it).
+
+> **So everything this sketch links must be valid C++11 as well as C++17**, and
+> that is not a detail — it is the constraint that decides how several of these
+> headers are written. `-std=gnu++11` is hard-coded in the core's `platform.txt`
+> and the IDE has no mechanism to override it; `build_unflags` is a PlatformIO
+> mechanism the IDE never sees, so the PlatformIO build gets C++17 and this one
+> does not. A multi-statement `constexpr` function is green under `pio run` and
+> red here — it has happened once already, in `LockDriver.h` — while `inline
+> constexpr` *variables* survive as a GCC extension. Only the `arduino-cli
+> compile` step in CI catches the difference.
 
 ## The developer route
 

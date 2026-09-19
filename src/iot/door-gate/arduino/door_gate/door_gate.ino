@@ -168,7 +168,7 @@ char gMacHex[dc::hex::encodedSize(6U)];
 /// heap it would churn is shared with the network stack.
 char gAuthHeader[devapi::kAuthorizationBufSize] = {};
 
-esp32_hal::Esp32HttpPort gHttp(API_BASE_URL, gAuthHeader);
+esp32_hal::Esp32HttpPort gHttp(API_BASE_URL, gAuthHeader, gClock);
 devlink::ApiBreaker gBreaker;
 GateApi gApi(gHttp, gBreaker, gClock);
 
@@ -259,7 +259,12 @@ void setup() {
   // watchdog reset causes at 3am.
   gApp.beginOutputs();
 
+  // Retried inside begin(); false here means three attempts all refused. The
+  // board still runs and still opens doors — a door that admits nobody is far
+  // worse than one on the core's five seconds — but it says so, on the boot
+  // line below and on the lamp for as long as it is true.
   const bool watchdogArmed = gWatchdog.begin(kGateConfig.watchdogSeconds);
+  gApp.setWatchdogArmed(watchdogArmed);
 
   // The receive buffer and the error callback are set inside this, before the
   // driver is installed, because afterwards both are ignored.

@@ -14,6 +14,7 @@
 //   solid            the lock is released — push the door
 //   3 fast blinks    refused
 //   1 Hz blink       the radio is not associated (roster-only mode)
+//   4 Hz blink       the task watchdog refused to arm — a board to look at
 //   2 quick blinks   the board just booted
 //
 // WHY IT IS A STATE MACHINE AND NOT delay()
@@ -29,7 +30,9 @@
 // Released beats everything: while the door is open the lamp is solid, even if
 // the WiFi dropped a second ago, because "you may go in" is the only thing that
 // matters to the person in the doorway. A transient cue (refusal, boot) beats
-// the link state. The link blink is what is left.
+// the link state. The FAULT blink beats the link blink — a board with no
+// watchdog is worth knowing about whether or not it is also offline, and the
+// two are otherwise indistinguishable. The link blink is what is left.
 //
 // No Arduino headers, no heap. Compiles for Xtensa and the host test runner.
 
@@ -69,6 +72,21 @@ inline constexpr uint8_t kBootBlinks = 2U;
 /// 1 Hz: on for half a second, off for half a second.
 inline constexpr uint32_t kLinkDownHalfMs = 500U;
 
+/// THE FAULT VARIANT OF THE LINK BLINK: 4 Hz, four times the rate.
+///
+/// The board is running under a watchdog it did not choose, because
+/// `esp_task_wdt_init` refused. It still opens doors — a board that refused to
+/// because of a missing watchdog would be a door that admits nobody, which is
+/// far worse than one running on the core's own five seconds — but the fault
+/// must not be silent, and the boot log has already scrolled past by the time
+/// anybody is standing at the door.
+///
+/// Four times the rate rather than a new shape, so it reads as "that blink,
+/// wrong" to somebody who has seen a healthy board, and is unmistakable beside
+/// one. It is not a MEMBER-facing cue and never outranks one: a released door
+/// is solid and a refusal still blinks three times.
+inline constexpr uint32_t kFaultHalfMs = 125U;
+
 class LedPattern {
 public:
   /// Start a one-shot. A new cue replaces one in flight rather than queueing
@@ -81,6 +99,10 @@ public:
 
   /// Whether the radio is associated. Slow blink while it is not.
   void setLinkUp(bool up) { linkUp_ = up; }
+
+  /// Whether the board is running under a watchdog it did not choose. Fast
+  /// blink while it is, whatever the radio is doing — see kFaultHalfMs.
+  void setFault(bool fault) { fault_ = fault; }
 
   /// What the lamp should be showing at `nowMs`. Pure: calling it twice with
   /// the same clock gives the same answer, so a test can sample a whole pattern
@@ -95,6 +117,7 @@ private:
   bool cueActive_ = false;
   bool released_ = false;
   bool linkUp_ = false;
+  bool fault_ = false;
 };
 
 } // namespace gatelogic

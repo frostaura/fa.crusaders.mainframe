@@ -28,6 +28,26 @@
 // carries the same constraint and learned it the hard way, green under
 // `pio run` and red under `arduino-cli`.
 //
+// AND WHY NONE OF THEM COMPARES ITS ARGUMENT TO nullptr
+// -----------------------------------------------------
+// They used to, "so a caller may ask about a macro that expanded to nothing
+// without a special case" — which was not a case that exists: a macro expanding
+// to nothing is a syntax error at the call, not a null pointer arriving at it.
+// What the branch DID do was make every one of these functions impossible to
+// evaluate at compile time under GCC's undefined-behaviour sanitizer.
+//
+// `-fsanitize=undefined` stops GCC folding the address of an object, so
+// `text::length(kPathHeartbeat)` becomes `(((const char*)(&kPathHeartbeat)) == 0)`,
+// which GCC then reports as "not a constant expression" — and every
+// `static_assert` built on it fails to COMPILE. Apple clang folds it and is
+// green, so the whole class is invisible outside CI's `native_asan` job. See
+// `memory/gotchas-build.md`.
+//
+// Every argument these take is a string literal or a `constexpr char[]`, in a
+// constant expression, and a null one is a dereference the compiler refuses
+// rather than a wrong answer at run time. That is a better failure than the
+// branch ever bought.
+//
 // No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
 
 #ifndef CRUSADERS_GATELOGIC_STATICTEXT_H
@@ -38,27 +58,20 @@
 namespace gatelogic {
 namespace text {
 
-/// Characters before the NUL. Zero for a null pointer, so a caller may ask
-/// about a macro that expanded to nothing without a special case.
+/// Characters before the NUL.
 constexpr size_t length(const char* s) {
-  return (s == nullptr || *s == '\0') ? 0U : 1U + length(s + 1);
+  return (*s == '\0') ? 0U : 1U + length(s + 1);
 }
 
 /// Both strings, to their NULs.
 constexpr bool equals(const char* a, const char* b) {
-  return (a == nullptr || b == nullptr) ? (a == b)
-         : (*a != *b)                   ? false
-         : (*a == '\0')                 ? true
-                                        : equals(a + 1, b + 1);
+  return (*a != *b) ? false : (*a == '\0') ? true : equals(a + 1, b + 1);
 }
 
 /// `s` begins with the whole of `prefix`. False when `s` runs out first: the
 /// NUL cannot match a prefix character, so the recursion ends on its own.
 constexpr bool startsWith(const char* s, const char* prefix) {
-  return (s == nullptr || prefix == nullptr) ? false
-         : (*prefix == '\0')                 ? true
-         : (*s != *prefix)                   ? false
-                                             : startsWith(s + 1, prefix + 1);
+  return (*prefix == '\0') ? true : (*s != *prefix) ? false : startsWith(s + 1, prefix + 1);
 }
 
 } // namespace text

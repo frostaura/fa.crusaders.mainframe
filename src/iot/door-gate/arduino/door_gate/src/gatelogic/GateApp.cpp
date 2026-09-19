@@ -22,6 +22,11 @@ GateApp::GateApp(const Ports& ports)
 
 // --- boot -------------------------------------------------------------------
 
+void GateApp::setWatchdogArmed(bool armed) {
+  // The lamp and nothing else. See the header for why the door is untouched.
+  led_.setFault(!armed);
+}
+
 void GateApp::beginOutputs() {
   lock_.begin();
   // The same level-before-mode rule the lock follows. A lamp is not a safety
@@ -62,14 +67,56 @@ void GateApp::pass() {
   uptime_.tick(now);
   watchdog_.kick();
 
-  // The scanner FIRST, before the blocking calls below: a scan that arrived a
-  // moment ago should be decided now rather than after a heartbeat has spent
-  // its whole timeout finding out the API is gone.
-  pumpScanner();
-  pumpLock();
+  // THE LINK FIRST, because it is the input every step below is decided
+  // against. Read after the scanner, `linkUp_` was a whole pass out of date,
+  // so the first scan after the radio re-associated was decided from the
+  // roster — and on a board whose roster is empty or stale that is a member
+  // refused at a door whose network is working.
   pumpLink();
-  pumpEvents();
+
+  // THE MEMBER AT THE DOOR WINS THE PASS — BUT NOT FOR EVER.
+  //
+  // The scanner is drained before the blocking calls below because a scan that
+  // arrived a moment ago should be decided now rather than after a heartbeat
+  // has spent its whole timeout finding out the API is gone. A scanner that
+  // never stops talking would otherwise win EVERY pass, and a board that never
+  // heartbeats is a board whose roster ages out at six hours and then admits
+  // nobody. So the priority is bounded: after kMaxScanPassesBeforeHeartbeat
+  // consecutive passes in which a scan took the call with a heartbeat already
+  // due, the heartbeat goes first and this pass's scan waits ten milliseconds.
+  const bool heartbeatDue = heartbeatAt_.expired(clock_.nowMs()) && linkUp_;
+  if (heartbeatDue && scanDeferrals_ >= kMaxScanPassesBeforeHeartbeat) {
+    pumpHeartbeat();
+  }
+
+  const uint16_t callsBeforeScanner = blockingCalls_;
+  pumpScanner();
+  const bool scanTookTheCall = blockingCalls_ > callsBeforeScanner;
+  pumpLock();
+  if (heartbeatDue && scanTookTheCall && scanDeferrals_ < kMaxScanPassesBeforeHeartbeat) {
+    ++scanDeferrals_;
+  }
+
+  // THE HEARTBEAT BEFORE THE EVENT DRAIN, AND THIS ORDER IS THE WHOLE OF E1.
+  //
+  // Both are gated on the same one-blocking-call-per-pass flag, so whichever
+  // runs first takes the pass. With the drain first, an `/events` that refused
+  // while keeping the head event — a 401, a 408, a 429, a 5xx, or a 200 whose
+  // `accepted_through` does not reach the head — re-posted it on every pass and
+  // the heartbeat NEVER RAN AGAIN. `begin()` queues a `boot` event on every
+  // boot, so that was not an exotic path: it was the normal one for any board
+  // that met a rate limiter, a WAF, or a club that disabled it.
+  //
+  // Three things followed, each worse than the refusal: the roster aged out at
+  // ROSTER_MAX_AGE_MS and the door then admitted NOBODY; a board taken out of
+  // service never heard the heartbeat's 403 and kept admitting rostered
+  // members through a door an admin believed was shut; and the API was hammered
+  // about twenty-five times a second by a device that speaks twice a minute.
+  //
+  // A heartbeat is due once an interval. This costs the drain one pass in three
+  // thousand and is what keeps the roster fresh.
   pumpHeartbeat();
+  pumpEvents();
 
   // The lamp last, so what it shows is the state every step above just left it
   // in.
@@ -98,11 +145,30 @@ Attempt GateApp::attempt(uint32_t nowMs) {
 
 void GateApp::pumpScanner() {
   if (scanner_.takeRxError()) {
-    // The driver dropped bytes. What read() hands up next is in order and
-    // printable and has a hole in it, so the line in flight is discarded
-    // through its next terminator rather than trimmed into a token nobody
-    // scanned.
-    assembler_.markCorrupt();
+    // THE HOLE IS AT THE TAIL OF WHAT IS BUFFERED, NOT IN THE LINE IN ASSEMBLY.
+    //
+    // A receive FIFO overruns when it is FULL: everything the driver already
+    // has it keeps, and what it drops is what arrived next. So the bytes
+    // `read()` hands up afterwards are the OLD ones — in order, printable,
+    // whole lines — followed by the far side of a hole. Marking only the line
+    // in assembly therefore poisoned the WRONG LINE: a good buffered line was
+    // thrown away and the holed one was handed up a few passes later as a
+    // perfectly valid token, which is a refusal for somebody standing there
+    // or, far worse, a match on another member's booking.
+    //
+    // The whole buffer goes instead, and then everything through the NEXT
+    // TERMINATOR, because the last thing buffered may be half of the holed
+    // line. If the drain ended ON a terminator the holed line is already
+    // complete and the next byte starts a clean one.
+    bool endedOnTerminator = false;
+    uint8_t dropped = 0U;
+    for (uint16_t i = 0U; i < kScannerDrainOnErrorBytes && scanner_.read(dropped); ++i) {
+      endedOnTerminator = isLineTerminator(dropped);
+    }
+    assembler_.reset();
+    if (!endedOnTerminator) {
+      assembler_.markCorrupt();
+    }
   }
 
   // `!blocked_` is the ONE-CALL-PER-PASS rule, enforced where the calls
@@ -250,6 +316,14 @@ void GateApp::pumpEvents() {
     return;
   }
 
+  // THE BACKOFF. Disarmed on a healthy board, so this costs nothing; armed by
+  // the last post that left the head event exactly where it was. Without it,
+  // an endpoint that refuses-and-keeps is a hot loop — which is what starved
+  // the heartbeat, and what hammered the API.
+  if (eventsAt_.remaining(now) > 0U) {
+    return;
+  }
+
   // One event per pass. A board back from a week offline has a full ring, and
   // draining it in one iteration would stop the scanner being read — which is a
   // member standing at a door that is busy talking about last Tuesday.
@@ -268,13 +342,55 @@ void GateApp::pumpEvents() {
   }
 
   char response[192] = {};
+  const uint16_t held = queue_.size();
   beforeBlocking();
   const uint16_t status = api_.uploadEvent(body, response, sizeof(response));
   afterBlocking();
   applyEventReaction(status, response);
+
+  // DID THE QUEUE ACTUALLY MOVE? Not "what did the server say": a 200 whose
+  // `accepted_through` does not reach the head leaves it exactly where a 429
+  // does, and a drain that paced itself on the STATUS would have kept the one
+  // healthy-looking hot loop that every board can reach from its own boot
+  // event.
+  armEventRetry(queue_.size() < held);
+}
+
+void GateApp::armEventRetry(bool queueMoved) {
+  if (queueMoved) {
+    // Progress. Back to the loop's own pace immediately, so a rate limiter
+    // lifting does not leave a healthy board posting once every five minutes
+    // for the rest of the evening.
+    eventBackoffMs_ = 0U;
+    eventsAt_.disarm();
+    return;
+  }
+
+  eventBackoffMs_ = (eventBackoffMs_ == 0U)                      ? kEventRetryStartMs
+                    : (eventBackoffMs_ >= kEventRetryMaxMs / 2U) ? kEventRetryMaxMs
+                                                                 : eventBackoffMs_ * 2U;
+  // A FRESH clock read, like every other instant on this side of a blocking
+  // call: armed from before it, a backoff window starts a whole worst-case
+  // call in the past and is that much shorter than it says.
+  eventsAt_.arm(clock_.nowMs(), eventBackoffMs_);
 }
 
 void GateApp::applyEventReaction(uint16_t status, const char* response) {
+  if (status == 403U) {
+    // THE SAME AUTHORITATIVE WORD AS ON `/gate` AND ON THE HEARTBEAT: the club
+    // took this board out of service. It is the one 4xx that is a statement
+    // about the BOARD rather than about this request, and it arrives here
+    // first on exactly the board this matters most for — one with something in
+    // its ring, which after `begin()` is every board.
+    //
+    // The event is KEPT. This board did nothing wrong, the club may put it back
+    // in service, and an evening of entries is not thrown away over a button
+    // somebody pressed by mistake. The backoff above is what stops that being a
+    // hot loop; it used to be one.
+    commitEmptyRoster();
+    return;
+  }
+
   switch (devapi::react(status)) {
   case devapi::Reaction::Accepted: {
     uint32_t through = 0U;
@@ -307,10 +423,14 @@ void GateApp::pumpHeartbeat() {
   // host one pass every heartbeat interval spends a whole worst-case call, and
   // a member scanning during that pass waits for it. The alternative is a door
   // that stays offline-only until somebody power-cycles it.
+  //
+  // The scan-deferral count is cleared here rather than in pass(), so it counts
+  // passes the heartbeat actually LOST rather than passes that went by.
+  scanDeferrals_ = 0U;
   heartbeatBody_[0] = '\0';
   beforeBlocking();
-  const uint16_t status =
-      api_.heartbeat(mac_, firmwareVersion_, uptime_.value(), heartbeatBody_, heartbeatBodyCap_);
+  const uint16_t status = api_.heartbeat(mac_, firmwareVersion_, uptime_.value(), noPushHeartbeats_,
+                                         heartbeatBody_, heartbeatBodyCap_);
   afterBlocking();
 
   // ARMED AFTER THE CALL. Armed before it, the call's own duration comes out of
@@ -322,21 +442,27 @@ void GateApp::pumpHeartbeat() {
   adoptHeartbeat(status);
 }
 
+void GateApp::commitEmptyRoster() {
+  // THE CLUB TOOK THIS BOARD OUT OF SERVICE. An empty roster, committed, so
+  // the offline fallback admits nobody — leaving the old one in place would
+  // keep the door letting every rostered member in for the whole staleness
+  // window after an admin pressed the button meant to stop exactly that.
+  //
+  // Committed rather than abandoned, so `everLoaded()` stays true and the
+  // refusal is `not_recognised` rather than `roster_stale`.
+  //
+  // THE RESIDUAL, and it is narrower than it was but not closed: only a board
+  // that cannot REACH the server never hears the 403. It keeps admitting
+  // rostered bookings until its roster goes stale at ROSTER_MAX_AGE_MS, and no
+  // firmware can close that window. A board that CAN reach the server now
+  // hears it on whichever of the three paths it speaks on first.
+  roster_.beginReplace(clock_.nowMs());
+  roster_.commitReplace();
+}
+
 void GateApp::adoptHeartbeat(uint16_t status) {
   if (status == 403U) {
-    // THE CLUB TOOK THIS BOARD OUT OF SERVICE. An empty roster, committed, so
-    // the offline fallback admits nobody — leaving the old one in place would
-    // keep the door letting every rostered member in for the whole staleness
-    // window after an admin pressed the button meant to stop exactly that.
-    //
-    // Committed rather than abandoned, so `everLoaded()` stays true and the
-    // refusal is `not_recognised` rather than `roster_stale`.
-    //
-    // THE RESIDUAL: a board that cannot REACH the server never hears the 403.
-    // It keeps admitting rostered bookings until its roster goes stale at
-    // ROSTER_MAX_AGE_MS, and no firmware can close that window.
-    roster_.beginReplace(clock_.nowMs());
-    roster_.commitReplace();
+    commitEmptyRoster();
     return;
   }
 
@@ -354,6 +480,16 @@ void GateApp::adoptHeartbeat(uint16_t status) {
   // re-anchors it, which is what resets staleness; ROSTER_MAX_AGE_MS only
   // governs how long the last one survives offline.
   lastSync_ = devlink::applyRoster(heartbeatBody_, len, roster_, clock_.nowMs());
+  if (!lastSync_.replaced) {
+    // AN ACCEPTED HEARTBEAT THAT PUSHED NOTHING. A body cut short by a peer
+    // that hung up, or one missing the `roster` key the contract says is
+    // always present. The roster silently does not change and its age silently
+    // keeps running, and the one feedback surface on this board is a lamp with
+    // nothing to say about it — so the count goes out in the next request,
+    // where an admin can read it off the device row. Counted rather than acted
+    // on: it changes no decision here.
+    ++noPushHeartbeats_;
+  }
   // Takes effect from the NEXT arm. The one above already used the old value,
   // which is a one-interval delay and not worth a re-arm that could shorten
   // this interval to nothing.

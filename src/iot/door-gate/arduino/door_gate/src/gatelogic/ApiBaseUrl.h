@@ -77,59 +77,75 @@ inline constexpr size_t kUrlBufSize = kMaxApiBaseUrlLen + kMaxPathLen + 1U;
 
 namespace url {
 
+/// FAILURE, AS AN OFFSET RATHER THAN A NULL POINTER.
+///
+/// Every step of the grammar below propagates failure, and it used to propagate
+/// it as `nullptr` — which meant every step compared a pointer derived from the
+/// address of a string literal against null. GCC under `-fsanitize=undefined`
+/// will not fold an object's address in a constant expression, so the whole
+/// grammar stops being constexpr and every `static_assert` built on it fails to
+/// COMPILE, on a compiler nobody here runs. An offset is an integer: it folds
+/// under every compiler and every sanitizer, and it costs nothing. The same
+/// trap, and where it was found, is in `StaticText.h` and
+/// `memory/gotchas-build.md`.
+///
+/// Every function still has ONE return statement — the sketch is gnu++11 — and
+/// every one short-circuits on `kNoMatch` BEFORE indexing, so a failed step
+/// never reads `s[kNoMatch]`.
+inline constexpr size_t kNoMatch = static_cast<size_t>(-1);
+
 constexpr bool isDigit(char c) {
   return c >= '0' && c <= '9';
 }
 
-/// Digits from `s`, stopping at the first byte that is not one.
-constexpr unsigned digitRun(const char* s) {
-  return isDigit(*s) ? 1U + digitRun(s + 1) : 0U;
+/// Digits from `s + at`, stopping at the first byte that is not one.
+constexpr unsigned digitRun(const char* s, size_t at) {
+  return isDigit(s[at]) ? 1U + digitRun(s, at + 1U) : 0U;
 }
 
-/// The value of the first `n` digits at `s`.
-constexpr unsigned digitValue(const char* s, unsigned n, unsigned acc) {
-  return n == 0U ? acc : digitValue(s + 1, n - 1U, acc * 10U + static_cast<unsigned>(*s - '0'));
+/// The value of the `n` digits at `s + at`.
+constexpr unsigned digitValue(const char* s, size_t at, unsigned n, unsigned acc) {
+  return n == 0U ? acc : digitValue(s, at + 1U, n - 1U, acc * 10U + static_cast<unsigned>(s[at] - '0'));
 }
 
 /// One dotted-quad octet: one to three digits, at most 255, and no redundant
 /// leading zero. `010` is refused because it is genuinely ambiguous — several
 /// resolvers read a leading zero as octal, and a base URL that means one host
 /// to the compiler and another to lwIP is worse than one that does not parse.
-constexpr bool isOctet(const char* s, unsigned n) {
-  return n >= 1U && n <= 3U && !(n > 1U && s[0] == '0') && digitValue(s, n, 0U) <= 255U;
+constexpr bool isOctet(const char* s, size_t at, unsigned n) {
+  return n >= 1U && n <= 3U && !(n > 1U && s[at] == '0') && digitValue(s, at, n, 0U) <= 255U;
 }
 
-/// Past one octet, or nullptr. Every step of the grammar propagates nullptr, so
-/// a failure anywhere in the chain below is a nullptr at the end of it.
-constexpr const char* pastOctet(const char* s) {
-  return s == nullptr ? nullptr : isOctet(s, digitRun(s)) ? s + digitRun(s) : nullptr;
+/// Past one octet, or kNoMatch.
+constexpr size_t pastOctet(const char* s, size_t at) {
+  return at == kNoMatch ? kNoMatch : isOctet(s, at, digitRun(s, at)) ? at + digitRun(s, at) : kNoMatch;
 }
 
-constexpr const char* pastDot(const char* s) {
-  return (s != nullptr && *s == '.') ? s + 1 : nullptr;
+constexpr size_t pastDot(const char* s, size_t at) {
+  return (at != kNoMatch && s[at] == '.') ? at + 1U : kNoMatch;
 }
 
-/// Past `d.d.d.d`, or nullptr.
-constexpr const char* pastIpv4(const char* s) {
-  return pastOctet(pastDot(pastOctet(pastDot(pastOctet(pastDot(pastOctet(s)))))));
+/// Past `d.d.d.d`, or kNoMatch.
+constexpr size_t pastIpv4(const char* s, size_t at) {
+  return pastOctet(s, pastDot(s, pastOctet(s, pastDot(s, pastOctet(s, pastDot(s, pastOctet(s, at)))))));
 }
 
 /// 1 to 65535, written without a leading zero.
-constexpr bool isPort(const char* s, unsigned n) {
-  return n >= 1U && n <= 5U && s[0] != '0' && digitValue(s, n, 0U) <= 65535U;
+constexpr bool isPort(const char* s, size_t at, unsigned n) {
+  return n >= 1U && n <= 5U && s[at] != '0' && digitValue(s, at, n, 0U) <= 65535U;
 }
 
-/// Past an OPTIONAL `:port`. No colon at all is legal and leaves `s` where it
-/// was — the API on port 80 needs none.
-constexpr const char* pastPort(const char* s) {
-  return s == nullptr                     ? nullptr
-         : *s != ':'                      ? s
-         : isPort(s + 1, digitRun(s + 1)) ? s + 1 + digitRun(s + 1)
-                                          : nullptr;
+/// Past an OPTIONAL `:port`. No colon at all is legal and leaves the offset
+/// where it was — the API on port 80 needs none.
+constexpr size_t pastPort(const char* s, size_t at) {
+  return at == kNoMatch                             ? kNoMatch
+         : s[at] != ':'                             ? at
+         : isPort(s, at + 1U, digitRun(s, at + 1U)) ? at + 1U + digitRun(s, at + 1U)
+                                                    : kNoMatch;
 }
 
-constexpr bool endsHere(const char* s) {
-  return s != nullptr && *s == '\0';
+constexpr bool endsHere(const char* s, size_t at) {
+  return at != kNoMatch && s[at] == '\0';
 }
 
 } // namespace url
@@ -138,7 +154,7 @@ constexpr bool endsHere(const char* s) {
 /// string — no path, no trailing slash, no query, no credentials.
 constexpr bool isValidApiBaseUrl(const char* url) {
   return text::startsWith(url, kApiScheme) &&
-         url::endsHere(url::pastPort(url::pastIpv4(url + text::length(kApiScheme))));
+         url::endsHere(url, url::pastPort(url, url::pastIpv4(url, text::length(kApiScheme))));
 }
 
 /// It also has to fit, together with the longest path, in the one buffer the

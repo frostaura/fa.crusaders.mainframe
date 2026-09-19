@@ -35,10 +35,11 @@
 namespace gatelogic {
 
 /// The smallest buffer renderGateHeartbeatBody is ever given: the court box's
-/// four keys plus `kind`.
-inline constexpr size_t kGateHeartbeatBodyCap = 160U;
+/// four keys plus `kind`, and `no_push` when there is one to report.
+inline constexpr size_t kGateHeartbeatBodyCap = 192U;
 
-/// Renders the `/api/v1/device/heartbeat` body, with `kind` last.
+/// Renders the `/api/v1/device/heartbeat` body, with `kind` last and `no_push`
+/// after it when it is not zero.
 ///
 /// Returns the length written, or 0 — with `out` empty — when it would not fit
 /// or `mac` is missing. Never a truncated body: a half-rendered object is a 400
@@ -48,8 +49,28 @@ inline constexpr size_t kGateHeartbeatBodyCap = 160U;
 /// `uptimeMs` is the 64-bit tb::Uptime64 value, not a cast of it — the same
 /// 49.7-day wrap that made the court box report a two-month-old board as ten
 /// days old.
+///
+/// WHY `no_push` IS OMITTED AT ZERO, AND WHY IT EXISTS AT ALL
+/// ----------------------------------------------------------
+/// A heartbeat the board accepted whose body carried no usable roster — cut
+/// short by a short read, or missing the key the contract says is always
+/// present — is otherwise COMPLETELY UNOBSERVABLE. The roster silently does not
+/// change, its age silently keeps running, and the one feedback surface on this
+/// board is a lamp that has nothing to say about it. A technician standing at
+/// the door cannot tell that case from a healthy one, and neither can anybody
+/// reading the admin console.
+///
+/// A distinct LED pattern was considered and rejected: this lamp is what tells
+/// a MEMBER their scan was seen, and a diagnostic blink on it is a refusal
+/// nobody can interpret. So the count rides in the request, where an admin can
+/// read it off the device row.
+///
+/// Omitted at zero because a healthy board is the overwhelming case and the
+/// contract corpus's request vector has no such field: a board that sent
+/// `"no_push":0` forever would put a key in every request that nothing on the
+/// wire has agreed to.
 size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const char* firmwareVersion,
-                               uint64_t uptimeMs);
+                               uint64_t uptimeMs, uint32_t noPush);
 
 /// Reads `gate.unlock_seconds` out of a heartbeat response into `unlockMs`,
 /// clamped into [kMinUnlockMs, kGateConfig.unlockHardCapMs].

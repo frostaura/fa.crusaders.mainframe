@@ -53,8 +53,12 @@ public:
 
   /// Heartbeat. The response lands in `out`; the status is returned so the
   /// caller can decide whether to adopt anything from it.
-  uint16_t heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs, char* out,
-                     size_t outCap);
+  ///
+  /// `noPush` is the diagnostic counter of accepted heartbeats that carried no
+  /// usable roster. Omitted from the body when it is zero — see
+  /// GateHeartbeat.h for why it exists and why it is not a lamp pattern.
+  uint16_t heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs, uint32_t noPush,
+                     char* out, size_t outCap);
 
   /// One already-rendered event-upload body. Rendered by the caller because
   /// devlink owns that shape and every firmware renders it identically.
