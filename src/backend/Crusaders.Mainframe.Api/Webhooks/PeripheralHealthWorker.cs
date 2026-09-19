@@ -159,15 +159,27 @@ public sealed class PeripheralHealthWorker : BackgroundService
             return;
         }
 
-        _logger.LogWarning(
-            "Court box {DeviceCode} unreachable — last heartbeat {LastSeen}, threshold {Threshold}s",
-            device.DeviceCode, lastSeen, health.OfflineAfterSeconds);
-
         var minutes = (int)Math.Round((health.Now - lastSeen).TotalMinutes, MidpointRounding.AwayFromZero);
-        var alert = new PeripheralAlert(
-            device.Name, device.DeviceCode, device.CourtNumbers, minutes,
-            health.Tenant.DisplayName, health.ConsoleUrl);
-        await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralUnhealthy(m, alert), ct);
+
+        if (device.Kind == DeviceKind.Gate)
+        {
+            _logger.LogWarning(
+                "Door gate {DeviceCode} ({GateKey}) unreachable — last heartbeat {LastSeen}, threshold {Threshold}s",
+                device.DeviceCode, device.GateKey, lastSeen, health.OfflineAfterSeconds);
+
+            await AlertAdminsAsync(health, m => EmailTemplates.AdminGateUnhealthy(m, GateAlertFor(health, device, minutes)), ct);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Court box {DeviceCode} unreachable — last heartbeat {LastSeen}, threshold {Threshold}s",
+                device.DeviceCode, lastSeen, health.OfflineAfterSeconds);
+
+            var alert = new PeripheralAlert(
+                device.Name, device.DeviceCode, device.CourtNumbers, minutes,
+                health.Tenant.DisplayName, health.ConsoleUrl);
+            await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralUnhealthy(m, alert), ct);
+        }
 
         await EmitAsync(health, device, "peripheral.unhealthy", new()
         {
@@ -184,12 +196,21 @@ public sealed class PeripheralHealthWorker : BackgroundService
         await health.Db.SaveChangesAsync(ct);
 
         var minutes = (int)Math.Round((outage.EndedAt.Value - outage.StartedAt).TotalMinutes, MidpointRounding.AwayFromZero);
-        _logger.LogInformation("Court box {DeviceCode} is back after {Minutes} minutes", device.DeviceCode, minutes);
 
-        var alert = new PeripheralAlert(
-            device.Name, device.DeviceCode, device.CourtNumbers, minutes,
-            health.Tenant.DisplayName, health.ConsoleUrl);
-        await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralRecovered(m, alert), ct);
+        if (device.Kind == DeviceKind.Gate)
+        {
+            _logger.LogInformation("Door gate {DeviceCode} is back after {Minutes} minutes", device.DeviceCode, minutes);
+            await AlertAdminsAsync(health, m => EmailTemplates.AdminGateRecovered(m, GateAlertFor(health, device, minutes)), ct);
+        }
+        else
+        {
+            _logger.LogInformation("Court box {DeviceCode} is back after {Minutes} minutes", device.DeviceCode, minutes);
+
+            var alert = new PeripheralAlert(
+                device.Name, device.DeviceCode, device.CourtNumbers, minutes,
+                health.Tenant.DisplayName, health.ConsoleUrl);
+            await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralRecovered(m, alert), ct);
+        }
 
         await EmitAsync(health, device, "peripheral.recovered", new()
         {
@@ -197,6 +218,32 @@ public sealed class PeripheralHealthWorker : BackgroundService
             ["recovered_at"] = outage.EndedAt,
             ["outage_minutes"] = minutes,
         }, ct);
+    }
+
+    /// <summary>
+    /// The alert for a door, which names the door rather than a court list.
+    ///
+    /// <para>
+    /// The kind branch above it is the whole fix: this sweep took every enabled row with no
+    /// filter on its kind, so a silent gate mailed the club "Court box not reporting", warned
+    /// about members on "those courts" and promised refunds with no no-show penalty. A gate
+    /// drives no courts, stamps no attendance and is invisible to <c>DeviceOutageIndex</c>, so
+    /// none of that happens — the admin goes looking for a box that is working fine while the
+    /// door stays shut.
+    /// </para>
+    ///
+    /// <para>
+    /// The outage ROW and the <c>peripheral.*</c> events are deliberately unchanged and shared:
+    /// a door going dark is a real incident, it is once per outage like any other, and the
+    /// Devices page reads the same rows. What differs is only what an admin is told to do
+    /// about it.
+    /// </para>
+    /// </summary>
+    private static GateAlert GateAlertFor(Health health, Device device, int minutes)
+    {
+        return new GateAlert(
+            device.Name, device.DeviceCode, device.GateKey, minutes,
+            health.Tenant.DisplayName, health.ConsoleUrl);
     }
 
     /// <summary>

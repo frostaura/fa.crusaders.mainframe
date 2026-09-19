@@ -1,15 +1,16 @@
 ---
 name: crusaders-mainframe-decisions-gate
-description: "The door gate reuses the court box's contract with no migration; a door is never attendance, gate_access_policy is the one setting that fails closed, and offline it admits rostered bookings only."
+description: "The door gate reuses the court box's contract with no EF migration; a board declares its kind once, a door is never attendance, and gate_access_policy is the one setting in the tree that fails closed."
 type: decision
 last_verified: 2026-09-19
 ---
 
-# Live decisions — the door gate
+# Live decisions — the door gate's shape
 
 Behaviour oracle: `docs/specs/door-gate.md`. Shared wire corpus:
 `src/contracts/device-protocol/gate/`. The device contract it is built on is
-[`decisions-device.md`](decisions-device.md) and is unchanged by any of this.
+[`decisions-device.md`](decisions-device.md) and is unchanged by any of this. Who gets through
+a door, and with what, is [`decisions-gate-access.md`](decisions-gate-access.md).
 
 - **The device model held, and the bet is worth recording because it paid.** `DeviceKind` and
   `GateKey` were modelled years before there was hardware, on the argument that a second device
@@ -36,10 +37,11 @@ Behaviour oracle: `docs/specs/door-gate.md`. Shared wire corpus:
   here the two failure modes are "a member is sent to the desk" and "the building is open to
   anyone holding a live code", and only one of those is recoverable by a person. An ABSENT key is
   still the documented default (`active_member`) — that is not a failure at all.
-- **All four court-box routes refuse a gate row by name**, not by the accident of its empty court
-  list. Each already refused one — the activation path fails its relay-index check, the walk-up
-  answers `court_not_on_device` — but both are wrong sentences and both stop being refusals the
-  moment anyone puts a court number on a gate row, which is one PATCH away.
+- **Each kind is refused by name on the other's paths**, never by the accident of an empty court
+  list. The four court-box routes answer a gate `not_a_court_box`, and a `gate_open` event from a
+  court-box row answers `not_a_gate` with a subject of null. *Why the last one matters although
+  nothing settles on it:* the row it prevents NAMES A MEMBER as having opened a door that does not
+  exist, and a false record of who was in the building is worse than a refusal.
 - **Offline, a gate admits rostered bookings and nobody else.** A sixty-second `MemberIdent` code
   cannot be in a cache fetched minutes ago, so under the default policy an active member with no
   court booked gets in online and not offline. Stated rather than engineered around: the only fix

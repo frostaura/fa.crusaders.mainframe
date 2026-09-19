@@ -133,6 +133,74 @@ public sealed class AccessCodeTests
         Assert.NotEqual(a, b);
     }
 
+    // ---- Normalise ---------------------------------------------------------
+
+    /// <summary>
+    /// Case and surrounding space are forgiven; anything that could not be a code at all is
+    /// not. The scanner emits what the label carries and a desk types what it reads.
+    /// </summary>
+    [Theory]
+    [InlineData("7q3f9km2xz8b", "7Q3F9KM2XZ8B")]
+    [InlineData("  7Q3F9KM2XZ8B  ", "7Q3F9KM2XZ8B")]
+    [InlineData("\r\n7Q3F9KM2XZ8B\r\n", "7Q3F9KM2XZ8B")]
+    [InlineData("7Q3F9KM2XZ8", null)]        // eleven
+    [InlineData("7Q3F9KM2XZ8BB", null)]      // thirteen
+    [InlineData("7Q3F9KM2XZ8I", null)]       // I is not in the alphabet
+    [InlineData("   ", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void A_presented_code_is_trimmed_and_upper_cased_or_refused(string? presented, string? expected)
+    {
+        Assert.Equal(expected, AccessCodeService.Normalise(presented));
+    }
+
+    /// <summary>
+    /// <b>The length is checked BEFORE anything is allocated</b>, so a board — or anyone
+    /// holding the club key — cannot make the server upper-case a megabyte per request.
+    ///
+    /// <para>
+    /// This is the one property of <c>Normalise</c> that its return value cannot express: the
+    /// answer for an over-long string is <c>null</c> either way, and every behavioural test
+    /// above stays green against the slow order. So the assertion is on allocation, and the
+    /// varied field has to be the LENGTH — the same test at twelve characters passes against
+    /// both implementations, which is exactly why it would not have caught this.
+    /// </para>
+    ///
+    /// <para>
+    /// The budget is a thousandth of the input's own byte count rather than zero: the
+    /// measurement itself and the theory's own boxing are not free, and the defect this
+    /// guards is a factor-of-a-million one, not a byte.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The filler character is load-bearing and was wrong the first time.</b> A megabyte of
+    /// <c>'A'</c> measured as free even against the slow order, because
+    /// <see cref="string.ToUpperInvariant"/> scans for the first character that would change
+    /// and hands back the SAME instance when none does — so the fixture, not the code, was
+    /// what made the test pass. Lower case is what forces the copy the fast order exists to
+    /// avoid.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void An_absurdly_long_token_is_refused_before_anything_is_allocated()
+    {
+        const int chars = 4 * 1024 * 1024;
+        var absurd = new string('a', chars);
+
+        // Warm the path, so the JIT's own one-off allocations are not the measurement.
+        Assert.Null(AccessCodeService.Normalise(absurd));
+        Assert.Equal("7Q3F9KM2XZ8B", AccessCodeService.Normalise("7q3f9km2xz8b"));
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        Assert.Null(AccessCodeService.Normalise(absurd));
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(
+            allocated < chars * 2L / 1000,
+            $"Normalise allocated {allocated} bytes refusing a {chars}-character token; it is "
+            + "upper-casing before it checks the length.");
+    }
+
     // ---- Booking codes -----------------------------------------------------
 
     /// <summary>One booking, one code — however many times the phone asks.</summary>

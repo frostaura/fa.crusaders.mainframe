@@ -49,10 +49,32 @@ public static class GateAccess
 
     /// <summary>
     /// Policy <see cref="GateAccessPolicies.BookingWindow"/> only: an active member with
-    /// nothing booked inside <c>[StartsAt − gate_early_entry_minutes, EndsAt]</c>. Unreachable
-    /// under the default policy.
+    /// nothing booked inside <c>[StartsAt − gate_early_entry_minutes, EndsAt]</c>, and not a
+    /// club admin. Unreachable under the default policy.
     /// </summary>
     public const string NoBooking = "no_booking";
+
+    /// <summary>
+    /// A <see cref="AccessCodePurpose.BookingActivation"/> code presented before its own
+    /// booking's entry window opens — <see cref="BookingCodeWindow.DoorHorizonMinutes"/>
+    /// before <c>StartsAt</c>.
+    ///
+    /// <para>
+    /// Named rather than folded into <see cref="NotRecognised"/>, which is the opposite of the
+    /// reasoning behind every other refusal here, and deliberately so. The oracle argument
+    /// applies to codes whose validity is the secret; this one tells the holder of a code the
+    /// club itself minted for them that they are EARLY — a fact they already know, about a
+    /// booking that is already theirs, which the door will honour later the same day. Telling
+    /// them "not recognised" instead sends a member with a valid booking to a desk that may
+    /// not be staffed.
+    /// </para>
+    ///
+    /// <para>
+    /// A <see cref="AccessCodePurpose.MemberIdent"/> code never answers this: it names no
+    /// booking, and it expires in sixty seconds.
+    /// </para>
+    /// </summary>
+    public const string TooEarly = "too_early";
 
     /// <summary>
     /// Anything but <c>qr</c> or <c>code</c>. A PIN against the whole membership roll is an
@@ -93,7 +115,7 @@ public static class GateAccess
     /// never comes.
     /// </summary>
     public static readonly string[] Reasons =
-        [Ok, NotRecognised, MemberNotActive, NoBooking, MethodNotSupported, NotAGate];
+        [Ok, NotRecognised, MemberNotActive, NoBooking, TooEarly, MethodNotSupported, NotAGate];
 
     /// <summary>Shortest release the lock is ever given. A zero-second release is a door that clicks and stays shut.</summary>
     public const int MinUnlockSeconds = 1;
@@ -138,10 +160,22 @@ public static class GateAccess
         if (resolved is null) return Refused(NotRecognised);
 
         // Not-Active rather than Suspended, and a user with no membership row is not barred:
-        // both rules, and why they are stated that way round, live in MembershipAccess.
+        // both rules, and why they are stated that way round, live in MembershipAccess. This
+        // runs before the policy, so a suspended member — a club admin included — is told the
+        // same thing whichever policy the club runs.
         if (await MembershipAccess.IsBarredFromCourtsAsync(db, resolved.UserId, ct))
         {
             return Refused(MemberNotActive, resolved.UserId);
+        }
+
+        // A booking code is bounded by its OWN booking, under every policy — see
+        // BookingCodeScopeAsync. Before the policy, because it is a property of the credential
+        // rather than of the club's rule: a code outside its window opens nothing whichever
+        // policy is running, and a club on active_member has no policy check at all.
+        if (resolved.Purpose == AccessCodePurpose.BookingActivation
+            && await BookingCodeScopeAsync(db, context, resolved, ct) is { } outside)
+        {
+            return Refused(outside, resolved.UserId);
         }
 
         if (context.Settings.GateAccessPolicy == GateAccessPolicies.BookingWindow
@@ -151,6 +185,58 @@ public static class GateAccess
         }
 
         return new GateDecision(true, Ok, resolved.UserId, UnlockSecondsFor(context.Settings));
+    }
+
+    /// <summary>
+    /// Why this booking code opens nothing right now, or null when it does.
+    ///
+    /// <para>
+    /// <b>A booking code is not a standing building key.</b> It is minted with the booking and
+    /// lives until the slot ends plus the grace window, and it is a stable token for the whole
+    /// of that — which is what a court box deciding offline needs and what makes it dangerous
+    /// at a door. Unbounded, the code a member's phone showed them at 17:00 for a 19:00 court
+    /// opened every door in the club at 03:00 the same night, and a roster captured off the
+    /// LAN bought a building key rather than an entry to one booking.
+    /// </para>
+    ///
+    /// <para>
+    /// The bound is the booking's own window: <c>[StartsAt − H, EndsAt]</c>, with <c>H</c>
+    /// from <see cref="BookingCodeWindow.DoorHorizonMinutes"/> — the club's entry window under
+    /// <c>booking_window</c>, and under <c>active_member</c> the horizon in which the member's
+    /// own phone would have shown them that code at all. The two horizons come from one place
+    /// so the screen and the door cannot drift.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The two refusals are deliberately asymmetric.</b> Early is <see cref="TooEarly"/>:
+    /// the member holds a real booking and the door will honour it later, and telling them
+    /// "not recognised" sends somebody with a valid booking to a desk that may not be staffed.
+    /// Late — and a booking that is no longer <c>Booked</c> — is <see cref="NotRecognised"/>,
+    /// indistinguishable from a code that never existed, because the row outlives the slot by
+    /// the grace window and a door that told "spent" from "unknown" would be the oracle every
+    /// other refusal here avoids.
+    /// </para>
+    ///
+    /// <para>
+    /// The status check is on the BOOKING and not on the code, because nothing revokes a code
+    /// when its booking is cancelled — revoking on cancel would strand a court box deciding
+    /// offline from a roster it fetched beforehand, which is the one thing the roster is for.
+    /// </para>
+    /// </summary>
+    private static async Task<string?> BookingCodeScopeAsync(
+        MainframeDbContext db, GateContext context, ResolvedAccessCode resolved, CancellationToken ct)
+    {
+        var booking = resolved.BookingId is { } id
+            ? await db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == id, ct)
+            : null;
+
+        if (booking is null || booking.Status != BookingStatus.Booked) return NotRecognised;
+        if (context.Now > booking.EndsAt) return NotRecognised;
+
+        var latestStart = BookingCodeWindow.LatestStart(
+            context.Now, BookingCodeWindow.DoorHorizonMinutes(context.Settings));
+
+        return booking.StartsAt <= latestStart ? null : TooEarly;
     }
 
     /// <summary>
@@ -165,21 +251,33 @@ public static class GateAccess
     /// </para>
     ///
     /// <para>
-    /// <b>An admin or operator with no membership row always passes.</b> Those accounts are
-    /// created by provisioning rather than by registration and never hold a booking, and a
-    /// club that switches to <c>booking_window</c> must not thereby lock its own staff out of
-    /// the building. It is deliberately "no membership row" and not "is an admin": an admin
-    /// who is also a member is a member, and is held to the same window as everybody else —
-    /// otherwise the policy has a hole shaped like whoever the club promoted last.
+    /// <b>Club admins always pass.</b> A club that switches to <c>booking_window</c> must not
+    /// thereby lock its own staff out of the building, and staff do not hold bookings for the
+    /// hours they are working.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It is keyed on <see cref="User.IsAdmin"/>, and it used to be keyed on the ABSENCE of
+    /// a membership row.</b> That was a state no production path creates: registration writes
+    /// a membership, an admin promoted off the member roll keeps theirs, and there is no
+    /// screen or service that makes a user without one. So the carve-out fired for nobody —
+    /// the club's own admins were refused the day it changed policy — and the test that said
+    /// otherwise passed only because it deleted the row first, which is a fixture the product
+    /// cannot produce. The narrower reading it was protecting ("an admin who is also a member
+    /// is a member") turned out to protect nothing, because there is no other kind of admin.
+    /// </para>
+    ///
+    /// <para>
+    /// This is the BOOKING check only. An admin is held to <see cref="MembershipAccess"/>
+    /// exactly as everybody is, one step earlier in <see cref="DecideAsync"/>: a club that has
+    /// suspended an admin's membership has said something about that person, and a door is not
+    /// where it gets quietly undone.
     /// </para>
     /// </summary>
     private static async Task<bool> MayEnterOnABookingAsync(
         MainframeDbContext db, GateContext context, ResolvedAccessCode resolved, CancellationToken ct)
     {
-        if (!await db.Memberships.AnyAsync(m => m.UserId == resolved.UserId, ct))
-        {
-            return await db.Users.AnyAsync(u => u.Id == resolved.UserId && u.IsAdmin, ct);
-        }
+        if (await db.Users.AnyAsync(u => u.Id == resolved.UserId && u.IsAdmin, ct)) return true;
 
         // `StartsAt − early ≤ now` rearranged to `StartsAt ≤ now + early`: two constants the
         // provider can translate, the same rearrangement DeviceRosterBuilder uses.

@@ -175,6 +175,16 @@ public static class DeviceEventEndpoints
                     // event the board cannot change is a board retrying for ever.
                     ActivationKind or ReleaseKind when device!.Kind != DeviceKind.CourtBox
                         => new ActivationOutcome(GateAccess.NotACourtBox, null, e.Kind),
+
+                    // And the mirror: a court box reporting a door it does not have. Guarded
+                    // for the same reason the two above are and not because anything settles
+                    // — nothing does — but because the row this writes NAMES A MEMBER. Left
+                    // ungated, any holder of the club key with a box's MAC could post an
+                    // access code and have the trail record that person opening a door that
+                    // does not exist, which is a worse lie than a refusal.
+                    GateOpenKind when device!.Kind != DeviceKind.Gate
+                        => new ActivationOutcome(GateAccess.NotAGate, null, GateOpenKind),
+
                     ActivationKind => await ActivationOutcomeAsync(device!, e, time.OccurredAt, services, ct),
                     ReleaseKind => await ReleaseOutcomeAsync(device!, e, time.OccurredAt, services, ct),
                     GateOpenKind => await GateOpenOutcomeAsync(e, time.OccurredAt, services, ct),

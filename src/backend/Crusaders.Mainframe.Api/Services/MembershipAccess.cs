@@ -29,11 +29,19 @@ namespace Crusaders.Mainframe.Api.Services;
 ///
 /// <para>
 /// <b>A user with no membership row is not barred.</b> The test is "the club has recorded a
-/// decision about this person, and it was not approval" — so a user who has never had a
-/// membership row (an operator account created by provisioning rather than by registration)
-/// keeps the access they have today. Widening this to "must hold an Active membership" would
-/// be a different rule with a different blast radius, and it is not the one the console
-/// promises.
+/// decision about this person, and it was not approval" — and about such a user it has
+/// recorded none, so they keep the access they have today. Widening this to "must hold an
+/// Active membership" would be a different rule with a different blast radius, and it is not
+/// the one the console promises.
+/// </para>
+///
+/// <para>
+/// <b>This is not a staff carve-out and must not be read as one.</b> It used to be described
+/// as covering "operator accounts created by provisioning rather than by registration", and
+/// there is no such thing in this product: there is no operator role, and no path — not
+/// registration, not admin promotion, not the seeder — creates a user without a membership
+/// row. Anything that needs staff to get through a door has to say <c>IsAdmin</c> and mean it;
+/// <see cref="GateAccess"/> records what keying it on this instead cost.
 /// </para>
 /// </summary>
 public static class MembershipAccess

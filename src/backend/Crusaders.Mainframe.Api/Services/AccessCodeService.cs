@@ -198,12 +198,37 @@ public sealed class AccessCodeService
     /// <summary>
     /// Upper-cased and trimmed, or null if it could not be a code at all. A scanner that
     /// emits lower case, or a desk that types it, must not be refused for the case.
+    ///
+    /// <para>
+    /// <b>The length is settled before anything is allocated</b>, and the order is the whole
+    /// point of the method reading the way it does. Trimming over a span costs nothing, and a
+    /// token that is not <see cref="AccessCode.Length"/> characters is refused there — so a
+    /// body carrying a megabyte in <c>token</c> is one comparison, not a megabyte upper-cased
+    /// into the large object heap and thrown away. Every caller of this is on a route a holder
+    /// of the club key can reach as often as the rate limiter allows, and the work was
+    /// unbounded in the size of what they sent.
+    /// </para>
+    ///
+    /// <para>
+    /// Upper-casing after the length check is safe because invariant casing is a per-character
+    /// map: no character in this alphabet's neighbourhood grows or shrinks the string, so a
+    /// twelve-character token is twelve characters afterwards.
+    /// </para>
+    ///
+    /// <para>
+    /// Internal rather than private so the allocation property has a test at all — the return
+    /// value is <c>null</c> under either order, so nothing about it can be asserted from
+    /// outside.
+    /// </para>
     /// </summary>
-    private static string? Normalise(string? code)
+    internal static string? Normalise(string? code)
     {
-        if (string.IsNullOrWhiteSpace(code)) return null;
-        var text = code.Trim().ToUpperInvariant();
-        if (text.Length != AccessCode.Length) return null;
+        if (code is null) return null;
+
+        var trimmed = code.AsSpan().Trim();
+        if (trimmed.Length != AccessCode.Length) return null;
+
+        var text = trimmed.ToString().ToUpperInvariant();
         foreach (var ch in text)
         {
             if (Alphabet.IndexOf(ch) < 0) return null;

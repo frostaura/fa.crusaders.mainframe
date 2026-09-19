@@ -276,6 +276,13 @@ public class DeviceGateProtocolCorpusTests
     /// The same for the scan decision, and one refusal reason per vector. A reason string
     /// the server spells differently from the corpus is a door that answers a refusal the
     /// firmware has no screen for.
+    ///
+    /// <para>
+    /// Counted against <c>GateAccess.Reasons.Length</c> rather than a literal, which is the
+    /// stronger assertion and not merely the lower-maintenance one: the sibling test below
+    /// compares the two as SETS, so a second vector for a reason that already has one is
+    /// invisible to it and is caught only here.
+    /// </para>
     /// </summary>
     [Fact]
     public void Every_scan_vector_is_what_the_server_really_serialises()
@@ -297,7 +304,7 @@ public class DeviceGateProtocolCorpusTests
             executed++;
         }
 
-        Assert.Equal(6, executed);
+        Assert.Equal(GateAccess.Reasons.Length, executed);
     }
 
     /// <summary>

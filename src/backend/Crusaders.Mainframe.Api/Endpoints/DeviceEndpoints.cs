@@ -96,9 +96,32 @@ public static class DeviceEndpoints
         // gate's roster is the club's rather than this board's.
         if (device.Kind == DeviceKind.Gate)
         {
+            // A DOOR NOBODY HAS NAMED GETS NO ROSTER. Auto-registration is the whole
+            // provisioning story, so anything holding the club's device key can heartbeat
+            // with a MAC it invented and a `kind` of "gate" and have a row appear — and that
+            // one call used to be answered with the club's live access codes for every
+            // booking in the roster window, each of which opens every door in the club for
+            // the length of its booking. Naming the door is the admin's acknowledgement that
+            // the board is one of theirs, and it is the cheapest possible gate on the only
+            // call that hands a caller OTHER MEMBERS' live codes in bulk. (/me/qr/generate
+            // hands a member their own, one at a time, authenticated as them — a different
+            // thing, and not this risk.)
+            //
+            // Online scans are unaffected, so an install stays plug-and-play: what waits for
+            // the admin is the OFFLINE fallback. The list is still always present and still
+            // replaced wholesale — an omitted key would leave a stale cache live, which is
+            // the opposite of what this is for.
+            //
+            // Checked here and not inside BuildAsync, which deliberately takes no Device: two
+            // NAMED gates on one club are still handed the identical list, and that sentence
+            // is pinned. This is a gate on whether the board is asked at all.
+            var gateRoster = string.IsNullOrWhiteSpace(device.GateKey)
+                ? []
+                : await DeviceGateRosterBuilder.BuildAsync(db, codes, s, now, ct);
+
             return Results.Ok(GateHeartbeatView.Of(
                 device, tenant.TenantSlug, s.HeartbeatSeconds, GateAccess.UnlockSecondsFor(s),
-                await DeviceGateRosterBuilder.BuildAsync(db, codes, s, now, ct), now));
+                gateRoster, now));
         }
 
         // The bookings this box may admit on its own, as TOKEN|relay|opens_in|closes_in.

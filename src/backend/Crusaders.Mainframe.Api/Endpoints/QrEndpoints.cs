@@ -168,7 +168,13 @@ public static class QrEndpoints
         // [StartsAt − cue, EndsAt] intersects [now, now + roster]  ⇔
         // StartsAt ≤ now + roster + cue  ∧  EndsAt ≥ now. Rearranged so the predicate is
         // a comparison against two constants the provider can translate.
-        var latestStart = now.AddMinutes(settings.RosterWindowMinutes + settings.ActivationCueWindowMinutes);
+        //
+        // The horizon and the rearrangement both come from BookingCodeWindow, and that is not
+        // tidiness: under the default gate policy this predicate and the DOOR's are the same
+        // predicate, and they were two independent copies of it in two files. A door narrower
+        // than this screen refuses a code the product has just handed somebody; a door wider
+        // than it is a standing building key. See BookingCodeWindow and GateAccess.
+        var latestStart = BookingCodeWindow.LatestStart(now, BookingCodeWindow.DisplayHorizonMinutes(settings));
         var booking = kind == KindIdent ? null : await db.Bookings
             .Where(b => b.UserId == userId
                         && b.Status == BookingStatus.Booked
