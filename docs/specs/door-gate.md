@@ -366,6 +366,31 @@ ceiling the member's screen still shows the code and the door answers `too_early
 honest, is actionable by the person standing outside, and is pinned. Hiding a booking's own
 code from the member who owns it would be the worse half of the trade.
 
+**The phone is TOLD the window rather than left to derive it.** `POST /me/qr/generate`
+answers three more fields:
+
+| Field | For a booking code | For an ident code |
+|---|---|---|
+| `doors` | whether the club has ≥ 1 **enabled** `Kind=Gate` row | the same |
+| `door_opens_at` | `StartsAt − H` | `null` |
+| `door_closes_at` | the code's own `ExpiresAt` | `null` |
+
+The page cannot compute `H` for itself, and must not be able to: it is
+`max(gate_early_entry, min(roster + cue, 240))` under one policy and `gate_early_entry` under
+the other, and none of those three settings belongs on a member's API surface. A page
+computing its own copy is how a member is told their code works at a time their club's door
+refuses it, which is the drift `BookingCodeWindow` exists to make impossible — so the server
+answers with the same function the door decides with.
+
+`door_closes_at` is the CODE's expiry and not the booking's end, because that is genuinely
+the door's upper edge and it is later than the slot by the grace window; understating it
+would have the product denying its own generosity to the member walking back in for a
+forgotten racquet. An ident code gets `null` for both because it names no booking and
+therefore has no window of its own — under `active_member` it opens whenever the club's rules
+allow, which is not an instant. `doors` counts **enabled** rows, because a board the club has
+switched off is refused `403` on every route it calls and promising a member it will let them
+in would be false.
+
 ### The upper edge is the code's own liveness, and there is only one of it
 
 **A booking code opens a door until the CODE expires, not until the booking's `EndsAt`.**
@@ -1165,6 +1190,8 @@ new sentence above with no row is the defect this table exists to expose.
 | A code outside its own window opens for a member due on another court | `DeviceGateTests.A_spent_booking_code_still_opens_the_door_for_a_member_due_on_another_court`, `…An_early_booking_code_opens_the_door_for_a_member_whose_court_is_running`, `DeviceGateHttpTests.A_spent_booking_code_opens_the_door_for_a_member_whose_next_court_is_due` |
 | An ident code has no booking window of its own | `DeviceGateTests.An_ident_code_has_no_booking_window_of_its_own` |
 | The door's horizon under `active_member` is the phone's, and cannot drift from it | `DeviceGateTests.The_doors_horizon_under_the_default_policy_is_the_one_the_phone_shows`, `DeviceGateHttpTests.The_door_accepts_a_booking_code_exactly_while_the_phone_would_show_it` |
+| The member's screen is told `doors`, `door_opens_at` and `door_closes_at`, and the door agrees with them | `DeviceGateHttpTests.The_member_screen_is_told_what_its_code_does_at_a_door` (drives the real decision at both edges of the stated window) |
+| `doors` counts ENABLED gates only, and a court box is not a door | `DeviceGateHttpTests.A_club_whose_only_door_is_out_of_service_has_no_doors_on_the_member_screen` |
 | No settings combination, legal or hand-edited, reaches further than four hours | `DeviceGateTests.No_settings_combination_lets_a_door_reach_further_than_four_hours`, `…A_club_with_an_enormous_phone_horizon_still_has_a_four_hour_door`, `DeviceGateHttpTests.The_door_reaches_four_hours_however_wide_the_clubs_own_horizon_is` |
 | The release is the club's setting, clamped to 1–30 | `DeviceGateTests.The_release_is_the_clubs_setting_clamped`, `DeviceGateHttpTests.The_release_on_the_wire_is_the_clubs_setting` |
 | Every reason has a vector and every vector a reason | `DeviceGateProtocolCorpusTests.The_refusal_reasons_and_their_vectors_are_the_same_set` |

@@ -1151,6 +1151,132 @@ public sealed class DeviceGateHttpTests
     private const string SharedHorizonSettings =
         """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","roster_window_minutes":120,"activation_cue_window_minutes":10,"gate_early_entry_minutes":30,"gate_access_policy":"active_member"}""";
 
+    /// <summary>
+    /// <b>The member's page cannot tell the truth about doors without being told.</b>
+    ///
+    /// <para>
+    /// The Court Code screen says what the code in the member's hand will do, and since the
+    /// gate shipped it has been wrong: a booking code also opens the club door, from
+    /// `StartsAt − H` until shortly after the booking ends, and the page said nothing about
+    /// it. The page cannot work that out for itself either — `H` is
+    /// `max(gate_early_entry, min(roster + cue, 240))` under one policy and something else
+    /// under the other, and the three settings behind it are not on a member's API surface
+    /// and should not be. So the server, which already computes it for the door, says it.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>doors</c> is separate from the two instants because it answers a different question:
+    /// whether this club has doors at all. A club with none must have a page that says nothing
+    /// about them rather than one saying "it opens the door" about a building with no
+    /// controller in it.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_member_screen_is_told_what_its_code_does_at_a_door()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", SharedHorizonSettings);
+        var device = factory.CreateClient();
+        var phone = MemberClient(factory, club);
+
+        // No gate row yet: the club has no doors, and the page must say nothing about them.
+        var noDoors = await GenerateAsync(phone);
+        Assert.False(noDoors.GetProperty("doors").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, noDoors.GetProperty("door_opens_at").ValueKind);
+        Assert.Equal(JsonValueKind.Null, noDoors.GetProperty("door_closes_at").ValueKind);
+
+        var mac = await GateAsync(factory, club, device, "front-door");
+
+        // Still an ident code — no booking in reach — so the door instants stay null, because
+        // a sixty-second ident code has no booking window of its own.
+        var ident = await GenerateAsync(phone);
+        Assert.Equal("ident", ident.GetProperty("kind").GetString());
+        Assert.True(ident.GetProperty("doors").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, ident.GetProperty("door_opens_at").ValueKind);
+        Assert.Equal(JsonValueKind.Null, ident.GetProperty("door_closes_at").ValueKind);
+
+        // Now a booking inside the phone's horizon: the code becomes that booking's own, and
+        // the two instants are the door's window for it.
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(60));
+        var screen = await GenerateAsync(phone);
+        Assert.Equal("booking", screen.GetProperty("kind").GetString());
+        Assert.True(screen.GetProperty("doors").GetBoolean());
+
+        using var scope = factory.Services.CreateScope();
+
+        // The tenant has to be set by hand: outside a request nothing has resolved one, and
+        // the global query filter would then read every table as the empty tenant's — so the
+        // code would resolve to nothing and the probe below would pass for the wrong reason.
+        scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>()
+            .Set(club.TenantId, club.Slug);
+
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var codes = scope.ServiceProvider.GetRequiredService<AccessCodeService>();
+        var row = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+        var live = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+
+        // Opens at StartsAt − H, and H is the DOOR's horizon: 130 minutes at these settings,
+        // not the thirty-minute entry window. Asserted against the shared function over the
+        // club's own live settings rather than against a literal, so the page and the door
+        // cannot drift even in the test.
+        var horizon = BookingCodeWindow.DoorHorizonMinutes(live);
+        Assert.Equal(130, horizon);
+        Assert.NotEqual(horizon, BookingCodeWindow.EntryWindowMinutes(live));
+
+        Assert.Equal(
+            booking.StartsAt.AddMinutes(-horizon),
+            screen.GetProperty("door_opens_at").GetDateTimeOffset());
+
+        // Closes when the CODE dies, which is the door's real upper edge — the slot's end plus
+        // the grace window — and is deliberately later than the booking's own end.
+        var closes = screen.GetProperty("door_closes_at").GetDateTimeOffset();
+        Assert.Equal(booking.EndsAt.AddMinutes(live.GraceWindowMinutes), closes);
+        Assert.True(closes > booking.EndsAt);
+
+        // The probe: the code the page is showing really does open the door at
+        // door_opens_at + a minute, and really does not a minute before it. One field, two
+        // instants, and the door is asked rather than the arithmetic re-stated.
+        var code = screen.GetProperty("code").GetString()!;
+        var opensAt = screen.GetProperty("door_opens_at").GetDateTimeOffset();
+
+        Assert.True((await GateAccess.DecideAsync(
+            db, codes, new GateContext(row, live, "qr", code, opensAt.AddMinutes(1)), default)).Opened);
+        Assert.Equal(GateAccess.TooEarly, (await GateAccess.DecideAsync(
+            db, codes, new GateContext(row, live, "qr", code, opensAt.AddMinutes(-1)), default)).Reason);
+    }
+
+    /// <summary>
+    /// A club whose only door is out of service has no doors as far as the member's page is
+    /// concerned. The page's promise is "this will let you in", and a board the club has
+    /// switched off will not — it is refused `403` on every route it calls.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_club_whose_only_door_is_out_of_service_has_no_doors_on_the_member_screen()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var device = factory.CreateClient();
+        var phone = MemberClient(factory, club);
+        var mac = await GateAsync(factory, club, device, "front-door");
+
+        Assert.True((await GenerateAsync(phone)).GetProperty("doors").GetBoolean());
+
+        var (gateId, _) = await IdsAsync(factory, mac, mac);
+        var admin = await AdminClientAsync(factory, club);
+        Assert.Equal(HttpStatusCode.OK,
+            (await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { enabled = false })).StatusCode);
+
+        Assert.False((await GenerateAsync(phone)).GetProperty("doors").GetBoolean());
+
+        // The probe: a COURT BOX is not a door. A club with boxes and no gates has no doors.
+        await CourtBoxAsync(club, device);
+        Assert.False((await GenerateAsync(phone)).GetProperty("doors").GetBoolean());
+    }
+
     /// <summary>What the member's own screen asks for: <c>POST /me/qr/generate</c>, kind auto.</summary>
     private static async Task<JsonElement> GenerateAsync(HttpClient phone)
     {
