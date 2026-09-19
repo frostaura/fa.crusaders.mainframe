@@ -1611,6 +1611,140 @@ describe("AdminDevices", () => {
       expect(screen.queryByText(/gate key too long/)).not.toBeInTheDocument();
     });
 
+    /**
+     * <b>The four refusals, driven by a server that actually refuses them.</b>
+     *
+     * <p>
+     * Until now the stateful mock applied the API's patch rule and refused nothing, so every
+     * one of these was pinned only by a canned 400 — a route that would have answered the
+     * same 400 to a request the API takes happily, and would have gone on answering it after
+     * the contract changed. `refuseDevicePatch` mirrors `KindFieldsRefusal`, so what follows
+     * is the screen meeting the refusal for the reason production produces it.
+     * </p>
+     *
+     * <p>
+     * A row's KIND is the thing none of these PATCHes can change and all of them turn on: the
+     * API has no member for it, and the reset is to delete the row and let the board register
+     * itself again. That is also the one legitimate way a screen with an open form meets
+     * `gate_key_not_a_gate` or `court_fields_on_a_gate` — the row was re-kinded while the
+     * editor was open — which is what `replace` stages.
+     * </p>
+     */
+    it("says a door name belongs on a door when the row turned out to be a box", async () => {
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }));
+      stubFetch([
+        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+        ...server.routes,
+      ]);
+
+      renderPage(<AdminDevicesPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
+      // Deleted and re-registered as a court box while the form sat open.
+      server.replace(deviceFixture({ id: gateFixture().id }));
+      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "side-door" } });
+      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+
+      expect(await screen.findByText(/A door name only belongs on a door gate, and this row is a court box/))
+        .toHaveTextContent(/delete the row and let it register itself again/);
+      // Not the underscore swap, and the editor stays open because the save did not go through.
+      expect(screen.queryByText(/gate key not a gate/)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Save door/ })).toBeInTheDocument();
+    });
+
+    it("says courts belong on a box when the row turned out to be a door", async () => {
+      const server = deviceServer(deviceFixture({ court_numbers: [1] }));
+      stubFetch([
+        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+        ...server.routes,
+      ]);
+
+      renderPage(<AdminDevicesPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /Edit name and courts/ }));
+      server.replace(gateFixture({ id: deviceFixture().id }));
+      fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "2" } });
+      fireEvent.click(screen.getByRole("button", { name: /Save box/ }));
+
+      expect(await screen.findByText(/Courts and button maps belong on a court box, and this row is a door gate/))
+        .toHaveTextContent(/A door drives no courts/);
+      expect(screen.queryByText(/court fields on a gate/)).not.toBeInTheDocument();
+    });
+
+    /**
+     * The same refusal through the other field. A present-but-null `button_map` counts as
+     * sent — it binds as a `JsonElement` and the API asks `ValueKind != Undefined` — so
+     * "back to the club's map", which is a real instruction on a box, is as refused on a gate
+     * as a list would be. That is the difference from `gate_key`, whose null IS an absence.
+     */
+    it("says the same of a button map, including the one that clears an override", async () => {
+      const server = deviceServer(deviceFixture({ button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "minutes:60"] }));
+      stubFetch([
+        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+        ...server.routes,
+      ]);
+
+      renderPage(<AdminDevicesPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /Edit buttons/ }));
+      server.replace(gateFixture({ id: deviceFixture().id }));
+      fireEvent.change(screen.getByLabelText("Court 1 box button 1 court"), { target: { value: "B" } });
+      fireEvent.click(screen.getByRole("button", { name: /Save buttons/ }));
+
+      expect(await screen.findByText(/Courts and button maps belong on a court box/)).toBeInTheDocument();
+    });
+
+    /**
+     * And the length bound, refused by the mock rather than by a canned status — which is
+     * what proves the bound the mock holds is the API's 64 and not a number the test picked.
+     */
+    it("refuses a door name past 64 characters at the server, not only at the keyboard", async () => {
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }));
+      stubFetch([
+        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+        ...server.routes,
+      ]);
+
+      renderPage(<AdminDevicesPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
+      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "x".repeat(65) } });
+      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+
+      expect(await screen.findByText(/A door name is at most 64 characters/)).toBeInTheDocument();
+      // The row kept its old name: a refused PATCH applies nothing.
+      expect(server.current().gate_key).toBe("front-door");
+
+      // And exactly 64 goes through, so the bound is the API's and not one off it.
+      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "y".repeat(64) } });
+      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+      await waitFor(() => expect(server.current().gate_key).toBe("y".repeat(64)));
+    });
+
+    /**
+     * <b>The "New" badge is the API's to clear, and the API clears it on any edit at all.</b>
+     * `UpdateAsync` sets `AutoRegistered = false` unconditionally — not guarded by which
+     * field changed — so a mock that left it alone would let this screen keep showing "New —
+     * name this door" over a row the server had already stopped calling new.
+     */
+    it("drops the new badge after a save, because the API drops it", async () => {
+      const server = deviceServer(gateFixture({ auto_registered: true }));
+      stubFetch([
+        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+        ...server.routes,
+      ]);
+
+      renderPage(<AdminDevicesPage />);
+
+      expect(await screen.findByText("New — name this door")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /Edit name and door/ }));
+      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "front-door" } });
+      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+
+      await waitFor(() => expect(server.current().auto_registered).toBe(false));
+      await waitFor(() => expect(screen.queryByText("New — name this door")).not.toBeInTheDocument());
+    });
+
     /** The API's own bound, on the field, so a long name is stopped where it is typed. */
     it("holds the door name to the 64 characters the API stores", async () => {
       stubFetch(withDevices([gateFixture()]));

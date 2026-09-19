@@ -6,6 +6,9 @@ import { ToastProvider } from "../components/Toast";
 import { AuthProvider } from "../lib/auth";
 import { BalanceProvider } from "../lib/balance";
 import { tokenStore } from "../lib/api";
+// The API's own bound on `gate_key`, read from the copy module rather than restated: a mock
+// that refuses at 64 while the column stores 64 has to be the SAME 64.
+import { GATE_KEY_MAX_LENGTH } from "../lib/gateCopy";
 
 /**
  * The shared frontend test harness.
@@ -130,6 +133,39 @@ function statusFor(route: StubRoute, nth: number): number {
   return route.status[Math.min(nth, route.status.length - 1)];
 }
 
+const REFUSAL = Symbol("stub-refusal");
+
+/** A status and a body, returned FROM a {@link StubRoute.respond} handler. See {@link refuse}. */
+export type StubRefusal = { [REFUSAL]: true; status: number; body: unknown };
+
+/**
+ * A refusal a `respond` handler can answer with.
+ *
+ * <p>
+ * `status` on a route is fixed per call index, which is enough for a stub that always
+ * refuses and useless for a stub that decides. A server that refuses what the API refuses
+ * has to answer 400 for one request and 200 for the next on the same route — so the status
+ * travels back with the body rather than beside it.
+ * </p>
+ */
+export function refuse(status: number, body: unknown): StubRefusal {
+  return { [REFUSAL]: true, status, body };
+}
+
+function asRefusal(answer: unknown): StubRefusal | null {
+  const marked = typeof answer === "object" && answer !== null
+    && (answer as Record<symbol, unknown>)[REFUSAL] === true;
+  return marked ? (answer as StubRefusal) : null;
+}
+
+/** The body and the status for this call, with a {@link refuse} from a handler unwrapped. */
+function resolveAnswer(route: StubRoute, nth: number, request: StubRequest): { answer: unknown; status: number } {
+  const answer = answerFor(route, nth, request);
+  const refusal = asRefusal(answer);
+  if (refusal) return { answer: refusal.body, status: refusal.status };
+  return { answer, status: statusFor(route, nth) };
+}
+
 export function stubFetch(routes: StubRoute[]): FetchStub {
   const calls: StubCall[] = [];
   const served = new Map<StubRoute, number>();
@@ -168,7 +204,6 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
 
     const nth = served.get(route) ?? 0;
     served.set(route, nth + 1);
-    const answer = answerFor(route, nth, { method, path, body });
 
     // `status` and `ok` are computed out here rather than inline in the literal because
     // lizard reads a bare `<` inside an object literal in a .tsx file as the start of a
@@ -176,7 +211,7 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
     // anonymous function. That is why `make complexity` used to measure this file as a
     // single 189-line function and could not see `stubFetch` at all — and why adding a
     // fixture to the end of the file tripped the length gate on a line nobody touched.
-    const status = statusFor(route, nth);
+    const { answer, status } = resolveAnswer(route, nth, { method, path, body });
     const ok = status < 400;
     // `json()` and `blob()` as well as `text()`: the typed client reads text and parses it,
     // the multipart photo upload calls `res.json()` directly, and the wallet CSV must be
@@ -390,7 +425,9 @@ export function applyDevicePatch(
   row: Record<string, unknown>, patch: Record<string, unknown>,
 ): Record<string, unknown> {
   const next = { ...row };
-  if (typeof patch.name === "string") next.name = patch.name;
+  // `device.Name = cmd.Name.Trim()`. Trimmed on the API as well as by the editor, so a name
+  // pasted with a trailing space is stored without one.
+  if (typeof patch.name === "string") next.name = patch.name.trim();
   if (typeof patch.enabled === "boolean") next.enabled = patch.enabled;
   if (Array.isArray(patch.court_numbers)) next.court_numbers = patch.court_numbers;
   if ("button_map" in patch) next.button_map = patch.button_map;
@@ -399,7 +436,57 @@ export function applyDevicePatch(
     const trimmed = patch.gate_key.trim();
     next.gate_key = trimmed === "" ? null : trimmed;
   }
+  // `UpdateAsync` sets this unconditionally — not guarded by which field changed, and not
+  // guarded by anything changing at all. The badge it drives says "nobody has checked this
+  // row yet", and an admin who has PATCHed it has checked it. A mock that left the flag
+  // alone would let a page test assert a badge the real API had already cleared.
+  next.auto_registered = false;
   return next;
+}
+
+/**
+ * What the API would refuse this PATCH with, or null when it would take it.
+ *
+ * <p>
+ * <b>A mock that only applies the rules is still a server that says yes.</b>
+ * {@link applyDevicePatch} was written to catch the `gate_key` no-op and did; it also
+ * accepted a door name on a court box, court fields on a gate, and a name of any length —
+ * so a page test written on it proved the screen handles a success the real API never
+ * sends. That is the gate-key failure one field along.
+ * </p>
+ *
+ * <p>
+ * Mirrored from <code>AdminDeviceEndpoints.KindFieldsRefusal</code>, <b>including the
+ * order</b>: the kind refusals are answered before the length bound and before the button
+ * map is parsed at all, so a request carrying both a court field and an over-long name is
+ * refused for the field that does not belong.
+ * </p>
+ *
+ * <p>
+ * `gate_key` present-as-null is an ABSENCE, not a value — the API binds it as a nullable
+ * string and asks <code>req.GateKey is null</code>, which reads a JSON null and an omitted
+ * key identically. `button_map` present-as-null is a VALUE, because it binds as a
+ * `JsonElement` and the API asks <code>ValueKind != Undefined</code>. The two fields look
+ * alike on the wire and do not behave alike, which is the confusion this whole area keeps
+ * producing.
+ * </p>
+ */
+export function refuseDevicePatch(
+  row: Record<string, unknown>, patch: Record<string, unknown>,
+): StubRefusal | null {
+  const sentGateKey = patch.gate_key !== undefined && patch.gate_key !== null;
+  if (row.kind !== "Gate") {
+    return sentGateKey ? refuse(400, { error: "gate_key_not_a_gate" }) : null;
+  }
+  if (patch.court_numbers != null || "button_map" in patch) {
+    return refuse(400, { error: "court_fields_on_a_gate" });
+  }
+  // Bounded here rather than truncated at the column, and measured after the trim, because
+  // a door whose name is silently shortened is a door nobody can find in the audit trail.
+  if (sentGateKey && String(patch.gate_key).trim().length > GATE_KEY_MAX_LENGTH) {
+    return refuse(400, { error: "gate_key_too_long", max_length: GATE_KEY_MAX_LENGTH });
+  }
+  return null;
 }
 
 /** A device server's routes plus a window onto the row it is holding. */
@@ -407,6 +494,18 @@ export type DeviceServer = {
   routes: StubRoute[];
   /** The row as the server now holds it — what a real GET would serve next. */
   current: () => Record<string, unknown>;
+  /**
+   * Swaps the row the server is holding, without going through a PATCH.
+   *
+   * <p>
+   * For the one thing a PATCH cannot do: change a row's KIND. The API has no member for it
+   * and never has — the reset is to delete the row and let the board register itself again,
+   * which is also the only legitimate way a screen with an open form meets
+   * `gate_key_not_a_gate` or `court_fields_on_a_gate`. Without this those two refusals are
+   * decodable and untestable, which is how copy for them rots.
+   * </p>
+   */
+  replace: (next: Record<string, unknown>) => void;
 };
 
 /**
@@ -429,12 +528,18 @@ export function deviceServer(initial: Record<string, unknown>): DeviceServer {
         method: "PATCH",
         path: "/api/v1/admin/devices/",
         respond: (request) => {
-          row = applyDevicePatch(row, (request.body ?? {}) as Record<string, unknown>);
+          const patch = (request.body ?? {}) as Record<string, unknown>;
+          // Refuse first and apply nothing: the API answers its refusals before it touches
+          // the row, so a half-applied patch behind a 400 is a failure mode it does not have.
+          const refusal = refuseDevicePatch(row, patch);
+          if (refusal) return refusal;
+          row = applyDevicePatch(row, patch);
           return row;
         },
       },
     ],
     current: () => row,
+    replace: (next) => { row = { ...next }; },
   };
 }
 
