@@ -1,21 +1,30 @@
 ---
 name: crusaders-mainframe-gotchas-build
-description: "Firmware and gate traps: src/iot/arduino/ is GENERATED and anything court_mega links must be valid C++11 as well as C++17; a PlatformIO coordinate is owner/name; several gates report a red run as green."
+description: "Firmware toolchain traps: src/iot is several PlatformIO projects sharing one venv, court-box/arduino/ is GENERATED and self-asserting, anything court_mega links must be valid C++11 as well as C++17, and a library coordinate is owner/name."
 type: gotcha
-last_verified: 2026-09-11
+last_verified: 2026-09-19
 ---
 
-# Gotchas — firmware toolchain and the quality gates
+# Gotchas — the firmware toolchain
 
-- **`src/iot/arduino/` is generated output and three gates have to know it.** `make arduino-export`
-  writes it from `lib/`, `src/` and `platformio.ini`'s `-D` flags; `make arduino-check` regenerates
-  and fails on a diff. It holds machine-rewritten copies of `lib/` plus two vendored libraries, so
-  **the clang-format file list must exclude it** — the Makefile does, and the CI job duplicates that
-  list inline and needs the same. A hand-edit there is not flagged, just deleted by the next export.
+The gates that check this firmware have traps of their own:
+[`gotchas-gates.md`](gotchas-gates.md).
+
+- **`pio` is always `-d <project>`, never `-d src/iot`** — several PlatformIO projects (`shared/`,
+  `court-box/`) share one venv there. `IOT_PROJECTS` in the Makefile is the one place a third is
+  registered and every gate derives from it; `ci.yml` still names board builds, the arduino-cli
+  compile and the simulator smoke test per project by hand.
+- **`src/iot/court-box/arduino/` is generated and three gates have to know it.** `make
+  arduino-export` writes it from BOTH `lib/` roots, `src/` and the `-D` flags; `make arduino-check`
+  fails on a diff. It holds machine-rewritten copies plus two vendored libraries, so **the
+  clang-format list must exclude it** (`:(exclude)src/iot/*/arduino/**`) — the Makefile does, the CI
+  job duplicates it inline. A hand-edit there is deleted by the next export, not flagged. The
+  exporter **asserts every string rewrite it makes**, so rewording the bridge's `secrets.h` `#error`
+  text fails the export instead of shipping an instruction pointing nowhere: fix the substitution.
 - **The Arduino AVR core hard-codes `-std=gnu++11` and the IDE cannot override it** (verified on
   arduino:avr 1.8.6 *and* 1.8.8 — `platform.txt`, no sketch-level build-flag mechanism, no settable
-  `extra_flags`). So the deployment route compiles `lib/` at C++11 while PlatformIO compiles it at
-  C++17, and **anything `court_mega` links must be valid in both.** `inline constexpr` variables are
+  `extra_flags`). So the deployment route compiles both `lib/` roots at C++11 while PlatformIO
+  compiles them at C++17, and **anything `court_mega` links must be valid in both.** `inline constexpr` variables are
   fine (GCC 7.3 accepts them in C++11 as an extension); a `constexpr` function with a loop is not.
 - **The mirror image, on the PlatformIO side:** the AVR builder appends `-std=gnu++11` *after*
   `build_flags`, so `[common]`'s `-std=gnu++17` lost every time and nothing in `lib/` could compile
@@ -26,35 +35,10 @@ last_verified: 2026-09-11
   never been in the PlatformIO registry; `marcoschwartz/...@1.1.4` is the registry one, same API.
   `pio pkg search <name>` is the check, and the reason sits in a comment beside the line.
 - **arduino-cli cores are pinned to match the PlatformIO platforms** (`arduino:avr@1.8.6`,
-  `esp8266:esp8266@3.1.2` behind the esp8266 index URL). Only one version of a core installs at a
-  time, so checking a second replaces the first. `court_mega` comes out byte-identical between the
-  two toolchains; the bridge differs by tens of bytes, from board defaults rather than our code.
-- **`make complexity` prints its warning to stdout and exits 1** — piping it through `tail` loses
-  the exit code and reports a red gate as green. That is how a failing gate reached CI. Read `$?`.
-- **lizard's `.tsx` lexer desyncs three ways** — a bare `<` in an object literal, an odd number of
-  bare apostrophes in JSX text, or an inline object type inside a generic argument — each reporting
-  a function nobody wrote at a length nobody wrote; the tell is that the *enclosing* component stops
-  being reported at all. The cure is the text, not the code: name the type, reword the sentence,
-  hoist the literal.
-- **lizard's C# parser mis-scopes any expression-bodied member whose body contains braces**
-  (`=> new { … }`, `=> x switch { … }`, a property pattern), dumping the rest of the file into a
-  `*global*` pseudo-function whose length is the whole file — the gate trips naming no real function
-  at line 0. The fix is a block body, not a whitelist entry; a method placed directly *after* an
-  expression-bodied private constructor misfiles identically. Placement, not content.
-- **The rollover grep gate keys on identifier NAMES and has a hole:** it catches `now >=
-  expiresAtMs` but not `now >= until_[i].at`, and `at` is the deadline type's public field, so the
-  naive comparison is reachable through any deadline named otherwise. The tests are the real gate.
-- **`git ls-files` only matches tracked files**, so a lint target built on it silently passes on new
-  work (the iot target uses `-co --exclude-standard`); **`clang-format` output varies by version**,
-  so it is pinned — an OS-provided formatter lets CI reject correctly-formatted code.
-- **`-Wswitch-enum` is not satisfied by a `default:` label.** Adding one silences the single warning
-  that catches a newly-added enum member; name every case and put the fallback after the brace.
+  `esp8266:esp8266@3.1.2` behind the esp8266 index URL); only one version of a core installs at a
+  time. `court_mega` is byte-identical between the two toolchains; the bridge differs by tens of
+  bytes, from board defaults rather than our code.
 - **PlatformIO compiles only the files inside each `test_<name>/` directory**, so a shared helper in
   `test/support/` compiles and then fails to link, once per suite — which is why the corpus reader is
-  header-only with everything `inline`.
-- **A migration file with a UTF-8 BOM fails `dotnet format` with `error CHARSET`.** `dotnet ef
-  migrations add` writes one and the `.Designer.cs` keeps it; a hand-edited `.cs` must not have one.
-- **A *fresh remote* session has no `dotnet` and no `pio`** — install the .NET 10 SDK and the pinned
-  iot requirements before trusting any gate result there. Postgres starts without Docker from the
-  distro's `postgresql/16/bin`; on a locally-initialised cluster the superuser is **`crusaders`**,
-  not `postgres`, and `pg_ctl` refuses to run as root.
+  header-only with everything `inline`. It is also **per project**: `court-box/test/support/` is
+  invisible from `shared/test/`, which is why every corpus-bound assertion stayed in `court-box`.

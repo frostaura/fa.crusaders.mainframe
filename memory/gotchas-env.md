@@ -2,7 +2,7 @@
 name: crusaders-mainframe-gotchas-env
 description: "This checkout sits on iCloud: MSBuild is denied copying appsettings into bin, iCloud fabricates numbered duplicates inside generated sketches, and a worktree under .claude/ inherits a hidden flag that makes .NET ignore appsettings.json."
 type: gotcha
-last_verified: 2026-09-11
+last_verified: 2026-09-19
 ---
 
 # Gotchas — this machine and this iCloud checkout
@@ -30,7 +30,7 @@ Verified on the founder's Mac 2026-09-11: the system `python3` is below gcovr's 
   checkout and verify. Never `npm ci` in a worktree — it fights iCloud, which fabricates a
   `node_modules 2` beside it.
 - **iCloud fabricates numbered duplicates of files it has just seen written, and they are not always
-  harmless.** Under `bin`/`obj` they are gitignored build output. Inside `src/iot/arduino/` they are
+  harmless.** Under `bin`/`obj` they are gitignored build output. Inside `src/iot/court-box/arduino/` they are
   not: an export once produced dozens of `Name 3.cpp` / `.hpp` copies **between the generator
   finishing and `git add`**, which committed them — and the Arduino IDE compiles every `.cpp` under
   `src/` recursively, so a stale duplicate is a second definition. `.gitignore` carries the
@@ -44,10 +44,14 @@ Verified on the founder's Mac 2026-09-11: the system `python3` is below gcovr's 
   floor (so is Xcode's), so the venv is created and the requirements install fails, leaving no `pio`.
   Recovery: `rm -rf src/iot/.venv && uv venv --python 3.12 src/iot/.venv`, then install the pinned
   requirements into it. CI uses setup-python 3.12 and is unaffected.
-- **`tools/strict_compile.sh` cannot run on macOS at all** — macOS's `/bin/bash` predates `mapfile`, and
-  Apple clang flags dozens of *untouched* headers the GNU-calibrated gate does not. Discharge it by
-  hand-compiling each touched `lib/` file with the script's exact flag set; **the CI `iot` job is
-  the real gate.** Do not "fix" it for clang — that is still not the compiler it was calibrated on.
+- **`strict_compile.sh` RUNS on macOS now and still cannot PASS here.** The `mapfile` calls that made
+  it die instantly on macOS's bash 3.2 are gone (2026-09-19, plain `while read` loops), so it
+  compiles and reports — but Apple clang's `-Wunused-const-variable` is in its `-Wall` for C++ where
+  GCC's is not, so four *untouched* headers (`shared/lib/hal/{Button,Display,Relay,Store}.h`) fail
+  under `-Werror` on this Mac and nowhere else. Discharge the gate by running it and confirming those
+  four, and only those four, are the failures; **the CI `iot` job on GCC is the real gate.** Still do
+  not "fix" the headers for clang — that is not the compiler the flag set was calibrated on, and
+  `make lint-iot` is therefore red locally by design.
 - **The Docker CLI on this Mac wedges and never returns** — `ps`, `system df` and `exec` all hang
   indefinitely and have cost several agents real time. Nothing needs it: a test Postgres listens
   directly on **5439** (homebrew `psql` reaches it) and a throwaway Python SMTP sink on 1025 stands
