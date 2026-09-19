@@ -97,6 +97,17 @@ public sealed class TenantSettingsAccessor
             // key-holder could mint boards that each alerted every admin.
             DeviceAlertCooldownMinutes = TryInt(
                 root, "device_alert_cooldown_minutes", TenantSettingsView.DefaultDeviceAlertCooldownMinutes),
+
+            // The five Wave 1 door settings. Read RAW here, exactly like every other key on
+            // this accessor, and bounded by DoorSettings at each reader — which is the whole
+            // point: this method's contract is "what the column says", and "what a door may
+            // act on" is a different question with a different answer for a hand-edited
+            // document. See DoorSettings and door-gate.md §8.
+            DoorLogRetentionDays = TryInt(root, "door_log_retention_days", DoorSettings.DefaultLogRetentionDays),
+            DoorRefusalSpikeCount = TryInt(root, "door_refusal_spike_count", DoorSettings.DefaultRefusalSpikeCount),
+            DoorRefusalSpikeMinutes = TryInt(root, "door_refusal_spike_minutes", DoorSettings.DefaultRefusalSpikeMinutes),
+            ClubContactPhone = TryString(root, "club_contact_phone", ""),
+            ClubContactEmail = TryString(root, "club_contact_email", ""),
         };
     }
 
@@ -264,6 +275,33 @@ public sealed record TenantSettingsView(
     /// <see cref="DayStartMinute"/>/<see cref="DayEndMinute"/> pair the Settings page edits.
     /// </summary>
     public OperatingHours OperatingHours { get; init; } = OperatingHours.Empty;
+
+    // ---- The five Wave 1 door settings ----
+    //
+    // Raw as stored, like everything else on this record. Every one of them is read through
+    // DoorSettings, which is where the bounds live and the only place a reader should take
+    // them from; the two strings are trimmed and cut there as well. The defaults are
+    // DoorSettings' own constants rather than literals here, so the accessor's fallback and
+    // this initialiser cannot drift — the trap the settings endpoint's own defaults fell into
+    // once already (AdminSettingsHttpTests.Opening_the_settings_page_and_saving_it_changes_nothing).
+
+    /// <summary>How long a club keeps its door rows, days. Read via <see cref="DoorSettings.LogRetentionDays"/>.</summary>
+    public int DoorLogRetentionDays { get; init; } = DoorSettings.DefaultLogRetentionDays;
+
+    /// <summary>Refusals at one door that raise the spike flag. Read via <see cref="DoorSettings.RefusalSpikeCount"/>.</summary>
+    public int DoorRefusalSpikeCount { get; init; } = DoorSettings.DefaultRefusalSpikeCount;
+
+    /// <summary>The window those refusals are counted in, minutes. Read via <see cref="DoorSettings.RefusalSpikeMinutes"/>.</summary>
+    public int DoorRefusalSpikeMinutes { get; init; } = DoorSettings.DefaultRefusalSpikeMinutes;
+
+    /// <summary>
+    /// The number a member refused at a door should ring. Empty by default — a club that has
+    /// not set one must not be given an invented one, and the member's page says so in words.
+    /// </summary>
+    public string ClubContactPhone { get; init; } = "";
+
+    /// <summary>The address a member refused at a door should write to. Empty by default, for the same reason.</summary>
+    public string ClubContactEmail { get; init; } = "";
 
     /// <summary>
     /// The club's open and close for one local weekday, as minutes past local midnight.
