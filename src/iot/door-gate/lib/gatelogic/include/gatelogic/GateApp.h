@@ -177,7 +177,7 @@ public:
   ///
   /// THE DOOR IS UNAFFECTED, deliberately. A board that refused to open for a
   /// missing watchdog would be a door that admits nobody, which is far worse
-  /// than one running on five seconds instead of twelve. Nothing on this path
+  /// than one running on five seconds instead of fifteen. Nothing on this path
   /// touches the lock in either direction.
   void setWatchdogArmed(bool armed);
 

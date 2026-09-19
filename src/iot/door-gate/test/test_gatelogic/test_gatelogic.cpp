@@ -3593,7 +3593,7 @@ void test_led_a_watchdog_that_would_not_arm_blinks_four_times_as_fast() {
 ///
 /// A board that refused to open because its watchdog would not arm would be a
 /// door that admits nobody, which is far worse than one running on the core's
-/// five seconds instead of twelve. And the fault must not open one either.
+/// five seconds instead of fifteen. And the fault must not open one either.
 void test_app_a_refused_watchdog_changes_nothing_about_the_door() {
   Rig rig(kBaseMid);
   rig.app.setWatchdogArmed(false);

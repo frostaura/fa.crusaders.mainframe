@@ -48,7 +48,7 @@ so the headers still compile with no build system at all.
 | `GATE_UNLOCK_DEFAULT_MS` | 3000 | release time until the first heartbeat |
 | `GATE_UNLOCK_HARD_CAP_MS` | 30000 | the lock can never stay released longer |
 | `GATE_MAX_TOKEN_LEN` | 20 | `= roster::kMaxTokenLen`, asserted |
-| `GATE_WATCHDOG_SECONDS` | 12 | task watchdog period; **asserted** to exceed one worst-case HTTP call |
+| `GATE_WATCHDOG_SECONDS` | 15 | task watchdog period; **asserted** to exceed one worst-case HTTP call. Was 12, when a call was two phases rather than three. |
 | `HEARTBEAT_INTERVAL_MS` | 30000 | starting cadence; the tenant's is adopted |
 | `ROSTER_MAX_AGE_MS` | 21600000 | 6 h, same as the court box |
 | `EVENTQ_SLOTS` | 64 | offline events held before the oldest is lost |
@@ -59,8 +59,9 @@ negotiable per board, and they are one budget rather than three numbers
 
 | Constant | Value | What it is |
 |---|---|---|
-| `kHttpConnectTimeoutMs` / `kHttpResponseTimeoutMs` | 4000 / 4000 | the two halves of one blocking call. The core applies them **separately** and a single call can spend **both**. |
-| `kWorstBlockingCallMs` | 8000 | their sum, and the spine of three guarantees: the watchdog period, the release-overrun bound, and the scanner buffer. Derived, never written out. |
+| `kHttpConnectTimeoutMs` / `kHttpResponseTimeoutMs` | 4000 / 4000 | the connect and the **header** phase. The core applies them **separately** and a single call can spend both. |
+| `kHttpBodyBudgetMs` | 4000 | the **body** phase, which is this firmware's own and is sampled **after** the headers return. It used to share the whole call's budget, so a slow header phase handed the body a deadline already in the past and a perfectly good roster was reported as a transport failure. |
+| `kWorstBlockingCallMs` | 12000 | their sum — three phases, not two — and the spine of three guarantees: the watchdog period, the release-overrun bound, and the scanner buffer. Derived, never written out. |
 | `kScannerRxBufferBytes` | 1024 | the UART receive buffer, set **before** `Serial2.begin`. The core's 256-byte default is 267 ms at 9600 baud and overruns while the loop is inside a blocking call. |
 
 `GATE_WATCHDOG_SECONDS` is `static_assert`ed to exceed `kWorstBlockingCallMs`
@@ -202,6 +203,23 @@ Everything else — a transport failure, 401, 404, 408, 429, any 5xx, or a 200
 whose body cannot be read — says the board learned *nothing*, and the roster gets
 its turn.
 
+**A single spurious 403 costs the offline fallback one heartbeat interval.** The
+roster is committed empty the moment the board hears one, and the next accepted
+heartbeat refills it — so the window is one interval, **30 s at the default
+cadence and up to 5 minutes** at the longest the server may push. A member
+arriving inside that window with the link ALSO down is refused, which is the
+price of the 403 being authoritative. Measured: 30 020 ms at a 30-second
+cadence, 300 020 ms at 300.
+
+**A 404 on `/events` keeps the event.** `devapi::react` classes a 404 as
+"a 4xx this box caused — drop it", which is right for the court box and is
+shared code, so the gate's drain has its own rule: on this route a 404 means the
+API did not recognise this MAC because the device row was deleted in the
+console, the board re-registers on its next heartbeat, and the very same event
+is then accepted. Dropping the backlog would throw away an evening of door
+entries to save twelve requests an hour. It is paced by the same backoff a 429
+is.
+
 **A response body that does not fit, or does not arrive, is a transport failure
 — never a short body.** It is read a byte at a time into the caller's buffer
 under that buffer's cap and the call's own deadline; a body longer than the
@@ -209,6 +227,34 @@ buffer is refused with nothing written rather than truncated, because
 `{"opened":true,` cut after the comma is a door that opens for a body nobody
 could have read. A refused or unfinished body is reported as status 0, so the
 scan goes to the roster rather than to a parser holding half an object.
+
+**And the board asks for a framing it can read.** This is round G3's critical,
+and on a real board it took every door out of service. Kestrel answers every
+device route `Transfer-Encoding: chunked` with **no** `Content-Length` and
+**holds the socket open**, because `HTTPClient` defaults to keep-alive. The
+reader consulted only `http.getSize()` — which is -1 unless there is a
+Content-Length — and read until the peer closed. It never closed. Every call
+spent its whole budget and returned a transport failure, so the roster never
+loaded and the door refused everyone; and had the peer closed, the framing bytes
+would have gone to the parser, because `5d1\r\n{"kind":"gate",…}\r\n0\r\n\r\n`
+is not a document. Nothing in this repository could see it: no test here reads a
+real socket.
+
+Two halves, because a proxy that ignores the first takes every door in the club
+out of service and nothing says why:
+
+- the port asks for **HTTP/1.0** — `useHTTP10(true)` with `setReuse(false)` —
+  and the same server then answers close-delimited with `Connection: close`;
+- `gatelogic::readBody` takes the **framing** as an input rather than guessing
+  it: known length, chunked, or until-close, derived in one place from
+  `getSize()` and a collected `Transfer-Encoding` header. It **de-chunks**, and
+  framing that does not parse is a reported failure rather than a salvaged half
+  of a document.
+
+The fixtures are the bytes off the wire: the 61-byte `3d\r\n…\r\n0\r\n\r\n`
+gate response, a full 48-entry heartbeat as one 0x5d1 = 1489-byte chunk, both
+split at every boundary, a peer that hangs up mid-chunk, and the keep-alive read
+that produced the outage.
 
 **Offline, the roster decides**, and the degraded mode is narrower than the court
 box's: only a member with a rostered booking gets in. A walk-up member's
@@ -236,8 +282,12 @@ the deadline passes. The deadline is re-checked with a fresh clock immediately
 after every call, and a pass makes at most one, so the true bound is:
 
 > physical release ≤ granted window + `kWorstBlockingCallMs` + `kIdleDelayMs`
-> — **8 010 ms** over the deadline with this image's numbers, and a worst case of
-> **38.01 s** against the 30-second hard cap.
+> — **12 010 ms** over the deadline with this image's numbers, and a worst case
+> of **42.01 s** against the 30-second hard cap.
+
+It was 8 010 ms and 38.01 s until round G3 gave the response body its own
+budget. The number went **up** because the old one was measured against a call
+whose body phase could be handed no time at all.
 
 That sentence replaces "the lock can never stay released longer than the hard
 cap", which was false: the loop used to check the deadline once per pass
@@ -245,8 +295,8 @@ cap", which was false: the loop used to check the deadline once per pass
 
 **Its one precondition, which is the core's and not ours.** The bound assumes a
 call really is bounded by `kWorstBlockingCallMs`. The connect is, and so is the
-body — that phase is ours and takes an absolute deadline sampled before the call
-starts. `HTTPClient`'s own **header** loop is not: `setTimeout` is an *inter-byte*
+body — that phase is ours and takes an absolute deadline sampled **after the
+headers return**. `HTTPClient`'s own **header** loop is not: `setTimeout` is an *inter-byte*
 timeout, so a peer sending one byte every three seconds resets it forever, and
 there is no way to interrupt `POST()` from here. A peer that dribbles headers
 can hold one call past the bound. That case is the **watchdog's**, deliberately,
@@ -271,8 +321,38 @@ empty or stale is a member refused at a door whose network is working.
 drained first, so a scan that arrived a moment ago is decided now rather than
 after a heartbeat has spent its whole timeout finding out the API is gone. A
 scanner that never stops talking would otherwise win *every* pass: after four
-consecutive passes in which a scan took the call with a heartbeat already due,
-the heartbeat goes first and that pass's scan waits ten milliseconds.
+consecutive passes in which a scan took the call with an **upload** already
+waiting — a due heartbeat *or* a ready event drain — the upload goes first.
+
+**What that costs the fifth member, as a number rather than as a word.** This
+paragraph used to say the scan "waits ten milliseconds". Ten milliseconds is
+what it waits when the upload returns instantly; what it can wait is one whole
+blocking call plus the pass tick — `kWorstBlockingCallMs` + `kIdleDelayMs`,
+**12 010 ms** with this image's numbers. Measured against an eight-second
+heartbeat before the budgets changed: 8 081 ms, with the four scans ahead of it
+waiting 71 ms each.
+
+**Both uploads are bounded, not just the heartbeat.** Round G2 bounded the
+heartbeat alone. Measured afterwards: with a scan offered every 210 ms for a
+simulated hour the heartbeat kept its cadence — 116 calls — and the event drain
+posted **nothing at all**, so a door back from a night offline spent the morning
+holding entries the club never learned about while its ring overwrote its own
+oldest rows. The counter is cleared by whichever upload takes the pass, and by a
+link drop: four passes spent deferring an upload that could not have run are not
+a debt the member on the other side of an outage owes.
+
+**No heartbeat is attempted within 15 s of the previous attempt**, whatever
+armed it. A link-up edge arms one for "now" — the heartbeat is what fills the
+roster, and until it has, an offline scan is refused — which on a door at the
+edge of the AP's range is one call *per pass*. Measured against the real loop
+with the link toggling every pass for a simulated hour: **179 999 heartbeats**
+against a cadence that says 120, an API the club would read as an attack and a
+board that spends its life inside a connect. The floor bounds it at **240 an
+hour**, twice the healthy cadence, and it is measured from the previous
+*attempt* rather than the previous success, because a flapping radio is exactly
+the case that produces failing calls. It equals `devlink::kMinHeartbeatMs`, the
+shortest interval the server may push, so it can never make the board disobey a
+cadence it was told to keep.
 
 **A due heartbeat goes before the event drain**, and a drain that posts without
 moving its queue backs off — 15 s, doubling to a five-minute cap, cleared the
@@ -295,6 +375,19 @@ bytes at a time. Poisoning only the line in assembly poisoned the wrong line —
 good buffered line was dropped and the holed one was handed up several passes
 later as a perfectly valid token. A member re-scans; nobody else's booking opens
 a door.
+
+Two consequences of that rule, stated because both look like faults:
+
+- **an error with an EMPTY buffer costs the NEXT line.** There is nothing
+  buffered to discard, so the assembler is marked corrupt and stays that way
+  until a terminator arrives — which means the next whole line a member scans is
+  thrown away and they scan again. Discarding nothing instead would leave the
+  far side of the hole to be assembled as a token;
+- **a scanner that never sends a terminator produces nothing at all.** No token,
+  no refusal, no queued event, no blink: the assembler refuses a line past the
+  token cap and then waits for the terminator that ends it. A code taped over
+  the window is therefore a silent door rather than a door refusing repeatedly,
+  and the thing to look at is the scanner's own configuration.
 
 ---
 
@@ -320,7 +413,8 @@ should be showing once per pass and answers from the clock.
 **The fault blink does not change what the door does, in either direction.** A
 board that refused to open because its watchdog would not arm would be a door
 that admits nobody, which is far worse than one running on the core's own five
-seconds instead of twelve. The board retries three times, then says so and
+seconds instead of the fifteen this image asks for. The board retries three
+times, then says so and
 carries on.
 
 **A board that accepted a heartbeat carrying no usable roster counts it**, and
@@ -328,7 +422,21 @@ sends the running total as `no_push` in its next heartbeat request. That case is
 otherwise invisible: the roster silently does not change, its age silently keeps
 running, and this lamp has nothing to say about it. A diagnostic pattern *on the
 lamp* was rejected for it — this is what tells a member their scan was seen, and
-a blink they cannot interpret is worse than none.
+a blink they cannot interpret is worse than none. A heartbeat the server
+answered whose **body** never arrived whole counts too: that is exactly the case
+the counter exists for, and it was the one case the counter missed.
+
+**And a board that lost queued events says so**, as `events_lost` in the same
+request. The ring holds 64 and overwrites its oldest entry when it is full, so a
+door offline overnight comes back having already discarded an evening of
+entries. `EventQueue.h` has promised since it was written that "an overflow is
+reported, never silent" and until round G3 nothing anywhere read the counter.
+
+Both are **totals since boot**, not deltas — the board has no way to know which
+reports the server kept — and both **saturate** at 2 147 483 647 rather than
+wrapping, because the API binds them as a signed 64-bit value and silently
+ignores a negative or oversized one. Both are **omitted at zero**, so a healthy
+board's request stays byte-identical to the contract corpus's vector.
 
 **A refusal while the door is already released shows nothing**, and that is
 intended: solid outranks the three blinks, so the second member of a pair —
@@ -389,7 +497,8 @@ are in [`test/`](test/) and run by `make test-iot`.
 | At most one blocking call per pass | `test_app_a_pass_makes_at_most_one_blocking_call` |
 | The watchdog is kicked around every blocking call | `test_app_the_watchdog_is_kicked_around_every_blocking_call` + the `static_assert` in `GateConfig.h` |
 | A dead API host never trips the watchdog or starves the lock | `test_app_a_dead_api_host_never_starves_the_watchdog_or_the_lock` |
-| The 8 010 ms release-overrun bound above | `test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call` |
+| The 12 010 ms release-overrun bound above | `test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call`, `test_config_the_worst_call_is_connect_plus_headers_plus_body` |
+| A call is three phases and the watchdog exceeds their sum | `test_config_the_worst_call_is_connect_plus_headers_plus_body` + the `static_assert` in `GateConfig.h` |
 | An overrun costs everything buffered, and nothing after the next terminator | `test_app_an_rx_error_discards_everything_that_was_buffered_when_it_happened` |
 | Boot and a link event throw away a partial line | `test_app_boot_and_a_link_event_throw_away_a_partial_line` |
 | The heartbeat interval is armed after the call | `test_app_the_heartbeat_interval_is_armed_after_the_call` |
@@ -403,15 +512,30 @@ are in [`test/`](test/) and run by `make test-iot`.
 | An unacknowledged boot event is not a hot loop | `test_app_a_boot_event_the_server_never_acknowledges_is_not_a_hot_loop` |
 | A 403 on `/events` empties the roster too | `test_app_a_403_on_events_takes_the_board_out_of_service_too` |
 | A permanently busy scanner cannot starve the heartbeat | `test_app_a_permanently_busy_scanner_cannot_starve_the_heartbeat` + the `static_assert` in `GateConfig.h` |
-| A body that fits arrives whole, however it is chunked | `test_body_a_body_that_fits_arrives_whole_however_it_is_chunked` |
+| …nor the event drain | `test_app_a_permanently_busy_scanner_cannot_starve_the_event_drain` |
+| A draining backlog still lets the member at the door through | `test_app_a_draining_backlog_still_lets_the_member_at_the_door_through` |
+| A link drop clears the deferral debt | `test_app_a_link_drop_clears_the_scan_deferral_debt` |
+| A flapping link buys at most one heartbeat per 15 s | `test_app_a_flapping_link_cannot_hammer_the_heartbeat`, `test_app_the_heartbeat_floor_bounds_failing_calls_too` |
+| A 404 on `/events` keeps the backlog and retries it | `test_app_a_404_on_events_keeps_the_backlog_and_retries_it` |
+| A body that fits arrives whole, however the TCP segments fall | `test_body_a_body_that_fits_arrives_whole_however_the_segments_fall` |
+| A chunked keep-alive response is read by its framing or not at all | `test_body_a_chunked_keep_alive_capture_is_read_by_its_framing_or_not_at_all` |
+| The chunk framing survives every split, including a 1489-byte chunk | `test_body_chunk_framing_survives_every_split`, `test_body_a_full_heartbeat_arrives_as_one_1489_byte_chunk` |
+| Malformed chunk framing is a failure, never garbage | `test_body_malformed_chunk_framing_is_a_failure_not_garbage` |
+| A chunked peer that hangs up early is not a short body | `test_body_a_chunked_peer_that_hangs_up_early_is_not_a_short_body` |
+| An empty body is a whole body | `test_body_an_empty_body_is_a_whole_body` |
+| The framing comes from Content-Length and Transfer-Encoding | `test_body_the_framing_comes_from_content_length_and_transfer_encoding` |
 | A body over the cap is refused, never truncated | `test_body_a_body_over_the_cap_is_refused_rather_than_truncated` |
-| A dribbling peer is cut off at the call's deadline | `test_body_a_dribbling_peer_is_bounded_by_the_calls_deadline` |
+| A dribbling peer is cut off at the body phase's own deadline | `test_body_a_dribbling_peer_is_bounded_by_the_body_budget` |
 | Only a whole body keeps the server's status | `test_body_only_a_whole_body_keeps_the_servers_status` |
-| `no_push` is sent only when there is one | `test_heartbeat_body_carries_no_push_only_when_there_is_one` |
+| `no_push` and `events_lost` are sent only when there are some, and saturate | `test_heartbeat_body_carries_its_counters_only_when_there_are_some` |
+| A heartbeat whose body never arrived counts as a no-push | `test_app_a_heartbeat_whose_body_never_arrived_counts_as_a_no_push` |
+| Events the ring discarded reach the next heartbeat | `test_app_events_the_ring_discarded_are_reported_in_the_next_heartbeat` |
 | A heartbeat that pushed no roster is counted and reported | `test_app_a_heartbeat_that_pushed_no_roster_is_counted_and_reported` |
 | The 4 Hz fault blink, and that a cue still outranks it | `test_led_a_watchdog_that_would_not_arm_blinks_four_times_as_fast` |
 | A refused watchdog changes nothing about the door | `test_app_a_refused_watchdog_changes_nothing_about_the_door` |
 | `API_BASE_URL` is `http://` + an IPv4 literal + optional port | `test_url_accepts_only_cleartext_http_to_an_ipv4_literal` + `static_assert`s in `main.cpp` |
+| `0.0.0.0` and `255.255.255.255` are refused as reserved hosts | `test_url_accepts_only_cleartext_http_to_an_ipv4_literal` + `static_assert`s in the suite |
+| An unedited `secrets.h.example` does not compile, on either route | the `static_assert`s in `main.cpp`; proved by compiling the example file with `pio run -e door_gate` and `arduino-cli compile` |
 | Every wire body and every response shape | `test/test_gate_corpus/` — all 15 vectors of `src/contracts/device-protocol/gate/` |
 
 Four sentences above are **not** pinned by a test and cannot be, and are marked

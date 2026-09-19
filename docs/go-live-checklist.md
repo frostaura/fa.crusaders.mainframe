@@ -399,9 +399,10 @@ list measures instead of assuming. The wiring is fixed; nothing here asks for a 
       quiet board with a slow-blinking LED. A board that reprints its boot line every ten or
       twenty seconds is **reset-looping**, which means it is admitting nobody and will keep
       doing so until the network comes back. That is exactly what an 8-second watchdog
-      against an 8-second worst-case HTTP call used to do; the period is 12 s now and the
-      relation is `static_assert`ed, and this is the check that says the assert is about the
-      real timeout.
+      against an 8-second worst-case HTTP call used to do; the period is **15 s** now — a
+      call is three phases (connect, headers, body) of 4 s each, not two — the relation is
+      `static_assert`ed, and this is the check that says the assert is about the real
+      timeout.
 - [ ] While the API host is still unreachable, **scan a rostered member** and confirm they
       still get in from the roster. The board must decide the door while it is failing to
       reach the server, not instead of it.
@@ -423,10 +424,19 @@ certified as one, and no combination of the build flags turns it into one.
 
 ### The board, the network and the roster
 
-- [ ] `src/iot/door-gate/src/common/secrets.h` created from the `.example` on the flashing
-      machine, with all four values. It is gitignored, and the build `#error`s on a missing
-      one and `static_assert`s on an empty one — there is no way to produce an image with a
-      blank in it.
+- [ ] **The technician's copy is `src/iot/door-gate/arduino/door_gate/secrets.h` — beside
+      the `.ino`, in the sketch folder that gets opened — not the PlatformIO one.** Both
+      exist and neither is read by the other route: `src/iot/door-gate/src/common/secrets.h`
+      is the developer's, for `pio run`. Copy `secrets.h.example` from whichever folder is
+      being built and fill in all four values. Both are gitignored.
+- [ ] **All four values actually replaced.** Every value in the `.example` is a placeholder
+      and **every placeholder is a compile error** — `WIFI_SSID`, `WIFI_PASSWORD` and
+      `DEVICE_API_KEY` against their own literal, and `API_BASE_URL` against the reserved
+      host `0.0.0.0` that the `.example` ships. The build also `#error`s on a missing value
+      and `static_assert`s on an empty one, so there is no way to produce an image with a
+      blank *or* a placeholder in it. The file used to ship plausible values (`"ClubWiFi"`,
+      a real-looking LAN address), which compile and flash and produce a board that joins
+      nothing — indistinguishable at the door from a board whose server is down.
 - [ ] Flashed **from the Arduino IDE**, out of `src/iot/door-gate/arduino/door_gate/` — board
       *ESP32 Dev Module*, pick the port, Upload — with `secrets.h` copied from the `.example`
       beside the `.ino` and filled in. That folder is generated, carries its own README written
@@ -454,7 +464,7 @@ certified as one, and no combination of the build flags turns it into one.
       service, or pulling the AP, while somebody's window is open does not cut it short.
 - [ ] **A 4 Hz blink — four times the offline rate — means the task watchdog refused to
       arm**, three times over. The board still works and still opens doors; it is running
-      under the core's own 5 s watchdog instead of the 12 s this firmware asks for, which
+      under the core's own 5 s watchdog instead of the 15 s this firmware asks for, which
       makes a slow API host a possible reset loop. Note the board and read the boot line at
       115200, which says the same thing. It is not a member-facing pattern and never
       outranks one.
@@ -481,6 +491,36 @@ certified as one, and no combination of the build flags turns it into one.
       `device.gate_open` — and **no** booking shows a `CheckedInAt` from them. Walking
       through a door is not attendance, and a gate that posted attendance would let somebody
       lose their refund by walking past a door.
+- [ ] **A single spurious 403 — a proxy, a WAF, a rule somebody added — costs the offline
+      fallback ONE heartbeat interval.** The roster is committed empty the moment the board
+      hears one and the next accepted heartbeat refills it, so the window is 30 s at the
+      default cadence and up to 5 minutes at the longest the server may push. A member
+      arriving inside that window with the link **also** down is refused. Nothing at the
+      door shows it; the recovery is automatic and needs no intervention.
+- [ ] **The lamp stays dark and the board never appears on the Devices page.** Not a
+      separate pattern — it is the *absence* of one, and it is the most likely thing a
+      technician actually meets. In order: board powered, and is `GATE_LED_PIN` the pin the
+      lamp is on? Then **open the serial monitor at 115200 and press RESET**: one line with
+      the firmware version, the MAC and the API address should appear. No line at all means
+      the Upload did not take or the sketch is not running; a line but nothing on the
+      Devices page means the MAC is reaching no server — check the `api=` address on that
+      line and that the board and the backend are on the same LAN.
+- [ ] **If the IDE Upload fails with hundreds of `redefinition of …` errors, it is iCloud
+      Drive**, not the firmware. A synced folder fabricates numbered duplicates (`Json
+      2.cpp`, `GateApp 2.h`) and the IDE compiles every `.cpp` under `src/` recursively, so
+      each one is a second definition. They are invisible in Finder's default view and are
+      never committed. From the repository root: `make sweep-icloud`. From the sketch
+      folder by hand: `find . -name '* [0-9].*' -print -delete` and then
+      `find . -name '* [0-9]' -print -delete`. Then Upload again.
+- [ ] **Read `no_push` and `events_lost` off the device row after a week.** Both are
+      since-boot totals the board sends in its heartbeat and neither has any other observer:
+      `no_push` counts heartbeats the server accepted from which no roster could be adopted
+      (a cut body, bad framing, a missing key) and `events_lost` counts door entries the
+      64-slot ring discarded while the board could not reach the API. A zero on both is a
+      healthy board. A rising `no_push` is a roster that is not being refreshed even though
+      the board looks online; a rising `events_lost` is entries the club has permanently
+      lost. Both saturate rather than wrapping, so a very large number means "at least
+      this many".
 
 **If skipped:** a door that works on the bench and refuses every member the first time the
 WiFi drops, or one that keeps admitting people from a roster a week out of date.

@@ -5,7 +5,19 @@
 // WHAT IT GUARANTEES
 // ------------------
 //   * An event that was accepted is delivered at least once, unless the queue
-//     overflowed — and an overflow is reported, never silent.
+//     overflowed — and an overflow is COUNTED, by `overflowed()`.
+//
+//     WHETHER IT IS REPORTED IS THE FIRMWARE'S, NOT THIS CLASS'S, AND THE TWO
+//     DEVICES DIFFER. This header said "an overflow is reported, never silent"
+//     from the day it was written, and for as long as that sentence stood
+//     `overflowed()` was read by NOTHING anywhere in the repository. The DOOR
+//     GATE reads it now and sends the since-boot total as `events_lost` in its
+//     heartbeat request, where an admin can see it on the device row. The COURT
+//     BOX does not: its heartbeat's wire shape has no such field, nothing
+//     consumes the counter, and an overflow there is visible only to a debugger
+//     — so on that device this remains a silent loss, stated rather than
+//     implied. Adding the field to the court box is a wire change and is not
+//     one this class may make on its own.
 //   * At-least-once, NOT at-most-once. The API deduplicates on (device, seq).
 //     A queue that dropped an event to avoid a duplicate would be trading a
 //     charge the club can reverse for a game it never learns about.
@@ -199,6 +211,9 @@ public:
   /// Events discarded because the ring was full. A rising count is the club
   /// losing history — it means the box has been unable to reach the API for
   /// long enough to fill the queue.
+  ///
+  /// Read by the DOOR GATE, which sends it as `events_lost`; not read by the
+  /// court box, whose heartbeat has no field for it. See the header.
   uint32_t overflowed() const { return overflowed_; }
 
   /// The last sequence number issued. Zero before the first push.

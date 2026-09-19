@@ -218,7 +218,7 @@ public:
   /// lamp's 4 Hz fault blink — the boot log has scrolled past by the time
   /// anybody is standing at the door. The DOOR is unaffected: refusing to open
   /// for a missing watchdog would be a door that admits nobody, which is far
-  /// worse than one running on five seconds instead of twelve.
+  /// worse than one running on five seconds instead of fifteen.
   bool begin(uint8_t seconds);
 
   /// How many times begin() asks before reporting failure.
