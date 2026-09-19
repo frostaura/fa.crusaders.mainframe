@@ -1167,8 +1167,18 @@ private:
 };
 
 /// Scanner bytes, and the overrun the real UART signals out of band.
+///
+/// READING A BYTE COSTS A MILLISECOND. That is roughly true at 9600 baud, and it
+/// is load-bearing rather than decoration: without it the clock never moves
+/// between the kick at the top of a pass and the instant a blocking call
+/// starts, the two coincide, and "the watchdog is kicked immediately BEFORE
+/// every blocking call" is a property no fixture can distinguish from "the
+/// watchdog is kicked at the top of the pass". A mutation removing that kick
+/// survived until this fake cost time.
 class FakeScannerBytes final : public gatelogic::IScannerBytes {
 public:
+  explicit FakeScannerBytes(fakes::FakeClock& clock) : clock_(clock) {}
+
   void feed(const char* text) {
     for (size_t i = 0U; text[i] != '\0' && count_ < sizeof(buf_); ++i) {
       buf_[count_] = static_cast<uint8_t>(text[i]);
@@ -1186,6 +1196,7 @@ public:
     }
     out = buf_[head_];
     ++head_;
+    clock_.advance(1U);
     return true;
   }
 
@@ -1196,6 +1207,7 @@ public:
   }
 
 private:
+  fakes::FakeClock& clock_;
   uint8_t buf_[512] = {};
   size_t count_ = 0U;
   size_t head_ = 0U;
@@ -1217,6 +1229,20 @@ public:
 
   void setLatency(uint32_t ms) { latency_ = ms; }
 
+  /// Bytes that arrive AT THE SCANNER while this call is blocking.
+  ///
+  /// The real board is deaf for the whole of a call and the UART buffers
+  /// whatever turns up, so "a member scanned while the heartbeat was in flight"
+  /// is the ordinary case rather than an exotic one — and it is the only way to
+  /// build the sequence that makes the deadline re-check on the way OUT of a
+  /// call matter: a heartbeat that overruns the window, and a scan waiting to
+  /// block the pass that would otherwise have taken the lock back.
+  void feedDuringCall(FakeScannerBytes* scanner, const char* text) {
+    arrivals_ = scanner;
+    strncpy(arrivalText_, text, sizeof(arrivalText_) - 1U);
+    arrivalText_[sizeof(arrivalText_) - 1U] = '\0';
+  }
+
   void answer(uint16_t status, const char* body) {
     status_ = status;
     answer_[0] = '\0';
@@ -1230,6 +1256,9 @@ public:
     static_cast<void>(body);
     if (calls_ < kMaxCalls) {
       entered_[calls_] = clock_.value();
+    }
+    if (arrivals_ != nullptr && arrivalText_[0] != '\0') {
+      arrivals_->feed(arrivalText_);
     }
     clock_.advance(latency_);
     if (calls_ < kMaxCalls) {
@@ -1258,6 +1287,8 @@ public:
 
 private:
   fakes::FakeClock& clock_;
+  FakeScannerBytes* arrivals_ = nullptr;
+  char arrivalText_[64] = {};
   char path_[64] = {};
   char answer_[512] = {};
   uint32_t entered_[kMaxCalls] = {};
@@ -1270,7 +1301,7 @@ private:
 /// One whole board, wired the way main.cpp wires it.
 struct Rig {
   explicit Rig(uint32_t base)
-      : clock(base), watchdog(clock), http(clock), api(http, breaker, clock),
+      : clock(base), watchdog(clock), scanner(clock), http(clock), api(http, breaker, clock),
         lock(relayPin, gatelogic::kGateConfig.relayActiveHigh, gatelogic::kGateConfig.unlockEnergisesRelay),
         unlock(gatelogic::kGateConfig.unlockHardCapMs), roster(gatelogic::kGateConfig.rosterMaxAgeMs),
         queue(&store), app(wire()) {}
@@ -1379,6 +1410,11 @@ struct Rig {
 
 constexpr char kOpenThreeSeconds[] = "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3}";
 
+/// What the body above grants, as a number the assertions derive from rather
+/// than repeat. A one-field probe that changed the body's seconds and left the
+/// assertions alone is what asked for this.
+constexpr uint32_t kOpenGrantMs = 3000U;
+
 /// (a) MUTATION-PROVED. The release window is timed from AFTER the HTTP call.
 ///
 /// The shipped loop read the clock BEFORE `gApi.scan()` and armed the release
@@ -1408,9 +1444,10 @@ void test_app_a_release_is_timed_from_after_the_call_that_granted_it() {
       TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "the window has to end");
 
       const uint32_t held = tb::since(closed, opened);
-      TEST_ASSERT_TRUE_MESSAGE(held >= 3000U, "the member was granted three seconds and must get them");
-      TEST_ASSERT_TRUE_MESSAGE(held < 3000U + (2U * gatelogic::kIdleDelayMs),
-                               "and not materially more than three seconds");
+      TEST_ASSERT_TRUE_MESSAGE(held >= kOpenGrantMs,
+                               "the member was granted a window and must get all of it");
+      TEST_ASSERT_TRUE_MESSAGE(held < kOpenGrantMs + (2U * gatelogic::kIdleDelayMs),
+                               "and not materially more than the window");
     }
   }
 }
@@ -1559,20 +1596,29 @@ void test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call() {
   TEST_ASSERT_TRUE(rig.lock.released());
   const uint32_t opened = rig.clock.value() - gatelogic::kIdleDelayMs;
 
-  // Now the API goes slow, and a heartbeat falls due in the middle of the
-  // member's window. Every subsequent call spends its whole worst case.
+  // Now the API goes slow, and a HEARTBEAT falls due inside the member's window
+  // — the one blocking call a pass makes after it has already checked the lock.
+  // While it is in flight somebody scans, which is the ordinary case: the board
+  // is deaf for the whole call and the UART buffers what arrives.
+  //
+  // THAT SEQUENCE IS WHAT THIS TEST IS FOR. Without the fresh-clock deadline
+  // check on the way OUT of a blocking call, the relay is not looked at until
+  // the next pass — and the next pass's scanner spends another whole worst case
+  // before it gets there. The overrun is two calls, not one, and it has no
+  // bound at all for as long as people keep scanning.
   rig.http.setLatency(gatelogic::kWorstBlockingCallMs);
-  rig.http.answer(0U, "");
+  rig.http.answer(200U, "{\"opened\":false,\"reason\":\"no_booking\",\"unlock_seconds\":0}");
+  rig.http.feedDuringCall(&rig.scanner, "TOKENBBBBBBB\n");
   rig.link.set(false);
   rig.tick();
-  rig.link.set(true); // the link edge arms the heartbeat for the next pass
+  rig.link.set(true); // the link edge arms the heartbeat for the pass below
 
   const uint32_t closed = rig.runUntilLocked(4000U);
   TEST_ASSERT_FALSE(rig.lock.released());
 
   const uint32_t held = tb::since(closed, opened);
-  const uint32_t bound = 3000U + gatelogic::kWorstBlockingCallMs + gatelogic::kIdleDelayMs;
-  TEST_ASSERT_TRUE_MESSAGE(held >= 3000U, "the window is still the window");
+  const uint32_t bound = kOpenGrantMs + gatelogic::kWorstBlockingCallMs + gatelogic::kIdleDelayMs;
+  TEST_ASSERT_TRUE_MESSAGE(held >= kOpenGrantMs, "the window is still the window");
   TEST_ASSERT_TRUE_MESSAGE(held <= bound,
                            "a release may outlive its deadline by ONE blocking call, not by a pass");
 }
@@ -1759,24 +1805,35 @@ void test_app_a_queued_open_carries_what_the_lock_was_given() {
   rig.scanner.feed("TOKENAAAAAAA\n");
   rig.tick();
   TEST_ASSERT_TRUE(rig.lock.released());
+  const uint32_t openedAt = rig.clock.value() - gatelogic::kIdleDelayMs;
 
-  // A second member, 29.5 s in. The window may not pass the cap measured from
-  // the moment the door first opened, so they get 500 ms and not 30 000.
+  // A second member, well into the first one's window. The window may not pass
+  // the cap measured from the moment the door FIRST opened, so what they get is
+  // whatever is left of it — DERIVED here rather than written out, because a
+  // one-field probe that moved this offset and left a hand-written bound behind
+  // is a test that pins the offset instead of the rule.
   rig.clock.advance(29500U);
   rig.scanner.feed("TOKENBBBBBBB\n");
   rig.tick();
+  const uint32_t secondScanAt = rig.clock.value() - gatelogic::kIdleDelayMs;
+  const uint32_t sinceOpen = tb::since(secondScanAt, openedAt);
+  const uint32_t expected = sinceOpen >= 30000U ? 0U : 30000U - sinceOpen;
 
   eventq::Event event;
   uint32_t lastOpenDuration = 0U;
+  uint16_t opens = 0U;
   while (rig.queue.peek(event)) {
     if (event.kind == eventq::Kind::GateOpen) {
       lastOpenDuration = event.durationMs;
+      ++opens;
     }
     static_cast<void>(rig.queue.release());
   }
-  TEST_ASSERT_TRUE_MESSAGE(lastOpenDuration <= 1000U,
-                           "the event claimed a release the hard cap never allowed");
-  TEST_ASSERT_TRUE_MESSAGE(lastOpenDuration > 0U, "and it was released for something");
+  TEST_ASSERT_EQUAL_UINT16_MESSAGE(2U, opens, "both scans opened the door from the roster");
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(expected, lastOpenDuration,
+                                   "the event must carry what the lock was given, not what was asked");
+  TEST_ASSERT_TRUE_MESSAGE(lastOpenDuration < 30000U,
+                           "and the cap has to have bitten, or this proves nothing");
 }
 
 /// An unreadable line asks the SAME question a scan does — the radio and the
