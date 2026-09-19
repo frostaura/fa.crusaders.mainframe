@@ -20,10 +20,6 @@ bool isAccepted(uint8_t byte) {
   return (byte >= 0x20U && byte < 0x7FU) || byte == static_cast<uint8_t>('\t');
 }
 
-bool isTerminator(uint8_t byte) {
-  return byte == static_cast<uint8_t>('\r') || byte == static_cast<uint8_t>('\n');
-}
-
 } // namespace
 
 void ScanAssembler::reset() {
@@ -38,7 +34,7 @@ void ScanAssembler::markCorrupt() {
 }
 
 ScanEvent ScanAssembler::feed(uint8_t byte) {
-  if (!isTerminator(byte)) {
+  if (!isLineTerminator(byte)) {
     if (!isAccepted(byte)) {
       // The line is dead from here. Kept accumulating-but-marked rather than
       // reset on the spot, so the bytes that follow are swallowed with it

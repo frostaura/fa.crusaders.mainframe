@@ -168,10 +168,45 @@ inline constexpr uint32_t kWatchdogMarginMs = 2000UL;
 /// a jammed scanner streaming forever cannot starve the loop.
 inline constexpr uint16_t kScannerBytesPerPass = 64U;
 
+/// WHERE THE EVENT DRAIN'S BACKOFF STARTS, AND WHERE THE DOUBLING STOPS.
+///
+/// A post that leaves the head event exactly where it was — a 401, a 408, a
+/// 429, a 5xx, or a 200 whose `accepted_through` does not reach the head — is
+/// not a reason to stop uploading, and the drain keeps the event. What it used
+/// to be was a reason to re-post it on EVERY PASS, about twenty-five times a
+/// second, which starved the heartbeat that shares the pass's one blocking
+/// call: the roster then aged out at six hours and the door admitted nobody, a
+/// board taken out of service never heard the heartbeat's 403 and kept
+/// admitting rostered members, and the API was hammered by a device that is
+/// supposed to speak twice a minute.
+///
+/// Fifteen seconds is short enough that a rate limiter lifting is noticed
+/// within one heartbeat interval; five minutes is long enough that a
+/// permanently refusing endpoint costs twelve requests an hour instead of
+/// ninety thousand. Anything that actually MOVES the queue clears it.
+inline constexpr uint32_t kEventRetryStartMs = 15000UL;
+inline constexpr uint32_t kEventRetryMaxMs = 300000UL;
+
+/// The most CONSECUTIVE passes a scan may take the pass's one blocking call
+/// while a heartbeat is already due.
+///
+/// The member at the door wins the pass — that is the whole reason the scanner
+/// is drained first — but a scanner that never stops talking would otherwise
+/// win every pass forever, and a board that never heartbeats is a board whose
+/// roster ages out. Four passes is at most four worst-case calls of delay on a
+/// cadence measured in tens of seconds, which no door can notice, and it is a
+/// bound rather than a hope.
+inline constexpr uint8_t kMaxScanPassesBeforeHeartbeat = 4U;
+
 /// The longest idle the loop ever takes. Ten milliseconds of doing nothing
 /// costs nothing a door can notice and keeps the ESP32's own housekeeping tasks
 /// scheduled. It is the ONLY delay in this firmware.
 inline constexpr uint32_t kIdleDelayMs = 10UL;
+
+/// A backoff shorter than one pass would not be a backoff, and one that starts
+/// past its own cap would never double.
+static_assert(kEventRetryStartMs >= kIdleDelayMs && kEventRetryStartMs <= kEventRetryMaxMs,
+              "the event backoff must start somewhere between one pass and its own cap");
 
 /// The UART receive buffer, set BEFORE `Serial2.begin` — afterwards it is too
 /// late, the driver has already allocated.
@@ -189,6 +224,21 @@ inline constexpr uint32_t kIdleDelayMs = 10UL;
 /// without pause is a broken scanner, and the guarantee for that case is the
 /// overrun callback, not the buffer size.
 inline constexpr uint16_t kScannerRxBufferBytes = 1024U;
+
+/// Bytes the loop discards in one go when the driver reports a receive error.
+///
+/// THE WHOLE BUFFER, because the hole is at the TAIL of what is buffered and
+/// not at the head of it. An overrun happens when the FIFO is full: everything
+/// the driver had, it keeps, and what it drops is what arrived next — so the
+/// bytes `read()` hands up afterwards are the OLD ones, in order and printable,
+/// followed by the far side of a hole. Poisoning only the line in assembly
+/// therefore poisoned the wrong line: a good buffered line was dropped and the
+/// holed one was handed up later as a perfectly valid token.
+///
+/// An overrun costs everything that was buffered when it happened, and nothing
+/// after the next terminator. A member re-scans; nobody else's booking opens a
+/// door.
+inline constexpr uint16_t kScannerDrainOnErrorBytes = kScannerRxBufferBytes;
 
 /// Every wiring and timing fact this firmware has, in one value.
 struct GateConfig {
@@ -265,6 +315,27 @@ static_assert(kGateConfig.unlockDefaultMs <= kGateConfig.unlockHardCapMs,
 
 static_assert(kGateConfig.rosterMaxAgeMs > 0UL,
               "a roster with no maximum age eventually admits a booking cancelled last week");
+
+/// The event drain's backoff exists so a refusing `/events` cannot starve the
+/// heartbeat. A backoff longer than the staleness window it protects would give
+/// that back: the roster could age out between two attempts.
+static_assert(kEventRetryMaxMs < kGateConfig.rosterMaxAgeMs,
+              "the event backoff cap must be well inside ROSTER_MAX_AGE_MS");
+
+/// The bound a busy scanner may put on the heartbeat, stated against what the
+/// heartbeat is FOR rather than against its own cadence.
+///
+/// The worst case is kMaxScanPassesBeforeHeartbeat whole blocking calls — 32 s
+/// with this image's numbers — so a permanently busy door heartbeats at roughly
+/// twice its cadence rather than, as it used to, never. Stating it against the
+/// cadence would be the wrong comparison and would not hold: the server may
+/// push an interval as short as `devlink::kMinHeartbeatMs`. What the heartbeat
+/// protects is the roster's age and hearing a 403, and thirty-two seconds is
+/// under half a percent of ROSTER_MAX_AGE_MS.
+static_assert(static_cast<uint32_t>(kMaxScanPassesBeforeHeartbeat) * kWorstBlockingCallMs <
+                  kGateConfig.rosterMaxAgeMs / 100UL,
+              "a busy scanner may delay the heartbeat by a fraction of the staleness window, never by a "
+              "meaningful part of it");
 static_assert(kGateConfig.heartbeatMs >= devlink::kMinHeartbeatMs &&
                   kGateConfig.heartbeatMs <= devlink::kMaxHeartbeatMs,
               "HEARTBEAT_INTERVAL_MS is outside what devlink::Cadence will adopt, so the board would "

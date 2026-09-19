@@ -188,8 +188,20 @@ private:
   void pumpLink();
   void pumpEvents();
   void applyEventReaction(uint16_t status, const char* response);
+
+  /// Arms or clears the drain's backoff, from whether the post that just
+  /// finished actually MOVED the queue. Not from its status: a 200 that
+  /// acknowledges nothing leaves the head exactly where a 429 does.
+  void armEventRetry(bool queueMoved);
+
   void pumpHeartbeat();
   void adoptHeartbeat(uint16_t status);
+
+  /// The club took this board out of service. A roster committed EMPTY rather
+  /// than abandoned, so `everLoaded()` stays true and the refusal is
+  /// `not_recognised` rather than `roster_stale`.
+  void commitEmptyRoster();
+
   void pumpLed();
 
   /// Whether to ask the API, on the same judgement everywhere: the radio AND
@@ -232,6 +244,17 @@ private:
   tb::Uptime64 uptime_;
   tb::Deadline heartbeatAt_;
   uint32_t heartbeatMs_ = kGateConfig.heartbeatMs;
+
+  /// When the event drain may next try, and how long it is currently waiting.
+  /// Disarmed — the state a healthy board is always in — means "now".
+  tb::Deadline eventsAt_;
+  uint32_t eventBackoffMs_ = 0U;
+
+  /// Consecutive passes in which a SCAN took the pass's one blocking call while
+  /// a heartbeat was already due. At kMaxScanPassesBeforeHeartbeat the
+  /// heartbeat goes first, so a scanner that never stops talking cannot hold
+  /// the call budget for ever.
+  uint8_t scanDeferrals_ = 0U;
 
   /// What the last heartbeat said a release should last. The build-flag default
   /// until the first accepted one, which is what makes a board that has never

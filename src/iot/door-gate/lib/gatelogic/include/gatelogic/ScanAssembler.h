@@ -42,6 +42,17 @@
 
 namespace gatelogic {
 
+/// CR or LF, and the one place the terminator set is written down.
+///
+/// The loop's overrun drain has to know where a line ends too — it discards
+/// what was buffered and then everything through the NEXT terminator — and two
+/// copies of "what ends a line" that could disagree is how the far side of a
+/// hole becomes the head of somebody's token. One return statement: the
+/// generated sketch compiles at gnu++11.
+constexpr bool isLineTerminator(uint8_t byte) {
+  return byte == 0x0DU || byte == 0x0AU;
+}
+
 /// What one byte produced.
 enum class ScanEvent : uint8_t {
   /// Nothing yet, or a line that was discarded without a decision: empty, or

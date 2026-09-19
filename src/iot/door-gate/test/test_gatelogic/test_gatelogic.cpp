@@ -26,6 +26,7 @@
 // chosen to put the wrap inside the scenario.
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unity.h>
 
@@ -1081,20 +1082,28 @@ void test_url_accepts_only_cleartext_http_to_an_ipv4_literal() {
 }
 
 /// The C++11 text helpers the checks above are built from. One return statement
-/// each, because the generated Arduino sketch compiles at gnu++11.
+/// each, because the generated Arduino sketch compiles at gnu++11 — and NO null
+/// branch, because the address-of-an-object comparison one costs stops GCC
+/// folding these at all under `-fsanitize=undefined`, which fails every
+/// `static_assert` built on them. See StaticText.h.
+///
+/// Called ONLY with string literals and `constexpr char[]`s, in constant
+/// expressions. That is pinned here by the fact that every assertion below is a
+/// `static_assert`: a runtime one would be evidence of a runtime caller.
 void test_static_text_compares_at_compile_time() {
   static_assert(gatelogic::text::length("") == 0U, "");
   static_assert(gatelogic::text::length("http://") == 7U, "");
+  static_assert(gatelogic::text::length(gatelogic::kApiScheme) == 7U,
+                "the address of an OBJECT, which is the form GCC refuses to fold under UBSan");
+  static_assert(gatelogic::text::length(gatelogic::kPathHeartbeat) == 24U, "the same, on a path");
   static_assert(gatelogic::text::equals("gate", "gate"), "");
   static_assert(!gatelogic::text::equals("gate", "gates"), "");
   static_assert(!gatelogic::text::equals("gates", "gate"), "");
   static_assert(gatelogic::text::startsWith("http://x", "http://"), "");
   static_assert(!gatelogic::text::startsWith("http:/", "http://"), "");
   static_assert(gatelogic::text::startsWith("anything", ""), "");
-
-  TEST_ASSERT_EQUAL_size_t(0U, gatelogic::text::length(nullptr));
-  TEST_ASSERT_FALSE(gatelogic::text::startsWith(nullptr, "http://"));
-  TEST_ASSERT_TRUE(gatelogic::text::equals(nullptr, nullptr));
+  static_assert(gatelogic::text::startsWith("http://10.0.0.1", gatelogic::kApiScheme),
+                "and a prefix that is an object rather than a literal");
 }
 
 // ---------------------------------------------------------------------------
@@ -1190,7 +1199,24 @@ public:
   /// with nothing missing from what read() returns afterwards.
   void signalRxError() { rxError_ = true; }
 
+  /// A scanner that NEVER STOPS TALKING: once the fed bytes run out it
+  /// synthesises another distinct token, for ever.
+  ///
+  /// A jammed reader, a code taped over the window, or simply a very busy door
+  /// with eight-second round trips. It has to be generated rather than fed,
+  /// because a fixed buffer runs dry after a few dozen tokens — and a scenario
+  /// whose scanner runs dry proves that the loop recovers, which is not the
+  /// question. The question is whether the heartbeat ever runs while it does
+  /// not.
+  void streamForever() { streaming_ = true; }
+
   bool read(uint8_t& out) override {
+    if (head_ >= count_ && streaming_) {
+      head_ = 0U;
+      const int written = snprintf(reinterpret_cast<char*>(buf_), sizeof(buf_), "STREAM%08u\n", streamSeq_);
+      ++streamSeq_;
+      count_ = written > 0 ? static_cast<size_t>(written) : 0U;
+    }
     if (head_ >= count_) {
       return false;
     }
@@ -1211,23 +1237,77 @@ private:
   uint8_t buf_[512] = {};
   size_t count_ = 0U;
   size_t head_ = 0U;
+  uint32_t streamSeq_ = 0U;
   bool rxError_ = false;
+  bool streaming_ = false;
 };
 
 /// The fake that makes the whole suite possible: an HTTP port that ADVANCES THE
-/// CLOCK.
+/// CLOCK, and answers PER PATH and PER CALL.
 ///
 /// Every defect in the shipped loop was a stale instant, and a fake that
 /// answered instantly could not express one. This one takes a latency, moves
 /// the clock by it, and records the window each call occupied so a test can ask
 /// whether the watchdog was kicked at both ends of it.
+///
+/// AND IT ANSWERS EACH PATH SEPARATELY, WHICH IS THE OTHER HALF.
+/// --------------------------------------------------------------
+/// The version of this fake that answered ONE status for EVERY path is what
+/// hid the worst defect this firmware has had. A board whose `/events` was
+/// refusing while `/heartbeat` was perfectly healthy — a rate limiter, a WAF, a
+/// proxy rule, or simply a board the club took out of service with an event
+/// still queued — re-posted the head event on every single pass, about
+/// twenty-five times a second, and the heartbeat NEVER RAN. The roster went
+/// stale after six hours and the door then admitted nobody; a board taken out
+/// of service never heard the heartbeat's 403 and kept admitting rostered
+/// members. Neither is reachable by a fake that cannot make one path refuse
+/// while another succeeds, so neither was reachable by a test.
+///
+/// `answer()` and `setLatency()` set the answer for EVERY path — which is what
+/// most scenarios want. `onPath()` overrides one path; `onCall()` overrides the
+/// Nth call to one path, so a scenario can make the third heartbeat a 403 and
+/// leave the rest alone.
 class LatentHttp final : public gatelogic::IHttpPort {
 public:
   static constexpr size_t kMaxCalls = 256U;
+  /// The three device paths, plus one spare so a fourth endpoint scripted by
+  /// mistake fails loudly here rather than silently landing on another's slot.
+  static constexpr size_t kMaxPaths = 4U;
+  /// Per-call overrides held at once, across all paths.
+  static constexpr size_t kMaxScripted = 8U;
 
   explicit LatentHttp(fakes::FakeClock& clock) : clock_(clock) {}
 
   void setLatency(uint32_t ms) { latency_ = ms; }
+
+  /// The standing answer for ONE path, overriding the every-path default.
+  void onPath(const char* path, uint16_t status, const char* body, uint32_t latencyMs) {
+    Reply& reply = pathReply(path);
+    reply.set(status, body, latencyMs);
+  }
+
+  /// The answer for the `nth` call to `path` (0-based), overriding both the
+  /// path's standing answer and the every-path default for that one call.
+  void onCall(const char* path, uint16_t nth, uint16_t status, const char* body, uint32_t latencyMs) {
+    TEST_ASSERT_TRUE_MESSAGE(scripted_ < kMaxScripted, "too many per-call overrides");
+    strncpy(script_[scripted_].path, path, sizeof(script_[scripted_].path) - 1U);
+    script_[scripted_].path[sizeof(script_[scripted_].path) - 1U] = '\0';
+    script_[scripted_].nth = nth;
+    script_[scripted_].reply.set(status, body, latencyMs);
+    ++scripted_;
+  }
+
+  /// Calls made to one path since the last forget(). Unbounded, unlike the
+  /// windowed call log: a scenario that runs seven simulated hours makes far
+  /// more calls than any log worth keeping.
+  uint32_t callsTo(const char* path) const {
+    for (size_t i = 0U; i < paths_; ++i) {
+      if (strcmp(path_[i].path, path) == 0) {
+        return path_[i].calls;
+      }
+    }
+    return 0U;
+  }
 
   /// Bytes that arrive AT THE SCANNER while this call is blocking.
   ///
@@ -1254,43 +1334,118 @@ public:
 
   uint16_t post(const char* path, const char* body, char* out, size_t outCap) override {
     static_cast<void>(body);
+    PathState& state = pathState(path);
+    const Reply& reply = replyFor(state);
+
     if (calls_ < kMaxCalls) {
       entered_[calls_] = clock_.value();
     }
     if (arrivals_ != nullptr && arrivalText_[0] != '\0') {
       arrivals_->feed(arrivalText_);
     }
-    clock_.advance(latency_);
+    clock_.advance(reply.set_ ? reply.latency : latency_);
     if (calls_ < kMaxCalls) {
       exited_[calls_] = clock_.value();
     }
     ++calls_;
+    ++state.calls;
 
-    strncpy(path_, path, sizeof(path_) - 1U);
-    path_[sizeof(path_) - 1U] = '\0';
+    strncpy(lastPath_, path, sizeof(lastPath_) - 1U);
+    lastPath_[sizeof(lastPath_) - 1U] = '\0';
     if (out != nullptr && outCap > 0U) {
-      strncpy(out, answer_, outCap - 1U);
+      strncpy(out, reply.set_ ? reply.body : answer_, outCap - 1U);
       out[outCap - 1U] = '\0';
     }
-    return status_;
+    return reply.set_ ? reply.status : status_;
   }
 
-  void forget() { calls_ = 0U; }
+  /// Forgets the call WINDOW log and every per-path count, so a scenario's
+  /// assertions are about the scenario. The scripted answers survive: they are
+  /// the scenario's setup, not its history.
+  void forget() {
+    calls_ = 0U;
+    for (size_t i = 0U; i < paths_; ++i) {
+      path_[i].calls = 0U;
+    }
+  }
 
   uint16_t calls() const { return calls_; }
 
-  const char* lastPath() const { return path_; }
+  const char* lastPath() const { return lastPath_; }
 
   uint32_t enteredAt(size_t i) const { return entered_[i]; }
 
   uint32_t exitedAt(size_t i) const { return exited_[i]; }
 
 private:
+  /// One scripted answer. `set_` is what distinguishes "this path answers 0"
+  /// from "nothing was said about this path", which the every-path default has
+  /// to win.
+  struct Reply {
+    void set(uint16_t st, const char* text, uint32_t lat) {
+      status = st;
+      latency = lat;
+      body[0] = '\0';
+      if (text != nullptr) {
+        strncpy(body, text, sizeof(body) - 1U);
+        body[sizeof(body) - 1U] = '\0';
+      }
+      set_ = true;
+    }
+
+    char body[5120] = {};
+    uint32_t latency = 0U;
+    uint16_t status = 0U;
+    bool set_ = false;
+  };
+
+  struct PathState {
+    char path[64] = {};
+    Reply standing;
+    uint32_t calls = 0U;
+  };
+
+  struct Scripted {
+    char path[64] = {};
+    Reply reply;
+    uint16_t nth = 0U;
+  };
+
+  PathState& pathState(const char* path) {
+    for (size_t i = 0U; i < paths_; ++i) {
+      if (strcmp(path_[i].path, path) == 0) {
+        return path_[i];
+      }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(paths_ < kMaxPaths, "more distinct paths than this fake holds");
+    strncpy(path_[paths_].path, path, sizeof(path_[paths_].path) - 1U);
+    path_[paths_].path[sizeof(path_[paths_].path) - 1U] = '\0';
+    ++paths_;
+    return path_[paths_ - 1U];
+  }
+
+  Reply& pathReply(const char* path) { return pathState(path).standing; }
+
+  /// Per-call beats per-path beats every-path. An empty Reply falls through to
+  /// the every-path default in post().
+  const Reply& replyFor(const PathState& state) const {
+    for (size_t i = 0U; i < scripted_; ++i) {
+      if (strcmp(script_[i].path, state.path) == 0 && script_[i].nth == state.calls) {
+        return script_[i].reply;
+      }
+    }
+    return state.standing;
+  }
+
   fakes::FakeClock& clock_;
   FakeScannerBytes* arrivals_ = nullptr;
   char arrivalText_[64] = {};
-  char path_[64] = {};
+  char lastPath_[64] = {};
   char answer_[512] = {};
+  PathState path_[kMaxPaths] = {};
+  Scripted script_[kMaxScripted] = {};
+  size_t paths_ = 0U;
+  size_t scripted_ = 0U;
   uint32_t entered_[kMaxCalls] = {};
   uint32_t exited_[kMaxCalls] = {};
   uint32_t latency_ = 0U;
@@ -1385,6 +1540,16 @@ struct Rig {
       tick();
     }
     return clock.value();
+  }
+
+  /// Passes until `ms` of SIMULATED time have gone by. The scenarios that found
+  /// the event-drain defect are hours long, and they are hours long because the
+  /// consequence — a roster ageing out at six — is not visible in seconds.
+  void runFor(uint32_t ms) {
+    const uint32_t start = clock.value();
+    while (tb::since(clock.value(), start) < ms) {
+      tick();
+    }
   }
 
   fakes::FakeClock clock;
@@ -1623,32 +1788,93 @@ void test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call() {
                            "a release may outlive its deadline by ONE blocking call, not by a pass");
 }
 
-/// (e) A UART OVERRUN COSTS ITS LINE AND NOTHING ELSE.
+/// (e) / E2. AN OVERRUN COSTS EVERYTHING THAT WAS BUFFERED WHEN IT HAPPENED,
+/// AND NOTHING AFTER THE NEXT TERMINATOR.
 ///
-/// A serial FIFO overrun drops bytes silently: what `read()` hands up afterwards
-/// is in order, printable, and has a hole in it. The assembler trims it, finds
-/// it inside the token cap and emits a perfectly valid token that nobody
-/// scanned — which is either a refusal for a member who is standing there or,
-/// far worse, a match on somebody else's booking.
-void test_app_an_rx_error_discards_the_line_it_holed_and_only_that_line() {
-  Rig rig(kBaseMid);
-  rig.boot(true);
-  rig.http.answer(200U, kOpenThreeSeconds);
+/// A serial FIFO overruns when it is FULL. Everything the driver already has it
+/// keeps; what it drops is what arrived NEXT. So the bytes `read()` hands up
+/// afterwards are the OLD ones — in order, printable, whole lines — followed by
+/// the far side of a hole, and the hole is at the TAIL of about a kilobyte of
+/// buffered data that the loop drains sixty-four bytes at a time.
+///
+/// Poisoning only the line in ASSEMBLY therefore poisoned the wrong line: a
+/// good buffered line was thrown away and the holed one was handed up several
+/// passes later as a perfectly valid token — a refusal for somebody standing
+/// there, or a match on another member's booking.
+///
+/// THE OLD FIXTURE COULD NOT SEE THAT, and that is the lesson. It fed a PARTIAL
+/// line before signalling, so the line in assembly and the holed line were the
+/// same line and marking one marked the other. Feed WHOLE lines first — the
+/// real shape — and the old firmware goes red.
+///
+/// MUTATION-PROVED: replace the drain with a bare `markCorrupt()` and the first
+/// row below fails on `GOODLINETWO2` opening the door.
+void test_app_an_rx_error_discards_everything_that_was_buffered_when_it_happened() {
+  // THE REAL SHAPE: whole lines already in the ring, the hole at the tail.
+  {
+    Rig rig(kBaseMid);
+    rig.boot(true);
+    rig.http.answer(200U, kOpenThreeSeconds);
+    rig.http.forget();
 
-  // Half a line arrives, the driver drops the middle, the rest arrives.
-  rig.scanner.feed("7Q3F9K");
-  rig.tick();
-  rig.scanner.signalRxError();
-  rig.scanner.feed("XZ8B\n");
-  rig.tick();
-  TEST_ASSERT_EQUAL_UINT16_MESSAGE(0U, rig.http.calls(), "a holed line must not become a token");
-  TEST_ASSERT_FALSE(rig.lock.released());
+    rig.scanner.feed("GOODLINEONE1\nGOODLINETWO2\nHOLEDLINEXX");
+    rig.scanner.signalRxError();
+    rig.scanner.feed("YZ\n"); // the far side of the hole, already buffered
+    for (int i = 0; i < 4; ++i) {
+      rig.tick();
+    }
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(0U, rig.http.calls(),
+                                     "nothing buffered when the driver overran may become a token");
+    TEST_ASSERT_FALSE(rig.lock.released());
 
-  // The NEXT line is clean, and is decided normally.
-  rig.scanner.feed("K4TQ8N2ZV7BM\n");
-  rig.tick();
-  TEST_ASSERT_EQUAL_UINT16(1U, rig.http.calls());
-  TEST_ASSERT_TRUE(rig.lock.released());
+    // And the next line, which arrived after all of it, is clean.
+    rig.scanner.feed("K4TQ8N2ZV7BM\n");
+    rig.tick();
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(1U, rig.http.calls(), "the overrun must not cost the next line too");
+    TEST_ASSERT_TRUE(rig.lock.released());
+  }
+
+  // THE FAR SIDE OF THE HOLE HAS NOT ARRIVED YET, so the discard has to run on
+  // past the drain, through the next terminator.
+  {
+    Rig rig(kBaseMid);
+    rig.boot(true);
+    rig.http.answer(200U, kOpenThreeSeconds);
+    rig.http.forget();
+
+    rig.scanner.feed("GOODLINEONE1\nHOLEDLINEXX");
+    rig.scanner.signalRxError();
+    rig.tick();
+    rig.scanner.feed("YZ\n"); // arrives a pass later
+    rig.tick();
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(0U, rig.http.calls(), "the far side of a hole is not a token");
+
+    rig.scanner.feed("K4TQ8N2ZV7BM\n");
+    rig.tick();
+    TEST_ASSERT_EQUAL_UINT16(1U, rig.http.calls());
+    TEST_ASSERT_TRUE(rig.lock.released());
+  }
+
+  // THE ORIGINAL SHAPE still holds: half a line in assembly, the rest after.
+  {
+    Rig rig(kBaseMid);
+    rig.boot(true);
+    rig.http.answer(200U, kOpenThreeSeconds);
+    rig.http.forget();
+
+    rig.scanner.feed("7Q3F9K");
+    rig.tick();
+    rig.scanner.signalRxError();
+    rig.scanner.feed("XZ8B\n");
+    rig.tick();
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(0U, rig.http.calls(), "a holed line must not become a token");
+    TEST_ASSERT_FALSE(rig.lock.released());
+
+    rig.scanner.feed("K4TQ8N2ZV7BM\n");
+    rig.tick();
+    TEST_ASSERT_EQUAL_UINT16(1U, rig.http.calls());
+    TEST_ASSERT_TRUE(rig.lock.released());
+  }
 }
 
 /// (e) And the assembler is empty at boot, as its own header has promised since
@@ -1869,6 +2095,250 @@ void test_app_an_unreadable_line_queues_on_the_same_judgement_a_scan_makes() {
   TEST_ASSERT_TRUE(event.kind == eventq::Kind::UnknownScan);
 }
 
+// ---------------------------------------------------------------------------
+// E1 — the event drain must never starve the heartbeat
+// ---------------------------------------------------------------------------
+
+/// Queues `count` offline refusals, which is the cheapest way to fill the ring
+/// with events only this board knows about. Leaves the radio DOWN.
+void queueOfflineEvents(Rig& rig, uint16_t count) {
+  rig.link.set(false);
+  rig.tick(); // let pumpLink see the drop before any scan decides
+  for (uint16_t i = 0U; i < count; ++i) {
+    char token[roster::kMaxTokenLen + 2U] = {};
+    snprintf(token, sizeof(token), "QUEUED%06u\n", i);
+    rig.scanner.feed(token);
+    rig.tick();
+    rig.tick();
+  }
+}
+
+constexpr char kHealthyHeartbeat[] =
+    "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":3},\"roster\":[\"MEMBERTOKEN1|0|0|86399\"],"
+    "\"accepted_through\":0}";
+
+/// E1 CRITICAL, and the scenario the round-G2 finders reproduced against the
+/// real GateApp.
+///
+/// `/events` refusing while `/heartbeat` is perfectly healthy is not exotic: a
+/// rate limiter, a WAF rule, a proxy, or a 200 whose `accepted_through` does
+/// not cover the head event all produce it, and `begin()` queues a `boot` event
+/// on EVERY boot, so a board that meets one of them has something in its ring
+/// from its first second.
+///
+/// The shipped loop drained events BEFORE the heartbeat and both were gated on
+/// the same one-blocking-call-per-pass flag, so the refused head was re-posted
+/// on every pass — about twenty-five times a second — and the heartbeat never
+/// ran again. Three things follow, and all three are worse than the refusal:
+/// the roster ages out at six hours and the door then admits NOBODY; a board
+/// the club took out of service never hears the heartbeat's 403 and keeps
+/// admitting rostered members; and the API is hammered by a device that is
+/// supposed to speak twice a minute.
+///
+/// MUTATION-PROVED: put `pumpEvents()` back before `pumpHeartbeat()`, or delete
+/// the backoff, and this goes red on both counts.
+void test_app_a_refusing_events_endpoint_never_starves_the_heartbeat() {
+  struct Row {
+    uint16_t status;
+    const char* body;
+    const char* why;
+  };
+
+  // Every refusal class that KEEPS the head event. A 400 releases it (the board
+  // caused it) and makes progress, so it is not this defect's shape; 403 is its
+  // own scenario below, because it also empties the roster.
+  const Row rows[] = {
+      {401U, "", "401 — the compiled-in key is not the tenant's"},
+      {408U, "", "408"},
+      {429U, "", "429 — a rate limiter is the ordinary cause"},
+      {503U, "", "503 — a container restarting"},
+      {200U, "{\"ok\":true}", "a 200 that acknowledges nothing"},
+      {200U, "{\"accepted_through\":0}", "a 200 whose acknowledgement does not reach the head"},
+  };
+
+  // Thirty simulated minutes: sixty heartbeats are due in that time.
+  const uint32_t kWindowMs = 1800000UL;
+  const uint32_t kDueHeartbeats = kWindowMs / gatelogic::kGateConfig.heartbeatMs;
+
+  for (const Row& row : rows) {
+    Rig rig(kBaseMid);
+    rig.boot(true);
+    queueOfflineEvents(rig, 3U);
+
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 20U);
+    rig.http.onPath(gatelogic::kPathEvents, row.status, row.body, 20U);
+    rig.link.set(true);
+    rig.tick();
+    rig.http.forget();
+
+    rig.runFor(kWindowMs);
+
+    const uint32_t heartbeats = rig.http.callsTo(gatelogic::kPathHeartbeat);
+    const uint32_t posts = rig.http.callsTo(gatelogic::kPathEvents);
+
+    // THE CADENCE IS KEPT. Not "some heartbeats happened": most of them.
+    TEST_ASSERT_TRUE_MESSAGE(heartbeats >= (kDueHeartbeats - (kDueHeartbeats / 10U)), row.why);
+
+    // AND THE DRAIN IS PACED. The backoff starts at 15 s and doubles to a
+    // five-minute cap, so thirty minutes is about nine posts. The bound below
+    // is the number of posts that schedule can produce with room to spare — and
+    // it is thousands below what a hot loop produces, which is the point.
+    TEST_ASSERT_TRUE_MESSAGE(posts >= 1U, row.why);
+    TEST_ASSERT_TRUE_MESSAGE(posts <= 20U, row.why);
+
+    // AND THE ROSTER IS FRESH, which is the consequence that shuts the door.
+    TEST_ASSERT_TRUE_MESSAGE(rig.roster.ageMs(rig.clock.value()) < 3U * gatelogic::kGateConfig.heartbeatMs,
+                             row.why);
+    TEST_ASSERT_TRUE_MESSAGE(
+        rig.roster.decide("MEMBERTOKEN1", roster::CourtCount(1U), rig.clock.value()).verdict ==
+            roster::Verdict::Allow,
+        row.why);
+  }
+}
+
+/// E1(b). The backoff RESETS once the drain makes progress, so a transient
+/// refusal does not leave a healthy board posting one event every five minutes
+/// for the rest of the evening.
+void test_app_the_event_backoff_resets_once_the_drain_moves_again() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  queueOfflineEvents(rig, 4U);
+
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.http.onPath(gatelogic::kPathEvents, 429U, "", 0U);
+  rig.link.set(true);
+  rig.tick();
+  rig.http.forget();
+
+  // A minute of refusals arms and doubles the backoff.
+  rig.runFor(60000UL);
+  const uint32_t refusals = rig.http.callsTo(gatelogic::kPathEvents);
+  TEST_ASSERT_TRUE_MESSAGE(refusals >= 1U && refusals <= 8U, "a minute of refusals is a handful of posts");
+
+  // The rate limiter lifts. The queue must drain at the loop's own pace from
+  // the next attempt, not at the backoff's.
+  rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+  rig.runFor(60000UL);
+  TEST_ASSERT_TRUE_MESSAGE(rig.queue.empty(), "the queue must drain once the endpoint recovers");
+}
+
+/// E1(c). A 403 on `/events` is the SAME authoritative word as a 403 on
+/// `/gate` and on the heartbeat: the club took this board out of service.
+///
+/// This is the sequence that made the critical dangerous rather than merely
+/// wasteful. A board with an event in its ring — every board, from its first
+/// boot — that the club disables gets 403 everywhere. With the drain ahead of
+/// the heartbeat and no backoff, the heartbeat never ran, so the board never
+/// heard its own 403, kept its roster, and admitted every rostered member for
+/// the next six hours from behind a door the admin believed was shut.
+void test_app_a_403_on_events_takes_the_board_out_of_service_too() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  const roster::Entry entries[] = {booking("MEMBERTOKEN1", 0U, 86399000U)};
+  loadRoster(rig.roster, rig.clock.value(), entries, 1U);
+  queueOfflineEvents(rig, 2U);
+
+  // Out of service: every device path answers 403.
+  rig.http.answer(403U, "");
+  rig.link.set(true);
+  rig.tick();
+  rig.http.forget();
+
+  // One heartbeat interval, with slack for the pass the link edge costs.
+  rig.runFor(2U * gatelogic::kGateConfig.heartbeatMs);
+
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, rig.roster.size(),
+                                  "a 403 anywhere on the device API empties the roster");
+  TEST_ASSERT_TRUE_MESSAGE(rig.roster.everLoaded(), "empty, not never-loaded");
+
+  // And now the link drops — the residual case D4 names, where the board can no
+  // longer be told anything. It must already know.
+  rig.link.set(false);
+  rig.tick();
+  rig.debounce.reset();
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(),
+                            "a board taken out of service must refuse a rostered member after a drop");
+}
+
+/// E1(b), the normal path for a board nobody has done anything to. `begin()`
+/// queues a `boot` event on every boot; a server that answers 200 without an
+/// `accepted_through` covering it leaves it at the head forever. That is not a
+/// refusal anybody would notice — it is a healthy-looking board posting the
+/// same event about twenty-five times a second.
+void test_app_a_boot_event_the_server_never_acknowledges_is_not_a_hot_loop() {
+  Rig rig(kBaseMid);
+  rig.bootRaw(true);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"ok\":true}", 0U);
+  rig.tick();
+  rig.http.forget();
+
+  const uint32_t kWindowMs = 300000UL; // five minutes
+  rig.runFor(kWindowMs);
+
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathEvents) <= 8U,
+                           "an unacknowledged boot event must not be re-posted on every pass");
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathHeartbeat) >=
+                               (kWindowMs / gatelogic::kGateConfig.heartbeatMs) - 1U,
+                           "and the heartbeat must keep its cadence while it is stuck");
+}
+
+/// E1(d). A scanner that never stops talking must not starve the heartbeat
+/// either. The member at the door wins the pass — but not forever: after
+/// `kMaxScanPassesBeforeHeartbeat` consecutive passes in which a scan took the
+/// one blocking call with a heartbeat already due, the heartbeat goes first.
+///
+/// Without the bound, a jammed scanner — or simply a very busy door with
+/// eight-second round trips — is a board that never heartbeats, which is a
+/// roster that ages out, which is a door that admits nobody.
+void test_app_a_permanently_busy_scanner_cannot_starve_the_heartbeat() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.onPath(gatelogic::kPathGate, 200U, "{\"opened\":false,\"reason\":\"not_recognised\"}",
+                  gatelogic::kWorstBlockingCallMs);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, gatelogic::kWorstBlockingCallMs);
+
+  // A distinct token per scan, so the debounce never suppresses one, arriving
+  // faster than a pass can decide them and never running out.
+  rig.scanner.streamForever();
+  rig.http.forget();
+
+  rig.runFor(600000UL); // ten simulated minutes of unbroken scanning
+
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathGate) > 0U,
+                           "the scenario has to keep the scanner busy to prove anything");
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathHeartbeat) > 0U,
+                           "a busy scanner starved the heartbeat completely");
+  // The bound, stated as the thing it protects: the roster never got near its
+  // maximum age while the door was busy.
+  TEST_ASSERT_TRUE_MESSAGE(rig.roster.ageMs(rig.clock.value()) < gatelogic::kGateConfig.rosterMaxAgeMs,
+                           "the roster aged out while the door was busy");
+}
+
+/// E5. The link is read BEFORE the scanner decides, not after it.
+///
+/// `linkUp_` was a pass stale: `pumpLink()` ran after `pumpScanner()`, so the
+/// first scan after the radio re-associated was decided from the roster — and
+/// on a board whose roster is empty or stale, that is a member refused at a
+/// door whose network is working.
+void test_app_the_link_is_read_before_the_scanner_decides() {
+  Rig rig(kBaseMid);
+  rig.boot(false); // associated, then dropped
+  rig.http.answer(200U, kOpenThreeSeconds);
+  rig.http.forget();
+
+  // The radio comes back and a member scans in the SAME pass.
+  rig.link.set(true);
+  rig.scanner.feed("7Q3F9KM2XZ8B\n");
+  rig.tick();
+
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, rig.http.callsTo(gatelogic::kPathGate),
+                                   "the scan was decided against a link state one pass out of date");
+  TEST_ASSERT_TRUE(rig.lock.released());
+}
+
 } // namespace
 
 void setUp() {
@@ -1939,7 +2409,7 @@ int main(int, char**) {
   RUN_TEST(test_app_the_watchdog_is_kicked_around_every_blocking_call);
   RUN_TEST(test_app_a_dead_api_host_never_starves_the_watchdog_or_the_lock);
   RUN_TEST(test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call);
-  RUN_TEST(test_app_an_rx_error_discards_the_line_it_holed_and_only_that_line);
+  RUN_TEST(test_app_an_rx_error_discards_everything_that_was_buffered_when_it_happened);
   RUN_TEST(test_app_boot_and_a_link_event_throw_away_a_partial_line);
   RUN_TEST(test_app_the_heartbeat_interval_is_armed_after_the_call);
   RUN_TEST(test_app_a_403_on_the_heartbeat_commits_an_empty_roster);
@@ -1947,6 +2417,13 @@ int main(int, char**) {
   RUN_TEST(test_app_a_truncated_heartbeat_body_never_replaces_the_roster);
   RUN_TEST(test_app_a_queued_open_carries_what_the_lock_was_given);
   RUN_TEST(test_app_an_unreadable_line_queues_on_the_same_judgement_a_scan_makes);
+
+  RUN_TEST(test_app_a_refusing_events_endpoint_never_starves_the_heartbeat);
+  RUN_TEST(test_app_the_event_backoff_resets_once_the_drain_moves_again);
+  RUN_TEST(test_app_a_403_on_events_takes_the_board_out_of_service_too);
+  RUN_TEST(test_app_a_boot_event_the_server_never_acknowledges_is_not_a_hot_loop);
+  RUN_TEST(test_app_a_permanently_busy_scanner_cannot_starve_the_heartbeat);
+  RUN_TEST(test_app_the_link_is_read_before_the_scanner_decides);
 
   return UNITY_END();
 }
