@@ -1956,14 +1956,34 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
-    /// The board's diagnostic counter is accepted, changes nothing, and cannot take a door out
-    /// of service — including when it arrives negative, which is not a counter.
+    /// <b>A diagnostic counter must not be able to take a door out of service, and one could.</b>
+    ///
+    /// <para>
+    /// Both counters are SINCE-BOOT TOTALS — the board cannot know which report the server
+    /// kept, so a counter reset on send loses the whole count on any lost response — and both
+    /// SATURATE at <c>INT32_MAX</c> rather than wrapping. <c>no_push</c> bound as
+    /// <c>int?</c>, so the very first value past that saturation point was a <b>400 for the
+    /// whole heartbeat</b>: no <c>gate</c> block, no <c>roster</c>, nothing. A door that had
+    /// been up long enough to saturate a counter then lost its cache at the next stale
+    /// deadline, and the field's own contract vector says in as many words that this must
+    /// never happen. Binding is now 64-bit and an out-of-range value is IGNORED.
+    /// </para>
+    ///
+    /// <para>
+    /// The values below are the real shape of the problem: the saturation point, one past it,
+    /// <c>long.MaxValue</c> for a board or proxy that does something else entirely, and
+    /// negatives, which are not counters.
+    /// </para>
     /// </summary>
     [SkippableTheory]
-    [InlineData(4)]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public async Task A_no_push_counter_is_accepted_and_changes_nothing(int noPush)
+    [InlineData(4L, null)]
+    [InlineData(0L, 0L)]
+    [InlineData(-1L, -7L)]
+    [InlineData(2147483647L, 2147483647L)]
+    [InlineData(2147483648L, 2147483648L)]
+    [InlineData(long.MaxValue, long.MinValue)]
+    [InlineData(null, 12L)]
+    public async Task The_boards_diagnostic_counters_are_accepted_and_change_nothing(long? noPush, long? eventsLost)
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -1978,14 +1998,23 @@ public sealed class DeviceGateHttpTests
             ["firmware_version"] = "1.0.0",
             ["uptime_ms"] = 60000,
             ["kind"] = DeviceKinds.Gate,
-            ["no_push"] = noPush,
         };
+        if (noPush is { } n) body["no_push"] = n;
+        if (eventsLost is { } e) body["events_lost"] = e;
 
-        var json = await BodyAsync(await client.SendAsync(Signed(club.Key, HeartbeatPath, body)));
+        var response = await client.SendAsync(Signed(club.Key, HeartbeatPath, body));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await BodyAsync(response);
 
+        // The whole answer is intact, which is the point: a door that cannot read its roster
+        // is a door that admits nobody at the next stale deadline.
         Assert.Equal(DeviceKinds.Gate, json.GetProperty("kind").GetString());
         Assert.Equal(3, json.GetProperty("gate").GetProperty("unlock_seconds").GetInt32());
+        Assert.Equal(JsonValueKind.Array, json.GetProperty("roster").ValueKind);
+
+        // And neither counter comes back or is stored: they are logged and nothing else.
         Assert.False(json.TryGetProperty("no_push", out _));
+        Assert.False(json.TryGetProperty("events_lost", out _));
     }
 
     /// <summary>
@@ -2238,6 +2267,68 @@ public sealed class DeviceGateHttpTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         Assert.Null((await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == gateMac)).GateKey);
+    }
+
+    /// <summary>
+    /// <b>The silent no-op the spec itself argues against, on the PATCH this time.</b>
+    ///
+    /// <para>
+    /// §8's settings PUT binds both spellings for exactly this reason: the endpoint answers
+    /// snake_case and .NET binds camelCase, so the cost of a client picking the wrong one is
+    /// not an error — it is <c>null</c>, which <c>gate_key</c> reads as "omitted, leave
+    /// unchanged", so the request answers <c>200</c> with the door's old name in the body and
+    /// nothing anywhere says the write was dropped. That argument was made in this document
+    /// and then not applied to the one field on the PATCH that carries it.
+    /// </para>
+    ///
+    /// <para>
+    /// Both refusals still fire under either spelling, because a spelling is not a way round a
+    /// rule: a camelCase <c>gateKey</c> on a court box is still <c>gate_key_not_a_gate</c>,
+    /// and one past 64 characters is still <c>gate_key_too_long</c>.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_admin_patch_binds_gate_key_under_either_spelling()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var deviceClient = factory.CreateClient();
+        var gateMac = await GateAsync(factory, club, deviceClient, "front-door");
+        var boxMac = await CourtBoxAsync(club, deviceClient);
+        var (gateId, boxId) = await IdsAsync(factory, gateMac, boxMac);
+        var admin = await AdminClientAsync(factory, club);
+
+        var camel = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { gateKey = "side-door" });
+        Assert.Equal(HttpStatusCode.OK, camel.StatusCode);
+        Assert.Equal("side-door", (await BodyAsync(camel)).GetProperty("gate_key").GetString());
+
+        // The empty string clears under the camelCase spelling too — the console's own
+        // gesture must not depend on which of the two it happens to send.
+        var cleared = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { gateKey = "" });
+        Assert.Equal(JsonValueKind.Null, (await BodyAsync(cleared)).GetProperty("gate_key").ValueKind);
+
+        // Absent under BOTH spellings still means "leave it alone".
+        await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { gateKey = "back-door" });
+        var untouched = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { name = "Back door" });
+        Assert.Equal("back-door", (await BodyAsync(untouched)).GetProperty("gate_key").GetString());
+
+        // And neither refusal can be stepped around by respelling the field.
+        var onABox = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{boxId}", new { gateKey = "front-door" });
+        Assert.Equal(HttpStatusCode.BadRequest, onABox.StatusCode);
+        Assert.Equal(
+            AdminDeviceEndpoints.GateKeyNotAGate, (await BodyAsync(onABox)).GetProperty("error").GetString());
+
+        var tooLong = await admin.PatchAsJsonAsync(
+            $"/api/v1/admin/devices/{gateId}", new { gateKey = new string('g', Device.GateKeyMaxLength + 1) });
+        Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+        Assert.Equal(
+            AdminDeviceEndpoints.GateKeyTooLong, (await BodyAsync(tooLong)).GetProperty("error").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal("back-door", (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == gateMac)).GateKey);
     }
 
     /// <summary>

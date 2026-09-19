@@ -636,19 +636,42 @@ event at the head stops every event behind it from ever arriving — including t
 the no-show sweep is waiting on, which is real money. A board cannot edit what it has already
 queued, so the only exit is a receipt.
 
-### The heartbeat request carries an optional `no_push`
+### The heartbeat request carries two optional counters
 
-A board with one LED and a boot log has two failures it must report and must never show a
-member: a heartbeat body that did not fit its buffer or arrived incomplete, and a watchdog
-that would not arm. They ride the heartbeat request as one optional non-negative integer,
-`no_push` — additive, so a board that sends nothing is reporting zero, and the court box's
-wire is untouched.
+A board with one LED and a boot log has failures it must report and must never show a member.
+Two of them ride the heartbeat request as optional integers — additive, so a board that sends
+nothing is reporting zero, and the court box's wire is untouched:
 
-The server **logs it against the device code and stores nothing**: a column would be an EF
+| Field | Counts |
+|---|---|
+| `no_push` | heartbeats the board could not push: a body that did not fit its buffer, arrived incomplete, or failed its read on an otherwise-`200` response |
+| `events_lost` | queued events its ring overwrote before they could be uploaded |
+
+**Both are SINCE-BOOT TOTALS, and three places in this repository said otherwise** — this
+section, the heartbeat's own field comment, and the log line the server writes ("since the
+last one it could"). A board cannot know which of its reports the server kept, and a lost
+response is precisely the case `no_push` exists to report, so a counter reset on send would
+lose the whole count exactly when it mattered. The reader takes the **rise** between two
+heartbeats. Both **saturate** at `INT32_MAX` on the board rather than wrapping, so a board up
+for years reports a ceiling instead of a small number.
+
+**The watchdog half does NOT ride `no_push`, and this section said it did.** A watchdog that
+will not arm is reported by the link pattern's fault variant on the LED and by the boot log.
+It is not a heartbeat that failed to push, and folding it in would make one number mean two
+unrelated things to whoever reads it.
+
+The server **logs both against the device code and stores nothing**: a column would be an EF
 migration for a counter nothing decides anything on, and §9's "no EF migration" still holds.
-It changes no part of the response, and a negative value is ignored rather than refused,
-because a diagnostic must not be able to take a door out of service. Corpus vector
-`gate-heartbeat-request-no-push`.
+They change no part of the response.
+
+**They bind as 64-bit, and an out-of-range or negative value is IGNORED rather than refused.**
+`no_push` bound as a 32-bit integer, so the very first value past the board's own saturation
+point answered **`400` for the whole heartbeat** — no `gate` block, no `roster`, nothing — and
+a door that had been up long enough to saturate a counter then lost its cache at the next
+stale deadline. The corpus vector's own note has said since it was written that a counter must
+not be able to take a door out of service; it could. Vectors
+`gate-heartbeat-request-no-push`, `gate-heartbeat-request-events-lost`,
+`gate-heartbeat-request-counters-out-of-range`.
 
 **A `gate_open` uploaded by a `CourtBox` row is refused by name**, the mirror of §7: receipted
 and acknowledged, outcome `not_a_gate`, and the `device.gate_open` row **names nobody**.
@@ -880,6 +903,15 @@ console's. `""` clears the name; `null` and an absent key both mean "leave it al
 console sends `""` to clear, deliberately, because the other reading is the one a client gets
 wrong for free: send `null` meaning "clear it" and the API answers `200` having changed
 nothing, and nothing anywhere says so.
+
+**Both spellings bind, for the reason §8 gives about the settings PUT** — and that argument
+was made in this document and then not applied to the one field on this PATCH that carries the
+same risk. This endpoint answers snake_case and .NET binds camelCase, so `{"gateKey": "x"}`
+bound to `null`, which `gate_key` reads as "omitted", and the PATCH returned `200` with the
+door's OLD name in the body. For a value that names the door in every audit row a club will
+ever read back, a silent no-op is worth removing rather than documenting. snake_case wins
+where both arrive, and every refusal in the table above applies to whichever value is used —
+a spelling is not a way round a rule.
 
 **Naming a door now does something**, which it did not when this section was first written: it
 is what starts that board's offline fallback (§4). The console says so where an admin can act
@@ -1209,7 +1241,8 @@ new sentence above with no row is the defect this table exists to expose.
 | `kind` is normalised once and every later decision reads that value | `DeviceGateHttpTests.A_door_event_kind_is_normalised_before_anything_is_decided_from_it` (five spellings), `…An_unknown_kind_is_recorded_as_normalised_and_still_fingerprinted` |
 | A respelt `gate_open` cannot step around the court-box refusal | `DeviceGateHttpTests.A_court_box_cannot_post_a_door_open_by_respelling_the_kind` |
 | A missing, empty or over-long `kind` is receipted as `malformed`, never 500, and the queue drains past it | `DeviceGateHttpTests.A_malformed_event_kind_is_receipted_rather_than_five_hundred` |
-| `no_push` is accepted, logged, stored nowhere, and changes nothing | `DeviceGateHttpTests.A_no_push_counter_is_accepted_and_changes_nothing`, `DeviceGateProtocolCorpusTests.Request_vectors_bind_to_the_records_the_endpoints_take` |
+| `no_push` and `events_lost` are accepted, logged, stored nowhere, and change nothing — at any value, saturated or negative | `DeviceGateHttpTests.The_boards_diagnostic_counters_are_accepted_and_change_nothing`, `DeviceGateProtocolCorpusTests.Request_vectors_bind_to_the_records_the_endpoints_take` |
+| `gate_key` binds under either spelling, and both refusals still fire under either | `DeviceGateHttpTests.The_admin_patch_binds_gate_key_under_either_spelling` |
 | A `gate_open` from a court box is `not_a_gate` and names nobody | `DeviceGateHttpTests.A_gate_open_uploaded_by_a_court_box_names_nobody_and_says_not_a_gate` |
 | A gate cannot activate or sell a walk-up | `DeviceGateHttpTests.A_gate_cannot_activate_a_court_or_sell_a_walk_up` |
 | A gate's `activation` upload settles nothing | `DeviceGateHttpTests.An_activation_uploaded_by_a_gate_is_recorded_and_settles_nothing` |
