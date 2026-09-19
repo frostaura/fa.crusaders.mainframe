@@ -86,6 +86,12 @@ public static class AdminConfigEndpoints
                 gate_unlock_seconds = GetInt(doc, "gate_unlock_seconds", defaults.GateUnlockSeconds),
                 gate_access_policy = defaults.GateAccessPolicy,
                 gate_early_entry_minutes = GetInt(doc, "gate_early_entry_minutes", defaults.GateEarlyEntryMinutes),
+
+                // Always present, never conditional: the console's settings type requires it
+                // and carries no client-side default, so an omitted key would be a page that
+                // cannot render rather than a page that falls back.
+                device_alert_cooldown_minutes = GetInt(
+                    doc, "device_alert_cooldown_minutes", defaults.DeviceAlertCooldownMinutes),
             });
         });
 
@@ -416,15 +422,22 @@ public static class AdminConfigEndpoints
         {
             return "gate_early_entry_minutes_out_of_range";
         }
+        if (req.EffectiveDeviceAlertCooldownMinutes is { } cooldown
+            && (cooldown < TenantSettingsView.MinDeviceAlertCooldownMinutes
+                || cooldown > TenantSettingsView.MaxDeviceAlertCooldownMinutes))
+        {
+            return "device_alert_cooldown_minutes_out_of_range";
+        }
         return null;
     }
 
-    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the three gate settings.</summary>
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the gate block.</summary>
     private static void WriteOptionalGateSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
         if (req.EffectiveGateUnlockSeconds is { } unlock) doc["gate_unlock_seconds"] = ToElement(unlock);
         if (req.EffectiveGateAccessPolicy is { } policy) doc[GateAccessPolicies.Key] = ToElement(policy.Trim());
         if (req.EffectiveGateEarlyEntryMinutes is { } early) doc["gate_early_entry_minutes"] = ToElement(early);
+        if (req.EffectiveDeviceAlertCooldownMinutes is { } cooldown) doc["device_alert_cooldown_minutes"] = ToElement(cooldown);
     }
 
     /// <summary>
@@ -558,6 +571,14 @@ public sealed record UpdateSettingsRequest(
     string? GateAccessPolicy = null,
     int? GateEarlyEntryMinutes = null,
 
+    /// <summary>
+    /// How long the peripheral sweep waits before mailing about the same board again. Not a
+    /// door number — it governs court boxes too — but it binds under both spellings like the
+    /// three above, because it is edited on the same screen and the cost of a client picking
+    /// the wrong spelling is the same silent no-op.
+    /// </summary>
+    int? DeviceAlertCooldownMinutes = null,
+
     // ---- and the same three under their snake_case names ----
     //
     // This endpoint is asymmetric and always has been: the GET answers snake_case and the
@@ -575,7 +596,8 @@ public sealed record UpdateSettingsRequest(
     // means a client on either convention is heard, rather than silently ignored.
     [property: JsonPropertyName("gate_unlock_seconds")] int? GateUnlockSecondsSnake = null,
     [property: JsonPropertyName("gate_access_policy")] string? GateAccessPolicySnake = null,
-    [property: JsonPropertyName("gate_early_entry_minutes")] int? GateEarlyEntryMinutesSnake = null)
+    [property: JsonPropertyName("gate_early_entry_minutes")] int? GateEarlyEntryMinutesSnake = null,
+    [property: JsonPropertyName("device_alert_cooldown_minutes")] int? DeviceAlertCooldownMinutesSnake = null)
 {
     /// <summary>The release the club asked for, under either spelling, or null when neither arrived.</summary>
     public int? EffectiveGateUnlockSeconds => GateUnlockSeconds ?? GateUnlockSecondsSnake;
@@ -585,6 +607,9 @@ public sealed record UpdateSettingsRequest(
 
     /// <summary>The entry window the club asked for, under either spelling.</summary>
     public int? EffectiveGateEarlyEntryMinutes => GateEarlyEntryMinutes ?? GateEarlyEntryMinutesSnake;
+
+    /// <summary>The alert cooldown the club asked for, under either spelling.</summary>
+    public int? EffectiveDeviceAlertCooldownMinutes => DeviceAlertCooldownMinutes ?? DeviceAlertCooldownMinutesSnake;
 }
 
 /// <summary>

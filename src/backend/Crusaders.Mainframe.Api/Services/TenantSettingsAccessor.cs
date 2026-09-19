@@ -90,6 +90,13 @@ public sealed class TenantSettingsAccessor
             GateUnlockSeconds = TryInt(root, "gate_unlock_seconds", TenantSettingsView.DefaultGateUnlockSeconds),
             GateAccessPolicy = GateAccessPolicies.FromSettings(root),
             GateEarlyEntryMinutes = TryInt(root, "gate_early_entry_minutes", TenantSettingsView.DefaultGateEarlyEntryMinutes),
+
+            // Not a door number: it bounds how often ANY board may mail the club about
+            // itself, doors and court boxes alike. It lives beside them because the door is
+            // what made the absence of one expensive — auto-registration is unbounded, so a
+            // key-holder could mint boards that each alerted every admin.
+            DeviceAlertCooldownMinutes = TryInt(
+                root, "device_alert_cooldown_minutes", TenantSettingsView.DefaultDeviceAlertCooldownMinutes),
         };
     }
 
@@ -161,6 +168,21 @@ public sealed record TenantSettingsView(
     /// <summary>Widest back-to-back disambiguation window a club may run — a day.</summary>
     public const int MaxActivationForwardWindowMinutes = 1440;
 
+    // ---- How often a board may mail the club about itself ----
+
+    /// <summary>
+    /// How long <c>PeripheralHealthWorker</c> waits before mailing about the same board again.
+    /// An hour: long enough that a board flapping on a bad uplink is one message rather than a
+    /// hundred, short enough that a real outage is still reported within an admin's morning.
+    /// </summary>
+    public const int DefaultDeviceAlertCooldownMinutes = 60;
+
+    /// <summary>Shortest cooldown a club may set. Below five minutes the sweep's own thirty-second stride starts to show through.</summary>
+    public const int MinDeviceAlertCooldownMinutes = 5;
+
+    /// <summary>Longest cooldown a club may set — a day, after which an outage nobody heard about is an outage nobody will.</summary>
+    public const int MaxDeviceAlertCooldownMinutes = 1440;
+
     // ---- The door-gate numbers ----
     //
     // Three seconds is long enough to push a door and short enough that it has shut again
@@ -210,6 +232,20 @@ public sealed record TenantSettingsView(
     /// online. A member let in offline and a member let in online are let in on one rule.
     /// </summary>
     public int GateEarlyEntryMinutes { get; init; } = DefaultGateEarlyEntryMinutes;
+
+    /// <summary>
+    /// How long <c>PeripheralHealthWorker</c> waits before mailing the club about the same
+    /// board again, minutes. Applies to court boxes and doors alike.
+    ///
+    /// <para>
+    /// Without it the sweep mailed every admin on every transition, with no minimum outage and
+    /// no cooldown, so a board on a marginal uplink flapping every few minutes was a mailbox
+    /// full of "unreachable" and "back" — and auto-registration is unbounded, so anyone
+    /// holding the club's device key could mint boards that each did it. An alert nobody reads
+    /// is worse than no alert, because the club believes it has one.
+    /// </para>
+    /// </summary>
+    public int DeviceAlertCooldownMinutes { get; init; } = DefaultDeviceAlertCooldownMinutes;
 
     /// <summary>
     /// When the club is open, per weekday. Empty means "no per-weekday map configured",

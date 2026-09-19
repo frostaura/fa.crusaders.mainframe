@@ -61,10 +61,20 @@ public sealed class PeripheralHealthWorker : BackgroundService
     {
         /// <summary>Console link for the alert, resolved once per tick rather than per device.</summary>
         public string ConsoleUrl { get; init; } = "/admin/devices";
+
+        /// <summary>The club's <c>device_alert_cooldown_minutes</c>. See <see cref="AnnouncedAsync"/>.</summary>
+        public TimeSpan Cooldown { get; init; } = TimeSpan.FromMinutes(TenantSettingsView.DefaultDeviceAlertCooldownMinutes);
     }
 
     /// <summary>Internal so tests drive one tick directly rather than waiting on the timer.</summary>
-    internal async Task TickAsync(CancellationToken ct)
+    internal Task TickAsync(CancellationToken ct) => TickAsync(DateTimeOffset.UtcNow, ct);
+
+    /// <summary>
+    /// The same sweep at a stated instant. Every judgement here is a comparison against this
+    /// one value, so threading it changes nothing the worker does and is the only way a test
+    /// can drive the REAL worker across the hours a flapping board takes to misbehave.
+    /// </summary>
+    internal async Task TickAsync(DateTimeOffset now, CancellationToken ct)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -73,7 +83,6 @@ public sealed class PeripheralHealthWorker : BackgroundService
         var email = scope.ServiceProvider.GetRequiredService<IEmailService>();
         var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
-        var now = DateTimeOffset.UtcNow;
         var baseUrl = config["App:PublicBaseUrl"] ?? "http://localhost:8088";
 
         var tenants = await db.Tenants.IgnoreQueryFilters().ToListAsync(ct);
@@ -84,6 +93,10 @@ public sealed class PeripheralHealthWorker : BackgroundService
             var health = new Health(db, email, tenant, HeartbeatCadence.OfflineAfterSeconds(s.HeartbeatSeconds), now)
             {
                 ConsoleUrl = $"{baseUrl}/admin/devices",
+                Cooldown = TimeSpan.FromMinutes(Math.Clamp(
+                    s.DeviceAlertCooldownMinutes,
+                    TenantSettingsView.MinDeviceAlertCooldownMinutes,
+                    TenantSettingsView.MaxDeviceAlertCooldownMinutes)),
             };
 
             // Disabled boxes are excluded deliberately. An admin who switches a box off has
@@ -160,25 +173,32 @@ public sealed class PeripheralHealthWorker : BackgroundService
         }
 
         var minutes = (int)Math.Round((health.Now - lastSeen).TotalMinutes, MidpointRounding.AwayFromZero);
+        var announce = Mailable(device) && await AnnouncedAsync(health, device, outage, ct);
 
         if (device.Kind == DeviceKind.Gate)
         {
             _logger.LogWarning(
-                "Door gate {DeviceCode} ({GateKey}) unreachable — last heartbeat {LastSeen}, threshold {Threshold}s",
-                device.DeviceCode, device.GateKey, lastSeen, health.OfflineAfterSeconds);
+                "Door gate {DeviceCode} ({GateKey}) unreachable — last heartbeat {LastSeen}, threshold {Threshold}s, mailed {Mailed}",
+                device.DeviceCode, device.GateKey, lastSeen, health.OfflineAfterSeconds, announce);
 
-            await AlertAdminsAsync(health, m => EmailTemplates.AdminGateUnhealthy(m, GateAlertFor(health, device, minutes)), ct);
+            if (announce)
+            {
+                await AlertAdminsAsync(health, m => EmailTemplates.AdminGateUnhealthy(m, GateAlertFor(health, device, minutes)), ct);
+            }
         }
         else
         {
             _logger.LogWarning(
-                "Court box {DeviceCode} unreachable — last heartbeat {LastSeen}, threshold {Threshold}s",
-                device.DeviceCode, lastSeen, health.OfflineAfterSeconds);
+                "Court box {DeviceCode} unreachable — last heartbeat {LastSeen}, threshold {Threshold}s, mailed {Mailed}",
+                device.DeviceCode, lastSeen, health.OfflineAfterSeconds, announce);
 
-            var alert = new PeripheralAlert(
-                device.Name, device.DeviceCode, device.CourtNumbers, minutes,
-                health.Tenant.DisplayName, health.ConsoleUrl);
-            await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralUnhealthy(m, alert), ct);
+            if (announce)
+            {
+                var alert = new PeripheralAlert(
+                    device.Name, device.DeviceCode, device.CourtNumbers, minutes,
+                    health.Tenant.DisplayName, health.ConsoleUrl);
+                await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralUnhealthy(m, alert), ct);
+            }
         }
 
         await EmitAsync(health, device, "peripheral.unhealthy", new()
@@ -197,19 +217,31 @@ public sealed class PeripheralHealthWorker : BackgroundService
 
         var minutes = (int)Math.Round((outage.EndedAt.Value - outage.StartedAt).TotalMinutes, MidpointRounding.AwayFromZero);
 
+        // An all-clear for an alarm nobody was given is noise about an event the club never
+        // heard of. Same predicate, same rows, so the two decisions cannot disagree.
+        var announce = Mailable(device) && await AnnouncedAsync(health, device, outage, ct);
+
         if (device.Kind == DeviceKind.Gate)
         {
-            _logger.LogInformation("Door gate {DeviceCode} is back after {Minutes} minutes", device.DeviceCode, minutes);
-            await AlertAdminsAsync(health, m => EmailTemplates.AdminGateRecovered(m, GateAlertFor(health, device, minutes)), ct);
+            _logger.LogInformation(
+                "Door gate {DeviceCode} is back after {Minutes} minutes, mailed {Mailed}", device.DeviceCode, minutes, announce);
+            if (announce)
+            {
+                await AlertAdminsAsync(health, m => EmailTemplates.AdminGateRecovered(m, GateAlertFor(health, device, minutes)), ct);
+            }
         }
         else
         {
-            _logger.LogInformation("Court box {DeviceCode} is back after {Minutes} minutes", device.DeviceCode, minutes);
+            _logger.LogInformation(
+                "Court box {DeviceCode} is back after {Minutes} minutes, mailed {Mailed}", device.DeviceCode, minutes, announce);
 
-            var alert = new PeripheralAlert(
-                device.Name, device.DeviceCode, device.CourtNumbers, minutes,
-                health.Tenant.DisplayName, health.ConsoleUrl);
-            await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralRecovered(m, alert), ct);
+            if (announce)
+            {
+                var alert = new PeripheralAlert(
+                    device.Name, device.DeviceCode, device.CourtNumbers, minutes,
+                    health.Tenant.DisplayName, health.ConsoleUrl);
+                await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralRecovered(m, alert), ct);
+            }
         }
 
         await EmitAsync(health, device, "peripheral.recovered", new()
@@ -244,6 +276,73 @@ public sealed class PeripheralHealthWorker : BackgroundService
         return new GateAlert(
             device.Name, device.DeviceCode, device.GateKey, minutes,
             health.Tenant.DisplayName, health.ConsoleUrl);
+    }
+
+    /// <summary>
+    /// Whether this board is one the club has asked to hear about at all.
+    ///
+    /// <para>
+    /// <b>A gate nobody has named is not mailed about.</b> Auto-registration is the whole
+    /// provisioning story and it is unbounded: anything holding the club's device key can
+    /// heartbeat with a MAC it invented and <c>kind: "gate"</c>, and a row appears. Before
+    /// this, each of those boards could then mail every admin of the club on every transition
+    /// — a mail flood available on demand to anyone who had the key, which is the same
+    /// capability D3 took the roster away for and for the same reason. Naming the door is the
+    /// admin's acknowledgement that the board is one of theirs; until then the club has said
+    /// nothing about it and hears nothing about it.
+    /// </para>
+    ///
+    /// <para>
+    /// The outage ROW and the <c>peripheral.*</c> events are written either way. The Devices
+    /// page reads those rows, and a board an admin is looking at should show its history
+    /// whether or not anybody was mailed about it — what is withheld is the interruption, not
+    /// the record. A court box has no equivalent gate: its row is named by the club's own
+    /// court numbers at registration and it drives real money.
+    /// </para>
+    /// </summary>
+    private static bool Mailable(Device device) =>
+        device.Kind != DeviceKind.Gate || !string.IsNullOrWhiteSpace(device.GateKey);
+
+    /// <summary>
+    /// Whether this outage is one the club was, or is about to be, told about — at most one
+    /// per board per <c>device_alert_cooldown_minutes</c>.
+    ///
+    /// <para>
+    /// <b>Derived from the rows rather than stored on them</b>, which is what keeps this out
+    /// of an EF migration for a notification decision. The board's outages are replayed in
+    /// order and each is announced iff the cooldown has elapsed since the last ANNOUNCED one —
+    /// not since the last outage, which would let a board flapping every fifty minutes chain
+    /// its way past an hour's cooldown for ever. The rows are immutable once written, so the
+    /// same replay at close time returns the same answer it did at open time and a recovery
+    /// mail cannot be sent for an outage nobody was told about.
+    /// </para>
+    ///
+    /// <para>
+    /// The one thing that can move between the two is the SETTING: a club that shortens its
+    /// cooldown mid-outage may get an all-clear for an alarm it did not get, or the reverse.
+    /// That is the price of not adding a column, it is bounded to the boards in outage at the
+    /// moment of the change, and it is stated rather than left to be discovered.
+    /// </para>
+    /// </summary>
+    private static async Task<bool> AnnouncedAsync(
+        Health health, Device device, DeviceOutage outage, CancellationToken ct)
+    {
+        var history = await health.Db.DeviceOutages.AsNoTracking()
+            .Where(o => o.DeviceId == device.Id && o.DetectedAt <= outage.DetectedAt)
+            .Select(o => new { o.Id, o.DetectedAt })
+            .ToListAsync(ct);
+
+        var last = DateTimeOffset.MinValue;
+        foreach (var row in history.OrderBy(o => o.DetectedAt).ThenBy(o => o.Id))
+        {
+            var announced = row.DetectedAt - last > health.Cooldown;
+            if (announced) last = row.DetectedAt;
+            if (row.Id == outage.Id) return announced;
+        }
+
+        // The row is not in its own history: it has not been saved, which OpenAsync guarantees
+        // it has. Silence is the safe reading of a state that should not arise.
+        return false;
     }
 
     /// <summary>
