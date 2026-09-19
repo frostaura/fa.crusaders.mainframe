@@ -269,9 +269,9 @@ struct Nesting {
       return false;
     }
     if (opener == '{') {
-      openers |= (1UL << depth);
+      openers |= bit(depth);
     } else {
-      openers &= ~(1UL << depth);
+      openers &= static_cast<uint32_t>(~bit(depth));
     }
     ++depth;
     return true;
@@ -283,10 +283,16 @@ struct Nesting {
       return false;
     }
     --depth;
-    return ((openers & (1UL << depth)) != 0U) == (closer == '}');
+    return ((openers & bit(depth)) != 0U) == (closer == '}');
   }
 
   bool balanced() const { return depth == 0U; }
+
+private:
+  /// One bit of the word, in the word's own width. `1UL` is 64 bits on the
+  /// host and 32 on both boards, and GCC's -Wconversion (the strict-compile
+  /// gate, which Apple clang does not reproduce) refuses the narrowing back.
+  static uint32_t bit(uint32_t level) { return static_cast<uint32_t>(1U) << level; }
 };
 
 /// Scans from the `{` at `at` to its matching `}` and answers the position just
