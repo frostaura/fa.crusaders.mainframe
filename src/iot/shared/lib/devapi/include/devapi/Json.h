@@ -40,7 +40,29 @@ namespace json {
 /// Not-found, for every position-returning function here.
 inline constexpr size_t kNotFound = static_cast<size_t>(-1);
 
-/// Position just past `"<key>"` in `body`, or kNotFound.
+/// Position just past the closing quote of the KEY `"<key>"`, or kNotFound.
+///
+/// <b>A key is a quoted string followed by optional whitespace and a colon.</b>
+/// A quoted string that is a VALUE, or an element of an array, is skipped whole.
+/// That distinction is the whole point of this function: a gate heartbeat
+/// response opens `{"kind":"gate",…}` and carries a `"gate":{…}` object later,
+/// so a scan that matched quoted text anywhere returned the value of `kind` —
+/// which read the right number off the contract corpus and would have driven a
+/// lock for somebody else's the moment a field was added between the two. Every
+/// server-controlled string is a decoy for this: a tenant slugged `roster`, a
+/// door named `heartbeat_seconds`, a `reason` of `court_number`.
+///
+/// <b>Keys are found at ANY DEPTH, by a flat scan.</b> The court box reads
+/// `button_map`, `slice_minutes` and `walk_up_max_minutes` out of the
+/// heartbeat's nested `config` object with no path expression at all. That is
+/// depended upon, not tolerated — narrowing this to the top level is a breaking
+/// change, and there is no path syntax here to replace it with. A caller that
+/// needs a key from one particular object scopes the scan itself, by finding
+/// that object's key first and reading from there (`gatelogic::adoptUnlockMs`).
+///
+/// <b>`\`-escapes are honoured</b> when deciding where a string ends, so a quote
+/// inside a value cannot put the scan out of phase with the document. A body
+/// truncated inside a string ends the scan: nothing past it is readable.
 size_t findKey(const char* body, size_t len, const char* key);
 
 /// Copies the string value of `key` into `out`. False when the key is absent, the
@@ -49,6 +71,10 @@ size_t findKey(const char* body, size_t len, const char* key);
 /// <b>Refuses rather than truncates.</b> Half a value is a different value, and
 /// every caller here treats absence as "learned nothing" while a truncation
 /// would be acted on as fact.
+///
+/// <b>Escape pairs are copied verbatim, not decoded</b>, and cost two bytes of
+/// `outCap`. This is a scanner, not a parser; it agrees with findKey about where
+/// the string ends and claims nothing further about what is in it.
 bool stringField(const char* body, size_t len, const char* key, char* out, size_t outCap);
 
 /// Reads the unsigned integer value of `key`. False when the key is absent, the value is
@@ -63,6 +89,21 @@ bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out)
 /// is not literally `true` or `false` — a quoted "true" is reported as absent,
 /// for the same reason a quoted integer is.
 bool boolField(const char* body, size_t len, const char* key, bool& out);
+
+/// Position of the first byte INSIDE the object under `key`, with `outLen` set
+/// to the bytes from there up to (not including) its matching `}`. kNotFound,
+/// with `outLen` untouched, when the key is absent, its value is not an object,
+/// or the braces never balance.
+///
+/// This is how a caller reads a field from ONE object when the flat scan above
+/// would find the same field name elsewhere. `findKey` plus a read from there
+/// is not the same thing: it bounds the scan at the START of the object and not
+/// at its end, so a key added to the document AFTER the object would be adopted
+/// as if it were inside it.
+///
+/// Strings are skipped whole while matching braces, so a `{` or `}` inside a
+/// value cannot close the object early.
+size_t findObject(const char* body, size_t len, const char* key, size_t& outLen);
 
 /// Position of the first element of the array under `key`, or kNotFound when the
 /// key is absent or its value is not an array.
