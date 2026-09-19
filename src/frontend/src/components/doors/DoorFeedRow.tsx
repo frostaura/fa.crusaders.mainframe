@@ -1,8 +1,8 @@
 import { Badge } from "../Button";
 import { relative } from "../../lib/deviceLiveness";
-import { doorOutcomeChip } from "../../lib/doorsCopy";
-import { describeActivityReason, describeActivityWho } from "../../lib/deviceActivity";
-import { formatInstant } from "../../lib/utils";
+import { doorRowRender } from "../../lib/doorsCopy";
+import { describeActivityWho } from "../../lib/deviceActivity";
+import { clubInstant } from "../../lib/clubClock";
 import { type DeviceActivityEntry } from "../../lib/api";
 
 /**
@@ -15,11 +15,21 @@ import { type DeviceActivityEntry } from "../../lib/api";
  * </p>
  *
  * <p>
+ * <b>Tone comes from {@link doorRowRender}, never from a test at this call site (B1 / A2 /
+ * C4).</b> It used to read
+ * <code>action.startsWith("gate.denied") || action === "device.unknown_scan" ? "warning" :
+ * "success"</code> — a two-way test on a four-way fact — so every row that was not one of
+ * those two came out <b>success-green and labelled "Refused"</b>, including an admin's own
+ * `device.updated` edit. A row that is not a scan now wears no outcome chip at all, and a
+ * refusal can no longer come out green from any input whatsoever.
+ * </p>
+ *
+ * <p>
  * <b>An offline row is distinct three ways, because one is not enough:</b> a second
- * `[Offline]` chip, a 2 px left rule, and the existing "decided at the door" sentence. Its
- * `<time>` carries the SCAN's own time — the API resolves an offline row at the scan's time,
- * not at the upload's — and the title says so, so nobody reads it as the moment the club
- * heard about it.
+ * `[Offline]` chip, a 2 px left rule, and a sentence saying when the club actually heard
+ * about it. Its `<time>` carries the SCAN's own time — the API resolves an offline row at
+ * the scan's time, not at the upload's — and the title says so, so nobody reads it as the
+ * moment the club heard (A4).
  * </p>
  */
 export function DoorFeedRow({ entry, now, doorName, innerRef }: {
@@ -34,12 +44,20 @@ export function DoorFeedRow({ entry, now, doorName, innerRef }: {
    */
   innerRef?: React.Ref<HTMLLIElement>;
 }) {
+  const render = doorRowRender(entry);
   const who = describeActivityWho(entry);
-  const why = describeActivityReason(entry);
-  const detail = [doorName, why].filter((part) => part).join(" · ");
+  const detail = [doorName, render.detail].filter((part) => part).join(" · ");
+  /**
+   * A4. "decided at the door at 21:25" beside "last heard from 21:00" reads as a
+   * contradiction until the row says the two are different facts: an offline row is stamped
+   * with the SCAN, and the club learned of it whenever the board next called in.
+   */
   const title = entry.offline
-    ? `decided at the door at ${formatInstant(entry.at)}`
-    : formatInstant(entry.at);
+    ? `Decided at the door at ${clubInstant(entry.at)}.`
+      + (entry.delivered_at
+        ? ` The club was told at ${clubInstant(entry.delivered_at)}.`
+        : " The club was told when the door next called in.")
+    : clubInstant(entry.at);
   return (
     <li
       ref={innerRef}
@@ -48,9 +66,7 @@ export function DoorFeedRow({ entry, now, doorName, innerRef }: {
     >
       <div className="flex flex-wrap items-baseline gap-2 sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3">
         <span className="flex flex-wrap items-center gap-1.5">
-          <Badge tone={entry.action.startsWith("gate.denied") || entry.action === "device.unknown_scan" ? "warning" : "success"}>
-            {doorOutcomeChip(entry)}
-          </Badge>
+          {render.chip && <Badge tone={render.tone}>{render.chip}</Badge>}
           {entry.offline && <Badge tone="warning">Offline</Badge>}
         </span>
         <span className="min-w-0 break-words text-sm text-text-secondary">{who ?? ""}</span>
@@ -59,6 +75,11 @@ export function DoorFeedRow({ entry, now, doorName, innerRef }: {
         </time>
       </div>
       {detail && <p className="mt-0.5 min-w-0 break-words text-sm text-text-secondary">{detail}</p>}
+      {/* Said in the row, not only in a `title`: a tooltip is invisible on a phone and to a
+          screen reader, and the "scan time vs delivery time" confusion is A4's whole finding. */}
+      {entry.offline && (
+        <p className="mt-0.5 text-xs text-text-muted">{title}</p>
+      )}
     </li>
   );
 }

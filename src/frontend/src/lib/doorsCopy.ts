@@ -1,6 +1,14 @@
-import { DOOR_OUTCOME_CHIPS } from "./deviceActivity";
+import {
+  DOOR_OUTCOME_CHIPS, UNRECOGNISED_EVENT, classifyDoorRow, describeActivityReason,
+  describeDoorEvent, describeDoorEventKind, type DoorRowKind,
+} from "./deviceActivity";
+// A13 — one club-locale formatter for the whole surface. See lib/clubClock.ts.
+import { clubClock, clubDayAndClock } from "./clubClock";
 import { POWER_LOSS_LABELS, doorShutNotice } from "./gateCopy";
-import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal, type DoorToday } from "./api";
+import {
+  type AdminDoorDevice, type DeviceActivityEntry, type DoorEventEntry, type DoorSignal,
+  type DoorToday,
+} from "./api";
 
 /**
  * What is true of a door right now, and how a door record should be read.
@@ -48,19 +56,6 @@ export type DoorChip = { label: string; tone: "success" | "danger" | "muted" | "
 
 /** How long a cached roster lives on a board. Mirrors the firmware's `ROSTER_MAX_AGE_MS`. */
 const ROSTER_MAX_AGE_MS = 6 * 3_600_000;
-
-/** A clock face in the CLUB's zone — the zone the club's own day is measured in. */
-function clubClock(iso: string, timezone: string): string {
-  return new Date(iso).toLocaleTimeString("en-GB", {
-    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: timezone,
-  });
-}
-
-/** "Wed 18:40" — a weekday and a clock face, in club time. */
-function clubDayAndClock(iso: string, timezone: string): string {
-  const day = new Date(iso).toLocaleDateString("en-GB", { weekday: "short", timeZone: timezone });
-  return `${day} ${clubClock(iso, timezone)}`;
-}
 
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -137,9 +132,12 @@ export function doorStateNotice(device: AdminDoorDevice, online: boolean, timezo
     return `${head} Until then it opens for nobody, and it has never called in, so it holds no list at`
       + " all.";
   }
-  const stale = clubClock(new Date(new Date(device.last_seen_at).getTime() + ROSTER_MAX_AGE_MS).toISOString(), timezone);
+  // A7: the DAY as well as the clock face. Six hours after a last call at 21:00 is 03:00
+  // tomorrow, and an admin standing in a club at 09:00 reading "goes stale at 03:00" cannot
+  // tell whether that has already happened. `clubDayAndClock` carries the date too (B20).
+  const stale = clubDayAndClock(new Date(new Date(device.last_seen_at).getTime() + ROSTER_MAX_AGE_MS).toISOString(), timezone);
   return `${head} Until then it opens for members with a booking, from the list it last downloaded,`
-    + ` and that list goes stale at ${stale}.`;
+    + ` and that list goes stale on ${stale}.`;
 }
 
 /**
@@ -285,10 +283,13 @@ export function doorLogHowToRead(): [string, string] {
  */
 export function doorRetentionNotice(days: number | null): string {
   const tail = " Money records follow a separate, longer rule.";
-  if (days === null) {
-    return `Door scans are deleted after the number of days set under Admin settings.${tail}`;
-  }
-  return `Door scans are kept for ${plural(days, "day")} and then deleted, receipts and all.${tail}`;
+  // A11: ONE sentence, with the number in it when the number is known. The two arms used to
+  // be different sentences making different KINDS of claim — one stated a fact about the
+  // records, the other named a setting — so an admin who read the page online and again
+  // during an outage was told two different things about the same rule and could not tell
+  // whether the rule had changed or the page had.
+  const how = days === null ? "the number of days set under Admin settings" : plural(days, "day");
+  return `Door scans are kept for ${how} and then deleted, receipts and all.${tail}`;
 }
 
 /**
@@ -300,8 +301,41 @@ export function doorRetentionNotice(days: number | null): string {
  */
 export function doorCsvNotice(days: number | null): string {
   const rule = days === null ? "the club's retention rule" : `the club's ${days}-day rule`;
-  return "The file has the same rows as this page, members' names included. Once it is downloaded it"
-    + ` is outside ${rule}.`;
+  // B3 / A15. "The same rows as this page" was not true and the reviewer proved it: the page
+  // shows one page of 50 and the file carried 165. It is the same FILTERS, over everything
+  // that matches them, which is a different and more useful promise — and the cap is named
+  // because a club with more than that gets a truncated file and has to know.
+  return `The file has every scan matching the filters above, not just the ${DOOR_LOG_PAGE_HINT} on`
+    + ` this page, and up to ${CSV_MAX_ROWS.toLocaleString("en-GB")} rows. Members' names are in it.`
+    + ` Once it is downloaded it is outside ${rule}.`;
+}
+
+/** WIRE-W1 §4's cap. Named on screen because a truncated export is silent otherwise. */
+export const CSV_MAX_ROWS = 10_000;
+
+const DOOR_LOG_PAGE_HINT = "rows";
+
+/**
+ * How many rows the file actually has, announced after the download (B3).
+ *
+ * <p>
+ * The toast said "50 scans downloaded" — the length of the list on screen — over a 165-row
+ * file. It is the one number an admin repeats to a committee, and it was the wrong one by a
+ * factor of three. The real count comes from the response's own `X-Crusaders-Rows` header;
+ * where the header is absent the sentence carries NO number rather than falling back to the
+ * page length, because a wrong number is worse than no number.
+ * </p>
+ */
+export function doorCsvDownloaded(rows: number | null): string {
+  if (rows === null) {
+    return "The file has downloaded. It holds every scan matching the filters, which may be more"
+      + " than this page shows.";
+  }
+  if (rows >= CSV_MAX_ROWS) {
+    return `${plural(rows, "scan")} downloaded — that is the ${CSV_MAX_ROWS.toLocaleString("en-GB")}-row`
+      + " limit, so older scans in this range were left out. Narrow the range to get the rest.";
+  }
+  return `${plural(rows, "scan")} downloaded.`;
 }
 
 /** Under the last row, when there is no further cursor. */
@@ -319,9 +353,22 @@ export function doorExhaustedNotice(retentionDays: number | null): string {
  * cannot tell them apart, so it names the second rather than implying the first.
  * </p>
  */
-export function doorLogEmptyOneDoor(doorName: string, from: string): string {
-  return `No scans at the ${doorName} between ${from} and now. If members have been using it, its`
-    + " board may not be reaching the club.";
+export function doorLogEmptyOneDoor(
+  doorName: string, from: string, online: boolean | null = null,
+): string {
+  const head = `No scans at ${doorName} between ${from} and now.`;
+  // C7. The second sentence used to be asserted whatever the door was doing, so an admin
+  // filtering a perfectly healthy door to a quiet range was sent to look for a fault. It is
+  // now derived from the door's OWN liveness — and the third arm says the screen does not
+  // know, rather than guessing either way.
+  if (online === true) {
+    return `${head} It is reporting, so the club is hearing from it — nobody has scanned at it in`
+      + " this range.";
+  }
+  if (online === false) {
+    return `${head} Nothing can reach it, so if members have been using it the club would not know.`;
+  }
+  return `${head} This page cannot say whether that board is reaching the club — check it on Doors.`;
 }
 
 /**
@@ -360,11 +407,64 @@ export function doorStaleChecksNotice(failures: number, secondsSinceRead: number
  * </p>
  */
 export function doorNeedsAttention(device: AdminDoorDevice, online: boolean): string | null {
-  if (!device.enabled) return `${device.name} is shut. Nobody gets in through it.`;
-  if (device.gate_key === null) {
-    return "A door still has no name, so it opens nothing while it is offline.";
+  return doorAttentionReason(device, online, [])?.reason ?? null;
+}
+
+/** Why a door needs somebody, and which of the four kinds of "needs somebody" it is. */
+export type DoorAttention = {
+  kind: "silent" | "shut" | "unnamed" | "signal";
+  reason: string;
+};
+
+/**
+ * Why this door needs somebody — or null. <b>Signals count (A3).</b>
+ *
+ * <p>
+ * <b>What was wrong.</b> A door flagged "Refusing a lot" or "May not be releasing" was
+ * invisible to every cue the product has: it was never in the gear badge, never named in the
+ * doors page's own banner, and — because the ordering used the same predicate — it sorted
+ * below the fold on a phone, under three healthy doors. A reviewer found a front door
+ * turning away thirty scans in twenty minutes by scrolling past it. The signal rendered
+ * perfectly on the tile nobody could see.
+ * </p>
+ *
+ * <p>
+ * <b>A2.6 is not violated by this and it is worth saying why.</b> That amendment keeps
+ * signals off ADMIN HOME — "a badge that fires on a dirty scanner is a badge an admin learns
+ * to ignore before the badge that fires on a dead board ever appears" — and Home is a screen
+ * an admin sees on every visit, whether or not they came about doors. `/admin/doors`, its
+ * banner, and the gear that is the only route to it are a different surface with a different
+ * reader: somebody who has come to look at doors, or is being told there is something to
+ * look at. {@link doorNeedsAttention} keeps the three-state rule for Home's row, and this
+ * one carries the four for everywhere else.
+ * </p>
+ *
+ * <p>
+ * Shut is checked before silence, because an admin who shut a door is not to be told it has
+ * gone quiet — a state they created and already know about. Signals are checked LAST: a door
+ * that is both unreachable and refusing is a door to go and look at, and "has not been heard
+ * from" is the sentence that sends somebody to the right place.
+ * </p>
+ */
+export function doorAttentionReason(
+  device: AdminDoorDevice, online: boolean, signals: DoorSignal[],
+): DoorAttention | null {
+  if (!device.enabled) {
+    return { kind: "shut", reason: `${device.name} is shut. Nobody gets in through it.` };
   }
-  if (!online) return `${device.name} has not been heard from.`;
+  if (device.gate_key === null) {
+    return { kind: "unnamed", reason: "A door still has no name, so it opens nothing while it is offline." };
+  }
+  if (!online) return { kind: "silent", reason: `${device.name} has not been heard from.` };
+  const signal = signals[0];
+  if (signal) {
+    return {
+      kind: "signal",
+      reason: signal.kind === "refusal_spike"
+        ? `${device.name} is turning a lot of scans away.`
+        : `${device.name} may not be releasing.`,
+    };
+  }
   return null;
 }
 
@@ -398,11 +498,116 @@ export function doorsAttentionSummary(reasons: string[]): string | null {
  * </p>
  */
 export function doorOutcomeChip(entry: DeviceActivityEntry): string {
-  if (entry.action === "gate.opened" || entry.action === "device.gate_open") {
-    return DOOR_OUTCOME_CHIPS.ok;
-  }
+  if (classifyDoorRow(entry) === "released") return DOOR_OUTCOME_CHIPS.ok;
   if (entry.reason && DOOR_OUTCOME_CHIPS[entry.reason]) return DOOR_OUTCOME_CHIPS[entry.reason];
   return "Refused";
+}
+
+/**
+ * What one feed row IS, before anything decides how to paint it.
+ *
+ * <p>
+ * <b>The whole of B1 / A2 / C4 is here.</b> `DoorFeedRow` chose its chip tone with
+ * `action.startsWith("gate.denied") ? "warning" : "success"` — a two-way test on a four-way
+ * fact — so every row that was not a recognised refusal came out success-green, including
+ * `device.updated` (an admin edit), `device.boot` and `doors.shut_all`. It then labelled them
+ * "Refused", because `doorOutcomeChip`'s own catch-all was the word "Refused". Green, and
+ * saying refused, about somebody renaming a door.
+ * </p>
+ *
+ * <p>
+ * The tone now falls out of the classification and cannot be chosen at a call site:
+ * <b>a refusal is NEVER success-toned</b>, an event and an unrecognised row are never toned
+ * as an outcome at all, and there is no branch left that can guess.
+ * </p>
+ */
+export type DoorRowRender = {
+  kind: DoorRowKind;
+  /** The chip's word, or null where this row is not an outcome and must not wear one. */
+  chip: string | null;
+  tone: DoorChip["tone"];
+  /**
+   * The sentence under the chip. Never null for a refusal — {@link NO_REASON_RECORDED} is
+   * the arm for a refusal the trail could not say a reason for, because a refusal row with
+   * an empty second line reads as a rendering fault and leaves the reader guessing.
+   */
+  detail: string | null;
+};
+
+/**
+ * A refusal the audit trail carries no reason for.
+ *
+ * <p>
+ * Five of eight refusals on one reviewed screen had no reason line at all. A missing reason
+ * is a real state — an offline board that cannot resolve a code has nothing to name, and a
+ * row written before a reason was recorded has nothing to read — and it is a different fact
+ * from "the reason is uninteresting". Said out loud, once, rather than left blank.
+ * </p>
+ */
+export const NO_REASON_RECORDED = "No reason recorded";
+
+/**
+ * What the "Door events" block is, said once at the top of it.
+ *
+ * It exists because the alternative reading is the one that shipped: a reader who sees
+ * these rows beside the scans and is not told otherwise counts them. The sentence says both
+ * halves — these are not scans, and they are not in any of the numbers.
+ */
+export const DOOR_EVENTS_NOTE = "Things that happened to this door, rather than scans at it. None"
+  + " of these are counted in the numbers above or in the club's log.";
+
+export function doorRowRender(entry: DeviceActivityEntry): DoorRowRender {
+  const kind = classifyDoorRow(entry);
+  if (kind === "released") {
+    return { kind, chip: DOOR_OUTCOME_CHIPS.ok, tone: "success", detail: describeActivityReason(entry) };
+  }
+  if (kind === "refused") {
+    return {
+      kind,
+      chip: doorOutcomeChip(entry),
+      // Never "success", whatever the reason token turns out to be.
+      tone: "warning",
+      detail: describeActivityReason(entry) ?? NO_REASON_RECORDED,
+    };
+  }
+  if (kind === "event") {
+    return { kind, chip: null, tone: "muted", detail: describeDoorEvent(entry) };
+  }
+  // The raw token is the detail here, and deliberately: it is the only thing a reader can
+  // report upstream, and hiding it would make a new action unsearchable.
+  return { kind, chip: null, tone: "muted", detail: `${UNRECOGNISED_EVENT} · ${entry.action}` };
+}
+
+/**
+ * The events a door's page shows beside its scans, whether or not the API sends them yet.
+ *
+ * <p>
+ * Two sources, one list. Where the API serves its own `events` array those are the truth;
+ * where it does not, the non-scan rows still arriving inside `items` are lifted out and
+ * rendered identically — so the page is right against both backends and there is exactly one
+ * place that decides what an event looks like. Deduplicated on the instant and the words,
+ * because during the changeover a row can legitimately arrive down both paths.
+ * </p>
+ */
+export function doorEventRows(
+  items: DeviceActivityEntry[] | null, events: DoorEventEntry[] | null | undefined,
+): { at: string; text: string; actor: string | null }[] {
+  const rows = (events ?? []).map((e) => ({
+    at: e.at, text: describeDoorEventKind(e), actor: e.actor_name,
+  }));
+  for (const entry of items ?? []) {
+    if (classifyDoorRow(entry) === "released" || classifyDoorRow(entry) === "refused") continue;
+    rows.push({ at: entry.at, text: doorRowRender(entry).detail ?? UNRECOGNISED_EVENT, actor: entry.member?.name ?? null });
+  }
+  const seen = new Set<string>();
+  return rows
+    .filter((row) => {
+      const key = `${row.at}|${row.text}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => b.at.localeCompare(a.at));
 }
 
 /** The door-card value as a heading reads it. An unknown value is the honest default. */
