@@ -1,3 +1,5 @@
+import { GATE_ACCESS_POLICIES, type GateAccessPolicy } from "./api";
+
 /**
  * Small derivations from the club's own settings, kept out of the settings page.
  *
@@ -51,6 +53,57 @@ export function describeOfflineAfter(configured: number): string {
     return `${minutes} minute${minutes === 1 ? "" : "s"}`;
   }
   return `${seconds} seconds`;
+}
+
+/**
+ * The three door-gate bounds, mirroring the API's own
+ * <code>AdminConfigEndpoints.ValidateDeviceNumbers</code>.
+ *
+ * <p>
+ * The unlock maximum is mirrored twice over on purpose: the API refuses anything above it,
+ * AND the firmware clamps the released window to it (<code>GATE_UNLOCK_HARD_CAP_MS</code>)
+ * so that a value smuggled past the API by any other route still cannot hold a lock open
+ * longer. The console states the bound rather than only enforcing it, because "30" on its
+ * own reads as an arbitrary form limit rather than as what the hardware will do.
+ * </p>
+ */
+export const GATE_UNLOCK_MIN_SECONDS = 1;
+export const GATE_UNLOCK_MAX_SECONDS = 30;
+export const GATE_EARLY_ENTRY_MIN_MINUTES = 0;
+export const GATE_EARLY_ENTRY_MAX_MINUTES = 240;
+
+/**
+ * Why the door-gate settings cannot be saved, in a sentence, or null when they can.
+ *
+ * <p>
+ * The bounds are on the inputs too, but a number input's <code>min</code> and
+ * <code>max</code> stop the spinner and nothing else — a typed or pasted value passes
+ * straight through, and Save here is not a native submit, so the browser never says a
+ * word. That is the same gap the credits-per-rand <code>step</code> fell through, where
+ * the field looked fine while the arrows moved the money conversion rate by a hundredth.
+ * The policy is checked against the closed list as well, so a document carrying a value
+ * this build does not know about is refused here rather than saved back as a blank select.
+ * </p>
+ */
+export function gateSettingsComplaint(settings: {
+  gate_unlock_seconds: number;
+  gate_access_policy: string;
+  gate_early_entry_minutes: number;
+}): string | null {
+  if (!inRange(settings.gate_unlock_seconds, GATE_UNLOCK_MIN_SECONDS, GATE_UNLOCK_MAX_SECONDS)) {
+    return `Unlock time has to be a whole number of seconds between ${GATE_UNLOCK_MIN_SECONDS} and ${GATE_UNLOCK_MAX_SECONDS}.`;
+  }
+  if (!inRange(settings.gate_early_entry_minutes, GATE_EARLY_ENTRY_MIN_MINUTES, GATE_EARLY_ENTRY_MAX_MINUTES)) {
+    return `Early entry has to be a whole number of minutes between ${GATE_EARLY_ENTRY_MIN_MINUTES} and ${GATE_EARLY_ENTRY_MAX_MINUTES}.`;
+  }
+  if (!GATE_ACCESS_POLICIES.includes(settings.gate_access_policy as GateAccessPolicy)) {
+    return "Pick who may open a door.";
+  }
+  return null;
+}
+
+function inRange(value: number, min: number, max: number): boolean {
+  return Number.isInteger(value) && value >= min && value <= max;
 }
 
 /**

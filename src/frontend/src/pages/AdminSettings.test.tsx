@@ -341,3 +341,241 @@ describe("AdminSettings — opening hours per weekday", () => {
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
   });
 });
+
+/**
+ * The three door-gate numbers.
+ *
+ * <p>
+ * Their own block rather than three more fields under "Court boxes": a door and a box share
+ * the key, the heartbeat and nothing else. Every hint here states a BEHAVIOUR rather than a
+ * bound, because the two activation windows one block above were described the wrong way
+ * round for months — an admin edited the field whose hint said what they wanted, saw
+ * "Settings saved.", and changed nothing.
+ * </p>
+ */
+describe("AdminSettings — door gates", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const routes = (settings: Record<string, unknown> = {}) => [
+    { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...settings } },
+    { path: "/api/v1/admin/courts/", body: [] },
+    { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
+  ];
+
+  /** The hint is a separate <p> wired by aria-describedby — what a screen reader reads out. */
+  const hintOf = (field: HTMLElement) =>
+    document.getElementById(field.getAttribute("aria-describedby")!)!.textContent!;
+
+  it("shows the three door settings with the API's own bounds on the inputs", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const unlock = await screen.findByLabelText(/Unlock time/);
+    expect(unlock).toHaveValue(3);
+    expect(unlock).toHaveAttribute("min", "1");
+    expect(unlock).toHaveAttribute("max", "30");
+
+    const early = screen.getByLabelText(/Early entry/);
+    expect(early).toHaveValue(30);
+    expect(early).toHaveAttribute("min", "0");
+    expect(early).toHaveAttribute("max", "240");
+
+    expect(screen.getByLabelText(/Who may open a door/)).toHaveValue("active_member");
+  });
+
+  it("offers both policies and nothing else", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const picker = await screen.findByLabelText(/Who may open a door/);
+    const values = Array.from(picker.querySelectorAll("option")).map((o) => o.getAttribute("value"));
+    expect(values).toEqual(["active_member", "booking_window"]);
+    expect(picker.textContent).toContain("Any member in good standing");
+    expect(picker.textContent).toContain("Only a member with a booking");
+  });
+
+  /**
+   * The unlock hint states what the HARDWARE will do, not only what the form accepts. "1–30"
+   * on its own reads as an arbitrary form limit; the firmware's own cap is why it is that
+   * number, and an admin who wants a door held open for a minute needs to know it is not on
+   * offer anywhere rather than go looking for another setting.
+   */
+  it("says the unlock bound is the door's, not the form's", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const hint = hintOf(await screen.findByLabelText(/Unlock time/));
+    expect(hint).toMatch(/1–30/);
+    expect(hint).toMatch(/never holds it open longer than 30 seconds, whatever is set here/);
+  });
+
+  /**
+   * Each policy's hint names the accounts that pass either way. "A user with no membership
+   * row is not barred" is how an operator or a club admin opens a door at all, and nobody
+   * would guess it from a label reading "Any member in good standing".
+   */
+  it("describes the policy that is actually selected, and names who always passes", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const picker = await screen.findByLabelText(/Who may open a door/);
+    expect(hintOf(picker)).toMatch(/unless their membership is suspended, pending approval or rejected/);
+    expect(hintOf(picker)).toMatch(/club admins and operators, always pass/);
+
+    fireEvent.change(picker, { target: { value: "booking_window" } });
+    // The hint follows the choice rather than describing both at once, and it spells out the
+    // early-entry number rather than making an admin scroll and do arithmetic.
+    expect(hintOf(screen.getByLabelText(/Who may open a door/)))
+      .toMatch(/starts within the next 30 minutes/);
+    expect(hintOf(screen.getByLabelText(/Who may open a door/))).toMatch(/Anyone else is turned away/);
+  });
+
+  it("follows the early-entry number into the strict policy's hint", async () => {
+    stubFetch(routes({ gate_access_policy: "booking_window", gate_early_entry_minutes: 90 }));
+    renderPage(<AdminSettingsPage />);
+
+    expect(hintOf(await screen.findByLabelText(/Who may open a door/)))
+      .toMatch(/starts within the next 90 minutes/);
+
+    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "5" } });
+    expect(hintOf(screen.getByLabelText(/Who may open a door/)))
+      .toMatch(/starts within the next 5 minutes/);
+  });
+
+  /**
+   * <b>The degraded mode.</b> It is the one door behaviour nobody would predict from the
+   * controls: whichever policy is chosen, a door that loses the network falls back to a
+   * roster built from BOOKINGS, so the open policy silently becomes booking-only for the
+   * length of the outage. An admin who does not know that reads a member locked out during
+   * an outage as a broken lock and sends somebody to look at the hardware.
+   */
+  it("says that an offline door admits only booked members, whichever policy is set", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const block = await screen.findByText(/How the doors behave/);
+    expect(block).toHaveTextContent("falls back to the roster it last downloaded");
+    expect(block).toHaveTextContent("that roster holds bookings and nothing else");
+    expect(block).toHaveTextContent(
+      "only members with an upcoming or running booking can get in — whichever policy is set below");
+  });
+
+  it("sends the three door settings on save, and leaves the button map alone", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "booking_window" } });
+    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "45" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+
+    await waitFor(() => {
+      const save = stub.calls.find((c) => c.method === "PUT");
+      expect(save).toBeTruthy();
+      expect(save!.body).toMatchObject({
+        gateUnlockSeconds: 7,
+        gateAccessPolicy: "booking_window",
+        gateEarlyEntryMinutes: 45,
+      });
+      // Still not this screen's business, gates or no gates.
+      expect(save!.body).not.toHaveProperty("buttonMap");
+    });
+  });
+
+  /**
+   * <b>Validation, because the inputs are not enough.</b> A number input's min and max stop
+   * the SPINNER and nothing else, and Save here is not a native submit, so a typed or pasted
+   * value goes to the API with the browser silent about it — the same gap the
+   * credits-per-rand `step` fell through, where the field looked fine while the arrows moved
+   * the money conversion rate by a hundredth.
+   */
+  it("holds Save and names the bound when a value is typed past the range", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "45" } });
+    expect(screen.getByText("Unlock time has to be a whole number of seconds between 1 and 30.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
+
+    // And zero, which is the other end and the one that reads as broken hardware: a door
+    // that never releases the lock at all.
+    fireEvent.change(screen.getByLabelText(/Unlock time/), { target: { value: "0" } });
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/Unlock time/), { target: { value: "30" } });
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeEnabled();
+  });
+
+  it("holds Save on an early-entry value past 240 minutes, and allows 0", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText(/Early entry/), { target: { value: "300" } });
+    expect(screen.getByText("Early entry has to be a whole number of minutes between 0 and 240.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+
+    // Zero is legal — a club that wants nobody in before their booking starts — so it must
+    // not be caught by a falsy check standing in for the range.
+    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "0" } });
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeEnabled();
+  });
+
+  /**
+   * A refused save now decodes through the shared device-error dictionary instead of this
+   * screen's old underscores-to-spaces swap, which would have read "gate unlock seconds out
+   * of range" and said nothing about the bound.
+   */
+  it("turns a refused door value into a sentence with the bound in it", async () => {
+    stubFetch([
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      { path: "/api/v1/admin/courts/", body: [] },
+      { method: "PUT", path: "/api/v1/admin/settings/", status: 400, body: { error: "gate_unlock_seconds_out_of_range" } },
+    ]);
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+
+    expect(await screen.findByText(/Unlock time has to be between 1 and 30 seconds/))
+      .toHaveTextContent(/never holds the lock open longer than 30 seconds/);
+  });
+
+  /**
+   * And the fallback is unchanged for every token nobody has written copy for, which is what
+   * makes switching this screen to the shared dictionary safe rather than a rewrite of how it
+   * reports failure.
+   */
+  it("still reads an unmapped refusal the way it always did", async () => {
+    stubFetch([
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      { path: "/api/v1/admin/courts/", body: [] },
+      { method: "PUT", path: "/api/v1/admin/settings/", status: 400, body: { error: "topup_max_below_block" } },
+    ]);
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText(/Top-up cap per member/), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+
+    expect(await screen.findByText(/topup max below block/)).toBeInTheDocument();
+  });
+
+  /**
+   * A policy the client does not know about, which is a settings document written by
+   * something else — an older or newer API, or a hand-edited JSON column. Caught before Save
+   * rather than rendered as a blank select and then saved back as one.
+   */
+  it("refuses to save a policy it cannot render", async () => {
+    const stub = stubFetch(routes({ gate_access_policy: "anyone_at_all" }));
+    renderPage(<AdminSettingsPage />);
+
+    expect(await screen.findByText("Pick who may open a door.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
+
+    fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "booking_window" } });
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeEnabled();
+  });
+});

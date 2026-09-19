@@ -52,6 +52,9 @@ const SETTINGS = {
   activation_cue_window_minutes: 10,
   qr_lifetime_seconds: 60,
   roster_window_minutes: 120,
+  gate_unlock_seconds: 3,
+  gate_access_policy: "active_member",
+  gate_early_entry_minutes: 30,
 };
 
 /**
@@ -76,6 +79,36 @@ const FRESH = {
   created_at: new Date().toISOString(),
   auto_registered: true,
   button_map: null,
+  effective_heartbeat_seconds: 60,
+};
+
+/**
+ * A door gate exactly as it arrives: the API generated the code and the name, nobody has
+ * named the door, and `auto_registered` is what says so.
+ *
+ * <p>
+ * Written out rather than spread from FRESH, because the fields that differ are the whole
+ * point: no courts (the API refuses the field on a Gate row), no button map (a gate's
+ * heartbeat carries neither a map nor a config block), an ESP32 rather than the box's
+ * ESP8266, and a null `gate_key`.
+ * </p>
+ */
+const GATE = {
+  id: "99999999-9999-9999-9999-999999999999",
+  device_code: "gate-0a1b2c",
+  name: "Door gate",
+  kind: "Gate",
+  hardware: "Esp32",
+  court_numbers: [],
+  gate_key: null as string | null,
+  mac_address: "5ccf7f0a1b2c",
+  enabled: true,
+  last_seen_at: new Date().toISOString(),
+  last_ip_address: "192.168.68.160",
+  running_version: "1.0.0",
+  mega_version: null,
+  created_at: new Date().toISOString(),
+  auto_registered: true,
   effective_heartbeat_seconds: 60,
 };
 
@@ -525,5 +558,163 @@ test.describe("The walk-up cap the buttons are held to", () => {
     // A warning, not a refusal: the cap can be raised afterwards, and blocking the save
     // would deadlock this screen against the Settings screen.
     await expect(page.getByRole("button", { name: "Save button map" })).toBeEnabled();
+  });
+});
+
+/**
+ * A door gate on the same screen as the boxes.
+ *
+ * <p>
+ * In a real browser rather than only in jsdom, and at both project widths, because both
+ * halves of what this row does are things a jsdom test cannot settle. The interactions are
+ * two-step confirms whose armed labels are the copy itself; and the row carries the two
+ * widest tokens on the page — a device name and a 64-character door name — on a screen that
+ * has pushed itself wider than a phone on a long name before (R2 I-F6). Standard 3 here is
+ * that a jsdom test does not settle what a page does.
+ * </p>
+ */
+test.describe("A door gate", () => {
+  test("reads as a door, offers only the door's own editor, and names the door on save", async ({ page }) => {
+    await openDevices(page, [GATE], [
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false } },
+    ]);
+
+    // What it is, and which door — including the unnamed state every door in the club is
+    // actually in the first time an admin opens this screen.
+    await expect(page.getByText("gate-0a1b2c · Door gate · no door name yet · 5ccf7f0a1b2c")).toBeVisible();
+    // The badge asks for the job a door has, not the one a box has.
+    await expect(page.getByText("New — name this door")).toBeVisible();
+    await expect(page.getByText("New — check court numbers")).toHaveCount(0);
+
+    // Neither court editor nor button editor, and no kind selector. The API refuses court
+    // fields on a Gate row and has no member for kind at all, so an editor for either would
+    // be a form whose save can only fail.
+    await expect(page.getByRole("button", { name: "Edit name and courts" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit buttons" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Edit name and door" }).click();
+    await expect(page.getByLabel("box-a1b2c3 relay A court")).toHaveCount(0);
+
+    await page.getByLabel("Name", { exact: true }).fill("Front door");
+    await page.getByLabel("Door name", { exact: true }).fill("front-door");
+
+    const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
+    await serveApi(page, routes([{ ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false }], [
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false } },
+    ]));
+    await page.getByRole("button", { name: "Save door" }).click();
+
+    // Name and door key in one call, and no court_numbers — the API refuses that field here.
+    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ name: "Front door", gate_key: "front-door" });
+    await expect(page.getByRole("status")).toContainText("Front door is the front-door door.");
+    await expect(page.getByText("New — name this door")).toBeHidden();
+  });
+
+  /**
+   * The out-of-service copy, which is the door's own and shares nothing with the box's.
+   *
+   * <p>
+   * The middle clause is the one a shorter sentence would have got wrong, and the one this
+   * test exists for: a 403 is not a refusal to the firmware, it is an outage, so a door
+   * whose API has stopped answering falls back to its cached roster and keeps admitting a
+   * booked member until that goes stale. "The door stops opening" would be the same class of
+   * falsehood as the box side's "nobody can check in there", which survived three rounds and
+   * was read off a production build before anybody noticed.
+   * </p>
+   */
+  test("says what taking a DOOR out of service costs, and none of what it costs a box", async ({ page }) => {
+    const door = { ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false };
+    await openDevices(page, [door], [
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...door, enabled: false } },
+    ]);
+
+    const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
+
+    await page.getByRole("button", { name: "Take out of service" }).click();
+    const confirm = page.getByRole("button", {
+      name: "Out of service? The API stops answering scans at this door. It may still open from its"
+        + " cached roster until that goes stale. No booking, check-in or no-show penalty changes.",
+    });
+    await expect(confirm).toBeVisible();
+    // Never the box's, which promises a court's no-shows stop being penalised.
+    await expect(page.getByRole("button", { name: /Nothing else drives/ })).toHaveCount(0);
+
+    await serveApi(page, routes([{ ...door, enabled: false }], [
+      { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...door, enabled: false } },
+    ]));
+    await confirm.click();
+
+    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ enabled: false });
+
+    // Read off the row notice specifically: the toast says the same thing, deliberately —
+    // one generator feeds both — and an unscoped match on the shared half finds two, which
+    // is a strict-mode violation reading as the notice being absent. Anchored at the start,
+    // where the two differ: the row opens "Out of service.", the toast "<name> is out of
+    // service." Written unanchored first, and this run is what caught it.
+    const notice = page.getByText(/^Out of service\. The club is not alerted/);
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("the API stops answering scans at this door");
+    await expect(notice).toContainText("The door keeps whatever roster it last downloaded");
+    await expect(notice).toContainText("may still get in until it goes stale — nobody else will");
+    await expect(notice).toContainText(
+      "Bookings, check-ins, refunds and no-show penalties are untouched either way");
+    // And none of the court-box copy, which is about courts going dark and penalties being
+    // waived and is false of a door in every clause.
+    await expect(notice).not.toContainText("refunded in full");
+    await expect(notice).not.toContainText("No box in service drives");
+    await expect(page.getByText(/The API refuses this box/)).toHaveCount(0);
+
+    // Deleting a door loses its name, which is what the label has to say.
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(page.getByRole("button", {
+      name: "Delete? The door re-registers on its next heartbeat with no name.",
+    })).toBeVisible();
+  });
+
+  /**
+   * <b>The row must not widen the page.</b> A 64-character door name is the longest
+   * unbreakable token this screen can be asked to render, and the mobile project is 412 px
+   * wide. Measured as a horizontal overflow of the document rather than as a class name,
+   * because the class is what a jsdom test can already see and the overflow is what an
+   * admin actually experiences.
+   */
+  test("does not push the page sideways on a 64-character door name", async ({ page }) => {
+    const longKey = "back-staircase-changing-room-corridor-door-by-the-fire-exit-0123";
+    expect(longKey).toHaveLength(64);
+
+    await openDevices(page, [{
+      ...GATE,
+      auto_registered: false,
+      name: "The changing room corridor door by the back staircase",
+      gate_key: longKey,
+    }]);
+
+    await expect(page.getByText(new RegExp(longKey))).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
+  /**
+   * A gate and a box on one list, which is the club's real shape — and the arrangement where
+   * a missing kind filter costs money. A door on a court's wall counted as a box in service
+   * on that court would make the court read as covered, so taking the club's only court box
+   * out of service would confirm with the plain "the box stops switching lights on" while
+   * the ledger stopped penalising that court's no-shows.
+   */
+  test("never counts as cover for a court, even carrying a court number", async ({ page }) => {
+    const box = { ...FRESH, name: "Court 1 box", auto_registered: false, court_numbers: [1] };
+    // A court number on a Gate row, which the API never sends and a hand-edited row could.
+    // The filter is on kind, so this changes nothing.
+    await openDevices(page, [box, { ...GATE, auto_registered: false, court_numbers: [1] }]);
+
+    await expect(page.getByText("Door gate · no door name yet")).toBeVisible();
+    await expect(page.getByText("box-a1b2c3 · A: court 1 · 5ccf7f1a2b3c")).toBeVisible();
+
+    await page.getByRole("button", { name: "Take out of service" }).first().click();
+    await expect(page.getByRole("button", { name: /Nothing else drives court 1/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /The box stops switching lights on/ })).toHaveCount(0);
   });
 });

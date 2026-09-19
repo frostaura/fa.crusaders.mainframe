@@ -391,3 +391,82 @@ describe("coverageWithout", () => {
     });
   });
 });
+
+// --- door gates are invisible to all of this ------------------------------------------------
+
+/**
+ * A gate drives no courts, so every number this module produces has to be blind to one.
+ *
+ * <p>
+ * The API keeps `court_numbers` empty on a Gate row and refuses the field on an update, so a
+ * gate is excluded here by its KIND and not by the emptiness of its court list — and these
+ * fixtures give a gate court numbers on purpose, because a fixture that relies on the empty
+ * list proves only that an empty list contributes nothing. That would have been green
+ * against a `coverageWithout` with no kind awareness at all, which is exactly the state this
+ * module was in before gates existed.
+ * </p>
+ *
+ * <p>
+ * What a missing filter would cost is not cosmetic. A door hanging on a court's wall counted
+ * as a box in service on that court makes the court read as covered, which means its
+ * no-shows keep being penalised on the strength of hardware that has never switched a light
+ * on — and the screen says so in a sentence an admin has no way to check.
+ * </p>
+ */
+const gate = (over: Partial<AdminDevice> & { id: string }): AdminDevice =>
+  device({ kind: "Gate", gate_key: "front-door", ...over });
+
+describe("coverageWithout — door gates", () => {
+  /**
+   * The brief's own probe: a club whose only enabled device is a gate has NO court coverage
+   * of any kind — not shut, not quiet, not covered. Three empty lists, not "shut: [1]".
+   */
+  it("gives a gate no coverage at all, even one carrying court numbers", () => {
+    const door = gate({ id: "g", court_numbers: [1, 2] });
+    expect(coverageWithout(door, [door], reportingExcept())).toEqual({
+      shut: [], unattested: [], covered: [], quietBoxes: 0, reportingBoxes: 0,
+    });
+  });
+
+  /** And therefore no sentences: the row notice for a disabled gate is generated elsewhere. */
+  it("produces no court sentences for a gate", () => {
+    const door = gate({ id: "g", court_numbers: [1, 2], enabled: false });
+    expect(outOfServiceConsequences(coverageWithout(door, [door], reportingExcept()))).toEqual([]);
+  });
+
+  /**
+   * The other direction, and the one that costs money: a reporting gate on a box's court is
+   * not cover. Without the kind filter this reads `covered: [1]` and the screen tells an
+   * admin another board still has the court — so taking the real box out looks free.
+   */
+  it("never counts a gate as the box that covers a court", () => {
+    const box = device({ id: "a", court_numbers: [1] });
+    const door = gate({ id: "g", court_numbers: [1] });
+    expect(coverageWithout(box, [box, door], reportingExcept())).toEqual({
+      shut: [1], unattested: [], covered: [], quietBoxes: 0, reportingBoxes: 0,
+    });
+  });
+
+  /**
+   * Nor as a quiet box to go and walk to. A silent gate on a court would otherwise push the
+   * court out of `shut` and into `unattested` — a weaker sentence, and one that sends an
+   * admin looking for a court box that does not exist.
+   */
+  it("never counts a silent gate as a quiet box on the court", () => {
+    const box = device({ id: "a", court_numbers: [1] });
+    const door = gate({ id: "g", court_numbers: [1] });
+    expect(coverageWithout(box, [box, door], reportingExcept("g"))).toEqual({
+      shut: [1], unattested: [], covered: [], quietBoxes: 0, reportingBoxes: 0,
+    });
+  });
+
+  /** A real box beside the gate still counts, so the filter is a filter and not an off switch. */
+  it("still counts the real boxes on the same court", () => {
+    const box = device({ id: "a", court_numbers: [1] });
+    const spare = device({ id: "b", court_numbers: [1] });
+    const door = gate({ id: "g", court_numbers: [1] });
+    expect(coverageWithout(box, [box, spare, door], reportingExcept())).toEqual({
+      shut: [], unattested: [], covered: [1], quietBoxes: 0, reportingBoxes: 1,
+    });
+  });
+});

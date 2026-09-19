@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
-  describeOfflineAfter, formatDayHours, offlineAfterSeconds, operatingHoursComplaint,
-  parseDayHours, timezoneOptions,
+  GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES, GATE_UNLOCK_MAX_SECONDS,
+  GATE_UNLOCK_MIN_SECONDS, describeOfflineAfter, formatDayHours, gateSettingsComplaint,
+  offlineAfterSeconds, operatingHoursComplaint, parseDayHours, timezoneOptions,
 } from "./tenantSettings";
 
 /**
@@ -90,5 +91,73 @@ describe("operating hours", () => {
     });
     expect(operatingHoursComplaint({ sat: "20:00-20:00" })?.day).toBe("sat");
     expect(operatingHoursComplaint({ tue: "rubbish" })?.day).toBe("tue");
+  });
+});
+
+/**
+ * The three door-gate bounds, mirroring `AdminConfigEndpoints.ValidateDeviceNumbers`.
+ *
+ * <p>
+ * The inputs carry the same min and max, and that is not enough on its own: a number input's
+ * bounds stop the SPINNER and nothing else, and Save on that screen is not a native submit,
+ * so a typed or pasted value goes to the API with the browser silent about it. That is the
+ * same gap the credits-per-rand `step` fell through, where the field looked fine while the
+ * arrows moved the money conversion rate by a hundredth.
+ * </p>
+ */
+describe("gateSettingsComplaint", () => {
+  const ok = { gate_unlock_seconds: 3, gate_access_policy: "active_member", gate_early_entry_minutes: 30 };
+
+  it("is quiet on the API's defaults", () => {
+    expect(gateSettingsComplaint(ok)).toBeNull();
+  });
+
+  it("allows both ends of each range", () => {
+    expect(gateSettingsComplaint({ ...ok, gate_unlock_seconds: GATE_UNLOCK_MIN_SECONDS })).toBeNull();
+    expect(gateSettingsComplaint({ ...ok, gate_unlock_seconds: GATE_UNLOCK_MAX_SECONDS })).toBeNull();
+    expect(gateSettingsComplaint({ ...ok, gate_early_entry_minutes: GATE_EARLY_ENTRY_MIN_MINUTES })).toBeNull();
+    expect(gateSettingsComplaint({ ...ok, gate_early_entry_minutes: GATE_EARLY_ENTRY_MAX_MINUTES })).toBeNull();
+  });
+
+  /**
+   * One past each end, both ways. A bound checked only from above passes everything below it,
+   * and zero unlock seconds is a door that never releases the lock at all — the failure an
+   * admin would read as broken hardware.
+   */
+  it("names the bound rather than saying the value is wrong", () => {
+    expect(gateSettingsComplaint({ ...ok, gate_unlock_seconds: 0 }))
+      .toBe("Unlock time has to be a whole number of seconds between 1 and 30.");
+    expect(gateSettingsComplaint({ ...ok, gate_unlock_seconds: 31 }))
+      .toBe("Unlock time has to be a whole number of seconds between 1 and 30.");
+    expect(gateSettingsComplaint({ ...ok, gate_early_entry_minutes: -1 }))
+      .toBe("Early entry has to be a whole number of minutes between 0 and 240.");
+    expect(gateSettingsComplaint({ ...ok, gate_early_entry_minutes: 241 }))
+      .toBe("Early entry has to be a whole number of minutes between 0 and 240.");
+  });
+
+  /**
+   * Both settings are whole units on the API. A `<input type="number">` with no step happily
+   * produces 2.5, and 0 minutes of early entry is a legal value, so `!value` cannot stand in
+   * for the check either.
+   */
+  it("refuses a fraction and a value that is not a number at all", () => {
+    expect(gateSettingsComplaint({ ...ok, gate_unlock_seconds: 2.5 })).toContain("whole number");
+    expect(gateSettingsComplaint({ ...ok, gate_early_entry_minutes: 30.5 })).toContain("whole number");
+    // Number("") is 0, which is IN range for early entry — so an emptied field has to be
+    // caught by the unlock bound, and an emptied unlock field by Number.isInteger(NaN).
+    expect(gateSettingsComplaint({ ...ok, gate_unlock_seconds: Number("") })).not.toBeNull();
+    expect(gateSettingsComplaint({ ...ok, gate_unlock_seconds: Number("abc") })).not.toBeNull();
+  });
+
+  /**
+   * A policy outside the closed list. The select offers only the two, so this is a settings
+   * document written by something else — an older or newer API, or a hand-edited JSON column.
+   * Caught here rather than rendered as a blank select and then saved back as one.
+   */
+  it("refuses a policy this build does not know", () => {
+    expect(gateSettingsComplaint({ ...ok, gate_access_policy: "anyone_at_all" }))
+      .toBe("Pick who may open a door.");
+    expect(gateSettingsComplaint({ ...ok, gate_access_policy: "" })).toBe("Pick who may open a door.");
+    expect(gateSettingsComplaint({ ...ok, gate_access_policy: "booking_window" })).toBeNull();
   });
 });

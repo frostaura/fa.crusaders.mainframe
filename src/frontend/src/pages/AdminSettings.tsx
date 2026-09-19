@@ -1,9 +1,13 @@
 import { useEffect, useState, cloneElement, isValidElement, useId } from "react";
-import { endpoints, type AdminSettings, type AdminCourt, ApiError } from "../lib/api";
+import { endpoints, GATE_ACCESS_POLICIES, type AdminSettings, type AdminCourt, type GateAccessPolicy } from "../lib/api";
 import {
-  DAY_KEYS, DAY_NAMES, OFFLINE_FLOOR_SECONDS, describeOfflineAfter, formatDayHours,
-  operatingHoursComplaint, parseDayHours, timezoneOptions, type DayHours, type DayKey,
+  DAY_KEYS, DAY_NAMES, GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
+  GATE_UNLOCK_MAX_SECONDS, GATE_UNLOCK_MIN_SECONDS, OFFLINE_FLOOR_SECONDS, describeOfflineAfter,
+  formatDayHours, gateSettingsComplaint, operatingHoursComplaint, parseDayHours, timezoneOptions,
+  type DayHours, type DayKey,
 } from "../lib/tenantSettings";
+import { GATE_POLICY_LABELS, describeGatePolicy, gateOfflineFallbackNotice } from "../lib/gateCopy";
+import { describeDeviceError } from "../lib/deviceErrors";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -49,10 +53,12 @@ export default function AdminSettingsPage() {
       await endpoints.adminSettingsSave(withoutButtonMap);
       toast.push({ tone: "success", text: "Settings saved." });
     } catch (err) {
-      const msg = err instanceof ApiError && typeof err.payload === "object" && err.payload && "error" in (err.payload as Record<string, unknown>)
-        ? String((err.payload as { error: string }).error)
-        : "Save failed.";
-      toast.push({ tone: "danger", text: msg.replace(/_/g, " ") });
+      // Through the shared device-error dictionary rather than this screen's old
+      // underscores-to-spaces swap. That swap is still the fallback for every token nobody
+      // has written copy for — `topup_max_below_block` still reads as it did — but a code
+      // that HAS a sentence now gets it, which is the difference between an admin reading
+      // "gate unlock seconds out of range" and being told the bound is 1 to 30.
+      toast.push({ tone: "danger", text: describeDeviceError(err, "Save failed."), durationMs: 8000 });
     } finally {
       setSaving(false);
     }
@@ -186,6 +192,8 @@ export default function AdminSettingsPage() {
 
       <DeviceNumbersSection settings={settings} onChange={setSettings} />
 
+      <GateSection settings={settings} onChange={setSettings} />
+
       <Card className="space-y-5">
         <h2 className="text-base font-semibold">Records</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -199,7 +207,10 @@ export default function AdminSettingsPage() {
           </Field>
         </div>
         <div className="flex justify-end">
-          <Button onClick={save} disabled={saving || hoursComplaint !== null}>{saving ? "Saving…" : "Save settings"}</Button>
+          {/* Held on the gate block too, for the same reason it is held on the weekly
+              table: a number input's min/max stop the spinner and nothing else, so a typed
+              or pasted value would round-trip into a refusal the admin has to decode. */}
+          <Button onClick={save} disabled={saving || hoursComplaint !== null || gateSettingsComplaint(settings) !== null}>{saving ? "Saving…" : "Save settings"}</Button>
         </div>
       </Card>
 
@@ -394,6 +405,71 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
             onChange={(e) => set({ roster_window_minutes: Number(e.target.value) })} />
         </Field>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * The three door-gate numbers.
+ *
+ * <p>
+ * Its own block rather than three more fields under "Court boxes", because a door and a
+ * court box share the key, the heartbeat and nothing else: a gate drives no courts, has no
+ * buttons, and its decisions never touch a booking, a check-in, the ledger or the no-show
+ * sweep. Filing them together would have put "who may open a door" beside "how early a scan
+ * switches the lights on" — two settings that look like one another and are not, which is
+ * the shape of the mistake the two activation windows on that block already made once.
+ * </p>
+ *
+ * <p>
+ * The offline sentence is at the TOP, before the policy picker, because it is the one thing
+ * on this block an admin would not predict from the controls: whichever policy they choose,
+ * a door that loses the network falls back to a roster built from bookings, so the open
+ * policy silently becomes the strict one. Read after the picker it is a footnote; read
+ * before it, it is the context the choice is made in.
+ * </p>
+ */
+function GateSection({ settings, onChange }: { settings: AdminSettings; onChange: (next: AdminSettings) => void }) {
+  const set = (patch: Partial<AdminSettings>) => onChange({ ...settings, ...patch });
+  const complaint = gateSettingsComplaint(settings);
+  return (
+    <Card className="space-y-5">
+      <h2 className="text-base font-semibold">Door gates</h2>
+      <p className="text-sm text-text-secondary">
+        How the doors behave. Doors pick a change up on their next heartbeat.{" "}
+        {gateOfflineFallbackNotice()}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field
+          label="Unlock time (seconds)"
+          hint={`${GATE_UNLOCK_MIN_SECONDS}–${GATE_UNLOCK_MAX_SECONDS}. How long the lock is released each time a door opens. A door never holds it open longer than ${GATE_UNLOCK_MAX_SECONDS} seconds, whatever is set here.`}
+        >
+          <Input type="number" min={GATE_UNLOCK_MIN_SECONDS} max={GATE_UNLOCK_MAX_SECONDS} value={settings.gate_unlock_seconds}
+            onChange={(e) => set({ gate_unlock_seconds: Number(e.target.value) })} />
+        </Field>
+        <Field
+          label="Who may open a door"
+          hint={describeGatePolicy(settings.gate_access_policy, settings.gate_early_entry_minutes)}
+        >
+          <select
+            value={settings.gate_access_policy}
+            onChange={(e) => set({ gate_access_policy: e.target.value as GateAccessPolicy })}
+            className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+          >
+            {GATE_ACCESS_POLICIES.map((policy) => (
+              <option key={policy} value={policy}>{GATE_POLICY_LABELS[policy]}</option>
+            ))}
+          </select>
+        </Field>
+        <Field
+          label="Early entry (minutes before a booking)"
+          hint={`${GATE_EARLY_ENTRY_MIN_MINUTES}–${GATE_EARLY_ENTRY_MAX_MINUTES}. How long before a booking starts its holder may come in. It is also how far ahead a door's cached roster reaches, so lowering it narrows what a door can do offline as well as online.`}
+        >
+          <Input type="number" min={GATE_EARLY_ENTRY_MIN_MINUTES} max={GATE_EARLY_ENTRY_MAX_MINUTES} value={settings.gate_early_entry_minutes}
+            onChange={(e) => set({ gate_early_entry_minutes: Number(e.target.value) })} />
+        </Field>
+      </div>
+      {complaint && <p className="text-xs text-danger-strong">{complaint}</p>}
     </Card>
   );
 }

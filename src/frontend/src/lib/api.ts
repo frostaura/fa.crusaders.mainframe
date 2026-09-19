@@ -449,7 +449,40 @@ export type AdminSettings = {
   qr_lifetime_seconds: number;
   /** 5–1440. How far ahead the box's offline roster reaches. */
   roster_window_minutes: number;
+
+  // The three door-gate numbers. A gate is a second kind of board — one ESP32 on a door,
+  // a QR scanner and a lock relay — and none of the six above say anything about it.
+  /** 1–30. How long the lock is released per open. The firmware caps it at 30 s whatever this says. */
+  gate_unlock_seconds: number;
+  /** Who may open a door at all. See {@link GATE_ACCESS_POLICIES}. */
+  gate_access_policy: GateAccessPolicy;
+  /**
+   * 0–240. How long before a booking starts its holder may come in. It is both the early
+   * edge of the `booking_window` policy and how far ahead a door's cached roster reaches,
+   * so lowering it narrows the offline fallback as well as the online decision.
+   */
+  gate_early_entry_minutes: number;
 };
+
+/**
+ * Who a door opens for.
+ *
+ * <p>
+ * `active_member` is the default: any member the scan resolves opens the door unless their
+ * membership is barred. `booking_window` narrows it to a member whose booking is running, or
+ * starts within `gate_early_entry_minutes`. An account with no membership row at all — an
+ * admin or an operator — is not barred by either.
+ * </p>
+ *
+ * <p>
+ * Neither says anything about the OFFLINE case: a door that cannot reach the API falls back
+ * to its cached roster, which holds bookings and nothing else, so offline only a booked
+ * member gets in whichever of these is set.
+ * </p>
+ */
+export const GATE_ACCESS_POLICIES = ["active_member", "booking_window"] as const;
+
+export type GateAccessPolicy = (typeof GATE_ACCESS_POLICIES)[number];
 
 /**
  * What a settings save may carry. The eight booking fields are required because every
@@ -486,14 +519,25 @@ export type AdminDevice = {
   id: string;
   device_code: string;
   name: string;
+  /**
+   * `"CourtBox"` or `"Gate"`, and NOT editable from here: the row's kind is set by the
+   * board's first heartbeat and the API has no member for it on the update. Re-kinding a
+   * board means deleting the row and letting it register itself again.
+   */
   kind: string;
   hardware: string;
   /**
    * The courts this box drives, in relay order: index 0 is relay A, index 3 is relay D.
    * One box, up to four courts — a court box is not "the box for court N" any more.
-   * Empty for a gate.
+   * Always empty for a gate: a door drives no courts, and the API refuses
+   * `court_numbers` on a Gate row outright (`court_fields_on_a_gate`).
    */
   court_numbers: number[];
+  /**
+   * Which door this is — "front-door", "changing-rooms" — or null while nobody has named
+   * it. Gates only, at most 64 characters, and the one thing that distinguishes one door
+   * from another: there is ONE firmware for every door and nothing per-gate is compiled in.
+   */
   gate_key: string | null;
   /** Read-only identity the box reported. Nothing is authenticated against it. */
   mac_address: string | null;
@@ -535,6 +579,21 @@ export type AdminDevice = {
    */
   offline_after_seconds?: number;
 };
+
+/**
+ * Is this row a door gate rather than a court box?
+ *
+ * <p>
+ * The wire spelling lives here, once, beside the type that carries it. It was inline as
+ * `device.kind !== "Gate"` on the Devices page and nowhere else; the moment a second module
+ * had to answer the same question — `deviceCoverage`, which must ignore gates entirely — a
+ * second copy of the literal was the obvious next step, and a typo in either one is a gate
+ * silently treated as a box.
+ * </p>
+ */
+export function isGate(device: Pick<AdminDevice, "kind">): boolean {
+  return device.kind === "Gate";
+}
 
 /**
  * The club's one device API key.
@@ -1105,6 +1164,12 @@ export const endpoints = {
     ...(req.activation_cue_window_minutes !== undefined ? { activationCueWindowMinutes: req.activation_cue_window_minutes } : {}),
     ...(req.qr_lifetime_seconds !== undefined ? { qrLifetimeSeconds: req.qr_lifetime_seconds } : {}),
     ...(req.roster_window_minutes !== undefined ? { rosterWindowMinutes: req.roster_window_minutes } : {}),
+    // The three door-gate numbers, on the same omitted-means-unchanged terms as the rest —
+    // so the Devices page's button-map save cannot reset a club's door policy, and a club
+    // with no gates never sends them at all.
+    ...(req.gate_unlock_seconds !== undefined ? { gateUnlockSeconds: req.gate_unlock_seconds } : {}),
+    ...(req.gate_access_policy !== undefined ? { gateAccessPolicy: req.gate_access_policy } : {}),
+    ...(req.gate_early_entry_minutes !== undefined ? { gateEarlyEntryMinutes: req.gate_early_entry_minutes } : {}),
   }),
 
   // Admin: devices.
@@ -1123,9 +1188,17 @@ export const endpoints = {
    * `court_numbers`): a list sets one, `null` goes back to the club's map, and an ABSENT
    * key leaves it alone. The spread below keeps that contract — a caller that does not
    * mention `button_map` sends no such key, and JSON.stringify drops an `undefined` one.
+   *
+   * `gate_key` binds the same three ways and is a GATE row's only editable configuration:
+   * a string names the door (trimmed, at most 64 characters), `null` clears the name, and
+   * an absent key leaves it alone. It is refused on a court box (`gate_key_not_a_gate`),
+   * exactly as `court_numbers` and `button_map` are refused on a gate
+   * (`court_fields_on_a_gate`). `kind` is on neither this request nor the API's, by design.
    */
-  adminDeviceUpdate: (id: string, req: { name?: string; enabled?: boolean; court_numbers?: number[]; button_map?: string[] | null }) =>
-    api.patch<AdminDevice>(`/api/v1/admin/devices/${id}`, { ...req }),
+  adminDeviceUpdate: (
+    id: string,
+    req: { name?: string; enabled?: boolean; court_numbers?: number[]; button_map?: string[] | null; gate_key?: string | null },
+  ) => api.patch<AdminDevice>(`/api/v1/admin/devices/${id}`, { ...req }),
   /**
    * Forgets a box. It is not a revocation and does not lock anything out: the box still
    * holds the club's API key, so it registers itself again on its next heartbeat — as a
