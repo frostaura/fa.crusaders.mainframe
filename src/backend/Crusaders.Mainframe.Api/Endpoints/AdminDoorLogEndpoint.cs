@@ -48,6 +48,29 @@ public static class AdminDoorLogEndpoint
     public const string TruncatedHeader = "X-Crusaders-Truncated";
 
     /// <summary>
+    /// How many scan rows the file actually holds.
+    ///
+    /// <para>
+    /// <b>The page could not know and said a number anyway.</b> The export ignores paging —
+    /// correctly: a club exporting a filtered range wants the range, not the fifty rows on
+    /// screen — but the console had only its own page size to announce, so a 165-row file was
+    /// reported as "50 scans downloaded". A browser cannot read a response header it has not
+    /// been allowed to, so this and <see cref="TruncatedHeader"/> are both named in the CORS
+    /// policy's exposed headers; without that line the header is present on the wire and
+    /// invisible to the page, which is the same defect wearing a fix.
+    /// </para>
+    /// </summary>
+    public const string RowsHeader = "X-Crusaders-Rows";
+
+    /// <summary>
+    /// The export's columns, in order. Stated as a constant because the CSV is a contract with
+    /// a spreadsheet and with the frontend's own copy, and a header row assembled inline is a
+    /// contract nothing can assert against.
+    /// </summary>
+    public const string Header =
+        "date,time,timezone,at_utc,door,door_name,outcome,reason,reason_code,offline,member,code_fingerprint";
+
+    /// <summary>
     /// <c>GET /api/v1/admin/doors/activity</c> — one page of the club's door log.
     /// </summary>
     public static async Task<IResult> HandleAsync(
@@ -114,12 +137,19 @@ public static class AdminDoorLogEndpoint
         var doors = await DoorsAsync(
             db, exported.Select(r => DoorTrail.DeviceIdOf(DoorActivityView.Details(r.DetailsJson))), ct);
 
-        var csv = new StringBuilder("at,door,door_name,outcome,reason,offline,member,fingerprint\r\n");
+        // The club's own zone, so the two readable columns are the times an admin saw on the
+        // screen they exported from. A zone this platform does not know falls back to UTC and
+        // SAYS so in the `timezone` column, rather than printing local-looking times that are
+        // not — the same rule DoorDay applies to the day boundary.
+        var day = DoorDay.StartOfToday(settings, DateTimeOffset.UtcNow);
+        var zone = TimeZoneInfo.TryFindSystemTimeZoneById(day.Timezone, out var found) ? found : TimeZoneInfo.Utc;
+
+        var csv = new StringBuilder(Header).Append("\r\n");
         foreach (var row in exported)
         {
             var details = DoorActivityView.Details(row.DetailsJson);
             var door = DoorTrail.DeviceIdOf(details) is { } id && doors.TryGetValue(id, out var d) ? d : null;
-            csv.Append(Line(row.Action, row.CreatedAt, row.SubjectUserId, details, door, names));
+            csv.Append(Line(row.Action, row.CreatedAt, row.SubjectUserId, details, door, names, zone, day.Timezone));
         }
 
         // The export is a thing that happened to a club's own records, so the trail says who
@@ -147,27 +177,71 @@ public static class AdminDoorLogEndpoint
 
         if (truncated) ctx.Response.Headers[TruncatedHeader] = "true";
 
+        // The real count, so the page announces the file rather than its own page size (B3).
+        ctx.Response.Headers[RowsHeader] = exported.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        // A UTF-8 BOM, because Excel reads a BOM-less UTF-8 file in the machine's legacy code
+        // page and a club whose door is named "Café" gets mojibake on a wall-printed report.
+        // Every other reader tolerates it; Excel is the one that does not tolerate its absence.
+        var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
+
+        // Quoted, as WIRE-W1 §4 says and as RFC 6266 wants (S2). Unquoted it survives only
+        // because this filename happens to contain no space or comma today.
         var filename = $"door-log-{query.From:yyyy-MM-dd}-{query.To:yyyy-MM-dd}.csv";
-        return Results.File(Encoding.UTF8.GetBytes(csv.ToString()), "text/csv", filename);
+        ctx.Response.Headers.ContentDisposition = $"attachment; filename=\"{filename}\"";
+        return Results.File(bytes, "text/csv; charset=utf-8");
     }
 
-    /// <summary>One row of the file. Block body for the lizard reason in <c>memory/gotchas.md</c>.</summary>
+    /// <summary>
+    /// One row of the file, spreadsheet-first.
+    ///
+    /// <para>
+    /// <b>Every column here was a complaint (B4).</b> The instant was a round-trip ISO string
+    /// with seven fractional digits, which Excel will not parse at all and which read two
+    /// hours off every screen the admin had just been looking at, with nothing on the row
+    /// saying which zone it was in. It is now four columns: <c>date</c> and <c>time</c> in the
+    /// club's zone and in the formats a spreadsheet recognises without being told,
+    /// <c>timezone</c> so the file is still unambiguous when it is mailed on, and
+    /// <c>at_utc</c> to the second for anybody reconciling against another system.
+    /// </para>
+    ///
+    /// <para>
+    /// The instant is the SCAN's, not the row's — see <see cref="DoorActivityView.ScannedAt"/>.
+    /// An offline scan happened when somebody stood at the door and was recorded when the
+    /// board next called in, and an export stamped with the second answers the wrong question.
+    /// </para>
+    ///
+    /// <para>
+    /// Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
     private static string Line(
         string action, DateTimeOffset at, Guid? subjectUserId, JsonElement? details, DoorRef? door,
-        IReadOnlyDictionary<Guid, string> names)
+        IReadOnlyDictionary<Guid, string> names, TimeZoneInfo zone, string timezone)
     {
         var member = subjectUserId is { } id && id != Guid.Empty
             ? names.TryGetValue(id, out var name) ? name : ""
             : "";
 
+        var scanned = DoorActivityView.ScannedAt(details, at);
+        var local = TimeZoneInfo.ConvertTime(scanned, zone);
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+
         var cells = new[]
         {
-            at.ToString("O"),
+            local.ToString("yyyy-MM-dd", invariant),
+            local.ToString("HH:mm:ss", invariant),
+            timezone,
+            scanned.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", invariant),
             door?.GateKey ?? "",
             door?.Name ?? "",
-            DoorTrail.OutcomeOf(action) ?? "",
+            DoorWords.OutcomeOf(action) ?? "",
+            DoorWords.ReasonOf(DoorActivityView.Reason(details)),
+
+            // The machine value beside the words: a club filtering a spreadsheet wants the
+            // stable one, and a club reading it wants the sentence.
             DoorActivityView.Reason(details) ?? "",
-            DoorActivityView.Offline(details) ? "true" : "false",
+            DoorActivityView.Offline(details) ? "yes" : "no",
             member,
             DoorActivityView.Fingerprint(details) ?? "",
         };

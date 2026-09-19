@@ -182,6 +182,16 @@ public sealed record DoorClub(
         await db.SaveChangesAsync();
     }
 
+    /// <summary>This club's audit rows for one action — the trail as a test reads it.</summary>
+    public async Task<List<AuditLog>> AuditRowsAsync(TestWebAppFactory factory, string action)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == TenantId && a.Action == action)
+            .ToListAsync();
+    }
+
     public HttpClient AdminClient(TestWebAppFactory factory) => ClientFor(factory, AdminUserId, "admin");
 
     public HttpClient MemberClient(TestWebAppFactory factory) => ClientFor(factory, MemberUserId, null);

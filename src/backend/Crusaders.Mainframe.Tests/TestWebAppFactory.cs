@@ -70,6 +70,22 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
     /// </summary>
     public int? ForwardLimit { get; init; }
 
+    /// <summary>
+    /// The hosting environment name. Null is "Testing", which is what every suite but one
+    /// wants — <c>Program.cs</c> runs the dev Seeder under <c>IsDevelopment()</c> and the
+    /// Seeder talks to a database.
+    ///
+    /// <para>
+    /// <b>Set it to "Production" to test what a CLUB'S deployment answers.</b> Development
+    /// adds the developer exception page, which turns a malformed request into a stack trace
+    /// naming types, assemblies and absolute source paths on the machine that built it; the
+    /// review stack ran in Development and the reviewer read that as the product's behaviour.
+    /// The only way to know is to boot the environment the club runs. See
+    /// <c>DeploymentPostureTests</c>.
+    /// </para>
+    /// </summary>
+    public string? EnvironmentName { get; init; }
+
     private static readonly Dictionary<string, int> DefaultRateLimits = new()
     {
         ["AuthPerMinute"] = 100_000,
@@ -112,7 +128,7 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
 
         // "Testing" rather than "Development": Program.cs runs the Seeder under
         // IsDevelopment(), and the Seeder talks to the database.
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment(EnvironmentName ?? "Testing");
 
         builder.ConfigureAppConfiguration((_, config) =>
         {

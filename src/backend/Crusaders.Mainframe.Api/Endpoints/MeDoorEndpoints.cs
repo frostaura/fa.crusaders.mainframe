@@ -147,14 +147,27 @@ public static class MeDoorEndpoints
         var retentionDays = DoorSettings.LogRetentionDays(settings);
         var floor = now.AddDays(-retentionDays);
 
+        // Clamped, not refused — the same rule the admin log's limit runs and for the same
+        // reason: a page asking for a million rows is a mistake to bound, and an error screen
+        // is not what a member opening their own history wanted.
         var limit = Math.Clamp(
             int.TryParse(ctx.Request.Query["limit"].ToString(), out var asked) ? asked : DefaultHistoryLimit,
             1, MaxHistoryLimit);
 
         var rows = Mine(db, userId).Where(a => a.CreatedAt >= floor);
-        if (DoorLogCursor.Parse(ctx.Request.Query["cursor"].ToString()) is { } cursor)
+
+        // A cursor is different, and E3 is why. It is not a number to bound: a truncated one
+        // silently answered the FIRST page, which a page labelling itself "older" then showed
+        // as older rows it had already shown. Refused by name so the page can say so.
+        var cursorText = ctx.Request.Query["cursor"].ToString();
+        var cursor = DoorLogCursor.Parse(cursorText);
+        if (!string.IsNullOrWhiteSpace(cursorText) && cursor is null)
         {
-            rows = rows.Where(a => a.CreatedAt < cursor.At || (a.CreatedAt == cursor.At && a.Id.CompareTo(cursor.Id) < 0));
+            return Results.BadRequest(new { error = DoorLogQuery.CursorInvalid });
+        }
+        if (cursor is { } position)
+        {
+            rows = rows.Where(a => a.CreatedAt < position.At || (a.CreatedAt == position.At && a.Id.CompareTo(position.Id) < 0));
         }
 
         var page = await rows.OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id)

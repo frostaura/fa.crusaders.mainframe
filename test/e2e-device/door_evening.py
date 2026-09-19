@@ -493,10 +493,16 @@ class Door:
         return self.qr("ident")["code"]
 
     def activity(self, limit: Optional[int] = None) -> list[dict]:
+        return self.activity_body(limit).get("items") or []
+
+    def activity_body(self, limit: Optional[int] = None) -> dict:
+        """The whole response. `items` is the door's SCANS and `events` is the board's own
+        story — a registration, an admin edit, a clock the server had to overrule. They are
+        two arrays because a console renders a row it has no chip for through whatever branch
+        is last, which is how `device.updated` was painted as a green "Refused" scan."""
         q = f"?limit={limit}" if limit is not None else ""
-        r = expect_status(self.w.http.get(f"/api/v1/admin/devices/{self.gate_id}/activity{q}",
-                                          token=self.w.admin_token), 200, "device activity")
-        return r.get("items") or []
+        return expect_status(self.w.http.get(f"/api/v1/admin/devices/{self.gate_id}/activity{q}",
+                                             token=self.w.admin_token), 200, "device activity")
 
 
 def d1_plug_in(d: Door) -> None:
@@ -1200,7 +1206,9 @@ def d16_cross_kind(d: Door, booking: dict) -> None:
 
 def da_activity(d: Door) -> None:
     sc.step("DA  B5 — the trail finally has a reader")
-    items = d.activity()
+    body = d.activity_body()
+    items = body.get("items") or []
+    events = body.get("events") or []
     chk("B5", "GET /admin/devices/{id}/activity answers this board's rows",
         len(items) > 0, f"n={len(items)}")
     actions = [i.get("action") for i in items]
@@ -1210,13 +1218,36 @@ def da_activity(d: Door) -> None:
         and any(str(a).startswith("gate.denied_") for a in actions)
         and any(a == "device.gate_open" for a in actions), f"actions={sorted(set(map(str, actions)))}")
     chk("B5", "it is the BOARD's trail and not a door-opens feed: the registration row and the "
-              "admin's edits are in it too",
-        any(str(a).startswith("device.auto_registered") or str(a).startswith("device.registered")
-            for a in actions) or any(str(a).startswith("device.updated") for a in actions),
-        f"actions={sorted(set(map(str, actions)))}")
-    chk("B5", "newest first", all(parse_dt(items[i]["at"]) >= parse_dt(items[i + 1]["at"])
-                                  for i in range(len(items) - 1)),
-        f"first={items[0]['at']} last={items[-1]['at']}")
+              "admin's edits are here too — in `events`, under a neutral word, NEVER among the "
+              "scans, because a console paints a row it has no chip for as a green refusal",
+        any(str(e.get("action")).startswith("device.auto_registered")
+            or str(e.get("action")).startswith("device.updated") for e in events)
+        and not any(str(a).startswith("device.auto_registered") or str(a).startswith("device.updated")
+                    for a in actions)
+        and all(e.get("kind") in {"registered", "edited", "removed", "clock_corrected", "unrecognised"}
+                for e in events),
+        f"events={sorted({(str(e.get('action')), str(e.get('kind'))) for e in events})}")
+    chk("B5", "one scan is ONE row on every surface: the clock-correction row the upload writes "
+              "beside a clamped event carries identical details and is not a second scan",
+        len({(i.get("action"), i.get("at"), i.get("fingerprint")) for i in items}) == len(items),
+        f"n={len(items)} distinct={len({(i.get('action'), i.get('at'), i.get('fingerprint')) for i in items})}")
+
+    def delivered(row: dict) -> str:
+        """The axis the trail is ordered on: when the CLUB heard about the row. An offline
+        row's `at` is the SCAN, which is older than its delivery by the length of the
+        outage, so the two are not the same list (A4)."""
+        return row.get("delivered_at") or row["at"]
+
+    chk("B5", "newest first, by when the club heard about it",
+        all(parse_dt(delivered(items[i])) >= parse_dt(delivered(items[i + 1]))
+            for i in range(len(items) - 1)),
+        f"first={delivered(items[0])} last={delivered(items[-1])}")
+    chk("B5", "an online decision has nothing to deliver, and an offline one says when it "
+              "arrived — a page that had only `at` could not tell a two-hour-old scan from a "
+              "two-hour-old outage",
+        all(i.get("delivered_at") is None for i in items if not i.get("offline"))
+        and all(i.get("delivered_at") for i in items if i.get("offline")),
+        f"offline={[(i['at'], i.get('delivered_at')) for i in items if i.get('offline')][:3]}")
 
     offline = [i for i in items if i.get("offline")]
     online = [i for i in items if not i.get("offline")]
@@ -1241,7 +1272,7 @@ def da_activity(d: Door) -> None:
         and all(c in "0123456789abcdef" for c in gate_open["fingerprint"]),
         f"fingerprint={(gate_open or {}).get('fingerprint')}")
 
-    serialised = json.dumps(items)
+    serialised = json.dumps(body)
     chk("B5", "DetailsJson is NEVER returned, in whole or in part: it carries the club's internal "
               "device id, the gate key and a court box's relay and booking ids",
         d.gate_id not in serialised and "front-door" not in serialised

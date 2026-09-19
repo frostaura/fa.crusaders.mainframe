@@ -41,6 +41,17 @@ builder.Services.AddCors(options =>
         .WithOrigins(allowedOrigins)
         .AllowAnyHeader()
         .AllowAnyMethod()
+
+        // A browser hands a page only the six CORS-safelisted response headers unless the
+        // server names the rest. Both of these are read by the console — the door log's
+        // export announces how many rows the FILE holds and whether it was truncated — and
+        // without this line they are present on the wire, visible in a terminal, and
+        // undefined in the page that needs them. That shape is worse than not sending them:
+        // the console announced its own page size instead, so a 165-row export was reported
+        // to the admin as "50 scans downloaded" (B3).
+        .WithExposedHeaders(
+            Crusaders.Mainframe.Api.Endpoints.AdminDoorLogEndpoint.RowsHeader,
+            Crusaders.Mainframe.Api.Endpoints.AdminDoorLogEndpoint.TruncatedHeader)
         .AllowCredentials());
 });
 

@@ -438,17 +438,124 @@ public sealed class AdminDoorLogHttpTests
             subjectUserId: club.MemberUserId, reason: "ok", gateKey: "front-door");
 
         var res = await club.AdminClient(factory).GetAsync($"{CsvPath}?door={doorId}");
-        var text = await res.Content.ReadAsStringAsync();
-        var lines = text.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+        var bytes = await res.Content.ReadAsByteArrayAsync();
+        var text = System.Text.Encoding.UTF8.GetString(bytes);
+        var lines = text.TrimStart('﻿').Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
 
         Assert.Equal("text/csv", res.Content.Headers.ContentType?.MediaType);
         Assert.Equal("attachment", res.Content.Headers.ContentDisposition?.DispositionType);
         Assert.StartsWith("door-log-", res.Content.Headers.ContentDisposition?.FileName?.Trim('"') ?? "");
         Assert.EndsWith(".csv", res.Content.Headers.ContentDisposition?.FileName?.Trim('"') ?? "");
-        Assert.Equal("at,door,door_name,outcome,reason,offline,member,fingerprint", lines[0]);
+
+        // S2: WIRE-W1 §4 says the filename is QUOTED, and it was not. It survived only
+        // because this name happens to hold no space or comma.
+        Assert.Contains(
+            "filename=\"door-log-",
+            res.Content.Headers.ContentDisposition?.ToString() ?? "", StringComparison.Ordinal);
+
+        // B4: a UTF-8 BOM, because Excel reads a BOM-less UTF-8 file in the machine's legacy
+        // code page and a club whose door is named "Café" gets mojibake on a printed report.
+        Assert.Equal(System.Text.Encoding.UTF8.GetPreamble(), bytes.Take(3).ToArray());
+
+        Assert.Equal(AdminDoorLogEndpoint.Header, lines[0]);
         Assert.Equal(2, lines.Length);
         Assert.Contains("Front door", lines[1]);
-        Assert.Contains("released", lines[1]);
+
+        // The words, not the machine codes — and the machine code beside them.
+        var cells = lines[1].Split(',');
+        Assert.Equal(DoorWords.Released, cells[6]);
+        Assert.Equal(DoorWords.ReasonOf(GateAccess.Ok), cells[7]);
+        Assert.Equal(GateAccess.Ok, cells[8]);
+        Assert.Equal("no", cells[9]);
+    }
+
+    /// <summary>
+    /// B4: the two readable columns are the club's own zone and the file says which zone that
+    /// was, so it is still unambiguous when it is mailed on. <c>at_utc</c> is to the SECOND —
+    /// a round-trip ISO string with seven fractional digits is a string Excel will not parse.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_csv_states_the_clubs_own_time_and_names_the_zone()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(
+            factory, "csvzone",
+            """{"slice_minutes":15,"grace_window_minutes":5,"timezone":"Africa/Johannesburg","heartbeat_seconds":45}""");
+        var doorId = await club.AddDoorAsync(factory, "gate-lg0022", "front-door", name: "Front door");
+
+        // 18:25:07 UTC is 20:25:07 in Johannesburg, and the club's screens say the latter.
+        var at = new DateTimeOffset(2026, 9, 18, 18, 25, 7, 123, TimeSpan.Zero);
+        await club.WriteRowAsync(
+            factory, doorId, DeviceGateEndpoint.OpenedAction, at, reason: "ok", gateKey: "front-door");
+
+        var text = await (await club.AdminClient(factory)
+            .GetAsync($"{CsvPath}?door={doorId}&from={Uri.EscapeDataString(at.AddHours(-1).ToString("O"))}"))
+            .Content.ReadAsStringAsync();
+        var cells = text.TrimStart('﻿').Split("\r\n", StringSplitOptions.RemoveEmptyEntries)[1].Split(',');
+
+        Assert.Equal("2026-09-18", cells[0]);
+        Assert.Equal("20:25:07", cells[1]);
+        Assert.Equal("Africa/Johannesburg", cells[2]);
+        Assert.Equal("2026-09-18T18:25:07Z", cells[3]);
+    }
+
+    /// <summary>
+    /// An offline row is exported with the instant somebody stood at the door, not the instant
+    /// the board came back and said so. An export stamped with the second answers a question
+    /// nobody asked.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_csv_exports_the_scan_and_not_its_delivery()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "csvscan");
+        var doorId = await club.AddDoorAsync(factory, "gate-lg0023", "front-door");
+
+        var delivered = new DateTimeOffset(2026, 9, 18, 9, 0, 0, TimeSpan.Zero);
+        var scanned = new DateTimeOffset(2026, 9, 18, 6, 40, 0, TimeSpan.Zero);
+        await club.WriteRowAsync(
+            factory, doorId, DoorTrail.OfflineOpenAction, delivered, seq: 4, occurredAt: scanned);
+
+        var text = await (await club.AdminClient(factory)
+            .GetAsync($"{CsvPath}?door={doorId}&from={Uri.EscapeDataString(scanned.AddHours(-1).ToString("O"))}"))
+            .Content.ReadAsStringAsync();
+        var cells = text.TrimStart('﻿').Split("\r\n", StringSplitOptions.RemoveEmptyEntries)[1].Split(',');
+
+        Assert.Equal("06:40:00", cells[1]);
+        Assert.Equal("2026-09-18T06:40:00Z", cells[3]);
+        Assert.Equal(DoorWords.Released, cells[6]);
+        Assert.Equal("yes", cells[9]);
+    }
+
+    /// <summary>
+    /// B3: the file's own row count, in a header the browser is ALLOWED to read. The page had
+    /// only its own page size to announce, so a 165-row export was reported as "50 scans
+    /// downloaded" — and a header the CORS policy does not expose is invisible to the page,
+    /// which is the same defect wearing a fix.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_csv_announces_how_many_rows_the_file_holds()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "csvrows");
+        var doorId = await club.AddDoorAsync(factory, "gate-lg0024", "front-door");
+        var now = DateTimeOffset.UtcNow;
+
+        for (var i = 0; i < 7; i++)
+        {
+            await club.WriteRowAsync(factory, doorId, DeviceGateEndpoint.OpenedAction, now.AddMinutes(-i - 1));
+        }
+
+        var res = await club.AdminClient(factory).GetAsync($"{CsvPath}?door={doorId}&limit=2");
+
+        Assert.Equal("7", res.Headers.GetValues(AdminDoorLogEndpoint.RowsHeader).Single());
+        Assert.DoesNotContain(AdminDoorLogEndpoint.TruncatedHeader, res.Headers.Select(h => h.Key));
     }
 
     /// <summary>

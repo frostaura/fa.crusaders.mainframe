@@ -41,6 +41,36 @@ public sealed record DoorLogQuery(
     public const string OutcomeInvalid = "outcome_invalid";
 
     /// <summary>
+    /// The refusal when <c>?from=</c> is present and is not an instant.
+    ///
+    /// <para>
+    /// <b>It used to be ignored, and the export is why that mattered.</b> A mistyped range
+    /// silently fell back to the default window — or, for the CSV, to the whole retention
+    /// period — and answered 200 with rows the admin believed were filtered. Somebody
+    /// exporting "last Tuesday" got the club's entire log and filed it as last Tuesday's. A
+    /// LIMIT is clamped because a console asking for too much is unambiguous; a date that is
+    /// not a date is not a request the server can bound, and guessing what it meant is how an
+    /// export lies.
+    /// </para>
+    /// </summary>
+    public const string FromInvalid = "from_invalid";
+
+    /// <summary>The same for <c>?to=</c>. See <see cref="FromInvalid"/>.</summary>
+    public const string ToInvalid = "to_invalid";
+
+    /// <summary>
+    /// The refusal when <c>?cursor=</c> is present and is not one of ours.
+    ///
+    /// <para>
+    /// A malformed cursor used to answer the FIRST page, on the reasoning that it is a value
+    /// a console echoes rather than one a person types. That is true and it is still the
+    /// wrong answer: a console that truncated it gets page one back labelled as page nine and
+    /// an admin walks a list that silently restarted. Refusing says so.
+    /// </para>
+    /// </summary>
+    public const string CursorInvalid = "cursor_invalid";
+
+    /// <summary>
     /// Reads the query string, clamps everything, and refuses only the one parameter that has a
     /// closed set.
     ///
@@ -73,12 +103,19 @@ public sealed record DoorLogQuery(
         // offset to a `timestamp with time zone` — and `?from=2026-09-19T00:00:00+02:00` is
         // exactly what a console in a club's own zone sends. Same instant; it is the
         // representation the parameter has to be in, not the value.
-        var from = (Instant(request, "from") ?? now - DefaultWindow).ToUniversalTime();
-        var to = (Instant(request, "to") ?? now).ToUniversalTime();
+        var (fromValue, fromBad) = Instant(request, "from");
+        if (fromBad) return (null, FromInvalid);
+        var (toValue, toBad) = Instant(request, "to");
+        if (toBad) return (null, ToInvalid);
+
+        var from = (fromValue ?? now - DefaultWindow).ToUniversalTime();
+        var to = (toValue ?? now).ToUniversalTime();
         if (from < floor) from = floor.ToUniversalTime();
         if (to < from) to = from;
 
-        var cursor = DoorLogCursor.Parse(Text(request, "cursor"));
+        var cursorText = Text(request, "cursor");
+        var cursor = DoorLogCursor.Parse(cursorText);
+        if (cursorText is not null && cursor is null) return (null, CursorInvalid);
 
         return (new DoorLogQuery(
             Door: Guid.TryParse(Text(request, "door"), out var door) ? door : null,
@@ -160,12 +197,20 @@ public sealed record DoorLogQuery(
     private static int? Number(HttpRequest request, string key)
         => int.TryParse(Text(request, key), out var value) ? value : null;
 
-    private static DateTimeOffset? Instant(HttpRequest request, string key)
-        => DateTimeOffset.TryParse(
-            Text(request, key), System.Globalization.CultureInfo.InvariantCulture,
+    /// <summary>
+    /// The instant this parameter names, and whether it was present and unreadable — which is
+    /// a different answer from absent and is the whole of E3. Block body for the lizard reason
+    /// in <c>memory/gotchas.md</c>.
+    /// </summary>
+    public static (DateTimeOffset? Value, bool Invalid) Instant(HttpRequest request, string key)
+    {
+        if (Text(request, key) is not { } text) return (null, false);
+        return DateTimeOffset.TryParse(
+            text, System.Globalization.CultureInfo.InvariantCulture,
             System.Globalization.DateTimeStyles.RoundtripKind, out var value)
-            ? value
-            : null;
+            ? (value, false)
+            : (null, true);
+    }
 }
 
 /// <summary>
@@ -197,10 +242,12 @@ public sealed record DoorLogCursor(DateTimeOffset At, Guid Id)
     /// A cursor from the wire, or null when there is none or it is not one.
     ///
     /// <para>
-    /// A malformed cursor answers the FIRST page rather than a 400. It is a value the console
-    /// echoes back rather than one a person typed, so the recoverable reading is the useful
-    /// one — and the failure it protects against, a truncated or re-encoded string, would
-    /// otherwise strand a console mid-list with no way back.
+    /// Null for a malformed one, which its callers answer 400 <c>cursor_invalid</c> to. It was
+    /// the first page for as long as this type has existed, on the reasoning that a cursor is
+    /// echoed rather than typed and the recoverable reading is the useful one — and E3 is what
+    /// that costs: a truncated cursor answers page one, the console labels it page nine, and
+    /// an admin walks a list that silently restarted without a single thing on screen saying
+    /// so. Recoverable is not the same as correct.
     /// </para>
     /// </summary>
     public static DoorLogCursor? Parse(string? encoded)
