@@ -153,6 +153,31 @@ describe("My door history", () => {
     expect(screen.queryByText("Opened")).toBeNull();
   });
 
+  /**
+   * A row the endpoint returns with no reason on it at all.
+   *
+   * <p>
+   * `DoorActivityView.Details` swallows a `JsonException` and answers null, and `Reason`
+   * then finds neither a `reason` nor an `outcome` to read — so a refusal whose details
+   * were written malformed arrives here with `reason: null`. The row is still the member's
+   * own evidence that a code of theirs was turned away; dropping it, or rendering the word
+   * "null" into the chip, are the two wrong answers.
+   * </p>
+   */
+  it("still shows a row the server could not say a reason for", async () => {
+    renderProfile([
+      {
+        path: "/api/v1/me/door/history",
+        body: HISTORY({ items: [memberDoorHistoryRowFixture({ released: false, reason: null })] }),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    expect(await screen.findByText("Turned away")).toBeInTheDocument();
+    expect(screen.getByText(/front-door/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/\bnull\b|\bundefined\b/);
+  });
+
   it("says an offline row was decided from the door's own downloaded list", async () => {
     renderProfile([
       { path: "/api/v1/me/door/history", body: HISTORY({ items: [memberDoorHistoryRowFixture({ offline: true })] }) },

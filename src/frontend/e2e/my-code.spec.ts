@@ -28,18 +28,48 @@ const CODE = {
 
 const CONTACT = { phone: "021 555 0134", email: "info@crusaders.co.za" };
 
+/**
+ * `GET /api/v1/me/door`, with every key `MeDoorEndpoints.DoorAsync` returns.
+ *
+ * <p>
+ * Spelled out in full rather than trimmed to what a test reads, because a stub narrower
+ * than the API is how this page came to be built against one that was. Every value here
+ * is the endpoint's own default: `gate_early_entry_minutes` at 30,
+ * `DeviceGateRosterBuilder.GateRosterMaxEntries` at 48, `DoorSettings`' 90-day retention.
+ * </p>
+ */
 function door(over: Record<string, unknown> = {}) {
   return {
     doors: true,
     policy: "booking_window",
     membership: "active",
+    membership_detail: "active",
+    is_club_admin: false,
     next_booking: {
       starts_at: "2099-01-01T17:00:00Z",
+      ends_at: "2099-01-01T17:45:00Z",
+      court_number: 3,
       door_opens_at: "2099-01-01T16:30:00Z",
       door_closes_at: "2099-01-01T18:05:00Z",
     },
+    early_entry_minutes: 30,
+    roster_max_entries: 48,
     contact: CONTACT,
+    door_log_retention_days: 90,
     last_decision: null,
+    ...over,
+  };
+}
+
+/** One decision, with both of the fields WIRE-W1 §8 did not carry. */
+function decision(over: Record<string, unknown> = {}) {
+  return {
+    at: "2099-01-01T16:02:00Z",
+    door_name: "front-door",
+    released: false,
+    reason: "too_early",
+    offline: false,
+    opens_at: null,
     ...over,
   };
 }
@@ -101,18 +131,114 @@ test("a too-early member gets a countdown and no error styling", async ({ page }
   await signIn(page);
   await serveApi(page, [...COMMON, {
     path: "/api/v1/me/door",
-    body: door({ last_decision: { at: "2099-01-01T16:02:00Z", door_name: "front-door", released: false, reason: "too_early" } }),
+    // The shape the endpoint really sends for this refusal: `opens_at` on the decision
+    // and NO `next_booking`, because `too_early` means the booking's window has not
+    // opened and that is exactly when `NextBookingAsync` returns null. Before the
+    // decision carried its own instant, the commonest too-early card had no countdown.
+    body: door({
+      next_booking: null,
+      last_decision: decision({ opens_at: "2099-01-01T16:30:00Z" }),
+    }),
   }]);
 
   await page.goto("/my-code");
 
   const card = page.getByRole("status");
-  await expect(card).toContainText(/Too early — the door opens for you in/);
+  await expect(card).toContainText(/Too early — the door opens for you in \d/);
   await expect(card).toContainText("front-door");
   await expect(card.locator("[role='alert']")).toHaveCount(0);
   await expect(card).toHaveClass(/border-info-strong/);
   await expect(card).not.toHaveClass(/danger/);
 });
+
+/**
+ * §6.1's second `ok` arm, in a real browser because what distinguishes it is a sentence
+ * rather than a class — and because a success chrome around a sentence about an outage is
+ * the pairing worth seeing assembled.
+ */
+test("an open the door decided alone says so, and still says the lock released", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, {
+    path: "/api/v1/me/door",
+    body: door({ last_decision: decision({ reason: "ok", released: true, offline: true }) }),
+  }]);
+
+  await page.goto("/my-code");
+
+  const card = page.getByRole("status");
+  await expect(card).toContainText(/from the door's own list/);
+  await expect(card).toContainText(/couldn't reach the club/);
+  await expect(card).toHaveClass(/border-success-strong/);
+  // A1.2, which outranks the UX spec's own literal wording for this arm.
+  await expect(card).not.toContainText(/door opened|let you in|walked in/);
+});
+
+/**
+ * §6.2 row 7. `GateAccess` lets a club admin past the booking check under
+ * `booking_window`, and the page used to send its own club's admins to book a court.
+ */
+test("a club admin is told a door opens without a booking, and what a cut-off door holds", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, {
+    path: "/api/v1/me/door",
+    body: door({ is_club_admin: true, next_booking: null }),
+  }]);
+
+  await page.goto("/my-code");
+
+  const line = page.getByText(/You're a club admin/);
+  await expect(line).toBeVisible();
+  await expect(line).toContainText(/without one/);
+  await expect(line).toContainText(/bookings, not admins/);
+  await expect(page.getByRole("link", { name: "Book a court" })).toHaveCount(0);
+});
+
+/**
+ * The club's own numbers, both of them, on the assembled page: the early-entry window in
+ * the standing line, and the roster cap inside the offline disclosure. Neither may be a
+ * constant this page holds — one is a tenant setting and the other belongs to the
+ * firmware — and a `<details>` that never opens is exactly the place a wrong number
+ * survives a code review.
+ */
+test("the page names the club's own numbers rather than its own constants", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, {
+    path: "/api/v1/me/door",
+    body: door({ next_booking: null, early_entry_minutes: 45, roster_max_entries: 12 }),
+  }]);
+
+  await page.goto("/my-code");
+
+  await expect(page.getByText(/nothing booked in the next 45 minutes/)).toBeVisible();
+
+  await page.getByText("What if the door is offline?").click();
+  const half = page.getByText(/decides from a list of bookings/);
+  await expect(half).toContainText("first 12 bookings");
+  await expect(half).not.toContainText("first 48 bookings");
+});
+
+/**
+ * §6.2 row 3. Three not-actives, three different things for a person outside a building
+ * to do next — and the page used to say the same sentence to all three.
+ */
+for (const [detail, word] of [
+  ["pending_approval", "not yet approved"],
+  ["suspended", "suspended"],
+  ["rejected", "turned down"],
+] as const) {
+  test(`a member the club has as ${detail} is told which not-active that is`, async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, [...COMMON, {
+      path: "/api/v1/me/door",
+      body: door({ membership: "not_active", membership_detail: detail }),
+    }]);
+
+    await page.goto("/my-code");
+
+    await expect(page.getByText(new RegExp(`The club has yours as ${word},`))).toBeVisible();
+    await expect(page.getByText(/The club has yours as not active,/)).toHaveCount(0);
+  });
+}
 
 test("a club with no door is told nothing whatever about one", async ({ page }) => {
   await signIn(page);
@@ -137,7 +263,7 @@ test("a club with no door is told nothing whatever about one", async ({ page }) 
  */
 test("the self-diagnosis answers with one thing to do, and never with nothing", async ({ page }) => {
   await signIn(page);
-  await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door({ membership: "not_active" }) }]);
+  await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door({ membership: "not_active", membership_detail: "suspended" }) }]);
 
   await page.goto("/my-code");
   await page.getByRole("button", { name: "The door didn't open" }).click();
@@ -163,7 +289,7 @@ test("nothing scrolls sideways, and every control is big enough to hit in the da
   await signIn(page);
   await serveApi(page, [...COMMON, {
     path: "/api/v1/me/door",
-    body: door({ last_decision: { at: "2099-01-01T16:02:00Z", door_name: "front-door", released: false, reason: "no_booking" } }),
+    body: door({ next_booking: null, last_decision: decision({ reason: "no_booking" }) }),
   }]);
 
   await page.setViewportSize({ width: 360, height: 640 });

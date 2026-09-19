@@ -975,9 +975,56 @@ export function memberDoorFixture(overrides: Record<string, unknown> = {}) {
     doors: false,
     policy: "active_member",
     membership: "active",
+    // The same fact at the resolution that says WHICH not-active it is. The two move
+    // together in reality, so a fixture that overrides one and not the other is
+    // describing a club whose own records disagree — see `memberDoorNotActiveFixture`.
+    membership_detail: "active",
+    is_club_admin: false,
     next_booking: null,
+    // `gate_early_entry_minutes`' own default, clamped server-side to 0..240.
+    early_entry_minutes: 30,
+    // `DeviceGateRosterBuilder.GateRosterMaxEntries`, which the firmware shares.
+    roster_max_entries: 48,
     contact: { phone: "021 555 0134", email: "info@crusaders.co.za" },
+    // `DoorSettings.DefaultLogRetentionDays`.
+    door_log_retention_days: 90,
     last_decision: null,
+    ...overrides,
+  };
+}
+
+/**
+ * A membership the club has as not active, with both halves of the fact in step.
+ *
+ * <p>
+ * Spelling the pair out at every call site is how one of them ends up saying `active`
+ * under a `not_active` — a club whose own records contradict each other, which is a state
+ * the endpoint cannot produce and a fixture that proves nothing about the page.
+ * </p>
+ */
+export function memberDoorNotActiveFixture(
+  detail: "pending_approval" | "rejected" | "suspended",
+  overrides: Record<string, unknown> = {},
+) {
+  return memberDoorsOnFixture({ membership: "not_active", membership_detail: detail, ...overrides });
+}
+
+/**
+ * The booking the endpoint sends, with every field on it.
+ *
+ * <p>
+ * Both edges of the door window are always present — `NextBookingAsync` computes them from
+ * `BookingCodeWindow` on every booking it returns — so a fixture omitting one is testing a
+ * response shape the API cannot emit. `court_number` is the one genuinely nullable half.
+ * </p>
+ */
+export function memberDoorBookingFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    starts_at: "2026-09-19T17:00:00Z",
+    ends_at: "2026-09-19T17:45:00Z",
+    court_number: 3,
+    door_opens_at: "2026-09-19T16:30:00Z",
+    door_closes_at: "2026-09-19T18:05:00Z",
     ...overrides,
   };
 }
@@ -1002,6 +1049,12 @@ export function memberDoorDecisionFixture(overrides: Record<string, unknown> = {
     door_name: "front-door",
     released: false,
     reason: "too_early",
+    // A door that could reach the club, which is the common case and the one where the
+    // open arm says the shorter sentence.
+    offline: false,
+    // Null on every reason but `too_early`, and null there too when the booking behind the
+    // refusal has since gone. A fixture that wants a countdown asks for one.
+    opens_at: null,
     ...overrides,
   };
 }

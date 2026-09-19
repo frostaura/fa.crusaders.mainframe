@@ -35,7 +35,10 @@ export function DoorSection(props: {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const opensAt = door?.next_booking?.door_opens_at ?? null;
+  // Same precedence as the decision card's, and for the same reason: `too_early` is the
+  // one state with an instant to wait for, and it is exactly the state in which
+  // `next_booking` is null. The booking is the floor, not the source.
+  const opensAt = door?.last_decision?.opens_at ?? door?.next_booking?.door_opens_at ?? null;
   const opensIn = useCountdownSeconds(opensAt);
   const standing = (door ?? cached.door?.value) ?? null;
 
@@ -69,8 +72,14 @@ export function DoorSection(props: {
             // what lets the connection row — evaluated next, and the true finding — win
             // instead of the page blaming a membership it could not read.
             membership: standing?.membership ?? "active",
+            membership_detail: standing?.membership_detail ?? "active",
             policy: standing?.policy ?? "active_member",
-            hasBooking: !!door?.next_booking,
+            // `opens_at` exists only because `TooEarlyOpensAtAsync` FOUND a booking — one
+            // whose window has not opened, which is precisely why `next_booking` is null
+            // beside it. Keying this row on the booking alone told the one member who is
+            // standing outside waiting for their court that they had nothing booked, and
+            // then sent them to book another.
+            hasBooking: !!door?.next_booking || !!door?.last_decision?.opens_at,
             bookingStartsClock: door?.next_booking ? formatClock(door.next_booking.starts_at) : null,
             doorWindowOpen: opensAt === null ? null : (opensIn ?? 0) <= 0,
             opensAtClock: opensAt ? formatClock(opensAt) : null,

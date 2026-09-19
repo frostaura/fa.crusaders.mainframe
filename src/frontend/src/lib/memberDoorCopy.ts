@@ -1,6 +1,12 @@
 import { GATE_ROSTER_MAX_ENTRIES } from "./gateCopy";
 import { formatClock, formatCountdown } from "./countdown";
-import type { MemberDoorBooking, MemberDoorContact, MemberDoorMembership, MemberDoorPolicy } from "./api";
+import type {
+  MemberDoorBooking,
+  MemberDoorContact,
+  MemberDoorMembership,
+  MemberDoorMembershipDetail,
+  MemberDoorPolicy,
+} from "./api";
 
 /**
  * Everything the member's door surfaces say, in the member's own voice.
@@ -145,6 +151,15 @@ export type DecisionContext = {
   opensAtClock: string | null;
   /** When their court starts, on the clock. */
   bookingStartsClock: string | null;
+  /**
+   * `early_entry_minutes` from the response — the club's own number, already clamped.
+   *
+   * <p>
+   * Zero means "the club has no early-entry window set", which is a real setting and not
+   * an absent field; see {@link armNoBooking} for the sentence it earns.
+   * </p>
+   */
+  earlyEntryMinutes: number;
   contact: MemberDoorContact;
 };
 
@@ -178,6 +193,36 @@ function armOk(): Arm {
 }
 
 /**
+ * The open, at a door that had lost the club's network — the other half of P6's
+ * conditional, and a genuinely different event from the one above.
+ *
+ * <p>
+ * The board did not ask the club anything. It matched the code against the list of
+ * bookings it had downloaded earlier and released the lock on its own, and the club's
+ * record of it arrived when the board next got through. A member who is told only "the
+ * lock released" has not been told that their booking was checked against a snapshot —
+ * which is exactly the fact that explains why the door let them in on a night the club's
+ * own screens showed nothing.
+ * </p>
+ *
+ * <p>
+ * A1.2 binds this arm as it binds {@link armOk}: the lock released, and nothing here says
+ * a door moved or that anybody went through it.
+ * </p>
+ */
+function armOkOffline(): Arm {
+  return {
+    tone: "success",
+    headline: "The lock released — from the door's own list.",
+    body: "That door couldn't reach the club when you held your code up, so it decided from the list of"
+      + " bookings it had downloaded earlier. Its board reported releasing the lock, and the club's record"
+      + " of it arrived afterwards. Nothing about your booking changed — a door marks nobody as having"
+      + " arrived.",
+    wants: [],
+  };
+}
+
+/**
  * The one refusal that resolves itself, so it is a clock fact and must not be dressed as
  * a fault: info tone, live countdown, and no error styling anywhere in the arm.
  */
@@ -200,12 +245,45 @@ function armTooEarly(ctx: DecisionContext): Arm {
   };
 }
 
-function armNoBooking(): Arm {
+/**
+ * The club's early-entry window, in words a member reads rather than a count of minutes.
+ *
+ * <p>
+ * `gate_early_entry_minutes` clamps to 0..240 server-side, so this only ever renders
+ * something inside four hours — but "240 minutes" is a number nobody converts standing in
+ * a doorway, which is the same argument `formatCountdown` already makes about a booking
+ * code's quarter of an hour.
+ * </p>
+ */
+export function formatWindowMinutes(minutes: number): string {
+  if (minutes < 60) return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  const hourPart = hours === 1 ? "1 hour" : `${hours} hours`;
+  if (rest === 0) return hourPart;
+  return `${hourPart} ${rest === 1 ? "1 minute" : `${rest} minutes`}`;
+}
+
+/**
+ * How near a booking has to be, said with the club's own number when it has one.
+ *
+ * <p>
+ * Both halves. A club with `gate_early_entry_minutes` at zero has no window to name, and
+ * "nothing booked in the next 0 minutes" is not a sentence — it is what a page prints when
+ * it treats a real setting as an absent field. The wordless form is the floor.
+ * </p>
+ */
+function bookingNearness(earlyEntryMinutes: number): string {
+  if (earlyEntryMinutes > 0) return `in the next ${formatWindowMinutes(earlyEntryMinutes)}`;
+  return "soon enough for a door to open";
+}
+
+function armNoBooking(ctx: DecisionContext): Arm {
   return {
     tone: "warning",
     headline: "The door needs a court booked.",
-    body: "Your club opens its doors only for members with a court booked, and you have none starting soon"
-      + " enough for a door to open.",
+    body: "Your club opens its doors only for members with a court booked, and you have none starting"
+      + ` ${bookingNearness(ctx.earlyEntryMinutes)}.`,
     wants: ["book_a_court"],
   };
 }
@@ -257,6 +335,22 @@ function armUnknown(): Arm {
   };
 }
 
+/**
+ * The key a reason looks its sentence up by.
+ *
+ * <p>
+ * A null reason — what the endpoint answers for a refusal whose details would not parse —
+ * is mapped to a key no table holds, rather than guarded separately at each of the three
+ * call sites. "This build has no sentence for that" is the same finding whether the token
+ * was absent or merely unrecognised, and the mutation pass that found this was right: two
+ * spellings of one rule are two things to keep in step, and a redundant guard reads to the
+ * next person as a second rule that must exist for a reason.
+ * </p>
+ */
+function reasonKey(reason: string | null): string {
+  return reason ?? "";
+}
+
 const ARMS: Record<string, (ctx: DecisionContext) => Arm> = {
   ok: armOk,
   too_early: armTooEarly,
@@ -290,14 +384,27 @@ function resolveActions(wants: ActionKind[], contact: MemberDoorContact): Decisi
  *
  * <p>
  * `released` is the authoritative bit: a row the board let through is the open arm
- * whatever token travelled with it. Everything else forks on the reason.
+ * whatever token travelled with it. Everything else forks on the reason — and a reason of
+ * null, which the endpoint returns for a refusal whose details would not parse, lands on
+ * {@link armUnknown} by the same route an unrecognised token does. Both are "the door
+ * turned you away and this screen cannot say why", which is the honest sentence for each.
+ * </p>
+ *
+ * <p>
+ * <b>`offline` forks the OPEN only.</b> A refusal a cut-off door decided alone is the same
+ * refusal for the same reason — the board applied the club's own rule to the list it had —
+ * and a second sentence about the network there would be the page explaining a mechanism
+ * instead of answering the question. The open is different because the club's own record
+ * of it is late, which is a fact about what the member will and will not see next.
  * </p>
  */
 export function describeDecision(
-  decision: { reason: string; released: boolean },
+  decision: { reason: string | null; released: boolean; offline: boolean },
   ctx: DecisionContext,
 ): MemberDecisionCopy {
-  const build = decision.released ? armOk : (ARMS[decision.reason] ?? armUnknown);
+  const build = decision.released
+    ? (decision.offline ? armOkOffline : armOk)
+    : (ARMS[reasonKey(decision.reason)] ?? armUnknown);
   const arm = build(ctx);
   return { tone: arm.tone, headline: arm.headline, body: arm.body, actions: resolveActions(arm.wants, ctx.contact) };
 }
@@ -347,10 +454,36 @@ export type StandingLine = {
 const ACTIVE_MEMBER_RULE = "Your club opens its doors for any active member.";
 const BOOKING_RULE = "Your club opens its doors only for members with a court booked.";
 
-/** The membership half, which outranks the booking half: the club has to move first. */
-function standingNotActive(rule: string): StandingLine {
+/**
+ * Which not-active this is, in the club's own vocabulary.
+ *
+ * <p>
+ * The wave-1 wire shape carried three membership values, so this sentence used to say
+ * "not active" and stop. The endpoint now carries the club's recorded status beside it,
+ * and the difference is not cosmetic: a member whose application has not been approved has
+ * something to wait for, a suspended one has a conversation to have, and a turned-down one
+ * has neither. Naming the wrong one sends a person to the desk for nothing.
+ * </p>
+ *
+ * <p>
+ * `active` and `none` are absent on purpose — neither is a not-active state and neither
+ * reaches {@link standingNotActive}.
+ * </p>
+ */
+export const MEMBERSHIP_DETAIL_WORDS: Record<string, string> = {
+  pending_approval: "not yet approved",
+  rejected: "turned down",
+  suspended: "suspended",
+};
+
+/** The fallback for a status this build has never heard of — `lapsed`, one day. */
+const MEMBERSHIP_DETAIL_FALLBACK = "not active";
+
+/** The membership half, which outranks every other: the club has to move first. */
+function standingNotActive(rule: string, detail: MemberDoorMembershipDetail): StandingLine {
+  const word = MEMBERSHIP_DETAIL_WORDS[detail] ?? MEMBERSHIP_DETAIL_FALLBACK;
   return {
-    body: `${rule} The club has yours as not active, so no code of yours opens a door until they change that.`,
+    body: `${rule} The club has yours as ${word}, so no code of yours opens a door until they change that.`,
     hasClockWindow: false,
     // The contradiction arm: the code card must not promise a window over this sentence.
     suppressesCodeClause: true,
@@ -358,54 +491,88 @@ function standingNotActive(rule: string): StandingLine {
   };
 }
 
+/**
+ * §5's carve-out, said rather than left for a club admin to discover at their own door.
+ *
+ * <p>
+ * `GateAccess` grants it on `User.IsAdmin` alone and it is the BOOKING check only, so this
+ * arm sits below the membership one and above both booking arms. The offline half is the
+ * part that would be easiest to drop and the part that matters at midnight: the list a
+ * cut-off door decides from holds bookings, and an admin is not in it.
+ * </p>
+ */
+function standingClubAdmin(): StandingLine {
+  return {
+    body: `${BOOKING_RULE} You're a club admin, so a door opens for you without one — but only a door that`
+      + " can still reach the club's system. A door that has lost the network decides from a list of"
+      + " bookings, not admins.",
+    hasClockWindow: false,
+    // No clock window to duplicate, and nothing to contradict: a door does open for this
+    // member, so the code card's clause is the only place the times can come from.
+    suppressesCodeClause: false,
+    action: null,
+  };
+}
+
 function standingBooking(booking: MemberDoorBooking): StandingLine {
   const starts = formatClock(booking.starts_at);
-  if (!booking.door_opens_at) {
-    return {
-      body: `${BOOKING_RULE} Yours starts at ${starts}, but the club hasn't told this screen when a door`
-        + " starts opening for it.",
-      hasClockWindow: false,
-      // Nothing to contradict and nothing to duplicate: if the code card knows the window
-      // this line does not, it is the only place the member can read it.
-      suppressesCodeClause: false,
-      action: null,
-    };
-  }
+  const court = booking.court_number === null ? "" : ` on court ${booking.court_number}`;
   const opensAt = Date.parse(booking.door_opens_at);
   const open = !Number.isNaN(opensAt) && opensAt <= Date.now();
-  const until = booking.door_closes_at ? ` until your code for it runs out at ${formatClock(booking.door_closes_at)}` : "";
   const window = open
-    ? `the door opens for you now${until}.`
+    ? `the door opens for you now, until your code for it runs out at ${formatClock(booking.door_closes_at)}.`
     : `the door opens for you from ${formatClock(booking.door_opens_at)}.`;
   return {
-    body: `${BOOKING_RULE} Yours starts at ${starts}, and ${window}`,
+    body: `${BOOKING_RULE} Yours is at ${starts}${court}, and ${window}`,
     hasClockWindow: true,
     suppressesCodeClause: true,
     action: null,
   };
 }
 
+/** Everything the endpoint sends that bears on what opens a door for this member. */
+export type StandingInput = {
+  policy: MemberDoorPolicy;
+  membership: MemberDoorMembership;
+  membership_detail: MemberDoorMembershipDetail;
+  is_club_admin: boolean;
+  early_entry_minutes: number;
+  next_booking: MemberDoorBooking | null;
+};
+
 /**
  * What opens the door for this member right now — the standing facts, stated in full.
  *
  * <p>
- * The wave-1 wire shape carries three membership values rather than five, so this
- * sentence says "not active" and stops: naming a status the response cannot distinguish
- * would be inventing one. It also carries no early-entry number, which is why the
- * no-booking arm says "soon enough for a door to open" rather than a count of minutes the
- * page was never sent.
+ * <b>The order of the four checks is the door's own.</b> `GateAccess` refuses a barred
+ * membership before it looks at anything else, then lets a club admin past the booking
+ * check, then applies the policy. A line that reordered them would be describing a
+ * different building — and the one that matters most is the first: a suspended club admin
+ * is refused, so the carve-out may never outrank the membership arm.
+ * </p>
+ *
+ * <p>
+ * <b>`none` is not a refusal.</b> A user with no membership row is not barred —
+ * `MembershipAccess.StatusIfBarredAsync` answers null for it and `GateAccess` walks
+ * straight past the check — so telling that member the club has theirs as not active is
+ * the page contradicting the door they are standing at. It is a hole in the product rather
+ * than a state of this member's, and W2.2 closes it on the admin's side, not here.
  * </p>
  */
-export function describeStanding(door: {
-  policy: MemberDoorPolicy;
-  membership: MemberDoorMembership;
-  next_booking: MemberDoorBooking | null;
-}): StandingLine {
+export function describeStanding(door: StandingInput): StandingLine {
   const rule = door.policy === "active_member" ? ACTIVE_MEMBER_RULE : BOOKING_RULE;
-  if (door.membership !== "active") return standingNotActive(rule);
+  if (door.membership === "not_active") return standingNotActive(rule, door.membership_detail);
   if (door.policy === "active_member") {
     return {
-      body: `${ACTIVE_MEMBER_RULE} Yours is active, so the code on this screen opens the club door.`,
+      // Three states, and `none` gets its own rather than borrowing either neighbour's.
+      // "Yours is active" would be as false as "yours is not active" — the club has
+      // nothing on file at all — and the door opens regardless, so the sentence has to
+      // say both halves.
+      body: door.membership === "none"
+        ? `${ACTIVE_MEMBER_RULE} The club has no membership on file for you, which is not the same as one it`
+          + " has turned off — so the code on this screen still opens the club door. Worth asking the club to"
+          + " put that right."
+        : `${ACTIVE_MEMBER_RULE} Yours is active, so the code on this screen opens the club door.`,
       hasClockWindow: false,
       // The one arm where the clause EARNS its place: this line has no clock times and
       // the code card does.
@@ -413,10 +580,11 @@ export function describeStanding(door: {
       action: null,
     };
   }
+  if (door.is_club_admin) return standingClubAdmin();
   if (!door.next_booking) {
     return {
-      body: `${BOOKING_RULE} You have nothing booked soon enough for a door to open, so a door won't open`
-        + " for you.",
+      body: `${BOOKING_RULE} You have nothing booked ${bookingNearness(door.early_entry_minutes)}, so a door`
+        + " won't open for you.",
       hasClockWindow: false,
       // The other contradiction arm. An ident code's clause reads "whenever the club's
       // door rules allow", directly over a sentence saying a door will not open at all.
@@ -453,17 +621,26 @@ export const OFFLINE_DETAILS_SUMMARY = "What if the door is offline?";
  * What a door that has lost the club's network can and cannot do.
  *
  * <p>
- * The member-voice sibling of `gateCopy.gateOfflineFallbackNotice()`. The cap is
- * interpolated from {@link GATE_ROSTER_MAX_ENTRIES}, which the firmware and the API share
- * — a copy module that spells a number the firmware owns is a number that drifts. And the
- * unnamed-door half is stated, because it is the one that is easiest to leave out and the
- * one that leaves a member standing at a door that was never going to open.
+ * The member-voice sibling of `gateCopy.gateOfflineFallbackNotice()`. The unnamed-door
+ * half is stated, because it is the one that is easiest to leave out and the one that
+ * leaves a member standing at a door that was never going to open.
+ * </p>
+ *
+ * <p>
+ * <b>The cap comes off the wire, and {@link GATE_ROSTER_MAX_ENTRIES} is the fallback.</b>
+ * The firmware and the API share the number, and the response now carries it — so the
+ * constant here is what a member reads when the response has not landed or predates the
+ * field, rather than the page's own idea of a number the board owns. A cap of zero or less
+ * is not a cap the club set; it is a field that did not arrive.
  * </p>
  */
-export function offlineDetailsBody(): string {
+export function offlineDetailsBody(rosterMaxEntries?: number | null): string {
+  const cap = rosterMaxEntries !== null && rosterMaxEntries !== undefined && rosterMaxEntries > 0
+    ? rosterMaxEntries
+    : GATE_ROSTER_MAX_ENTRIES;
   return "If a door has lost the club's network it decides from a list of bookings it downloaded earlier,"
     + " and nothing else. During an outage only a member with a court booked soon gets in — whichever rule"
-    + ` is set above — and only if their booking is among the first ${GATE_ROSTER_MAX_ENTRIES} by start`
+    + ` is set above — and only if their booking is among the first ${cap} bookings by start`
     + " time. A door the club hasn't named yet is sent no list at all, so it opens nothing while it is"
     + " cut off.";
 }
@@ -539,6 +716,8 @@ export type DiagnosisRow = {
 
 export type DiagnosisInput = {
   membership: MemberDoorMembership;
+  /** So the failing row names WHICH not-active, exactly as the standing line does. */
+  membership_detail: MemberDoorMembershipDetail;
   policy: MemberDoorPolicy;
   hasBooking: boolean;
   bookingStartsClock: string | null;
@@ -567,10 +746,29 @@ function windowRow(input: DiagnosisInput): DiagnosisRow {
   return row("window", "attention", `opens for you at ${input.opensAtClock ?? "a time the club sets"}`);
 }
 
+/**
+ * The membership row — and the one place on this surface where "not active" and "no
+ * membership row" must not be the same answer.
+ *
+ * <p>
+ * `MembershipAccess` bars neither `none` nor an absent row: `StatusIfBarredAsync` answers
+ * null for both and `GateAccess` walks past the check. A checklist that failed this row
+ * for a member with no membership would hand them the conclusion "that's the whole reason"
+ * about a rule the door does not apply — sending somebody to the desk to fix a thing that
+ * is not stopping them, while whatever IS stopping them goes unnamed.
+ * </p>
+ */
+function membershipRow(input: DiagnosisInput): DiagnosisRow {
+  if (input.membership === "not_active") {
+    return row("membership", "failed", MEMBERSHIP_DETAIL_WORDS[input.membership_detail] ?? MEMBERSHIP_DETAIL_FALLBACK);
+  }
+  if (input.membership === "none") return row("membership", "passed", "nothing on file, and nothing barring you");
+  return row("membership", "passed", "active");
+}
+
 function diagnosisRows(input: DiagnosisInput): DiagnosisRow[] {
-  const membershipOk = input.membership === "active";
   return [
-    row("membership", membershipOk ? "passed" : "failed", membershipOk ? "active" : "not active"),
+    membershipRow(input),
     row("policy", "passed", input.policy === "active_member" ? "an active membership" : "a court booked"),
     bookingRow(input),
     windowRow(input),
@@ -595,8 +793,9 @@ function diagnosisRows(input: DiagnosisInput): DiagnosisRow[] {
  */
 function concludeFrom(input: DiagnosisInput): string {
   const reach = reachTheClub(input.contact);
-  if (input.membership !== "active") {
-    return `The club has your membership as not active. That's the whole reason, and only the club can`
+  if (input.membership === "not_active") {
+    const word = MEMBERSHIP_DETAIL_WORDS[input.membership_detail] ?? MEMBERSHIP_DETAIL_FALLBACK;
+    return `The club has your membership as ${word}. That's the whole reason, and only the club can`
       + ` change it. ${reach}`;
   }
   if (!input.connectionOk) {
@@ -683,16 +882,17 @@ const CHIP_TONES: Record<string, ChipTone> = {
  * does not recognise gets a muted chip and a neutral word rather than the raw token.
  * </p>
  */
-export function historyChip(row: { reason: string; released: boolean; offline: boolean }): { label: string; tone: ChipTone } {
+export function historyChip(row: { reason: string | null; released: boolean; offline: boolean }): { label: string; tone: ChipTone } {
   if (row.released) return { label: "Lock released", tone: "success" };
-  return { label: CHIP_LABELS[row.reason] ?? "Turned away", tone: CHIP_TONES[row.reason] ?? "muted" };
+  const key = reasonKey(row.reason);
+  return { label: CHIP_LABELS[key] ?? "Turned away", tone: CHIP_TONES[key] ?? "muted" };
 }
 
 /** The sentence under a row, or nothing when the chip has already said all there is. */
-export function historyLine(row: { reason: string; released: boolean; offline: boolean }): string | null {
+export function historyLine(row: { reason: string | null; released: boolean; offline: boolean }): string | null {
   if (row.offline) return HISTORY_OFFLINE_LINE;
   if (row.released) return null;
-  return MEMBER_DOOR_REASON_LINES[row.reason] ?? null;
+  return MEMBER_DOOR_REASON_LINES[reasonKey(row.reason)] ?? null;
 }
 
 /** The retention, from the server, or the honest absence of one. Never a fabricated number. */

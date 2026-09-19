@@ -30,9 +30,21 @@ import type { MemberDoor, MyQrCode } from "./api";
 
 export const LAST_KNOWN_KEY = "crusaders.member-door.last-known";
 
-/** Bump to discard every stored record. A shape read field-by-field by code that assumes
- *  a different one surfaces as a blank card rather than as an error anybody can act on. */
-export const LAST_KNOWN_VERSION = 1;
+/**
+ * Bump to discard every stored record. A shape read field-by-field by code that assumes
+ * a different one surfaces as a blank card rather than as an error anybody can act on.
+ *
+ * <p>
+ * <b>2 — the door record grew five fields.</b> `GET /api/v1/me/door` gained
+ * `membership_detail`, `is_club_admin`, `early_entry_minutes`, `roster_max_entries` and
+ * `door_log_retention_days`, and every one of them is read for a SENTENCE. A v1 record
+ * survives a `Partial` parse intact and then tells a member the club has their membership
+ * as "not active" when it is suspended, or names a roster cap of `undefined` — which is
+ * the exact failure this counter exists to prevent, arriving as plausible prose rather
+ * than as a crash anybody would notice.
+ * </p>
+ */
+export const LAST_KNOWN_VERSION = 2;
 
 /** The half of a code the offline page renders. No token beyond the code itself. */
 export type LastKnownQr = {
@@ -117,14 +129,29 @@ export function rememberQr(qr: MyQrCode): void {
   writeRecord({ ...current, qr: { savedAt: new Date().toISOString(), value } });
 }
 
-/** Remembers the standing door facts. The decision is dropped here, on purpose. */
+/**
+ * Remembers the standing door facts. The decision is dropped here, on purpose.
+ *
+ * <p>
+ * Field by field rather than by spreading the response and deleting one key, so that a
+ * field added to the wire cannot reach storage — and the offline page cannot start
+ * rendering one — without somebody deciding it should. The compiler makes that decision
+ * unavoidable: {@link LastKnownDoor} is derived from `MemberDoor`, so a new wire field
+ * fails this assignment until it is named here.
+ * </p>
+ */
 export function rememberDoor(door: MemberDoor): void {
   const value: LastKnownDoor = {
     doors: door.doors,
     policy: door.policy,
     membership: door.membership,
+    membership_detail: door.membership_detail,
+    is_club_admin: door.is_club_admin,
     next_booking: door.next_booking,
+    early_entry_minutes: door.early_entry_minutes,
+    roster_max_entries: door.roster_max_entries,
     contact: door.contact,
+    door_log_retention_days: door.door_log_retention_days,
   };
   const current = readRecord();
   writeRecord({ ...current, door: { savedAt: new Date().toISOString(), value } });

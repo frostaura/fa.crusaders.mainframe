@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
+import type { LastKnownDoor } from "./lastKnown";
 import {
   LAST_KNOWN_KEY,
   LAST_KNOWN_VERSION,
@@ -46,9 +47,23 @@ describe("lastKnown", () => {
     doors: true,
     policy: "booking_window" as const,
     membership: "active" as const,
-    next_booking: { starts_at: "2026-09-19T17:00:00Z", door_opens_at: "2026-09-19T16:30:00Z", door_closes_at: "2026-09-19T18:05:00Z" },
+    membership_detail: "active",
+    is_club_admin: false,
+    next_booking: {
+      starts_at: "2026-09-19T17:00:00Z",
+      ends_at: "2026-09-19T17:45:00Z",
+      court_number: 3,
+      door_opens_at: "2026-09-19T16:30:00Z",
+      door_closes_at: "2026-09-19T18:05:00Z",
+    },
+    early_entry_minutes: 30,
+    roster_max_entries: 48,
     contact: { phone: "021 555 0134", email: "info@crusaders.co.za" },
-    last_decision: { at: "2026-09-19T06:04:00Z", door_name: "front-door", released: false, reason: "too_early" },
+    door_log_retention_days: 90,
+    last_decision: {
+      at: "2026-09-19T06:04:00Z", door_name: "front-door", released: false,
+      reason: "too_early", offline: false, opens_at: "2026-09-19T16:30:00Z",
+    },
   };
 
   it("has nothing to say before anything has been stored", () => {
@@ -93,6 +108,34 @@ describe("lastKnown", () => {
     expect(stored?.value.policy).toBe("booking_window");
     expect(stored?.value.contact.phone).toBe("021 555 0134");
     expect(stored?.value.next_booking?.starts_at).toBe("2026-09-19T17:00:00Z");
+  });
+
+  /**
+   * Every standing field the offline page reads for a SENTENCE, named one at a time.
+   *
+   * <p>
+   * A round-trip that checks three keys passes just as happily when the other seven were
+   * dropped, and what a member then reads is not an error — it is the standing line saying
+   * "not active" over a suspended membership, or the offline note naming a roster cap of
+   * `undefined`. Plausible prose is the failure mode this store has, so each field is
+   * asserted rather than the object compared.
+   * </p>
+   */
+  it.each([
+    ["membership_detail", "active"],
+    ["is_club_admin", false],
+    ["early_entry_minutes", 30],
+    ["roster_max_entries", 48],
+    ["door_log_retention_days", 90],
+  ])("remembers %s, which the page reads for a sentence", (key, expected) => {
+    rememberDoor(DOOR);
+    expect(readLastKnown().door!.value[key as keyof LastKnownDoor]).toBe(expected);
+  });
+
+  /** Both edges of the window and the court, so the cached standing line reads as the live one. */
+  it("remembers the whole booking, not only when it starts", () => {
+    rememberDoor(DOOR);
+    expect(readLastKnown().door!.value.next_booking).toEqual(DOOR.next_booking);
   });
 
   /**
@@ -175,6 +218,45 @@ describe("lastKnown", () => {
   it("discards a record with no version at all", () => {
     window.localStorage.setItem(LAST_KNOWN_KEY, JSON.stringify({ qr: { savedAt: "x", value: { code: "OLD" } } }));
     expect(readLastKnown().qr).toBeNull();
+  });
+
+  /**
+   * The bump that had to happen when the door record grew five fields.
+   *
+   * <p>
+   * This is the case the counter exists for and the one that would otherwise pass every
+   * other test in this file: a v1 door record parses cleanly, carries `policy`,
+   * `membership` and `contact` exactly as the current shape does, and is then read for
+   * five fields it has never held. The result is not a blank card — it is the standing line
+   * telling a suspended member the club has theirs as "not active", and the offline note
+   * naming a roster cap of `undefined`. Nothing about that looks like a bug to the person
+   * reading it.
+   * </p>
+   */
+  it("discards a door record written before the endpoint grew its five sentences", () => {
+    window.localStorage.setItem(LAST_KNOWN_KEY, JSON.stringify({
+      version: 1,
+      qr: null,
+      door: {
+        savedAt: "2026-09-19T06:00:00.000Z",
+        value: {
+          doors: true,
+          policy: "booking_window",
+          membership: "not_active",
+          next_booking: null,
+          contact: { phone: "021 555 0134", email: null },
+        },
+      },
+    }));
+    expect(readLastKnown().door).toBeNull();
+  });
+
+  /** And the version this build writes is the one it reads back. */
+  it("writes the current version", () => {
+    rememberDoor(DOOR);
+    const raw = JSON.parse(window.localStorage.getItem(LAST_KNOWN_KEY)!);
+    expect(raw.version).toBe(LAST_KNOWN_VERSION);
+    expect(LAST_KNOWN_VERSION).toBe(2);
   });
 
   it("forgets everything on request", () => {
