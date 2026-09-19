@@ -148,6 +148,44 @@ void executeHeartbeatRequest(const char* expected, size_t expectedLen, const cha
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
 }
 
+/// The counters at values NO HONEST BOARD EMITS — and that is what this vector
+/// asks the firmware side to prove.
+///
+/// It exists for the SERVER: `no_push` at INT32_MAX + 1 and a negative
+/// `events_lost` must both be ignored and answered with a clean 200, because an
+/// `int?` binding would answer 400 for the whole heartbeat — roster included —
+/// and a diagnostic counter would then have taken a door out of service.
+///
+/// The firmware's half of the same contract is that it CANNOT PRODUCE either
+/// value. Both counters saturate at kMaxDiagnosticCount and neither can go
+/// negative, so this executor renders the vector's own numbers and asserts the
+/// body that comes out is the SATURATED one rather than the vector's. Skipping
+/// it would leave the corpus carrying a case this build says nothing about,
+/// which the executor below refuses on principle.
+void executeOutOfRangeCountersRequest(const char* expected, size_t expectedLen, const char* mac) {
+  char version[32] = {};
+  TEST_ASSERT_TRUE(
+      devapi::json::stringField(expected, expectedLen, "firmware_version", version, sizeof(version)));
+  uint32_t uptime = 0U;
+  TEST_ASSERT_TRUE(devapi::json::unsignedField(expected, expectedLen, "uptime_ms", uptime));
+
+  // INT32_MAX + 1, taken from the vector rather than written here so a change
+  // to the corpus moves this with it. The negative `events_lost` is not read
+  // back — an unsigned counter has no way to hold one, which IS the property.
+  uint32_t noPush = 0U;
+  TEST_ASSERT_TRUE(devapi::json::unsignedField(expected, expectedLen, "no_push", noPush));
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(2147483648UL, noPush, "the vector is meant to be one past INT32_MAX");
+
+  char rendered[gatelogic::kGateHeartbeatBodyCap] = {};
+  const gatelogic::GateDiagnostics diagnostics = {noPush, 4294967295UL};
+  TEST_ASSERT_TRUE(
+      gatelogic::renderGateHeartbeatBody(rendered, sizeof(rendered), mac, version, uptime, diagnostics) > 0U);
+  TEST_ASSERT_NOT_EQUAL_MESSAGE(0, strcmp(expected, rendered),
+                                "this firmware must not be able to render the out-of-range body");
+  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rendered, "\"no_push\":2147483647,\"events_lost\":2147483647}"),
+                               "both counters saturate at the value the server can always bind");
+}
+
 /// The scan body: the same three fields as `/device/activate` minus `court`.
 void executeScanRequest(const char* expected, size_t expectedLen, const char* mac) {
   char token[roster::kMaxTokenLen + 1U] = {};
@@ -250,9 +288,13 @@ void test_every_request_vector_is_rendered_byte_for_byte() {
     size_t expectedLen = 0U;
     const char* expected = body(element, expectedLen);
 
-    if (strcmp(id, "gate-heartbeat-request") == 0 || strcmp(id, "gate-heartbeat-request-no-push") == 0) {
+    if (strcmp(id, "gate-heartbeat-request") == 0 || strcmp(id, "gate-heartbeat-request-no-push") == 0 ||
+        strcmp(id, "gate-heartbeat-request-events-lost") == 0) {
       TEST_ASSERT_EQUAL_STRING(gatelogic::kPathHeartbeat, path);
       executeHeartbeatRequest(expected, expectedLen, mac);
+    } else if (strcmp(id, "gate-heartbeat-request-counters-out-of-range") == 0) {
+      TEST_ASSERT_EQUAL_STRING(gatelogic::kPathHeartbeat, path);
+      executeOutOfRangeCountersRequest(expected, expectedLen, mac);
     } else if (strcmp(id, "gate-scan-request") == 0) {
       TEST_ASSERT_EQUAL_STRING(gatelogic::kPathGate, path);
       executeScanRequest(expected, expectedLen, mac);
