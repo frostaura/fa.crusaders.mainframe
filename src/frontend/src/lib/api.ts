@@ -504,6 +504,21 @@ export type AdminSettings = {
    * so lowering it narrows the offline fallback as well as the online decision.
    */
   gate_early_entry_minutes: number;
+
+  // doors: admin — W1's five new tenant settings (WIRE-W1 §6). Optional, because an older
+  // API does not serve them and `deviceNumbersComplaint`'s rule is that an absent key is not
+  // a complaint: omitted means unchanged on the way back, so a console talking to an API
+  // without them must not refuse to save.
+  /** 7–730, default 90. How long a door scan is kept before it is DELETED, receipts and all. */
+  door_log_retention_days?: number;
+  /** 3–100, default 8. Refusals at one door inside the window below before the tile says so. */
+  door_refusal_spike_count?: number;
+  /** 5–240, default 20. The window that count is measured over. */
+  door_refusal_spike_minutes?: number;
+  /** ≤32 chars, may be empty. What a member sees when a door turns them away. */
+  club_contact_phone?: string;
+  /** ≤254 chars, may be empty. The same, by mail. */
+  club_contact_email?: string;
 };
 
 /**
@@ -1309,6 +1324,15 @@ export const endpoints = {
     ...(req.gate_unlock_seconds !== undefined ? { gateUnlockSeconds: req.gate_unlock_seconds } : {}),
     ...(req.gate_access_policy !== undefined ? { gateAccessPolicy: req.gate_access_policy } : {}),
     ...(req.gate_early_entry_minutes !== undefined ? { gateEarlyEntryMinutes: req.gate_early_entry_minutes } : {}),
+    // doors: admin — the five W1 door settings, on the same omitted-means-unchanged terms.
+    // They are here rather than in a PUT of their own because this page has one Save button
+    // and a second request would be a second audit row for one click. The API binds both
+    // spellings; camelCase is what every other number on this call sends.
+    ...(req.door_log_retention_days !== undefined ? { doorLogRetentionDays: req.door_log_retention_days } : {}),
+    ...(req.door_refusal_spike_count !== undefined ? { doorRefusalSpikeCount: req.door_refusal_spike_count } : {}),
+    ...(req.door_refusal_spike_minutes !== undefined ? { doorRefusalSpikeMinutes: req.door_refusal_spike_minutes } : {}),
+    ...(req.club_contact_phone !== undefined ? { clubContactPhone: req.club_contact_phone } : {}),
+    ...(req.club_contact_email !== undefined ? { clubContactEmail: req.club_contact_email } : {}),
   }),
 
   // Admin: devices.
@@ -1415,3 +1439,221 @@ function qs(o: Record<string, string | number | undefined>) {
   const p = Object.entries(o).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
   return p ? `?${p}` : "";
 }
+
+// ---------------------------------------------------------------------------------------
+// doors: admin
+//
+// Everything W1's doors surface reads and writes, appended as one block so a sibling lane
+// editing this file has one place to merge rather than nine. Shapes are WIRE-W1's, exactly;
+// where one of them looked wrong the rule was to say so rather than to invent another.
+// ---------------------------------------------------------------------------------------
+
+/**
+ * What this door's lock does with no power — admin-entered, and NEVER inferred.
+ *
+ * <p>
+ * An earlier version of this product guessed it from the board's own polarity flags and was
+ * wrong. It is a property of the lock and its wiring, which this software cannot see and
+ * cannot change; `not_established` is the honest default rather than a placeholder, and the
+ * screens say whose job it is to find out.
+ * </p>
+ */
+export const POWER_LOSS_BEHAVIOURS = ["not_established", "released", "locked"] as const;
+
+export type PowerLossBehaviour = (typeof POWER_LOSS_BEHAVIOURS)[number];
+
+/**
+ * A gate row with W1.4's door-card fields on it.
+ *
+ * <p>
+ * An intersection rather than three more members on {@link AdminDevice}, because they are
+ * meaningful on a Gate alone — the API refuses both on a court box with
+ * `door_fields_on_a_court_box` — and because a type that says so is cheaper than a comment
+ * saying so. Every field is optional on the way in: the migration lands with the backend
+ * lane, and a doors page talking to an API without it must render the "nobody has written
+ * this down" arm rather than `undefined`.
+ * </p>
+ */
+export type AdminDoorDevice = AdminDevice & {
+  /** At most 200 characters. Where somebody would physically find this board. */
+  location_note?: string | null;
+  power_loss_behaviour?: PowerLossBehaviour;
+  /** When this door was shut, for the standing notice. Null while it is open. */
+  out_of_service_since?: string | null;
+};
+
+/**
+ * A reading of recent events at one door, derived on read — never a row, never an event.
+ *
+ * <p>
+ * <b>It carries no member, no fingerprint and no code, by construction.</b> P3 and P4 forbid
+ * a per-member observation on an admin screen as plainly as they forbid a per-member filter,
+ * and the derivation for "may not be releasing" is "the same credential three times in sixty
+ * seconds" — which at a club of two hundred people IS a member. Keeping the member out of the
+ * payload is what makes the rule structural instead of a convention the next round forgets:
+ * `describeActivityWho` cannot be reached from a value that has nothing to give it.
+ * </p>
+ */
+export type DoorSignal = {
+  kind: "refusal_spike" | "may_not_be_releasing";
+  since: string;
+  until: string;
+  /** A count of SCANS. One person trying four times is four. */
+  scans: number;
+};
+
+/**
+ * Today's two numbers for one door, counted in the CLUB's timezone by the server.
+ *
+ * <p>
+ * Two numbers and never one: a single headline number per door, on a list of doors, is a
+ * footfall ranking by accident — which is the shape P3 exists to prevent. And counted at the
+ * server because "today" in a browser is a different day from the club's for any admin
+ * travelling or with a wrong device clock, and this is the number an admin quotes in a
+ * committee meeting.
+ * </p>
+ */
+export type DoorToday = { released: number; refused: number };
+
+export type DoorRow = {
+  device: AdminDoorDevice;
+  /**
+   * Null when the counting failed — NEVER `{released: 0, refused: 0}` for unknown. A zero
+   * rendered on a failed read is the `admin-failed-read` defect with a different noun: an
+   * admin reads "0 opened" and concludes a working door is dead.
+   */
+  today: DoorToday | null;
+  signals: DoorSignal[];
+};
+
+export type DoorsView = {
+  /** The club-time day boundary the counts are measured from. Named on screen. */
+  day_started_at: string;
+  timezone: string;
+  /** True while any door is shut by a shut-all — the club-wide banner's whole input (A1.5). */
+  shut_all_active: boolean;
+  /** Name ascending, stable. There is no sort parameter and no sort control. */
+  doors: DoorRow[];
+};
+
+/** One club-log row: a device activity entry plus which door it happened at. */
+export type DoorLogEntry = DeviceActivityEntry & {
+  door: { id: string; name: string; gate_key: string | null };
+};
+
+export type DoorLogPage = {
+  items: DoorLogEntry[];
+  next_cursor: string | null;
+  /** The club's own retention setting, so the page states a number it did not guess. */
+  retention_days: number;
+};
+
+/**
+ * What the club log may be narrowed by: DOOR, TIME and OUTCOME. That is the whole list.
+ *
+ * <p>
+ * There is deliberately no `member`, `user`, `subject`, `q` or `search` here, and the API
+ * ignores them if they arrive. A member's own door history belongs to the member, on their
+ * profile — P3 — and a filter is how a log becomes the attendance report nobody agreed to.
+ * </p>
+ */
+export type DoorLogFilters = {
+  /** A device id. */
+  door?: string;
+  from?: string;
+  to?: string;
+  outcome?: "released" | "refused" | "offline";
+  reason?: string;
+  cursor?: string;
+  limit?: number;
+};
+
+/** One door's line in a shut-all / reopen-all result, as the server saw it at that instant. */
+export type FleetDoorResult = {
+  id: string;
+  name: string;
+  gate_key: string | null;
+  enabled: boolean;
+  /**
+   * The age at the moment the SERVER did the work. The result panel renders this and never
+   * recomputes it: a receipt left open for ten minutes must not drift "confirmed 12s ago"
+   * into "confirmed 10m ago".
+   */
+  last_seen_at: string | null;
+  offline_after_seconds: number;
+  power_loss_behaviour: PowerLossBehaviour;
+};
+
+export type FleetResult = { doors: FleetDoorResult[] };
+
+function doorLogQuery(f: DoorLogFilters): string {
+  return qs({
+    door: f.door, from: f.from, to: f.to, outcome: f.outcome, reason: f.reason,
+    cursor: f.cursor, limit: f.limit !== undefined ? String(f.limit) : undefined,
+  });
+}
+
+export const doorEndpoints = {
+  /** The overview's one read: every gate, its two counts and its signals, in one call. */
+  doors: () => api.get<DoorsView>("/api/v1/admin/doors"),
+
+  /** The club log, newest first, cursor-paged. Defaults at the server: last 24 h, 50 rows. */
+  doorActivity: (filters: DoorLogFilters = {}) =>
+    api.get<DoorLogPage>(`/api/v1/admin/doors/activity${doorLogQuery(filters)}`),
+
+  /** The CSV's URL, exported so a test can prove it is byte-identical to the list's query. */
+  doorActivityCsvUrl: (filters: DoorLogFilters = {}) =>
+    `/api/v1/admin/doors/activity.csv${doorLogQuery(filters)}`,
+
+  /**
+   * The CSV, fetched WITH the session's bearer token and handed back as a blob.
+   *
+   * <p>
+   * A bare `<a download>` navigates with no Authorization header at all, so the API cannot
+   * even resolve a tenant and answers `400 tenant_unresolved` as JSON: the download starts,
+   * cancels itself, and the page looks identical before and after. That exact defect shipped
+   * once already on the wallet CSV, and this is the same fix, not a new one.
+   * </p>
+   */
+  doorActivityCsv: async (filters: DoorLogFilters = {}): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetchWithTimeout(doorEndpoints.doorActivityCsvUrl(filters), {
+      headers: { ...(tokenStore.get() ? { authorization: `Bearer ${tokenStore.get()}` } : {}) },
+    });
+    if (!res.ok) throw await failureFrom(res);
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const match = /filename="?([^"]+)"?/.exec(disposition);
+    return { blob: await res.blob(), filename: match?.[1] ?? "door-log.csv" };
+  },
+
+  /**
+   * Shut every door, or reopen the ones a shut-all shut.
+   *
+   * <p>
+   * One unit of work and one audit row at the server, which is the only reason the error copy
+   * is allowed to say "nothing was shut, every door is exactly as it was". N PATCHes would
+   * make that sentence a guess.
+   * </p>
+   *
+   * <p>
+   * `reopen-all` reopens only what a shut-all shut, so a door an admin shut on its own stays
+   * shut — otherwise the club-wide control would quietly undo an individual decision.
+   * </p>
+   */
+  doorsShutAll: () => api.post<FleetResult>("/api/v1/admin/doors/shut-all", {}),
+  doorsReopenAll: () => api.post<FleetResult>("/api/v1/admin/doors/reopen-all", {}),
+
+  /**
+   * The door-card fields, on the devices PATCH that already owns a gate row.
+   *
+   * <p>
+   * `location_note` binds two-valued like `gate_key`: `""` clears it, an absent key leaves it
+   * alone. There is no way to spell a clear as `null` here, for the same reason
+   * {@link endpoints.adminDeviceUpdate} has none — the page did exactly that once and cleared
+   * nothing while reporting success.
+   * </p>
+   */
+  doorFieldsSave: (
+    id: string,
+    req: { location_note?: string; power_loss_behaviour?: PowerLossBehaviour },
+  ) => api.patch<AdminDoorDevice>(`/api/v1/admin/devices/${id}`, { ...req }),
+};

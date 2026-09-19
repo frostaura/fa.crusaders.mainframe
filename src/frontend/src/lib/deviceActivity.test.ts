@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DeviceActivityEntry } from "./api";
 import {
+  DOOR_OUTCOME_CHIPS,
   DOOR_REFUSAL_REASONS,
   MAX_UNACKNOWLEDGED_DEVICES,
   UNACKNOWLEDGED_NOTICE_FROM,
@@ -250,5 +251,59 @@ describe("unacknowledgedBoardsNotice", () => {
   it("does not promise room the club no longer has", () => {
     const notice = unacknowledgedBoardsNotice(MAX_UNACKNOWLEDGED_DEVICES) ?? "";
     expect(notice).not.toMatch(/you can still add/i);
+  });
+});
+
+/**
+ * The chip dictionary and the sentence dictionary, held against each other.
+ *
+ * <p>
+ * This is the test that makes it right to put both maps in one module. A reason with a
+ * sentence and no chip renders an unlabelled row in the feed; a chip with no sentence is an
+ * outcome the log offers as a filter value and which matches nothing. Neither failure is
+ * visible from either map alone, and both are one keystroke away whenever the door gains a
+ * refusal reason.
+ * </p>
+ */
+describe("DOOR_OUTCOME_CHIPS", () => {
+  it("covers exactly the reasons that have sentences, in both directions", () => {
+    expect(Object.keys(DOOR_OUTCOME_CHIPS).sort()).toEqual(Object.keys(DOOR_REFUSAL_REASONS).sort());
+  });
+
+  it("has a non-empty label for every reason", () => {
+    for (const [reason, chip] of Object.entries(DOOR_OUTCOME_CHIPS)) {
+      expect(chip.trim(), reason).not.toBe("");
+    }
+  });
+
+  /**
+   * <b>A1.2.</b> P2 says no screen may imply the door moved. "Opened" on a chip is exactly
+   * that implication wearing a badge, and the sentence beside it cannot retract a word the
+   * chip has already said. "Lock released" is the strongest true statement: the board
+   * reported it energised the lock, and there is no sensor on any door.
+   */
+  it("says Lock released for a granted scan, never Opened", () => {
+    expect(DOOR_OUTCOME_CHIPS.ok).toBe("Lock released");
+    for (const chip of Object.values(DOOR_OUTCOME_CHIPS)) {
+      expect(chip).not.toBe("Opened");
+      expect(chip).not.toBe("Working");
+      expect(chip).not.toBe("Open");
+    }
+  });
+
+  /** The court box's vocabulary is not a door's, here as everywhere else on this surface. */
+  it("borrows nothing from the court box", () => {
+    for (const chip of Object.values(DOOR_OUTCOME_CHIPS)) {
+      for (const boxOnly of ["court", "relay", "lights"]) {
+        expect(chip.toLowerCase()).not.toContain(boxOnly);
+      }
+    }
+  });
+
+  /** A chip is a label on a row that is eight characters wide on a phone. */
+  it("keeps every label short enough to be a chip", () => {
+    for (const [reason, chip] of Object.entries(DOOR_OUTCOME_CHIPS)) {
+      expect(chip.length, reason).toBeLessThanOrEqual(16);
+    }
   });
 });

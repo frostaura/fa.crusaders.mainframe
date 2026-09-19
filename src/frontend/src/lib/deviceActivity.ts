@@ -60,6 +60,36 @@ export const DOOR_REFUSAL_REASONS: Record<string, string> = {
   not_a_gate: "That board is a court box, not a door",
 };
 
+/**
+ * The same seven decisions as chip labels, for a reason-first row.
+ *
+ * <p>
+ * <b>Why here and not in a doors module.</b> {@link DOOR_REFUSAL_REASONS} is the sentence
+ * for each decision and this is the two-word label for the same decision; a chip with no
+ * sentence renders an unlabelled row, and a sentence with no chip is a log filter value that
+ * matches nothing. The matrix test asserting the two maps have identical key sets in BOTH
+ * directions is what makes the pair safe, and that test can only exist where both maps do.
+ * </p>
+ *
+ * <p>
+ * <b>`ok` reads "Lock released", never "Opened" (A1.2).</b> P2: the strongest thing this
+ * product can say is that the board energised the lock. There is no sensor on any door, so
+ * "Opened" on a chip an admin quotes back after somebody stood outside for ten minutes is a
+ * claim the product cannot make — and a sentence underneath cannot retract a word the chip
+ * has already said. The word "relay" stays absent from door copy; "the lock" is the
+ * vocabulary this product already uses.
+ * </p>
+ */
+export const DOOR_OUTCOME_CHIPS: Record<string, string> = {
+  ok: "Lock released",
+  not_recognised: "Not recognised",
+  member_not_active: "Not active",
+  no_booking: "No booking",
+  too_early: "Too early",
+  method_not_supported: "Door fault",
+  not_a_gate: "Wrong board",
+};
+
 /** What an OFFLINE open reads as: the board decided, and uploaded the row afterwards. */
 const OFFLINE_OPENED = "Opened while offline";
 

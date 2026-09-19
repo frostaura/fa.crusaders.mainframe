@@ -650,3 +650,253 @@ export const DEVICE_API_KEY_FIXTURE = {
   api_key: "crsdr_live_9f3a7c21b8e4d650a1c2",
   regenerated_at: "2026-09-01T08:30:00Z",
 };
+
+// ---------------------------------------------------------------------------------------
+// doors: admin
+//
+// A stateful stand-in for the doors API, appended as one block. It applies the API's own
+// rules rather than answering canned bodies, for the reason `deviceServer` exists: a mock
+// that accepts anything pins nothing, and the two gate-key tests that shipped a PATCH the
+// API discards were green against exactly such a mock.
+// ---------------------------------------------------------------------------------------
+
+/** A gate carrying W1.4's door-card fields, as `GET /admin/doors` serves one. */
+export function doorFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    ...gateFixture(),
+    id: "99999999-9999-9999-9999-999999999999",
+    // Named by default, because the doors surface is mostly about doors somebody has named
+    // and the unnamed state is the interesting one a test asks for.
+    gate_key: "side-door",
+    name: "Side door",
+    location_note: null,
+    power_loss_behaviour: "not_established",
+    out_of_service_since: null,
+    ...overrides,
+  };
+}
+
+/** One club-log row: an activity entry plus the door it happened at. */
+export function doorLogFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    ...activityFixture(),
+    door: { id: "99999999-9999-9999-9999-999999999999", name: "Side door", gate_key: "side-door" },
+    ...overrides,
+  };
+}
+
+/** What `GET /admin/doors` says about one door beyond the device row itself. */
+export type DoorsServerRow = {
+  today?: { released: number; refused: number } | null;
+  signals?: { kind: string; since: string; until: string; scans: number }[];
+};
+
+export type DoorsServer = {
+  routes: StubRoute[];
+  /** The rows as the server now holds them — what a real GET would serve next. */
+  current: () => Record<string, unknown>[];
+  setActivity: (next: Record<string, unknown>[]) => void;
+  /** Swaps one door's counts and signals without going through a write. */
+  setRow: (id: string, row: DoorsServerRow) => void;
+};
+
+/**
+ * Which outcome bucket a log row falls in. Mirrors the API's own `outcome` parameter, whose
+ * three values are the only ones the filter offers.
+ */
+function doorOutcomeOf(entry: Record<string, unknown>): string[] {
+  const action = String(entry.action ?? "");
+  const buckets: string[] = [];
+  if (action === "gate.opened" || action === "device.gate_open") buckets.push("released");
+  if (action.startsWith("gate.denied") || action === "device.unknown_scan") buckets.push("refused");
+  if (entry.offline === true) buckets.push("offline");
+  return buckets;
+}
+
+/**
+ * A stand-in for the doors API: the overview, the club log with its cursor, the CSV, the two
+ * fleet writes and the devices PATCH that owns a door's fields.
+ *
+ * <p>
+ * <b>The fleet semantics are the reason this is stateful.</b> `shut-all` is one unit of work
+ * over every gate and stamps `shut_by_shut_all_at`; `reopen-all` reopens ONLY the doors that
+ * stamp names, so a door an admin shut on its own stays shut. A canned `{doors: [...]}` body
+ * would let a page claim either behaviour and stay green.
+ * </p>
+ */
+export function doorsServer(
+  initial: Record<string, unknown>[],
+  options: {
+    activity?: Record<string, unknown>[];
+    rows?: Record<string, DoorsServerRow>;
+    retentionDays?: number;
+    timezone?: string;
+    dayStartedAt?: string;
+    /** The page size the cursor pages at, so a test can produce a second page from four rows. */
+    pageSize?: number;
+  } = {},
+): DoorsServer {
+  let doors = initial.map((d) => ({ ...d }));
+  let activity = [...(options.activity ?? [])];
+  const rows: Record<string, DoorsServerRow> = { ...(options.rows ?? {}) };
+  const retentionDays = options.retentionDays ?? 90;
+  const pageSize = options.pageSize ?? 50;
+  const shutByFleet = new Set<string>();
+
+  const view = () => ({
+    day_started_at: options.dayStartedAt ?? new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
+    timezone: options.timezone ?? "Africa/Johannesburg",
+    shut_all_active: doors.some((d) => d.enabled === false && shutByFleet.has(String(d.id))),
+    doors: [...doors]
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      .map((device) => ({
+        device,
+        today: rows[String(device.id)]?.today ?? { released: 0, refused: 0 },
+        signals: rows[String(device.id)]?.signals ?? [],
+      })),
+  });
+
+  /** One fleet write, applied to every gate the club has. */
+  const fleet = (enabled: boolean) => {
+    const at = new Date().toISOString();
+    doors = doors.map((d) => {
+      if (enabled) {
+        if (!shutByFleet.has(String(d.id))) return d;
+        shutByFleet.delete(String(d.id));
+        return { ...d, enabled: true, out_of_service_since: null };
+      }
+      if (d.enabled === false) return d;
+      shutByFleet.add(String(d.id));
+      return { ...d, enabled: false, out_of_service_since: at };
+    });
+    return {
+      doors: doors.map((d) => ({
+        id: d.id, name: d.name, gate_key: d.gate_key, enabled: d.enabled,
+        last_seen_at: d.last_seen_at,
+        offline_after_seconds: d.offline_after_seconds ?? 180,
+        power_loss_behaviour: d.power_loss_behaviour ?? "not_established",
+      })),
+    };
+  };
+
+  const logPage = (path: string) => {
+    const query = new URLSearchParams(path.split("?")[1] ?? "");
+    const door = query.get("door");
+    const outcome = query.get("outcome");
+    const from = query.get("from");
+    const to = query.get("to");
+    // The retention clamp the API applies, so a page that states a range states a real one.
+    const floor = Date.now() - retentionDays * 86_400_000;
+    const matched = activity.filter((e) => {
+      const at = new Date(String(e.at)).getTime();
+      const entryDoor = (e.door ?? {}) as Record<string, unknown>;
+      if (door && String(entryDoor.id) !== door) return false;
+      if (outcome && !doorOutcomeOf(e).includes(outcome)) return false;
+      if (from && at < Math.max(new Date(from).getTime(), floor)) return false;
+      if (to && at > new Date(to).getTime()) return false;
+      return at >= floor;
+    });
+    const start = Number(query.get("cursor") ?? 0);
+    const items = matched.slice(start, start + pageSize);
+    const next = start + pageSize;
+    return {
+      items,
+      next_cursor: next < matched.length ? String(next) : null,
+      retention_days: retentionDays,
+    };
+  };
+
+  return {
+    routes: [
+      // Longest prefix wins in this stub, so `.csv` out-lengths `activity`, which out-lengths
+      // the collection. Declaration order is irrelevant and deliberately not relied on.
+      {
+        path: "/api/v1/admin/doors/activity.csv",
+        headers: { "content-disposition": 'attachment; filename="door-log.csv"' },
+        body: "at,door,door_name,outcome,reason,offline,member,fingerprint\n",
+      },
+      { path: "/api/v1/admin/doors/activity", respond: (r) => logPage(r.path) },
+      { path: "/api/v1/admin/doors", respond: () => view() },
+      { method: "POST", path: "/api/v1/admin/doors/shut-all", respond: () => fleet(false) },
+      { method: "POST", path: "/api/v1/admin/doors/reopen-all", respond: () => fleet(true) },
+      {
+        // The B5 per-device feed the door detail page reads, and the device list beneath it.
+        path: "/api/v1/admin/devices/",
+        respond: (request) => {
+          if (!request.path.includes("/activity")) return doors;
+          const id = request.path.split("/api/v1/admin/devices/")[1].split("/")[0];
+          return { items: activity.filter((e) => ((e.door ?? {}) as Record<string, unknown>).id === undefined
+            || ((e.door ?? {}) as Record<string, unknown>).id === id) };
+        },
+      },
+      {
+        method: "PATCH",
+        path: "/api/v1/admin/devices/",
+        respond: (request) => {
+          const patch = (request.body ?? {}) as Record<string, unknown>;
+          const id = request.path.split("/api/v1/admin/devices/")[1];
+          const index = doors.findIndex((d) => String(d.id) === id);
+          if (index < 0) return refuse(404, { error: "not_found" });
+          const refusal = refuseDoorPatch(doors[index], patch);
+          if (refusal) return refusal;
+          doors[index] = applyDoorPatch(doors[index], patch);
+          // An individual shut is NOT a fleet shut, so reopen-all must leave it alone.
+          if (patch.enabled === false) shutByFleet.delete(id);
+          return doors[index];
+        },
+      },
+    ],
+    current: () => doors,
+    setActivity: (next) => { activity = [...next]; },
+    setRow: (id, row) => { rows[id] = row; },
+  };
+}
+
+/** The API's bound on `location_note` — mirrored here so the mock refuses what the API refuses. */
+export const LOCATION_NOTE_MAX_LENGTH = 200;
+
+/**
+ * What the API would refuse a door PATCH with, or null.
+ *
+ * The door-card fields are gates-only: the API answers `door_fields_on_a_court_box` for
+ * either of them on a CourtBox row, and a mock that accepted them would let a page prove it
+ * handles a success the server never sends.
+ */
+export function refuseDoorPatch(
+  row: Record<string, unknown>, patch: Record<string, unknown>,
+): StubRefusal | null {
+  const touchesDoorFields = patch.location_note !== undefined || patch.power_loss_behaviour !== undefined;
+  if (row.kind !== "Gate") {
+    return touchesDoorFields ? refuse(400, { error: "door_fields_on_a_court_box" }) : refuseDevicePatch(row, patch);
+  }
+  if (typeof patch.location_note === "string" && patch.location_note.trim().length > LOCATION_NOTE_MAX_LENGTH) {
+    return refuse(400, { error: "location_note_too_long", max_length: LOCATION_NOTE_MAX_LENGTH });
+  }
+  if (patch.power_loss_behaviour !== undefined
+    && !["not_established", "released", "locked"].includes(String(patch.power_loss_behaviour))) {
+    return refuse(400, { error: "power_loss_behaviour_unknown" });
+  }
+  return refuseDevicePatch(row, patch);
+}
+
+/**
+ * One door row, patched the way the API patches it.
+ *
+ * `location_note` binds two-valued exactly as `gate_key` does — `""` clears, absent leaves
+ * alone, and there is no `null` clear. That is the field's whole trap, one field along from
+ * the one that produced it.
+ */
+export function applyDoorPatch(
+  row: Record<string, unknown>, patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = applyDevicePatch(row, patch);
+  if (typeof patch.location_note === "string") {
+    const trimmed = patch.location_note.trim();
+    next.location_note = trimmed === "" ? null : trimmed;
+  }
+  if (typeof patch.power_loss_behaviour === "string") next.power_loss_behaviour = patch.power_loss_behaviour;
+  // `UpdateAsync` stamps the transition; the standing notice reads it.
+  if (patch.enabled === false && row.enabled !== false) next.out_of_service_since = new Date().toISOString();
+  if (patch.enabled === true) next.out_of_service_since = null;
+  return next;
+}
