@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { endpoints } from "../lib/api";
-import { Card } from "../components/Card";
+import { AuthShell } from "../components/AuthShell";
 import { Button, Input, Label } from "../components/Button";
 import { describeFailure } from "../lib/errors";
 
@@ -43,9 +43,9 @@ export default function ForgotPasswordPage() {
 
   if (sent) {
     return (
-      <div className="max-w-md mx-auto pt-6">
-        <Card>
-          <h1 className="text-xl font-semibold mb-2">Check your inbox</h1>
+      <AuthShell className="my-auto" subline="Set a new password for your club account.">
+        <>
+          <h1 className="text-lg font-semibold mb-2">Check your inbox</h1>
           <p className="text-sm text-text-secondary mb-4">
             If <span className="font-medium">{email.trim()}</span> belongs to an account, we've emailed a link to
             set a new password. It works once, and expires in an hour.
@@ -54,15 +54,15 @@ export default function ForgotPasswordPage() {
             Nothing arrived? Check spam, then ask the club committee — they can issue you a temporary password.
           </p>
           <Link to="/login" className="text-accent-strong hover:underline text-sm">Back to sign in</Link>
-        </Card>
-      </div>
+        </>
+    </AuthShell>
     );
   }
 
   return (
-    <div className="max-w-md mx-auto pt-6">
-      <Card>
-        <h1 className="text-xl font-semibold mb-1">Reset your password</h1>
+    <AuthShell className="my-auto" subline="Set a new password for your club account.">
+      <>
+        <h1 className="text-lg font-semibold mb-1">Reset your password</h1>
         <p className="text-sm text-text-secondary mb-5">
           Enter the email address you registered with and we'll send you a link to set a new password.
         </p>
@@ -71,8 +71,12 @@ export default function ForgotPasswordPage() {
             <Label htmlFor="email">Email</Label>
             <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
           </div>
-          {error && <p className="text-sm text-danger-strong">{error}</p>}
-          <Button type="submit" disabled={loading} className="w-full">
+          {error && (
+            <p role="alert" className="rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong">
+              {error}
+            </p>
+          )}
+          <Button type="submit" variant="primary" loading={loading} className="w-full">
             {loading ? "Sending…" : "Send reset link"}
           </Button>
         </form>
@@ -80,7 +84,7 @@ export default function ForgotPasswordPage() {
           Remembered it?{" "}
           <Link to="/login" className="text-accent-strong hover:underline">Sign in</Link>
         </p>
-      </Card>
-    </div>
+      </>
+    </AuthShell>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { Card } from "../components/Card";
+import { AuthShell } from "../components/AuthShell";
 import { Button } from "../components/Button";
 
 export default function WelcomePage() {
@@ -50,11 +50,9 @@ export default function WelcomePage() {
   if (error && auth.status === "authenticated") return <Navigate to="/schedule" replace />;
 
   return (
-    <div className="max-w-md mx-auto pt-6">
-      <Card>
-        {error ? <LinkSpent message={error} /> : <p>Signing you in…</p>}
-      </Card>
-    </div>
+    <AuthShell className="my-auto" subline="Welcome to the club.">
+      {error ? <LinkSpent message={error} /> : <p role="status">Signing you in…</p>}
+    </AuthShell>
   );
 }
 
@@ -73,7 +71,7 @@ export default function WelcomePage() {
 function LinkSpent({ message }: { message: string }) {
   return (
     <>
-      <h1 className="text-xl font-semibold mb-2">That link has already been used</h1>
+      <h1 className="text-lg font-semibold mb-2">That link has already been used</h1>
       <p role="alert" className="text-sm text-danger-strong mb-3">{message}</p>
       <p className="text-sm text-text-secondary mb-4">
         Your account is fine — only the link is spent. Sign in with your password, or have the

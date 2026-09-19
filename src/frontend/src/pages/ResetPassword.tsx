@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, endpoints, errorCode } from "../lib/api";
-import { Card } from "../components/Card";
+import { AuthShell } from "../components/AuthShell";
 import { Button, Input, Label } from "../components/Button";
 import { describeFailure } from "../lib/errors";
 
@@ -53,20 +53,20 @@ export default function ResetPasswordPage() {
 
   if (done) {
     return (
-      <div className="max-w-md mx-auto pt-6">
-        <Card>
-          <h1 className="text-xl font-semibold mb-2">Password updated</h1>
+      <AuthShell className="my-auto" subline="Set a new password for your club account.">
+        <>
+          <h1 className="text-lg font-semibold mb-2">Password updated</h1>
           <p className="text-sm text-text-secondary mb-4">You can sign in with your new password now.</p>
-          <Button onClick={() => nav("/login")} className="w-full">Sign in</Button>
-        </Card>
-      </div>
+          <Button variant="primary" onClick={() => nav("/login")} className="w-full">Sign in</Button>
+        </>
+    </AuthShell>
     );
   }
 
   return (
-    <div className="max-w-md mx-auto pt-6">
-      <Card>
-        <h1 className="text-xl font-semibold mb-1">Choose a new password</h1>
+    <AuthShell className="my-auto" subline="Set a new password for your club account.">
+      <>
+        <h1 className="text-lg font-semibold mb-1">Choose a new password</h1>
         <p className="text-sm text-text-secondary mb-5">This link works once, and only for an hour after it was sent.</p>
         <form onSubmit={submit} className="space-y-4">
           <div>
@@ -79,13 +79,13 @@ export default function ResetPasswordPage() {
             <Input id="confirm" type="password" required minLength={8} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
           </div>
           {error && <p className="text-sm text-danger-strong">{error}</p>}
-          <Button type="submit" disabled={loading} className="w-full">{loading ? "Saving…" : "Set new password"}</Button>
+          <Button type="submit" variant="primary" loading={loading} className="w-full">{loading ? "Saving…" : "Set new password"}</Button>
         </form>
         <p className="mt-4 text-sm text-text-secondary">
           Link expired?{" "}
           <Link to="/forgot-password" className="text-accent-strong hover:underline">Request a new one</Link>
         </p>
-      </Card>
-    </div>
+      </>
+    </AuthShell>
   );
 }

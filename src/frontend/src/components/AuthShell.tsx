@@ -75,7 +75,14 @@ export function AuthShell({ subline, children, className }: AuthShellProps) {
             Hidden below sm, where the club's name wants the full width more than the texture
             does.
           */}
-          <CourtPlan className="pointer-events-none absolute right-5 top-1/2 hidden h-[74%] w-auto -translate-y-1/2 opacity-55 sm:block" />
+          {/*
+            max-w is load-bearing, not belt-and-braces. The motif is sized from the band's
+            HEIGHT, and the band grows when a longer subline wraps to two lines — at which
+            point 74% of a taller band is wider than the column `sm:pr-36` reserves, and the
+            court's right-hand edge disappears under the card's own overflow-hidden. Capping
+            the width keeps it inside its column whatever the subline does.
+          */}
+          <CourtPlan className="pointer-events-none absolute right-5 top-1/2 hidden h-[74%] w-auto max-w-[7.5rem] -translate-y-1/2 opacity-55 sm:block" />
           {/* The right padding reserves the motif's column so a longer subline wraps instead of
               running underneath it. It applies only at sm+, which is exactly where the motif is
               rendered. */}
