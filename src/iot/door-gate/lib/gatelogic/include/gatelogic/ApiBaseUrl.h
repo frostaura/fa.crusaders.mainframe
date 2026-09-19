@@ -60,7 +60,10 @@ namespace gatelogic {
 inline constexpr char kApiScheme[] = "http://";
 
 /// `http://255.255.255.255:65535` — the longest base URL the grammar below
-/// admits, which is what makes the buffer size provable rather than guessed.
+/// could SPELL, which is what makes the buffer size provable rather than
+/// guessed. That exact address is refused as a reserved host (see
+/// `isReservedApiHost`) and `http://255.255.255.254:65535` is the same length,
+/// so the sizing is unaffected by the refusal.
 inline constexpr size_t kMaxApiBaseUrlLen = 7U + 15U + 6U;
 
 /// Room for the longest path this firmware posts to. `GateFlow.h` asserts its
@@ -148,10 +151,35 @@ constexpr bool endsHere(const char* s, size_t at) {
 
 } // namespace url
 
+/// The two IPv4 literals the grammar refuses even though they parse.
+///
+/// `0.0.0.0` IS THE PLACEHOLDER. `secrets.h.example` ships it, and the whole
+/// point of E5 is that a board flashed from the example file must not compile —
+/// an image that posts every scan to "this host, unspecified" is a door that
+/// admits nobody, and it looks exactly like a working one until it is screwed
+/// to a wall. It is also meaningless as a destination in its own right, so
+/// nothing legitimate is lost by refusing it.
+///
+/// `255.255.255.255` is the limited broadcast address. A POST to it is not a
+/// request to the API and never will be.
+///
+/// Checked as a PREFIX, which is safe because the grammar has already refused
+/// a redundant leading zero: `0.0.0.05` is not a legal octet run, so nothing
+/// legal begins with these fifteen (or seven) characters and continues.
+constexpr bool isReservedApiHost(const char* url) {
+  return text::startsWith(url + text::length(kApiScheme), "0.0.0.0") ||
+         text::startsWith(url + text::length(kApiScheme), "255.255.255.255");
+}
+
 /// `http://` + an IPv4 literal + an optional `:port`, and then the end of the
-/// string — no path, no trailing slash, no query, no credentials.
+/// string — no path, no trailing slash, no query, no credentials — and not one
+/// of the two reserved hosts.
+///
+/// The scheme check comes FIRST and the `&&` short-circuits, which is what
+/// keeps `isReservedApiHost` from reading past the end of a string shorter than
+/// `http://`.
 constexpr bool isValidApiBaseUrl(const char* url) {
-  return text::startsWith(url, kApiScheme) &&
+  return text::startsWith(url, kApiScheme) && !isReservedApiHost(url) &&
          url::endsHere(url, url::pastPort(url, url::pastIpv4(url, text::length(kApiScheme))));
 }
 

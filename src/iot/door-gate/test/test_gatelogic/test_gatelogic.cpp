@@ -1039,19 +1039,33 @@ void test_led_a_cue_outranks_the_link_blink_and_then_gives_it_back() {
 /// a bad secrets.h is a build that does not produce an image.
 static_assert(gatelogic::isValidApiBaseUrl("http://192.168.1.10:8088"), "the club's own shape");
 static_assert(gatelogic::isValidApiBaseUrl("http://10.0.0.1"), "no port is legal");
-static_assert(gatelogic::isValidApiBaseUrl("http://255.255.255.255:65535"), "the longest legal base");
+static_assert(gatelogic::isValidApiBaseUrl("http://255.255.255.254:65535"), "the longest legal base");
 static_assert(!gatelogic::isValidApiBaseUrl("https://192.168.1.10:8088"), "cleartext to :443");
 static_assert(!gatelogic::isValidApiBaseUrl("http://mainframe.local:8088"), "an unbounded DNS wait");
 static_assert(!gatelogic::isValidApiBaseUrl("http://192.168.1.10:8088/"), "a trailing slash is a 404");
+/// E5. THE PLACEHOLDER MUST NOT COMPILE. `secrets.h.example` ships
+/// `http://0.0.0.0:8088`, so an unedited copy of it is a build error rather
+/// than an image on a wall. `255.255.255.255` goes with it: a POST to the
+/// limited broadcast address is not a request to the API and never will be.
+static_assert(!gatelogic::isValidApiBaseUrl("http://0.0.0.0:8088"), "secrets.h.example's own value");
+static_assert(!gatelogic::isValidApiBaseUrl("http://0.0.0.0"), "with or without a port");
+static_assert(!gatelogic::isValidApiBaseUrl("http://255.255.255.255:65535"), "limited broadcast");
+static_assert(!gatelogic::isValidApiBaseUrl("http://255.255.255.255"), "limited broadcast, no port");
+/// And the refusal costs no LEGAL address: the two reserved ones are the same
+/// length as their neighbours, so the buffer sizing is untouched.
 static_assert(gatelogic::apiBaseUrlFits("http://255.255.255.255:65535"), "must fit the URL buffer");
+static_assert(gatelogic::isValidApiBaseUrl("http://1.0.0.0"), "a zero octet is legal elsewhere");
+static_assert(gatelogic::isValidApiBaseUrl("http://0.0.0.1"), "and in every position but all four");
+static_assert(gatelogic::isValidApiBaseUrl("http://255.255.255.0"), "255s are legal too");
 
 /// The same grammar as a runtime table, so a failure prints which value broke
 /// rather than one line number for all of them — and so the cases nobody would
 /// write a static_assert for are still covered.
 void test_url_accepts_only_cleartext_http_to_an_ipv4_literal() {
   const char* good[] = {
-      "http://192.168.1.10:8088", "http://10.0.0.1",  "http://127.0.0.1:80",
-      "http://0.0.0.0",           "http://8.8.8.8:1", "http://255.255.255.255:65535",
+      "http://192.168.1.10:8088", "http://10.0.0.1",      "http://127.0.0.1:80",
+      "http://0.0.0.1",           "http://8.8.8.8:1",     "http://255.255.255.254:65535",
+      "http://1.0.0.0",           "http://255.255.255.0",
   };
   for (const char* url : good) {
     TEST_ASSERT_TRUE_MESSAGE(gatelogic::isValidApiBaseUrl(url), url);
@@ -1079,6 +1093,13 @@ void test_url_accepts_only_cleartext_http_to_an_ipv4_literal() {
       "http://.168.1.10",             // a leading one
       "http://",
       "http://192.168.1.10 ", // a stray space, which is how a .example is edited
+      // E5. The two reserved hosts, with and without a port. `0.0.0.0` is
+      // secrets.h.example's own value, so an unedited example file is a build
+      // error; `255.255.255.255` is the limited broadcast address.
+      "http://0.0.0.0",
+      "http://0.0.0.0:8088",
+      "http://255.255.255.255",
+      "http://255.255.255.255:65535",
   };
   for (const char* url : bad) {
     TEST_ASSERT_FALSE_MESSAGE(gatelogic::isValidApiBaseUrl(url), url);

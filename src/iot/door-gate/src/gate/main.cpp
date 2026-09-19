@@ -125,6 +125,32 @@ static_assert(sizeof(WIFI_PASSWORD) > 1U,
               "WIFI_PASSWORD in secrets.h is empty — fill it in before flashing the gate");
 static_assert(sizeof(DEVICE_API_KEY) > 1U,
               "DEVICE_API_KEY in secrets.h is empty — copy it from the admin Devices page");
+
+// AN EMPTY VALUE WAS NEVER THE LIKELY MISTAKE. THE EXAMPLE'S OWN VALUE WAS.
+//
+// `secrets.h.example` used to ship `WIFI_SSID "ClubWiFi"` and `API_BASE_URL
+// "http://192.168.1.10:8088"` — plausible values that compile, flash, and
+// produce a board that joins nothing and posts to a machine that is not the
+// club's. Nothing checked them, and the only feedback surface on this board is
+// one LED, so "wrong SSID" and "server down" are the same slow blink to the
+// person on the ladder.
+//
+// Every value in the example is a placeholder now and every placeholder is a
+// compile error. THESE FOUR LITERALS ARE THE EXAMPLE FILE'S, CHARACTER FOR
+// CHARACTER: change one there and change it here, or the guard stops firing on
+// the file it exists to guard. The URL's placeholder is the reserved host
+// `0.0.0.0`, refused by the grammar itself — see `gatelogic/ApiBaseUrl.h`.
+static_assert(!gatelogic::text::equals(WIFI_SSID, "REPLACE_ME_WIFI_SSID"),
+              "WIFI_SSID is still secrets.h.example's placeholder — put the club's SSID in secrets.h "
+              "before flashing. A board that joins nothing blinks exactly like a board whose server is "
+              "down, and there is no console on this hardware to tell them apart");
+static_assert(!gatelogic::text::equals(WIFI_PASSWORD, "REPLACE_ME_WIFI_PASSWORD"),
+              "WIFI_PASSWORD is still secrets.h.example's placeholder — put the club's WiFi password in "
+              "secrets.h before flashing");
+static_assert(!gatelogic::text::equals(DEVICE_API_KEY, "REPLACE_ME_DEVICE_API_KEY"),
+              "DEVICE_API_KEY is still secrets.h.example's placeholder — copy the tenant's device key "
+              "from the admin Devices page into secrets.h. Every call would be a 401, which this board "
+              "reads as an outage and answers from a roster it can never load");
 static_assert(sizeof(DEVICE_API_KEY) - 1U <= devapi::kMaxApiKeyLen,
               "DEVICE_API_KEY is longer than devapi::kMaxApiKeyLen — a truncated key is a 401 that "
               "reads exactly like the wrong key");
@@ -139,7 +165,9 @@ static_assert(sizeof(DEVICE_API_KEY) - 1U <= devapi::kMaxApiKeyLen,
 static_assert(gatelogic::isValidApiBaseUrl(API_BASE_URL),
               "API_BASE_URL must be http:// + an IPv4 literal + an optional :port, with no trailing "
               "slash and no path — e.g. \"http://192.168.1.10:8088\". A hostname is an unbounded DNS "
-              "wait; https:// is sent in cleartext to :443; a trailing slash produces //api/v1/...");
+              "wait; https:// is sent in cleartext to :443; a trailing slash produces //api/v1/...; and "
+              "0.0.0.0 is secrets.h.example's placeholder, refused so that an unedited example file "
+              "cannot become an image on a wall");
 static_assert(gatelogic::apiBaseUrlFits(API_BASE_URL),
               "API_BASE_URL does not fit the URL buffer together with the longest device path");
 

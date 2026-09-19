@@ -366,9 +366,18 @@ jobs:
       # here rather than committed as an example copy so that a developer who
       # forgets their own still gets the #error.
       #
+      # AND THEY MAY NOT BE THE EXAMPLE FILE'S VALUES. Since round G3 the gate
+      # `static_assert`s every one of the four against `secrets.h.example`'s
+      # placeholder and refuses `0.0.0.0` as a base-URL host, so an unedited
+      # example file cannot become an image on a wall. These values are
+      # deliberately unmistakable: 192.0.2.0/24 is RFC 5737's TEST-NET-1, which
+      # exists to be written down and never routed.
+      #
       # ONE FILE PER PROJECT. They are not shared and must not be: a symlink or a
       # single file reached from both would make a change to one board's
-      # credentials a change to the other's.
+      # credentials a change to the other's. The court box has no such guard and
+      # is unaffected by the values; it gets the same file because one loop is
+      # easier to keep true than two.
       - name: Write a throwaway secrets.h for each board project
         run: |
           set -euo pipefail
@@ -377,7 +386,7 @@ jobs:
           #pragma once
           #define WIFI_SSID "ci-build-only"
           #define WIFI_PASSWORD "ci-build-only"
-          #define API_BASE_URL "http://127.0.0.1:8088"
+          #define API_BASE_URL "http://192.0.2.10:8088"
           #define DEVICE_API_KEY "ci-build-only-not-a-real-key"
           SECRETS
           done
