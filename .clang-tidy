@@ -1,5 +1,5 @@
 ---
-# Crusaders Mainframe — static analysis for src/iot.
+# Crusaders Mainframe — static analysis for every firmware project under src/iot.
 #
 # WarningsAsErrors is deliberately narrow: the checks listed there are ones that
 # cause FIELD failures on a relay controller, not style preferences. In particular
@@ -46,7 +46,7 @@ WarningsAsErrors: >
   misc-uniqueptr-reset-release,
   performance-*,
   readability-function-cognitive-complexity
-HeaderFilterRegex: 'src/iot/(lib|src)/.*'
+HeaderFilterRegex: 'src/iot/[^/]+/(lib|src)/.*'
 CheckOptions:
   - key: readability-function-cognitive-complexity.Threshold
     value: '25'

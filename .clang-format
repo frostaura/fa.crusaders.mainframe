@@ -1,5 +1,5 @@
 ---
-# Crusaders Mainframe — C/C++ style for src/iot.
+# Crusaders Mainframe — C/C++ style for every firmware project under src/iot.
 # IndentWidth matches .editorconfig's global indent_size = 2.
 Language: Cpp
 BasedOnStyle: LLVM

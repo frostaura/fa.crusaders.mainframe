@@ -111,10 +111,14 @@ secrets.json
 # want tracked is still visible to `git status`.
 .claude/worktrees/
 
-# IoT firmware (src/iot) — build output, toolchain venv, coverage
-src/iot/.pio/
+# IoT firmware (src/iot) — build output, toolchain venv, coverage.
+# ONE venv for every project under src/iot (src/iot/.venv, from
+# src/iot/requirements.txt); one .pio per PlatformIO project, so the glob has to
+# reach a level deeper than the venv does — src/iot/court-box/.pio, and whatever
+# the next firmware project is called.
 src/iot/.venv/
-src/iot/coverage.xml
+src/iot/**/.pio/
+src/iot/**/coverage.xml
 src/iot/**/*.bin
 src/iot/**/*.elf
 src/iot/**/*.hex
@@ -124,13 +128,14 @@ src/iot/**/*.hex
 # `Name 3.cpp` copies of files it has just seen written. Inside a sketch's src/
 # the Arduino IDE COMPILES them, and 27 of them were committed once before this
 # rule existed. `make arduino-export` also deletes them; belt and braces.
-src/iot/arduino/**/* [0-9]*.*
-src/iot/arduino/**/* [0-9]
+# Matched under any iot project's arduino/, not just the court box's.
+src/iot/*/arduino/**/* [0-9]*.*
+src/iot/*/arduino/**/* [0-9]
 
 # Firmware secrets — a filled-in secrets.h was previously committable.
-# Two copies exist by design and both are covered by this one rule:
-#   src/iot/src/common/secrets.h                    the PlatformIO build's
-#   src/iot/arduino/court_bridge/secrets.h          the Arduino IDE sketch's
+# Two copies exist per firmware by design and both are covered by this one rule:
+#   src/iot/court-box/src/common/secrets.h              the PlatformIO build's
+#   src/iot/court-box/arduino/court_bridge/secrets.h    the Arduino IDE sketch's
 # Their .example siblings ARE committed.
 **/secrets.h
 **/ota_privkey.pem

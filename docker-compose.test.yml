@@ -30,12 +30,16 @@ services:
       timeout: 2s
       retries: 15
 
-  # The court box's Mega half, built from src/iot. Not a stub: the same CourtBox, the
-  # same protocol codec and the same relay timer the real board runs.
+  # The court box's Mega half, built from src/iot/court-box. Not a stub: the same
+  # CourtBox, the same protocol codec and the same relay timer the real board runs.
+  #
+  # The build CONTEXT is src/iot, not src/iot/court-box: the simulator compiles the
+  # shared libraries in src/iot/shared/lib too, and a context rooted at the project
+  # could not see them. The Dockerfile is named relative to that context.
   device:
     build:
       context: ./src/iot
-      dockerfile: Dockerfile.simulator
+      dockerfile: court-box/Dockerfile.simulator
     command: ["--port", "5555", "--bind-all"]
     ports:
       - "${SIMULATOR_PORT:-5555}:5555"

@@ -222,7 +222,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('src/iot/platformio.ini') }}
+          key: pio-${{ runner.os }}-${{ hashFiles('src/iot/*/platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
       - name: Install pinned toolchain
@@ -231,19 +231,25 @@ jobs:
       - name: Formatting (clang-format)
         run: |
           # Must be the pinned pip build, not the OS one — versions format differently.
-          # src/iot/arduino/ is generated output plus two vendored libraries; the
-          # originals under lib/ and src/ are already in this list.
+          # Every iot project's sources; the generated sketch folders are excluded
+          # because they hold machine-rewritten copies of these same files plus two
+          # vendored libraries, and the originals are already in this list.
           clang-format --version
-          clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h' ':(exclude)src/iot/arduino/**')
+          clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h' ':(exclude)src/iot/*/arduino/**')
 
+      # Covers EVERY project under src/iot, not just the one it lives in: the
+      # shared libraries are compiled into all of them, so a gate scoped to one
+      # firmware would leave the widest blast radius unchecked. No argument =
+      # every sibling with a platformio.ini and a lib/.
       - name: Strict compile — full pedantic set as errors
-        run: src/iot/tools/strict_compile.sh
+        run: src/iot/court-box/tools/strict_compile.sh
 
       - name: Purity gate — pure lib/ must not include Arduino headers
         run: |
           if grep -rn --include=*.h --include=*.cpp \
                -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal)' \
-               src/iot/lib --exclude-dir=arduino_hal --exclude-dir=posix_hal; then
+               src/iot/shared/lib src/iot/court-box/lib \
+               --exclude-dir=arduino_hal --exclude-dir=posix_hal; then
             echo "::error::pure lib/ modules must stay free of Arduino headers so they compile for the host"
             exit 1
           fi
@@ -260,7 +266,8 @@ jobs:
       - name: Rollover gate — no raw deadline comparisons
         run: |
           if grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)|millis\(\) *(>=|<=|>|<)|(>=|<=|>|<) *millis\(\)|(>=|<=|>|<) *[A-Za-z_][A-Za-z0-9_]*\.at\b' \
-               src/iot/lib src/iot/src --include=*.cpp --include=*.h 2>/dev/null \
+               src/iot/shared/lib src/iot/court-box/lib src/iot/court-box/src \
+               --include=*.cpp --include=*.h 2>/dev/null \
                | grep -v 'lib/timebase'; then
             echo "::error::use tb::reached() or tb::Deadline — a direct comparison breaks at the 49.7-day millis() wrap"
             exit 1
@@ -271,15 +278,20 @@ jobs:
         # lists; CI only overrides PY since the pinned toolchain is on PATH here.
         run: make corpus-check PY=python3
 
+      # BOTH projects. `shared` carries the device-agnostic libraries every
+      # firmware compiles, `court-box` the box's own; running one of the two
+      # proves half the firmware. The Makefile's IOT_PROJECTS list is the single
+      # place a third project is added.
       - name: Unit tests (host)
-        run: pio test -d src/iot -e native
+        run: make test-iot PIO=pio
 
       - name: Unit tests under ASAN + UBSAN
-        run: pio test -d src/iot -e native_asan
+        run: make test-iot-asan PIO=pio
 
       - name: Complexity (C++, C# and TypeScript)
         run: |
-          lizard src/iot/lib src/iot/src src/backend/Crusaders.Mainframe.Api src/frontend/src \
+          lizard src/iot/shared/lib src/iot/court-box/lib src/iot/court-box/src \
+            src/backend/Crusaders.Mainframe.Api src/frontend/src \
             -C 15 -L 200 -a 6 -W whitelizard.txt \
             -x '*/Migrations/*' -x '*/node_modules/*' -x '*/.pio/*' -x '*/.venv/*' \
             -x '*/bin/*' -x '*/obj/*' -x '*.test.tsx' -x '*.test.ts' -w
@@ -326,7 +338,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-boards-${{ runner.os }}-${{ hashFiles('src/iot/platformio.ini') }}
+          key: pio-boards-${{ runner.os }}-${{ hashFiles('src/iot/*/platformio.ini') }}
           restore-keys: pio-boards-${{ runner.os }}-
 
       - name: Install pinned toolchain
@@ -341,7 +353,7 @@ jobs:
       - name: Write a throwaway secrets.h
         run: |
           set -euo pipefail
-          cat > src/iot/src/common/secrets.h <<'SECRETS'
+          cat > src/iot/court-box/src/common/secrets.h <<'SECRETS'
           #pragma once
           #define WIFI_SSID "ci-build-only"
           #define WIFI_PASSWORD "ci-build-only"
@@ -350,9 +362,9 @@ jobs:
           SECRETS
 
       - name: Build court_mega, court_bridge and the simulator
-        run: pio run -d src/iot -e court_mega -e court_bridge -e simulator
+        run: pio run -d src/iot/court-box -e court_mega -e court_bridge -e simulator
 
-      # The Arduino IDE is the DEPLOYMENT route and src/iot/arduino/ is generated,
+      # The Arduino IDE is the DEPLOYMENT route and src/iot/court-box/arduino/ is generated,
       # so a source or platformio.ini change that was not re-exported would leave a
       # technician flashing last week's firmware from a folder that looks current.
       - name: Arduino sketches are current
@@ -362,7 +374,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.arduino15
-          key: arduino-cores-${{ runner.os }}-${{ hashFiles('src/iot/arduino/arduino-cli.yaml') }}
+          key: arduino-cores-${{ runner.os }}-${{ hashFiles('src/iot/court-box/arduino/arduino-cli.yaml') }}
 
       - name: Compile both sketches with the Arduino toolchain
         run: |
@@ -382,10 +394,10 @@ jobs:
           arduino-cli core install esp8266:esp8266@3.1.2 --additional-urls "$ESP_URL"
           # The sketch reads its OWN secrets.h, beside the .ino. Same throwaway
           # values written above; gitignored either way.
-          cp src/iot/src/common/secrets.h src/iot/arduino/court_bridge/secrets.h
-          arduino-cli compile --fqbn arduino:avr:mega:cpu=atmega2560 src/iot/arduino/court_mega
-          arduino-cli compile --fqbn esp8266:esp8266:generic:eesz=4M2M,xtal=80,baud=115200 src/iot/arduino/court_bridge
-          rm -f src/iot/arduino/court_bridge/secrets.h
+          cp src/iot/court-box/src/common/secrets.h src/iot/court-box/arduino/court_bridge/secrets.h
+          arduino-cli compile --fqbn arduino:avr:mega:cpu=atmega2560 src/iot/court-box/arduino/court_mega
+          arduino-cli compile --fqbn esp8266:esp8266:generic:eesz=4M2M,xtal=80,baud=115200 src/iot/court-box/arduino/court_bridge
+          rm -f src/iot/court-box/arduino/court_bridge/secrets.h
 
       # The simulator is what the .NET integration tests talk to, so "it links"
       # is not enough — it has to come up and bind its socket. --port 0 asks the
@@ -393,7 +405,7 @@ jobs:
       - name: Simulator starts and binds
         run: |
           set -euo pipefail
-          out=$(timeout 10s src/iot/.pio/build/simulator/program \
+          out=$(timeout 10s src/iot/court-box/.pio/build/simulator/program \
                   --port 0 --store "$RUNNER_TEMP/simstore" </dev/null || true)
           echo "$out"
           echo "$out" | grep -q '^\[sim\] listening on 127\.0\.0\.1:[0-9]\+$'
@@ -456,7 +468,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-boards-${{ runner.os }}-${{ hashFiles('src/iot/platformio.ini') }}
+          key: pio-boards-${{ runner.os }}-${{ hashFiles('src/iot/*/platformio.ini') }}
           restore-keys: pio-boards-${{ runner.os }}-
 
       - name: Cache NuGet packages
