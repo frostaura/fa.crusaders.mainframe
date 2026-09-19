@@ -498,8 +498,10 @@ describe("gateOfflineFallbackNotice", () => {
     expect(gateOfflineFallbackNotice()).toBe(
       "When a door cannot reach the API it falls back to the roster it last downloaded, and"
       + " that roster holds bookings and nothing else. So while a door is offline, only members"
-      + " with an upcoming or running booking can get in — whichever policy is set below. A door"
-      + " nobody has named yet is sent no roster at all, so it opens nothing while it is offline.",
+      + " with an upcoming or running booking can get in — whichever policy is set below. That list"
+      + " holds at most 48 bookings, taken in start order, so on a busy night the latest-starting"
+      + " bookings beyond that cannot get in while the door is offline. A door nobody has named yet"
+      + " is sent no roster at all, so it opens nothing while it is offline.",
     );
   });
 
@@ -514,6 +516,34 @@ describe("gateOfflineFallbackNotice", () => {
    */
   it("excepts the unnamed door, which has no roster to fall back to", () => {
     expect(gateOfflineFallbackNotice()).toContain("nobody has named yet is sent no roster at all");
+  });
+
+  /**
+   * The cap, which is the half an admin cannot see coming.
+   *
+   * <p>
+   * The roster is ordered by `StartsAt` then `Id` and cut to 48 AFTER ordering
+   * (`docs/specs/door-gate.md` §4), so on a night with more than 48 bookings the ones that
+   * fall off are the LATEST-STARTING — the members who arrive last. "Only members with an
+   * upcoming or running booking can get in" reads as a complete rule without this, and it
+   * is not one: a club whose league night runs sixty bookings has twelve members with a
+   * live booking and no way in, and nothing on the screen would have said so.
+   * </p>
+   */
+  it("names the 48-booking cap and who falls off it", () => {
+    const notice = gateOfflineFallbackNotice();
+    expect(notice).toContain("48");
+    expect(notice).toContain("latest-starting");
+  });
+
+  /**
+   * Ordered by START, not by when the booking was made. An admin who reads "the first 48"
+   * as "the first 48 booked" would tell the wrong member to re-book.
+   */
+  it("does not describe the cap as first-come", () => {
+    const notice = gateOfflineFallbackNotice().toLowerCase();
+    expect(notice).not.toContain("first 48 bookings made");
+    expect(notice).not.toContain("first come");
   });
 });
 

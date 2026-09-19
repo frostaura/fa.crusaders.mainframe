@@ -793,3 +793,129 @@ test.describe("A door gate", () => {
     await expect(page.getByRole("button", { name: /The box stops switching lights on/ })).toHaveCount(0);
   });
 });
+
+/**
+ * A board's own trail.
+ *
+ * <p>
+ * The door wrote an audit row for every scan from the day it shipped and no screen read
+ * one, so the answer to "why did the front door not let me in last night" was a database
+ * query. These run in the mobile project first, because the panel's whole risk is width: a
+ * fifty-row list carrying member names and reasons, on a phone held in a corridor.
+ * </p>
+ */
+test.describe("A board's activity", () => {
+  const MEMBER = { id: "00000000-0000-0000-0000-0000000000aa", name: "Ada Lovelace" };
+  const NAMED_GATE = { ...GATE, auto_registered: false, gate_key: "front-door" };
+  const ACTIVITY_PATH = `/api/v1/admin/devices/${GATE.id}/activity`;
+
+  function activityRoute(items: unknown[]): ApiRoute {
+    return { path: ACTIVITY_PATH, body: { items } };
+  }
+
+  test("is shut until asked for, then says who, why and when in words", async ({ page }) => {
+    await openDevices(page, [NAMED_GATE], [activityRoute([
+      {
+        at: new Date(Date.now() - 4 * 60_000).toISOString(),
+        action: "gate.denied_too_early",
+        reason: "too_early",
+        offline: false,
+        member: MEMBER,
+        fingerprint: "1f2e3d4c",
+      },
+      {
+        at: new Date(Date.now() - 9 * 60_000).toISOString(),
+        action: "device.unknown_scan",
+        reason: null,
+        offline: true,
+        member: null,
+        fingerprint: "9ab0cd12",
+      },
+    ])]);
+
+    const toggle = page.getByRole("button", { name: "Door activity" });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // Nothing fetched and nothing rendered until an admin asks.
+    await expect(page.getByText("Ada Lovelace")).toHaveCount(0);
+
+    await toggle.click();
+
+    await expect(page.getByText("Ada Lovelace")).toBeVisible();
+    // The refusal dictionary, on a screen at last: a token would say nothing to an admin.
+    await expect(page.getByText(/Too early for that booking/)).toBeVisible();
+    await expect(page.getByText("too_early")).toHaveCount(0);
+    // The offline refusal names nobody and says why it cannot.
+    await expect(page.getByText(/Unknown code · 9ab0cd12/)).toBeVisible();
+    await expect(page.getByText(/the door cannot say who/)).toBeVisible();
+  });
+
+  test("says nothing is recorded yet for a door nobody has been through", async ({ page }) => {
+    await openDevices(page, [NAMED_GATE], [activityRoute([])]);
+
+    await page.getByRole("button", { name: "Door activity" }).click();
+
+    await expect(page.getByText("Nothing recorded for this door yet.")).toBeVisible();
+  });
+
+  /**
+   * The width test, and the reason these specs are here rather than only in vitest: fifty
+   * rows of decisions, each carrying a member name of a length nobody controls. This page
+   * has pushed itself wider than a phone on a long name before (R2 I-F6), and jsdom cannot
+   * see it — only a real layout can.
+   */
+  test("does not push the page sideways on fifty rows and a long member name", async ({ page }) => {
+    const longName = "Bartholomew Fitzgerald-Montgomery-Wetherby-Ashcombe-Pemberton";
+    expect(longName.length).toBeGreaterThanOrEqual(60);
+    const rows = Array.from({ length: 50 }, (_, i) => ({
+      at: new Date(Date.now() - i * 60_000).toISOString(),
+      action: i % 2 === 0 ? "gate.opened" : "gate.denied_member_not_active",
+      reason: i % 2 === 0 ? "ok" : "member_not_active",
+      offline: false,
+      member: { id: MEMBER.id, name: longName },
+      fingerprint: "1f2e3d4c",
+    }));
+
+    await openDevices(page, [NAMED_GATE], [activityRoute(rows)]);
+    await page.getByRole("button", { name: "Door activity" }).click();
+    await expect(page.getByText(longName).first()).toBeVisible();
+
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+});
+
+/**
+ * The cap an admin never sees refused. Auto-registration answers 409
+ * `too_many_unacknowledged_devices` to the BOARD, on its own heartbeat, so the only party
+ * that meets the refusal is firmware with one LED — an admin who flashes a new board and
+ * watches it never appear on this list has no error to read anywhere.
+ */
+test.describe("Boards nobody has acknowledged", () => {
+  const boards = (count: number, unnamed: number) => Array.from({ length: count }, (_, i) => ({
+    ...FRESH,
+    id: `11111111-1111-1111-1111-${String(i).padStart(12, "0")}`,
+    device_code: `box-${i}`,
+    name: `box-${i}`,
+    auto_registered: i < unnamed,
+  }));
+
+  test("warns from twelve, and says what stops at sixteen", async ({ page }) => {
+    await openDevices(page, boards(13, 12));
+
+    const notice = page.getByText(/stops registering new boards/);
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("12 boards have registered themselves");
+    await expect(notice).toContainText("At 16");
+  });
+
+  test("says nothing to a club whose boards have been named", async ({ page }) => {
+    await openDevices(page, boards(20, 3));
+
+    // Exact, because the row's identity line below the name contains the code too.
+    await expect(page.getByText("box-0", { exact: true })).toBeVisible();
+    await expect(page.getByText(/stops registering new boards/)).toHaveCount(0);
+  });
+});

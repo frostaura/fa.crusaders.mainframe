@@ -489,11 +489,38 @@ export function refuseDevicePatch(
   return null;
 }
 
+/**
+ * One row of a board's trail, as `GET /admin/devices/{id}/activity` serves one.
+ *
+ * <p>
+ * Defaults to the commonest row there is — a door that opened for a member it resolved —
+ * so a test that wants a refusal, an offline upload or an unknown code asks for it and the
+ * ask is the point of the test. `fingerprint` is present even on a resolved row, because
+ * the API sends both and the panel's rule (the member wins) is only testable when it does.
+ * </p>
+ */
+export function activityFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    at: new Date().toISOString(),
+    action: "gate.opened",
+    reason: "ok",
+    offline: false,
+    member: { id: "44444444-4444-4444-4444-444444444444", name: "Ada Lovelace" },
+    fingerprint: "1f2e3d4c",
+    ...overrides,
+  };
+}
+
 /** A device server's routes plus a window onto the row it is holding. */
 export type DeviceServer = {
   routes: StubRoute[];
   /** The row as the server now holds it — what a real GET would serve next. */
   current: () => Record<string, unknown>;
+  /**
+   * Swaps what the activity route serves, so one test can drive a panel from empty to
+   * populated without re-stubbing the whole server.
+   */
+  setActivity: (next: Record<string, unknown>[]) => void;
   /**
    * Swaps the row the server is holding, without going through a PATCH.
    *
@@ -519,11 +546,29 @@ export type DeviceServer = {
  * OUTCOME — and the wire value the two gate-key tests pinned was the wrong one.
  * </p>
  */
-export function deviceServer(initial: Record<string, unknown>): DeviceServer {
+export function deviceServer(
+  initial: Record<string, unknown>,
+  initialActivity: Record<string, unknown>[] = [],
+): DeviceServer {
   let row = { ...initial };
+  let activity = [...initialActivity];
   return {
     routes: [
-      { path: "/api/v1/admin/devices/", respond: () => [row] },
+      {
+        // One GET route for both reads, dispatching on the path — not two routes.
+        //
+        // `/api/v1/admin/devices/{id}/activity` starts with `/api/v1/admin/devices/`, so a
+        // second route would have to spell the row's id to out-length the list route under
+        // the stub's longest-prefix rule, and `replace` can change that id underneath it.
+        // A route that matched the list path and answered the list for an activity request
+        // would hand the panel an ARRAY where it expects `{items}` — a page that renders
+        // nothing, from a stub that returned 200.
+        //
+        // Tenant-blind and device-blind by design: this stands in for one club's one
+        // board. A new device simply has an empty list, which is the real API's answer too.
+        path: "/api/v1/admin/devices/",
+        respond: (request) => (request.path.includes("/activity") ? { items: activity } : [row]),
+      },
       {
         method: "PATCH",
         path: "/api/v1/admin/devices/",
@@ -540,6 +585,7 @@ export function deviceServer(initial: Record<string, unknown>): DeviceServer {
     ],
     current: () => row,
     replace: (next) => { row = { ...next }; },
+    setActivity: (next) => { activity = [...next]; },
   };
 }
 

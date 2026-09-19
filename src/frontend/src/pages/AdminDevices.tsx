@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { Cpu, Wifi, WifiOff } from "lucide-react";
-import { endpoints, isGate, type AdminCourt, type AdminDevice, type AdminSettings } from "../lib/api";
+import {
+  endpoints, isGate, type AdminCourt, type AdminDevice, type AdminSettings, type DeviceActivityEntry,
+} from "../lib/api";
 import { describeDeviceError } from "../lib/deviceErrors";
+import {
+  ACTIVITY_READ_FAILED, activityEmptyNotice, activityPanelTitle, describeActivityAction,
+  describeActivityReason, describeActivityWho, unacknowledgedBoardsNotice,
+} from "../lib/deviceActivity";
+import { formatInstant } from "../lib/utils";
 import {
   coverageWithout, outOfServiceConfirm, outOfServiceConsequences, type CourtCoverage,
 } from "../lib/deviceCoverage";
@@ -576,6 +583,145 @@ function OutOfServiceNotice({ device, coverage }: { device: AdminDevice; coverag
   );
 }
 
+// --- a board's own trail ---------------------------------------------------------
+
+/**
+ * One row of the trail: what happened, to whom, why, and when.
+ *
+ * <p>
+ * Its own component rather than a `map` body inside the panel, because the panel is
+ * already a loader with four states and the complexity gate holds this file at its bound.
+ * </p>
+ *
+ * <p>
+ * Two lines, not four columns. Fifty rows of four columns on a phone is four columns of
+ * two characters each; the decision goes on the first line with its age, and who and why
+ * share the second. A row with neither — a boot — renders one line rather than an empty
+ * second one.
+ * </p>
+ *
+ * <p>
+ * `title` on the action carries the raw token. The words are for reading; the token is for
+ * whoever has to report a new action upstream, and losing it would make a humanised
+ * unknown unsearchable.
+ * </p>
+ */
+function ActivityRow({ entry }: { entry: DeviceActivityEntry }) {
+  const who = describeActivityWho(entry);
+  const why = describeActivityReason(entry);
+  const detail = [who, why].filter((part) => part !== null).join(" · ");
+  return (
+    <li className="border-t border-slate-100 py-1.5 first:border-t-0">
+      <div className="flex items-baseline gap-2">
+        <span className="min-w-0 break-words font-medium text-slate-700" title={entry.action}>
+          {describeActivityAction(entry)}
+        </span>
+        {/* Relative for the glance, exact on hover or long-press for the reconciliation —
+            the pair the liveness line above and the ledger both already use. */}
+        <time dateTime={entry.at} title={formatInstant(entry.at)} className="ml-auto shrink-0 text-slate-400">
+          {relative(entry.at)}
+        </time>
+      </div>
+      {/* min-w-0 AND break-words: a member's display name is the one arbitrarily wide
+          thing in this panel, and a row that sets its own width pushes the whole page
+          wider than the phone (R2 I-F6) — fifty times over, here. */}
+      {detail && <div className="mt-0.5 min-w-0 break-words text-slate-500">{detail}</div>}
+    </li>
+  );
+}
+
+/** What the panel is showing right now, once the four states are collapsed into one read. */
+function ActivityBody({ entries, loading, error, gate }: {
+  entries: DeviceActivityEntry[] | null;
+  loading: boolean;
+  error: string | null;
+  gate: boolean;
+}) {
+  if (loading) return <p className="text-xs text-slate-500">Loading…</p>;
+  // Before empty, deliberately. A failed read that rendered "nothing recorded yet" would
+  // be making a claim about the DOOR ("nobody has been through it") out of a claim about
+  // the request, which is how an admin concludes a working door is dead.
+  if (error) return <p className="text-xs text-danger-strong">{error}</p>;
+  if (!entries || entries.length === 0) return <p className="text-xs text-slate-500">{activityEmptyNotice(gate)}</p>;
+  return (
+    <ul className="text-xs">
+      {entries.map((entry, i) => <ActivityRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} />)}
+    </ul>
+  );
+}
+
+/**
+ * A board's own trail, collapsed until an admin asks for it.
+ *
+ * <p>
+ * <b>Why this screen at all.</b> The door has written an audit row for every scan since it
+ * shipped and nothing read one, so "why was I turned away at the front door last night"
+ * had a database query as its only answer — and the seven refusal reasons had travelled
+ * through the firmware, the wire corpus and the spec for three rounds without ever becoming
+ * a sentence anybody could read.
+ * </p>
+ *
+ * <p>
+ * <b>Shut by default and fetched on open.</b> A club with eight boards would otherwise make
+ * eight extra calls on every load of a page that already re-reads itself every fifteen
+ * seconds, for panels nobody opened. Re-fetched on every open rather than cached, because
+ * the trail is the one thing on this row that a member standing at the door changes while
+ * the admin is looking at it.
+ * </p>
+ *
+ * <p>
+ * No `mounted` ref and no cleanup guard: this is event-driven, not effect-driven, so
+ * StrictMode's mount → cleanup → mount cannot leave a ref false before the first click —
+ * the shape that has produced two defects in this repo.
+ * </p>
+ *
+ * <p>
+ * The label does not change with the state; `aria-expanded` carries it. A control whose
+ * accessible name flips between "Door activity" and "Hide door activity" is a control a
+ * screen-reader user has to re-find after every press.
+ * </p>
+ */
+function DeviceActivityPanel({ device }: { device: AdminDevice }) {
+  const gate = isGate(device);
+  const [open, setOpen] = useState(false);
+  const [entries, setEntries] = useState<DeviceActivityEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle() {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    setLoading(true);
+    setError(null);
+    try {
+      setEntries((await endpoints.adminDeviceActivity(device.id)).items);
+    } catch (e) {
+      setError(describeDeviceError(e, ACTIVITY_READ_FAILED));
+      setEntries(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <Button
+        variant="outline"
+        className="h-8 px-3 text-xs"
+        aria-expanded={open}
+        onClick={() => void toggle()}
+      >
+        {activityPanelTitle(gate)}
+      </Button>
+      {open && (
+        <div className="mt-2 rounded-lg bg-slate-50 p-3">
+          <ActivityBody entries={entries} loading={loading} error={error} gate={gate} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * What the court-box editors on a row need from the page, travelling as one thing.
  *
@@ -634,6 +780,11 @@ function DeviceRow({
       <UnnamedGateNotice device={device} editing={editing === "details"} />
 
       {!device.enabled && <OutOfServiceNotice device={device} coverage={coverage} />}
+
+      {/* Above the action strip, because it is the one control on this row that reads
+          rather than writes — and an admin usually opens it to decide whether to press
+          one of the others. */}
+      <DeviceActivityPanel device={device} />
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {editing === null && (
@@ -749,6 +900,31 @@ function deletedToast(device: AdminDevice): string {
     ? "as a new door with no name"
     : "as a new box";
   return `${device.name} deleted. It still has the club's key, so it re-registers on its next heartbeat ${comesBack} — unplug it if you meant to retire it.`;
+}
+
+/**
+ * The warning that the club is running out of room for new boards.
+ *
+ * <p>
+ * <b>It is here because the refusal is not reachable from this console at all.</b>
+ * Auto-registration refuses a new MAC once the tenant holds sixteen rows nobody has
+ * acknowledged, and it refuses the BOARD — a 409 `too_many_unacknowledged_devices`
+ * answered on the board's own heartbeat, to a piece of firmware with one LED. An admin who
+ * flashes a new board and watches it never appear on this list has no error to read
+ * anywhere: the screen simply does not grow a row. A warning BEFORE the club gets there is
+ * the only form this can take on a screen.
+ * </p>
+ *
+ * <p>
+ * Counted on `auto_registered` rather than on how many boards there are. A club with
+ * twenty boards an admin has already named is in no danger, and warning it would teach the
+ * club to ignore the notice in the state that matters.
+ * </p>
+ */
+function UnacknowledgedBoardsNotice({ devices }: { devices: AdminDevice[] }) {
+  const notice = unacknowledgedBoardsNotice(devices.filter((d) => d.auto_registered).length);
+  if (notice === null) return null;
+  return <p role="status" className="mb-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">{notice}</p>;
 }
 
 /**
@@ -978,6 +1154,8 @@ export function AdminDevicesPage() {
         <p className="mb-3 text-xs text-slate-500">
           {checkedAt ? `Checked ${relative(checkedAt)}` : "Checking…"} · this page re-reads the boards every {REFRESH_MS / 1000} seconds while this tab is in front.
         </p>
+
+        <UnacknowledgedBoardsNotice devices={devices} />
 
         {loading ? (
           <p className="text-sm text-slate-500">Loading…</p>
