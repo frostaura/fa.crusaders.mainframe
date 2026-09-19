@@ -72,6 +72,98 @@ export const GATE_UNLOCK_MAX_SECONDS = 30;
 export const GATE_EARLY_ENTRY_MIN_MINUTES = 0;
 export const GATE_EARLY_ENTRY_MAX_MINUTES = 240;
 
+/** Mirrors <code>AdminConfigEndpoints.ValidateDeviceNumbers</code> for the two court windows. */
+export const ROSTER_WINDOW_MIN_MINUTES = 5;
+export const ROSTER_WINDOW_MAX_MINUTES = 1440;
+export const ACTIVATION_CUE_MIN_MINUTES = 0;
+export const ACTIVATION_CUE_MAX_MINUTES = 1440;
+
+/**
+ * The hard ceiling on how early a booking's own QR opens a door, in minutes.
+ *
+ * Mirrors <code>GateAccess.MaxEarlyEntryMinutes</code>. Four hours, and the API applies it
+ * inside the one function that answers the question, so no combination of settings — legal
+ * or hand-edited — buys a door a wider horizon than this.
+ */
+export const DOOR_BOOKING_HORIZON_MAX_MINUTES = 240;
+
+/**
+ * How far before a booking that booking's own QR opens a door, given the club's current
+ * settings. Mirrors <code>BookingCodeWindow.DoorHorizonMinutes</code>.
+ *
+ * <p>
+ * <b>Why this exists at all.</b> The settings screen printed
+ * <code>gate_early_entry_minutes</code> and called it the window a booking QR opens a door
+ * in. Under <code>booking_window</code> it is. Under <code>active_member</code> — the API's
+ * default, so what most clubs are actually running — the door accepts a booking's code for
+ * exactly as long as the member's own phone would have shown it, which is
+ * <code>roster_window_minutes + activation_cue_window_minutes</code>: 130 minutes at the
+ * defaults, while the screen said 30. An admin narrowing "Early entry" to 5 narrowed nothing,
+ * and nothing on the screen said which two fields they wanted instead.
+ * </p>
+ *
+ * <p>
+ * The <code>max</code> is what keeps online at least as permissive as offline: the cached
+ * roster admits a booking from <code>StartsAt − gate_early_entry_minutes</code>, so a door
+ * accepting less than that while it could reach the server would refuse, online, a member it
+ * would have admitted during an outage.
+ * </p>
+ *
+ * <p>
+ * <b>The inputs are clamped before the arithmetic</b>, as the API clamps them on read. The
+ * settings document is a JSON column, a hand edit can put anything in it, and the point of
+ * the cap is that nothing widens a door past it.
+ * </p>
+ */
+export function doorBookingHorizonMinutes(settings: {
+  gate_access_policy: string;
+  gate_early_entry_minutes: number;
+  roster_window_minutes: number;
+  activation_cue_window_minutes: number;
+}): number {
+  const early = clamp(settings.gate_early_entry_minutes, GATE_EARLY_ENTRY_MIN_MINUTES, GATE_EARLY_ENTRY_MAX_MINUTES);
+  // The strict policy's whole claim is that a member may be in the building because they are
+  // due on a court, so the entry window is when they are due — and nothing else reaches it.
+  if (settings.gate_access_policy === "booking_window") return early;
+  const roster = clamp(settings.roster_window_minutes, ROSTER_WINDOW_MIN_MINUTES, ROSTER_WINDOW_MAX_MINUTES);
+  const cue = clamp(settings.activation_cue_window_minutes, ACTIVATION_CUE_MIN_MINUTES, ACTIVATION_CUE_MAX_MINUTES);
+  return Math.max(early, Math.min(roster + cue, DOOR_BOOKING_HORIZON_MAX_MINUTES));
+}
+
+/** A settings value as the API would read it: whole, inside its bounds, and never NaN. */
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+/**
+ * How long the club waits between "not reporting" emails about one board, in minutes.
+ *
+ * Mirrors the API's <code>device_alert_cooldown_minutes</code> bound. It is a device number
+ * rather than a door one: a court box that goes quiet flaps exactly as a door does.
+ */
+export const DEVICE_ALERT_COOLDOWN_MIN_MINUTES = 5;
+export const DEVICE_ALERT_COOLDOWN_MAX_MINUTES = 1440;
+
+/**
+ * Why the court-box and identification numbers cannot be saved, in a sentence, or null.
+ *
+ * <p>
+ * Same argument as {@link gateSettingsComplaint}: a number input's <code>min</code> and
+ * <code>max</code> stop the spinner and nothing else, and Save is not a native submit. An
+ * absent key is not a complaint — an older API that does not serve the cooldown leaves it
+ * undefined, and omitted means unchanged on the way back, so there is nothing to refuse.
+ * </p>
+ */
+export function deviceNumbersComplaint(settings: { device_alert_cooldown_minutes?: number }): string | null {
+  const cooldown = settings.device_alert_cooldown_minutes;
+  if (cooldown === undefined) return null;
+  if (!inRange(cooldown, DEVICE_ALERT_COOLDOWN_MIN_MINUTES, DEVICE_ALERT_COOLDOWN_MAX_MINUTES)) {
+    return `Alert cooldown has to be a whole number of minutes between ${DEVICE_ALERT_COOLDOWN_MIN_MINUTES} and ${DEVICE_ALERT_COOLDOWN_MAX_MINUTES}.`;
+  }
+  return null;
+}
+
 /**
  * Why the door-gate settings cannot be saved, in a sentence, or null when they can.
  *
