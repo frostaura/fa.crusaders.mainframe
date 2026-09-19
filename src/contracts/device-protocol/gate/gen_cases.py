@@ -93,6 +93,30 @@ requests = [
         }),
     },
     {
+        "id": "gate-heartbeat-request-no-push",
+        "note": (
+            "the diagnostic counter a board with one LED and no screen has nowhere else to put. "
+            "`no_push` is how many heartbeats the board could not push — a body that did not fit "
+            "its buffer, or arrived incomplete — since it last reported one, plus its "
+            "watchdog-arm failures. Optional and additive: a board that sends nothing is a board "
+            "reporting zero, which is why it is not in the vector above. The server LOGS it "
+            "against the device code and stores nothing (a column would be an EF migration for a "
+            "diagnostic), and it never changes the response: a counter must not be able to take a "
+            "door out of service. A negative value is not a counter and is ignored rather than "
+            "refused, for the same reason."
+        ),
+        "method": "POST",
+        "path_and_query": "/api/v1/device/heartbeat",
+        "authorization": BEARER,
+        "body_hex": body_hex({
+            "mac": MAC,
+            "firmware_version": "1.0.0",
+            "uptime_ms": 86400000,
+            "kind": "gate",
+            "no_push": 4,
+        }),
+    },
+    {
         "id": "gate-scan-request",
         "note": (
             "a scan the gate could not answer from its roster, or chose not to. Same three "
