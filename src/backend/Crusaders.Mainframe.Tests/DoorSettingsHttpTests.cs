@@ -85,12 +85,15 @@ public sealed class DoorSettingsHttpTests
         Assert.Equal(int.Parse(value), shown.GetProperty(read).GetInt32());
     }
 
+    // Each key gets a value of its OWN kind. Both used to be sent an email address, which
+    // passed only because neither field was validated at all (B10) — the exact shape of
+    // fixture that keeps a suite green through a missing rule.
     [SkippableTheory]
-    [InlineData("clubContactPhone", "club_contact_phone")]
-    [InlineData("club_contact_phone", "club_contact_phone")]
-    [InlineData("clubContactEmail", "club_contact_email")]
-    [InlineData("club_contact_email", "club_contact_email")]
-    public async Task Every_contact_string_binds_under_either_spelling(string sent, string read)
+    [InlineData("clubContactPhone", "club_contact_phone", "+27 21 555 0100")]
+    [InlineData("club_contact_phone", "club_contact_phone", "+27 21 555 0100")]
+    [InlineData("clubContactEmail", "club_contact_email", "desk@club.test")]
+    [InlineData("club_contact_email", "club_contact_email", "desk@club.test")]
+    public async Task Every_contact_string_binds_under_either_spelling(string sent, string read, string value)
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -98,11 +101,11 @@ public sealed class DoorSettingsHttpTests
         var club = await DoorClub.SeedAsync(factory, $"dsetc-{sent}", "{}");
         var client = club.AdminClient(factory);
 
-        var res = await PutAsync(client, $"\"{sent}\":\"  desk@club.test  \"");
+        var res = await PutAsync(client, $"\"{sent}\":\"  {value}  \"");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
 
         var shown = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
-        Assert.Equal("desk@club.test", shown.GetProperty(read).GetString());
+        Assert.Equal(value, shown.GetProperty(read).GetString());
     }
 
     [SkippableTheory]

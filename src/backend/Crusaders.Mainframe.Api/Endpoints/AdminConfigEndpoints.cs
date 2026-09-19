@@ -495,6 +495,16 @@ public static class AdminConfigEndpoints
         {
             return "club_contact_email_too_long";
         }
+
+        // B10 / C12. The two contact fields accepted ANYTHING — the console's inputs are not
+        // inside a <form>, so no browser validation ran either — and the value is then printed
+        // on a door card that hangs on a wall and handed to a member outside a building at
+        // night as a tel: or mailto: link. "Ask at the desk" was a valid phone number and it
+        // produced a link that dialled nothing. Length was bounded and shape was not, which is
+        // the half of the rule that catches a typo and not the half that catches a sentence.
+        if (!DoorSettings.IsPhone(req.EffectiveClubContactPhone)) return "club_contact_phone_invalid";
+        if (!DoorSettings.IsEmail(req.EffectiveClubContactEmail)) return "club_contact_email_invalid";
+
         return null;
     }
 

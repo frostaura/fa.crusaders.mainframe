@@ -54,6 +54,25 @@ public static class AdminDoorsOverviewEndpoint
             // exists to hold. See Device.ShutByShutAllAt.
             shut_all_active = doors.Any(d => d.ShutByShutAllAt is not null),
 
+            // The same distinction as two NAMED lists, because the banner has to say it in
+            // words and a boolean cannot (C1).
+            //
+            // "Reopen all 3" against a club where one door was shut on its own answered
+            // `{"doors":[]}` and the page printed "0 doors reopened" — the fleet control
+            // existed, was labelled with the wrong count, and silently did nothing. With these
+            // the console can offer the fleet control ONLY while `shut_together` is non-empty,
+            // label it with that count, and say of the others that they were shut on their own
+            // and are reopened from their own page. `name` and `gate_key` are here so the
+            // banner can link to each door by the label the club uses for it.
+            shut_together = doors
+                .Where(d => d.ShutByShutAllAt is not null)
+                .Select(d => new { id = d.Id, name = d.Name, gate_key = d.GateKey })
+                .ToList(),
+            shut_individually = doors
+                .Where(d => !d.Enabled && d.ShutByShutAllAt is null)
+                .Select(d => new { id = d.Id, name = d.Name, gate_key = d.GateKey })
+                .ToList(),
+
             doors = doors.Select(d => new
             {
                 device = DeviceView.Of(d, settings.HeartbeatSeconds),

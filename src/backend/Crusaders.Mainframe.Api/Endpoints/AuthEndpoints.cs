@@ -51,7 +51,8 @@ public static class AuthEndpoints
             return ok ? Results.Ok(new { verified = true }) : Results.BadRequest(new { error = "invalid_or_expired" });
         }).AllowAnonymous();
 
-        g.MapPost("/login", async (LoginRequest req, AuthService auth, CancellationToken ct) =>
+        g.MapPost("/login", async (
+            LoginRequest req, AuthService auth, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var result = await auth.LoginAsync(req.Email, req.Password, ct);
             return result switch
@@ -62,7 +63,29 @@ public static class AuthEndpoints
                 // screen said "Your account isn't approved yet" to members who were approved and
                 // had simply never clicked the verify link, and offered them nothing to do about it.
                 LoginResult.EmailNotVerified => Results.Json(new { error = "email_not_verified" }, statusCode: 403),
-                LoginResult.NotApproved na => Results.Json(new { error = "not_approved", status = na.Status.ToString() }, statusCode: 403),
+                LoginResult.NotApproved na => Results.Json(
+                    new
+                    {
+                        error = "not_approved",
+                        status = na.Status.ToString(),
+
+                        // D8. The screen tells a pending or suspended member to "speak to the
+                        // club" and had nothing for them to speak to it WITH — they cannot sign
+                        // in, so every other surface carrying the club's contact is behind the
+                        // door they are locked out of. This is the club's own PUBLIC contact,
+                        // the same two fields already printed on the door card and shown to any
+                        // member on their code page.
+                        //
+                        // Three narrow conditions, and each is load-bearing. Only on THIS
+                        // refusal: an unknown address and a wrong password answer 401 with no
+                        // body, unchanged, because a contact block appearing for one of them
+                        // would make this route an account oracle. Only these two fields:
+                        // nothing about the membership, the club's size, or who to ask for.
+                        // And tenant-scoped like every other read — the accessor resolves the
+                        // club the request arrived at, not the one the member believes in.
+                        contact = await ContactAsync(settingsAccessor, ct),
+                    },
+                    statusCode: 403),
                 _ => Results.Problem("Unexpected"),
             };
         }).AllowAnonymous();
@@ -163,6 +186,28 @@ public static class AuthEndpoints
 
         await auth.RevokeAccessTokenAsync(userId.Value, jti, expiresAt, ct);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// The club's public contact, for the one refusal that has nothing else to offer (D8).
+    ///
+    /// <para>
+    /// The same two tenant settings the door card prints and the member's code page shows, read
+    /// through <see cref="DoorSettings"/> so they are trimmed, bounded and blank-means-null
+    /// here exactly as they are there. A club that has set neither gets two nulls and the
+    /// screen says what it can — which is the honest state of most clubs on their first day,
+    /// and is not the same as the read having failed. Block body for the lizard reason in
+    /// <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static async Task<object> ContactAsync(TenantSettingsAccessor accessor, CancellationToken ct)
+    {
+        var settings = await accessor.GetAsync(ct);
+        return new
+        {
+            phone = DoorSettings.ContactPhone(settings),
+            email = DoorSettings.ContactEmail(settings),
+        };
     }
 }
 

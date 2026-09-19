@@ -94,6 +94,20 @@ public static class AdminDoorFleetEndpoint
 
         var changing = doors.Where(d => shut ? d.Enabled : d.ShutByShutAllAt is not null).ToList();
 
+        // What this call will NOT touch, and why the console needs it in words (C1).
+        //
+        // A reopen-all undoes a shut-all; a door an admin shut on its own stays shut, for the
+        // reason ReopenAllAsync gives. That semantic is right and it was unreadable: after
+        // shut-one, shut-all, reopen-all the console said "0 doors reopened" — or "Reopen all
+        // 3" and then nothing — with no sentence anywhere naming the door that stayed shut or
+        // saying why. A zero-change result that does not explain itself is the defect, not the
+        // rule behind it, so the rule now comes with its own evidence attached.
+        var leftShut = shut
+            ? []
+            : doors.Where(d => !d.Enabled && d.ShutByShutAllAt is null)
+                .Select(d => new { id = d.Id, name = d.Name, gate_key = d.GateKey })
+                .ToList();
+
         // Taking a board out of service closes whatever outage it is in, silently — the same
         // rule and the same reasoning as DeviceRegistryService.UpdateAsync, which explains why
         // an outage nobody can close eventually lies. Read for the whole set at once rather
@@ -134,7 +148,14 @@ public static class AdminDoorFleetEndpoint
         // on this line and on nothing else.
         await db.SaveChangesAsync(ct);
 
-        return Results.Ok(new { doors = changing.Select(d => Wire(d, settings)).ToList() });
+        return Results.Ok(new
+        {
+            doors = changing.Select(d => Wire(d, settings)).ToList(),
+
+            // Always present, empty on a shut-all: one response shape, and a console that
+            // types it once cannot forget the case where it is not empty.
+            left_shut = leftShut,
+        });
     }
 
     /// <summary>

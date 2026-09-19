@@ -65,6 +65,25 @@ public static class DoorSettings
     /// <summary>Longest club contact email accepted — the RFC's own address ceiling.</summary>
     public const int MaxContactEmailLength = 254;
 
+    /// <summary>
+    /// The characters a phone number may be written in: digits, space, and <c>+ - ( ) ,</c> —
+    /// the comma being the pause a dialler honours before an extension.
+    ///
+    /// <para>
+    /// <b>A closed set rather than a pattern, because this value is PRINTED and DIALLED.</b> It
+    /// goes on a door card that hangs on a wall, and it reaches a member outside a building at
+    /// night as a <c>tel:</c> link. The settings page accepted anything at all — the inputs are
+    /// not inside a <c>&lt;form&gt;</c> and nothing on the server looked — so "ask at the desk"
+    /// was a valid club phone number and produced a link that dialled nothing (B10 / C12).
+    /// Formats vary far too much between countries to validate the SHAPE; what can be said is
+    /// that a phone number is made of these and has at least a few digits in it.
+    /// </para>
+    /// </summary>
+    public const string PhoneCharacters = "+-(), 0123456789";
+
+    /// <summary>Fewest digits a phone number may carry. Below this it is not one.</summary>
+    public const int MinContactPhoneDigits = 5;
+
     /// <summary>The club's door-log retention, in days, clamped to the range its own PUT declares.</summary>
     public static int LogRetentionDays(TenantSettingsView settings)
         => Math.Clamp(settings.DoorLogRetentionDays, MinLogRetentionDays, MaxLogRetentionDays);
@@ -84,6 +103,45 @@ public static class DoorSettings
     /// <summary>The club's contact email, trimmed and bounded, or null when it has set none.</summary>
     public static string? ContactEmail(TenantSettingsView settings)
         => Bounded(settings.ClubContactEmail, MaxContactEmailLength);
+
+    /// <summary>
+    /// Whether this is something a member could dial. Empty is fine — a club may set none.
+    ///
+    /// <para>
+    /// Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    public static bool IsPhone(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return true;
+
+        var trimmed = value.Trim();
+        if (trimmed.Length > MaxContactPhoneLength) return false;
+        if (trimmed.Any(c => !PhoneCharacters.Contains(c))) return false;
+        return trimmed.Count(char.IsAsciiDigit) >= MinContactPhoneDigits;
+    }
+
+    /// <summary>
+    /// Whether this is something a member could write to. Empty is fine.
+    ///
+    /// <para>
+    /// <c>MailAddress</c> rather than a regular expression, for the reason the repository's
+    /// other address checks give: an address grammar written as a pattern is wrong in one
+    /// direction or the other, and this one is rendered to a member as a <c>mailto:</c> link.
+    /// The two extra conditions are what <c>MailAddress</c> itself allows and a club does not
+    /// mean — a display name ("Desk &lt;desk@club&gt;") and a domain with no dot in it.
+    /// Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    public static bool IsEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return true;
+
+        var trimmed = value.Trim();
+        if (trimmed.Length > MaxContactEmailLength) return false;
+        if (!System.Net.Mail.MailAddress.TryCreate(trimmed, out var parsed)) return false;
+        return parsed.Address == trimmed && parsed.Host.Contains('.') && !parsed.Host.EndsWith('.');
+    }
 
     /// <summary>
     /// A stored string as a reader should see it: trimmed, cut to the length the PUT declares,
