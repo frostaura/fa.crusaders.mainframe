@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   GATE_KEY_MAX_LENGTH, GATE_POLICY_LABELS, NEW_GATE_BADGE, UNNAMED_GATE, describeGate,
   describeGatePolicy, gateDeleteConfirm, gateOfflineFallbackNotice, gateOutOfServiceConfirm,
-  gateOutOfServiceNotice,
+  gateOutOfServiceNotice, unnamedGateOfflineNotice,
 } from "./gateCopy";
 import { GATE_ACCESS_POLICIES } from "./api";
 
@@ -73,35 +73,46 @@ describe("NEW_GATE_BADGE", () => {
 describe("gateOutOfServiceNotice", () => {
   it("is exactly this", () => {
     expect(gateOutOfServiceNotice()).toBe(
-      "The club is not alerted about its silence, and the API stops answering scans at this"
-      + " door, so it opens nothing from the instant the switch is thrown. The door keeps whatever"
-      + " roster it last downloaded, so a member with a booking already in that cache may still get"
-      + " in until it goes stale — nobody else will. Bookings, check-ins, refunds and no-show"
-      + " penalties are untouched either way: opening a door is not attendance.",
+      "The club is not alerted about its silence, and the API refuses every scan at this door"
+      + " from the instant the switch is thrown. A door that can still reach the API hears that"
+      + " refusal and opens for nobody, with no fall back to its roster. A door that has also lost"
+      + " the network never hears it, and keeps admitting members with a booking from the roster it"
+      + " last downloaded until that goes stale, which takes up to six hours. Bookings, check-ins,"
+      + " refunds and no-show penalties are untouched either way: opening a door is not attendance.",
     );
   });
 
   /**
-   * <b>It does not claim the door stops opening.</b>
+   * <b>Both halves, because each on its own is now a falsehood.</b>
    *
    * <p>
-   * This is the claim that would have been wrong, and it is the exact shape of the box
-   * side's "nobody can check in there" — a plausible, simple sentence that the code does not
-   * support and that survived three rounds. A 403 is not a refusal to the firmware, it is an
-   * outage, and the documented response to any non-200 is the cached roster. So a door whose
-   * API has stopped answering it keeps opening for a booked member until that roster goes
-   * stale, and an admin who believed the flat sentence would have no way to understand
-   * somebody walking through a door the screen had told them was shut.
+   * This test used to hold the opposite claim — that the notice must NOT say the door stops
+   * opening — and that was right until a 403 became authoritative for a gate. It now is: a
+   * board that reaches the API and is refused denies the scan with no roster fallback, and a
+   * 403 on its heartbeat commits an empty roster. So "it keeps opening from the cache" is the
+   * sentence that is wrong for the ordinary case, and "the door stops opening" is still wrong
+   * for the board that has also lost the network and never hears the refusal at all.
+   * </p>
+   *
+   * <p>
+   * An admin who reads either half alone cannot explain the other, which is the same failure
+   * the box side's "nobody can check in there" was: a plausible, simple sentence that survived
+   * three rounds because nothing asserted the half it left out.
    * </p>
    */
-  it("does not promise the door stops opening, because a cached roster still opens it", () => {
+  it("says both what a reachable door does and what a cut-off one does", () => {
     const notice = gateOutOfServiceNotice();
+    // The reachable board: refused, and explicitly NOT falling back.
+    expect(notice).toContain("can still reach the API hears that refusal and opens for nobody");
+    expect(notice).toContain("with no fall back to its roster");
+    // The cut-off board: never hears it, and the bound on how long that lasts. Without the
+    // bound the caveat reads as "out of service does nothing".
+    expect(notice).toContain("has also lost the network never hears it");
     expect(notice).toContain("roster it last downloaded");
-    expect(notice).toContain("may still get in until it goes stale");
+    expect(notice).toContain("up to six hours");
+    // And neither half stated flatly, with no condition attached to it.
+    expect(notice).not.toContain("The door opens for nobody.");
     expect(notice).not.toContain("stops opening");
-    expect(notice).not.toContain("opens for nobody");
-    // And the limit on the caveat, or it reads as "out of service does nothing".
-    expect(notice).toContain("nobody else will");
   });
 
   /**
@@ -133,19 +144,30 @@ describe("gateOutOfServiceNotice", () => {
 describe("gateOutOfServiceConfirm", () => {
   it("is exactly this", () => {
     expect(gateOutOfServiceConfirm()).toBe(
-      "Out of service? The API stops answering scans at this door. It may still open from its"
-      + " cached roster until that goes stale. No booking, check-in or no-show penalty changes.",
+      "Out of service? A door that can reach the API opens for nobody from this click. One that"
+      + " has also lost the network keeps admitting booked members from its cached roster for up to"
+      + " six hours. No booking, check-in or no-show penalty changes.",
     );
   });
 
-  it("carries both halves the notice carries, compressed rather than dropped", () => {
+  it("carries all three halves the notice carries, compressed rather than dropped", () => {
     const confirm = gateOutOfServiceConfirm();
+    expect(confirm).toContain("can reach the API opens for nobody");
     expect(confirm).toContain("cached roster");
+    expect(confirm).toContain("up to six hours");
     expect(confirm).toContain("No booking, check-in or no-show penalty changes");
   });
 
+  /**
+   * The confirm and the notice must agree about the cut-off door, which is the half a
+   * shorter sentence drops first — and dropping it is what would make this a promise the
+   * click cannot keep.
+   */
   it("does not claim more than the notice the click produces", () => {
-    expect(gateOutOfServiceConfirm()).not.toContain("stops opening");
+    const confirm = gateOutOfServiceConfirm();
+    expect(confirm).not.toContain("stops opening");
+    expect(confirm).toContain("has also lost the network");
+    expect(gateOutOfServiceNotice()).toContain("has also lost the network");
   });
 });
 
@@ -168,23 +190,68 @@ describe("gateDeleteConfirm", () => {
 
 describe("describeGatePolicy", () => {
   /**
-   * Both arms name the exemption, because it is the one an admin cannot guess and the one
-   * that matters at 6am: a user with no membership row is NOT barred, which is how an
-   * operator or a club admin opens a door at all.
+   * <b>The exemption is on one arm, and it is about admins, not about missing rows.</b>
+   *
+   * <p>
+   * It used to be printed on both, phrased as "accounts with no membership of their own,
+   * such as club admins and operators, always pass". Three things were wrong with that. The
+   * rule is `User.IsAdmin`; there is no operator role in this product at all; and under
+   * `active_member` every active member passes anyway, so an exemption there exempted
+   * nobody from anything — while being FALSE of the one account it could have mattered to,
+   * because a club admin whose own membership is suspended is barred like anybody else.
+   * </p>
    */
-  it("names the accounts that pass under either policy", () => {
+  it("exempts club admins only where there is something to be exempt from", () => {
+    const strict = describeGatePolicy("booking_window", 30);
+    expect(strict).toContain("Club admins always pass this booking check");
+    // And the limit on it, in the same breath: the barred check is not waived for an admin.
+    expect(strict).toContain("still turns anyone away, admin or not");
+
+    // Nothing of the sort under the open policy, where it would exempt nobody.
+    expect(describeGatePolicy("active_member", 30)).not.toContain("always pass");
+    expect(describeGatePolicy("active_member", 30)).not.toContain("admins");
+  });
+
+  /** There is no operator role in the product, so the word is in neither arm. */
+  it("never says operator, because no such role exists", () => {
     for (const policy of GATE_ACCESS_POLICIES) {
-      expect(describeGatePolicy(policy, 30)).toContain("club admins and operators, always pass");
+      expect(describeGatePolicy(policy, 30).toLowerCase()).not.toContain("operator");
     }
   });
 
   it("names the three membership states that are turned away under the open policy", () => {
     const open = describeGatePolicy("active_member", 30);
     expect(open).toBe(
-      "Any member whose code scans opens the door, unless their membership is suspended,"
-      + " pending approval or rejected. Accounts with no membership of their own, such as club"
-      + " admins and operators, always pass.",
+      "Any member whose own code scans opens the door at any hour, unless their membership is"
+      + " suspended, pending approval or rejected. A booking's QR is narrower: it opens a door only"
+      + " from about the time the member's phone starts showing that code until the booking ends,"
+      + " and not at all once the booking is cancelled.",
     );
+  });
+
+  /**
+   * <b>A booking code is not a standing building key.</b>
+   *
+   * <p>
+   * Under `active_member` a member's OWN code opens a door at any hour, and that is the
+   * policy working as named. A `BookingActivation` code is a different thing wearing the
+   * same shape: it opens a door only inside its own booking's window — from about the point
+   * the member's phone would show that code at all, to the booking's end — and not once the
+   * booking is cancelled. Nothing on this screen would let an admin guess that from the
+   * policy name, and the previous sentence positively implied the opposite by describing
+   * every code as "any member whose code scans".
+   * </p>
+   */
+  it("says a booking's QR is narrower than the member's own code, under the open policy", () => {
+    const open = describeGatePolicy("active_member", 30);
+    expect(open).toContain("own code scans opens the door at any hour");
+    expect(open).toContain("A booking's QR is narrower");
+    expect(open).toContain("until the booking ends");
+    expect(open).toContain("not at all once the booking is cancelled");
+    // No number: that horizon is the widest of three settings, so any figure printed here
+    // would be wrong for some club. "About" is the honest word and has to survive.
+    expect(open).toContain("from about the time");
+    expect(open).not.toMatch(/\d/);
   });
 
   /**
@@ -242,12 +309,66 @@ describe("gateOfflineFallbackNotice", () => {
     expect(gateOfflineFallbackNotice()).toBe(
       "When a door cannot reach the API it falls back to the roster it last downloaded, and"
       + " that roster holds bookings and nothing else. So while a door is offline, only members"
-      + " with an upcoming or running booking can get in — whichever policy is set below.",
+      + " with an upcoming or running booking can get in — whichever policy is set below. A door"
+      + " nobody has named yet is sent no roster at all, so it opens nothing while it is offline.",
     );
   });
 
   it("names the policy-independence explicitly, which is the part that surprises", () => {
     expect(gateOfflineFallbackNotice()).toContain("whichever policy is set");
+  });
+
+  /**
+   * The exception to the sentence above it, and the state every door in the club is in on
+   * install day: a heartbeat for a gate with a null key answers an empty roster, so
+   * "falls back to the roster it last downloaded" is flatly untrue of an unnamed door.
+   */
+  it("excepts the unnamed door, which has no roster to fall back to", () => {
+    expect(gateOfflineFallbackNotice()).toContain("nobody has named yet is sent no roster at all");
+  });
+});
+
+/**
+ * What an unnamed door cannot do — the Devices row, the door-name editor and the
+ * cleared-name toast all read this one generator.
+ *
+ * <p>
+ * Online scans work from the moment the board is plugged in, which is what keeps the
+ * install plug-and-play; the offline fallback is what waits for a name. The security
+ * reason is that anybody holding the club's one device key can self-register a gate with a
+ * random MAC, and handing that board the club-wide code set on its first heartbeat is the
+ * hole naming the door closes.
+ * </p>
+ */
+describe("unnamedGateOfflineNotice", () => {
+  it("is exactly this", () => {
+    expect(unnamedGateOfflineNotice()).toBe(
+      "Until you name this door it only works while it can reach the server: an unnamed door is"
+      + " sent an empty roster, so it opens nothing at all while it is offline.",
+    );
+  });
+
+  /**
+   * Both halves. The consequence alone reads as a bug report; the mechanism alone does not
+   * tell an admin what to do about it, and the thing to do is name the door.
+   */
+  it("says what is lost and what gets it back", () => {
+    const notice = unnamedGateOfflineNotice();
+    expect(notice).toContain("Until you name this door");
+    expect(notice).toContain("only works while it can reach the server");
+    expect(notice).toContain("sent an empty roster");
+    expect(notice).toContain("opens nothing at all while it is offline");
+  });
+
+  /**
+   * And it must NOT say the door does not work. It does: an unnamed door opens for whoever
+   * the live policy admits, on every scan the API answers. Saying otherwise would send an
+   * admin to look at hardware that is behaving exactly as designed.
+   */
+  it("does not claim an unnamed door is broken", () => {
+    const notice = unnamedGateOfflineNotice().toLowerCase();
+    expect(notice).not.toContain("does not work");
+    expect(notice).not.toContain("opens nothing at all until");
   });
 });
 

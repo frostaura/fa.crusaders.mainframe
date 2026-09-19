@@ -55,6 +55,31 @@ export function describeGate(gateKey: string | null): string {
 export const NEW_GATE_BADGE = "New — name this door";
 
 /**
+ * What an unnamed door cannot do, said wherever the unnamed state is visible.
+ *
+ * <p>
+ * A heartbeat for a Gate row whose `GateKey` is null answers `roster: []` — the key is
+ * present and empty. Online scans work from the moment the board is plugged in, so the
+ * install stays plug-and-play; the OFFLINE fallback is what does not exist until an admin
+ * has named the door. The reason is not tidiness: anybody holding the club's one device key
+ * can self-register a "gate" with a random MAC, and before this that handed them the
+ * club-wide code set on demand. Naming the door is the admin's acknowledgement that the
+ * board is theirs.
+ * </p>
+ *
+ * <p>
+ * It is keyed on the NAME being absent rather than on the "New" badge, which fires on
+ * `auto_registered`. Those two states overlap and are not the same one: an admin who clears
+ * a door's name has taken its roster away again, and a row that has been edited for some
+ * other reason no longer carries the badge while still having no name.
+ * </p>
+ */
+export function unnamedGateOfflineNotice(): string {
+  return "Until you name this door it only works while it can reach the server: an unnamed door is"
+    + " sent an empty roster, so it opens nothing at all while it is offline.";
+}
+
+/**
  * What taking a door out of service actually does, as the row notice and the toast both
  * say it.
  *
@@ -67,14 +92,19 @@ export const NEW_GATE_BADGE = "New — name this door";
  *       `!device.IsActive` on every `/api/v1/device/` route, and `/device/gate` is one of
  *       them, so from the instant the switch is thrown the server opens nothing at this
  *       door.</li>
- *   <li><b>The door may still open anyway, for a while.</b> This is the half worth being
- *       honest about. A 403 is not a refusal to the firmware — it is an outage, and the
- *       gate's documented response to any non-200 is to fall back to the roster it last
- *       downloaded. Its heartbeat is being refused too, so that roster stops being
- *       refreshed and eventually goes stale, and a stale roster admits nobody. Until then a
- *       member whose booking is in the cache can still get in. Saying "the door stops
- *       opening" flatly would be the same class of falsehood as the box side's "nobody can
- *       check in there", which survived three rounds.</li>
+ *   <li><b>Whether the door still opens depends on whether it can hear the refusal.</b>
+ *       This is the half worth being honest about, and it is a pair of halves rather than
+ *       one. A 403 is now AUTHORITATIVE for a gate: a board that reaches the API and is
+ *       refused denies the scan outright with no roster fallback, and a 403 on its
+ *       heartbeat commits an empty roster — so a door that is merely out of service, on a
+ *       working network, opens for nobody from the instant the switch is thrown. A board
+ *       that has ALSO lost the network never hears any of that. Every other failure
+ *       (401/404/408/429/5xx/0/malformed) still falls back to the roster it last
+ *       downloaded, so a cut-off door keeps admitting members with a booking in that cache
+ *       until it goes stale at six hours. Saying "the door stops opening" flatly would be
+ *       the same class of falsehood as the box side's "nobody can check in there", which
+ *       survived three rounds; saying only the cached-roster half is now the opposite
+ *       falsehood, and would have been true copy before this round.</li>
  *   <li><b>No money moves.</b> A gate decision never writes a booking, a `CheckedInAt`, a
  *       ledger entry or a settlement row, online or from the roster. That is worth stating
  *       rather than leaving out, because the identical control one row above — on a court
@@ -83,11 +113,12 @@ export const NEW_GATE_BADGE = "New — name this door";
  * </ol>
  */
 export function gateOutOfServiceNotice(): string {
-  return "The club is not alerted about its silence, and the API stops answering scans at this"
-    + " door, so it opens nothing from the instant the switch is thrown. The door keeps whatever"
-    + " roster it last downloaded, so a member with a booking already in that cache may still get"
-    + " in until it goes stale — nobody else will. Bookings, check-ins, refunds and no-show"
-    + " penalties are untouched either way: opening a door is not attendance.";
+  return "The club is not alerted about its silence, and the API refuses every scan at this door"
+    + " from the instant the switch is thrown. A door that can still reach the API hears that"
+    + " refusal and opens for nobody, with no fall back to its roster. A door that has also lost"
+    + " the network never hears it, and keeps admitting members with a booking from the roster it"
+    + " last downloaded until that goes stale, which takes up to six hours. Bookings, check-ins,"
+    + " refunds and no-show penalties are untouched either way: opening a door is not attendance.";
 }
 
 /**
@@ -95,14 +126,16 @@ export function gateOutOfServiceNotice(): string {
  *
  * <p>
  * Shorter than the notice — a confirm has room for one clause per consequence — but it must
- * not out-promise it: the pair on the box side disagreed twice, at different call sites,
- * about what the very next click would do. Both halves that vary are here, compressed: the
- * cached-roster caveat, and the fact that nothing settles.
+ * not out-promise it, and it must not UNDER-promise it either: the pair on the box side
+ * disagreed twice, at different call sites, about what the very next click would do. All
+ * three halves that vary are here, compressed: the reachable door that stops opening, the
+ * cut-off door that does not, and the fact that nothing settles.
  * </p>
  */
 export function gateOutOfServiceConfirm(): string {
-  return "Out of service? The API stops answering scans at this door. It may still open from its"
-    + " cached roster until that goes stale. No booking, check-in or no-show penalty changes.";
+  return "Out of service? A door that can reach the API opens for nobody from this click. One that"
+    + " has also lost the network keeps admitting booked members from its cached roster for up to"
+    + " six hours. No booking, check-in or no-show penalty changes.";
 }
 
 /**
@@ -130,27 +163,42 @@ export const GATE_POLICY_LABELS: Record<GateAccessPolicy, string> = {
  * What a policy does, in the words the hint beside the picker needs.
  *
  * <p>
- * Both arms name the accounts that pass either way, because that exemption is the one an
- * admin cannot guess and the one that matters at 6am: a user with no membership row is not
- * barred — that is how an operator or a club admin opens a door at all.
+ * <b>The staff exemption is named on ONE arm, and the word "operator" is gone from both.</b>
+ * There is no operator role in this product — the rule is `User.IsAdmin`, not "has no
+ * membership row", which was a fixture-shaped reading of a test that deleted the row to get
+ * there. And the exemption belongs only under `booking_window`, where it exempts somebody
+ * from something: under `active_member` every active member already passes, so printing an
+ * exemption there would describe a privilege that changes no outcome — while being FALSE of
+ * the one admin it could matter to, since a club admin whose own membership is suspended is
+ * barred exactly like anybody else.
+ * </p>
+ *
+ * <p>
+ * <b>Both arms say what a booking's own QR can do</b>, because that is the half nobody would
+ * guess from a policy name: a booking code is not a standing building key, and it opens a
+ * door only inside its own booking's window whichever policy is set.
  * </p>
  *
  * <p>
  * The early-entry number is interpolated rather than described, because it is the setting
  * directly below and an admin reading "within the early-entry window" has to scroll and do
- * arithmetic to learn what they have actually chosen.
+ * arithmetic to learn what they have actually chosen. The `active_member` arm deliberately
+ * does NOT interpolate a number: that horizon is the widest of the early-entry minutes and
+ * the roster and cue windows together, so any single figure printed there would be wrong for
+ * some club.
  * </p>
  */
 export function describeGatePolicy(policy: GateAccessPolicy, earlyEntryMinutes: number): string {
   if (policy === "booking_window") {
     return `Only a member whose booking has already started, or starts within the next`
       + ` ${earlyEntryMinutes} ${earlyEntryMinutes === 1 ? "minute" : "minutes"}, and has not yet`
-      + ` ended — on any court. Anyone else is turned away. Accounts with no membership of their`
-      + ` own, such as club admins and operators, always pass.`;
+      + ` ended — on any court. Anyone else is turned away. Club admins always pass this booking`
+      + ` check; a suspended, pending or rejected membership still turns anyone away, admin or not.`;
   }
-  return "Any member whose code scans opens the door, unless their membership is suspended,"
-    + " pending approval or rejected. Accounts with no membership of their own, such as club"
-    + " admins and operators, always pass.";
+  return "Any member whose own code scans opens the door at any hour, unless their membership is"
+    + " suspended, pending approval or rejected. A booking's QR is narrower: it opens a door only"
+    + " from about the time the member's phone starts showing that code until the booking ends,"
+    + " and not at all once the booking is cancelled.";
 }
 
 /**
@@ -163,9 +211,17 @@ export function describeGatePolicy(policy: GateAccessPolicy, earlyEntryMinutes: 
  * booking-only the moment a door loses the network. An admin who does not know that reads
  * a member locked out during an outage as a broken lock.
  * </p>
+ *
+ * <p>
+ * The unnamed-door clause is here rather than only on the Devices page because this block is
+ * where a club decides what its doors do: a heartbeat for a gate with no name answers an
+ * empty roster, so "falls back to the roster it last downloaded" is flatly untrue of a door
+ * nobody has named, and that is the state every door in the club is in on install day.
+ * </p>
  */
 export function gateOfflineFallbackNotice(): string {
   return "When a door cannot reach the API it falls back to the roster it last downloaded, and"
     + " that roster holds bookings and nothing else. So while a door is offline, only members"
-    + " with an upcoming or running booking can get in — whichever policy is set below.";
+    + " with an upcoming or running booking can get in — whichever policy is set below. A door"
+    + " nobody has named yet is sent no roster at all, so it opens nothing while it is offline.";
 }
