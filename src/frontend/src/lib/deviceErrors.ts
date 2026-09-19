@@ -1,13 +1,20 @@
 import { ApiError } from "./api";
 import { RELAYS } from "../components/ButtonMapEditor";
+import {
+  GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
+  GATE_UNLOCK_MAX_SECONDS, GATE_UNLOCK_MIN_SECONDS,
+} from "./tenantSettings";
 
 /**
  * Device refusals, turned into sentences an admin can act on.
  *
  * <p>
- * Shared by the Devices page and the device API key panel rather than living on one of
- * them, because both talk to the same endpoints and a refusal decoded in only one place
- * is a toast reading `court_number_not_found` in the other.
+ * Shared by the Devices page, the device API key panel and — for the door-gate numbers —
+ * the Settings page, rather than living on one of them, because they talk to the same
+ * endpoints and a refusal decoded in only one place is a toast reading
+ * `court_number_not_found` in the other. The Settings page used to decode its own
+ * refusals by swapping underscores for spaces, which is why a bad gate value would have
+ * read `gate unlock seconds out of range` and said nothing about the bound.
  * </p>
  *
  * <p>
@@ -29,6 +36,26 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
   // relay's hard cap. The editor bounds the field, so this is a map that arrived from
   // somewhere else, or a hand-edited one.
   button_map_invalid: "One of the buttons is set to something a box cannot do. Court is A–D and a grant is 1–90 minutes.",
+
+  // --- door gates -------------------------------------------------------------------
+  //
+  // A row's kind is set by the board's first heartbeat and is not editable, so both of
+  // these mean the screen offered an editor for the wrong kind of board — which is a
+  // frontend defect, not something an admin mistyped. The copy says what to do anyway,
+  // because the one way it reaches an admin for a legitimate reason is a row that was
+  // deleted and re-registered as the other kind while the form was open.
+  gate_key_not_a_gate: `A door name only belongs on a door gate, and this row is a court box. Refresh the page — if the board really is a door, delete the row and let it register itself again.`,
+  court_fields_on_a_gate: "Courts and button maps belong on a court box, and this row is a door gate. A door drives no courts. Refresh the page and edit the door's name instead.",
+
+  // The three tenant numbers, each named with the bound the API holds, because
+  // "out of range" alone leaves an admin guessing which end they went past.
+  gate_unlock_seconds_out_of_range: `Unlock time has to be between ${GATE_UNLOCK_MIN_SECONDS} and ${GATE_UNLOCK_MAX_SECONDS} seconds. A door never holds the lock open longer than ${GATE_UNLOCK_MAX_SECONDS} seconds whatever is set here.`,
+  gate_early_entry_minutes_out_of_range: `Early entry has to be between ${GATE_EARLY_ENTRY_MIN_MINUTES} and ${GATE_EARLY_ENTRY_MAX_MINUTES} minutes.`,
+  // GUESSED TOKEN. The contract names the other two refusals and the two admin-device ones
+  // but never spells the invalid-policy one, so this follows the `<key>_invalid` shape
+  // `button_map_invalid` already uses. If the API answers something else the fallback below
+  // still shows the server's own `message`, so a mismatch degrades rather than misleads.
+  gate_access_policy_invalid: "Who may open a door has to be either “Any member in good standing” or “Only a member with a booking”. Pick one and save again.",
 };
 
 const MAP_MISMATCH_GENERIC =

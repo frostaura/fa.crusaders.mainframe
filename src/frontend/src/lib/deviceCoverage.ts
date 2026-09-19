@@ -1,4 +1,4 @@
-import type { AdminDevice } from "./api";
+import { isGate, type AdminDevice } from "./api";
 
 /**
  * What a court box's courts are left with when that box is out of service, and the sentences
@@ -108,6 +108,18 @@ export type ReportingPredicate = (device: AdminDevice) => boolean;
  * below see the split and nothing else, so a clause that names boxes has to be handed the
  * number of boxes or it will end up counting courts, which is exactly what round 9 shipped.
  * </p>
+ *
+ * <p>
+ * <b>A door gate is not a box and is invisible to every line of this.</b> It is excluded twice
+ * over — as a subject, which answers the empty coverage whatever else is on the row, and as a
+ * candidate cover, so a door hanging on a court's wall never counts as the box that keeps that
+ * court's no-shows penalised. The API keeps `court_numbers` empty on a Gate row and refuses it
+ * on an update, so both filters look redundant today; they are the thing that makes them
+ * redundant. A gate arriving with a stray court number — from a hand-edited row, an older API,
+ * or the next kind of board after this one — would otherwise be read here as a court box, and
+ * the failure would be silent and monetary: a court reported as covered by hardware that has
+ * never switched a light on in its life, with its no-show penalties charged on that basis.
+ * </p>
  */
 export function coverageWithout(
   device: AdminDevice,
@@ -119,8 +131,9 @@ export function coverageWithout(
   const covered: number[] = [];
   const quiet = new Set<string>();
   const reporting = new Set<string>();
-  for (const court of device.court_numbers) {
-    const others = devices.filter((d) => d.id !== device.id && d.enabled && d.court_numbers.includes(court));
+  const courts = isGate(device) ? [] : device.court_numbers;
+  for (const court of courts) {
+    const others = devices.filter((d) => d.id !== device.id && d.enabled && !isGate(d) && d.court_numbers.includes(court));
     const live = others.filter((d) => isReporting(d));
     if (live.length > 0) {
       covered.push(court);
