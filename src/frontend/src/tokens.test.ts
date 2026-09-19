@@ -138,6 +138,68 @@ describe("the armed confirm can be read", () => {
 });
 
 /**
+ * WCAG 2.1 SC 1.4.11, Non-text Contrast — the criterion nothing in this repo measured.
+ *
+ * <p>
+ * Every text field, select and outline button in the product drew its boundary in the `border`
+ * token: <b>1.23:1</b> on the white behind it, where the criterion asks 3:1 for the visual
+ * boundary of a user-interface component. An empty text field has nothing but its outline to
+ * say that it is a field, so at that ratio there was, for a good many people, no field on the
+ * screen — a label with nothing under it.
+ * </p>
+ *
+ * <p>
+ * The floor is 3:1, not 4.5:1: 1.4.11 is about perceiving a boundary, not reading text. And it
+ * is measured against every background a control is set on, because the first value that
+ * passes on white can still fail on a muted card, which is how this sort of fix half-lands.
+ * </p>
+ */
+describe("a control's boundary can actually be seen", () => {
+  /** SC 1.4.11. Non-text, so the body floor does not apply — and neither does the relaxation. */
+  const AA_NON_TEXT = 3;
+
+  for (const [name, bgHex] of Object.entries({
+    "bg.surface": palette.bg.surface,
+    "bg.app": palette.bg.app,
+    "bg.muted": palette.bg.muted,
+  })) {
+    it(`control on ${name}`, () => {
+      expect(contrast(palette.control, bgHex)).toBeGreaterThanOrEqual(AA_NON_TEXT);
+    });
+  }
+
+  it("the decorative border token is still allowed to be quiet", () => {
+    // Deliberately NOT held to 3:1. A card edge and a table rule are decoration in WCAG's
+    // sense; raising them too would turn every surface in the product into a wireframe. The
+    // point of splitting the token was to stop one rule having to serve both jobs.
+    expect(contrast(palette.border, palette.bg.surface)).toBeLessThan(AA_NON_TEXT);
+  });
+
+  it("is distinguishable from the decorative one, or splitting them achieved nothing", () => {
+    expect(contrast(palette.control, palette.border)).toBeGreaterThan(2);
+  });
+
+  it("no form control draws its boundary with the decorative token", () => {
+    /*
+     * The source check, because the measurement above only proves the token is good — not
+     * that anything uses it. This was twelve verbatim copies of one class string across nine
+     * files, so "fixed the Input component" would have fixed one of twelve.
+     */
+    const offenders: string[] = [];
+    for (const file of listSources("components").concat(listSources("pages"))) {
+      if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue;
+      const body = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+      // A className string that dresses a control — h-11 is this product's control height —
+      // and still reaches for the decorative border.
+      for (const m of body.matchAll(/"[^"]*\bh-11\b[^"]*"/g)) {
+        if (/\bborder-border\b/.test(m[0])) offenders.push(`${file.split("/src/")[1]}: ${m[0].slice(0, 70)}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
+/**
  * Every consumer still derives from the token module.
  *
  * These are the tests that would have caught the three-way drift. Each one fails the moment

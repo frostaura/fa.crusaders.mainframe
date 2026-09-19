@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Modal } from "./Modal";
-import { Button, Label } from "./Button";
+import { Button, Label, fieldClassName } from "./Button";
 import { CostSummary, OverdraftNotice, Refusal, ShortfallPrompt } from "./BookingConfirmParts";
 import { formatCredits } from "../lib/utils";
 
@@ -269,7 +269,7 @@ function AdminOptions(props: {
   members: { userId: string; name: string }[];
 }) {
   const { mode, setMode, memberId, setMemberId, blockLabel, setBlockLabel, members } = props;
-  const field = "w-full h-11 px-3 rounded-lg border border-border bg-bg-surface";
+  const field = fieldClassName;
   return (
     <div className="mb-4 space-y-2">
       <Label htmlFor="booking-mode">Book this as</Label>

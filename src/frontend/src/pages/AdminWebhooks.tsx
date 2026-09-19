@@ -3,7 +3,7 @@ import { Check, Copy, Plus, X } from "lucide-react";
 import { ApiError, endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
 import { describeFailure } from "../lib/errors";
 import { Card } from "../components/Card";
-import { Badge, Button, Input, Label } from "../components/Button";
+import { Badge, Button, Input, Label, fieldClassName } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { useToast } from "../components/Toast";
@@ -619,7 +619,8 @@ function TemplateInput({
         value={value}
         placeholder={placeholder}
         className={cn(
-          "w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary placeholder:text-text-muted",
+          fieldClassName,
+          "placeholder:text-text-muted",
           "focus:outline-none focus:ring-2 focus:ring-accent-strong focus:border-accent-strong",
           "font-mono text-sm",
         )}

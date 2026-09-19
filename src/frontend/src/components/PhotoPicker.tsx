@@ -185,7 +185,7 @@ export function PhotoPicker({
       />
 
       {chosen ? (
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-surface p-3 peer-focus-visible:ring-2 peer-focus-visible:ring-accent-strong peer-focus-visible:ring-offset-2">
+        <div className="flex items-center gap-3 rounded-lg border border-control bg-bg-surface p-3 peer-focus-visible:ring-2 peer-focus-visible:ring-accent-strong peer-focus-visible:ring-offset-2">
           {preview ? (
             <img
               src={preview}
@@ -212,7 +212,7 @@ export function PhotoPicker({
           <div className="flex shrink-0 gap-1">
             <label
               htmlFor={inputId}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border text-text-secondary hover:bg-bg-muted"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-control text-text-secondary hover:bg-bg-muted"
               title="Choose a different photo"
             >
               <RefreshCw size={16} aria-hidden="true" />
@@ -222,7 +222,7 @@ export function PhotoPicker({
               type="button"
               onClick={clear}
               disabled={disabled}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border text-text-secondary hover:bg-bg-muted"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-control text-text-secondary hover:bg-bg-muted"
               title="Remove this photo"
             >
               <X size={16} aria-hidden="true" />
@@ -239,7 +239,7 @@ export function PhotoPicker({
           className={cn(
             "flex min-h-[7rem] w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-4 text-center",
             "peer-focus-visible:ring-2 peer-focus-visible:ring-accent-strong peer-focus-visible:ring-offset-2",
-            dragging ? "border-accent-strong bg-accent-soft" : "border-border bg-bg-muted hover:bg-bg-muted/70",
+            dragging ? "border-accent-strong bg-accent-soft" : "border-control bg-bg-muted hover:bg-bg-muted/70",
             (disabled || busy) && "opacity-60",
             problem && !dragging && "border-danger-strong",
           )}

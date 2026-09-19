@@ -5,7 +5,7 @@ import {
   operatingHoursComplaint, parseDayHours, timezoneOptions, type DayHours, type DayKey,
 } from "../lib/tenantSettings";
 import { Card } from "../components/Card";
-import { Button, Input, Label } from "../components/Button";
+import { Button, Input, Label, fieldClassName } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useToast } from "../components/Toast";
 
@@ -102,7 +102,7 @@ export default function AdminSettingsPage() {
             <select
               value={settings.timezone}
               onChange={(e) => setSettings({ ...settings, timezone: e.target.value })}
-              className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+              className={fieldClassName}
             >
               {timezoneOptions(settings.timezone).map((tz) => <option key={tz} value={tz}>{tz}</option>)}
             </select>

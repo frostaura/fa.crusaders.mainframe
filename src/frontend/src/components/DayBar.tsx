@@ -1,4 +1,4 @@
-import { Button } from "./Button";
+import { Button, fieldClassName } from "./Button";
 
 function formatDayOfWeek(ymdDate: string): string {
   const [y, m, d] = ymdDate.split("-").map(Number);
@@ -32,7 +32,7 @@ export function DayBar({ date, bounds, loading, onDate, onRefresh }: {
         min={bounds.min}
         max={bounds.max}
         onChange={(e) => onDate(e.target.value)}
-        className="h-11 px-3 rounded-lg border border-border bg-bg-surface"
+        className={fieldClassName}
       />
       <Button variant="ghost" onClick={onRefresh} disabled={loading}>{loading ? "Loading…" : "Refresh"}</Button>
       <span className="ml-auto text-sm font-medium text-text-secondary">{formatDayOfWeek(date)}</span>

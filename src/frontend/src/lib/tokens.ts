@@ -35,7 +35,32 @@ export const palette = {
     surface: "#FFFFFF",
     muted: "#F1F5F9",
   },
+  /**
+   * Hairlines that separate, but do not have to be perceived: card edges, table rules,
+   * dividers. Purely decorative in WCAG's sense, so 1.23:1 on white is a design choice.
+   */
   border: "#E2E8F0",
+  /**
+   * The boundary of a control a person has to find and operate — a text field, a select, a
+   * drop target.
+   *
+   * <p>
+   * NOT `border`. Every input in the product drew its edge in `#E2E8F0`, which measures
+   * <b>1.23:1</b> on the white it sits on. WCAG 2.1 SC 1.4.11 (Non-text Contrast) asks for
+   * 3:1 on the visual boundary of a user-interface component, and that success criterion
+   * exists for exactly this: an empty text field whose only indication that it is a field is
+   * its outline. At 1.23:1 there is, for a good many people, no field on the screen at all —
+   * just a label with nothing under it.
+   * </p>
+   *
+   * <p>
+   * `#7C8DA4` is the lightest value on this ramp that clears 3:1 against all three background
+   * tokens a control is ever set on — 3.39:1 on `bg.surface`, 3.24:1 on `bg.app`, 3.09:1 on
+   * `bg.muted` — rather than the first value that passed on white and quietly failed on the
+   * muted cards. All three are measured in `tokens.test.ts`.
+   * </p>
+   */
+  control: "#7C8DA4",
   text: {
     primary: "#0F172A",
     secondary: "#475569",

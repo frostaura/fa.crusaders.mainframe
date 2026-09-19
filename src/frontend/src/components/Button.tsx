@@ -22,7 +22,9 @@ export function Button({
      */
     primary: "bg-brand-strong text-brand-ink border border-brand-strong hover:bg-brand-strong/90",
     ghost: "bg-transparent text-text-secondary hover:bg-bg-muted",
-    outline: "border border-border bg-bg-surface hover:bg-bg-muted",
+    // `border-control`: an outline button's boundary IS the button — there is no fill to see
+    // it by — so SC 1.4.11's 3:1 applies to it more plainly than to anything else here.
+    outline: "border border-control bg-bg-surface hover:bg-bg-muted",
     danger: "bg-danger-soft text-danger-strong border border-danger-soft hover:bg-danger-soft/70",
   };
   // The hover lift, the pressed state, the cursor and the focus ring all come from the
@@ -59,17 +61,42 @@ export function Button({
   );
 }
 
+/**
+ * What a control that a person types into or picks from looks like.
+ *
+ * <p>
+ * Exported, because this exact string was written out at twelve sites across nine files — every
+ * bare `<input type="date">` and every native `<select>` that did not reach for `Input`. Two
+ * consequences, and the second is the one that mattered. It drifted: some copies carried
+ * `text-text-primary`, some did not, one carried a focus ring the rest lacked. And it carried
+ * `border-border` — <b>1.23:1</b> against the white behind it, where WCAG 2.1 SC 1.4.11 asks
+ * 3:1 for the boundary of a user-interface component. An empty text field has nothing but its
+ * outline to say it is a field; at 1.23:1 there was, for a good many people, no field there.
+ * Twelve places to fix that one at a time, or one.
+ * </p>
+ *
+ * <p>
+ * `border-control`, not `border-border`: a card edge and a text field have different jobs and
+ * only one of them is a control. See `control` in lib/tokens.ts.
+ * </p>
+ */
+export const fieldClassName = cn(
+  "w-full h-11 px-3 rounded-lg border border-control bg-bg-surface text-text-primary placeholder:text-text-muted",
+  "focus:outline-none focus:ring-2 focus:ring-accent-strong focus:border-accent-strong",
+);
+
 export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      className={cn(
-        "w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary placeholder:text-text-muted",
-        "focus:outline-none focus:ring-2 focus:ring-accent-strong focus:border-accent-strong",
-        className
-      )}
-      {...props}
-    />
-  );
+  return <input className={cn(fieldClassName, className)} {...props} />;
+}
+
+/**
+ * The native select, wearing the same clothes as {@link Input}.
+ *
+ * A `<select>` was hand-rolled at every one of its eleven call sites, which is why some of them
+ * had a focus ring and some did not.
+ */
+export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select className={cn(fieldClassName, className)} {...props} />;
 }
 
 export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {

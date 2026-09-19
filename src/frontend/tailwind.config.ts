@@ -30,6 +30,8 @@ const config: Config = {
       colors: {
         bg: palette.bg,
         border: { DEFAULT: palette.border },
+        // The 3:1 boundary for controls — see `control` in tokens.ts.
+        control: { DEFAULT: palette.control },
         text: palette.text,
         success: palette.success,
         info: palette.info,

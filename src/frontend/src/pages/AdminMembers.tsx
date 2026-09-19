@@ -8,7 +8,7 @@ import {
 import { describeFailure } from "../lib/errors";
 import { notifyPendingApplicationsChanged } from "../lib/pendingApplications";
 import { Card } from "../components/Card";
-import { Badge, Button, Input, Label } from "../components/Button";
+import { Badge, Button, Input, Label, fieldClassName } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { Modal } from "../components/Modal";
 import { ScrollArea } from "../components/ScrollArea";
@@ -369,7 +369,7 @@ export default function AdminMembersPage() {
               id="status"
               value={status}
               onChange={(e) => setStatus(e.target.value as StatusFilter)}
-              className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+              className={fieldClassName}
             >
               {STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
@@ -1165,7 +1165,7 @@ function RelatedBookingField(
         id="credit-booking"
         value={choice}
         onChange={(e) => pick(e.target.value)}
-        className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+        className={fieldClassName}
       >
         <option value="">Not for a specific booking</option>
         {recent === null && <option value="loading" disabled>Loading recent bookings…</option>}
@@ -1383,7 +1383,7 @@ function BiometricModal({
           <select
             value={fingerLabel}
             onChange={(e) => setFingerLabel(e.target.value)}
-            className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-strong focus:border-accent-strong"
+            className={fieldClassName}
           >
             {FINGER_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
           </select>
