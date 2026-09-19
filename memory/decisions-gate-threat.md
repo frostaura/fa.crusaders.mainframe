@@ -24,18 +24,23 @@ to assume a door is held to a higher standard than the court box it was built fr
   booking's window at every door rather than a standing key; the device API key is worth more than
   any code, and rotating it is the club's remedy. Nothing identifies the person presenting a code,
   so `gate.opened` names *whose code it was* — not who walked through, and not attendance.
-- **The audit trail is not a credential store.** The online path left the token out of
-  `gate.opened` from the start; the OFFLINE path wrote it in full. `gate_open` and `unknown_scan`
-  details now carry an eight-hex SHA-256 fingerprint of the normalised code instead, which keeps
-  the only property worth keeping — two scans of one code still correlate — while nothing
-  reversible survives. Keyed on the KIND rather than the sending row's kind, deliberately wider
-  than the finding: a court box posting `gate_open` is refused `not_a_gate`, but its token is just
-  as live, and a guard depending on the sender being honest about itself is not a guard. A court
-  box's own `activation` events are untouched; narrowing those is a separate decision about the
-  court-box trail. **`RetentionWorker` anonymises a row's SUBJECT and never touches `DetailsJson`,
-  so rows written before this change still hold their tokens** — nothing rewrites them, and the
-  remedy is the one the console already offers for a leaked roster.
-- **Two residuals are stated rather than engineered around.** The roster is capped at 48 after
-  ordering, so a club with more bookings in its window has a **49th member no door admits
-  offline**; and a roster is a snapshot, so a suspension, cancellation or sweep after the push
-  does not reach the board until the next heartbeat.
+- **The audit trail is not a credential store, and the guard is keyed on NOTHING.** The online
+  path left the token out of `gate.opened` from the start; the OFFLINE path wrote it in full.
+  Details now carry an eight-hex SHA-256 fingerprint of the normalised code, which keeps the only
+  property worth keeping — two scans of one code still correlate. It was keyed on the two DOOR
+  kinds, and that was wrong twice. Mechanically: it read `e.Kind` raw while everything else read
+  it trimmed, so `" gate_open "` was audited as an honest door event with the live code beside it.
+  In substance: an `activation` token was exempted as "the roster token for a booking the receipt
+  already names", which stopped being true the moment the door shipped, because that token opens
+  every door in the club for its booking's window. The kind is now normalised once and **every**
+  subject is fingerprinted. **`RetentionWorker` anonymises a row's SUBJECT and never touches
+  `DetailsJson`, so rows written before this still hold their tokens** — which is why the activity
+  reader VALIDATES the field's shape rather than forwarding it.
+- **A 403 from the GATEWAY would take every door out of service**, until each board's next
+  accepted heartbeat, with nothing red: the firmware obeys that status and the application-level
+  pin does not reach `nginx`. The shipped `nginx.conf` carries no `deny` and no `return 403`, and
+  is pinned to keep it that way. Anything in front of the gateway is outside both.
+- **Three residuals are stated rather than engineered around.** The roster is capped at 48 after
+  ordering, so a club with more bookings has a **49th member no door admits offline**; a roster is
+  a snapshot, so a suspension or sweep after the push does not reach the board until the next
+  heartbeat; and nothing purges `device_event_receipts` or `audit_log` ([`watch-doors.md`](watch-doors.md)).

@@ -1501,6 +1501,78 @@ public class DeviceGateTests
         Assert.Equal(opensIn.OrderBy(x => x), opensIn);
     }
 
+    /// <summary>
+    /// <b>WHO is locked out when a club overflows the cap, and that it is the same people
+    /// every time.</b>
+    ///
+    /// <para>
+    /// The cap is a real lockout: on a busy night a booking beyond the forty-eighth cannot get
+    /// in while the door is offline, and the club needs to be able to say which bookings those
+    /// are. The answer is <c>StartsAt</c> then <c>Id</c>, cap after ordering — so it is the
+    /// LATEST-STARTING bookings that fall off, ties broken by a value that never changes.
+    /// </para>
+    ///
+    /// <para>
+    /// The tie-break is what makes the sentence true rather than approximately true. A club
+    /// with sixty bookings in its window very plausibly has a dozen starting on the same slice
+    /// boundary, and a cap applied to an unstable order sends a different forty-eight on every
+    /// heartbeat — so a member is in the cache at 18:00, out of it at 18:01, and nobody can
+    /// tell them which they will be. Every booking here starts at exactly the same instant, so
+    /// nothing BUT the tie-break decides, and the roster is asked twice to say that the answer
+    /// is stable rather than merely correct once.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_overflow_locks_out_the_latest_starting_bookings_deterministically()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var now = DateTimeOffset.UtcNow;
+        var settings = Policy(f, GateAccessPolicies.ActiveMember);
+        const int Cap = DeviceGateRosterBuilder.GateRosterMaxEntries;   // 48
+        const int Earlier = 40;
+        const int Tied = 24;                                            // 64 in the window
+
+        // Forty, each a minute apart, so StartsAt alone orders them and every one fits.
+        var earlier = new List<Booking>();
+        for (var i = 0; i < Earlier; i++)
+        {
+            earlier.Add(await BookAsync(f, f.Host.Courts[i % 4], now.AddMinutes(1 + i), minutes: 5));
+        }
+
+        // Twenty-four on ONE slice boundary, which is the shape a busy club really has. Eight
+        // of them fit; nothing but the tie-break can decide which.
+        var sameInstant = new List<Booking>();
+        for (var i = 0; i < Tied; i++)
+        {
+            sameInstant.Add(await BookAsync(f, f.Host.Courts[i % 4], now.AddMinutes(90), minutes: 5));
+        }
+
+        var roster = await RosterAsync(f, settings, now);
+        Assert.Equal(Cap, roster.Count);
+        var tokens = roster.Select(TokenOf).ToList();
+
+        // Every earlier booking is in, so the whole overflow falls among the tied ones.
+        foreach (var booking in earlier) Assert.Contains(await CodeOfAsync(f, booking), tokens);
+
+        // Among the tied, the survivors are the lowest Ids: the documented tie-break, and the
+        // sixteen locked out are the ones the console's sentence is about.
+        var byId = sameInstant.OrderBy(b => b.Id).ToList();
+        for (var i = 0; i < byId.Count; i++)
+        {
+            var code = await CodeOfOrEmptyAsync(f, byId[i]);
+            if (i < Cap - Earlier) Assert.Contains(code, tokens);
+            else Assert.DoesNotContain(code, tokens);
+        }
+
+        // Asked again, at the same instant: the SAME forty-eight, in the same order. A cap
+        // applied to an unstable order would send a different set on every heartbeat and
+        // nobody could tell a member which one they were in.
+        Assert.Equal(roster, await RosterAsync(f, settings, now));
+    }
+
     /// <summary>A booking beyond the cap is never minted a code by the roster, so "its code" may not exist.</summary>
     private static async Task<string> CodeOfOrEmptyAsync(Fixture f, Booking booking) =>
         (await f.Db.AccessCodes.AsNoTracking().FirstOrDefaultAsync(c => c.BookingId == booking.Id))?.Code ?? "";

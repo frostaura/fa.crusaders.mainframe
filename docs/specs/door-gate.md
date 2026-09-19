@@ -243,6 +243,22 @@ every board, not slack in an estimate.
 An entry whose token would breach the length bound is **left out** rather than sent to be
 refused: a token cut short matches a different member.
 
+### Who is locked out when a club overflows the cap
+
+The cap is a real lockout and the club is owed a sentence about it: **on a busy night the
+bookings beyond the forty-eighth cannot get in while the door is offline.** Which ones is
+deterministic — the list is ordered by `StartsAt`, ties broken by `Id`, and the cap is applied
+**after** the ordering, so it is the **latest-starting** bookings that fall off.
+
+The tie-break is what makes that true rather than approximately true. A club with sixty
+bookings in its window very plausibly has a dozen starting on the same slice boundary, and a
+cap applied to an unstable order sends a different forty-eight on every heartbeat — a member
+is in the cache at 18:00, out of it at 18:01, and nobody can tell them which they will be.
+
+The console's sentence, for the settings and devices pages, is exactly this: *the offline list
+holds at most 48 bookings; on a busy night the latest-starting beyond 48 cannot get in while
+the door is offline.*
+
 ---
 
 ## 5. The scan — `POST /api/v1/device/gate`
@@ -680,6 +696,34 @@ record. Without it, anything holding the club key with a box's MAC could post an
 access code and have the trail say that person opened a door — for a door that does not exist.
 A false record of who was in the building is a worse artefact than a refusal.
 
+### An offline `unknown_scan` names nobody, and that is structural
+
+A gate queues `unknown_scan` for a scan its **cached roster did not carry**. By construction
+the server cannot then name the member either: if the token were resolvable it would have been
+in the roster the board was holding, and the board would have opened the door. So the row has
+`SubjectUserId = null` and a fingerprint, always — that is not a gap to be closed later and it
+is worth stating, because the activity reader (§9) shows these rows and "unknown code ·
+`1f4c9ab2`" is all a console can honestly render. The fingerprint is what makes them useful:
+the same badge at the same door eleven times is a pattern the desk can act on without anybody
+being named.
+
+### Residual: `/events` receipts and audit rows are never purged
+
+`RetentionWorker` anonymises a member's identity on old rows; nothing **deletes**
+`device_event_receipts` or `audit_log`. A busy club's door therefore accumulates rows for as
+long as the deployment lives. Nothing in this round changes that, and it is recorded rather
+than left to be discovered:
+
+- the activity reader bounds what one request can pull (§9, `limit` ≤ 200) but the table
+  underneath it grows without limit;
+- there is no index on `details_json`, which is what that route matches a board on;
+- the receipts table is what makes an event upload idempotent, so a purge is not merely a
+  delete — it has to be older than any board could still be retrying, which is
+  `MaxEventAge`'s thirty days at least.
+
+Carried on the watch list as `B8`. It is a capacity and cost question rather than a
+correctness one, which is why it is a residual and not a fix.
+
 ---
 
 ## 7. What a gate may not do, and what a board out of service may not do
@@ -736,7 +780,19 @@ board can provoke.
 The one documented exception is a **400**, not a 403, and is deliberate: an unrecognised `kind`
 on the heartbeat is refused before the MAC is resolved (§3), so a disabled board sending one is
 told its firmware is wrong rather than that it is out of service. A 400 is not a status D4 acts
-on.
+on. The registration cap (§8's fourth rule) answers **409** for the same reason, stated there.
+
+**That pin is APPLICATION-LEVEL, and the boards do not talk to the application.** They talk to
+`nginx`. A gateway rule that answered `403` for any reason at all — an IP allow-list, a rate
+limiter configured to forbid rather than to `429`, a WAF snippet pasted in during an incident —
+would take **every door in the club out of service at once**, and keep them there until each
+board's next ACCEPTED heartbeat: no code change, no API deploy, nothing red, and a symptom
+("all the doors stopped working") that points at the application rather than at the file that
+caused it. `nginx/nginx.conf` has no `deny` directive and no `return 403` today, and
+`DeploymentPostureTests.The_gateway_never_answers_forbidden_itself` is what keeps it that way.
+Anything in front of the gateway — a reverse proxy at the club, a tunnel, a CDN — is outside
+this repository and outside that check, and the same reasoning applies to it: on the device
+surface, `403` is a word the firmware obeys.
 
 **The residual, stated because it is real and because nobody should discover it during an
 incident:** this only reaches a board that can still reach us. A gate that has been **cut off**
@@ -1193,6 +1249,7 @@ new sentence above with no row is the defect this table exists to expose.
 | Every roster entry is on relay 0 | `DeviceGateTests.Every_gate_roster_entry_is_on_relay_zero` |
 | `opens_in` counts to `StartsAt − early` and goes negative | `DeviceGateTests.The_relative_seconds_are_measured_…`, `…The_roster_arithmetic_holds_at_every_minute_of_the_day` |
 | The cap is 48, applied after ordering | `DeviceGateTests.The_cap_keeps_the_forty_eight_earliest`, `…The_cap_is_forty_eight_and_the_grammar_bounds_the_token` |
+| The overflow is the LATEST-STARTING bookings, ties by `Id`, and the same set on every heartbeat | `DeviceGateTests.The_overflow_locks_out_the_latest_starting_bookings_deterministically` |
 | The 4096 budget is declared against the widest possible body | `DeviceGateProtocolCorpusTests.The_byte_budget_is_declared_against_the_widest_body_the_server_can_emit` |
 | An over-long token is left out, not truncated | `DeviceGateTests.The_cap_is_forty_eight_and_the_grammar_bounds_the_token` |
 | The roster window is `roster_window + early_entry` either side | `DeviceGateTests.Bookings_just_outside_the_roster_window_are_absent_and_just_inside_are_present` |
@@ -1249,6 +1306,7 @@ new sentence above with no row is the defect this table exists to expose.
 | An unnamed board is pushed no roster; naming it starts the fallback | `DeviceGateHttpTests.An_unnamed_gate_is_pushed_no_roster_until_an_admin_names_the_door` |
 | A board out of service is 403 on the heartbeat as well as the scan | `DeviceGateHttpTests.A_gate_taken_out_of_service_is_refused_on_the_heartbeat_too`, `…The_board_identity_failures_keep_their_own_shapes` |
 | …and on this surface a 403 can mean NOTHING ELSE | `DeviceForbiddenMeansOutOfServiceTests` (five tests: the group's routes and policy, the scheme's role claim, the source of everything that serves or wraps it, no refusal a working board can provoke, and the forward direction on all five routes) |
+| …and the GATEWAY in front of it never answers 403 either | `DeploymentPostureTests.The_gateway_never_answers_forbidden_itself` (no `deny` directive, no `return 403`, and a control that the file really is a proxy) |
 | A barred member is off BOTH rosters on real Postgres, not only in memory | `DeviceGateHttpTests.A_barred_members_booking_is_filtered_out_on_real_postgres` |
 | A silent door gets a door's alert and none of the court box's sentences | `PeripheralHealthTests.A_silent_gate_gets_a_door_alert_and_none_of_the_court_boxs_sentences`, `…A_gate_that_comes_back_gets_a_door_all_clear_and_none_of_the_court_boxs` |
 | A silent box beside a silent door still gets the court box's alert | `PeripheralHealthTests.A_silent_box_beside_a_silent_gate_still_gets_the_court_boxs_alert` |
