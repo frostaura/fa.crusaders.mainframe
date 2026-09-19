@@ -447,8 +447,28 @@ export type AdminSettings = {
   activation_cue_window_minutes: number;
   /** 15–3600. How long an ident code (walk-up / pay-for-someone) lives. */
   qr_lifetime_seconds: number;
-  /** 5–1440. How far ahead the box's offline roster reaches. */
+  /**
+   * 5–1440. How far ahead the box's offline roster reaches.
+   *
+   * <p>
+   * It reaches the DOORS as well, which is the half its name does not say: under the default
+   * `active_member` policy this plus {@link AdminSettings.activation_cue_window_minutes} is
+   * how early a booking's own QR opens a door, capped at four hours. Raising it to give the
+   * boxes a longer outage cushion widens every door in the club by the same amount.
+   * </p>
+   */
   roster_window_minutes: number;
+
+  /**
+   * 5–1440. The least time between two "not reporting" emails about the same board.
+   *
+   * <p>
+   * A device number rather than a door one: a court box that goes quiet flaps exactly as a
+   * door does, and this bounds both. A gate no admin has named is never alerted on at all,
+   * which is a separate rule and not a consequence of this one.
+   * </p>
+   */
+  device_alert_cooldown_minutes: number;
 
   // The three door-gate numbers. A gate is a second kind of board — one ESP32 on a door,
   // a QR scanner and a lock relay — and none of the six above say anything about it.
@@ -1174,6 +1194,9 @@ export const endpoints = {
     ...(req.activation_cue_window_minutes !== undefined ? { activationCueWindowMinutes: req.activation_cue_window_minutes } : {}),
     ...(req.qr_lifetime_seconds !== undefined ? { qrLifetimeSeconds: req.qr_lifetime_seconds } : {}),
     ...(req.roster_window_minutes !== undefined ? { rosterWindowMinutes: req.roster_window_minutes } : {}),
+    // The API binds camelCase case-insensitively and accepts either spelling for this one;
+    // camelCase is what every other number here sends, so it sends camelCase.
+    ...(req.device_alert_cooldown_minutes !== undefined ? { deviceAlertCooldownMinutes: req.device_alert_cooldown_minutes } : {}),
     // The three door-gate numbers, on the same omitted-means-unchanged terms as the rest —
     // so the Devices page's button-map save cannot reset a club's door policy, and a club
     // with no gates never sends them at all.

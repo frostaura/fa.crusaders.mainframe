@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  GATE_KEY_MAX_LENGTH, GATE_POLICY_LABELS, NEW_GATE_BADGE, UNNAMED_GATE, describeGate,
+  GATE_KEY_MAX_LENGTH, GATE_POLICY_LABELS, NEW_GATE_BADGE, UNNAMED_GATE,
+  describeCourtSettingDoorReach, describeDoorBookingHorizon, describeEarlyEntry, describeGate,
   describeGatePolicy, gateDeleteConfirm, gateOfflineFallbackNotice, gateOutOfServiceConfirm,
   gateOutOfServiceNotice, unnamedGateOfflineNotice,
 } from "./gateCopy";
 import { GATE_ACCESS_POLICIES } from "./api";
+import { DOOR_BOOKING_HORIZON_MAX_MINUTES, doorBookingHorizonMinutes } from "./tenantSettings";
 
 /**
  * Every sentence the console says about a door, pinned word for word.
@@ -212,6 +214,55 @@ describe("describeGatePolicy", () => {
     expect(describeGatePolicy("active_member", 30)).not.toContain("admins");
   });
 
+  /**
+   * <b>The carve-out has a third limit, and it is in the same sentence as the carve-out.</b>
+   *
+   * <p>
+   * "Club admins always pass this booking check" is true of a door that can reach the API and
+   * false of one that cannot. A cut-off door decides from its cached roster, the roster is
+   * built from BOOKINGS, and there is no admin flag anywhere in it — so the one person the
+   * club is most certain can always get in is refused at a door that has lost the network.
+   * Written as a separate sentence it is a footnote somebody stops reading before; written
+   * into the same sentence it is part of the claim, which is what it is.
+   * </p>
+   */
+  it("puts the offline limit on the admin carve-out in the same sentence as the carve-out", () => {
+    const strict = describeGatePolicy("booking_window", 30);
+    const sentence = strict.split(". ").find((s) => s.includes("Club admins always pass"))!;
+    expect(sentence).toBeTruthy();
+    expect(sentence).toContain("can still reach the API");
+    expect(sentence).toContain("an offline door holds bookings, not admins");
+  });
+
+  /**
+   * <b>A member who is late is not locked out of the building by the no-show sweep.</b>
+   *
+   * <p>
+   * The sweep marks a booking `NoShow` and the copy used to bound the door at "and has not yet
+   * ended", which reads as a lockout at the stroke of the slot's end — and the previous status
+   * rule made it one, because only a `Booked` booking counted. It does not: the booking's own
+   * code stays live, and a member walking in ten minutes late must not find the door shut on
+   * them by a penalty sweep.
+   * </p>
+   *
+   * <p>
+   * The sentence names the condition — the code still being live — rather than a clock time,
+   * deliberately. Saying "until the booking ends" promises less than the code actually buys,
+   * and naming an end-plus-grace arithmetic here promises more than this screen can know.
+   * </p>
+   */
+  it("says a late member still gets in while their code is live, under both policies", () => {
+    for (const policy of GATE_ACCESS_POLICIES) {
+      const hint = describeGatePolicy(policy, 30);
+      expect(hint).toContain("Arriving late is not a lockout");
+      expect(hint).toContain("no-show sweep does not take");
+    }
+    // And the strict arm says which condition actually bounds it, in place of the old
+    // "and has not yet ended" — which is the phrase the sweep made a lie.
+    expect(describeGatePolicy("booking_window", 30)).toContain("whose code for that booking is still live");
+    expect(describeGatePolicy("booking_window", 30)).not.toContain("has not yet ended");
+  });
+
   /** There is no operator role in the product, so the word is in neither arm. */
   it("never says operator, because no such role exists", () => {
     for (const policy of GATE_ACCESS_POLICIES) {
@@ -224,8 +275,10 @@ describe("describeGatePolicy", () => {
     expect(open).toBe(
       "Any member whose own code scans opens the door at any hour, unless their membership is"
       + " suspended, pending approval or rejected. A booking's QR is narrower: it opens a door only"
-      + " from about the time the member's phone starts showing that code until the booking ends,"
-      + " and not at all once the booking is cancelled.",
+      + " from about the time the member's phone starts showing that code — never more than four"
+      + " hours before the booking — and only while that code is still live. Arriving late is not a"
+      + " lockout: the no-show sweep does not take that code away. A cancelled booking's code opens"
+      + " nothing.",
     );
   });
 
@@ -246,12 +299,31 @@ describe("describeGatePolicy", () => {
     const open = describeGatePolicy("active_member", 30);
     expect(open).toContain("own code scans opens the door at any hour");
     expect(open).toContain("A booking's QR is narrower");
-    expect(open).toContain("until the booking ends");
-    expect(open).toContain("not at all once the booking is cancelled");
+    expect(open).toContain("only while that code is still live");
+    expect(open).toContain("A cancelled booking's code opens nothing");
     // No number: that horizon is the widest of three settings, so any figure printed here
-    // would be wrong for some club. "About" is the honest word and has to survive.
+    // would be wrong for some club. "About" is the honest word and has to survive — and the
+    // one bound that IS true of every club is spelt in words, not digits, for the same reason
+    // the interpolated early-entry figure would have been wrong here.
     expect(open).toContain("from about the time");
     expect(open).not.toMatch(/\d/);
+  });
+
+  /**
+   * <b>And the ceiling, which is the half that makes "about the time the phone shows it" safe
+   * to print.</b>
+   *
+   * <p>
+   * Without it the sentence is unbounded: a club whose roster reach and lights cue add to more
+   * than four hours would read "about the time the phone starts showing that code" as the
+   * whole truth, and the door would refuse `too_early` for the difference. The cap is the
+   * API's (`GateAccess.MaxEarlyEntryMinutes`), it is four hours, and it is the one number on
+   * this arm that is the same for every club.
+   * </p>
+   */
+  it("names the four-hour ceiling on the open policy's booking window", () => {
+    expect(describeGatePolicy("active_member", 30)).toContain("never more than four hours before the booking");
+    expect(DOOR_BOOKING_HORIZON_MAX_MINUTES).toBe(4 * 60);
   });
 
   /**
@@ -270,12 +342,129 @@ describe("describeGatePolicy", () => {
   it("says the strict policy counts a booking on any court, and turns everyone else away", () => {
     const strict = describeGatePolicy("booking_window", 30);
     expect(strict).toContain("on any court");
-    expect(strict).toContain("has not yet ended");
     expect(strict).toContain("Anyone else is turned away");
   });
 
   it("does not describe the two policies with the same sentence", () => {
     expect(describeGatePolicy("active_member", 30)).not.toBe(describeGatePolicy("booking_window", 30));
+  });
+});
+
+/**
+ * <b>What the "Early entry" field actually governs, which is not the same thing under the two
+ * policies.</b>
+ *
+ * <p>
+ * This is the defect the whole round is about. The field's hint said "How long before a
+ * booking starts its holder may come in", flatly, under both policies. Under
+ * <code>booking_window</code> that is the door. Under <code>active_member</code> — the API's
+ * default — the door's horizon is the wider of this and what the member's phone shows, so at
+ * the shipped defaults the hint said 30 and the door opened at 130. The number is still doing
+ * two real jobs under that policy (it is the offline roster's reach, and it is the FLOOR under
+ * the online horizon), and naming those two is what makes an admin's edit predictable.
+ * </p>
+ */
+describe("describeEarlyEntry", () => {
+  it("names the door, and nothing else, under the strict policy", () => {
+    const hint = describeEarlyEntry("booking_window");
+    expect(hint).toContain("this is the door");
+    expect(hint).toContain("a door's cached roster reaches exactly that far");
+    // No second horizon to mention: the two court windows do not reach a door under this
+    // policy, and naming them would send an admin to edit a field that changes nothing.
+    expect(hint).not.toContain("Offline roster reach");
+  });
+
+  /** Both jobs under the open policy, and the wider horizon that is not this field's. */
+  it("names the offline list and the floor under the open policy, and points at the rest", () => {
+    const hint = describeEarlyEntry("active_member");
+    expect(hint).toContain("the offline list and the floor");
+    expect(hint).toContain("never opens a door less early than this");
+    // And the two fields that decide the rest of it, by the labels they carry on screen.
+    expect(hint).toContain("Offline roster reach");
+    expect(hint).toContain("Lights on this early");
+    expect(hint).toContain("never more than 240 minutes");
+  });
+
+  /**
+   * CLAIM PROBE on "this is the door": the strict arm may say it because under that policy the
+   * horizon IS this number, for every value of it. The open arm must not, and does not.
+   */
+  it("only claims to be the door where it is the door", () => {
+    expect(describeEarlyEntry("active_member")).not.toContain("this is the door");
+    for (const early of [0, 1, 30, 239, 240]) {
+      expect(doorBookingHorizonMinutes({
+        gate_access_policy: "booking_window",
+        gate_early_entry_minutes: early,
+        roster_window_minutes: 1440,
+        activation_cue_window_minutes: 1440,
+      })).toBe(early);
+    }
+  });
+
+  it("does not describe the two policies with the same sentence", () => {
+    expect(describeEarlyEntry("active_member")).not.toBe(describeEarlyEntry("booking_window"));
+  });
+});
+
+/**
+ * <b>The sentence the two COURT-side settings gained.</b>
+ *
+ * <p>
+ * "Lights on this early" and "Offline roster reach" are filed under Court boxes, they are
+ * named for courts, and under the default door policy they are two thirds of what decides
+ * when a booking QR opens a DOOR. An admin raising the roster reach to give the boxes a
+ * longer outage cushion widened every door in the club, and nothing on either field said so.
+ * </p>
+ */
+describe("describeCourtSettingDoorReach", () => {
+  it("says the two court numbers reach the doors under the open policy", () => {
+    const line = describeCourtSettingDoorReach("active_member");
+    expect(line).toContain("how early a booking's QR opens a door");
+    expect(line).toContain("Offline roster reach");
+    expect(line).toContain("Lights on this early");
+    expect(line).toContain("240 minutes");
+  });
+
+  /**
+   * And says the opposite under the strict policy, rather than going silent: an admin who
+   * read the sentence once needs to know it has stopped applying, and which field took over.
+   */
+  it("says they do not reach the doors under the strict policy, and names the one that does", () => {
+    const line = describeCourtSettingDoorReach("booking_window");
+    expect(line).toContain("does not reach the doors");
+    expect(line).toContain("Early entry");
+    expect(line).not.toContain("how early a booking's QR opens a door");
+  });
+});
+
+/**
+ * <b>The effective number, computed rather than described.</b>
+ *
+ * <p>
+ * Three fields on two blocks decide it, two of them under a heading that says "Court boxes",
+ * and the answer under the default policy is none of the three. An admin cannot be asked to
+ * do that arithmetic from hints, and a hint that told them to would be the fourth round of
+ * this same screen describing a door wrongly.
+ * </p>
+ */
+describe("describeDoorBookingHorizon", () => {
+  it("states the number in the sentence the settings block prints", () => {
+    expect(describeDoorBookingHorizon(130))
+      .toBe("With these settings a booking QR opens a door from 130 minutes before the booking.");
+  });
+
+  /** Singular at one, because a line reading "1 minutes" is a line nobody trusts the rest of. */
+  it("agrees with itself at one minute and at none", () => {
+    expect(describeDoorBookingHorizon(1))
+      .toBe("With these settings a booking QR opens a door from 1 minute before the booking.");
+    expect(describeDoorBookingHorizon(0))
+      .toBe("With these settings a booking QR opens a door from 0 minutes before the booking.");
+  });
+
+  /** And at the cap, which is the number an admin is most likely to be surprised by. */
+  it("prints the cap as a number like any other", () => {
+    expect(describeDoorBookingHorizon(DOOR_BOOKING_HORIZON_MAX_MINUTES))
+      .toContain("from 240 minutes before the booking");
   });
 });
 

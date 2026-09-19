@@ -2,6 +2,7 @@ import { ApiError } from "./api";
 import { RELAYS } from "../components/ButtonMapEditor";
 import { GATE_KEY_MAX_LENGTH } from "./gateCopy";
 import {
+  DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
   GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
   GATE_UNLOCK_MAX_SECONDS, GATE_UNLOCK_MIN_SECONDS,
 } from "./tenantSettings";
@@ -59,6 +60,12 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
   // Confirmed against the API rather than guessed: this comment used to say the token was
   // inferred from `button_map_invalid`'s shape because the contract never spelt it out.
   gate_access_policy_invalid: "Who may open a door has to be either “Any member in good standing” or “Only a member with a booking”. Pick one and save again.",
+
+  // Not a door setting even though it arrived with the door work: the cooldown bounds the
+  // "not reporting" mail for every board, court boxes included. The sentence says what the
+  // number buys as well as the bound, because "5 to 1440" alone gives an admin no way to
+  // choose between 30 and 300.
+  device_alert_cooldown_minutes_out_of_range: `Alert cooldown has to be between ${DEVICE_ALERT_COOLDOWN_MIN_MINUTES} and ${DEVICE_ALERT_COOLDOWN_MAX_MINUTES} minutes. It is at most one “not reporting” email per board in that many minutes.`,
 };
 
 const MAP_MISMATCH_GENERIC =

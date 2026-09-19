@@ -185,20 +185,122 @@ export const GATE_POLICY_LABELS: Record<GateAccessPolicy, string> = {
  * arithmetic to learn what they have actually chosen. The `active_member` arm deliberately
  * does NOT interpolate a number: that horizon is the widest of the early-entry minutes and
  * the roster and cue windows together, so any single figure printed there would be wrong for
- * some club.
+ * some club. The ONE number that is the same for every club — the four-hour cap the API
+ * applies (`GateAccess.MaxEarlyEntryMinutes`) — is spelt in words for that reason, so it
+ * cannot be read as the club's own setting.
+ * </p>
+ *
+ * <p>
+ * <b>Neither arm bounds a booking at "and has not yet ended" any more.</b> The no-show sweep
+ * marks a booking `NoShow` when nobody checks in, and under the old rule that status took the
+ * door away — so a member arriving ten minutes late for a court they had paid for found the
+ * front door shut by a penalty sweep. It does not now, and the copy names the condition that
+ * really bounds it (the booking's own code still being live) rather than a clock time: "until
+ * the booking ends" promises less than the code buys, and stating an end-plus-grace
+ * arithmetic here would promise more than this screen can know.
+ * </p>
+ *
+ * <p>
+ * <b>The admin carve-out carries its third limit inside the same sentence.</b> "Club admins
+ * always pass this booking check" is true of a door that can reach the API and false of one
+ * that cannot: a cut-off door decides from its cached roster, that roster is built from
+ * bookings, and there is no admin flag anywhere in it. Split into a following sentence it is
+ * a footnote; inside the claim it is part of the claim.
  * </p>
  */
 export function describeGatePolicy(policy: GateAccessPolicy, earlyEntryMinutes: number): string {
   if (policy === "booking_window") {
     return `Only a member whose booking has already started, or starts within the next`
-      + ` ${earlyEntryMinutes} ${earlyEntryMinutes === 1 ? "minute" : "minutes"}, and has not yet`
-      + ` ended — on any court. Anyone else is turned away. Club admins always pass this booking`
-      + ` check; a suspended, pending or rejected membership still turns anyone away, admin or not.`;
+      + ` ${earlyEntryMinutes} ${earlyEntryMinutes === 1 ? "minute" : "minutes"}, and whose code`
+      + ` for that booking is still live — on any court. Anyone else is turned away. Arriving late`
+      + ` is not a lockout: the no-show sweep does not take that code away. Club admins always pass`
+      + ` this booking check, but only at a door that can still reach the API — an offline door`
+      + ` holds bookings, not admins; a suspended, pending or rejected membership still turns`
+      + ` anyone away, admin or not.`;
   }
   return "Any member whose own code scans opens the door at any hour, unless their membership is"
     + " suspended, pending approval or rejected. A booking's QR is narrower: it opens a door only"
-    + " from about the time the member's phone starts showing that code until the booking ends,"
-    + " and not at all once the booking is cancelled.";
+    + " from about the time the member's phone starts showing that code — never more than four"
+    + " hours before the booking — and only while that code is still live. Arriving late is not a"
+    + " lockout: the no-show sweep does not take that code away. A cancelled booking's code opens"
+    + " nothing.";
+}
+
+/**
+ * What the "Early entry" field governs, which is not the same thing under the two policies.
+ *
+ * <p>
+ * <b>This is the sentence the screen was wrong about.</b> The hint read "How long before a
+ * booking starts its holder may come in", flatly, and the field's value was printed into the
+ * policy hint above it as if it were the door's whole window. Under `booking_window` it is.
+ * Under `active_member` — the API's default, so the state a club actually ships in — the
+ * door's horizon is the WIDER of this number and the horizon the member's phone uses, so at
+ * the shipped defaults the screen said 30 and the door opened at 130. An admin lowering it to
+ * narrow the door narrowed nothing and was told nothing.
+ * </p>
+ *
+ * <p>
+ * Under the open policy the number is still doing two real jobs, and naming both is what
+ * makes an edit predictable: it is how far the door's OFFLINE roster reaches, and it is the
+ * FLOOR under the online horizon (a door must not be stricter online than it is during an
+ * outage). What it is not, there, is the ceiling — so the hint points at the two fields that
+ * decide the rest, by the labels they actually carry on screen.
+ * </p>
+ */
+export function describeEarlyEntry(policy: GateAccessPolicy): string {
+  if (policy === "booking_window") {
+    return "Under the policy above this is the door: a booking's QR opens a door from this many"
+      + " minutes before the booking starts, and a door's cached roster reaches exactly that far.";
+  }
+  return "Under the policy above this is the offline list and the floor, not the whole answer: a"
+    + " door's cached roster reaches this far ahead, and a booking's QR never opens a door less"
+    + " early than this. Online a door also opens as early as the member's phone shows the code —"
+    + " “Offline roster reach” plus “Lights on this early” under Court boxes above, and never more"
+    + " than 240 minutes.";
+}
+
+/**
+ * The sentence the two COURT-side settings gained, because under the default policy they
+ * decide a door.
+ *
+ * <p>
+ * "Lights on this early" and "Offline roster reach" sit under a heading that says Court boxes,
+ * are named for courts, and are two thirds of what decides when a booking QR opens a DOOR
+ * under `active_member`. An admin raising the roster reach to give the boxes a longer outage
+ * cushion widened every door in the club by the same amount, and neither field said a word.
+ * </p>
+ *
+ * <p>
+ * It says the opposite under the strict policy rather than going silent. An admin who has read
+ * the sentence once needs to know it has stopped applying — and which field took over — rather
+ * than to find it simply missing and wonder whether the screen or their memory is wrong.
+ * </p>
+ */
+export function describeCourtSettingDoorReach(policy: GateAccessPolicy): string {
+  if (policy === "booking_window") {
+    return "Under the club's current door policy this does not reach the doors — “Early entry”"
+      + " under Door gates does that.";
+  }
+  return "Under the club's current door policy this also decides how early a booking's QR opens a"
+    + " door: “Offline roster reach” plus “Lights on this early”, capped at 240 minutes.";
+}
+
+/**
+ * The effective horizon, computed from the form and printed as a number.
+ *
+ * <p>
+ * Three fields on two blocks decide it, two of them filed under Court boxes, and under the
+ * default policy the answer is none of the three. An admin cannot be asked to do that
+ * arithmetic from hints; a hint that asked them to would be this screen describing a door
+ * wrongly for the fourth time. The figure comes from
+ * {@link import("./tenantSettings").doorBookingHorizonMinutes}, which mirrors
+ * `BookingCodeWindow.DoorHorizonMinutes` including its cap, so the sentence moves when the
+ * form moves and cannot drift from what the door will do.
+ * </p>
+ */
+export function describeDoorBookingHorizon(minutes: number): string {
+  return `With these settings a booking QR opens a door from ${minutes}`
+    + ` ${minutes === 1 ? "minute" : "minutes"} before the booking.`;
 }
 
 /**

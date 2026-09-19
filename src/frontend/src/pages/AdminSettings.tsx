@@ -1,12 +1,17 @@
 import { useEffect, useState, cloneElement, isValidElement, useId } from "react";
 import { endpoints, GATE_ACCESS_POLICIES, type AdminSettings, type AdminCourt, type GateAccessPolicy } from "../lib/api";
 import {
-  DAY_KEYS, DAY_NAMES, GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
+  DAY_KEYS, DAY_NAMES, DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
+  GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
   GATE_UNLOCK_MAX_SECONDS, GATE_UNLOCK_MIN_SECONDS, OFFLINE_FLOOR_SECONDS, describeOfflineAfter,
-  formatDayHours, gateSettingsComplaint, operatingHoursComplaint, parseDayHours, timezoneOptions,
+  deviceNumbersComplaint, doorBookingHorizonMinutes, formatDayHours, gateSettingsComplaint,
+  operatingHoursComplaint, parseDayHours, timezoneOptions,
   type DayHours, type DayKey,
 } from "../lib/tenantSettings";
-import { GATE_POLICY_LABELS, describeGatePolicy, gateOfflineFallbackNotice } from "../lib/gateCopy";
+import {
+  GATE_POLICY_LABELS, describeCourtSettingDoorReach, describeDoorBookingHorizon, describeEarlyEntry,
+  describeGatePolicy, gateOfflineFallbackNotice,
+} from "../lib/gateCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
@@ -210,7 +215,7 @@ export default function AdminSettingsPage() {
           {/* Held on the gate block too, for the same reason it is held on the weekly
               table: a number input's min/max stop the spinner and nothing else, so a typed
               or pasted value would round-trip into a refusal the admin has to decode. */}
-          <Button onClick={save} disabled={saving || hoursComplaint !== null || gateSettingsComplaint(settings) !== null}>{saving ? "Saving…" : "Save settings"}</Button>
+          <Button onClick={save} disabled={saving || hoursComplaint !== null || gateSettingsComplaint(settings) !== null || deviceNumbersComplaint(settings) !== null}>{saving ? "Saving…" : "Save settings"}</Button>
         </div>
       </Card>
 
@@ -336,6 +341,12 @@ function DayHoursRow({ day, hours, fallback, error, onChange }: {
  */
 function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings; onChange: (next: AdminSettings) => void }) {
   const set = (patch: Partial<AdminSettings>) => onChange({ ...settings, ...patch });
+  const complaint = deviceNumbersComplaint(settings);
+  // The two fields below that a door reads as well as a box, said on the fields themselves.
+  // Both are named for courts and filed under this heading, and under the default door policy
+  // the pair of them is how early a booking QR opens a DOOR — so an admin lengthening the
+  // boxes' outage cushion widened every door in the club with nothing on screen saying so.
+  const doorReach = describeCourtSettingDoorReach(settings.gate_access_policy);
   return (
     <Card className="space-y-5">
       <h2 className="text-base font-semibold">Court boxes &amp; identification</h2>
@@ -391,7 +402,7 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
         </Field>
         <Field
           label="Lights on this early (minutes before a booking)"
-          hint={`0–${settings.activation_forward_window_minutes}. This is the one that decides how early a scan actually switches a booking's lights on. Must not exceed the booking lookahead.`}
+          hint={`0–${settings.activation_forward_window_minutes}. This is the one that decides how early a scan actually switches a booking's lights on. Must not exceed the booking lookahead. ${doorReach}`}
         >
           <Input type="number" min={0} max={settings.activation_forward_window_minutes} value={settings.activation_cue_window_minutes}
             onChange={(e) => set({ activation_cue_window_minutes: Number(e.target.value) })} />
@@ -400,11 +411,29 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
           <Input type="number" min={15} max={3600} value={settings.qr_lifetime_seconds}
             onChange={(e) => set({ qr_lifetime_seconds: Number(e.target.value) })} />
         </Field>
-        <Field label="Offline roster reach (minutes)" hint="5–1440. How far ahead a box's cached roster lets it admit booked members when the API is unreachable.">
+        <Field
+          label="Offline roster reach (minutes)"
+          hint={`5–1440. How far ahead a box's cached roster lets it admit booked members when the API is unreachable. ${doorReach}`}
+        >
           <Input type="number" min={5} max={1440} value={settings.roster_window_minutes}
             onChange={(e) => set({ roster_window_minutes: Number(e.target.value) })} />
         </Field>
+        {/* Here rather than in the Door gates block: the cooldown bounds the "not reporting"
+            mail for every board the club has, court boxes included, and filing it with the
+            doors would have read as a door setting an admin chasing a noisy box would never
+            find. The second clause is a separate rule rather than a consequence of this one,
+            and is said here because an admin who does not know it reads a silent unnamed door
+            as a cooldown that is too long. */}
+        <Field
+          label="Alert cooldown (minutes)"
+          hint={`${DEVICE_ALERT_COOLDOWN_MIN_MINUTES}–${DEVICE_ALERT_COOLDOWN_MAX_MINUTES}. At most one “not reporting” email per board in this many minutes; a door nobody has named never alerts.`}
+        >
+          <Input type="number" min={DEVICE_ALERT_COOLDOWN_MIN_MINUTES} max={DEVICE_ALERT_COOLDOWN_MAX_MINUTES}
+            value={settings.device_alert_cooldown_minutes}
+            onChange={(e) => set({ device_alert_cooldown_minutes: Number(e.target.value) })} />
+        </Field>
       </div>
+      {complaint && <p className="text-xs text-danger-strong">{complaint}</p>}
     </Card>
   );
 }
@@ -461,14 +490,27 @@ function GateSection({ settings, onChange }: { settings: AdminSettings; onChange
             ))}
           </select>
         </Field>
+        {/* The hint follows the POLICY, because this number does two different jobs under the
+            two of them. It used to say "How long before a booking starts its holder may come
+            in" flatly, which is the door under `booking_window` and the offline roster plus a
+            floor under `active_member` — where the door's real horizon is the wider of this
+            and what the member's phone shows. At the API's own defaults that made the screen
+            say 30 while the door opened at 130. */}
         <Field
           label="Early entry (minutes before a booking)"
-          hint={`${GATE_EARLY_ENTRY_MIN_MINUTES}–${GATE_EARLY_ENTRY_MAX_MINUTES}. How long before a booking starts its holder may come in. It is also how far ahead a door's cached roster reaches, so lowering it narrows what a door can do offline as well as online.`}
+          hint={`${GATE_EARLY_ENTRY_MIN_MINUTES}–${GATE_EARLY_ENTRY_MAX_MINUTES}. ${describeEarlyEntry(settings.gate_access_policy)}`}
         >
           <Input type="number" min={GATE_EARLY_ENTRY_MIN_MINUTES} max={GATE_EARLY_ENTRY_MAX_MINUTES} value={settings.gate_early_entry_minutes}
             onChange={(e) => set({ gate_early_entry_minutes: Number(e.target.value) })} />
         </Field>
       </div>
+      {/* The answer itself, rather than three hints and an arithmetic exercise. Three fields on
+          two blocks decide it, two of them under a heading that says Court boxes, and under the
+          default policy the answer is none of the three — which is exactly how this screen came
+          to state a door's early-entry window as 30 while the door's was 130. */}
+      <p className="text-sm font-medium text-text-primary">
+        {describeDoorBookingHorizon(doorBookingHorizonMinutes(settings))}
+      </p>
       {complaint && <p className="text-xs text-danger-strong">{complaint}</p>}
     </Card>
   );

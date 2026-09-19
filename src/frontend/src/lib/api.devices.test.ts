@@ -1,7 +1,10 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { endpoints } from "./api";
+import { ApiError, endpoints } from "./api";
 import { stubFetch } from "../test/harness";
-import { applyDevicePatch, deviceFixture, DEVICE_API_KEY_FIXTURE } from "../test/harness";
+import {
+  applyDevicePatch, deviceFixture, deviceServer, gateFixture, refuseDevicePatch,
+  DEVICE_API_KEY_FIXTURE,
+} from "../test/harness";
 
 /**
  * The device wrappers, pinned to their routes.
@@ -156,3 +159,162 @@ describe("device API wrappers", () => {
     }
   });
 });
+
+/**
+ * <b>The stateful mock has to refuse what the API refuses, or it pins a convenient API.</b>
+ *
+ * <p>
+ * {@link deviceServer} applies the API's own patch rule, which is what caught the `gate_key`
+ * no-op. It applied only the rule that had just gone wrong, though, and was otherwise a
+ * server that says yes: it accepted `gate_key` on a court box, court fields on a gate and a
+ * door name of any length at all. A page test written on it therefore proved that the screen
+ * handles a success the real API would never send — which is the same class of green the
+ * gate-key round was about, one field along.
+ * </p>
+ *
+ * <p>
+ * Mirrored from <c>AdminDeviceEndpoints.KindFieldsRefusal</c> and
+ * <c>DeviceRegistryService.UpdateAsync</c>, <b>including their order</b>: the kind refusals
+ * run before the length bound, and before the button map is parsed at all.
+ * </p>
+ */
+describe("refuseDevicePatch", () => {
+  const box = deviceFixture();
+  const gate = gateFixture();
+
+  /**
+   * A door name on a court box. Refusing rather than ignoring is the API's own choice, and
+   * the reason is that a PATCH reporting success while changing nothing is the worst of the
+   * three available answers.
+   */
+  it("refuses a door name on a court box", () => {
+    expect(refuseDevicePatch(box, { gate_key: "front-door" }))
+      .toMatchObject({ status: 400, body: { error: "gate_key_not_a_gate" } });
+    // Including the clear, which is a real instruction and still not one a box can take.
+    expect(refuseDevicePatch(box, { gate_key: "" })?.body).toEqual({ error: "gate_key_not_a_gate" });
+  });
+
+  /**
+   * And NOT when the key is null or absent. The API binds `gate_key` as a nullable string and
+   * asks `req.GateKey is null` — so a JSON null and an omitted key are the same thing to it,
+   * which is the whole reason `null` cannot spell a clear. A mock that refused null here
+   * would make the two distinguishable and would pin a contract the API does not have.
+   */
+  it("reads a null door name as an absence, on either kind of board", () => {
+    expect(refuseDevicePatch(box, { gate_key: null })).toBeNull();
+    expect(refuseDevicePatch(box, { name: "Annex box", court_numbers: [2] })).toBeNull();
+    expect(refuseDevicePatch(gate, { gate_key: null })).toBeNull();
+  });
+
+  it("refuses court numbers and button maps on a gate", () => {
+    expect(refuseDevicePatch(gate, { court_numbers: [1] })?.body).toEqual({ error: "court_fields_on_a_gate" });
+    expect(refuseDevicePatch(gate, { button_map: ["court:A"] })?.body).toEqual({ error: "court_fields_on_a_gate" });
+    // A present-but-null button map counts as sent. On a box that means "run the club's
+    // map", which is a real instruction; on a gate there is no map to run, so the request is
+    // as wrong as a list would be — and the API's `ValueKind != Undefined` says exactly that.
+    expect(refuseDevicePatch(gate, { button_map: null })?.body).toEqual({ error: "court_fields_on_a_gate" });
+    // An empty list is still a list.
+    expect(refuseDevicePatch(gate, { court_numbers: [] })?.body).toEqual({ error: "court_fields_on_a_gate" });
+  });
+
+  /**
+   * The 64-character bound, measured AFTER the trim — the endpoint trims before it measures
+   * (`key.Trim().Length > Device.GateKeyMaxLength`), so a name that only exceeds the column
+   * because somebody pasted a trailing space is not refused.
+   */
+  it("bounds a door name at 64 characters, after trimming", () => {
+    expect(refuseDevicePatch(gate, { gate_key: "x".repeat(64) })).toBeNull();
+    expect(refuseDevicePatch(gate, { gate_key: `  ${"x".repeat(64)}  ` })).toBeNull();
+    expect(refuseDevicePatch(gate, { gate_key: "x".repeat(65) }))
+      .toMatchObject({ status: 400, body: { error: "gate_key_too_long", max_length: 64 } });
+  });
+
+  /**
+   * <b>The order is the API's.</b> `KindFieldsRefusal` answers the court-field refusal before
+   * it reaches the length check, so a request carrying both is refused for the field that
+   * does not belong rather than for the length — and a screen decoding the token gets the
+   * sentence that tells the admin what is actually wrong with the row.
+   */
+  it("answers the kind refusal before the length one when a request carries both", () => {
+    expect(refuseDevicePatch(gate, { court_numbers: [1], gate_key: "x".repeat(200) })?.body)
+      .toEqual({ error: "court_fields_on_a_gate" });
+  });
+});
+
+/**
+ * What {@link applyDevicePatch} does once nothing is refused — mirrored from
+ * `DeviceRegistryService.UpdateAsync` rather than from what a page happens to need.
+ */
+describe("applyDevicePatch", () => {
+  /**
+   * <b>`auto_registered` goes false on every edit, whatever the edit was.</b>
+   *
+   * <p>
+   * `UpdateAsync` sets it unconditionally — it is not guarded by which field changed, and it
+   * is not guarded by anything changing at all. The badge it drives says "nobody has checked
+   * this row yet", and an admin who has PATCHed the row has checked it. A mock that left the
+   * flag alone would let a page test assert a badge the real API had already cleared.
+   * </p>
+   */
+  it("clears auto_registered on any edit at all", () => {
+    const fresh = gateFixture({ auto_registered: true });
+    expect(applyDevicePatch(fresh, { gate_key: "front-door" }).auto_registered).toBe(false);
+    // Including a PATCH that changes nothing else: the API does not ask what moved.
+    expect(applyDevicePatch(fresh, { enabled: true }).auto_registered).toBe(false);
+    expect(applyDevicePatch(fresh, {}).auto_registered).toBe(false);
+    // And the fixture is not mutated, so a test can reuse it.
+    expect(fresh.auto_registered).toBe(true);
+  });
+
+  /** `device.Name = cmd.Name.Trim()`, which the mock did not do. */
+  it("trims the board's name the way the API stores it", () => {
+    expect(applyDevicePatch(deviceFixture(), { name: "  Annex box  " }).name).toBe("Annex box");
+  });
+});
+
+/**
+ * And the whole thing wired up: the stateful server answers 400 and holds its row.
+ */
+describe("deviceServer", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("answers a refused PATCH with the API's status and token, and does not move the row", async () => {
+    const server = deviceServer(gateFixture({ gate_key: "front-door" }));
+    stubFetch(server.routes);
+
+    await expect(endpoints.adminDeviceUpdate(gateFixture().id as string, { court_numbers: [1] }))
+      .rejects.toBeInstanceOf(ApiError);
+    // The row is untouched — a refused PATCH that half-applied would be a mock inventing a
+    // failure mode the API does not have.
+    expect(server.current().gate_key).toBe("front-door");
+    expect(server.current().court_numbers).toEqual([]);
+  });
+
+  it("carries the refusal's payload through, so a screen can decode the token", async () => {
+    const server = deviceServer(deviceFixture());
+    stubFetch(server.routes);
+
+    const error = await endpoints.adminDeviceUpdate(deviceFixture().id as string, { gate_key: "front-door" })
+      .catch((e: unknown) => e as ApiError);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(400);
+    expect((error as ApiError).payload).toMatchObject({ error: "gate_key_not_a_gate" });
+  });
+
+  /**
+   * A board whose kind changed under the open form — the one legitimate route to these
+   * refusals, and the reason the screen decodes them at all rather than treating them as
+   * unreachable. Deleting a row and letting the board register itself again is how a
+   * misconfigured board is reset, and it is the only way a row's kind changes.
+   */
+  it("lets a test re-kind the row the way a delete and re-register would", async () => {
+    const server = deviceServer(gateFixture({ gate_key: "front-door" }));
+    stubFetch(server.routes);
+
+    server.replace(deviceFixture({ id: gateFixture().id }));
+    const error = await endpoints.adminDeviceUpdate(gateFixture().id as string, { gate_key: "side-door" })
+      .catch((e: unknown) => e as ApiError);
+    expect((error as ApiError).payload).toMatchObject({ error: "gate_key_not_a_gate" });
+  });
+});
+
