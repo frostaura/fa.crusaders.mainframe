@@ -587,6 +587,77 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// <b>Club admins always pass</b>, over the wire, holding an ordinary Active membership
+    /// and nothing booked.
+    ///
+    /// <para>
+    /// The exemption used to be keyed on having NO membership row, and no production path
+    /// creates such an account — registration writes one and an admin promoted from the member
+    /// roll keeps theirs. So the day a club switched to <c>booking_window</c> its own staff
+    /// were locked out of the building, and the test that claimed otherwise passed only
+    /// because it deleted the row first.
+    /// </para>
+    ///
+    /// <para>
+    /// The ordinary member on the same club, same policy, same instant is the probe: one
+    /// field differs between the two scans and it is <c>IsAdmin</c>.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_club_admin_with_a_membership_and_no_booking_still_opens_the_door()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", BookingWindowSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+
+        var adminId = await AdminUserAsync(factory, club);
+        var adminToken = await IdentCodeAsync(factory, club.TenantId, adminId);
+        var memberToken = await IdentCodeAsync(factory, club.TenantId, club.MemberId);
+
+        // The ordinary member, with the same Active membership and nothing booked, is out.
+        await AssertRefusedAsync(client, Scan(club.Key, mac, memberToken), GateAccess.NoBooking);
+
+        var opened = await BodyAsync(await client.SendAsync(Scan(club.Key, mac, adminToken)));
+        Assert.True(opened.GetProperty("opened").GetBoolean(),
+            "a club admin must not be locked out of the building by the booking_window policy");
+        Assert.Equal(GateAccess.Ok, opened.GetProperty("reason").GetString());
+    }
+
+    /// <summary>The settings a club runs its doors on under <c>booking_window</c>, thirty minutes early.</summary>
+    private const string BookingWindowSettings =
+        """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","gate_access_policy":"booking_window","gate_early_entry_minutes":30}""";
+
+    /// <summary>An admin of this club, holding an ordinary Active membership like a promoted member would.</summary>
+    private static async Task<Guid> AdminUserAsync(TestWebAppFactory factory, Club club)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var admin = new User
+        {
+            TenantId = club.TenantId,
+            Email = $"admin-{Guid.NewGuid():N}@test.local",
+            PasswordHash = "x",
+            EmailVerified = true,
+            IsAdmin = true,
+        };
+        db.Users.Add(admin);
+        db.Memberships.Add(new Membership
+        {
+            TenantId = club.TenantId,
+            UserId = admin.Id,
+            FullName = "Gate Admin",
+            MembershipNumber = $"A-{Guid.NewGuid():N}"[..12],
+            Status = MembershipStatus.Active,
+            MemberClass = MemberClass.Regular,
+        });
+        await db.SaveChangesAsync();
+        return admin.Id;
+    }
+
+    /// <summary>
     /// The release is the club's setting, from the settings document through the decision to
     /// the wire. The same club with one number changed answers a different number.
     /// </summary>

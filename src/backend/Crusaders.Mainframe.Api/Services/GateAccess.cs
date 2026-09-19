@@ -49,8 +49,8 @@ public static class GateAccess
 
     /// <summary>
     /// Policy <see cref="GateAccessPolicies.BookingWindow"/> only: an active member with
-    /// nothing booked inside <c>[StartsAt − gate_early_entry_minutes, EndsAt]</c>. Unreachable
-    /// under the default policy.
+    /// nothing booked inside <c>[StartsAt − gate_early_entry_minutes, EndsAt]</c>, and not a
+    /// club admin. Unreachable under the default policy.
     /// </summary>
     public const string NoBooking = "no_booking";
 
@@ -138,7 +138,9 @@ public static class GateAccess
         if (resolved is null) return Refused(NotRecognised);
 
         // Not-Active rather than Suspended, and a user with no membership row is not barred:
-        // both rules, and why they are stated that way round, live in MembershipAccess.
+        // both rules, and why they are stated that way round, live in MembershipAccess. This
+        // runs before the policy, so a suspended member — a club admin included — is told the
+        // same thing whichever policy the club runs.
         if (await MembershipAccess.IsBarredFromCourtsAsync(db, resolved.UserId, ct))
         {
             return Refused(MemberNotActive, resolved.UserId);
@@ -165,21 +167,33 @@ public static class GateAccess
     /// </para>
     ///
     /// <para>
-    /// <b>An admin or operator with no membership row always passes.</b> Those accounts are
-    /// created by provisioning rather than by registration and never hold a booking, and a
-    /// club that switches to <c>booking_window</c> must not thereby lock its own staff out of
-    /// the building. It is deliberately "no membership row" and not "is an admin": an admin
-    /// who is also a member is a member, and is held to the same window as everybody else —
-    /// otherwise the policy has a hole shaped like whoever the club promoted last.
+    /// <b>Club admins always pass.</b> A club that switches to <c>booking_window</c> must not
+    /// thereby lock its own staff out of the building, and staff do not hold bookings for the
+    /// hours they are working.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It is keyed on <see cref="User.IsAdmin"/>, and it used to be keyed on the ABSENCE of
+    /// a membership row.</b> That was a state no production path creates: registration writes
+    /// a membership, an admin promoted off the member roll keeps theirs, and there is no
+    /// screen or service that makes a user without one. So the carve-out fired for nobody —
+    /// the club's own admins were refused the day it changed policy — and the test that said
+    /// otherwise passed only because it deleted the row first, which is a fixture the product
+    /// cannot produce. The narrower reading it was protecting ("an admin who is also a member
+    /// is a member") turned out to protect nothing, because there is no other kind of admin.
+    /// </para>
+    ///
+    /// <para>
+    /// This is the BOOKING check only. An admin is held to <see cref="MembershipAccess"/>
+    /// exactly as everybody is, one step earlier in <see cref="DecideAsync"/>: a club that has
+    /// suspended an admin's membership has said something about that person, and a door is not
+    /// where it gets quietly undone.
     /// </para>
     /// </summary>
     private static async Task<bool> MayEnterOnABookingAsync(
         MainframeDbContext db, GateContext context, ResolvedAccessCode resolved, CancellationToken ct)
     {
-        if (!await db.Memberships.AnyAsync(m => m.UserId == resolved.UserId, ct))
-        {
-            return await db.Users.AnyAsync(u => u.Id == resolved.UserId && u.IsAdmin, ct);
-        }
+        if (await db.Users.AnyAsync(u => u.Id == resolved.UserId && u.IsAdmin, ct)) return true;
 
         // `StartsAt − early ≤ now` rearranged to `StartsAt ≤ now + early`: two constants the
         // provider can translate, the same rearrangement DeviceRosterBuilder uses.

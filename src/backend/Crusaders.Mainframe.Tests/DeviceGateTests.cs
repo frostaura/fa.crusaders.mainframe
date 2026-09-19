@@ -214,9 +214,12 @@ public class DeviceGateTests
     }
 
     /// <summary>
-    /// A user with no membership row at all is not barred — the operator accounts
-    /// <see cref="MembershipAccess"/> argues for, which have to be able to get into the
-    /// building they work in.
+    /// A user with no membership row at all is not barred. The test
+    /// <see cref="MembershipAccess"/> applies is "the club has recorded a decision about this
+    /// person, and it was not approval" — and it has recorded none. Note that this is the
+    /// BARRED check only: whether such a user then gets through a door is the policy's
+    /// question, and under <c>booking_window</c> the answer is no unless they are a club
+    /// admin.
     /// </summary>
     [Fact]
     public async Task A_user_with_no_membership_row_is_not_barred()
@@ -435,32 +438,81 @@ public class DeviceGateTests
     }
 
     /// <summary>
-    /// An admin or operator with no membership row always passes the booking check — a club
-    /// that switches to <c>booking_window</c> must not lock its own staff out of the
-    /// building. Deliberately keyed on "no membership row" and not on "is an admin": an admin
-    /// who is also a member is a member.
+    /// <b>Club admins always pass the booking check</b>, membership row or not — a club that
+    /// switches to <c>booking_window</c> must not lock its own staff out of the building.
+    ///
+    /// <para>
+    /// The exemption is keyed on <c>User.IsAdmin</c>. It used to be keyed on the ABSENCE of a
+    /// membership row, which is a state no production path creates: every account that reaches
+    /// a door has one, and the only reason the old test passed was that it deleted the row
+    /// first. A fixture production cannot produce is not evidence, so the rule it was
+    /// defending — "staff can get in" — was in fact enforced for nobody, and the club's own
+    /// admins were locked out the day it switched policy.
+    /// </para>
+    ///
+    /// <para>
+    /// The four rows vary exactly two fields, and three of them are the probe: flip
+    /// <c>isAdmin</c> and the same fixture must refuse, so this cannot pass against an
+    /// implementation that lets everybody through, and flip the membership row and an admin
+    /// must still pass, so it cannot pass against the old rule either.
+    /// </para>
     /// </summary>
-    [Fact]
-    public async Task An_operator_with_no_membership_passes_the_booking_check_and_an_admin_member_does_not()
+    [Theory]
+    [InlineData(true, true, true)]      // a club admin who is also a member: in
+    [InlineData(true, false, true)]     // a club admin with no membership row: in
+    [InlineData(false, true, false)]    // an ordinary member with nothing booked: out
+    [InlineData(false, false, false)]   // no membership row is not itself a way in
+    public async Task A_club_admin_passes_the_booking_check_and_nobody_else_does(
+        bool isAdmin, bool holdsMembership, bool opens)
     {
         var f = await CreateAsync();
         await using var _ = f.Host;
         using var __ = f.Scope;
 
         var now = DateTimeOffset.UtcNow;
-        var settings = Policy(f, GateAccessPolicies.BookingWindow);
-        var token = await IdentCodeAsync(f, f.Host.AdminUser.Id, now.AddMinutes(1));
+        var user = isAdmin ? f.Host.AdminUser : f.Host.PlayerUser;
+        var token = await IdentCodeAsync(f, user.Id, now.AddMinutes(1));
+        if (!holdsMembership) await SetMembershipAsync(f, user.Id, null);
 
-        // The seeded admin HAS a membership row, so the policy holds them to it like anyone.
-        Assert.False((await DecideAsync(f, GateOn(f), settings, token, now)).Opened);
+        var decision = await DecideAsync(f, GateOn(f), Policy(f, GateAccessPolicies.BookingWindow), token, now);
 
-        await SetMembershipAsync(f, f.Host.AdminUser.Id, null);
-        Assert.True((await DecideAsync(f, GateOn(f), settings, token, now)).Opened);
+        Assert.Equal(opens, decision.Opened);
+        Assert.Equal(opens ? GateAccess.Ok : GateAccess.NoBooking, decision.Reason);
+        Assert.Equal(user.Id, decision.SubjectUserId);
     }
 
     /// <summary>
-    /// A member with neither a membership row nor a booking is still refused. The operator
-    /// carve-out is for staff, and "no membership row" on its own must not become a way in.
+    /// An admin is still held to the membership check exactly as everybody else is. The
+    /// carve-out is on the BOOKING check and nothing else: a club that suspends an admin's
+    /// membership has said something about that person, and a door is not where it gets
+    /// quietly undone.
+    /// </summary>
+    [Theory]
+    [InlineData(GateAccessPolicies.ActiveMember)]
+    [InlineData(GateAccessPolicies.BookingWindow)]
+    public async Task A_suspended_club_admin_is_refused_by_name_under_either_policy(string policy)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var now = DateTimeOffset.UtcNow;
+        var token = await IdentCodeAsync(f, f.Host.AdminUser.Id, now.AddMinutes(1));
+
+        // The control: Active, and the admin walks in under either policy.
+        Assert.True((await DecideAsync(f, GateOn(f), Policy(f, policy), token, now)).Opened);
+
+        await SetMembershipAsync(f, f.Host.AdminUser.Id, MembershipStatus.Suspended);
+
+        var decision = await DecideAsync(f, GateOn(f), Policy(f, policy), token, now);
+        Assert.False(decision.Opened);
+        Assert.Equal(GateAccess.MemberNotActive, decision.Reason);
+    }
+
+    /// <summary>
+    /// A member with neither a membership row nor a booking is still refused. The staff
+    /// carve-out is for club admins, and "no membership row" on its own must not become a
+    /// way in.
     /// </summary>
     [Fact]
     public async Task A_non_admin_with_no_membership_and_no_booking_is_still_refused()
