@@ -351,21 +351,38 @@ monitor-bridge:
 test-e2e:
 	cd src/frontend && npx playwright test
 
-# Tests — end-to-end proof of the court-light system without hardware.
+# Tests — end-to-end proof of the device chain without hardware. TWO scenarios.
 #
-# Real API from source against a fresh Postgres database, the firmware's native
-# simulator (the Mega half) over TCP, and the PayFast mountebank imposter — the
-# script plays the ESP8266 bridge, the member's phone, the admin and PayFast. Every
-# review finding it pins is printed as `finding-id -> assertion`; exits non-zero on
-# any failed assertion. What it does and does not prove: test/e2e-device/README.md.
+# `scenario.py` is the COURT BOX: real API from source against a fresh Postgres
+# database, the firmware's native simulator (the Mega half) over TCP, and the
+# PayFast mountebank imposter — the script plays the ESP8266 bridge, the member's
+# phone, the admin and PayFast.
+#
+# `door_evening.py` is the DOOR, and it is not a second copy of that: it reuses the
+# same bootstrap and then reads every device response THE WAY THE BOARD DOES — a raw
+# socket speaking HTTP/1.0 with `Connection: close`, plus a pass over HTTP/1.1 on a
+# kept-open connection de-chunked by hand, and through the real `nginx` gateway where
+# one is installed. That is the one thing no other suite here can see: round G3 found
+# the API answering every device route `Transfer-Encoding: chunked` on a keep-alive
+# connection, against which the firmware's reader timed out on EVERY call — no
+# roster, and a door that refused everyone, with nothing red anywhere.
+#
+# Both print `finding-id -> assertion` and exit non-zero on any failed assertion. The
+# door needs `psql` on PATH (it places bookings at hours the admin API will not) and
+# it is run second, because it is the longer of the two and the shorter one failing
+# first is the cheaper signal. What each does and does not prove:
+# test/e2e-device/README.md.
 #
 # Postgres: whatever answers on E2E_PG_HOST:E2E_PG_PORT (default localhost:5439,
 # the throwaway `crusaders-fixprog-pg` container, started via docker if absent). A
 # fresh database is created per run and dropped on success. DOTNET, PIO and PY are
-# overridable like everywhere else in this file.
+# overridable like everywhere else in this file. E2E_REQUIRE_GATEWAY=1 turns "no
+# nginx on PATH" from a note into a failure — CI sets it, so the gateway pass cannot
+# go quiet there.
 test-e2e-device:
 	"$(PIO)" run -d $(IOT_DIR)/court-box -e simulator
 	DOTNET="$${DOTNET:-dotnet}" PIO="$(PIO)" "$(PY)" test/e2e-device/scenario.py
+	DOTNET="$${DOTNET:-dotnet}" "$(PY)" test/e2e-device/door_evening.py
 
 # Service virtualization as plain processes.
 #
