@@ -419,23 +419,33 @@ public class DeviceGateTests
     }
 
     /// <summary>
-    /// A cancelled slot is not a reason to be in the building, a completed one is over, and
-    /// an <c>AdminBlock</c> is not a member's booking at all.
+    /// A cancelled slot is not a reason to be in the building, and an <c>AdminBlock</c> is not
+    /// a member's booking at all.
     ///
     /// <para>
     /// <b><c>NoShow</c> used to be on this list and is deliberately not any more.</b> A
     /// no-show is the club's bet that the member did not come, settled five minutes after
     /// the slot starts — and the member standing at the door six minutes late is in the
     /// middle of losing that bet, with the product's own way to reverse it waiting on a court
-    /// box INSIDE the building. The three statuses left here are decisions about the booking;
+    /// box INSIDE the building. The statuses left here are decisions about the booking;
     /// a no-show is a decision about attendance, and a door records none. See
     /// <c>A_member_the_sweep_has_just_written_off_can_still_get_into_the_building</c>, which
     /// is the row that replaced it and drives the real sweep to get there.
     /// </para>
+    ///
+    /// <para>
+    /// <b><c>Completed</c> has now left it for the mirror reason</b>, and a worse one: it was
+    /// the ATTENDED member's status. <c>LightsCueWorker</c> promotes a checked-in booking
+    /// within fifteen seconds of its end, so this row refused, at the door, the member who had
+    /// just played — while the row above let in the member who had not. It is pinned by
+    /// <c>A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building</c>,
+    /// which drives that worker rather than setting the status by hand: a <c>Completed</c> row
+    /// with no <c>CheckedInAt</c>, which is what this theory produced, is a fixture the
+    /// product cannot make.
+    /// </para>
     /// </summary>
     [Theory]
     [InlineData(BookingStatus.Cancelled)]
-    [InlineData(BookingStatus.Completed)]
     [InlineData(BookingStatus.AdminBlock)]
     public async Task A_booking_that_is_not_live_does_not_open_the_door(BookingStatus status)
     {
@@ -763,18 +773,18 @@ public class DeviceGateTests
     /// </para>
     ///
     /// <para>
-    /// <b><c>NoShow</c> is no longer on this list either</b>, for the reason
-    /// <c>A_booking_that_is_not_live_does_not_open_the_door</c> gives above. It is replaced by
-    /// <c>A_member_the_sweep_has_just_written_off_can_still_get_into_the_building</c>, which
-    /// pins both halves: the swept member gets in for the slot they PAID for, and not a
-    /// minute past it.
+    /// <b>Neither <c>NoShow</c> nor <c>Completed</c> is on this list any more</b>, for the
+    /// reasons <c>A_booking_that_is_not_live_does_not_open_the_door</c> gives above. They are
+    /// replaced by the two rows that drive the REAL workers —
+    /// <c>A_member_the_sweep_has_just_written_off_can_still_get_into_the_building</c> and
+    /// <c>A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building</c> —
+    /// each of which pins both halves: the member gets in for the slot they PAID for, and not
+    /// a minute past it.
     /// </para>
     /// </summary>
     [Theory]
     [InlineData(GateAccessPolicies.ActiveMember, BookingStatus.Cancelled)]
-    [InlineData(GateAccessPolicies.ActiveMember, BookingStatus.Completed)]
     [InlineData(GateAccessPolicies.BookingWindow, BookingStatus.Cancelled)]
-    [InlineData(GateAccessPolicies.BookingWindow, BookingStatus.Completed)]
     public async Task A_booking_code_for_a_booking_that_is_no_longer_booked_opens_nothing(
         string policy, BookingStatus status)
     {
@@ -884,13 +894,117 @@ public class DeviceGateTests
     }
 
     /// <summary>
-    /// The other three terminal statuses are untouched by that relief, and this is the probe
-    /// that says the <c>NoShow</c> carve-out is a carve-out rather than a hole. A cancelled
-    /// booking's code opens nothing even while the row's own code is still live.
+    /// <b>The lights sweep must not lock an ATTENDED member out of the building either.</b>
+    ///
+    /// <para>
+    /// <c>NoShow</c> was the relief the member who did not come got, and a member who DID
+    /// come got nothing: <see cref="LightsCueWorker"/> runs every fifteen seconds and promotes
+    /// a checked-in booking to <see cref="BookingStatus.Completed"/> the moment its
+    /// <c>EndsAt</c> passes, so within about fifteen seconds of a slot ending the attended
+    /// member's own live code answered <c>not_recognised</c> and their ident code answered
+    /// <c>no_booking</c>. The member who was refused is the one who was on the court. The
+    /// member who was let in for the whole grace window is the one the club had just decided
+    /// never turned up.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>This drives the REAL worker, and that is the whole reason the defect survived two
+    /// rounds.</b> The tests that pinned "a <c>Completed</c> booking opens nothing" set the
+    /// status by hand on a row with <c>CheckedInAt == null</c> — a state no production path
+    /// produces, because the only writer of <c>Completed</c> requires attendance. A fixture
+    /// the product cannot produce pins nothing; the fixture here is the one the worker itself
+    /// wrote, and it is asserted rather than assumed.
+    /// </para>
+    ///
+    /// <para>
+    /// Both policies and both credentials, because the refusal differed between them and
+    /// none of the four was right.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(GateAccessPolicies.ActiveMember, true)]
+    [InlineData(GateAccessPolicies.ActiveMember, false)]
+    [InlineData(GateAccessPolicies.BookingWindow, true)]
+    [InlineData(GateAccessPolicies.BookingWindow, false)]
+    public async Task A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building(
+        string policy, bool bookingCode)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        // A forty-five minute court that ended a minute ago, played by somebody who was
+        // there. The worker reads its own clock, so the slot is placed relative to now.
+        var startsAt = DateTimeOffset.UtcNow.AddMinutes(-46);
+        var booking = await BookAsync(f, f.Host.Courts[0], startsAt, minutes: 45);
+        booking.CheckedInAt = startsAt.AddMinutes(1);
+        await f.Db.SaveChangesAsync();
+
+        var token = bookingCode
+            ? await BookingCodeAsync(f, booking)
+            : await IdentCodeAsync(f, f.Host.PlayerUser.Id, startsAt.AddHours(2));
+
+        await new LightsCueWorker(
+            f.Host.Services, f.Host.Services.GetRequiredService<IEventBus>(),
+            NullLogger<LightsCueWorker>.Instance).TickAsync(default);
+
+        // The fixture the worker itself produced, asserted: without the promotion this test
+        // is a re-statement of the Booked case and proves nothing.
+        await f.Db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.Completed, booking.Status);
+        Assert.NotNull(booking.CheckedInAt);
+
+        // At the door a minute later, still inside the five-minute grace window — which is
+        // exactly how long the product goes on holding a live code for this member.
+        var atTheDoor = booking.EndsAt.AddMinutes(1);
+        Assert.True(
+            atTheDoor < BookingService.OriginalEndsAt(booking).AddMinutes(f.Settings.GraceWindowMinutes),
+            "the door instant must be inside the grace window, or this tests the wrong edge");
+
+        var decision = await DecideAsync(f, GateOn(f), Policy(f, policy), token, atTheDoor);
+        Assert.True(decision.Opened, $"a member who played was refused at the door: {decision.Reason}");
+        Assert.Equal(GateAccess.Ok, decision.Reason);
+
+        // The probe, and the same one the swept member gets: past the instant that booking's
+        // own code dies, the relief is over. A completed court is not a building key either.
+        var afterTheGrace = BookingService.OriginalEndsAt(booking)
+            .AddMinutes(f.Settings.GraceWindowMinutes + 1);
+        var late = await DecideAsync(f, GateOn(f), Policy(f, policy), token, afterTheGrace);
+        if (bookingCode)
+        {
+            Assert.False(late.Opened);
+            Assert.Equal(GateAccess.NotRecognised, late.Reason);
+        }
+        else
+        {
+            // An ident code names no booking, so under the default policy it never needed one.
+            Assert.Equal(policy == GateAccessPolicies.ActiveMember, late.Opened);
+        }
+    }
+
+    /// <summary>
+    /// The terminal statuses that really are terminal, and the probe that says the relief
+    /// above is a carve-out rather than a hole. A cancelled booking's code opens nothing even
+    /// while the row's own code is still live.
+    ///
+    /// <para>
+    /// <b><c>Completed</c> used to be on this list and is deliberately not any more</b> — see
+    /// <c>A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building</c>.
+    /// It was here as a hand-set status on a row with no <c>CheckedInAt</c>, which is a state
+    /// the product cannot reach: <see cref="LightsCueWorker"/> is the only writer of
+    /// <c>Completed</c> and it requires attendance. So the row pinned a fixture rather than a
+    /// rule, and the rule it appeared to pin was wrong.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>AdminBlock</c> is not reachable through a booking CODE at all — an admin block
+    /// carries no user, and <c>AccessCodeService.StageForBookingAsync</c> refuses to stage a
+    /// code without one — so it is pinned on the policy path instead, in
+    /// <c>A_booking_that_is_not_live_does_not_open_the_door</c>.
+    /// </para>
     /// </summary>
     [Theory]
     [InlineData(BookingStatus.Cancelled)]
-    [InlineData(BookingStatus.Completed)]
     public async Task A_booking_the_member_did_not_lose_by_being_late_still_opens_nothing(BookingStatus status)
     {
         var f = await CreateAsync();
@@ -1387,6 +1501,78 @@ public class DeviceGateTests
         Assert.Equal(opensIn.OrderBy(x => x), opensIn);
     }
 
+    /// <summary>
+    /// <b>WHO is locked out when a club overflows the cap, and that it is the same people
+    /// every time.</b>
+    ///
+    /// <para>
+    /// The cap is a real lockout: on a busy night a booking beyond the forty-eighth cannot get
+    /// in while the door is offline, and the club needs to be able to say which bookings those
+    /// are. The answer is <c>StartsAt</c> then <c>Id</c>, cap after ordering — so it is the
+    /// LATEST-STARTING bookings that fall off, ties broken by a value that never changes.
+    /// </para>
+    ///
+    /// <para>
+    /// The tie-break is what makes the sentence true rather than approximately true. A club
+    /// with sixty bookings in its window very plausibly has a dozen starting on the same slice
+    /// boundary, and a cap applied to an unstable order sends a different forty-eight on every
+    /// heartbeat — so a member is in the cache at 18:00, out of it at 18:01, and nobody can
+    /// tell them which they will be. Every booking here starts at exactly the same instant, so
+    /// nothing BUT the tie-break decides, and the roster is asked twice to say that the answer
+    /// is stable rather than merely correct once.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_overflow_locks_out_the_latest_starting_bookings_deterministically()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var now = DateTimeOffset.UtcNow;
+        var settings = Policy(f, GateAccessPolicies.ActiveMember);
+        const int Cap = DeviceGateRosterBuilder.GateRosterMaxEntries;   // 48
+        const int Earlier = 40;
+        const int Tied = 24;                                            // 64 in the window
+
+        // Forty, each a minute apart, so StartsAt alone orders them and every one fits.
+        var earlier = new List<Booking>();
+        for (var i = 0; i < Earlier; i++)
+        {
+            earlier.Add(await BookAsync(f, f.Host.Courts[i % 4], now.AddMinutes(1 + i), minutes: 5));
+        }
+
+        // Twenty-four on ONE slice boundary, which is the shape a busy club really has. Eight
+        // of them fit; nothing but the tie-break can decide which.
+        var sameInstant = new List<Booking>();
+        for (var i = 0; i < Tied; i++)
+        {
+            sameInstant.Add(await BookAsync(f, f.Host.Courts[i % 4], now.AddMinutes(90), minutes: 5));
+        }
+
+        var roster = await RosterAsync(f, settings, now);
+        Assert.Equal(Cap, roster.Count);
+        var tokens = roster.Select(TokenOf).ToList();
+
+        // Every earlier booking is in, so the whole overflow falls among the tied ones.
+        foreach (var booking in earlier) Assert.Contains(await CodeOfAsync(f, booking), tokens);
+
+        // Among the tied, the survivors are the lowest Ids: the documented tie-break, and the
+        // sixteen locked out are the ones the console's sentence is about.
+        var byId = sameInstant.OrderBy(b => b.Id).ToList();
+        for (var i = 0; i < byId.Count; i++)
+        {
+            var code = await CodeOfOrEmptyAsync(f, byId[i]);
+            if (i < Cap - Earlier) Assert.Contains(code, tokens);
+            else Assert.DoesNotContain(code, tokens);
+        }
+
+        // Asked again, at the same instant: the SAME forty-eight, in the same order. A cap
+        // applied to an unstable order would send a different set on every heartbeat and
+        // nobody could tell a member which one they were in.
+        Assert.Equal(roster, await RosterAsync(f, settings, now));
+    }
+
     /// <summary>A booking beyond the cap is never minted a code by the roster, so "its code" may not exist.</summary>
     private static async Task<string> CodeOfOrEmptyAsync(Fixture f, Booking booking) =>
         (await f.Db.AccessCodes.AsNoTracking().FirstOrDefaultAsync(c => c.BookingId == booking.Id))?.Code ?? "";
@@ -1477,6 +1663,182 @@ public class DeviceGateTests
         Assert.Contains(await CodeOfAsync(f, justInside), tokens);
         Assert.Contains(await CodeOfAsync(f, almostOver), tokens);
         Assert.Equal(2, tokens.Count);
+    }
+
+    /// <summary>
+    /// <b>Every window the gate roster reads is clamped on read, and none of them was.</b>
+    ///
+    /// <para>
+    /// G2's B1 clamped the three numbers the ONLINE decision reads and left the roster
+    /// builder reading two of them raw — <c>roster_window_minutes</c> straight off the column
+    /// and, before that fix, <c>gate_early_entry_minutes</c> too. A hand-edited settings
+    /// document is the case the clamp exists for, and <c>TenantSettingsAccessor.TryInt</c>
+    /// bounds nothing on the way in, so a negative roster window silently emptied every door's
+    /// cache in the club: no error, no log, a present-and-empty <c>roster</c> key on a 200,
+    /// and a door that admits nobody the moment the network drops.
+    /// </para>
+    ///
+    /// <para>
+    /// The grid is the shape a hand-edited column really takes — negative, absurd, and just
+    /// past a legal bound — and the assertion is the ARITHMETIC rather than "not empty",
+    /// because a builder that ignored the settings entirely would satisfy the weaker one. Both
+    /// halves are checked: which bookings are in the list (the window), and the
+    /// <c>opens_in</c> on each (the early-entry term), so a mutant can be wrong in either
+    /// direction and be seen.
+    /// </para>
+    /// </summary>
+    [Theory]
+    //        roster,  cue,  early        what a hand-edited column looks like
+    [InlineData(120,    10,     30)]   // the defaults
+    [InlineData(-600,   10,     30)]   // the executed probe: a negative window emptied the door
+    [InlineData(120,    10,   -600)]
+    [InlineData(100000, 10, 100000)]
+    [InlineData(0,      10,    241)]   // one past the door's own ceiling
+    [InlineData(1,      10,      0)]   // one under the roster's floor
+    public async Task Every_window_the_gate_roster_reads_is_clamped_on_read(int roster, int cue, int early)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var now = DateTimeOffset.UtcNow;
+        var settings = Policy(f, GateAccessPolicies.ActiveMember, earlyEntryMinutes: early) with
+        {
+            RosterWindowMinutes = roster,
+            ActivationCueWindowMinutes = cue,
+        };
+
+        // What the clamps say the window and the early-entry term are, computed from the
+        // bounds the settings PUT itself declares rather than restated as literals.
+        var clampedRoster = Math.Clamp(
+            roster, TenantSettingsView.MinRosterWindowMinutes, TenantSettingsView.MaxRosterWindowMinutes);
+        var clampedEarly = Math.Clamp(early, 0, GateAccess.MaxEarlyEntryMinutes);
+
+        // One booking a minute inside the clamped window and one a minute outside it. Under
+        // the RAW reading of either number at least one of the two lands on the wrong side.
+        var inside = await BookAsync(f, f.Host.Courts[0], now.AddMinutes(clampedRoster + clampedEarly - 1));
+        var outside = await BookAsync(f, f.Host.Courts[1], now.AddMinutes(clampedRoster + clampedEarly + 1));
+
+        var entries = await RosterAsync(f, settings, now);
+        var tokens = entries.Select(TokenOf).ToList();
+
+        Assert.Contains(await CodeOfAsync(f, inside), tokens);
+        Assert.DoesNotContain(await CodeOfOrEmptyAsync(f, outside), tokens);
+
+        // And the early-entry term on the entry itself: opens_in counts down to
+        // StartsAt − clamped early, floored to whole seconds.
+        var entry = Assert.Single(entries);
+        var expected = (long)Math.Floor(
+            (inside.StartsAt.AddMinutes(-clampedEarly) - now).TotalSeconds);
+        Assert.InRange(OpensInOf(entry), expected - 2, expected);
+    }
+
+    /// <summary>
+    /// <b>Step 5's relief asks its question with the DOOR's horizon, not the club's entry
+    /// window</b>, and the two are different numbers under the default policy — 130 minutes
+    /// against 30 at the defaults.
+    ///
+    /// <para>
+    /// It is the difference between "is this member due on a court soon enough to be let in
+    /// for it" (step 6's question, the club's entry window) and "is this member entitled to be
+    /// in the building at all" (step 5's, the horizon in which the product itself puts that
+    /// member's next code on their screen). A member holding a code the product is showing
+    /// them, for a court an hour away, is not somebody to refuse at the front door.
+    /// </para>
+    ///
+    /// <para>
+    /// The existing relief tests all place the OTHER booking either already running or within
+    /// half an hour, so both horizons answer the same and a mutant swapping them changes
+    /// nothing. This one places it in the gap on purpose.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_reliefs_horizon_is_the_doors_and_not_the_clubs_entry_window()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var settings = Policy(f, GateAccessPolicies.ActiveMember, earlyEntryMinutes: 30);
+        var door = BookingCodeWindow.DoorHorizonMinutes(settings);
+        var entry = BookingCodeWindow.EntryWindowMinutes(settings);
+        Assert.True(door > entry + 2, "the two horizons must differ, or this test cannot discriminate");
+
+        var now = new DateTimeOffset(2024, 3, 10, 17, 0, 0, TimeSpan.Zero);
+
+        // The credential: an earlier court, played and over, whose code was minted with three
+        // hours of grace and is therefore still live — what a club that has since shortened
+        // the setting leaves in its members' hands. `Completed` with a `CheckedInAt` is what
+        // LightsCueWorker leaves behind, and it is what puts the code outside its OWN window
+        // so that the relief is what decides. Its own sold end plus the club's CURRENT grace
+        // is 16:05, an hour behind `now`, so this booking cannot satisfy the relief itself.
+        var earlier = await BookAsync(f, f.Host.Courts[0], now.AddMinutes(-120), minutes: 60);
+        var spent = (await f.Codes.MintForBookingAsync(earlier, TimeSpan.FromMinutes(180), default)).Code;
+        earlier.Status = BookingStatus.Completed;
+        earlier.CheckedInAt = earlier.StartsAt.AddMinutes(1);
+        await f.Db.SaveChangesAsync();
+
+        // The entitlement: a court that starts BETWEEN the two horizons.
+        var soon = await BookAsync(f, f.Host.Courts[1], now.AddMinutes((entry + door) / 2), minutes: 60);
+        Assert.True(soon.StartsAt > BookingCodeWindow.LatestStart(now, entry), "outside the entry window");
+        Assert.True(soon.StartsAt <= BookingCodeWindow.LatestStart(now, door), "inside the door's horizon");
+
+        Assert.True((await DecideAsync(f, GateOn(f), settings, spent, now)).Opened);
+
+        // The probe: take the later booking away and the SAME code at the SAME instant is
+        // refused. Vary the fixture, not the assertion.
+        f.Db.Bookings.Remove(soon);
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(GateAccess.NotRecognised, (await DecideAsync(f, GateOn(f), settings, spent, now)).Reason);
+    }
+
+    /// <summary>
+    /// <b>A booking with no member cannot carry a code, and the refusal is an exception rather
+    /// than a fallback.</b>
+    ///
+    /// <para>
+    /// The only booking in this product with a null <c>UserId</c> is an
+    /// <see cref="BookingStatus.AdminBlock"/>, and there is nobody to let in. The code's user
+    /// used to fall back to <c>BookedByUserId</c>, which made "the person the code identifies"
+    /// and "the person the booking belongs to" two potentially different people — and the
+    /// cached roster's barred filter keys on the BOOKING's user while the online door check
+    /// keys on the CODE's, so the two rules would have disagreed about whom a suspension
+    /// binds.
+    /// </para>
+    ///
+    /// <para>
+    /// Pinned because a fallback of any kind — <c>BookedByUserId</c>, <c>Guid.Empty</c> —
+    /// restores that divergence silently and every other test in this file goes on passing.
+    /// The agreement is a property of the type, and this is what makes it one.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_booking_with_no_member_cannot_carry_an_access_code()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var block = new Booking
+        {
+            TenantId = f.Host.Tenant.Id,
+            CourtId = f.Host.Courts[0].Id,
+            UserId = null,
+            BookedByUserId = f.Host.AdminUser.Id,
+            ActorUserId = f.Host.AdminUser.Id,
+            StartsAt = DateTimeOffset.UtcNow.AddMinutes(10),
+            EndsAt = DateTimeOffset.UtcNow.AddMinutes(55),
+            SliceMinutes = 15,
+            SliceCount = 3,
+            Status = BookingStatus.AdminBlock,
+        };
+        f.Db.Bookings.Add(block);
+        await f.Db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => f.Codes.MintForBookingAsync(block, TimeSpan.FromMinutes(5), default));
+
+        Assert.Empty(await f.Db.AccessCodes.Where(c => c.BookingId == block.Id).ToListAsync());
     }
 
     /// <summary>

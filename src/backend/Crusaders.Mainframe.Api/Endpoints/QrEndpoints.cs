@@ -183,6 +183,10 @@ public static class QrEndpoints
             .OrderBy(b => b.StartsAt)
             .FirstOrDefaultAsync(ct);
 
+        // Whether this club has a door at all, asked once for either branch. See DoorFacts.
+        var doors = await db.Devices
+            .AnyAsync(d => d.Kind == DeviceKind.Gate && d.Enabled, ct);
+
         if (booking is not null)
         {
             var code = await codes.MintForBookingAsync(booking, TimeSpan.FromMinutes(settings.GraceWindowMinutes), ct);
@@ -196,6 +200,13 @@ public static class QrEndpoints
                 booking_id = booking.Id,
                 court_number = court?.CourtNumber,
                 starts_at = booking.StartsAt,
+                doors,
+
+                // The door's window for THIS code, computed by the same function the door
+                // decides with. See DoorFacts for why the page is told rather than left to
+                // work it out.
+                door_opens_at = booking.StartsAt.AddMinutes(-BookingCodeWindow.DoorHorizonMinutes(settings)),
+                door_closes_at = code.ExpiresAt,
             });
         }
 
@@ -205,9 +216,53 @@ public static class QrEndpoints
             code = ident.Code,
             kind = "ident",
             expires_in_seconds = ExpiresIn(ident, now),
+            doors,
+
+            // An ident code names no booking, so it has no door window of its own: under the
+            // default policy it opens a door whenever the club's rules allow and under
+            // `booking_window` it needs a qualifying booking, neither of which is an instant.
+            // Null rather than absent, so the page's type is one shape in both branches.
+            door_opens_at = (DateTimeOffset?)null,
+            door_closes_at = (DateTimeOffset?)null,
         });
     }
 
+    /// <summary>
+    /// <b>Why the code's own screen is TOLD what a door will do with it.</b>
+    ///
+    /// <para>
+    /// Since the gate shipped, a <see cref="AccessCodePurpose.BookingActivation"/> code also
+    /// opens the club's doors — from <c>StartsAt − H</c> until the code itself expires — and
+    /// the Court Code page said nothing about it. It could not work the window out for itself
+    /// either: <c>H</c> is <c>max(gate_early_entry, min(roster + cue, 240))</c> under one
+    /// policy and <c>gate_early_entry</c> under the other, and none of those three settings is
+    /// on a member's API surface, nor should they be — they are the club's configuration, and
+    /// a member's page is not where a club's settings document gets published.
+    /// </para>
+    ///
+    /// <para>
+    /// So the server says it, using <see cref="BookingCodeWindow.DoorHorizonMinutes"/> — the
+    /// same function the door itself decides with, which is the whole reason that type exists.
+    /// A page computing its own copy is how a member ends up being told their code works at a
+    /// time their club's door refuses it.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>door_closes_at</c> is the CODE's expiry rather than the booking's end, because that
+    /// is genuinely the door's upper edge (<c>door-gate.md</c> §5) and it is later than the
+    /// slot by the grace window. Telling a member their access ends at their booking's end
+    /// would be the product understating its own generosity, and the member walking back in
+    /// for a forgotten racquet is exactly who notices.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>doors</c> is a separate field because it answers a separate question — has this club
+    /// any doors at all — and a club with none needs a page that says nothing about them
+    /// rather than one describing a building with no controller in it. It counts ENABLED gate
+    /// rows: a board the club has switched off is refused <c>403</c> on every route it calls,
+    /// so promising a member it will let them in would be false.
+    /// </para>
+    /// </summary>
     private static int ExpiresIn(AccessCode code, DateTimeOffset now)
         => (int)Math.Max(0, Math.Floor((code.ExpiresAt - now).TotalSeconds));
 }

@@ -38,7 +38,9 @@ attribute any of it to.
 This will come under pressure the first time somebody wants entry statistics, or asks why
 the member who scanned at the door is still being swept as a no-show. The answer to the
 second is that the courtside terminal and the court box are what record attendance, and the
-answer to the first is that `gate.opened` audit rows are the statistics.
+answer to the first is that `gate.opened` audit rows are the statistics — readable at
+`GET /api/v1/admin/devices/{id}/activity` (§9), which for one round they were not: this
+document assumed a reader in four places and no route read `audit_log` at all.
 
 ---
 
@@ -241,6 +243,22 @@ every board, not slack in an estimate.
 An entry whose token would breach the length bound is **left out** rather than sent to be
 refused: a token cut short matches a different member.
 
+### Who is locked out when a club overflows the cap
+
+The cap is a real lockout and the club is owed a sentence about it: **on a busy night the
+bookings beyond the forty-eighth cannot get in while the door is offline.** Which ones is
+deterministic — the list is ordered by `StartsAt`, ties broken by `Id`, and the cap is applied
+**after** the ordering, so it is the **latest-starting** bookings that fall off.
+
+The tie-break is what makes that true rather than approximately true. A club with sixty
+bookings in its window very plausibly has a dozen starting on the same slice boundary, and a
+cap applied to an unstable order sends a different forty-eight on every heartbeat — a member
+is in the cache at 18:00, out of it at 18:01, and nobody can tell them which they will be.
+
+The console's sentence, for the settings and devices pages, is exactly this: *the offline list
+holds at most 48 bookings; on a busy night the latest-starting beyond 48 cannot get in while
+the door is offline.*
+
 ---
 
 ## 5. The scan — `POST /api/v1/device/gate`
@@ -287,15 +305,16 @@ The order is not arbitrary; each step exists to keep the one after it from being
    being admins — step 5.
 5. **The booking code's own window,** for a `BookingActivation` code and only for one. A
    booking code opens a door only while `now ∈ [StartsAt − H, EndsAt]` of **the booking it
-   names**, and only while that booking is still `Booked` — *or* while the member holding it
-   is due on some other court (*A member is not a credential*, below). Outside both:
-   `too_early` before, `not_recognised` after. See *A booking code is not a standing
-   building key* below.
+   names** and that booking is still `Booked` — *or* while the member holding it holds any
+   qualifying booking whose door window contains now (*A member is not a credential*, below),
+   which is how the code goes on working for the booking it names after a worker has moved
+   that booking's status. Outside both: `too_early` before, `not_recognised` after. See *A
+   booking code is not a standing building key* below.
 6. **The policy.** `active_member` opens. `booking_window` opens for a **club admin**
    unconditionally, and otherwise only for a member with a qualifying booking, on any court,
    inside `[StartsAt − gate_early_entry_minutes, the instant that booking's code dies]`;
-   failing that, `no_booking`. Same upper edge as step 5 and the same qualifying statuses —
-   one rule for the whole door.
+   failing that, `no_booking`. Same upper edge as step 5's relief and the same qualifying
+   statuses — one rule for the whole door.
 7. **The release** is `clamp(gate_unlock_seconds, 1, 30)`.
 
 **Club admins always pass step 6.** A club that switches to `booking_window` must not thereby
@@ -363,6 +382,31 @@ ceiling the member's screen still shows the code and the door answers `too_early
 honest, is actionable by the person standing outside, and is pinned. Hiding a booking's own
 code from the member who owns it would be the worse half of the trade.
 
+**The phone is TOLD the window rather than left to derive it.** `POST /me/qr/generate`
+answers three more fields:
+
+| Field | For a booking code | For an ident code |
+|---|---|---|
+| `doors` | whether the club has ≥ 1 **enabled** `Kind=Gate` row | the same |
+| `door_opens_at` | `StartsAt − H` | `null` |
+| `door_closes_at` | the code's own `ExpiresAt` | `null` |
+
+The page cannot compute `H` for itself, and must not be able to: it is
+`max(gate_early_entry, min(roster + cue, 240))` under one policy and `gate_early_entry` under
+the other, and none of those three settings belongs on a member's API surface. A page
+computing its own copy is how a member is told their code works at a time their club's door
+refuses it, which is the drift `BookingCodeWindow` exists to make impossible — so the server
+answers with the same function the door decides with.
+
+`door_closes_at` is the CODE's expiry and not the booking's end, because that is genuinely
+the door's upper edge and it is later than the slot by the grace window; understating it
+would have the product denying its own generosity to the member walking back in for a
+forgotten racquet. An ident code gets `null` for both because it names no booking and
+therefore has no window of its own — under `active_member` it opens whenever the club's rules
+allow, which is not an instant. `doors` counts **enabled** rows, because a board the club has
+switched off is refused `403` on every route it calls and promising a member it will let them
+in would be false.
+
 ### The upper edge is the code's own liveness, and there is only one of it
 
 **A booking code opens a door until the CODE expires, not until the booking's `EndsAt`.**
@@ -375,6 +419,17 @@ edge, wrong in two directions at once:
   member six minutes late was refused on a booking that had not finished; and
 - a member whose court simply ran to its end was refused for the whole grace window, during
   which the product was still holding a live code for them.
+
+**The booking's STATUS is a second upper edge, and it is reached first.** Step 5's own-window
+test refuses every status but `Booked`, and the two statuses a *worker* writes arrive long
+before the code expires — `NoShow` five minutes after a slot starts, `Completed` within
+fifteen seconds of its end. Neither is a refusal, because step 5's relief re-admits the member
+on that same booking out to the same instant the code dies; what the status test really
+decides is the club's own verdict on the booking, `Cancelled` and `AdminBlock`, which the
+relief does not carry either. So the sentence *there is only one upper edge* is true of the
+answer the door gives, and false of the code path that computes it — which is precisely how
+`Completed` went unnoticed for two rounds, with the credential test refusing and the relief
+silently not catching it.
 
 The same edge governs the entitlement query behind step 5's relief and step 6's policy check,
 where it is written as arithmetic — `StartsAt + SliceMinutes × SliceCount + grace_window_minutes`
@@ -406,10 +461,20 @@ move with it or this edge silently narrows.
 A booking code bounded by its own booking is the right rule about the **code**. It was the
 wrong rule about the **person**, and twice over:
 
-- A member whose phone was still showing the QR for the court they played at 17:00, walking
-  back in at 18:50 for the court they have booked at 19:00, was told `not_recognised`: your
-  code is fake. It was not fake, it was theirs, it was live, and they were due on a court in
-  ten minutes.
+- A member holding the QR for the court they played at 17:00, walking back in for the court
+  they have booked at 19:00, was told `not_recognised`: your code is fake. It was not fake,
+  it was theirs, it was live, and they were due on a court shortly.
+
+  **How long that code lives is `grace_window_minutes` past the slot's end, and at the
+  default of five minutes that is 18:05** — so the reachable version of this complaint is a
+  member back at the door a minute or two after their court, not at 18:50. The relief cannot
+  reach further than the code does: past 18:05 `AccessCodeService.ResolveAsync` refuses the
+  token outright and the decision never gets here. 18:50 is the shape a club with a *long*
+  grace window produces, and it is the fixture
+  `A_spent_booking_code_still_opens_the_door_for_a_member_due_on_another_court` uses — minted
+  with sixty minutes of grace, which is what a club that has since shortened the setting
+  leaves in its members' hands. Read the example as "inside the life of the code they are
+  holding", not as a number.
 - A member **six minutes late** was told the same thing. The no-show sweep settles at
   `grace_window_minutes` past the start, sets `Status = NoShow` and truncates `EndsAt` to its
   own clock — so the booking QR answered `not_recognised` and the ident QR answered
@@ -426,7 +491,22 @@ exactly what it was. Qualifying means:
 |---|---|---|
 | `Booked` | yes | unchanged |
 | `NoShow` | yes | a bet against attendance the member is in the middle of losing |
-| `Cancelled` · `Completed` · `AdminBlock` | no | decisions about the booking, and final |
+| `Completed` | yes | the record that they were *on the court* — see below |
+| `Cancelled` · `AdminBlock` | no | decisions the CLUB took about the booking, and final |
+
+**`Completed` was the `NoShow` defect with the sign reversed, and it was the worse half.**
+`LightsCueWorker` runs every fifteen seconds and promotes a *checked-in* booking the moment
+its `EndsAt` passes, so within about fifteen seconds of a slot ending the member who had
+actually played was refused at the door — booking QR `not_recognised`, ident QR `no_booking` —
+while the member who had *not* turned up was still being let in for the whole grace window by
+the `NoShow` row above. The relief was reaching precisely the wrong one of the two.
+
+It survived two rounds because of its FIXTURE, not its rule: the tests that pinned "a
+completed booking's code opens nothing" set `Status = Completed` by hand on a row with
+`CheckedInAt == null`, and that row is a state the product cannot produce — the only writer of
+`Completed` requires attendance. `Completed` is not a decision about the booking at all; it is
+the record that the member was on the court, which is a better reason to be in the building
+than anything else this query can see.
 
 The end they are measured against is the instant that booking's own code dies — see *The
 upper edge is the code's own liveness* above — which for a `NoShow` is measured from the slot
@@ -469,7 +549,7 @@ needs a qualifying booking exactly as before.
 | `reason` | Means |
 |---|---|
 | `ok` | opened; the only reason carrying `opened:true` |
-| `not_recognised` | code unknown, expired, malformed, another club's — or a booking code presented after its slot ended or for a booking that is no longer `Booked` |
+| `not_recognised` | code unknown, expired, malformed, another club's — or a booking code presented past the life of the code it is, or for a booking the club has `Cancelled` or blocked, by a member who holds no other qualifying booking |
 | `member_not_active` | the club has suspended, rejected or not yet approved them |
 | `no_booking` | `booking_window` only: not a club admin, and nothing booked inside the entry window |
 | `too_early` | a booking code presented before its own booking's window opens |
@@ -526,16 +606,34 @@ a log — and this path wrote it in full under `subject`, for a `gate_open` and 
 `DetailsJson`, so those bytes stayed readable for as long as the row did, and they open every
 door in the club for the length of that booking's window.
 
-What `subject` now carries for those two kinds is the **first eight hex characters of SHA-256
-over the normalised code**. Not reversible, not a lookup key, and it keeps the one property
-worth keeping: two scans of one code still produce the same value, so "the same badge tried
-the side door eleven times" is still a question the trail answers. The identity lives on
-`SubjectUserId`, which the resolved `gate_open` path sets. The guard is keyed on the **kind**
-rather than on the sending row's kind, which is wider than it needs to be on purpose: a court
-box posting `gate_open` is refused `not_a_gate`, but the token it posted is just as live, and
-a guard that depends on the sender being honest about itself is not a guard. A court box's own
-`activation` events are untouched — that token is the roster token for a booking the receipt
-already names, and narrowing it is a decision about the court-box trail rather than a door fix.
+What `subject` carries is the **first eight hex characters of SHA-256 over the normalised
+code**. Not reversible, not a lookup key, and it keeps the one property worth keeping: two
+scans of one code still produce the same value, so "the same badge tried the side door eleven
+times" is still a question the trail answers. The identity lives on `SubjectUserId`, which the
+resolved `gate_open` path sets.
+
+**It is keyed on nothing at all: every kind is fingerprinted, including the court box's own
+`activation` and `release`.** It was keyed on the two door kinds, and that was wrong twice.
+
+- **Mechanically.** The guard read the `kind` RAW while the receipt, the audit action and the
+  malformed test all read it trimmed. So `" gate_open "` — one space — was stored, receipted
+  and audited as `device.gate_open`, indistinguishable in the trail from an honest event,
+  while the guard did not recognise it and wrote **the live access code in full**. The same
+  spelling stepped around the `gate_open`-from-a-court-box refusal below. Anything holding the
+  club key could do it by adding a character.
+- **In substance.** The narrow version reasoned that an activation token "is the roster token
+  for a booking the receipt already names", so hiding it gained nothing. That was true when it
+  was written and stopped being true the moment this document existed: since §5, that same
+  roster token opens **every door in the club** for the length of its booking's window. The
+  receipt naming the booking does not make the bytes less live.
+
+**So the `kind` is normalised ONCE, at the top of `/events` — trimmed and ordinal
+lower-cased — and every decision after it reads that value**: the dispatch, the kind guards,
+the fingerprint, the receipt's `kind` column and the audit action. A kind this server has
+never heard of is recorded as it normalised (it is evidence, and a board cannot edit what it
+has queued) and fingerprinted like every other. Lower-casing is ordinal and not the current
+culture, because `ToLower()` on a Turkish locale maps `I` to a dotless `ı` and a server's
+regional settings would then decide whether a board's events were recognised.
 
 **Rows written before this change still hold their tokens.** Nothing rewrites them and
 nothing here pretends otherwise; the remedy is the one the console already offers for a
@@ -554,19 +652,42 @@ event at the head stops every event behind it from ever arriving — including t
 the no-show sweep is waiting on, which is real money. A board cannot edit what it has already
 queued, so the only exit is a receipt.
 
-### The heartbeat request carries an optional `no_push`
+### The heartbeat request carries two optional counters
 
-A board with one LED and a boot log has two failures it must report and must never show a
-member: a heartbeat body that did not fit its buffer or arrived incomplete, and a watchdog
-that would not arm. They ride the heartbeat request as one optional non-negative integer,
-`no_push` — additive, so a board that sends nothing is reporting zero, and the court box's
-wire is untouched.
+A board with one LED and a boot log has failures it must report and must never show a member.
+Two of them ride the heartbeat request as optional integers — additive, so a board that sends
+nothing is reporting zero, and the court box's wire is untouched:
 
-The server **logs it against the device code and stores nothing**: a column would be an EF
+| Field | Counts |
+|---|---|
+| `no_push` | heartbeats the board could not push: a body that did not fit its buffer, arrived incomplete, or failed its read on an otherwise-`200` response |
+| `events_lost` | queued events its ring overwrote before they could be uploaded |
+
+**Both are SINCE-BOOT TOTALS, and three places in this repository said otherwise** — this
+section, the heartbeat's own field comment, and the log line the server writes ("since the
+last one it could"). A board cannot know which of its reports the server kept, and a lost
+response is precisely the case `no_push` exists to report, so a counter reset on send would
+lose the whole count exactly when it mattered. The reader takes the **rise** between two
+heartbeats. Both **saturate** at `INT32_MAX` on the board rather than wrapping, so a board up
+for years reports a ceiling instead of a small number.
+
+**The watchdog half does NOT ride `no_push`, and this section said it did.** A watchdog that
+will not arm is reported by the link pattern's fault variant on the LED and by the boot log.
+It is not a heartbeat that failed to push, and folding it in would make one number mean two
+unrelated things to whoever reads it.
+
+The server **logs both against the device code and stores nothing**: a column would be an EF
 migration for a counter nothing decides anything on, and §9's "no EF migration" still holds.
-It changes no part of the response, and a negative value is ignored rather than refused,
-because a diagnostic must not be able to take a door out of service. Corpus vector
-`gate-heartbeat-request-no-push`.
+They change no part of the response.
+
+**They bind as 64-bit, and an out-of-range or negative value is IGNORED rather than refused.**
+`no_push` bound as a 32-bit integer, so the very first value past the board's own saturation
+point answered **`400` for the whole heartbeat** — no `gate` block, no `roster`, nothing — and
+a door that had been up long enough to saturate a counter then lost its cache at the next
+stale deadline. The corpus vector's own note has said since it was written that a counter must
+not be able to take a door out of service; it could. Vectors
+`gate-heartbeat-request-no-push`, `gate-heartbeat-request-events-lost`,
+`gate-heartbeat-request-counters-out-of-range`.
 
 **A `gate_open` uploaded by a `CourtBox` row is refused by name**, the mirror of §7: receipted
 and acknowledged, outcome `not_a_gate`, and the `device.gate_open` row **names nobody**.
@@ -574,6 +695,34 @@ Nothing settles on this path either way, so no money turns on it; what the guard
 record. Without it, anything holding the club key with a box's MAC could post an arbitrary
 access code and have the trail say that person opened a door — for a door that does not exist.
 A false record of who was in the building is a worse artefact than a refusal.
+
+### An offline `unknown_scan` names nobody, and that is structural
+
+A gate queues `unknown_scan` for a scan its **cached roster did not carry**. By construction
+the server cannot then name the member either: if the token were resolvable it would have been
+in the roster the board was holding, and the board would have opened the door. So the row has
+`SubjectUserId = null` and a fingerprint, always — that is not a gap to be closed later and it
+is worth stating, because the activity reader (§9) shows these rows and "unknown code ·
+`1f4c9ab2`" is all a console can honestly render. The fingerprint is what makes them useful:
+the same badge at the same door eleven times is a pattern the desk can act on without anybody
+being named.
+
+### Residual: `/events` receipts and audit rows are never purged
+
+`RetentionWorker` anonymises a member's identity on old rows; nothing **deletes**
+`device_event_receipts` or `audit_log`. A busy club's door therefore accumulates rows for as
+long as the deployment lives. Nothing in this round changes that, and it is recorded rather
+than left to be discovered:
+
+- the activity reader bounds what one request can pull (§9, `limit` ≤ 200) but the table
+  underneath it grows without limit;
+- there is no index on `details_json`, which is what that route matches a board on;
+- the receipts table is what makes an event upload idempotent, so a purge is not merely a
+  delete — it has to be older than any board could still be retrying, which is
+  `MaxEventAge`'s thirty days at least.
+
+Carried on the watch list as `B8`. It is a capacity and cost question rather than a
+correctness one, which is why it is a residual and not a fix.
 
 ---
 
@@ -631,7 +780,19 @@ board can provoke.
 The one documented exception is a **400**, not a 403, and is deliberate: an unrecognised `kind`
 on the heartbeat is refused before the MAC is resolved (§3), so a disabled board sending one is
 told its firmware is wrong rather than that it is out of service. A 400 is not a status D4 acts
-on.
+on. The registration cap (§8's fourth rule) answers **409** for the same reason, stated there.
+
+**That pin is APPLICATION-LEVEL, and the boards do not talk to the application.** They talk to
+`nginx`. A gateway rule that answered `403` for any reason at all — an IP allow-list, a rate
+limiter configured to forbid rather than to `429`, a WAF snippet pasted in during an incident —
+would take **every door in the club out of service at once**, and keep them there until each
+board's next ACCEPTED heartbeat: no code change, no API deploy, nothing red, and a symptom
+("all the doors stopped working") that points at the application rather than at the file that
+caused it. `nginx/nginx.conf` has no `deny` directive and no `return 403` today, and
+`DeploymentPostureTests.The_gateway_never_answers_forbidden_itself` is what keeps it that way.
+Anything in front of the gateway — a reverse proxy at the club, a tunnel, a CDN — is outside
+this repository and outside that check, and the same reasoning applies to it: on the device
+surface, `403` is a word the firmware obeys.
 
 **The residual, stated because it is real and because nobody should discover it during an
 incident:** this only reaches a board that can still reach us. A gate that has been **cut off**
@@ -709,23 +870,45 @@ it is on this list because the door is what made its absence expensive.
 `PeripheralHealthWorker` had no cooldown and no minimum outage: every transition mailed every
 admin of the club. A board on a marginal uplink flapping every few minutes was a mailbox full
 of "not reporting" and "back online" until somebody muted the sender, and an alert nobody
-reads is worse than no alert because the club believes it has one. Auto-registration then
-makes it a capability rather than a nuisance: anything holding the club's device key can mint
-boards with invented MACs, and each one could mail the whole club on demand.
+reads is worse than no alert because the club believes it has one.
 
-Three rules, and the third is the door's:
+**The cooldown is per BOARD, and for one round this section claimed it also answered the
+fleet.** It does not. Auto-registration is unbounded, so anything holding the club's device
+key can mint boards with invented MACs — and twelve boards are twelve *first* outages, each
+inside its own cooldown, so the club still gets twelve mails in one thirty-second tick and the
+only ceiling is the tenant rate limit. The naming rule that was supposed to cover it was a
+DOOR rule, and a `kind`-less heartbeat registers a **court box**, which had no naming step at
+all. Four rules, and the last two are what actually bound the fleet:
 
 - **At most one outage mail per board per cooldown.** Derived by replaying that board's own
   outage rows rather than stored on them, so it needs no migration; each row is announced iff
   the cooldown has elapsed since the last *announced* one, not since the last row — otherwise
-  a board flapping just inside the window chains past it for ever.
+  a board flapping just inside the window chains past it for ever. This bounds a FLAPPING
+  board and nothing else.
 - **A recovery mail is sent only if its outage mail was.** Same replay, same rows, so the two
   decisions cannot disagree. The one thing that can move between them is the setting itself,
   and a club that changes it mid-outage may get an all-clear for an alarm it did not get; that
   is the price of not adding a column and it is bounded to the boards in outage at that moment.
-- **A gate no admin has named mails nobody** (§4's acknowledgement, applied to alerts). The
-  outage row and the `peripheral.*` events are still written — the Devices page is where an
-  admin looks at a board on purpose, and what is withheld is the interruption, not the record.
+- **A board NO ADMIN HAS ACKNOWLEDGED mails nobody**, whatever kind it is. `AutoRegistered`
+  means exactly "nobody has looked at this row", it is already on every kind, and the first
+  admin edit clears it — so a board a club genuinely installed becomes mailable the moment
+  anybody touches it, and an invented one never does. The gate's own naming rule survives as
+  the narrower of the two and is about a different thing: `gate_key` is what makes the message
+  identify a door at all, and §4 keys the offline roster on it. The outage row and the
+  `peripheral.*` events are still written — the Devices page is where an admin looks at a
+  board on purpose, and what is withheld is the interruption, not the record.
+- **A club may hold at most sixteen boards nobody has acknowledged** — the contract constant
+  `DeviceRegistryService.MaxUnacknowledgedDevices`. Past it, auto-registration answers
+  **`409 too_many_unacknowledged_devices`** and no row is created. It counts the
+  *unacknowledged* rows rather than all of them, because a cap on the total would eventually
+  refuse a club that genuinely has forty boards, at the worst possible moment; the way past it
+  is the thing an admin was going to do anyway. It bounds **creating** a row and never serving
+  one, so a flood cannot take a club's installed doors offline.
+
+  **409 and not 403**, and that is load-bearing rather than taste: on this route group a 403
+  means "this board is out of service" and nothing else (§7), and the firmware acts on it by
+  committing an empty roster and refusing to fall back. A registration refusal wearing a 403
+  would take every door in the club out of service for as long as the flood lasted.
 
 **Taking a board out of service closes whatever outage it is in, silently**, at the instant
 `OutOfServiceSince` records. The sweep skips disabled rows, so an outage open at that moment
@@ -777,6 +960,15 @@ console sends `""` to clear, deliberately, because the other reading is the one 
 wrong for free: send `null` meaning "clear it" and the API answers `200` having changed
 nothing, and nothing anywhere says so.
 
+**Both spellings bind, for the reason §8 gives about the settings PUT** — and that argument
+was made in this document and then not applied to the one field on this PATCH that carries the
+same risk. This endpoint answers snake_case and .NET binds camelCase, so `{"gateKey": "x"}`
+bound to `null`, which `gate_key` reads as "omitted", and the PATCH returned `200` with the
+door's OLD name in the body. For a value that names the door in every audit row a club will
+ever read back, a silent no-op is worth removing rather than documenting. snake_case wins
+where both arrive, and every refusal in the table above applies to whichever value is used —
+a spelling is not a way round a rule.
+
 **Naming a door now does something**, which it did not when this section was first written: it
 is what starts that board's offline fallback (§4). The console says so where an admin can act
 on it rather than leaving it to be discovered when the network drops.
@@ -784,8 +976,60 @@ on it rather than leaving it to be discovered when the network drops.
 `name` and `enabled` work on a gate exactly as on a box. Taking a gate out of service refuses
 it `403` on every device route, as it does a box.
 
+### `GET /api/v1/admin/devices/{id}/activity` — what this board has been doing
+
+Admin JWT, tenant-scoped, and the same route for a gate and a court box. It is the reader the
+audit trail did not have, and the door is why it had to exist: §1, §5, §6 and go-live §12 all
+assume somebody can read `gate.opened` rows back, and for one round nothing could.
+
+```
+GET /api/v1/admin/devices/{id}/activity?limit=50
+
+{ "items": [ {
+    "at":          "2026-09-19T18:04:11.271+00:00",
+    "action":      "gate.opened" | "gate.denied_<reason>" | "device.gate_open" | …,
+    "reason":      "ok" | "not_recognised" | … | null,
+    "offline":     false,
+    "member":      { "id": "<guid>", "name": "Jane Doe" } | null,
+    "fingerprint": "1f4c9ab2" | null
+} ] }
+```
+
+- **Newest first.** A console pages this and shows the first page; an ordering that was not
+  stated would eventually be changed by an index.
+- **`limit` is 1–200, default 50, and CLAMPED rather than refused.** A console asking for a
+  million rows is a mistake to bound, not a request to answer with an error screen.
+- **404 for another club's board**, because whether a device id exists at all is a fact about
+  that tenant. Both filters are pinned — the device lookup and the row query — by a
+  cross-tenant injection, because rows are attributed to a board by a `device_id` inside a
+  jsonb document with no foreign key behind it.
+- **`action` is the row's own action**, unrenamed. The console owns the dictionary that turns
+  it into a sentence, and it needs both vocabularies: §5's refusal reasons and §6's outcomes.
+- **`reason`** is a gate decision's `reason` or an uploaded event's `outcome`, whichever the
+  row carries, else null. The two are not unified here on purpose: they are written by
+  different paths about different things — a refusal the API decided, and what the server made
+  of something a board had already done.
+- **`offline`** is true when the row came from `POST /device/events`, keyed on the `seq` only
+  that path writes. Not on the action's prefix, which would call an admin's `device.updated`
+  an offline open, and not on a list of kinds, which goes stale the first time a board learns
+  a new one.
+- **It is the BOARD's trail, not a door-opens feed.** The registration row and the admin edit
+  are in it, because an admin diagnosing a door should not have to know which half of the
+  story to look in before they know what is wrong.
+- **`DetailsJson` is never returned**, in whole or in part: it carries the club's internal
+  device id, the gate key and a court box's relay and booking ids.
+- **`fingerprint` is validated to BE one** — eight lowercase hex characters — rather than
+  forwarded. Rows written before §6's fingerprint existed hold a live access code in `subject`
+  in full, and `RetentionWorker` never touches `DetailsJson`, so a reader that trusted the
+  field would have published every one of them to the console on the day it shipped. Such a
+  row is still listed, with `fingerprint: null`: it is evidence, and hiding it would be the
+  wrong half to withhold.
+
 **No EF migration.** `Kind` and `GateKey` have been columns with indexes since the device
-table shipped, and nothing here persists anything new.
+table shipped, and nothing here persists anything new. This route adds no column either — it
+reads `audit_log`, which has always been there. It has no index on `details_json` and does not
+need one at a club's volume; that, and the fact that nothing purges these rows, are recorded
+as residuals in §6 rather than left to be discovered.
 
 ---
 
@@ -1005,6 +1249,7 @@ new sentence above with no row is the defect this table exists to expose.
 | Every roster entry is on relay 0 | `DeviceGateTests.Every_gate_roster_entry_is_on_relay_zero` |
 | `opens_in` counts to `StartsAt − early` and goes negative | `DeviceGateTests.The_relative_seconds_are_measured_…`, `…The_roster_arithmetic_holds_at_every_minute_of_the_day` |
 | The cap is 48, applied after ordering | `DeviceGateTests.The_cap_keeps_the_forty_eight_earliest`, `…The_cap_is_forty_eight_and_the_grammar_bounds_the_token` |
+| The overflow is the LATEST-STARTING bookings, ties by `Id`, and the same set on every heartbeat | `DeviceGateTests.The_overflow_locks_out_the_latest_starting_bookings_deterministically` |
 | The 4096 budget is declared against the widest possible body | `DeviceGateProtocolCorpusTests.The_byte_budget_is_declared_against_the_widest_body_the_server_can_emit` |
 | An over-long token is left out, not truncated | `DeviceGateTests.The_cap_is_forty_eight_and_the_grammar_bounds_the_token` |
 | The roster window is `roster_window + early_entry` either side | `DeviceGateTests.Bookings_just_outside_the_roster_window_are_absent_and_just_inside_are_present` |
@@ -1017,10 +1262,10 @@ new sentence above with no row is the defect this table exists to expose.
 | Not-`Active` is refused by name; no membership row is not barred | `DeviceGateTests.A_member_the_club_has_not_approved_is_refused_by_name`, `…A_user_with_no_membership_row_is_not_barred` |
 | Unknown and expired both answer `not_recognised` | `DeviceGateTests.An_unknown_or_expired_code_is_not_recognised_and_names_nobody` |
 | The booking window opens at early entry and shuts when that booking's code dies | `DeviceGateTests.The_booking_window_opens_at_early_entry_and_shuts_at_the_slots_end` |
-| The door's upper edge is the code's liveness, and is never narrower than the phone's | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` (asserts the two agree on every late row), `DeviceGateHttpTests.The_door_still_opens_on_a_code_the_phone_has_stopped_offering` |
+| The door's upper edge, once the relief is counted in, is the code's liveness, and is never narrower than the phone's | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` (asserts the two agree on every late row), `DeviceGateHttpTests.The_door_still_opens_on_a_code_the_phone_has_stopped_offering` |
 | The window is the setting, not a constant | `DeviceGateTests.The_entry_window_is_the_clubs_setting_and_not_a_constant` |
 | Any court of the club counts | `DeviceGateTests.A_booking_on_any_court_opens_the_door` |
-| Only a `Booked` booking counts | `DeviceGateTests.A_booking_that_is_not_live_does_not_open_the_door` |
+| `Cancelled` and `AdminBlock` never count; `Booked`, `NoShow` and `Completed` all do | `DeviceGateTests.A_booking_that_is_not_live_does_not_open_the_door` |
 | Club admins always pass the booking check, and nobody else does | `DeviceGateTests.A_club_admin_passes_the_booking_check_and_nobody_else_does`, `DeviceGateHttpTests.A_club_admin_with_a_membership_and_no_booking_still_opens_the_door`, `DeviceGateTests.A_non_admin_with_no_membership_and_no_booking_is_still_refused` |
 | An admin is still held to the membership check | `DeviceGateTests.A_suspended_club_admin_is_refused_by_name_under_either_policy` |
 | An admin is still held to a booking code's own window | `DeviceGateTests.A_club_admins_booking_code_is_bounded_by_its_own_window_too` |
@@ -1028,28 +1273,40 @@ new sentence above with no row is the defect this table exists to expose.
 | A booking code opens the booking it names | `DeviceGateTests.A_booking_code_opens_the_door_for_the_booking_it_names` |
 | A booking code opens only inside its own booking's window, under either policy | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` |
 | `too_early` before the window, `not_recognised` after it | same test, and `DeviceGateHttpTests.A_booking_code_presented_too_early_is_refused_as_a_200_and_audited` |
-| A cancelled or completed booking's code opens nothing | `DeviceGateTests.A_booking_code_for_a_booking_that_is_no_longer_booked_opens_nothing`, `…A_booking_the_member_did_not_lose_by_being_late_still_opens_nothing` |
+| A cancelled booking's code opens nothing, even while that code is still live | `DeviceGateTests.A_booking_code_for_a_booking_that_is_no_longer_booked_opens_nothing`, `…A_booking_the_member_did_not_lose_by_being_late_still_opens_nothing` |
 | A swept no-show still gets in, to the end the slot was SOLD and no further | `DeviceGateTests.A_member_the_sweep_has_just_written_off_can_still_get_into_the_building` (drives the real `NoShowWorker`) |
+| A member the lights sweep has just promoted to `Completed` still gets in, to the same end and no further | `DeviceGateTests.A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building` (drives the real `LightsCueWorker`, so the fixture is the one the product makes) |
 | A code outside its own window opens for a member due on another court | `DeviceGateTests.A_spent_booking_code_still_opens_the_door_for_a_member_due_on_another_court`, `…An_early_booking_code_opens_the_door_for_a_member_whose_court_is_running`, `DeviceGateHttpTests.A_spent_booking_code_opens_the_door_for_a_member_whose_next_court_is_due` |
 | An ident code has no booking window of its own | `DeviceGateTests.An_ident_code_has_no_booking_window_of_its_own` |
 | The door's horizon under `active_member` is the phone's, and cannot drift from it | `DeviceGateTests.The_doors_horizon_under_the_default_policy_is_the_one_the_phone_shows`, `DeviceGateHttpTests.The_door_accepts_a_booking_code_exactly_while_the_phone_would_show_it` |
+| The member's screen is told `doors`, `door_opens_at` and `door_closes_at`, and the door agrees with them | `DeviceGateHttpTests.The_member_screen_is_told_what_its_code_does_at_a_door` (drives the real decision at both edges of the stated window) |
+| `doors` counts ENABLED gates only, and a court box is not a door | `DeviceGateHttpTests.A_club_whose_only_door_is_out_of_service_has_no_doors_on_the_member_screen` |
 | No settings combination, legal or hand-edited, reaches further than four hours | `DeviceGateTests.No_settings_combination_lets_a_door_reach_further_than_four_hours`, `…A_club_with_an_enormous_phone_horizon_still_has_a_four_hour_door`, `DeviceGateHttpTests.The_door_reaches_four_hours_however_wide_the_clubs_own_horizon_is` |
 | The release is the club's setting, clamped to 1–30 | `DeviceGateTests.The_release_is_the_clubs_setting_clamped`, `DeviceGateHttpTests.The_release_on_the_wire_is_the_clubs_setting` |
 | Every reason has a vector and every vector a reason | `DeviceGateProtocolCorpusTests.The_refusal_reasons_and_their_vectors_are_the_same_set` |
 | One audit row per decision, subject named, token absent | `DeviceGateHttpTests.An_active_member_opens_the_door_and_the_open_is_audited` |
+| The trail has a reader, and it carries the online and offline halves of a board's day | `DeviceGateHttpTests.A_doors_activity_is_readable_and_carries_both_halves_of_its_day`, `…A_court_boxs_activity_is_readable_on_the_same_route` |
+| It returns no raw details and no legacy token, and a fingerprint is validated to be one | `DeviceGateHttpTests.The_activity_route_returns_no_raw_details_and_no_legacy_token` |
+| `limit` is clamped to 1–200 and defaults to 50 | `DeviceGateHttpTests.The_activity_limit_is_clamped_and_defaults_to_fifty` |
+| Another club's board 404s, and another club's ROWS never appear | `DeviceGateHttpTests.Another_clubs_device_has_no_activity_here`, `…Another_clubs_audit_rows_never_appear_in_this_clubs_device_activity` |
 | Another club's code opens nothing here | `DeviceGateTests.Another_clubs_code_is_not_recognised_at_this_clubs_gate`, `DeviceGateHttpTests.Another_clubs_code_does_not_open_this_clubs_door` |
 | Another club's bookings never reach this club's roster | `DeviceGateTests.Another_clubs_booking_never_appears_…`, `DeviceGateHttpTests.Another_clubs_bookings_never_reach_…` |
 | `gate_open` is receipted, names the subject at the scan, settles nothing | `DeviceGateHttpTests.An_offline_gate_open_is_receipted_and_names_the_member_without_checking_them_in` |
 | An unresolvable `gate_open` is still recorded | `DeviceGateHttpTests.An_offline_gate_open_with_an_unresolvable_token_is_still_recorded` |
 | An offline door event fingerprints its token instead of logging it, and two scans of one code still correlate | `DeviceGateHttpTests.An_offline_door_event_fingerprints_the_token_instead_of_logging_it` |
+| EVERY kind's subject is fingerprinted, the court box's `activation` included | `DeviceGateHttpTests.A_court_boxs_activation_event_fingerprints_its_token_as_well`, `DeviceEventHttpTests.Activation_event_with_unknown_token_is_acked_and_audited` |
+| `kind` is normalised once and every later decision reads that value | `DeviceGateHttpTests.A_door_event_kind_is_normalised_before_anything_is_decided_from_it` (five spellings), `…An_unknown_kind_is_recorded_as_normalised_and_still_fingerprinted` |
+| A respelt `gate_open` cannot step around the court-box refusal | `DeviceGateHttpTests.A_court_box_cannot_post_a_door_open_by_respelling_the_kind` |
 | A missing, empty or over-long `kind` is receipted as `malformed`, never 500, and the queue drains past it | `DeviceGateHttpTests.A_malformed_event_kind_is_receipted_rather_than_five_hundred` |
-| `no_push` is accepted, logged, stored nowhere, and changes nothing | `DeviceGateHttpTests.A_no_push_counter_is_accepted_and_changes_nothing`, `DeviceGateProtocolCorpusTests.Request_vectors_bind_to_the_records_the_endpoints_take` |
+| `no_push` and `events_lost` are accepted, logged, stored nowhere, and change nothing — at any value, saturated or negative | `DeviceGateHttpTests.The_boards_diagnostic_counters_are_accepted_and_change_nothing`, `DeviceGateProtocolCorpusTests.Request_vectors_bind_to_the_records_the_endpoints_take` |
+| `gate_key` binds under either spelling, and both refusals still fire under either | `DeviceGateHttpTests.The_admin_patch_binds_gate_key_under_either_spelling` |
 | A `gate_open` from a court box is `not_a_gate` and names nobody | `DeviceGateHttpTests.A_gate_open_uploaded_by_a_court_box_names_nobody_and_says_not_a_gate` |
 | A gate cannot activate or sell a walk-up | `DeviceGateHttpTests.A_gate_cannot_activate_a_court_or_sell_a_walk_up` |
 | A gate's `activation` upload settles nothing | `DeviceGateHttpTests.An_activation_uploaded_by_a_gate_is_recorded_and_settles_nothing` |
 | An unnamed board is pushed no roster; naming it starts the fallback | `DeviceGateHttpTests.An_unnamed_gate_is_pushed_no_roster_until_an_admin_names_the_door` |
 | A board out of service is 403 on the heartbeat as well as the scan | `DeviceGateHttpTests.A_gate_taken_out_of_service_is_refused_on_the_heartbeat_too`, `…The_board_identity_failures_keep_their_own_shapes` |
 | …and on this surface a 403 can mean NOTHING ELSE | `DeviceForbiddenMeansOutOfServiceTests` (five tests: the group's routes and policy, the scheme's role claim, the source of everything that serves or wraps it, no refusal a working board can provoke, and the forward direction on all five routes) |
+| …and the GATEWAY in front of it never answers 403 either | `DeploymentPostureTests.The_gateway_never_answers_forbidden_itself` (no `deny` directive, no `return 403`, and a control that the file really is a proxy) |
 | A barred member is off BOTH rosters on real Postgres, not only in memory | `DeviceGateHttpTests.A_barred_members_booking_is_filtered_out_on_real_postgres` |
 | A silent door gets a door's alert and none of the court box's sentences | `PeripheralHealthTests.A_silent_gate_gets_a_door_alert_and_none_of_the_court_boxs_sentences`, `…A_gate_that_comes_back_gets_a_door_all_clear_and_none_of_the_court_boxs` |
 | A silent box beside a silent door still gets the court box's alert | `PeripheralHealthTests.A_silent_box_beside_a_silent_gate_still_gets_the_court_boxs_alert` |
@@ -1060,7 +1317,9 @@ new sentence above with no row is the defect this table exists to expose.
 | The bounds are 1–30, 0–240 and 5–1440 | `AdminSettingsHttpTests.A_gate_number_outside_its_bounds_is_refused` |
 | `device_alert_cooldown_minutes` is served whether or not the club has set one | `AdminSettingsHttpTests.The_alert_cooldown_binds_under_either_spelling_and_is_always_served` |
 | One outage mail per board per cooldown, and the cooldown is the club's | `PeripheralHealthTests.A_flapping_board_mails_the_club_once_per_cooldown_and_not_once_per_flap`, `…The_cooldown_is_the_clubs_setting` |
-| A gate no admin has named alerts nobody, and still records its outage | `PeripheralHealthTests.A_gate_no_admin_has_named_alerts_nobody_and_still_records_its_outage` |
+| A gate no admin has named alerts nobody, and still records its outage | `PeripheralHealthTests.A_gate_no_admin_has_named_alerts_nobody_and_still_records_its_outage`, `…An_acknowledged_but_unnamed_gate_still_mails_nobody` |
+| A board no admin has ACKNOWLEDGED alerts nobody, whatever kind, however many appear | `PeripheralHealthTests.A_board_no_admin_has_acknowledged_mails_nobody_however_many_of_them_appear` (twelve boards from the real `AutoRegisterAsync`) |
+| A club holds at most 16 unacknowledged boards; the 17th is `409`, never `403` | `DeviceGateHttpTests.A_club_cannot_be_filled_with_boards_nobody_has_acknowledged` |
 | Taking a board out of service closes its outage silently | `PeripheralHealthTests.Taking_a_board_out_of_service_closes_its_outage_silently` |
 | The policy is a closed set; a refused save writes nothing | `AdminSettingsHttpTests.An_access_policy_outside_the_closed_set_is_refused`, `…Both_access_policies_are_accepted` |
 | An unreadable stored policy narrows the door | `DeviceGateTests.An_unreadable_access_policy_narrows_the_door_rather_than_widening_it` |

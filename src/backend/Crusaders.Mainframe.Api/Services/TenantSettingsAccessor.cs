@@ -240,9 +240,20 @@ public sealed record TenantSettingsView(
     /// <para>
     /// Without it the sweep mailed every admin on every transition, with no minimum outage and
     /// no cooldown, so a board on a marginal uplink flapping every few minutes was a mailbox
-    /// full of "unreachable" and "back" — and auto-registration is unbounded, so anyone
-    /// holding the club's device key could mint boards that each did it. An alert nobody reads
-    /// is worse than no alert, because the club believes it has one.
+    /// full of "unreachable" and "back". An alert nobody reads is worse than no alert, because
+    /// the club believes it has one.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It is per BOARD, and this comment used to claim more than that.</b> It said the
+    /// cooldown also answered the case where "anyone holding the club's device key could mint
+    /// boards that each did it", and it does not: twelve invented MACs are twelve boards, each
+    /// inside its own first cooldown, so the club still got twelve mails in one tick and the
+    /// ceiling was the tenant rate limit. What bounds the FLEET is two other rules —
+    /// <c>PeripheralHealthWorker.Mailable</c>, which is silent about any board no admin has
+    /// acknowledged, and <c>DeviceRegistryService.MaxUnacknowledgedDevices</c>, which stops
+    /// the rows being created at all. This setting bounds a board that is flapping, which is
+    /// the different problem it was added for.
     /// </para>
     /// </summary>
     public int DeviceAlertCooldownMinutes { get; init; } = DefaultDeviceAlertCooldownMinutes;

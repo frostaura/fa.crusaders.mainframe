@@ -91,6 +91,53 @@ public sealed class DeploymentPostureTests
         Assert.DoesNotContain("graphql", directives, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// <b>The gateway must never answer <c>403</c> on the device surface, and nothing was
+    /// stopping it.</b>
+    ///
+    /// <para>
+    /// <c>DeviceForbiddenMeansOutOfServiceTests</c> pins that a <c>403</c> from the
+    /// APPLICATION on <c>/api/v1/device/*</c> can mean one thing only — this board is out of
+    /// service — because the firmware acts on that word: it denies the scan without consulting
+    /// its roster, and on a heartbeat it commits an EMPTY roster. That pin is
+    /// application-level, and the boards do not talk to the application. They talk to this
+    /// file.
+    /// </para>
+    ///
+    /// <para>
+    /// So an <c>nginx</c> rule that answered <c>403</c> for any reason at all — an IP
+    /// allow-list, a rate limiter configured to forbid rather than to 429, a WAF snippet
+    /// pasted in during an incident — would take <b>every door in the club out of service</b>,
+    /// and keep them there until each board's next ACCEPTED heartbeat. No code change, no
+    /// deploy of the API, nothing red. There is no such rule today and this is what says so.
+    /// </para>
+    ///
+    /// <para>
+    /// Directives only, like the check above, so the comment that has to name the thing being
+    /// forbidden cannot trip its own assertion — and matched as DIRECTIVES rather than as
+    /// substrings, because <c>add_header X-Frame-Options "DENY"</c> is a security header this
+    /// file should keep and contains the word.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void The_gateway_never_answers_forbidden_itself()
+    {
+        var directives = string.Join(
+            '\n',
+            Read("nginx", "nginx.conf")
+                .Split('\n')
+                .Where(line => !line.TrimStart().StartsWith('#')));
+
+        // `deny` as the directive that begins a line, and `return 403` anywhere. Those are
+        // the two ways this file can answer Forbidden on its own.
+        Assert.DoesNotMatch(new Regex(@"(?m)^\s*deny\s", RegexOptions.IgnoreCase), directives);
+        Assert.DoesNotMatch(new Regex(@"return\s+403\b"), directives);
+
+        // The control: the file really is the gateway the boards reach, so the absence above
+        // is about something rather than about an empty file.
+        Assert.Contains("proxy_pass", directives, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void The_backend_really_has_no_graphql_endpoint()
     {

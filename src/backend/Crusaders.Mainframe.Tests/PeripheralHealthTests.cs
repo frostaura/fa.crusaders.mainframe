@@ -629,6 +629,110 @@ public class PeripheralHealthTests
     }
 
     /// <summary>
+    /// <b>The naming gate was a door rule, and the flood was never a door problem.</b>
+    ///
+    /// <para>
+    /// <c>Mailable</c> exempted only an unnamed GATE, and a gate is the one kind of board that
+    /// has to be named before it does anything. A <c>kind</c>-less heartbeat from an invented
+    /// MAC auto-registers a COURT BOX with no naming step at all — and a court box is mailable
+    /// the instant it exists. So the capability D3 and G2's B5 were closing was still open,
+    /// on the default path, to anything holding the club's device key: mint boards, wait for
+    /// the threshold, and every admin of the club gets one mail per board per cooldown. Twelve
+    /// boards is twelve mails per admin in a single thirty-second tick, and the ceiling is the
+    /// tenant rate limit — thousands an hour, each one leaving a permanent row behind.
+    /// </para>
+    ///
+    /// <para>
+    /// The rule is therefore the acknowledgement itself and not the door's name:
+    /// <c>AutoRegistered</c> is exactly "nobody has looked at this row", it is already on
+    /// every kind, and the first admin edit clears it. A gate an admin has named has been
+    /// edited, so it passes for free and the door rule stops needing to be a separate one.
+    /// </para>
+    ///
+    /// <para>
+    /// The boards here are made by the REAL <c>AutoRegisterAsync</c>, which is what the
+    /// heartbeat calls. A hand-built fixture would be setting the very flag under test.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_board_no_admin_has_acknowledged_mails_nobody_however_many_of_them_appear()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var registry = scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
+
+        var silent = DateTimeOffset.UtcNow.AddHours(-1);
+        var minted = new List<Device>();
+        for (var i = 0; i < 12; i++)
+        {
+            var kind = i % 2 == 0 ? DeviceKind.CourtBox : DeviceKind.Gate;
+            var board = await registry.AutoRegisterAsync(Guid.NewGuid().ToString("N")[..12], kind, default);
+
+            // A court box auto-registers with NO gate key to withhold and, before this, was
+            // mailable from its first heartbeat. Half the boards here are gates purely so the
+            // rule is shown to be one rule rather than two.
+            board.LastSeenAt = silent;
+            minted.Add(board);
+        }
+        await db.SaveChangesAsync();
+        host.EmailService.Sent.Clear();
+
+        await CreateWorker(host).TickAsync(default);
+
+        Assert.Empty(host.EmailService.Sent);
+
+        // The record survives the silence: the Devices page is where an admin looks at a board
+        // on purpose, and what is withheld is the interruption.
+        Assert.Equal(12, await db.DeviceOutages.IgnoreQueryFilters()
+            .CountAsync(o => minted.Select(m => m.Id).Contains(o.DeviceId)));
+        Assert.Equal(12, Drain(host).Count(e => e.Type == "peripheral.unhealthy"));
+
+        // The probe: ONE field on ONE board. An admin edits it — which is what clears
+        // AutoRegistered — and the club hears about that board and no other.
+        var acknowledged = minted[0];
+        await registry.UpdateAsync(
+            acknowledged, new UpdateDeviceCommand("Front panel", null, null), host.AdminUser.Id, default);
+        Assert.False(acknowledged.AutoRegistered);
+
+        foreach (var board in minted) board.LastSeenAt = silent;
+        foreach (var outage in await db.DeviceOutages.IgnoreQueryFilters().ToListAsync())
+        {
+            outage.EndedAt = silent;
+        }
+        await db.SaveChangesAsync();
+        host.EmailService.Sent.Clear();
+
+        await CreateWorker(host).TickAsync(DateTimeOffset.UtcNow.AddHours(3), default);
+
+        Assert.Single(host.EmailService.Sent, m => m.Subject.Contains("not reporting", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The gate's own naming rule still holds, and is now the narrower of two: a gate an admin
+    /// HAS acknowledged but has not named still mails nobody. Naming is what starts the
+    /// offline roster (D3), and an alert about a door the club cannot identify in the message
+    /// is an alert nobody can act on.
+    /// </summary>
+    [Fact]
+    public async Task An_acknowledged_but_unnamed_gate_still_mails_nobody()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        // AddGateAsync leaves AutoRegistered false — an admin has been here — and gateKey null.
+        var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1), gateKey: null);
+        Assert.False(gate.AutoRegistered);
+        host.EmailService.Sent.Clear();
+
+        await CreateWorker(host).TickAsync(default);
+
+        Assert.Empty(host.EmailService.Sent);
+        Assert.Single(await db.DeviceOutages.IgnoreQueryFilters().Where(o => o.DeviceId == gate.Id).ToListAsync());
+    }
+
+    /// <summary>
     /// <b>Re-enabling a long-disabled board must not mail "back after 43 200 minutes".</b>
     ///
     /// <para>

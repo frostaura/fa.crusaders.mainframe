@@ -402,6 +402,52 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// A settings document nobody could have produced through the console: a negative roster
+    /// window. Everything else is the default.
+    /// </summary>
+    private const string NegativeRosterWindowSettings =
+        """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","roster_window_minutes":-600,"activation_cue_window_minutes":10,"gate_early_entry_minutes":30}""";
+
+    /// <summary>
+    /// <b>A hand-edited settings column emptied every door's cache in the club, silently.</b>
+    ///
+    /// <para>
+    /// G2's B1 clamped the three numbers the online decision reads and left both roster
+    /// builders reading the window raw. <c>TenantSettingsAccessor.TryInt</c> bounds nothing on
+    /// the way in, so <c>roster_window_minutes: -600</c> produced a `latestStart` ten hours in
+    /// the past and matched no booking at all: a clean 200, a present-and-empty <c>roster</c>
+    /// key, no error and no log — and every door in the club admitting nobody the moment its
+    /// link dropped. The failure mode the clamp exists for is exactly this one, because a
+    /// value the PUT would refuse still reaches the reader.
+    /// </para>
+    ///
+    /// <para>
+    /// Both builders, in one test, because they are two copies of the same arithmetic and the
+    /// court box's is the one that turns lights on.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_hand_edited_roster_window_cannot_silently_empty_a_boards_cache()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", NegativeRosterWindowSettings);
+        var client = factory.CreateClient();
+        var gateMac = await GateAsync(factory, club, client, "front-door");
+        var boxMac = await CourtBoxAsync(club, client);
+
+        // Ten minutes out, which is inside BOTH clamped windows and outside a ten-hour
+        // negative one. The two builders reach differently — a gate adds the entry window
+        // (5 + 30) and a box the lights-on cue (5 + 10) — so the booking has to clear the
+        // narrower of the two for this to say anything about both.
+        await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(10));
+
+        Assert.Single(await RosterAsync(client, club, gateMac, DeviceKinds.Gate));
+        Assert.Single(await RosterAsync(client, club, boxMac, null));
+    }
+
+    /// <summary>
     /// <b>A board nobody has named gets no roster.</b> Online scans work from its first
     /// heartbeat, so the install stays plug-and-play; the offline fallback starts when an
     /// admin names the door.
@@ -455,6 +501,86 @@ public sealed class DeviceGateHttpTests
         Assert.Equal("front-door", named.GetProperty("gate_key").GetString());
         var entry = Assert.Single(named.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!));
         Assert.Matches(DeviceProtocolCorpusTests.RosterEntryPattern, entry);
+    }
+
+    /// <summary>
+    /// <b>Auto-registration is unbounded, and unbounded is a resource anybody with the club
+    /// key can spend.</b>
+    ///
+    /// <para>
+    /// Every invented MAC that heartbeats leaves a permanent row: on the Devices page, in the
+    /// audit trail as <c>device.auto_registered</c>, and — until the fix beside this one — in
+    /// every admin's inbox as soon as it went quiet. The rate limit is the only ceiling, which
+    /// is thousands of rows an hour. Nothing deletes them but an admin, one at a time.
+    /// </para>
+    ///
+    /// <para>
+    /// So a club may hold at most <see cref="DeviceRegistryService.MaxUnacknowledgedDevices"/>
+    /// boards nobody has looked at. It is deliberately a count of the UNACKNOWLEDGED rather
+    /// than of all rows: a club with forty real boards is never near it, and the way out is
+    /// the thing an admin was going to do anyway — open the page and edit or delete the rows
+    /// that appeared. A cap on the total would eventually stop a real installation.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>409 and not 403.</b> A 403 on this route group means one thing and one thing only —
+    /// this board is out of service — and the firmware acts on that word: it commits an empty
+    /// roster and stops falling back. A registration refusal answered 403 would take every
+    /// door in the club out of service the moment somebody flooded the registry, which is a
+    /// far worse outcome than the flood. `DeviceForbiddenMeansOutOfServiceTests` pins the
+    /// converse; this pins the case that would have broken it.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_club_cannot_be_filled_with_boards_nobody_has_acknowledged()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+
+        var macs = new List<string>();
+        for (var i = 0; i < DeviceRegistryService.MaxUnacknowledgedDevices; i++)
+        {
+            var mac = NewMac();
+            macs.Add(mac);
+            Assert.Equal(HttpStatusCode.OK,
+                (await client.SendAsync(Heartbeat(club.Key, mac, i % 2 == 0 ? DeviceKinds.Gate : null))).StatusCode);
+        }
+
+        // The one after the cap is refused — and the refusal is 409, never 403.
+        var flooded = await client.SendAsync(Heartbeat(club.Key, NewMac(), DeviceKinds.Gate));
+        Assert.Equal(HttpStatusCode.Conflict, flooded.StatusCode);
+        Assert.Equal(
+            DeviceRegistryService.TooManyUnacknowledgedDevices,
+            (await BodyAsync(flooded)).GetProperty("error").GetString());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            Assert.Equal(
+                DeviceRegistryService.MaxUnacknowledgedDevices,
+                await db.Devices.IgnoreQueryFilters().CountAsync(d => d.TenantId == club.TenantId));
+        }
+
+        // The boards that DID register are unaffected: the cap is on creating a row, never on
+        // serving one. A club at its limit must not have its installed doors stop working.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, macs[0], DeviceKinds.Gate))).StatusCode);
+
+        // The probe: ONE admin edit, which is what clears AutoRegistered, and the next board
+        // registers. The way out is the thing the admin was going to do anyway.
+        var admin = await AdminClientAsync(factory, club);
+        Guid firstId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            firstId = (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == macs[0])).Id;
+        }
+        Assert.Equal(HttpStatusCode.OK,
+            (await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{firstId}", new { gate_key = "front-door" })).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, NewMac(), DeviceKinds.Gate))).StatusCode);
     }
 
     /// <summary>A charged booking for the club's member, written straight to the table.</summary>
@@ -1025,6 +1151,132 @@ public sealed class DeviceGateHttpTests
     private const string SharedHorizonSettings =
         """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","roster_window_minutes":120,"activation_cue_window_minutes":10,"gate_early_entry_minutes":30,"gate_access_policy":"active_member"}""";
 
+    /// <summary>
+    /// <b>The member's page cannot tell the truth about doors without being told.</b>
+    ///
+    /// <para>
+    /// The Court Code screen says what the code in the member's hand will do, and since the
+    /// gate shipped it has been wrong: a booking code also opens the club door, from
+    /// `StartsAt − H` until shortly after the booking ends, and the page said nothing about
+    /// it. The page cannot work that out for itself either — `H` is
+    /// `max(gate_early_entry, min(roster + cue, 240))` under one policy and something else
+    /// under the other, and the three settings behind it are not on a member's API surface
+    /// and should not be. So the server, which already computes it for the door, says it.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>doors</c> is separate from the two instants because it answers a different question:
+    /// whether this club has doors at all. A club with none must have a page that says nothing
+    /// about them rather than one saying "it opens the door" about a building with no
+    /// controller in it.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_member_screen_is_told_what_its_code_does_at_a_door()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", SharedHorizonSettings);
+        var device = factory.CreateClient();
+        var phone = MemberClient(factory, club);
+
+        // No gate row yet: the club has no doors, and the page must say nothing about them.
+        var noDoors = await GenerateAsync(phone);
+        Assert.False(noDoors.GetProperty("doors").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, noDoors.GetProperty("door_opens_at").ValueKind);
+        Assert.Equal(JsonValueKind.Null, noDoors.GetProperty("door_closes_at").ValueKind);
+
+        var mac = await GateAsync(factory, club, device, "front-door");
+
+        // Still an ident code — no booking in reach — so the door instants stay null, because
+        // a sixty-second ident code has no booking window of its own.
+        var ident = await GenerateAsync(phone);
+        Assert.Equal("ident", ident.GetProperty("kind").GetString());
+        Assert.True(ident.GetProperty("doors").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, ident.GetProperty("door_opens_at").ValueKind);
+        Assert.Equal(JsonValueKind.Null, ident.GetProperty("door_closes_at").ValueKind);
+
+        // Now a booking inside the phone's horizon: the code becomes that booking's own, and
+        // the two instants are the door's window for it.
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(60));
+        var screen = await GenerateAsync(phone);
+        Assert.Equal("booking", screen.GetProperty("kind").GetString());
+        Assert.True(screen.GetProperty("doors").GetBoolean());
+
+        using var scope = factory.Services.CreateScope();
+
+        // The tenant has to be set by hand: outside a request nothing has resolved one, and
+        // the global query filter would then read every table as the empty tenant's — so the
+        // code would resolve to nothing and the probe below would pass for the wrong reason.
+        scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>()
+            .Set(club.TenantId, club.Slug);
+
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var codes = scope.ServiceProvider.GetRequiredService<AccessCodeService>();
+        var row = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+        var live = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+
+        // Opens at StartsAt − H, and H is the DOOR's horizon: 130 minutes at these settings,
+        // not the thirty-minute entry window. Asserted against the shared function over the
+        // club's own live settings rather than against a literal, so the page and the door
+        // cannot drift even in the test.
+        var horizon = BookingCodeWindow.DoorHorizonMinutes(live);
+        Assert.Equal(130, horizon);
+        Assert.NotEqual(horizon, BookingCodeWindow.EntryWindowMinutes(live));
+
+        Assert.Equal(
+            booking.StartsAt.AddMinutes(-horizon),
+            screen.GetProperty("door_opens_at").GetDateTimeOffset());
+
+        // Closes when the CODE dies, which is the door's real upper edge — the slot's end plus
+        // the grace window — and is deliberately later than the booking's own end.
+        var closes = screen.GetProperty("door_closes_at").GetDateTimeOffset();
+        Assert.Equal(booking.EndsAt.AddMinutes(live.GraceWindowMinutes), closes);
+        Assert.True(closes > booking.EndsAt);
+
+        // The probe: the code the page is showing really does open the door at
+        // door_opens_at + a minute, and really does not a minute before it. One field, two
+        // instants, and the door is asked rather than the arithmetic re-stated.
+        var code = screen.GetProperty("code").GetString()!;
+        var opensAt = screen.GetProperty("door_opens_at").GetDateTimeOffset();
+
+        Assert.True((await GateAccess.DecideAsync(
+            db, codes, new GateContext(row, live, "qr", code, opensAt.AddMinutes(1)), default)).Opened);
+        Assert.Equal(GateAccess.TooEarly, (await GateAccess.DecideAsync(
+            db, codes, new GateContext(row, live, "qr", code, opensAt.AddMinutes(-1)), default)).Reason);
+    }
+
+    /// <summary>
+    /// A club whose only door is out of service has no doors as far as the member's page is
+    /// concerned. The page's promise is "this will let you in", and a board the club has
+    /// switched off will not — it is refused `403` on every route it calls.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_club_whose_only_door_is_out_of_service_has_no_doors_on_the_member_screen()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var device = factory.CreateClient();
+        var phone = MemberClient(factory, club);
+        var mac = await GateAsync(factory, club, device, "front-door");
+
+        Assert.True((await GenerateAsync(phone)).GetProperty("doors").GetBoolean());
+
+        var (gateId, _) = await IdsAsync(factory, mac, mac);
+        var admin = await AdminClientAsync(factory, club);
+        Assert.Equal(HttpStatusCode.OK,
+            (await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { enabled = false })).StatusCode);
+
+        Assert.False((await GenerateAsync(phone)).GetProperty("doors").GetBoolean());
+
+        // The probe: a COURT BOX is not a door. A club with boxes and no gates has no doors.
+        await CourtBoxAsync(club, device);
+        Assert.False((await GenerateAsync(phone)).GetProperty("doors").GetBoolean());
+    }
+
     /// <summary>What the member's own screen asks for: <c>POST /me/qr/generate</c>, kind auto.</summary>
     private static async Task<JsonElement> GenerateAsync(HttpClient phone)
     {
@@ -1419,6 +1671,221 @@ public sealed class DeviceGateHttpTests
     };
 
     /// <summary>
+    /// <b>The fingerprint guard was keyed on the RAW <c>kind</c>, and every other decision on
+    /// this route was keyed on the trimmed one.</b> A single space is the whole exploit.
+    ///
+    /// <para>
+    /// <c>AuditKind</c> trims, so <c>" gate_open "</c> is stored, receipted and audited as
+    /// <c>device.gate_open</c> — indistinguishable in the trail from an honest one. The
+    /// subject guard did not: <c>e.Kind is not (GateOpenKind or UnknownScanKind)</c> is false
+    /// for the padded spelling, so the branch fell through and wrote <b>the live access code
+    /// in full</b> into <c>DetailsJson</c>. That is the exact credential-in-a-log the G2 fix
+    /// removed, available to anything holding the club key by adding one character.
+    /// </para>
+    ///
+    /// <para>
+    /// The dispatch switch was keyed on the raw value too, which makes the same spelling a
+    /// SECOND bypass: <c>GateOpenKind when device.Kind != Gate</c> never matched
+    /// <c>" gate_open "</c>, so a COURT BOX could post a door open, skip the
+    /// <c>not_a_gate</c> refusal that exists to stop a false record of who was in the
+    /// building, and land in the <c>_ => null</c> arm with the token beside it.
+    /// </para>
+    ///
+    /// <para>
+    /// Upper case is the same hole by a different route — a scanner or a firmware branch that
+    /// shouts — and it has a second cost the padding does not: it fragments the trail, because
+    /// <c>device.GATE_OPEN</c> is a row the console's activity query does not find.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(" gate_open ")]
+    [InlineData("GATE_OPEN")]
+    [InlineData("Gate_Open")]
+    [InlineData("\tunknown_scan\n")]
+    [InlineData("UNKNOWN_SCAN")]
+    public async Task A_door_event_kind_is_normalised_before_anything_is_decided_from_it(string spelling)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+        var canonical = spelling.Trim().ToLowerInvariant();
+
+        var upload = await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(DoorEvent(21, spelling, token)),
+        }));
+        Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        // The receipt and the audit row carry the canonical spelling, so the trail is one
+        // stream rather than one per way of writing the word.
+        var receipt = Assert.Single(await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .Where(r => r.TenantId == club.TenantId).ToListAsync());
+        Assert.Equal(canonical, receipt.Kind);
+
+        var row = Assert.Single(await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == $"device.{canonical}").ToListAsync());
+
+        // And the token is nowhere in it.
+        Assert.DoesNotContain(token, row.DetailsJson, StringComparison.OrdinalIgnoreCase);
+        var subject = JsonDocument.Parse(row.DetailsJson!).RootElement.GetProperty("subject").GetString()!;
+        Assert.Equal(8, subject.Length);
+    }
+
+    /// <summary>
+    /// The second half of the same bypass, stated as the refusal it defeats: a COURT BOX
+    /// posting a door open must be told <c>not_a_gate</c> whatever spelling it uses.
+    ///
+    /// <para>
+    /// The guard exists because the row this writes NAMES A MEMBER, and a false record of who
+    /// was in the building is a worse artefact than a refusal. A guard a sender can step
+    /// around by shouting is not a guard.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(" gate_open ")]
+    [InlineData("GATE_OPEN")]
+    public async Task A_court_box_cannot_post_a_door_open_by_respelling_the_kind(string spelling)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var boxMac = await CourtBoxAsync(club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = boxMac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(DoorEvent(31, spelling, token)),
+        }))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var rows = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action.StartsWith("device.gate_open")).ToListAsync();
+
+        // The refusal is recorded, and the row names nobody.
+        Assert.Contains(rows, a => a.Action == $"device.{DeviceEventEndpoints.GateOpenKind}_{GateAccess.NotAGate}");
+        Assert.All(rows, a => Assert.Null(a.SubjectUserId));
+        Assert.All(rows, a => Assert.DoesNotContain(token, a.DetailsJson, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// <b>A court box's own <c>activation</c> token is a door key too, and the trail wrote it
+    /// in full.</b>
+    ///
+    /// <para>
+    /// The G2 fix narrowed the fingerprint to the two DOOR kinds and said so in as many words:
+    /// a court box's activation token "is the roster token for a booking the receipt already
+    /// names, and narrowing it is a separate decision about the court-box trail". That
+    /// reasoning was true when it was written and stopped being true the moment the gate
+    /// shipped — since D2, that same roster token opens <b>every door in the club</b> for the
+    /// length of its booking's window. The receipt naming the booking does not make the bytes
+    /// less live.
+    /// </para>
+    ///
+    /// <para>
+    /// So the fingerprint is now unconditional. Resolution still uses the raw subject, in
+    /// memory, where it never reaches a row: this asserts the activation was really applied —
+    /// <c>CheckedInAt</c> stamped — so the fix cannot be read as having broken attendance to
+    /// hide a token.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_court_boxs_activation_event_fingerprints_its_token_as_well()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var boxMac = await CourtBoxAsync(club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-5));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        var activation = DoorEvent(41, DeviceEventEndpoints.ActivationKind, token);
+        activation["court"] = 0;            // relay A, which this box drives for court 1
+        activation["uptime_ms"] = 3_599_000; // a second before the upload, so the scan is inside the cue window
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = boxMac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(activation),
+        }))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        // The control: the activation really was applied, so this is a fingerprint over a
+        // token the handler resolved rather than one it failed to.
+        Assert.NotNull((await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.Id == booking.Id)).CheckedInAt);
+
+        var rows = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action.StartsWith("device.activation")).ToListAsync();
+        Assert.NotEmpty(rows);
+        Assert.All(rows, a => Assert.DoesNotContain(token, a.DetailsJson, StringComparison.OrdinalIgnoreCase));
+        Assert.All(rows, a => Assert.Equal(
+            8, JsonDocument.Parse(a.DetailsJson!).RootElement.GetProperty("subject").GetString()!.Length));
+    }
+
+    /// <summary>
+    /// A kind this server has never heard of is recorded as it was normalised — it is
+    /// evidence, and the board cannot edit what it has queued — but its subject is
+    /// fingerprinted like every other, because "we do not recognise this word" is not a reason
+    /// to write a live credential into the trail.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_unknown_kind_is_recorded_as_normalised_and_still_fingerprinted()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(DoorEvent(51, "  Turnstile_Spun  ", token)),
+        }))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var receipt = Assert.Single(await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .Where(r => r.TenantId == club.TenantId).ToListAsync());
+        Assert.Equal("turnstile_spun", receipt.Kind);
+
+        var row = Assert.Single(await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == "device.turnstile_spun").ToListAsync());
+        Assert.DoesNotContain(token, row.DetailsJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            8, JsonDocument.Parse(row.DetailsJson!).RootElement.GetProperty("subject").GetString()!.Length);
+    }
+
+    /// <summary>
     /// <b>One malformed event must not pin the board's queue for ever.</b>
     ///
     /// <para>
@@ -1489,14 +1956,34 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
-    /// The board's diagnostic counter is accepted, changes nothing, and cannot take a door out
-    /// of service — including when it arrives negative, which is not a counter.
+    /// <b>A diagnostic counter must not be able to take a door out of service, and one could.</b>
+    ///
+    /// <para>
+    /// Both counters are SINCE-BOOT TOTALS — the board cannot know which report the server
+    /// kept, so a counter reset on send loses the whole count on any lost response — and both
+    /// SATURATE at <c>INT32_MAX</c> rather than wrapping. <c>no_push</c> bound as
+    /// <c>int?</c>, so the very first value past that saturation point was a <b>400 for the
+    /// whole heartbeat</b>: no <c>gate</c> block, no <c>roster</c>, nothing. A door that had
+    /// been up long enough to saturate a counter then lost its cache at the next stale
+    /// deadline, and the field's own contract vector says in as many words that this must
+    /// never happen. Binding is now 64-bit and an out-of-range value is IGNORED.
+    /// </para>
+    ///
+    /// <para>
+    /// The values below are the real shape of the problem: the saturation point, one past it,
+    /// <c>long.MaxValue</c> for a board or proxy that does something else entirely, and
+    /// negatives, which are not counters.
+    /// </para>
     /// </summary>
     [SkippableTheory]
-    [InlineData(4)]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public async Task A_no_push_counter_is_accepted_and_changes_nothing(int noPush)
+    [InlineData(4L, null)]
+    [InlineData(0L, 0L)]
+    [InlineData(-1L, -7L)]
+    [InlineData(2147483647L, 2147483647L)]
+    [InlineData(2147483648L, 2147483648L)]
+    [InlineData(long.MaxValue, long.MinValue)]
+    [InlineData(null, 12L)]
+    public async Task The_boards_diagnostic_counters_are_accepted_and_change_nothing(long? noPush, long? eventsLost)
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -1511,14 +1998,23 @@ public sealed class DeviceGateHttpTests
             ["firmware_version"] = "1.0.0",
             ["uptime_ms"] = 60000,
             ["kind"] = DeviceKinds.Gate,
-            ["no_push"] = noPush,
         };
+        if (noPush is { } n) body["no_push"] = n;
+        if (eventsLost is { } e) body["events_lost"] = e;
 
-        var json = await BodyAsync(await client.SendAsync(Signed(club.Key, HeartbeatPath, body)));
+        var response = await client.SendAsync(Signed(club.Key, HeartbeatPath, body));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await BodyAsync(response);
 
+        // The whole answer is intact, which is the point: a door that cannot read its roster
+        // is a door that admits nobody at the next stale deadline.
         Assert.Equal(DeviceKinds.Gate, json.GetProperty("kind").GetString());
         Assert.Equal(3, json.GetProperty("gate").GetProperty("unlock_seconds").GetInt32());
+        Assert.Equal(JsonValueKind.Array, json.GetProperty("roster").ValueKind);
+
+        // And neither counter comes back or is stored: they are logged and nothing else.
         Assert.False(json.TryGetProperty("no_push", out _));
+        Assert.False(json.TryGetProperty("events_lost", out _));
     }
 
     /// <summary>
@@ -1774,6 +2270,68 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// <b>The silent no-op the spec itself argues against, on the PATCH this time.</b>
+    ///
+    /// <para>
+    /// §8's settings PUT binds both spellings for exactly this reason: the endpoint answers
+    /// snake_case and .NET binds camelCase, so the cost of a client picking the wrong one is
+    /// not an error — it is <c>null</c>, which <c>gate_key</c> reads as "omitted, leave
+    /// unchanged", so the request answers <c>200</c> with the door's old name in the body and
+    /// nothing anywhere says the write was dropped. That argument was made in this document
+    /// and then not applied to the one field on the PATCH that carries it.
+    /// </para>
+    ///
+    /// <para>
+    /// Both refusals still fire under either spelling, because a spelling is not a way round a
+    /// rule: a camelCase <c>gateKey</c> on a court box is still <c>gate_key_not_a_gate</c>,
+    /// and one past 64 characters is still <c>gate_key_too_long</c>.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_admin_patch_binds_gate_key_under_either_spelling()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var deviceClient = factory.CreateClient();
+        var gateMac = await GateAsync(factory, club, deviceClient, "front-door");
+        var boxMac = await CourtBoxAsync(club, deviceClient);
+        var (gateId, boxId) = await IdsAsync(factory, gateMac, boxMac);
+        var admin = await AdminClientAsync(factory, club);
+
+        var camel = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { gateKey = "side-door" });
+        Assert.Equal(HttpStatusCode.OK, camel.StatusCode);
+        Assert.Equal("side-door", (await BodyAsync(camel)).GetProperty("gate_key").GetString());
+
+        // The empty string clears under the camelCase spelling too — the console's own
+        // gesture must not depend on which of the two it happens to send.
+        var cleared = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { gateKey = "" });
+        Assert.Equal(JsonValueKind.Null, (await BodyAsync(cleared)).GetProperty("gate_key").ValueKind);
+
+        // Absent under BOTH spellings still means "leave it alone".
+        await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { gateKey = "back-door" });
+        var untouched = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { name = "Back door" });
+        Assert.Equal("back-door", (await BodyAsync(untouched)).GetProperty("gate_key").GetString());
+
+        // And neither refusal can be stepped around by respelling the field.
+        var onABox = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{boxId}", new { gateKey = "front-door" });
+        Assert.Equal(HttpStatusCode.BadRequest, onABox.StatusCode);
+        Assert.Equal(
+            AdminDeviceEndpoints.GateKeyNotAGate, (await BodyAsync(onABox)).GetProperty("error").GetString());
+
+        var tooLong = await admin.PatchAsJsonAsync(
+            $"/api/v1/admin/devices/{gateId}", new { gateKey = new string('g', Device.GateKeyMaxLength + 1) });
+        Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+        Assert.Equal(
+            AdminDeviceEndpoints.GateKeyTooLong, (await BodyAsync(tooLong)).GetProperty("error").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal("back-door", (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == gateMac)).GateKey);
+    }
+
+    /// <summary>
     /// <c>kind</c> is not editable at all. A row that could change kind would keep a court
     /// list it can no longer use, or acquire one it never had; deleting the row and letting
     /// the board re-register is the reset.
@@ -1802,6 +2360,326 @@ public sealed class DeviceGateHttpTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         Assert.Equal(DeviceKind.Gate, (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == gateMac)).Kind);
     }
+
+    // ---- The trail's reader (B5) ---------------------------------------------
+
+    /// <summary>
+    /// <b>The door's trail had no reader, and the trail is the ENTIRE record a door leaves.</b>
+    ///
+    /// <para>
+    /// §5 argues at length that the audit row matters more than a court box's equivalent
+    /// because there is no ledger entry, no booking and no receipt to reconstruct an open
+    /// from — and then no API route read <c>audit_log</c> at all. "Nobody could get in through
+    /// the side door all Tuesday" was a question the spec promised an answer to and the
+    /// product could only answer with a database client.
+    /// </para>
+    ///
+    /// <para>
+    /// One test over one board's whole day, because the value of this route is that the
+    /// ONLINE and OFFLINE halves of a door's life appear in one list: an open, a refusal with
+    /// its reason, and an open the board decided for itself while the link was down. The
+    /// ordering is newest-first and is asserted rather than assumed, because a console that
+    /// pages this will show the first page and nothing else.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_doors_activity_is_readable_and_carries_both_halves_of_its_day()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client, "front-door");
+
+        // Online: one open, and one refusal with a reason.
+        var ident = await IdentCodeAsync(factory, club.TenantId, club.MemberId);
+        Assert.True((await BodyAsync(await client.SendAsync(Scan(club.Key, mac, ident)))).GetProperty("opened").GetBoolean());
+        Assert.False((await BodyAsync(await client.SendAsync(Scan(club.Key, mac, "ZZZZZZZZZZZZ")))).GetProperty("opened").GetBoolean());
+
+        // Offline: an open the board decided from its cache while the link was down.
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var bookingCode = await BookingCodeAsync(factory, club, booking);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(DoorEvent(61, DeviceEventEndpoints.GateOpenKind, bookingCode)),
+        }))).StatusCode);
+
+        var (gateId, _) = await IdsAsync(factory, mac, mac);
+        var admin = await AdminClientAsync(factory, club);
+
+        var response = await admin.GetAsync($"/api/v1/admin/devices/{gateId}/activity");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var items = (await BodyAsync(response)).GetProperty("items").EnumerateArray().ToList();
+
+        // Newest first: the offline upload is the last thing that happened.
+        var times = items.Select(i => i.GetProperty("at").GetDateTimeOffset()).ToList();
+        Assert.Equal(times.OrderByDescending(t => t), times);
+
+        var open = Assert.Single(items, i => i.GetProperty("action").GetString() == DeviceGateEndpoint.OpenedAction);
+        Assert.Equal(GateAccess.Ok, open.GetProperty("reason").GetString());
+        Assert.False(open.GetProperty("offline").GetBoolean());
+        Assert.Equal(club.MemberId, open.GetProperty("member").GetProperty("id").GetGuid());
+        Assert.Equal("Gate Member", open.GetProperty("member").GetProperty("name").GetString());
+
+        // An unreadable code names nobody, which is the whole of what the desk learns from it.
+        var denied = Assert.Single(
+            items, i => i.GetProperty("action").GetString() == $"{DeviceGateEndpoint.DeniedActionPrefix}{GateAccess.NotRecognised}");
+        Assert.Equal(GateAccess.NotRecognised, denied.GetProperty("reason").GetString());
+        Assert.Equal(JsonValueKind.Null, denied.GetProperty("member").ValueKind);
+        Assert.False(denied.GetProperty("offline").GetBoolean());
+
+        var offline = Assert.Single(
+            items, i => i.GetProperty("action").GetString() == $"device.{DeviceEventEndpoints.GateOpenKind}");
+        Assert.True(offline.GetProperty("offline").GetBoolean());
+        Assert.Equal(club.MemberId, offline.GetProperty("member").GetProperty("id").GetGuid());
+        Assert.Matches("^[0-9a-f]{8}$", offline.GetProperty("fingerprint").GetString());
+
+        // The online rows carry no fingerprint, because the online path never stored the
+        // token in any form — see §5.
+        Assert.Equal(JsonValueKind.Null, open.GetProperty("fingerprint").ValueKind);
+
+        // The row an admin's own PATCH wrote is here too: this is the BOARD's trail, not a
+        // door-opens-only feed, and "who named this door and when" is the same question.
+        Assert.Contains(items, i => i.GetProperty("action").GetString() == "device.auto_registered");
+    }
+
+    /// <summary>
+    /// <b>The route must not become a second way to read a token.</b>
+    ///
+    /// <para>
+    /// Two separate hazards. <c>DetailsJson</c> is never returned raw — it carries the club's
+    /// device id, the gate key and, for a court box, the relay and booking — and the
+    /// <c>fingerprint</c> field is validated to BE a fingerprint rather than trusted to be
+    /// one. That second half is not theoretical: rows written before the fingerprint existed
+    /// hold the live access code in <c>subject</c> in full, `RetentionWorker` never touches
+    /// `DetailsJson`, and a reader that simply forwarded the field would have published every
+    /// one of them to the console the day it shipped.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_activity_route_returns_no_raw_details_and_no_legacy_token()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client, "front-door");
+        var (gateId, _) = await IdsAsync(factory, mac, mac);
+
+        // Two rows exactly as the product wrote them before G2's B4, injected directly
+        // because no code path produces them any more. The first is the token in full. The
+        // second is the probe the first cannot be: twelve LOWERCASE HEX characters — the shape
+        // of a MAC address, which is a plausible thing for some other writer to have put in
+        // this field — which passes a character check and fails a length one. Without both,
+        // half the guard is untested and a mutant that drops the length check survives.
+        const string LegacyToken = "7Q3F9KM2XZ8B";
+        const string HexShapedSubject = "0a1b2c3d4e5f";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            foreach (var subject in new[] { LegacyToken, HexShapedSubject })
+            {
+                db.AuditLogs.Add(new AuditLog
+                {
+                    TenantId = club.TenantId,
+                    ActorUserId = Guid.Empty,
+                    Action = $"device.{DeviceEventEndpoints.UnknownScanKind}",
+                    DetailsJson = JsonSerializer.Serialize(new
+                    {
+                        device_id = gateId,
+                        device_code = "gate-legacy",
+                        seq = 4L,
+                        kind = DeviceEventEndpoints.UnknownScanKind,
+                        subject,
+                    }),
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var admin = await AdminClientAsync(factory, club);
+        var raw = await (await admin.GetAsync($"/api/v1/admin/devices/{gateId}/activity")).Content.ReadAsStringAsync();
+
+        Assert.DoesNotContain(LegacyToken, raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(HexShapedSubject, raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("details", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("gate_key", raw, StringComparison.OrdinalIgnoreCase);
+
+        // Both rows are still listed — they are evidence — with their fingerprint field null,
+        // because what they hold is not one.
+        var legacy = JsonDocument.Parse(raw).RootElement.GetProperty("items").EnumerateArray()
+            .Where(i => i.GetProperty("action").GetString() == $"device.{DeviceEventEndpoints.UnknownScanKind}")
+            .ToList();
+        Assert.Equal(2, legacy.Count);
+        Assert.All(legacy, i => Assert.Equal(JsonValueKind.Null, i.GetProperty("fingerprint").ValueKind));
+        Assert.All(legacy, i => Assert.True(i.GetProperty("offline").GetBoolean()));
+    }
+
+    /// <summary>
+    /// <b>The cross-tenant injection this route needs, and it is not the 404 above.</b>
+    ///
+    /// <para>
+    /// The device lookup being tenant-filtered stops an admin naming another club's board, and
+    /// that is pinned separately. This pins the SECOND filter: the audit query itself. Rows are
+    /// attributed to a board by a <c>device_id</c> inside a jsonb document with no foreign key
+    /// behind it, so if that query ever lost its tenant filter, any row anywhere carrying this
+    /// id would be served — and the id is the only thing being matched on.
+    /// </para>
+    ///
+    /// <para>
+    /// The row is injected rather than produced, because no code path writes another tenant's
+    /// device id into this tenant's details and none should. That is what a cross-tenant
+    /// injection test is for, and this repository requires one on every change touching a
+    /// tenant-scoped table.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task Another_clubs_audit_rows_never_appear_in_this_clubs_device_activity()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var mine = await ClubAsync(factory, "gate", DefaultSettings);
+        var theirs = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, mine, client, "front-door");
+        var (gateId, _) = await IdsAsync(factory, mac, mac);
+
+        const string TheirAction = "device.their_private_business";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.AuditLogs.Add(new AuditLog
+            {
+                TenantId = theirs.TenantId,
+                ActorUserId = Guid.Empty,
+                SubjectUserId = theirs.MemberId,
+                Action = TheirAction,
+                DetailsJson = JsonSerializer.Serialize(new { device_id = gateId, seq = 1L }),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var raw = await (await (await AdminClientAsync(factory, mine))
+            .GetAsync($"/api/v1/admin/devices/{gateId}/activity")).Content.ReadAsStringAsync();
+
+        Assert.DoesNotContain(TheirAction, raw, StringComparison.Ordinal);
+        Assert.DoesNotContain(theirs.MemberId.ToString(), raw, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The limit is clamped rather than refused, and defaults to fifty. A console asking for
+    /// a million rows is a mistake to bound, not a request to fail — and a console asking for
+    /// none of them is asking for nothing useful.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(null, 50)]
+    [InlineData(1, 1)]
+    [InlineData(3, 3)]
+    [InlineData(0, 1)]
+    [InlineData(-9, 1)]
+    [InlineData(200, 60)]
+    [InlineData(10_000, 60)]
+    public async Task The_activity_limit_is_clamped_and_defaults_to_fifty(int? limit, int expected)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client, "front-door");
+        var (gateId, _) = await IdsAsync(factory, mac, mac);
+
+        // Sixty rows: past the default page and short of the maximum, so both the "clamped
+        // down to the page" and "clamped up to what exists" cases are real.
+        for (var i = 0; i < 59; i++)
+        {
+            await client.SendAsync(Scan(club.Key, mac, "ZZZZZZZZZZZZ"));
+        }
+
+        var query = limit is null ? "" : $"?limit={limit}";
+        var response = await (await AdminClientAsync(factory, club)).GetAsync(
+            $"/api/v1/admin/devices/{gateId}/activity{query}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expected, (await BodyAsync(response)).GetProperty("items").GetArrayLength());
+    }
+
+    /// <summary>
+    /// Another club's board is not this club's to read, and the answer is a 404 rather than a
+    /// 403: whether a device id exists at all is itself a fact about the other tenant.
+    /// </summary>
+    [SkippableFact]
+    public async Task Another_clubs_device_has_no_activity_here()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var mine = await ClubAsync(factory, "gate", DefaultSettings);
+        var theirs = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+
+        var theirMac = await GateAsync(factory, theirs, client, "their-door");
+        var (theirGateId, _) = await IdsAsync(factory, theirMac, theirMac);
+        await client.SendAsync(Scan(theirs.Key, theirMac, await IdentCodeAsync(factory, theirs.TenantId, theirs.MemberId)));
+
+        var admin = await AdminClientAsync(factory, mine);
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await admin.GetAsync($"/api/v1/admin/devices/{theirGateId}/activity")).StatusCode);
+
+        // And their admin can read it, so the refusal above is tenancy and not a broken route.
+        var theirAdmin = await AdminClientAsync(factory, theirs);
+        var theirs200 = await theirAdmin.GetAsync($"/api/v1/admin/devices/{theirGateId}/activity");
+        Assert.Equal(HttpStatusCode.OK, theirs200.StatusCode);
+        Assert.NotEmpty((await BodyAsync(theirs200)).GetProperty("items").EnumerateArray());
+    }
+
+    /// <summary>
+    /// A court box has the same route and the same shape. Its trail is not a door's — it is
+    /// activations, releases and the outcomes they settled — but "what has this board been
+    /// doing" is one question and the console asks it from one place.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_court_boxs_activity_is_readable_on_the_same_route()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var boxMac = await CourtBoxAsync(club, client);
+        var (boxId, _) = await IdsAsync(factory, boxMac, boxMac);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-5));
+        var token = await BookingCodeAsync(factory, club, booking);
+        var activation = DoorEvent(71, DeviceEventEndpoints.ActivationKind, token);
+        activation["court"] = 0;
+        activation["uptime_ms"] = 3_599_000;
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = boxMac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(activation),
+        }))).StatusCode);
+
+        var response = await (await AdminClientAsync(factory, club)).GetAsync(
+            $"/api/v1/admin/devices/{boxId}/activity");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var items = (await BodyAsync(response)).GetProperty("items").EnumerateArray().ToList();
+        var row = Assert.Single(items, i => i.GetProperty("action").GetString() == $"device.{DeviceEventEndpoints.ActivationKind}");
+        Assert.True(row.GetProperty("offline").GetBoolean());
+        Assert.Matches("^[0-9a-f]{8}$", row.GetProperty("fingerprint").GetString());
+        Assert.Equal(ActivationOutcomeOk, row.GetProperty("reason").GetString());
+    }
+
+    /// <summary>The outcome an applied activation records, as the activity route reports it.</summary>
+    private const string ActivationOutcomeOk = "ok";
 
     private static async Task<(Guid Gate, Guid Box)> IdsAsync(TestWebAppFactory factory, string gateMac, string boxMac)
     {

@@ -83,15 +83,14 @@ public static class DeviceEndpoints
         // says why the health sweep alone cannot see this case.
         DeviceSilenceLog.NoteHeartbeat(db, device!, now, HeartbeatCadence.OfflineAfterSeconds(s.HeartbeatSeconds));
 
-        // The board's own diagnostic counter, to the log and no further. Warning rather than
-        // information: a board that could not push a heartbeat, or could not arm its
-        // watchdog, is a board somebody has to look at — and nobody at the door can see it.
-        if (req.NoPush is > 0 and { } noPush)
-        {
-            logs.CreateLogger(typeof(DeviceEndpoints)).LogWarning(
-                "Device {DeviceCode} reports {NoPush} heartbeat(s) it could not push since the last one it could",
-                device!.DeviceCode, noPush);
-        }
+        // The board's own diagnostic counters, to the log and no further. Warning rather than
+        // information: a board that could not push a heartbeat, or is losing queued events,
+        // is a board somebody has to look at — and nobody at the door can see it.
+        //
+        // Both are SINCE-BOOT TOTALS, which the log line has to say, because "N since the last
+        // one it could" is an instruction to read the wrong number: a technician reading it as
+        // a per-interval count sees a board that looks worse every hour it stays up.
+        NoteCountersAsync(logs, device!, req);
 
         device!.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
         if (req.EffectiveRunningVersion is { } running) device.RunningVersion = running;
@@ -193,6 +192,44 @@ public static class DeviceEndpoints
             roster,
         });
     }
+
+    /// <summary>
+    /// The board's two diagnostic counters, logged and nothing else.
+    ///
+    /// <para>
+    /// <b>A value out of range is ignored rather than refused, and that is the whole of B7.</b>
+    /// Both counters saturate at <c>int.MaxValue</c> on the board and are 64-bit here, so the
+    /// first value past the saturation point does not answer <c>400</c> for the WHOLE
+    /// heartbeat — which is what an <c>int?</c> binding did, taking the <c>gate</c> block and
+    /// the roster down with it. The corpus vector's own note has said since it was written
+    /// that a counter must not be able to take a door out of service; it could.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>They are since-boot totals.</b> A board has no way to know which report the server
+    /// kept, so a counter reset on send loses the whole count on any lost response — the exact
+    /// case the counter exists to report. The reader takes the RISE between two heartbeats,
+    /// which is why the log line says "since boot" rather than the sentence it used to.
+    /// </para>
+    /// </summary>
+    private static void NoteCountersAsync(ILoggerFactory logs, Device device, HeartbeatRequest req)
+    {
+        var logger = logs.CreateLogger(typeof(DeviceEndpoints));
+
+        if (req.NoPush is > 0 and { } noPush)
+        {
+            logger.LogWarning(
+                "Device {DeviceCode} reports {NoPush} heartbeat(s) it could not push since boot (a total, not a delta)",
+                device.DeviceCode, noPush);
+        }
+
+        if (req.EventsLost is > 0 and { } eventsLost)
+        {
+            logger.LogWarning(
+                "Device {DeviceCode} reports {EventsLost} queued event(s) its ring overwrote since boot (a total, not a delta)",
+                device.DeviceCode, eventsLost);
+        }
+    }
 }
 
 /// <summary>
@@ -242,27 +279,63 @@ public sealed record HeartbeatRequest(
     /// </summary>
     [property: JsonPropertyName("kind")] string? Kind = null,
     /// <summary>
-    /// How many heartbeats the board could not push since it last reported one, plus its
-    /// watchdog-arm failures. Optional, additive, and a DIAGNOSTIC — a board that sends
-    /// nothing is a board reporting zero.
+    /// How many heartbeats the board could not push <b>since boot</b>. Optional, additive, and
+    /// a DIAGNOSTIC — a board that sends nothing is a board reporting zero.
     ///
     /// <para>
-    /// A door has one LED and a boot log, and the two failures it needs to report are ones a
-    /// member must never be shown: a heartbeat body that did not fit the board's buffer or
-    /// arrived incomplete, and a watchdog that would not arm. A distinct LED cue for either
-    /// means nothing to the person standing at the door, so they ride the request instead.
+    /// A door has one LED and a boot log, and the failure this reports is one a member must
+    /// never be shown: a heartbeat body that did not fit the board's buffer, arrived
+    /// incomplete, or failed its read on an otherwise-200 response. A distinct LED cue means
+    /// nothing to the person standing at the door, so it rides the request instead.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It is a SINCE-BOOT TOTAL and this used to say "since it last reported one".</b> A
+    /// board cannot know which of its reports the server kept — the lost response is precisely
+    /// the case the counter exists to report — so a counter reset on send would lose the whole
+    /// count exactly when it mattered. The reader takes the rise between two heartbeats. The
+    /// board saturates it at <c>int.MaxValue</c> rather than wrapping, so a board up for years
+    /// reports a ceiling instead of a small number.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The watchdog half does NOT ride this, and three places said it did.</b> A watchdog
+    /// that will not arm is reported by the link pattern's fault variant on the LED and by the
+    /// boot log; it is not a heartbeat that failed to push, and folding it in here would make
+    /// a single number mean two unrelated things to whoever reads it.
     /// </para>
     ///
     /// <para>
     /// <b>It is logged and not stored.</b> A column on <see cref="Device"/> would be an EF
     /// migration for a counter nothing decides anything on, and this repository's rule is
     /// that a schema change needs one; the log line carries the device code, which is what a
-    /// technician searches by. It changes nothing about the response, and a negative value is
-    /// ignored rather than refused — a diagnostic must not be able to take a door out of
-    /// service. Corpus vector <c>gate-heartbeat-request-no-push</c>.
+    /// technician searches by. It changes nothing about the response. Corpus vector
+    /// <c>gate-heartbeat-request-no-push</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It binds as 64-bit, and this is not tidiness.</b> As an <c>int?</c> the first value
+    /// past the board's own saturation point answered <c>400</c> for the WHOLE heartbeat —
+    /// the <c>gate</c> block and the roster with it — so a diagnostic counter could take every
+    /// door in a club out of service at its next stale deadline, which is the one thing the
+    /// corpus vector's note says it must never do. Out-of-range and negative values are
+    /// IGNORED. Vector <c>gate-heartbeat-request-counters-out-of-range</c>.
     /// </para>
     /// </summary>
-    [property: JsonPropertyName("no_push")] int? NoPush = null)
+    [property: JsonPropertyName("no_push")] long? NoPush = null,
+    /// <summary>
+    /// How many queued events the board's ring overwrote before they could be uploaded,
+    /// <b>since boot</b>. Optional, additive, saturating, and bound and handled exactly as
+    /// <see cref="NoPush"/> is — see there for why both of those matter.
+    ///
+    /// <para>
+    /// The event queue's own header promised it was "never silent" about overflow, and for the
+    /// gate it now is not: a board that has been offline long enough to lose events says so,
+    /// and a technician can tell "nothing happened" from "we lost the record of it". The court
+    /// box's wire is untouched this round.
+    /// </para>
+    /// </summary>
+    [property: JsonPropertyName("events_lost")] long? EventsLost = null)
 {
     /// <summary>The reported version under either name, trimmed — or null when neither was sent.</summary>
     public string? EffectiveRunningVersion

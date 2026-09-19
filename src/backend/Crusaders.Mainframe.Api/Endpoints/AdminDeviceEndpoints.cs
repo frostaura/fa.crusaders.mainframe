@@ -37,6 +37,11 @@ public static class AdminDeviceEndpoints
         g.MapPatch("/{id:guid}", UpdateAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
 
+        // What this board has been doing. On this group rather than beside the audit trail
+        // because the question is about a DEVICE — see AdminDeviceActivityEndpoint for why a
+        // door needs it more than a court box does, and why the trail had no reader at all.
+        g.MapGet("/{id:guid}/activity", AdminDeviceActivityEndpoint.HandleAsync);
+
         return app;
     }
 
@@ -126,7 +131,7 @@ public static class AdminDeviceEndpoints
 
         var updated = await devices.UpdateAsync(
             device,
-            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, buttons, req.GateKey?.Trim()),
+            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, buttons, req.EffectiveGateKey?.Trim()),
             ctx.User.Id() ?? Guid.Empty, ct);
 
         return Results.Ok(DeviceView.Of(updated, await HeartbeatSecondsAsync(settingsAccessor, ct)));
@@ -171,7 +176,7 @@ public static class AdminDeviceEndpoints
     {
         if (device.Kind != DeviceKind.Gate)
         {
-            return req.GateKey is null ? null : Results.BadRequest(new { error = GateKeyNotAGate });
+            return req.EffectiveGateKey is null ? null : Results.BadRequest(new { error = GateKeyNotAGate });
         }
 
         if (req.CourtNumbers is not null || req.ButtonMap.ValueKind != JsonValueKind.Undefined)
@@ -180,8 +185,9 @@ public static class AdminDeviceEndpoints
         }
 
         // Bounded here rather than truncated at the column: a door whose name is silently
-        // shortened is a door nobody can find in the audit trail afterwards.
-        if (req.GateKey is { } key && key.Trim().Length > Device.GateKeyMaxLength)
+        // shortened is a door nobody can find in the audit trail afterwards. Read through
+        // EffectiveGateKey like everything else, so a spelling is not a way round a rule.
+        if (req.EffectiveGateKey is { } key && key.Trim().Length > Device.GateKeyMaxLength)
         {
             return Results.BadRequest(new { error = GateKeyTooLong, max_length = Device.GateKeyMaxLength });
         }
@@ -282,4 +288,34 @@ public sealed record UpdateDeviceRequest(
     bool? Enabled,
     [property: JsonPropertyName("court_numbers")] IReadOnlyList<int>? CourtNumbers,
     [property: JsonPropertyName("button_map")] JsonElement ButtonMap = default,
-    [property: JsonPropertyName("gate_key")] string? GateKey = null);
+    [property: JsonPropertyName("gate_key")] string? GateKey = null,
+    /// <summary>
+    /// The camelCase spelling of <see cref="GateKey"/>, bound so that picking the wrong one is
+    /// an answer rather than silence. Never read directly — see <see cref="EffectiveGateKey"/>.
+    /// </summary>
+    [property: JsonPropertyName("gateKey")] string? GateKeyCamel = null)
+{
+    /// <summary>
+    /// The door's name as the caller asked for it, under either spelling — or null when
+    /// neither arrived, which is the two-valued "leave it alone".
+    ///
+    /// <para>
+    /// <b>This endpoint answers snake_case and .NET binds camelCase</b>, and the cost of a
+    /// client choosing the wrong one is not an error: it is <c>null</c>, which
+    /// <c>gate_key</c> reads as "omitted", so the PATCH returns <c>200</c> with the door's OLD
+    /// name in the body and nothing anywhere says the write was dropped. <c>door-gate.md</c>
+    /// §8 makes exactly that argument about the settings PUT — where both spellings have bound
+    /// since it shipped — and it was never applied to the one field on this PATCH that carries
+    /// the same risk. For a value that names the door in every audit row a club will ever read
+    /// back, a silent no-op is worth removing rather than documenting.
+    /// </para>
+    ///
+    /// <para>
+    /// snake_case wins where both arrive, because it is the spelling this document and the
+    /// corpus declare; a caller sending two different values has a bug either way and the
+    /// deterministic answer is the documented one. Every refusal still applies to whichever
+    /// value this returns — a spelling is not a way round a rule.
+    /// </para>
+    /// </summary>
+    public string? EffectiveGateKey => GateKey ?? GateKeyCamel;
+}

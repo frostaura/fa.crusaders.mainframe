@@ -282,26 +282,44 @@ public sealed class PeripheralHealthWorker : BackgroundService
     /// Whether this board is one the club has asked to hear about at all.
     ///
     /// <para>
-    /// <b>A gate nobody has named is not mailed about.</b> Auto-registration is the whole
-    /// provisioning story and it is unbounded: anything holding the club's device key can
-    /// heartbeat with a MAC it invented and <c>kind: "gate"</c>, and a row appears. Before
-    /// this, each of those boards could then mail every admin of the club on every transition
-    /// — a mail flood available on demand to anyone who had the key, which is the same
-    /// capability D3 took the roster away for and for the same reason. Naming the door is the
-    /// admin's acknowledgement that the board is one of theirs; until then the club has said
-    /// nothing about it and hears nothing about it.
+    /// <b>A board no admin has acknowledged is not mailed about, whatever kind it is.</b>
+    /// Auto-registration is the whole provisioning story and it is unbounded: anything holding
+    /// the club's device key can heartbeat with a MAC it invented and a row appears. Each of
+    /// those boards could then mail every admin of the club on every transition — a mail flood
+    /// available on demand to anyone who had the key, which is the same capability D3 took the
+    /// roster away for and for the same reason.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>This used to exempt an unnamed GATE only, and the flood was never a door problem.</b>
+    /// A gate is the one kind of board that has to be named before it does anything; a
+    /// <c>kind</c>-less heartbeat auto-registers a COURT BOX with no naming step at all, and a
+    /// court box was mailable the instant it existed. So the default path was still wide open:
+    /// twelve invented MACs is twelve mails to every admin in one thirty-second tick, and the
+    /// ceiling is the tenant rate limit rather than anything here. The acknowledgement itself
+    /// is the right test — <see cref="Device.AutoRegistered"/> means exactly "nobody has looked
+    /// at this row", it is already on every kind, and the first admin edit clears it.
+    /// </para>
+    ///
+    /// <para>
+    /// The gate's naming rule survives as the narrower of the two, because it is about a
+    /// different thing: <c>gate_key</c> is what makes the message identify a door at all, and
+    /// D3 keys the offline roster on it. An acknowledged but unnamed gate is therefore still
+    /// silent.
     /// </para>
     ///
     /// <para>
     /// The outage ROW and the <c>peripheral.*</c> events are written either way. The Devices
     /// page reads those rows, and a board an admin is looking at should show its history
     /// whether or not anybody was mailed about it — what is withheld is the interruption, not
-    /// the record. A court box has no equivalent gate: its row is named by the club's own
-    /// court numbers at registration and it drives real money.
+    /// the record. That is also what keeps this from hiding a real outage: the board a club
+    /// genuinely installed is acknowledged the first time anybody edits it, and until then it
+    /// is visible on the page they would be sent to anyway.
     /// </para>
     /// </summary>
     private static bool Mailable(Device device) =>
-        device.Kind != DeviceKind.Gate || !string.IsNullOrWhiteSpace(device.GateKey);
+        !device.AutoRegistered
+        && (device.Kind != DeviceKind.Gate || !string.IsNullOrWhiteSpace(device.GateKey));
 
     /// <summary>
     /// Whether this outage is one the club was, or is about to be, told about — at most one

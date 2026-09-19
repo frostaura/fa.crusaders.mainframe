@@ -70,7 +70,26 @@ public static class DeviceIdentity
         if (normalised is null) return (null, Results.BadRequest(new { error = MacRequired }));
 
         var device = await db.Devices.FirstOrDefaultAsync(d => d.MacAddress == normalised, ct);
-        if (device is null) return (await devices.AutoRegisterAsync(normalised, hintedKind, ct), null);
+        if (device is null)
+        {
+            // A club may hold only so many boards nobody has looked at. Every invented MAC
+            // that gets here leaves a permanent row — on the Devices page, in the audit trail,
+            // and (before G3's B3) in every admin's inbox the moment it went quiet — and the
+            // rate limit was the only ceiling on how many. See
+            // DeviceRegistryService.MaxUnacknowledgedDevices for why the count is of the
+            // UNACKNOWLEDGED rows and why the answer is 409 rather than 403.
+            //
+            // Checked here and not inside AutoRegisterAsync, because this is a refusal to
+            // SERVE the request and that method's job is to build a row. A board that already
+            // has one never reaches this line: the cap bounds creation, never service, or a
+            // flood would take a club's installed doors offline.
+            if (await devices.UnacknowledgedCountAsync(ct) >= DeviceRegistryService.MaxUnacknowledgedDevices)
+            {
+                return (null, Results.Conflict(new { error = DeviceRegistryService.TooManyUnacknowledgedDevices }));
+            }
+
+            return (await devices.AutoRegisterAsync(normalised, hintedKind, ct), null);
+        }
 
         // A box an admin disabled is refused rather than silently re-registered: the row is
         // still there, and re-creating it around the disable would make the switch a lie.

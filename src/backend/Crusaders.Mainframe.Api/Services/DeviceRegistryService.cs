@@ -270,6 +270,48 @@ public sealed class DeviceRegistryService
     public const string MacAddressInvalid = "mac_address_invalid";
 
     /// <summary>
+    /// How many boards a club may hold that <b>nobody has looked at</b> before auto-registration
+    /// stops creating more.
+    ///
+    /// <para>
+    /// A CONTRACT CONSTANT, not a tenant setting: it is a bound on what the club key can be
+    /// spent on, and a number the club itself could raise is not that. Sixteen is comfortably
+    /// past any real installation's burst — a club flashing a batch of boards in one afternoon
+    /// is nowhere near it — and small enough that the flood it stops is over in one request.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It counts the UNACKNOWLEDGED rows and not all of them.</b> Auto-registration is the
+    /// whole provisioning story, so a cap on the total would eventually refuse a club that
+    /// genuinely has forty boards, at the worst possible moment — the one where somebody is
+    /// standing in a cupboard with a freshly flashed ESP32. <see cref="Device.AutoRegistered"/>
+    /// is cleared by the first admin edit, so the way past the cap is exactly the thing an
+    /// admin was going to do anyway: open the Devices page and deal with the rows that
+    /// appeared.
+    /// </para>
+    ///
+    /// <para>
+    /// It bounds CREATING a row and nothing else. A club at its limit still serves every board
+    /// that already registered, because the alternative is a flood taking a club's installed
+    /// doors offline, which is worse than the flood.
+    /// </para>
+    /// </summary>
+    public const int MaxUnacknowledgedDevices = 16;
+
+    /// <summary>
+    /// Error code when <see cref="MaxUnacknowledgedDevices"/> is reached. Answered <b>409</b>,
+    /// never 403: on the device route group a 403 means "this board is out of service" and
+    /// nothing else — the firmware commits an empty roster on one — so a registration refusal
+    /// wearing that status would take every door in the club out of service. See
+    /// <c>DeviceForbiddenMeansOutOfServiceTests</c>.
+    /// </summary>
+    public const string TooManyUnacknowledgedDevices = "too_many_unacknowledged_devices";
+
+    /// <summary>How many rows of this club's nobody has acknowledged yet. See <see cref="MaxUnacknowledgedDevices"/>.</summary>
+    public Task<int> UnacknowledgedCountAsync(CancellationToken ct) =>
+        _db.Devices.CountAsync(d => d.AutoRegistered, ct);
+
+    /// <summary>
     /// A MAC in the form the boards announce — twelve lowercase hex characters, no
     /// separators — or null when it could not be one.
     ///

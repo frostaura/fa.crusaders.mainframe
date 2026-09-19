@@ -135,7 +135,13 @@ public static class DeviceGateRosterBuilder
         // [StartsAt − early, EndsAt] ∩ [now, now + roster] ≠ ∅  ⇔
         // StartsAt ≤ now + roster + early  ∧  EndsAt ≥ now — two constants the provider can
         // translate, the same rearrangement DeviceRosterBuilder and QrEndpoints use.
-        var latestStart = now.AddMinutes(settings.RosterWindowMinutes).Add(earlyEntry);
+        //
+        // The window is clamped on read too, and it was the one number here that was not.
+        // TenantSettingsAccessor bounds nothing on the way in, so roster_window_minutes: -600
+        // put `latestStart` ten hours in the past and matched no booking at all: a clean 200,
+        // a present-and-empty roster key, no error, no log — and every door in the club
+        // admitting nobody the moment its link dropped.
+        var latestStart = now.AddMinutes(BookingCodeWindow.RosterReachMinutes(settings)).Add(earlyEntry);
 
         var bookings = await db.Bookings
             .Where(b => b.Status == BookingStatus.Booked
