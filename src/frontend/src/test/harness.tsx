@@ -295,6 +295,10 @@ export const SETTINGS_FIXTURE = {
   activation_cue_window_minutes: 10,
   qr_lifetime_seconds: 60,
   roster_window_minutes: 120,
+  // The API's default. With the two above it, this fixture is the club's shipping state —
+  // which is what makes the door horizon it implies (120 + 10 = 130, not the 30 in
+  // `gate_early_entry_minutes`) the number the settings screen has to be right about.
+  device_alert_cooldown_minutes: 60,
   // The three door-gate numbers, at the API's own defaults. `active_member` is the default
   // policy, so a fixture that wanted the strict one has to say so — which is what makes the
   // tests of `booking_window` prove something.

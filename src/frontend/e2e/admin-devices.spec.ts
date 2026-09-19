@@ -52,6 +52,7 @@ const SETTINGS = {
   activation_cue_window_minutes: 10,
   qr_lifetime_seconds: 60,
   roster_window_minutes: 120,
+  device_alert_cooldown_minutes: 60,
   gate_unlock_seconds: 3,
   gate_access_policy: "active_member",
   gate_early_entry_minutes: 30,

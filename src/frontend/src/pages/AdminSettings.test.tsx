@@ -458,8 +458,48 @@ describe("AdminSettings — door gates", () => {
     const hint = hintOf(await screen.findByLabelText(/Who may open a door/));
     expect(hint).toMatch(/own code scans opens the door at any hour/);
     expect(hint).toMatch(/A booking's QR is narrower/);
-    expect(hint).toMatch(/until the booking ends/);
-    expect(hint).toMatch(/not at all once the booking is cancelled/);
+    expect(hint).toMatch(/only while that code is still live/);
+    expect(hint).toMatch(/A cancelled booking's code opens nothing/);
+    // The one bound that is the same for every club, and the reason "about the time the
+    // phone shows it" is safe to print at all: without it the sentence is unbounded, and a
+    // club whose roster reach and lights cue exceed four hours would read it as the truth.
+    expect(hint).toMatch(/never more than four hours before the booking/);
+  });
+
+  /**
+   * <b>A member who is late is not locked out of the building by the no-show sweep.</b> The
+   * strict arm used to end at "and has not yet ended", which reads as — and, under the old
+   * status rule, was — the front door shutting on somebody at the stroke of their slot's end.
+   */
+  it("says arriving late is not a lockout, under both policies", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const picker = await screen.findByLabelText(/Who may open a door/);
+    expect(hintOf(picker)).toMatch(/Arriving late is not a lockout/);
+    expect(hintOf(picker)).toMatch(/no-show sweep does not take that code away/);
+
+    fireEvent.change(picker, { target: { value: "booking_window" } });
+    const strict = hintOf(screen.getByLabelText(/Who may open a door/));
+    expect(strict).toMatch(/Arriving late is not a lockout/);
+    expect(strict).toMatch(/whose code for that booking is still live/);
+    expect(strict).not.toMatch(/has not yet ended/);
+  });
+
+  /**
+   * <b>The admin carve-out's third limit, in the carve-out's own sentence.</b> A cut-off door
+   * decides from a cached roster built from bookings; there is no admin flag anywhere in it,
+   * so the one person a club is most certain can always get in is refused at a door that has
+   * lost the network.
+   */
+  it("bounds the admin carve-out to a door that can reach the API", async () => {
+    stubFetch(routes({ gate_access_policy: "booking_window" }));
+    renderPage(<AdminSettingsPage />);
+
+    const hint = hintOf(await screen.findByLabelText(/Who may open a door/));
+    const sentence = hint.split(". ").find((s) => s.includes("Club admins always pass"))!;
+    expect(sentence).toContain("only at a door that can still reach the API");
+    expect(sentence).toContain("an offline door holds bookings, not admins");
   });
 
   it("follows the early-entry number into the strict policy's hint", async () => {
@@ -609,5 +649,230 @@ describe("AdminSettings — door gates", () => {
 
     fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "booking_window" } });
     expect(screen.getByRole("button", { name: /Save settings/ })).toBeEnabled();
+  });
+
+  /**
+   * <b>The number the screen was wrong about, now computed and printed.</b>
+   *
+   * <p>
+   * At the API's own defaults — `active_member`, early entry 30, roster reach 120, lights cue
+   * 10 — a booking QR opens a door 130 minutes out, and this screen said 30. Nothing on it
+   * pointed at the two fields that actually decide it, and both of those are filed under a
+   * heading that says "Court boxes". An admin lowering "Early entry" to narrow the door
+   * narrowed nothing and was told "Settings saved."
+   * </p>
+   */
+  it("shows the horizon a booking QR really opens a door in, not the early-entry number", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    // 120 + 10, not the 30 in the field directly above it.
+    expect(await screen.findByText(
+      "With these settings a booking QR opens a door from 130 minutes before the booking.",
+    )).toBeInTheDocument();
+    expect(screen.getByLabelText(/Early entry/)).toHaveValue(30);
+  });
+
+  /** And it follows every one of the three fields that feed it, live. */
+  it("recomputes the horizon from whichever of the three fields is edited", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    await screen.findByText(/booking QR opens a door from 130 minutes/);
+
+    // The lights cue, which is on the Court boxes block and reaches the doors.
+    fireEvent.change(screen.getByLabelText(/Lights on this early/), { target: { value: "40" } });
+    expect(screen.getByText(/booking QR opens a door from 160 minutes/)).toBeInTheDocument();
+
+    // The roster reach, same block, same effect.
+    fireEvent.change(screen.getByLabelText(/Offline roster reach/), { target: { value: "60" } });
+    expect(screen.getByText(/booking QR opens a door from 100 minutes/)).toBeInTheDocument();
+
+    // Early entry is the FLOOR, so raising it past the pair moves the answer and lowering it
+    // below them does not — which is the half an admin cannot guess.
+    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "200" } });
+    expect(screen.getByText(/booking QR opens a door from 200 minutes/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "5" } });
+    expect(screen.getByText(/booking QR opens a door from 100 minutes/)).toBeInTheDocument();
+  });
+
+  /** The cap, which is the answer an admin is most likely to be surprised by. */
+  it("stops the horizon at four hours however wide the two court windows are", async () => {
+    stubFetch(routes({ roster_window_minutes: 1440, activation_cue_window_minutes: 1440 }));
+    renderPage(<AdminSettingsPage />);
+
+    expect(await screen.findByText(/booking QR opens a door from 240 minutes/)).toBeInTheDocument();
+  });
+
+  /** Under the strict policy the two court windows drop out of it entirely. */
+  it("reads the horizon off early entry alone under the strict policy", async () => {
+    stubFetch(routes({ gate_access_policy: "booking_window", gate_early_entry_minutes: 45 }));
+    renderPage(<AdminSettingsPage />);
+
+    expect(await screen.findByText(/booking QR opens a door from 45 minutes/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Offline roster reach/), { target: { value: "1440" } });
+    expect(screen.getByText(/booking QR opens a door from 45 minutes/)).toBeInTheDocument();
+  });
+
+  /**
+   * <b>The early-entry hint says what the number governs under the policy that is selected.</b>
+   * It used to say "How long before a booking starts its holder may come in" under both, which
+   * is the door under one of them and the offline roster plus a floor under the other.
+   */
+  it("changes what the early-entry hint claims when the policy changes", async () => {
+    stubFetch(routes({ gate_access_policy: "booking_window" }));
+    renderPage(<AdminSettingsPage />);
+
+    const strict = hintOf(await screen.findByLabelText(/Early entry/));
+    expect(strict).toMatch(/Under the policy above this is the door/);
+    expect(strict).toMatch(/cached roster reaches exactly that far/);
+
+    fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "active_member" } });
+    const open = hintOf(screen.getByLabelText(/Early entry/));
+    expect(open).toMatch(/the offline list and the floor/);
+    expect(open).toMatch(/never opens a door less early than this/);
+    // And it names the two fields that decide the rest, by the labels they carry on screen.
+    expect(open).toMatch(/Offline roster reach/);
+    expect(open).toMatch(/Lights on this early/);
+    expect(open).not.toMatch(/Under the policy above this is the door/);
+    // The bound is still on the hint: the field's own min/max stop the spinner and nothing else.
+    expect(open).toMatch(/0–240/);
+  });
+
+  /**
+   * <b>And the two court-side fields say they reach the doors.</b>
+   *
+   * <p>
+   * They are filed under "Court boxes", they are named for courts, and under the default
+   * policy they are two thirds of what decides when a booking QR opens a door. An admin
+   * raising the roster reach to give the boxes a longer outage cushion widened every door in
+   * the club by the same amount, and neither field said so.
+   * </p>
+   */
+  it("says on both court-side fields that they also decide how early a door opens", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    for (const label of [/Lights on this early/, /Offline roster reach/]) {
+      const hint = hintOf(await screen.findByLabelText(label));
+      expect(hint).toMatch(/also decides how early a booking's QR opens a door/);
+      expect(hint).toMatch(/capped at 240 minutes/);
+    }
+
+    // And the opposite under the strict policy, rather than going silent — with the field that
+    // took over named, so an admin is not left looking for it.
+    fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "booking_window" } });
+    for (const label of [/Lights on this early/, /Offline roster reach/]) {
+      const hint = hintOf(screen.getByLabelText(label));
+      expect(hint).toMatch(/does not reach the doors/);
+      expect(hint).toMatch(/“Early entry” under Door gates does that/);
+    }
+  });
+});
+
+/**
+ * <b>The alert cooldown.</b>
+ *
+ * <p>
+ * A board that goes quiet used to mail the club on every sweep, and re-enabling a board that
+ * had been off for a month mailed "back after 43 200 minutes". The setting bounds the first
+ * of those. It is filed with the device numbers rather than in the door block because it
+ * covers court boxes as well as doors — a box that goes quiet flaps exactly as a door does.
+ * </p>
+ */
+describe("AdminSettings — alert cooldown", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const routes = (settings: Record<string, unknown> = {}) => [
+    { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...settings } },
+    { path: "/api/v1/admin/courts/", body: [] },
+    { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
+  ];
+
+  const hintOf = (field: HTMLElement) =>
+    document.getElementById(field.getAttribute("aria-describedby")!)!.textContent!;
+
+  it("shows the cooldown with the API's bounds, beside the device numbers", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const field = await screen.findByLabelText(/Alert cooldown/);
+    expect(field).toHaveValue(60);
+    expect(field).toHaveAttribute("min", "5");
+    expect(field).toHaveAttribute("max", "1440");
+
+    // It belongs to the boards, not to the doors: it is inside the Court boxes card, which is
+    // where an admin looking for "why am I being mailed about this box" would go.
+    expect(field.closest("div.space-y-5")).toHaveTextContent("Court boxes & identification");
+  });
+
+  /**
+   * Both halves of what it does, because either alone leaves an admin with a wrong model: the
+   * cooldown bounds the mail, and a door nobody has named is never mailed about at all —
+   * which is not a failure of the cooldown and must not be read as one.
+   */
+  it("says what it bounds and which board it never mails about", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const hint = hintOf(await screen.findByLabelText(/Alert cooldown/));
+    expect(hint).toMatch(/At most one “not reporting” email per board in this many minutes/);
+    expect(hint).toMatch(/a door nobody has named never alerts/);
+    expect(hint).toMatch(/5–1440/);
+  });
+
+  it("sends it on save, camelCase like the rest of the numbers", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText(/Alert cooldown/), { target: { value: "15" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+
+    await waitFor(() => {
+      const save = stub.calls.find((c) => c.method === "PUT");
+      expect(save).toBeTruthy();
+      expect(save!.body).toMatchObject({ deviceAlertCooldownMinutes: 15 });
+    });
+  });
+
+  /**
+   * The input's bounds stop the spinner and nothing else, and Save is not a native submit —
+   * the same gap the credits-per-rand `step` fell through. The lower end is the one that
+   * matters: a cooldown of one minute is a club mailed once a sweep for as long as a board is
+   * unplugged, which is the flapping the setting exists to stop.
+   */
+  it("holds Save and names the bound when a value is typed past the range", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText(/Alert cooldown/), { target: { value: "1" } });
+    expect(screen.getByText("Alert cooldown has to be a whole number of minutes between 5 and 1440."))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
+
+    fireEvent.change(screen.getByLabelText(/Alert cooldown/), { target: { value: "5" } });
+    expect(screen.getByRole("button", { name: /Save settings/ })).toBeEnabled();
+  });
+
+  /** The refusal, decoded through the shared dictionary rather than the underscore swap. */
+  it("turns a refused cooldown into a sentence with the bound in it", async () => {
+    stubFetch([
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      { path: "/api/v1/admin/courts/", body: [] },
+      {
+        method: "PUT", path: "/api/v1/admin/settings/", status: 400,
+        body: { error: "device_alert_cooldown_minutes_out_of_range" },
+      },
+    ]);
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText(/Alert cooldown/), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+
+    expect(await screen.findByText(/Alert cooldown has to be between 5 and 1440 minutes/))
+      .toHaveTextContent(/one “not reporting” email per board/);
+    expect(screen.queryByText(/device alert cooldown minutes out of range/)).not.toBeInTheDocument();
   });
 });
