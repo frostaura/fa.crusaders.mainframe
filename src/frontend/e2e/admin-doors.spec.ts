@@ -97,7 +97,11 @@ function doorsView(doors: Record<string, unknown>[], options: DoorsOptions = {})
   return {
     day_started_at: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
     timezone: "Africa/Johannesburg",
-    shut_all_active: doors.some((d) => d.enabled === false),
+    // C1: a shut-all is standing only when a shut-all shut something. This used to be
+    // `doors.some(d => !d.enabled)`, which made a door shut on its OWN look like a fleet
+    // shut — the exact conflation that produced "Reopen all 3" over a request that
+    // reopened none of them, and the reason the fixture could not see the bug.
+    shut_all_active: doors.some((d) => d.enabled === false && d.shut_by_shut_all_at != null),
     doors: doors.map((device) => ({
       device,
       today: options.today && String(device.id) in options.today
@@ -260,7 +264,7 @@ test.describe("Shutting every door", () => {
       },
     ]);
 
-    await page.getByRole("button", { name: /Shut every door the club has open/ }).click();
+    await page.getByRole("button", { name: /— every door the club has open/ }).click();
     await page.getByRole("button", { name: /tap again to confirm/ }).click();
 
     const heading = page.getByRole("heading", { name: /2 doors shut — 1 confirmed, 1 not/ });
@@ -294,7 +298,7 @@ test.describe("Shutting every door", () => {
       },
     ]);
 
-    await page.getByRole("button", { name: /Shut every door the club has open/ }).click();
+    await page.getByRole("button", { name: /— every door the club has open/ }).click();
     await page.getByRole("button", { name: /tap again to confirm/ }).click();
 
     const line = page.getByText(/confirmed — heard from/);
@@ -312,8 +316,12 @@ test.describe("Shutting every door", () => {
     ]);
 
     await expect(page.getByText("2 doors · 1 open, 1 shut")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Shut every door the club has open — 1 of 2/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Reopen every door the club shut together/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Shut the 1 door still open — every door the club has open — 1 of 2/ })).toBeVisible();
+    // C1: Front door was shut on its OWN, and `reopen-all` reopens only what a shut-all
+    // shut — so a fleet reopen here would answer `{"doors":[]}` and print "0 doors
+    // reopened". It is not offered; the panel says where the way back actually is.
+    await expect(page.getByRole("button", { name: /shut together/ })).toHaveCount(0);
+    await expect(page.getByText(/Front door was shut on its own/)).toBeVisible();
   });
 
   /**
@@ -327,9 +335,14 @@ test.describe("Shutting every door", () => {
     await page.goto("/admin/settings");
 
     const banner = page.getByRole("alert");
-    await expect(banner).toContainText("1 of 1 door is shut.");
-    await expect(banner).toContainText("Members can't get in.");
-    await expect(page.getByRole("link", { name: "Reopen all doors" })).toHaveAttribute("href", "/admin/doors");
+    await expect(banner).toContainText("1 of 1 door shut");
+    // C2: the phrase is banned outright — a shut door the club cannot reach has not heard
+    // the refusal and goes on admitting booked members from its saved list.
+    await expect(banner).not.toContainText("can't get in");
+    // C1: shut on its own, so a fleet reopen would reopen nothing and is not offered.
+    await expect(banner).toContainText("would not touch these");
+    await expect(page.getByRole("link", { name: "Side door" }))
+      .toHaveAttribute("href", `/admin/doors/${DOOR_ID}`);
   });
 });
 
@@ -346,7 +359,7 @@ test.describe("One door's page", () => {
     ]);
 
     await expect(page.getByText("Needs a door name")).toBeVisible();
-    await page.getByRole("button", { name: "Edit name and door name" }).click();
+    await page.getByRole("button", { name: /^Edit / }).click();
     await page.getByLabel("Name", { exact: true }).fill("Front door");
     await page.getByLabel("Door name", { exact: true }).fill("front-door");
 
@@ -360,11 +373,14 @@ test.describe("One door's page", () => {
         body: { ...unnamed, name: "Front door", gate_key: "front-door", auto_registered: false },
       },
     ]));
-    await page.getByRole("button", { name: "Save door" }).click();
+    await page.getByRole("button", { name: /Save this door/ }).click();
 
     // Name and door key in one call, and no court_numbers — the API refuses that field here.
-    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ name: "Front door", gate_key: "front-door" });
-    await expect(page.getByRole("status").first()).toContainText("Front door is the front-door door.");
+    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({
+      name: "Front door", gate_key: "front-door", location_note: "", power_loss_behaviour: "not_established",
+    });
+    await expect(page.getByRole("status").first())
+      .toContainText("Front door saved. It is the front-door door");
   });
 
   /**
@@ -399,11 +415,16 @@ test.describe("One door's page", () => {
     await expect(page.getByText(/front-door · gate-0a1b2c/)).toBeVisible();
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
-    await page.getByRole("button", { name: "Edit name and door name" }).click();
+    await page.getByRole("button", { name: /^Edit / }).click();
     await page.getByLabel("Door name", { exact: true }).fill("   ");
-    await page.getByRole("button", { name: "Save door" }).click();
+    await page.getByRole("button", { name: /Save this door/ }).click();
 
-    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ name: "Front door", gate_key: "" });
+    // A19: one form over all four writable fields, so one PATCH carrying all four. `""`,
+    // not `null`, on both two-valued fields — a null is what the API reads as "leave it
+    // alone", and that is what the page used to send while reporting a success.
+    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({
+      name: "Front door", gate_key: "", location_note: "", power_loss_behaviour: "not_established",
+    });
     await expect(page.getByText(/no door name yet · gate-0a1b2c/)).toBeVisible();
     // And what the club has just given up: an unnamed door is sent an empty list, so it has
     // no offline fallback at all.
@@ -420,7 +441,7 @@ test.describe("One door's page", () => {
 
     const notice = page.getByText(/^The club is not alerted about its silence/);
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText("can still reach the API hears that refusal and opens for nobody");
+    await expect(notice).toContainText("can still reach the club hears that refusal and opens for nobody");
     await expect(notice).toContainText("has also lost the network never hears it");
     await expect(notice).toContainText("up to six hours");
     // A1.1: the denial survives P5's ban on the tokens.
@@ -430,6 +451,7 @@ test.describe("One door's page", () => {
     // And none of the court box's copy, which is false of a door in every clause.
     await expect(notice).not.toContainText("refunded in full");
     await expect(page.getByText(/The API refuses this box/)).toHaveCount(0);
+    await expect(notice).not.toContainText("the API");
 
     // A1.4: one name for the 403 path on a gate.
     await expect(page.getByRole("button", { name: "Shut this door — Front door" })).toBeVisible();
@@ -473,8 +495,13 @@ test.describe("One door's page", () => {
 
     await page.getByRole("button", { name: "Delete this door — Front door" }).click();
     await expect(page.getByRole("button", { name: "Delete this door — Front door — tap again to confirm" })).toBeVisible();
-    await expect(page.getByText("Delete? The door re-registers on its next heartbeat with no name.").first())
-      .toBeVisible();
+    // The armed button IS the confirm sentence — asserted on the control rather than on a
+    // text node, because the width sentinel carries the same words invisibly.
+    const armed = page.getByRole("button", { name: "Delete this door — Front door — tap again to confirm" });
+    await expect(armed).toBeVisible();
+    // C10: the two facts the old sentence destroyed without ever mentioning them.
+    await expect(armed).toContainText("what the lock does with no power");
+    await expect(armed).toContainText("where the board is");
   });
 
   /** Fifty rows of decisions, each carrying a member name of a length nobody controls. */
@@ -585,15 +612,20 @@ test.describe("The club door log", () => {
   test("says at the button what a downloaded file carries", async ({ page }) => {
     await openLog(page, [logRow()]);
 
-    await expect(page.getByText(/members' names included/)).toContainText("outside the club's 90-day rule");
+    // B3 / A15: the note promised "the same rows as this page" over a file that holds
+    // everything matching the filters — 50 on screen, 165 in the reviewer's download.
+    const note = page.getByText(/every scan matching the filters above/);
+    await expect(note).toContainText("not just the rows on this page");
+    await expect(note).toContainText("outside the club's 90-day rule");
+    await expect(page.getByText(/same rows as this page/)).toHaveCount(0);
   });
 
   /** The one-door empty case — the answer to the spec's own question. */
   test("answers an empty one-door range with the possibility an admin came to check", async ({ page }) => {
     await openLog(page, [], [], `/admin/doors/log?door=${DOOR_ID}`);
 
-    await expect(page.getByText(/No scans at the Side door between/))
-      .toContainText("its board may not be reaching the club");
+    await expect(page.getByText(/No scans at Side door between/))
+      .toContainText("It is reporting, so the club is hearing from it");
   });
 
   test("keeps the page inside the phone with a long member name on every row", async ({ page }) => {
@@ -625,7 +657,10 @@ test.describe("The printable door card", () => {
     })]));
     await page.goto(`/admin/doors/${DOOR_ID}/card`);
 
-    await expect(page.getByRole("heading", { name: "side-door" })).toBeVisible();
+    // B22 / C13: the club's OWN name for the door is the headline, slug beneath. The
+    // heading used to BE the slug — "side-door" in 36 px on a card taped to a wall.
+    await expect(page.getByRole("heading", { name: "Side door" })).toBeVisible();
+    await expect(page.getByText("side-door", { exact: true })).toBeVisible();
     await expect(page.getByText("gate-0a1b2c")).toBeVisible();
     await expect(page.getByText("In the cupboard above the fuse board")).toBeVisible();
     await expect(page.getByText(/RELEASED/)).toBeVisible();
@@ -644,12 +679,12 @@ test.describe("The printable door card", () => {
     await signIn(page);
     await serveApi(page, routes([door()]));
     await page.goto(`/admin/doors/${DOOR_ID}/card`);
-    await expect(page.getByRole("heading", { name: "side-door" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Side door" })).toBeVisible();
 
     await page.emulateMedia({ media: "print" });
     await expect(page.locator("header")).toBeHidden();
     await expect(page.getByRole("button", { name: /Print/ })).toBeHidden();
-    await expect(page.getByRole("heading", { name: "side-door" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Side door" })).toBeVisible();
     await page.emulateMedia({ media: "screen" });
   });
 });
@@ -780,10 +815,15 @@ test.describe("An armed doors confirm fits the words it is showing", () => {
   for (const size of WIDTHS) {
     test(`every confirm on the doors overview does at ${size.label}`, async ({ page }) => {
       await page.setViewportSize({ width: size.width, height: size.height });
-      // One door open and one already shut, so the fleet panel renders BOTH halves at once.
+      // One door open and one shut BY A SHUT-ALL, so the fleet panel renders both halves at
+      // once. `shut_by_shut_all_at` is what makes the Reopen exist — C1: a door shut on its
+      // own is not something `reopen-all` touches, so no control for it is offered.
       await openDoors(page, [
         door(),
-        door({ id: OTHER_ID, name: "Front door", gate_key: "front-door", enabled: false }),
+        door({
+          id: OTHER_ID, name: "Front door", gate_key: "front-door", enabled: false,
+          shut_by_shut_all_at: ago(120),
+        }),
       ]);
 
       await everyConfirmFits(page, 2);
