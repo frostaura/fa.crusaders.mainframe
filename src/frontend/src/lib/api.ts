@@ -626,6 +626,59 @@ export function isGate(device: Pick<AdminDevice, "kind">): boolean {
 }
 
 /**
+ * A member the server resolved for one activity row.
+ *
+ * `name` is a display name, never an email or a membership number — the same rule the
+ * booking grid is held to. The id is here so a row can be linked to a member later; it is
+ * not rendered.
+ */
+export type DeviceActivityMember = { id: string; name: string };
+
+/**
+ * How many activity rows a panel asks for. The API's own default, and its documented
+ * maximum is 200 — this page shows one screenful of recent history, not an archive.
+ */
+export const DEVICE_ACTIVITY_LIMIT = 50;
+
+/**
+ * One row of a board's own trail, as `GET /admin/devices/{id}/activity` serves it
+ * (B5), newest first.
+ *
+ * <p>
+ * This is a READER over the audit trail, and it is deliberately narrow: the endpoint never
+ * returns raw `DetailsJson` and never returns a token. What reaches this type is the
+ * decoded subject — a resolved member, or the non-reversible short fingerprint of the code
+ * that was presented — and nothing that could be replayed at a door.
+ * </p>
+ */
+export type DeviceActivityEntry = {
+  /** When it happened. UTC. */
+  at: string;
+  /**
+   * What happened, as the audit trail spells it: `gate.opened`, `gate.denied_<reason>`,
+   * `device.gate_open` (an open the BOARD decided while offline and uploaded later),
+   * `device.unknown_scan` (an offline refusal, which names nobody by construction), plus
+   * the court box's own `device.activation` / `device.release` / `device.boot`.
+   *
+   * <p>
+   * Left as an open string rather than a union on purpose. The set grows from the firmware
+   * side, and a union here would make a new action a type error on a screen whose job is to
+   * show it — see `describeActivityAction`, which renders an unrecognised action readably
+   * rather than hiding it.
+   * </p>
+   */
+  action: string;
+  /** The door's refusal reason where there is one — `too_early`, `no_booking`, … */
+  reason: string | null;
+  /** True when the BOARD decided this by itself and uploaded the row afterwards. */
+  offline: boolean;
+  /** The member, when `SubjectUserId` resolved to one. Null on an unknown code and on a boot. */
+  member: DeviceActivityMember | null;
+  /** First eight hex of the code's SHA-256 (B4) — the only thing that correlates two scans of one unknown code. */
+  fingerprint: string | null;
+};
+
+/**
  * The club's one device API key.
  *
  * <p>
@@ -1277,6 +1330,25 @@ export const endpoints = {
    * genuinely gone, or for starting its configuration over.
    */
   adminDeviceDelete: (id: string) => api.del<{ deleted: true }>(`/api/v1/admin/devices/${id}`),
+
+  /**
+   * One board's own trail, newest first (B5).
+   *
+   * <p>
+   * The door's audit rows existed from the day the gate shipped and nothing read them, so
+   * "why was I turned away at the front door" had a database query as its only answer. The
+   * endpoint is tenant-scoped and serves both kinds of board; it never returns raw
+   * `DetailsJson` and never returns a token.
+   * </p>
+   *
+   * <p>
+   * `limit` defaults to 50 here as well as on the API. Sending it explicitly rather than
+   * relying on the server's default keeps the page's promise ("the last 50") true of the
+   * request it actually made, rather than of whatever a future default becomes.
+   * </p>
+   */
+  adminDeviceActivity: (id: string, limit = DEVICE_ACTIVITY_LIMIT) =>
+    api.get<{ items: DeviceActivityEntry[] }>(`/api/v1/admin/devices/${id}/activity${qs({ limit })}`),
 
   // Admin: the club's one device API key.
   adminDeviceApiKey: () => api.get<DeviceApiKey>("/api/v1/admin/devices/api-key"),

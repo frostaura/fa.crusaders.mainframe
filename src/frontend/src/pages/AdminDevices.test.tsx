@@ -5,12 +5,14 @@ import {
   COURTS_FIXTURE,
   DEVICE_API_KEY_FIXTURE,
   SETTINGS_FIXTURE,
+  activityFixture,
   deviceFixture,
   deviceServer,
   gateFixture,
   renderPage,
   stubFetch,
 } from "../test/harness";
+import { formatInstant } from "../lib/utils";
 
 /**
  * The Devices screen, under the hobby-grade device contract.
@@ -2015,6 +2017,295 @@ describe("AdminDevices", () => {
 
       expect(await screen.findByRole("button", { name: /Nothing else drives court 1/ })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /The box stops switching lights on/ })).not.toBeInTheDocument();
+    });
+  });
+
+  // --- a board's own trail ------------------------------------------------------
+  //
+  // Round G3, F2. The door has written an audit row for every scan since it shipped and
+  // no screen read one, so "why was I turned away at the front door last night" had a
+  // database query as its only answer — and the seven refusal reasons had travelled
+  // through the firmware, the wire corpus and the spec for three rounds without ever
+  // becoming a sentence anybody could read.
+
+  describe("a board's activity", () => {
+    const activityCalls = (stub: ReturnType<typeof stubFetch>) =>
+      stub.calls.filter((c) => c.path.includes("/activity"));
+
+    /**
+     * Shut until asked, and read only then. A club with eight boards would otherwise make
+     * eight extra calls on every load of a page that already re-reads itself every fifteen
+     * seconds, for a panel nobody has opened.
+     */
+    it("stays shut until an admin asks, and reads the trail only then", async () => {
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [activityFixture()]);
+      const stub = stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+
+      const toggle = await screen.findByRole("button", { name: "Door activity" });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(activityCalls(stub)).toHaveLength(0);
+      expect(screen.queryByText("Ada Lovelace")).toBeNull();
+
+      fireEvent.click(toggle);
+
+      await waitFor(() => expect(activityCalls(stub)).toHaveLength(1));
+      // The limit the page promises is the limit it asked for, not whatever the server's
+      // default happens to become.
+      expect(activityCalls(stub)[0].path).toContain("limit=50");
+      expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Door activity" })).toHaveAttribute("aria-expanded", "true");
+    });
+
+    /**
+     * The refusal dictionary, on the screen at last. `too_early` is a token; "Too early for
+     * that booking" is the answer to the question the admin was actually asked.
+     */
+    it("says who was refused and why, in words rather than tokens", async () => {
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+        activityFixture({ action: "gate.denied_too_early", reason: "too_early" }),
+      ]);
+      const stub = stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      expect(await screen.findByText("Refused")).toBeInTheDocument();
+      expect(screen.getByText(/Ada Lovelace/)).toBeInTheDocument();
+      expect(screen.getByText(/Too early for that booking/)).toBeInTheDocument();
+      // Never the raw token on screen. The whole point of the dictionary.
+      expect(document.body.textContent).not.toContain("too_early");
+      expect(activityCalls(stub)).toHaveLength(1);
+    });
+
+    /**
+     * An offline refusal names nobody, because the door genuinely cannot: a board deciding
+     * from its cached roster has nothing to resolve an unrecognised code against. The
+     * fingerprint is the only thing that answers "is the same unknown code being tried over
+     * and over at my door", which is the question an admin actually has.
+     */
+    it("shows an unresolved code as a fingerprint and says the door cannot name anybody", async () => {
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+        activityFixture({ action: "device.unknown_scan", reason: null, offline: true, member: null, fingerprint: "9ab0cd12" }),
+      ]);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      expect(await screen.findByText(/Unknown code · 9ab0cd12/)).toBeInTheDocument();
+      expect(screen.getByText(/the door cannot say who/)).toBeInTheDocument();
+      // And not a member the club failed to identify, which is a different claim.
+      expect(document.body.textContent).not.toContain("Unknown member");
+    });
+
+    /**
+     * An open the BOARD decided while cut off and uploaded afterwards. Without the sentence
+     * it reads as an open the API authorised, which is the opposite of what happened and
+     * the difference between "the door is behaving" and "the door was on its own".
+     */
+    it("says an open that happened while the door was offline was the board's own", async () => {
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+        activityFixture({ action: "device.gate_open", reason: null, offline: true }),
+      ]);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      expect(await screen.findByText(/Opened while offline/)).toBeInTheDocument();
+      expect(screen.getByText("Door opened")).toBeInTheDocument();
+    });
+
+    /**
+     * An action this screen has no copy for is READ OUT. The set grows from the firmware
+     * side, so a panel that showed only what it recognised would be a trail that looks
+     * complete while hiding the one new row somebody is looking for.
+     */
+    it("renders an action nobody wrote copy for rather than dropping the row", async () => {
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+        activityFixture({ action: "device.tamper_detected", reason: null }),
+      ]);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      expect(await screen.findByText("Tamper detected")).toBeInTheDocument();
+      // The raw token stays reachable for whoever has to report it upstream.
+      expect(screen.getByText("Tamper detected")).toHaveAttribute("title", "device.tamper_detected");
+    });
+
+    /**
+     * When, twice: a relative age that answers "is this happening now" at a glance, and the
+     * instant behind it for anyone reconciling with a member's account of their evening.
+     * The same pair the rest of this page and the ledger already use.
+     */
+    it("gives each row a relative age and the exact instant behind it", async () => {
+      const at = "2026-09-19T18:04:00Z";
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [activityFixture({ at })]);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      const when = await screen.findByText(/ago$/);
+      expect(when).toHaveAttribute("datetime", at);
+      expect(when.getAttribute("title")).toBe(formatInstant(at));
+    });
+
+    it("says nothing is recorded yet rather than showing an empty panel", async () => {
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }), []);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      expect(await screen.findByText("Nothing recorded for this door yet.")).toBeInTheDocument();
+    });
+
+    /**
+     * A failed read says so. Silence would read as an empty trail — which is a claim about
+     * the door ("nobody has been through it") rather than about the request.
+     */
+    it("says so when the trail cannot be read, rather than reading as an empty one", async () => {
+      stubFetch([
+        ...withDevices([gateFixture({ gate_key: "front-door" })]),
+        { path: "/api/v1/admin/devices/99999999-9999-9999-9999-999999999999/activity", status: 500, body: {} },
+      ]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      expect(await screen.findByText(/Could not read that board's activity/)).toBeInTheDocument();
+      // The claim that matters: a failed READ must not render as a claim about the DOOR.
+      // "Nothing recorded for this door yet" would tell an admin nobody has been through it.
+      expect(screen.queryByText(/Nothing recorded/)).toBeNull();
+    });
+
+    /**
+     * And where the server does say something, its word wins over the page's fallback —
+     * the same rule every other refusal on this screen follows (`describeDeviceError`).
+     * Pinned because the fallback above would hide a real server sentence otherwise.
+     */
+    it("prefers the server's own word for a refused read", async () => {
+      stubFetch([
+        ...withDevices([gateFixture({ gate_key: "front-door" })]),
+        {
+          path: "/api/v1/admin/devices/99999999-9999-9999-9999-999999999999/activity",
+          status: 403,
+          body: { message: "Your session has expired." },
+        },
+      ]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      expect(await screen.findByText("Your session has expired.")).toBeInTheDocument();
+      expect(screen.queryByText(/Could not read that board's activity/)).toBeNull();
+    });
+
+    /** A box has a trail too, and it is not a door's — the label has to say which. */
+    it("calls it box activity on a court box", async () => {
+      const server = deviceServer(deviceFixture(), [
+        activityFixture({ action: "device.activation", reason: null }),
+      ]);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      expect(screen.queryByRole("button", { name: "Door activity" })).toBeNull();
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
+
+      expect(await screen.findByText("Court activated")).toBeInTheDocument();
+      // The door's wording nowhere near a box, either on the control or in the panel.
+      expect(screen.queryByText(/for this door/)).toBeNull();
+    });
+
+    /**
+     * A member name is the one arbitrarily wide thing in this panel, and this page has
+     * pushed itself wider than a phone on a long name before (R2 I-F6). Fifty rows of it
+     * would be fifty chances.
+     */
+    it("wraps a long member name instead of widening the row", async () => {
+      const longName = "Bartholomew Fitzgerald-Montgomery-Wetherby-Ashcombe-Pemberton III";
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+        activityFixture({ member: { id: "44444444-4444-4444-4444-444444444444", name: longName } }),
+      ]);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      const line = await screen.findByText(new RegExp(longName.slice(0, 20)));
+      expect(line.className).toContain("break-words");
+      expect(line.className).toContain("min-w-0");
+    });
+
+    /** Fifty rows is a screenful, and all fifty are rendered rather than silently cut. */
+    it("renders every row the API sent", async () => {
+      const rows = Array.from({ length: 50 }, (_, i) => activityFixture({
+        action: "gate.denied_no_booking",
+        reason: "no_booking",
+        at: new Date(Date.now() - i * 60_000).toISOString(),
+      }));
+      const server = deviceServer(gateFixture({ gate_key: "front-door" }), rows);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+
+      await screen.findAllByText("Refused");
+      expect(screen.getAllByText("Refused")).toHaveLength(50);
+    });
+  });
+
+  // --- boards nobody has acknowledged -------------------------------------------
+  //
+  // Auto-registration refuses a new MAC once the tenant holds 16 unacknowledged rows, and
+  // it refuses the BOARD, with a 409 only firmware ever sees. An admin who flashes a new
+  // board and watches it never appear on this list has no error to read anywhere.
+
+  describe("the unacknowledged-board cap", () => {
+    const boards = (count: number, auto: number) => Array.from({ length: count }, (_, i) => deviceFixture({
+      id: `11111111-1111-1111-1111-${String(i).padStart(12, "0")}`,
+      device_code: `box-${i}`,
+      name: `box-${i}`,
+      auto_registered: i < auto,
+    }));
+
+    it("says nothing while the club still has room", async () => {
+      stubFetch(withDevices(boards(13, 11)));
+
+      renderPage(<AdminDevicesPage />);
+
+      await screen.findByText("box-0");
+      expect(screen.queryByText(/stops registering new boards/)).toBeNull();
+    });
+
+    it("warns from twelve unnamed boards, and says what happens at sixteen", async () => {
+      stubFetch(withDevices(boards(13, 12)));
+
+      renderPage(<AdminDevicesPage />);
+
+      const notice = await screen.findByText(/stops registering new boards/);
+      expect(notice).toHaveTextContent("12 boards have registered themselves");
+      expect(notice).toHaveTextContent("At 16");
+      expect(notice).toHaveTextContent(/Name the ones you recognise/);
+    });
+
+    /**
+     * Counted on `auto_registered`, not on the list length. A club with twenty boards an
+     * admin has already named is in no danger at all, and warning it would teach the club
+     * to ignore the notice that matters.
+     */
+    it("counts the unnamed boards, not the boards", async () => {
+      stubFetch(withDevices(boards(20, 3)));
+
+      renderPage(<AdminDevicesPage />);
+
+      await screen.findByText("box-0");
+      expect(screen.queryByText(/stops registering new boards/)).toBeNull();
     });
   });
 });
