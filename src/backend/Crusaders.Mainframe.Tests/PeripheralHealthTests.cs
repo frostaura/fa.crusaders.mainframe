@@ -285,6 +285,185 @@ public class PeripheralHealthTests
         Assert.Single(Drain(host), e => e.Type == "peripheral.unhealthy");
     }
 
+    // ----- a door is not a court box ---------------------------------------------------
+
+    /// <summary>
+    /// One door gate: no courts, one lock, and a name an admin gave it.
+    ///
+    /// <para>
+    /// <c>CourtNumbers</c> is empty and that is not incidental — it is what keeps a gate out
+    /// of <c>DeviceOutageIndex</c>'s court darkness, which the money pin below exists to hold.
+    /// </para>
+    /// </summary>
+    private static async Task<Device> AddGateAsync(
+        TestHost host, MainframeDbContext db, DateTimeOffset? lastSeen, string? gateKey = "front-door")
+    {
+        var device = new Device
+        {
+            TenantId = host.Tenant.Id,
+            DeviceCode = $"gate-{Guid.NewGuid():N}"[..12],
+            Name = "Door gate",
+            Kind = DeviceKind.Gate,
+            Hardware = DeviceHardware.Esp32,
+            MacAddress = Guid.NewGuid().ToString("N")[..12],
+            CourtNumbers = [],
+            GateKey = gateKey,
+            LastSeenAt = lastSeen,
+        };
+        db.Devices.Add(device);
+        await db.SaveChangesAsync();
+        return device;
+    }
+
+    /// <summary>
+    /// <b>A silent door must not send the court-box outage mail.</b>
+    ///
+    /// <para>
+    /// The sweep took every enabled device with no filter on its kind, so a gate that stopped
+    /// reporting mailed the club's admins "Court box not reporting", told them members on
+    /// "those courts" might not be able to check in, and promised that bookings past their
+    /// grace window would be refunded with no no-show penalty. Every one of those sentences is
+    /// false about a door: a gate drives no courts, stamps no attendance and is invisible to
+    /// the settlement model, so nothing is refunded and no penalty is waived. An admin acting
+    /// on that mail goes looking for a court box that is working fine, and the door stays shut.
+    /// </para>
+    ///
+    /// <para>
+    /// What is true about a silent door is worth saying instead, so the alert carries it:
+    /// scans there fall back to booked members only, and to nobody once the cached roster goes
+    /// stale six hours after it was fetched.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_silent_gate_gets_a_door_alert_and_none_of_the_court_boxs_sentences()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
+        host.EmailService.Sent.Clear();
+
+        await CreateWorker(host).TickAsync(default);
+
+        var alert = Assert.Single(host.EmailService.Sent);
+        Assert.Equal(host.AdminUser.Email, alert.To);
+        Assert.Contains("Door gate not reporting", alert.Subject, StringComparison.Ordinal);
+        Assert.Contains(gate.DeviceCode, alert.Subject, StringComparison.Ordinal);
+        Assert.Contains("front-door", alert.HtmlBody, StringComparison.Ordinal);
+
+        // The door's own truth.
+        Assert.Contains("booked members", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("6 hours", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+
+        // And none of the court box's. Each of these is a sentence an admin would act on.
+        Assert.DoesNotContain("court box", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("courts", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("refund", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("no-show", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("check in", alert.HtmlBody, StringComparison.OrdinalIgnoreCase);
+
+        // The outage row itself is the court box's, unchanged: a door going dark is still an
+        // incident and still fires once per outage.
+        Assert.Single(await db.DeviceOutages.IgnoreQueryFilters().ToListAsync());
+        Assert.Single(Drain(host), e => e.Type == "peripheral.unhealthy");
+    }
+
+    /// <summary>
+    /// The all-clear has the same problem from the other end: the court box's says scans
+    /// recorded during the outage will upload and settle as attended, and that courts it lit
+    /// are otherwise refunded. A door records no attendance and lights no court.
+    /// </summary>
+    [Fact]
+    public async Task A_gate_that_comes_back_gets_a_door_all_clear_and_none_of_the_court_boxs()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
+        var worker = CreateWorker(host);
+        await worker.TickAsync(default);
+        host.EmailService.Sent.Clear();
+
+        gate.LastSeenAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        await worker.TickAsync(default);
+
+        var allClear = Assert.Single(host.EmailService.Sent);
+        Assert.Contains("Door gate back online", allClear.Subject, StringComparison.Ordinal);
+        Assert.DoesNotContain("court", allClear.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("refund", allClear.HtmlBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("attended", allClear.HtmlBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A court box that is still a court box. The two tests above would both pass against a
+    /// worker that sent the door's mail to everybody, which would be the same defect pointing
+    /// the other way — and the court box's mail is the one carrying the money sentences.
+    /// </summary>
+    [Fact]
+    public async Task A_silent_box_beside_a_silent_gate_still_gets_the_court_boxs_alert()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20), true, null, 1, 2);
+        var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
+        host.EmailService.Sent.Clear();
+
+        await CreateWorker(host).TickAsync(default);
+
+        var boxAlert = Assert.Single(host.EmailService.Sent, m => m.Subject.Contains(box.DeviceCode, StringComparison.Ordinal));
+        Assert.Contains("Court box not reporting", boxAlert.Subject, StringComparison.Ordinal);
+        Assert.Contains("courts 1, 2", boxAlert.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains("no no-show penalty", boxAlert.HtmlBody, StringComparison.Ordinal);
+
+        var gateAlert = Assert.Single(host.EmailService.Sent, m => m.Subject.Contains(gate.DeviceCode, StringComparison.Ordinal));
+        Assert.Contains("Door gate not reporting", gateAlert.Subject, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <b>A silent door darkens no court.</b> <c>DeviceOutageIndex</c> attributes darkness
+    /// through <see cref="Device.CourtNumbers"/> and a gate's is empty, so this holds today —
+    /// it is pinned at the WORKER level because the worker is what opens the outage row the
+    /// index reads, and because the obvious "fix" for the alert above is a kind column
+    /// somewhere in that query.
+    ///
+    /// <para>
+    /// The stake is a club's whole no-show income: a door in a corridor going dark for a week
+    /// must not waive the penalty on every court in the building. The control makes the BOX
+    /// silent too, so the test cannot pass against a sweep that waives nothing at all.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_silent_gate_darkens_no_court_and_waives_no_penalty()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // The court's own box is healthy; the door beside it has been dark for an hour.
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
+        var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1));
+
+        await CreateWorker(host).TickAsync(default);
+        Assert.Single(await db.DeviceOutages.IgnoreQueryFilters().Where(o => o.DeviceId == gate.Id).ToListAsync());
+        Drain(host);
+
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        // 30% of 8 retained: the court was never dark.
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
+        Assert.Equal(2.40m, evt.Data["penalty_credits"]);
+        Assert.Equal(false, evt.Data["peripheral_outage"]);
+    }
+
     // ----- money: §6a's "auto-credited (no penalty)" -----------------------------------
 
     private static async Task<Booking> AddDueBookingAsync(

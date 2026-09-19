@@ -78,6 +78,25 @@ public sealed record PeripheralAlert(
     string ClubName,
     string ConsoleUrl);
 
+/// <summary>
+/// The same incident on a door gate, which is a different message rather than the same one
+/// with a word changed.
+///
+/// <para>
+/// It carries <see cref="GateKey"/> — the door's own name — and no court list, because a gate
+/// drives none. Everything the court-box alert says about attendance, refunds and no-show
+/// penalties is false about a door, so the two templates share no sentences and this record
+/// deliberately cannot be passed to the court box's.
+/// </para>
+/// </summary>
+public sealed record GateAlert(
+    string DeviceName,
+    string DeviceCode,
+    string? GateKey,
+    int Minutes,
+    string ClubName,
+    string ConsoleUrl);
+
 public static class EmailTemplates
 {
     /// <summary>
@@ -652,6 +671,92 @@ public static class EmailTemplates
             </div>
             """,
         HighPriority: true);
+
+    /// <summary>
+    /// A door gate has stopped reporting.
+    ///
+    /// <para>
+    /// <b>It shares not one sentence with the court box's alert, and that is the point of it
+    /// existing.</b> A silent gate used to send that one: "Court box not reporting", members
+    /// on "those courts" may not be able to check in, bookings past their grace window
+    /// refunded with no no-show penalty. Every clause is false about a door — a gate drives no
+    /// courts, stamps no attendance, and is invisible to the settlement model, so nothing is
+    /// refunded and no penalty is waived. An admin acting on it goes looking for a court box
+    /// that is working, and the door stays shut.
+    /// </para>
+    ///
+    /// <para>
+    /// What IS true is the degraded mode, and it is worth stating because it has a deadline in
+    /// it: a door that has lost the server still admits members with a booking on the roster
+    /// it already holds, and admits nobody at all once that roster goes stale six hours after
+    /// it was fetched. The club has that long before the door stops working entirely.
+    /// </para>
+    ///
+    /// <para>
+    /// The power-cycle warning the court box's alert leads with is deliberately absent: a gate
+    /// queues door opens rather than attendance, so nothing a club can be charged for is lost
+    /// by restarting one.
+    /// </para>
+    /// </summary>
+    public static EmailMessage AdminGateUnhealthy(string to, GateAlert alert) => new(
+        To: to,
+        Subject: $"Door gate not reporting — {alert.DeviceCode}",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">A door gate has stopped reporting</h2>
+              <p><strong>{System.Net.WebUtility.HtmlEncode(alert.DeviceName)}</strong> at {System.Net.WebUtility.HtmlEncode(alert.ClubName)} last called home {alert.Minutes} minutes ago.</p>
+              <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
+                <tr><td style="padding:4px 16px 4px 0;color:#64748B">Board</td><td style="padding:4px 0"><strong>{System.Net.WebUtility.HtmlEncode(alert.DeviceCode)}</strong></td></tr>
+                <tr><td style="padding:4px 16px 4px 0;color:#64748B">Door</td><td style="padding:4px 0">{Door(alert.GateKey)}</td></tr>
+                <tr><td style="padding:4px 16px 4px 0;color:#64748B">Silent for</td><td style="padding:4px 0">{alert.Minutes} minutes</td></tr>
+              </table>
+              <p><strong>The door has not stopped working, yet.</strong> While it cannot reach us it falls back to the list it already holds, so it still opens for booked members — and for nobody else. That list goes stale <strong>6 hours</strong> after it was last received, and from then the door opens for nobody until it is back online.</p>
+              <p style="font-size:13px;color:#475569">Nothing about this affects money or play: a door gate records no attendance and nothing is charged or credited because of one.</p>
+              <p style="font-size:13px;color:#475569">Getting <em>out</em> of the building never depends on this board, its power, or us.</p>
+              <p style="margin:24px 0">
+                <a href="{alert.ConsoleUrl}"
+                   style="display:inline-block;background:#B91C1C;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+                  Open the Devices page
+                </a>
+              </p>
+              <p style="font-size:12px;color:#94A3B8">Or paste this into your browser: {alert.ConsoleUrl}</p>
+            </div>
+            """,
+        HighPriority: true);
+
+    /// <summary>
+    /// The door's all-clear. Separate from the court box's for the same reason as above: that
+    /// one promises queued scans will upload and settle as attended, and that lit time is
+    /// otherwise refunded. A door queues neither.
+    /// </summary>
+    public static EmailMessage AdminGateRecovered(string to, GateAlert alert) => new(
+        To: to,
+        Subject: $"Door gate back online — {alert.DeviceCode}",
+        HtmlBody:
+            $"""
+            <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
+              <h2 style="margin:0 0 12px">The door gate is reporting again</h2>
+              <p><strong>{System.Net.WebUtility.HtmlEncode(alert.DeviceName)}</strong> ({System.Net.WebUtility.HtmlEncode(alert.DeviceCode)}) at {System.Net.WebUtility.HtmlEncode(alert.ClubName)} is back after {alert.Minutes} minutes.</p>
+              <p style="font-size:13px;color:#475569">It has a current list again, so it is open to every member it should be. Any opens it decided on its own while it was away upload on its next few calls, for the record only.</p>
+              <p style="margin:24px 0">
+                <a href="{alert.ConsoleUrl}"
+                   style="display:inline-block;background:#0369A1;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+                  Open the Devices page
+                </a>
+              </p>
+            </div>
+            """);
+
+    /// <summary>
+    /// The door's name for an admin, or an honest stand-in. A gate nobody has named yet has no
+    /// offline fallback either, so "not named yet" is the actionable half of this alert rather
+    /// than a blank cell.
+    /// </summary>
+    private static string Door(string? gateKey) =>
+        string.IsNullOrWhiteSpace(gateKey)
+            ? "<em>not named yet</em>"
+            : $"<strong>{System.Net.WebUtility.HtmlEncode(gateKey)}</strong>";
 
     /// <summary>The all-clear, so an admin who was sent to a cupboard knows to stop looking.</summary>
     public static EmailMessage AdminPeripheralRecovered(string to, PeripheralAlert alert) => new(
