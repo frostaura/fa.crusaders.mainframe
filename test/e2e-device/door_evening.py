@@ -659,10 +659,16 @@ def d4_roster(d: Door, booking: dict) -> None:
             f"closes_in={entry[2]}")
     chk("D4", "the sixty-second ident code is NOT in the roster: a short-lived code cannot be cached",
         booking["ident"] not in roster_tokens(second))
-    chk("E1", f"the heartbeat body stays under the {wire.MAX_RESPONSE_BYTES}-byte ceiling the "
-              f"board's {wire.RESPONSE_CAP}-byte buffer is sized against",
-        len(second.body) <= wire.MAX_RESPONSE_BYTES,
-        f"{len(second.body)} bytes, framing={second.framing}")
+    # `body_result == OK` is half the assertion, not decoration. A body that did not
+    # fit comes back EMPTY — never truncated — so "len(body) <= 4096" is trivially
+    # true of exactly the failure it is meant to catch. Found by mutating the server
+    # to add a 5 KB field to the envelope: every heartbeat assertion in this file went
+    # red and this one stayed green.
+    chk("E1", f"the heartbeat body ARRIVED WHOLE and stays under the {wire.MAX_RESPONSE_BYTES}-byte "
+              f"ceiling the board's {wire.RESPONSE_CAP}-byte buffer is sized against",
+        second.body_result == wire.BodyResult.OK
+        and 0 < len(second.body) <= wire.MAX_RESPONSE_BYTES,
+        f"{len(second.body)} bytes, framing={second.framing}, read={second.body_result}")
 
 
 def d5_scans(d: Door, booking: dict) -> None:
@@ -1315,10 +1321,12 @@ def dw_wire(d: Door, booking: dict, gateway: Optional[Gateway]) -> None:
             d.reasons_seen.add(scan11.get("reason"))
 
         roster_hb = gate11.heartbeat()
-        chk("E1", f"and the chunked body is under the {wire.MAX_RESPONSE_BYTES}-byte ceiling the "
-                  f"board's {wire.RESPONSE_CAP}-byte buffer is sized against",
-            len(roster_hb.body) <= wire.MAX_RESPONSE_BYTES,
-            f"{len(roster_hb.body)} bytes")
+        chk("E1", f"and the chunked body ARRIVED WHOLE, under the {wire.MAX_RESPONSE_BYTES}-byte "
+                  f"ceiling the board's {wire.RESPONSE_CAP}-byte buffer is sized against — a body "
+                  f"that did not fit comes back EMPTY, so the size alone is not the assertion",
+            roster_hb.body_result == wire.BodyResult.OK
+            and 0 < len(roster_hb.body) <= wire.MAX_RESPONSE_BYTES,
+            f"{len(roster_hb.body)} bytes, read={roster_hb.body_result}")
     finally:
         board11.close()
 
