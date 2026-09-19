@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { endpoints, ApiError, errorCode, uploadPhoto } from "../lib/api";
+import { endpoints, uploadPhoto } from "../lib/api";
+import { describeFailure, isDeploymentFault } from "../lib/errors";
+import { preparePhoto, PhotoError, PHOTO_MESSAGES } from "../lib/photo";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 
@@ -21,6 +23,18 @@ const MESSAGES: Record<string, string> = {
   email_in_use: "An account with that email already exists. Sign in instead, or reset your password.",
   membership_number_in_use:
     "That membership number is already registered. Check the number on your card — if it's right, contact the club committee.",
+
+  // The upload endpoint's own refusals. They were absent, and that absence is what made a
+  // rejected photo read as a network fault: uploadPhoto throws before register() is ever
+  // called, and every code it can produce fell through to the connection sentence.
+  // preparePhoto now re-encodes to a small JPEG before the request, so reaching any of these
+  // means something stranger than a big iPhone photo went wrong — they stay mapped because a
+  // sentence naming the real cause is the entire point of this screen.
+  unsupported_content_type:
+    "The club's system wouldn't accept that image format. Try a different photo — a JPEG or PNG works.",
+  file_too_large: "That photo is too large for the club's system, even after resizing. Try a different one.",
+  file_missing: "The photo didn't reach the club's system. Pick it again and resubmit.",
+  expected_multipart: "The photo didn't upload correctly. Pick it again and resubmit.",
 };
 
 export default function RegisterPage() {
@@ -33,6 +47,8 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  /** Set when the failure is the club's to fix, so retrying is pointless — see isDeploymentFault. */
+  const [blocked, setBlocked] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,15 +59,27 @@ export default function RegisterPage() {
     }
     setLoading(true);
     try {
-      const upload = await uploadPhoto(photo);
+      // Re-encoded in the browser first: a phone's HEIC or 8MB JPEG is turned into a small,
+      // correctly-rotated JPEG the API accepts. Its failures are distinct from the API's and
+      // are reported as themselves.
+      const prepared = await preparePhoto(photo);
+      const upload = await uploadPhoto(prepared);
       await endpoints.register({ email, password, fullName, membershipNumber, photoUrl: upload.url });
       setSubmitted(true);
     } catch (err) {
-      const code = errorCode(err);
-      if (code && MESSAGES[code]) setError(MESSAGES[code]);
-      else if (err instanceof ApiError && err.status === 409) setError("Those details are already registered. Sign in instead, or reset your password.");
-      else if (err instanceof ApiError && err.status === 429) setError("Too many attempts. Wait a minute, then try again.");
-      else setError("Couldn't submit your application. Check your connection and try again — if it keeps failing, contact the club committee.");
+      if (err instanceof PhotoError) {
+        setError(PHOTO_MESSAGES[err.problem]);
+        setBlocked(false);
+      } else {
+        setError(describeFailure(err, {
+          codes: MESSAGES,
+          fallback: "We couldn't submit your application, and the club's system didn't say why. Try again — if it keeps failing, contact the club committee.",
+        }));
+        // A missing tenant or a 5xx is not something resubmitting can cure. Hiding the submit
+        // button is the honest response: the previous screen invited the member to keep
+        // pressing it against a fault only the club's operator could clear.
+        setBlocked(isDeploymentFault(err));
+      }
     } finally {
       setLoading(false);
     }
@@ -98,7 +126,9 @@ export default function RegisterPage() {
             <p className="text-xs text-text-muted mt-1">Used so other players can identify you on court.</p>
           </div>
           {error && <p className="text-sm text-danger-strong">{error}</p>}
-          <Button type="submit" disabled={loading} className="w-full">{loading ? "Submitting…" : "Submit application"}</Button>
+          {!blocked && (
+            <Button type="submit" disabled={loading} className="w-full">{loading ? "Submitting…" : "Submit application"}</Button>
+          )}
         </form>
         <p className="mt-4 text-sm text-text-secondary">
           Already have an account?{" "}

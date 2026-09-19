@@ -353,6 +353,22 @@ if (builder.Configuration.GetValue<bool>("Database:AutoMigrateOnStartup"))
     await db.Database.MigrateAsync();
 }
 
+// ---- First-run bootstrap ----
+//
+// Runs in EVERY environment, gated on Bootstrap:Enabled rather than on the environment name.
+// That distinction is the whole point: the Seeder below is dev-only, so a production stack came
+// up against an empty database with no tenant row and answered 404 tenant_not_found to every
+// request — no register, no sign-in, no product. See ProductionBootstrap for why it is a separate
+// type rather than the seeder with the environment check taken off.
+//
+// Deliberately NOT wrapped in try/catch. A bootstrap that cannot do its job leaves the API in
+// exactly the unusable state it exists to prevent, and a warning in a Portainer log nobody is
+// reading is how that goes unnoticed for a week. Failing here stops the container instead.
+{
+    var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Bootstrap");
+    await ProductionBootstrap.RunAsync(app.Services, builder.Configuration, logger);
+}
+
 // Bring back the sign-outs that are still inside their token's lifetime.
 //
 // The revocation list is in-process, so without this a restart — a redeploy, a crash — would

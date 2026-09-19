@@ -53,6 +53,30 @@ services:
       # Same password as POSTGRES_PASSWORD above.
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=crusaders_mainframe;Username=crusaders;Password=CHANGE-ME-strong-database-password
       Database__AutoMigrateOnStartup: "true"
+      # ---- First-run bootstrap ----
+      # Migrations create the SCHEMA. They do not create the club. Without the rows below the
+      # database is structurally perfect and completely empty, TenantResolutionMiddleware finds
+      # no tenant for the hostname, and every request — register included — answers
+      # 404 tenant_not_found. That is how the first deployment of this stack failed.
+      #
+      # Idempotent and additive: it creates only what is missing and never touches what exists,
+      # so leaving it enabled is harmless. Turn it off once the club is up if you prefer.
+      # If any value below is missing or unusable the API refuses to start and says which one.
+      Bootstrap__Enabled: "true"
+      # MUST equal the first label of App__PublicBaseUrl's hostname — the tenant is resolved from
+      # that subdomain. crusaders.frostaura.net -> crusaders.
+      Bootstrap__TenantSlug: crusaders
+      Bootstrap__TenantDisplayName: Crusaders Squash Club
+      # The club's first admin. One-time credential: the account is created with
+      # must-change-password set, so this password stops working at first sign-in.
+      # At least 12 characters, and not one of the placeholders this project has shipped before.
+      Bootstrap__AdminEmail: CHANGE-ME@frostaura.net
+      Bootstrap__AdminPassword: CHANGE-ME-at-least-12-characters
+      Bootstrap__Courts: "4"
+      # Credits charged per booking slice on each court created above. Courts carry their own
+      # price, and a court created at 0 is free to book — so this is a money setting, not a
+      # cosmetic one. Change court prices afterwards from Admin → Settings.
+      Bootstrap__SlicePriceCredits: "8"
       # Signs every member and admin session. At least 32 characters; changing it logs everyone out.
       Jwt__Secret: CHANGE-ME-random-string-of-at-least-32-characters
       # The address members use. Verification, welcome and password-reset links are built from it,
