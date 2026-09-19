@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Plus, X } from "lucide-react";
 import { ApiError, endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
+import { describeFailure } from "../lib/errors";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -224,8 +225,33 @@ export default function AdminWebhooksPage() {
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [openDeliveriesId, setOpenDeliveriesId] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDeliveryDto[]>([]);
+  /**
+   * Why the endpoint list could not be read, or null.
+   *
+   * <p>
+   * The loader was `load().catch(() => {})`. A failed read therefore produced no toast, no log
+   * and no mark on the screen — it left `list` at its initial `[]` and the page then said
+   * "No webhook endpoints yet. Create one above to start firing events." An admin who does what
+   * that sentence tells them adds a second endpoint pointing at the same destination, and every
+   * booking from then on fires the club's lights cue twice. The empty array is the initial
+   * value, not an answer from the server, and the screen has to be able to tell them apart.
+   * </p>
+   */
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const load = async () => setList(await endpoints.adminWebhooksList());
+  const load = async () => {
+    setLoading(true);
+    try {
+      setList(await endpoints.adminWebhooksList());
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(describeFailure(err, { action: "load the webhook endpoints" }));
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { load().catch(() => {}); }, []);
 
@@ -343,14 +369,36 @@ export default function AdminWebhooksPage() {
               variant="outline"
               className="shrink-0 whitespace-nowrap bg-info-soft border-info-soft text-info-strong hover:bg-info-soft/70"
               onClick={() => { setCreating(true); setCreatedSecret(null); }}
+              /*
+               * Not offered while the list is unknown. Leaving it live directly above a panel
+               * that says "do not create one until this list loads" is an instruction and its
+               * contradiction on the same screen, and the button is the one that gets pressed.
+               */
+              disabled={loadError !== null || loading}
+              title={loadError ? "Not while the existing endpoints cannot be read — you could create a duplicate." : undefined}
             >
               <Plus size={16} className="mr-1" /> New endpoint
             </Button>
           )}
         </div>
-        {list.length === 0 ? (
+        {loadError ? (
+          /*
+            Not "no endpoints". An admin told there are none, on a club that has one, creates a
+            second — and the lights cue then fires twice for every booking.
+          */
+          <div className="border border-dashed border-danger-strong/40 rounded-lg py-10 px-4 text-center flex flex-col items-center gap-3">
+            <p role="alert" className="text-sm font-medium text-danger-strong">{loadError}</p>
+            <p className="text-xs text-text-muted max-w-md">
+              Existing endpoints are not shown below because they could not be read — this club may already
+              have some. Do not create one until this list loads, or you may end up firing every event twice.
+            </p>
+            <Button type="button" variant="outline" onClick={() => { load().catch(() => {}); }} disabled={loading}>
+              {loading ? "Retrying…" : "Try again"}
+            </Button>
+          </div>
+        ) : list.length === 0 ? (
           <div className="border border-dashed border-border rounded-lg py-12 text-center text-sm text-text-secondary">
-            No webhook endpoints yet. Create one above to start firing events.
+            {loading ? "Loading endpoints…" : "No webhook endpoints yet. Create one above to start firing events."}
           </div>
         ) : (
           <ul className="divide-y divide-border -mx-4 sm:-mx-6">

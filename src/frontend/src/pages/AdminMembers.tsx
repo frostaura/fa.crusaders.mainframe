@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Ban, Fingerprint, KeyRound, MailWarning, Plus, RotateCcw, Search, Users, Wallet, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Ban, Fingerprint, KeyRound, MailWarning, Plus, RotateCcw, Search, Users, Wallet, X } from "lucide-react";
 import { endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type MemberClass } from "../lib/api";
 import {
   OTHER_BOOKING, newIdempotencyKey, recentBookingsFrom, relatedBookingRefusal,
   validateAdjustment, type RecentBooking,
 } from "../lib/creditAdjustment";
+import { describeFailure } from "../lib/errors";
 import { notifyPendingApplicationsChanged } from "../lib/pendingApplications";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
@@ -80,10 +81,24 @@ export default function AdminMembersPage() {
   /** Synchronous re-entry guard for Apply — see `adjust`. */
   const adjustInFlight = useRef(false);
   const [enrollFor, setEnrollFor] = useState<AdminMember | null>(null);
+  /**
+   * Why the last read failed, or null.
+   *
+   * <p>
+   * Kept in state rather than only raised as a toast. A toast is the whole of what a failed
+   * read used to leave behind, and it fades: after three seconds the screen said
+   * "0 total · 0 pending" over "No members yet." — a club of two hundred members rendered as a
+   * club with none, and, worse, as a club with no applications waiting. An admin reading that
+   * concludes there is nothing to approve and leaves. The failure has to survive on the screen
+   * for as long as the screen is wrong.
+   * </p>
+   */
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [biometrics, setBiometrics] = useState<Record<string, BiometricEnrollmentRow>>({});
 
   const load = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       // Server filter only when status is specific; the rest filters/sorts client-side.
       const r = await endpoints.adminMembers(status === "all" ? undefined : status);
@@ -98,7 +113,18 @@ export default function AdminMembersPage() {
       // replaced, so a transition that half-failed cannot leave one number ahead of the
       // other. See lib/pendingApplications.
       notifyPendingApplicationsChanged();
-    } catch { toast.push({ tone: "danger", text: "Couldn't load members." }); }
+    } catch (err) {
+      /*
+       * State only, no toast.
+       *
+       * The toast used to be the whole of the signal and it was not enough; with the panel
+       * below saying the same sentence permanently, a toast saying it again is one message
+       * twice — and under React's development double-invoke it was the same message three
+       * times, stacked over the search field. Toasts stay on the ACTIONS (approve, suspend,
+       * reset), where there is no place on the screen to put the result.
+       */
+      setLoadError(describeFailure(err, { action: "load the member list" }));
+    }
     finally { setLoading(false); }
   };
 
@@ -303,8 +329,14 @@ export default function AdminMembersPage() {
     finally { setBusyId(null); }
   };
 
+  /**
+   * The summary line, or null when there is nothing to summarise.
+   *
+   * Zeroes used to be returned for "we have not got the list", which is a different statement
+   * from "the club has no members" and looked identical.
+   */
   const counts = useMemo(() => {
-    if (!members) return { total: 0, pending: 0, active: 0, suspended: 0, rejected: 0 };
+    if (!members) return null;
     return {
       total: members.length,
       pending: members.filter((m) => m.status === "PendingApproval").length,
@@ -343,14 +375,16 @@ export default function AdminMembersPage() {
             </select>
           </div>
         </div>
-        <div className="flex flex-wrap gap-3 text-xs text-text-muted pt-1">
-          <span><strong className="text-text-primary">{counts.total}</strong> total</span>
-          <span>·</span>
-          <span><strong className="text-info-strong">{counts.pending}</strong> pending</span>
-          <span><strong className="text-success-strong">{counts.active}</strong> active</span>
-          <span><strong className="text-warning-strong">{counts.suspended}</strong> suspended</span>
-          <span><strong className="text-danger-strong">{counts.rejected}</strong> rejected</span>
-        </div>
+        {counts && (
+          <div className="flex flex-wrap gap-3 text-xs text-text-muted pt-1">
+            <span><strong className="text-text-primary">{counts.total}</strong> total</span>
+            <span>·</span>
+            <span><strong className="text-info-strong">{counts.pending}</strong> pending</span>
+            <span><strong className="text-success-strong">{counts.active}</strong> active</span>
+            <span><strong className="text-warning-strong">{counts.suspended}</strong> suspended</span>
+            <span><strong className="text-danger-strong">{counts.rejected}</strong> rejected</span>
+          </div>
+        )}
       </Card>
 
       {/*
@@ -387,7 +421,7 @@ export default function AdminMembersPage() {
       */}
       <Card className="!p-0 overflow-hidden">
         {filtered.length === 0 ? (
-          <EmptyState loading={loading} hasFilters={search.trim().length > 0 || status !== "all"} />
+          <EmptyState loading={loading} hasFilters={search.trim().length > 0 || status !== "all"} error={loadError} onRetry={load} />
         ) : (
           <ScrollArea label="Members table">
             <table className="w-full text-sm sm:table-fixed">
@@ -1196,7 +1230,37 @@ function SortHeader({ label, k, sortKey, sortDir, onSort, className }: { label: 
   );
 }
 
-function EmptyState({ loading, hasFilters }: { loading: boolean; hasFilters: boolean }) {
+/**
+ * What fills the table's body when it has no rows — which is three different situations, and
+ * used to be presented as one.
+ *
+ * <p>
+ * "No members yet." was shown whenever `members` was empty, including when it was empty because
+ * the read had failed and nothing had ever been assigned to it. That is the single most
+ * misleading thing this screen could say: the club it describes does not exist, the admin has
+ * no reason to doubt it, and the toast that said otherwise has already gone.
+ * </p>
+ */
+function EmptyState({ loading, hasFilters, error, onRetry }: {
+  loading: boolean; hasFilters: boolean; error: string | null; onRetry: () => void;
+}) {
+  if (error) {
+    return (
+      <div className="border border-dashed border-danger-strong/40 rounded-lg m-4 sm:m-6 py-12 flex flex-col items-center justify-center gap-3 text-center px-4">
+        <AlertTriangle size={28} className="text-danger-strong" />
+        <div>
+          <p role="alert" className="text-sm text-danger-strong font-medium">{error}</p>
+          {/* Said plainly, because the absence of rows is the thing being explained. */}
+          <p className="mt-1 text-xs text-text-muted">
+            This is not an empty club — the list could not be read, so nothing below is the club's real membership.
+          </p>
+        </div>
+        <Button type="button" variant="outline" onClick={onRetry} disabled={loading}>
+          {loading ? "Retrying…" : "Try again"}
+        </Button>
+      </div>
+    );
+  }
   return (
     <div className="border border-dashed border-border rounded-lg m-4 sm:m-6 py-16 flex flex-col items-center justify-center gap-2 text-center">
       <Users size={28} className="text-text-muted" />
