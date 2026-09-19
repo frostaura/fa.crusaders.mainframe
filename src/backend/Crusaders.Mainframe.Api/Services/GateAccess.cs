@@ -55,6 +55,28 @@ public static class GateAccess
     public const string NoBooking = "no_booking";
 
     /// <summary>
+    /// A <see cref="AccessCodePurpose.BookingActivation"/> code presented before its own
+    /// booking's entry window opens — <see cref="BookingCodeWindow.DoorHorizonMinutes"/>
+    /// before <c>StartsAt</c>.
+    ///
+    /// <para>
+    /// Named rather than folded into <see cref="NotRecognised"/>, which is the opposite of the
+    /// reasoning behind every other refusal here, and deliberately so. The oracle argument
+    /// applies to codes whose validity is the secret; this one tells the holder of a code the
+    /// club itself minted for them that they are EARLY — a fact they already know, about a
+    /// booking that is already theirs, which the door will honour later the same day. Telling
+    /// them "not recognised" instead sends a member with a valid booking to a desk that may
+    /// not be staffed.
+    /// </para>
+    ///
+    /// <para>
+    /// A <see cref="AccessCodePurpose.MemberIdent"/> code never answers this: it names no
+    /// booking, and it expires in sixty seconds.
+    /// </para>
+    /// </summary>
+    public const string TooEarly = "too_early";
+
+    /// <summary>
     /// Anything but <c>qr</c> or <c>code</c>. A PIN against the whole membership roll is an
     /// oracle rather than an identification, and unlike a court there is no candidate set
     /// here to check one against — see <see cref="IdentificationResolver"/>.
@@ -93,7 +115,7 @@ public static class GateAccess
     /// never comes.
     /// </summary>
     public static readonly string[] Reasons =
-        [Ok, NotRecognised, MemberNotActive, NoBooking, MethodNotSupported, NotAGate];
+        [Ok, NotRecognised, MemberNotActive, NoBooking, TooEarly, MethodNotSupported, NotAGate];
 
     /// <summary>Shortest release the lock is ever given. A zero-second release is a door that clicks and stays shut.</summary>
     public const int MinUnlockSeconds = 1;
@@ -146,6 +168,16 @@ public static class GateAccess
             return Refused(MemberNotActive, resolved.UserId);
         }
 
+        // A booking code is bounded by its OWN booking, under every policy — see
+        // BookingCodeScopeAsync. Before the policy, because it is a property of the credential
+        // rather than of the club's rule: a code outside its window opens nothing whichever
+        // policy is running, and a club on active_member has no policy check at all.
+        if (resolved.Purpose == AccessCodePurpose.BookingActivation
+            && await BookingCodeScopeAsync(db, context, resolved, ct) is { } outside)
+        {
+            return Refused(outside, resolved.UserId);
+        }
+
         if (context.Settings.GateAccessPolicy == GateAccessPolicies.BookingWindow
             && !await MayEnterOnABookingAsync(db, context, resolved, ct))
         {
@@ -153,6 +185,58 @@ public static class GateAccess
         }
 
         return new GateDecision(true, Ok, resolved.UserId, UnlockSecondsFor(context.Settings));
+    }
+
+    /// <summary>
+    /// Why this booking code opens nothing right now, or null when it does.
+    ///
+    /// <para>
+    /// <b>A booking code is not a standing building key.</b> It is minted with the booking and
+    /// lives until the slot ends plus the grace window, and it is a stable token for the whole
+    /// of that — which is what a court box deciding offline needs and what makes it dangerous
+    /// at a door. Unbounded, the code a member's phone showed them at 17:00 for a 19:00 court
+    /// opened every door in the club at 03:00 the same night, and a roster captured off the
+    /// LAN bought a building key rather than an entry to one booking.
+    /// </para>
+    ///
+    /// <para>
+    /// The bound is the booking's own window: <c>[StartsAt − H, EndsAt]</c>, with <c>H</c>
+    /// from <see cref="BookingCodeWindow.DoorHorizonMinutes"/> — the club's entry window under
+    /// <c>booking_window</c>, and under <c>active_member</c> the horizon in which the member's
+    /// own phone would have shown them that code at all. The two horizons come from one place
+    /// so the screen and the door cannot drift.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The two refusals are deliberately asymmetric.</b> Early is <see cref="TooEarly"/>:
+    /// the member holds a real booking and the door will honour it later, and telling them
+    /// "not recognised" sends somebody with a valid booking to a desk that may not be staffed.
+    /// Late — and a booking that is no longer <c>Booked</c> — is <see cref="NotRecognised"/>,
+    /// indistinguishable from a code that never existed, because the row outlives the slot by
+    /// the grace window and a door that told "spent" from "unknown" would be the oracle every
+    /// other refusal here avoids.
+    /// </para>
+    ///
+    /// <para>
+    /// The status check is on the BOOKING and not on the code, because nothing revokes a code
+    /// when its booking is cancelled — revoking on cancel would strand a court box deciding
+    /// offline from a roster it fetched beforehand, which is the one thing the roster is for.
+    /// </para>
+    /// </summary>
+    private static async Task<string?> BookingCodeScopeAsync(
+        MainframeDbContext db, GateContext context, ResolvedAccessCode resolved, CancellationToken ct)
+    {
+        var booking = resolved.BookingId is { } id
+            ? await db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == id, ct)
+            : null;
+
+        if (booking is null || booking.Status != BookingStatus.Booked) return NotRecognised;
+        if (context.Now > booking.EndsAt) return NotRecognised;
+
+        var latestStart = BookingCodeWindow.LatestStart(
+            context.Now, BookingCodeWindow.DoorHorizonMinutes(context.Settings));
+
+        return booking.StartsAt <= latestStart ? null : TooEarly;
     }
 
     /// <summary>

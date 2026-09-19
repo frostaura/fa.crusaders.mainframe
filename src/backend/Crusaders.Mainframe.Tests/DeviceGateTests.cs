@@ -564,6 +564,222 @@ public class DeviceGateTests
             f, GateOn(f), Policy(f, GateAccessPolicies.BookingWindow), token, now)).Opened);
     }
 
+    // ---- A booking code is not a standing building key -----------------------
+
+    /// <summary>
+    /// <b>Under EVERY policy, a booking's own code opens a door only inside that booking's
+    /// window</b> — from <c>StartsAt − H</c> until <c>EndsAt</c>, where <c>H</c> is
+    /// <see cref="BookingCodeWindow.DoorHorizonMinutes"/>.
+    ///
+    /// <para>
+    /// The code lives until the slot ends plus the grace window and is a stable token for the
+    /// whole of it, so before this the code the member's phone showed them at 17:00 for a
+    /// 19:00 court opened every door in the club at 03:00 the same night, under the default
+    /// policy, for as long as the row survived. A captured roster bought a building key rather
+    /// than an entry to one booking.
+    /// </para>
+    ///
+    /// <para>
+    /// Both edges of both horizons, a minute either side. A minute rather than a second
+    /// because the arithmetic is in minutes: a second-wide probe passes against a comparison
+    /// that is inverted for a whole minute at a time.
+    /// </para>
+    ///
+    /// <para>
+    /// The two reasons are not the same and the asymmetry is deliberate. Early is
+    /// <c>too_early</c> — the member has a valid booking and the door will honour it later.
+    /// Late is <c>not_recognised</c>, indistinguishable from a code that never existed,
+    /// because between <c>EndsAt</c> and <c>EndsAt + grace</c> the row is still live and a
+    /// door that told "spent" from "unknown" would be the oracle every other refusal here is
+    /// written to avoid.
+    /// </para>
+    /// </summary>
+    [Theory]
+    // active_member: H = max(30, roster 120 + cue 10) = 130 minutes.
+    [InlineData(GateAccessPolicies.ActiveMember, -131, false, GateAccess.TooEarly)]
+    [InlineData(GateAccessPolicies.ActiveMember, -130, true, GateAccess.Ok)]
+    [InlineData(GateAccessPolicies.ActiveMember, -30, true, GateAccess.Ok)]
+    [InlineData(GateAccessPolicies.ActiveMember, 44, true, GateAccess.Ok)]
+    [InlineData(GateAccessPolicies.ActiveMember, 45, true, GateAccess.Ok)]
+    [InlineData(GateAccessPolicies.ActiveMember, 46, false, GateAccess.NotRecognised)]
+    // booking_window: H = gate_early_entry_minutes = 30.
+    [InlineData(GateAccessPolicies.BookingWindow, -131, false, GateAccess.TooEarly)]
+    [InlineData(GateAccessPolicies.BookingWindow, -31, false, GateAccess.TooEarly)]
+    [InlineData(GateAccessPolicies.BookingWindow, -30, true, GateAccess.Ok)]
+    [InlineData(GateAccessPolicies.BookingWindow, 44, true, GateAccess.Ok)]
+    [InlineData(GateAccessPolicies.BookingWindow, 45, true, GateAccess.Ok)]
+    [InlineData(GateAccessPolicies.BookingWindow, 46, false, GateAccess.NotRecognised)]
+    public async Task A_booking_code_opens_a_door_only_inside_its_own_bookings_window(
+        string policy, int minutesFromStart, bool opens, string reason)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        // One anchor for the whole test, so the edges are measured against each other rather
+        // than against whatever the clock said when each line ran.
+        var startsAt = DateTimeOffset.UtcNow.AddHours(6);
+        var now = startsAt.AddMinutes(minutesFromStart);
+
+        var booking = await BookAsync(f, f.Host.Courts[0], startsAt);
+        var token = await BookingCodeAsync(f, booking);
+
+        // The code itself is still live at every row here — it lives until EndsAt + grace (5)
+        // — so a refusal at +46 is this rule and not plain expiry.
+        Assert.True(
+            (await f.Db.AccessCodes.AsNoTracking().FirstAsync(c => c.Code == token)).IsLiveAt(now),
+            "the fixture must present a LIVE code, or the late rows would be testing expiry");
+
+        var decision = await DecideAsync(f, GateOn(f), Policy(f, policy), token, now);
+
+        Assert.Equal(opens, decision.Opened);
+        Assert.Equal(reason, decision.Reason);
+        Assert.Equal(f.Host.PlayerUser.Id, decision.SubjectUserId);
+    }
+
+    /// <summary>
+    /// A sixty-second <see cref="AccessCodePurpose.MemberIdent"/> code is untouched by any of
+    /// it: it names no booking, so it has no window of its own to be outside. Under
+    /// <c>active_member</c> it opens at any hour, and under <c>booking_window</c> it still
+    /// needs a qualifying booking and still answers <c>no_booking</c> without one.
+    ///
+    /// <para>
+    /// This is the probe on the rule above. Vary ONLY the code's purpose — same member, same
+    /// clock, same booking six hours out — and the refusal changes from <c>too_early</c> to
+    /// the policy's own answer, which is what says the new gate is scoped to booking codes
+    /// rather than applied to everything that resolves.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task An_ident_code_has_no_booking_window_of_its_own()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var now = DateTimeOffset.UtcNow;
+        var booking = await BookAsync(f, f.Host.Courts[0], now.AddHours(6));
+        var ident = await IdentCodeAsync(f, f.Host.PlayerUser.Id, now.AddMinutes(1));
+
+        Assert.True((await DecideAsync(
+            f, GateOn(f), Policy(f, GateAccessPolicies.ActiveMember), ident, now)).Opened);
+
+        var underBookingWindow = await DecideAsync(
+            f, GateOn(f), Policy(f, GateAccessPolicies.BookingWindow), ident, now);
+        Assert.False(underBookingWindow.Opened);
+        Assert.Equal(GateAccess.NoBooking, underBookingWindow.Reason);
+
+        // …and the SAME member at the SAME instant, presenting that booking's own code
+        // instead, is refused for being early rather than for having nothing booked.
+        var bookingCode = await BookingCodeAsync(f, booking);
+        Assert.Equal(GateAccess.TooEarly, (await DecideAsync(
+            f, GateOn(f), Policy(f, GateAccessPolicies.BookingWindow), bookingCode, now)).Reason);
+    }
+
+    /// <summary>
+    /// A booking that is no longer <c>Booked</c> has a live code and no door behind it. The
+    /// <see cref="AccessCode"/> row outlives a cancellation — nothing revokes it, because
+    /// revoking on cancel would break a court box deciding offline from a roster fetched
+    /// before it — so the check has to be on the booking rather than on the code.
+    ///
+    /// <para>
+    /// Under both policies, because under <c>active_member</c> there was no booking check at
+    /// all: a member who cancelled their 19:00 court kept a code that opened the building
+    /// until the row was pruned.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(GateAccessPolicies.ActiveMember, BookingStatus.Cancelled)]
+    [InlineData(GateAccessPolicies.ActiveMember, BookingStatus.NoShow)]
+    [InlineData(GateAccessPolicies.ActiveMember, BookingStatus.Completed)]
+    [InlineData(GateAccessPolicies.BookingWindow, BookingStatus.Cancelled)]
+    [InlineData(GateAccessPolicies.BookingWindow, BookingStatus.NoShow)]
+    [InlineData(GateAccessPolicies.BookingWindow, BookingStatus.Completed)]
+    public async Task A_booking_code_for_a_booking_that_is_no_longer_booked_opens_nothing(
+        string policy, BookingStatus status)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var now = DateTimeOffset.UtcNow;
+        var booking = await BookAsync(f, f.Host.Courts[0], now.AddMinutes(5));
+        var token = await BookingCodeAsync(f, booking);
+        var settings = Policy(f, policy);
+
+        // The control: inside its own window and still Booked, it opens. Without this the
+        // assertion below would hold against an implementation that refuses everybody.
+        Assert.True((await DecideAsync(f, GateOn(f), settings, token, now)).Opened);
+
+        booking.Status = status;
+        await f.Db.SaveChangesAsync();
+
+        var decision = await DecideAsync(f, GateOn(f), settings, token, now);
+        Assert.False(decision.Opened);
+        Assert.Equal(GateAccess.NotRecognised, decision.Reason);
+
+        // The code is still live; it is the booking behind it that is gone.
+        Assert.True((await f.Db.AccessCodes.AsNoTracking().FirstAsync(c => c.Code == token)).IsLiveAt(now));
+    }
+
+    /// <summary>
+    /// <b>The door's horizon under <c>active_member</c> is the phone's, and the two cannot
+    /// drift apart.</b>
+    ///
+    /// <para>
+    /// <c>QrEndpoints</c> decides whether the member's screen shows a booking's code at all,
+    /// and this decides whether the door accepts it. Narrower here and the product refuses a
+    /// code it has just put on somebody's screen; wider and the code is a standing key again.
+    /// They were two independent rearrangements of one predicate in two files, and this walks
+    /// a whole day of anchors through BOTH — so a change to either side alone lands here.
+    /// </para>
+    ///
+    /// <para>
+    /// The <c>max</c> against the entry window is asserted from the other end: the door must
+    /// never be NARROWER than the cached roster, or a club's doors would work better during an
+    /// outage than online.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_doors_horizon_under_the_default_policy_is_the_one_the_phone_shows()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var settings = Policy(f, GateAccessPolicies.ActiveMember);
+
+        Assert.Equal(
+            settings.RosterWindowMinutes + settings.ActivationCueWindowMinutes,
+            BookingCodeWindow.DisplayHorizonMinutes(settings));
+        Assert.Equal(
+            BookingCodeWindow.DisplayHorizonMinutes(settings),
+            BookingCodeWindow.DoorHorizonMinutes(settings));
+
+        // Online is never narrower than the cached roster, under either policy.
+        Assert.True(BookingCodeWindow.DoorHorizonMinutes(settings) >= settings.GateEarlyEntryMinutes);
+        Assert.True(BookingCodeWindow.DoorHorizonMinutes(
+            Policy(f, GateAccessPolicies.BookingWindow)) >= settings.GateEarlyEntryMinutes);
+
+        // …and a club whose entry window is wider than the phone's horizon keeps the entry
+        // window, which is the case the max exists for.
+        var generous = Policy(f, GateAccessPolicies.ActiveMember, earlyEntryMinutes: 240);
+        Assert.Equal(240, BookingCodeWindow.DoorHorizonMinutes(generous));
+
+        // The predicate itself, at every minute of the UTC day: the rearrangement the door
+        // uses and the rearrangement the phone uses are the same function of the same numbers.
+        var midnight = new DateTimeOffset(2024, 3, 10, 0, 0, 0, TimeSpan.Zero);
+        for (var minute = 0; minute < 1440; minute++)
+        {
+            var now = midnight.AddMinutes(minute);
+            var horizon = BookingCodeWindow.DoorHorizonMinutes(settings);
+
+            Assert.Equal(now.AddMinutes(horizon), BookingCodeWindow.LatestStart(now, horizon));
+            Assert.True(BookingCodeWindow.LatestStart(now, horizon)
+                >= BookingCodeWindow.LatestStart(now, settings.GateEarlyEntryMinutes));
+        }
+    }
+
     // ---- The lock's release --------------------------------------------------
 
     /// <summary>

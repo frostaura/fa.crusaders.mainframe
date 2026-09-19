@@ -742,6 +742,133 @@ public sealed class DeviceGateHttpTests
             .GetProperty("gate").GetProperty("unlock_seconds").GetInt32());
     }
 
+    /// <summary>
+    /// <b><c>too_early</c> on the wire</b>, as a 200 like every other refusal, with a zero
+    /// release — and the audit row that names it.
+    ///
+    /// <para>
+    /// The same booking code, the same door, and the only thing that moves between the two
+    /// halves is the booking's distance from now.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_booking_code_presented_too_early_is_refused_as_a_200_and_audited()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", BookingWindowSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client, "front-door");
+
+        // Six hours out, against a thirty-minute entry window.
+        var early = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddHours(6));
+        await AssertRefusedAsync(
+            client, Scan(club.Key, mac, await BookingCodeAsync(factory, club, early)), GateAccess.TooEarly);
+
+        // Twenty minutes out is inside it, and the same member's own booking code opens the
+        // door — so the refusal above is the window and not the code.
+        var due = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(20));
+        Assert.True((await BodyAsync(await client.SendAsync(
+            Scan(club.Key, mac, await BookingCodeAsync(factory, club, due))))).GetProperty("opened").GetBoolean());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var denial = Assert.Single(await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId
+                        && a.Action == $"{DeviceGateEndpoint.DeniedActionPrefix}{GateAccess.TooEarly}")
+            .ToListAsync());
+
+        // Named, because a refusal that says who was turned away is the whole value of the row.
+        Assert.Equal(club.MemberId, denial.SubjectUserId);
+    }
+
+    /// <summary>
+    /// <b>The window the phone shows a booking code in and the window the door accepts it in
+    /// are the same window</b>, driven here through both real routes.
+    ///
+    /// <para>
+    /// <c>POST /me/qr/generate?kind=auto</c> is the member's screen and
+    /// <c>POST /device/gate</c> is the door. Under the default policy they must agree: a door
+    /// narrower than the screen refuses a code the product has just handed somebody, and a
+    /// door wider than the screen is the standing building key this whole rule exists to end.
+    /// They were two independent rearrangements of one predicate in two files.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>This fails if either side changes alone</b>, which is the point of driving both
+    /// rather than asserting the shared function twice. Widen the door and the far booking
+    /// opens it while the phone still says <c>ident</c>; narrow it and the near booking is
+    /// refused while the phone is showing its code. Move the phone's horizon and the two
+    /// <c>kind</c> assertions go the other way.
+    /// </para>
+    ///
+    /// <para>
+    /// The horizon is <c>roster_window_minutes + activation_cue_window_minutes</c> = 130
+    /// minutes here, and the two bookings sit ten minutes either side of it. The margin is
+    /// deliberately not tighter: the minute-precision of each edge is carried by
+    /// <c>DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window</c>
+    /// against a threaded clock, and what this test is for is the AGREEMENT between two
+    /// routes that each read <c>UtcNow</c> for themselves. They also have to be short enough
+    /// not to overlap: one court, and the exclusion constraint is real here.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_door_accepts_a_booking_code_exactly_while_the_phone_would_show_it()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", SharedHorizonSettings);
+        var device = factory.CreateClient();
+        var mac = await GateAsync(factory, club, device, "front-door");
+        var phone = MemberClient(factory, club);
+
+        // Beyond the horizon: the phone will not show this booking's code at all.
+        var far = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(140), minutes: 15);
+        var farCode = await BookingCodeAsync(factory, club, far);
+
+        var outOfReach = await GenerateAsync(phone);
+        Assert.Equal("ident", outOfReach.GetProperty("kind").GetString());
+        Assert.NotEqual(farCode, outOfReach.GetProperty("code").GetString());
+
+        // …and the door agrees, to the same minute.
+        await AssertRefusedAsync(device, Scan(club.Key, mac, farCode), GateAccess.TooEarly);
+
+        // Inside it: the phone shows that booking's own code…
+        var near = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(120), minutes: 15);
+        var nearCode = await BookingCodeAsync(factory, club, near);
+
+        var inReach = await GenerateAsync(phone);
+        Assert.Equal("booking", inReach.GetProperty("kind").GetString());
+        Assert.Equal(near.Id, inReach.GetProperty("booking_id").GetGuid());
+        Assert.Equal(nearCode, inReach.GetProperty("code").GetString());
+
+        // …and the door opens for exactly that code.
+        Assert.True((await BodyAsync(await device.SendAsync(Scan(club.Key, mac, nearCode))))
+            .GetProperty("opened").GetBoolean());
+    }
+
+    /// <summary>
+    /// The default policy with the two horizon inputs stated rather than defaulted, because
+    /// this is the one test whose arithmetic they decide: 120 + 10 = 130 minutes, against a
+    /// thirty-minute entry window that the max leaves behind.
+    /// </summary>
+    private const string SharedHorizonSettings =
+        """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","roster_window_minutes":120,"activation_cue_window_minutes":10,"gate_early_entry_minutes":30,"gate_access_policy":"active_member"}""";
+
+    /// <summary>What the member's own screen asks for: <c>POST /me/qr/generate</c>, kind auto.</summary>
+    private static async Task<JsonElement> GenerateAsync(HttpClient phone)
+    {
+        var response = await phone.PostAsync("/api/v1/me/qr/generate", null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return await BodyAsync(response);
+    }
+
+    /// <summary>The club member's own JWT — the principal the Court Code page runs as.</summary>
+    private static HttpClient MemberClient(TestWebAppFactory factory, Club club) =>
+        ClientFor(factory, club, club.MemberId, role: null);
+
     // ---- What a gate may not do on the court-box routes -----------------------
 
     /// <summary>
@@ -1167,46 +1294,29 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>An admin JWT for this club, minted the way <c>AdminSettingsHttpTests</c> does.</summary>
-    private static async Task<HttpClient> AdminClientAsync(TestWebAppFactory factory, Club club)
+    private static async Task<HttpClient> AdminClientAsync(TestWebAppFactory factory, Club club) =>
+        ClientFor(factory, club, await AdminUserAsync(factory, club), role: "admin");
+
+    /// <summary>
+    /// A signed client for one principal of this club. Shared by the admin console's JWT and
+    /// the member's own, so the two differ by exactly the role claim — which is what lets the
+    /// gate tests drive the Court Code page and the Devices page against one club.
+    /// </summary>
+    private static HttpClient ClientFor(TestWebAppFactory factory, Club club, Guid userId, string? role)
     {
-        Guid adminId;
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            var admin = new User
-            {
-                TenantId = club.TenantId,
-                Email = $"admin-{Guid.NewGuid():N}@test.local",
-                PasswordHash = "x",
-                EmailVerified = true,
-                IsAdmin = true,
-            };
-            db.Users.Add(admin);
-            db.Memberships.Add(new Membership
-            {
-                TenantId = club.TenantId,
-                UserId = admin.Id,
-                FullName = "Gate Admin",
-                MembershipNumber = $"A-{Guid.NewGuid():N}"[..12],
-                Status = MembershipStatus.Active,
-                MemberClass = MemberClass.Regular,
-            });
-            await db.SaveChangesAsync();
-            adminId = admin.Id;
-        }
+        List<System.Security.Claims.Claim> claims =
+        [
+            new(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new("tenant_id", club.TenantId.ToString()),
+            new("tenant_slug", club.Slug),
+            new("purpose", "access"),
+        ];
+        if (role is not null) claims.Add(new(System.Security.Claims.ClaimTypes.Role, role));
 
         var token = new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
             issuer: "crusaders.mainframe",
             audience: "crusaders.mainframe.app",
-            claims:
-            [
-                new System.Security.Claims.Claim(
-                    System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub, adminId.ToString()),
-                new System.Security.Claims.Claim("tenant_id", club.TenantId.ToString()),
-                new System.Security.Claims.Claim("tenant_slug", club.Slug),
-                new System.Security.Claims.Claim("purpose", "access"),
-                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "admin"),
-            ],
+            claims: claims,
             notBefore: DateTime.UtcNow,
             expires: DateTime.UtcNow.AddMinutes(10),
             signingCredentials: new Microsoft.IdentityModel.Tokens.SigningCredentials(
