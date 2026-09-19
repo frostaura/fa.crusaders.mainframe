@@ -24,10 +24,11 @@ the three manifest steps are gated on a *push to `main`*, so on a pull request t
 skipped — a green run on this branch says nothing whatever about the release half. At the branch
 head (`854ba10`, run `35448643445`, 2026-09-19) backend, backend-integration, frontend, both
 e2e jobs, `iot-build` and Security Scan passed, and **two jobs were red**: *IoT Firmware (native
-tests + lint)*, where the ASAN/UBSAN build refuses `gatelogic`'s `static_assert` over a
-`constexpr` string length that the plain build accepts, and **GitGuardian**, which is a probable
-false positive on a shared corpus fixture ([`watch.md`](watch.md)). Both were still red when this
-was written; take the current answer from `gh pr checks 3`.
+tests + lint)*, where the ASAN/UBSAN build refused `gatelogic`'s `static_assert` over a
+`constexpr` string length the plain build accepts — **`2a57f9c` landed on the branch after that
+run and is that fix**, so the job has not been re-measured since — and **GitGuardian**, a probable
+false positive on a shared corpus fixture ([`watch-doors.md`](watch-doors.md)). Take the current
+answer from `gh pr checks 3`, never from this paragraph.
 
 **What the product does now.** The court-light headline flow — book online, scan at the box,
 lights on — exists end to end and is pinned by `make test-e2e-device`. **The door gate now exists
