@@ -41,6 +41,9 @@ const launchOptions = process.env.PLAYWRIGHT_CHROMIUM_PATH
   ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH }
   : {};
 
+const PORT = process.env.PW_PORT ?? "4173";
+const LOCAL_URL = `http://localhost:${PORT}`;
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -53,7 +56,7 @@ export default defineConfig({
 
   reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:4173",
+    baseURL: process.env.E2E_BASE_URL ?? LOCAL_URL,
     trace: "on-first-retry",
     video: "retain-on-failure",
   },
@@ -67,8 +70,13 @@ export default defineConfig({
     ? undefined
     : {
         command: "npm run dev",
-        url: "http://localhost:4173",
-        reuseExistingServer: !process.env.CI,
+        env: { VITE_DEV_PORT: PORT },
+        url: LOCAL_URL,
+        // Never reuse by default. Another clone of this repo holding the port is a server that
+        // answers, and a lane once ran its whole suite against that clone's build and read the
+        // result as its own. A busy port is now a loud failure; PW_PORT moves off it, and
+        // PW_REUSE_SERVER=1 is for somebody who started the server themselves, on purpose.
+        reuseExistingServer: process.env.PW_REUSE_SERVER === "1",
         timeout: 60_000,
       },
 });

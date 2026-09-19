@@ -18,6 +18,6 @@
   "shortcuts": [
     { "name": "Book a court", "url": "/schedule" },
     { "name": "My wallet", "url": "/wallet" },
-    { "name": "Court code", "url": "/court-code" }
+    { "name": "My code", "url": "/my-code" }
   ]
 }
