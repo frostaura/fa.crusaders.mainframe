@@ -99,10 +99,16 @@ function SignedOutLanding() {
           <h1 className="mt-1 text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
             Crusaders Squash
           </h1>
+          {/*
+            "since the mid-1960s" belongs to Northwood Crusaders Sports Club, the parent club
+            with the rugby, hockey and cricket sections. Written as it was — inside a paragraph
+            headed "Crusaders Squash" — it read as the founding date of the squash section,
+            which is not what the source says and is not known.
+          */}
           <p className="mt-3 max-w-prose text-base text-text-secondary">
-            Four glass-back courts, thirteen league teams and a club that has been part of Durban
-            North since the mid-1960s. Book a court, top up your credits and check your league
-            night — all from here.
+            Four glass-back courts, thirteen league teams, and squash at Northwood Crusaders
+            Sports Club — part of Durban North since the mid-1960s. Book a court, top up your
+            credits and check your league night — all from here.
           </p>
 
           {/* The two things a visitor came to do. Buttons, not the pair of bare text links this
@@ -168,10 +174,15 @@ function SignedOutLanding() {
             <CalendarDays size={18} className="text-accent-strong" aria-hidden="true" />
             The Crusaders Open
           </h2>
+          {/*
+            "— the largest purse in the event's recorded history" used to end this sentence.
+            Nothing found supports it: prize money for earlier editions is not published
+            anywhere that was checked, so it is not a fact that went unverified, it is one that
+            cannot be checked at all. The R25 000 is sourced and stays.
+          */}
           <p className="mt-2 text-sm text-text-secondary">
             The club hosts the Crusaders Open each March, a tournament on Squash South Africa's
-            calendar. The 2026 edition ran from 5 to 8 March with R25 000 in prize money — the
-            largest purse in the event's recorded history.
+            calendar. The 2026 edition ran from 5 to 8 March with R25 000 in prize money.
           </p>
           <h3 className="mt-5 flex items-center gap-2 text-base font-semibold">
             <Users size={18} className="text-accent-strong" aria-hidden="true" />
@@ -188,13 +199,40 @@ function SignedOutLanding() {
       {/* ---- What this app is for -------------------------------------------------- */}
       <section aria-labelledby="mainframe" className="rounded-lg border border-border bg-bg-muted p-5 sm:p-6">
         <h2 id="mainframe" className="text-lg font-semibold">Booking, credits and court lights</h2>
+        {/*
+          What the member actually does, which is not what this paragraph used to say.
+
+          It read "Your booking turns the court lights on when you arrive, so there is no key to
+          collect and nothing to switch on yourself." There is no such thing in this product. A
+          booking earns the member a short-lived code; they hold its QR up to the scanner on the
+          court box, or type the twelve characters, and THAT is what raises the lights. The
+          signed-in home page one screen away says so — "Show this at the court to turn the
+          lights on" — and so does /court-code, so the public page was the only surface making
+          the claim and it contradicted both of them. Somebody who read it would stand on a dark
+          court waiting for it to notice them.
+
+          The slice length is also not stated any more. `slice_minutes` is per-tenant
+          configuration (the default is 15) and this page is signed out, so it cannot read it —
+          a club that sets 20 would have a public page quietly advertising the wrong thing.
+        */}
         <p className="mt-2 max-w-prose text-sm text-text-secondary">
-          Members book courts here in fifteen-minute slices, paid from a credit balance you top up
-          in the app. Your booking turns the court lights on when you arrive, so there is no key to
-          collect and nothing to switch on yourself.
+          Members book courts here in short slices, paid from a credit balance you top up in the
+          app — there is no key to collect and nothing to pay at the door. When you get to the
+          court, hold your code up to the scanner on the court box and the lights come on for
+          your slot.
         </p>
+        {/*
+          The opening hours are gone, and deliberately.
+
+          This said "Courts bookable 6:30am – 10pm on weekdays", which was wrong twice. The
+          club's configured hours run from 06:00, not 06:30 — and it is open on SATURDAY,
+          07:00 to 20:00, which the line omitted entirely. A visitor reading it concluded the
+          courts were shut at the weekend. Both numbers are `operating_hours` in tenant
+          settings, editable from Admin → Settings, and a signed-out page has no endpoint that
+          serves them; there is nothing to state here that is both specific and reliably true.
+        */}
         <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-text-secondary">
-          <span className="inline-flex items-center gap-1.5"><CalendarDays size={15} aria-hidden="true" /> Courts bookable 6:30am – 10pm on weekdays</span>
+          <span className="inline-flex items-center gap-1.5"><CalendarDays size={15} aria-hidden="true" /> Courts bookable through the day, seven days a week in season</span>
           <span className="inline-flex items-center gap-1.5"><Wallet size={15} aria-hidden="true" /> Pay from credits, not at the door</span>
         </div>
       </section>
