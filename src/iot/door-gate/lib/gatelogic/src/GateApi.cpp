@@ -6,21 +6,25 @@
 
 namespace gatelogic {
 
-uint16_t GateApi::post(const char* path, const char* body, char* out, size_t outCap) {
+HttpOutcome GateApi::post(const char* path, const char* body, char* out, size_t outCap) {
   if (body == nullptr || body[0] == '\0') {
     // An unrenderable body. Refused here rather than sent as something the
     // server has to reject — and it teaches the breaker nothing, because it
     // says nothing about whether the host is reachable.
-    return 0U;
+    return noCall();
   }
   if (out != nullptr && outCap > 0U) {
     out[0] = '\0';
   }
-  const uint16_t status = http_.post(path, body, out, outCap);
+  const HttpOutcome outcome = http_.post(path, body, out, outCap);
+  // TAUGHT FROM `status`, NOT FROM `peerStatus`. A 200 whose body did not
+  // arrive is a call this board learned nothing from, and the breaker exists to
+  // count exactly those.
+  //
   // A fresh clock read: the call may have just spent its whole timeout, and a
   // backoff window that starts four seconds in the past is four seconds short.
-  breaker_.onResult(status, clock_.nowMs());
-  return status;
+  breaker_.onResult(outcome.status, clock_.nowMs());
+  return outcome;
 }
 
 ScanDecision GateApi::scan(const char* mac, const char* token, uint32_t adoptedUnlockMs, uint32_t hardCapMs) {
@@ -34,21 +38,23 @@ ScanDecision GateApi::scan(const char* mac, const char* token, uint32_t adoptedU
   }
 
   char response[kScanResponseCap] = {};
-  const uint16_t status = post(kPathGate, body, response, sizeof(response));
-  return onGateResponse(status, response, strlen(response), adoptedUnlockMs, hardCapMs);
+  const HttpOutcome outcome = post(kPathGate, body, response, sizeof(response));
+  // `status`, deliberately: a 200 whose body this board could not read is not a
+  // decision anybody may act on, and it goes to the roster.
+  return onGateResponse(outcome.status, response, strlen(response), adoptedUnlockMs, hardCapMs);
 }
 
-uint16_t GateApi::heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs, uint32_t noPush,
-                            char* out, size_t outCap) {
+HttpOutcome GateApi::heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs,
+                               const GateDiagnostics& diagnostics, char* out, size_t outCap) {
   char body[kGateHeartbeatBodyCap] = {};
-  if (renderGateHeartbeatBody(body, sizeof(body), mac, firmwareVersion, uptimeMs, noPush) == 0U) {
-    return 0U;
+  if (renderGateHeartbeatBody(body, sizeof(body), mac, firmwareVersion, uptimeMs, diagnostics) == 0U) {
+    return noCall();
   }
   return post(kPathHeartbeat, body, out, outCap);
 }
 
 uint16_t GateApi::uploadEvent(const char* body, char* out, size_t outCap) {
-  return post(kPathEvents, body, out, outCap);
+  return post(kPathEvents, body, out, outCap).status;
 }
 
 } // namespace gatelogic

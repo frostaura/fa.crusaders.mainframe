@@ -30,21 +30,48 @@
 // answer that says nothing at all about what the server thinks, and which sends
 // the scan to the roster rather than to a parser holding half an object.
 //
-// AND IT IS BOUNDED BY THE CALL'S OWN DEADLINE.
-// ---------------------------------------------
+// AND IT IS BOUNDED BY ITS OWN DEADLINE, SAMPLED AFTER THE HEADERS.
+// ------------------------------------------------------------------
 // `setTimeout` on HTTPClient is an INTER-BYTE timeout, so a peer sending one
 // byte every three seconds keeps a read alive for ever and no number of
-// four-second timeouts bounds it. The body phase is ours now and takes an
-// absolute deadline computed from the instant the whole call started, so
-// `kWorstBlockingCallMs` is true of it.
+// four-second timeouts bounds it. The body phase is ours and takes an absolute
+// deadline — which the caller samples AFTER `POST()` returns, from
+// `kHttpBodyBudgetMs`, and NOT from the instant the whole call started. Round
+// G2 did the latter: a header phase that spent the connect and response
+// timeouts left the body a deadline already in the past, so a perfectly good
+// 4.6 KB roster on a slow evening was reported as a transport failure before a
+// byte of it was read. Three phases, three budgets, and `kWorstBlockingCallMs`
+// is their sum.
 //
 // WHAT IS STILL NOT BOUNDED, STATED RATHER THAN GLOSSED. HTTPClient's own
 // header loop runs inside `POST()` with the same inter-byte timeout and there
 // is no way to interrupt it from here. A peer that dribbles HEADERS — not a
 // body — can hold one call past `kWorstBlockingCallMs`, and that case is the
 // watchdog's, deliberately. It is why the watchdog exists rather than being
-// belt and braces, and it is the one precondition on the 8 010 ms sentence in
+// belt and braces, and it is the one precondition on the 12 010 ms sentence in
 // `GateApp.h` and README.md.
+//
+// AND THE READER FRAMES THE BODY, BECAUSE THE REAL SERVER CHUNKS IT.
+// ------------------------------------------------------------------
+// Round G2 asked only `http.getSize()`, which is the Content-Length or -1, and
+// treated -1 as "read until the peer closes". Against the real API that is a
+// door that never opens:
+//
+//   * Kestrel answers every device route `Transfer-Encoding: chunked` with NO
+//     Content-Length and holds the socket open. `getSize()` is -1, the peer
+//     never closes, and the read spent its whole budget and returned a
+//     transport failure — on EVERY call, so the roster never loaded and the
+//     door refused everyone;
+//   * and had the peer closed, the framing bytes would have gone to the parser:
+//     `5d1\r\n{"kind":"gate",…}\r\n0\r\n\r\n` is not a document.
+//
+// So framing is an INPUT to this reader, not a guess: the port collects
+// `Transfer-Encoding` and `getSize()` and says which of the three shapes it
+// got. Belt and braces with the port's own `useHTTP10(true)` — a server may
+// not chunk to an HTTP/1.0 client, so in normal service the body arrives
+// close-delimited and the de-chunker never runs. It exists for the proxy that
+// re-chunks anyway, because that proxy would otherwise take every door in the
+// club out of service and nothing would say why.
 //
 // No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
 
@@ -86,8 +113,59 @@ public:
   virtual void idle() = 0;
 };
 
-/// A response whose length the peer did not declare. Read until it closes.
+/// A response whose length the peer did not declare.
 inline constexpr int kUnknownBodyLength = -1;
+
+/// How the peer said this body ends. Exactly the three shapes HTTP/1.1 has,
+/// and the ONLY input this reader has about where to stop.
+enum class BodyFraming : uint8_t {
+  /// `Content-Length`. The body is over when that many bytes are in.
+  KnownLength = 0U,
+  /// `Transfer-Encoding: chunked`. Size line, CRLF, that many bytes, CRLF, and
+  /// again, until a zero-size line and its trailers. What Kestrel sends.
+  Chunked = 1U,
+  /// Neither header. The body is over when the peer hangs up — which is what
+  /// HTTP/1.0 with `Connection: close` produces, and what the port asks for.
+  UntilClose = 2U,
+};
+
+/// The framing, and the length that only one of the three has.
+///
+/// A plain aggregate with no default member initialisers on purpose: the
+/// generated sketch compiles at gnu++11, where a class with an NSDMI is no
+/// longer an aggregate and `BodyFrame{a, b}` stops compiling. Build one with
+/// the three functions below rather than by hand.
+struct BodyFrame {
+  BodyFraming framing;
+  /// Only read when `framing` is `KnownLength`.
+  int length;
+};
+
+constexpr BodyFrame knownLength(int length) {
+  return BodyFrame{BodyFraming::KnownLength, length};
+}
+
+constexpr BodyFrame chunkedBody() {
+  return BodyFrame{BodyFraming::Chunked, kUnknownBodyLength};
+}
+
+constexpr BodyFrame untilClose() {
+  return BodyFrame{BodyFraming::UntilClose, kUnknownBodyLength};
+}
+
+/// The framing implied by the two facts HTTPClient will tell you: its
+/// `getSize()` (the Content-Length, or -1) and whether the response carried a
+/// chunked `Transfer-Encoding`.
+///
+/// A Content-Length WINS over a chunked header, which cannot both be true of
+/// one response — RFC 7230 §3.3.3 says to ignore the length when the transfer
+/// coding is chunked, but this firmware talks to one API behind one proxy and
+/// the safer reading of a self-contradictory response is the one that stops at
+/// a declared number of bytes rather than parsing framing that may not be
+/// there. Either way it is a response no peer on this LAN produces.
+constexpr BodyFrame frameFromHeaders(int contentLength, bool chunked) {
+  return contentLength >= 0 ? knownLength(contentLength) : (chunked ? chunkedBody() : untilClose());
+}
 
 enum class BodyResult : uint8_t {
   /// The whole body is in `out`, NUL-terminated.
@@ -98,19 +176,25 @@ enum class BodyResult : uint8_t {
   TooLarge = 1U,
   /// The deadline passed with the body incomplete.
   Timeout = 2U,
+  /// The chunk framing did not parse — a size line that is not hexadecimal, a
+  /// chunk not followed by its CRLF, a size line with no digits at all.
+  /// REPORTED rather than salvaged: half a de-chunked document is exactly the
+  /// truncation this whole file exists to refuse.
+  Malformed = 3U,
 };
 
 /// Reads one body into `out`, NUL-terminated, never truncated.
 ///
-/// `expectedLength` is the peer's declared Content-Length, or
-/// `kUnknownBodyLength`. A declared length that cannot fit is refused before a
-/// single byte is read — there is nothing to be gained by pulling a megabyte
-/// through a 4.6 KB buffer to discover it does not fit.
+/// `frame` says where the body ends; see `frameFromHeaders`. A declared length
+/// that cannot fit is refused before a single byte is read — there is nothing
+/// to be gained by pulling a megabyte through a 4.6 KB buffer to discover it
+/// does not fit. For a chunked body `out` receives the DECODED bytes and never
+/// the framing.
 ///
 /// `deadlineAtMs` is an ABSOLUTE instant, not a duration, and is compared
 /// through `tb::reached`: these calls happen on a board that has been up for
 /// months and the millis() wrap is the normal case.
-BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadlineAtMs, int expectedLength,
+BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadlineAtMs, BodyFrame frame,
                     char* out, size_t outCap);
 
 /// What a bounded read means to the caller, in one place.

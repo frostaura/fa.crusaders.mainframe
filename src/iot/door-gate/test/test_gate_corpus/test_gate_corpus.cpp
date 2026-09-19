@@ -133,16 +133,17 @@ void executeHeartbeatRequest(const char* expected, size_t expectedLen, const cha
   uint32_t uptime = 0U;
   TEST_ASSERT_TRUE(devapi::json::unsignedField(expected, expectedLen, "uptime_ms", uptime));
 
-  // The diagnostic counter is read out of the vector rather than assumed: the
-  // plain heartbeat vector has no `no_push` key (a healthy board omits it), and
-  // the no-push vector carries the count the board must render. One executor
-  // for both, so the two vectors differ by the corpus alone.
-  uint32_t noPush = 0U;
-  (void)devapi::json::unsignedField(expected, expectedLen, "no_push", noPush);
+  // The diagnostic counters are read out of the vector rather than assumed: the
+  // plain heartbeat vector has neither key (a healthy board omits both), and a
+  // diagnostic vector carries the counts the board must render. One executor
+  // for all of them, so the vectors differ by the corpus alone.
+  gatelogic::GateDiagnostics diagnostics = gatelogic::quietDiagnostics();
+  (void)devapi::json::unsignedField(expected, expectedLen, "no_push", diagnostics.noPush);
+  (void)devapi::json::unsignedField(expected, expectedLen, "events_lost", diagnostics.eventsLost);
 
   char rendered[gatelogic::kGateHeartbeatBodyCap] = {};
   const size_t written =
-      gatelogic::renderGateHeartbeatBody(rendered, sizeof(rendered), mac, version, uptime, noPush);
+      gatelogic::renderGateHeartbeatBody(rendered, sizeof(rendered), mac, version, uptime, diagnostics);
   TEST_ASSERT_EQUAL_size_t(expectedLen, written);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
 }

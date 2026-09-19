@@ -131,7 +131,7 @@ public:
     }
   }
 
-  uint16_t post(const char* path, const char* body, char* out, size_t outCap) override {
+  gatelogic::HttpOutcome post(const char* path, const char* body, char* out, size_t outCap) override {
     ++calls_;
     strncpy(path_, path, sizeof(path_) - 1U);
     path_[sizeof(path_) - 1U] = '\0';
@@ -141,7 +141,10 @@ public:
       strncpy(out, answer_, outCap - 1U);
       out[outCap - 1U] = '\0';
     }
-    return status_;
+    // A fake whose body always arrives: `status` and `peerStatus` agree. The
+    // case where they do NOT is scripted on LatentHttp, which is where the
+    // scenarios that care about it live.
+    return gatelogic::HttpOutcome{status_, status_};
   }
 
   const char* lastPath() const { return path_; }
@@ -841,9 +844,11 @@ void test_api_the_heartbeat_posts_the_gate_kind_and_hands_back_the_response() {
 
   http.answer(200U, "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":5},\"roster\":[]}");
   char response[gatelogic::kGateResponseCap] = {};
-  const uint16_t status = api.heartbeat("5ccf7f0a1b2c", "1.0.0", 86400000ULL, 0U, response, sizeof(response));
+  const gatelogic::HttpOutcome outcome = api.heartbeat(
+      "5ccf7f0a1b2c", "1.0.0", 86400000ULL, gatelogic::quietDiagnostics(), response, sizeof(response));
 
-  TEST_ASSERT_EQUAL_UINT16(200U, status);
+  TEST_ASSERT_EQUAL_UINT16(200U, outcome.status);
+  TEST_ASSERT_EQUAL_UINT16(200U, outcome.peerStatus);
   TEST_ASSERT_EQUAL_STRING("/api/v1/device/heartbeat", http.lastPath());
   TEST_ASSERT_NOT_NULL(strstr(http.lastBody(), "\"kind\":\"gate\""));
   TEST_ASSERT_NOT_NULL(strstr(response, "\"unlock_seconds\":5"));
@@ -855,23 +860,23 @@ void test_api_the_heartbeat_posts_the_gate_kind_and_hands_back_the_response() {
 
 void test_heartbeat_body_carries_kind_last_and_refuses_rather_than_truncating() {
   char body[gatelogic::kGateHeartbeatBodyCap] = {};
-  TEST_ASSERT_TRUE(
-      gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 86400000ULL, 0U) > 0U);
+  TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
+                                                      86400000ULL, gatelogic::quietDiagnostics()) > 0U);
   TEST_ASSERT_EQUAL_STRING(
       "{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,\"kind\":\"gate\"}",
       body);
 
   // 64-bit, past the 49.7-day wrap: 0xFFFFFFFF + 20000.
   TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
-                                                      4295187295ULL, 0U) > 0U);
+                                                      4295187295ULL, gatelogic::quietDiagnostics()) > 0U);
   TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":4295187295,"));
 
   char tiny[16] = {};
-  TEST_ASSERT_EQUAL_size_t(
-      0U, gatelogic::renderGateHeartbeatBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "1.0.0", 1000ULL, 0U));
+  TEST_ASSERT_EQUAL_size_t(0U, gatelogic::renderGateHeartbeatBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "1.0.0",
+                                                                  1000ULL, gatelogic::quietDiagnostics()));
   TEST_ASSERT_EQUAL_STRING("", tiny);
-  TEST_ASSERT_EQUAL_size_t(0U,
-                           gatelogic::renderGateHeartbeatBody(body, sizeof(body), "", "1.0.0", 1000ULL, 0U));
+  TEST_ASSERT_EQUAL_size_t(0U, gatelogic::renderGateHeartbeatBody(body, sizeof(body), "", "1.0.0", 1000ULL,
+                                                                  gatelogic::quietDiagnostics()));
 }
 
 void test_heartbeat_adopts_the_gate_objects_unlock_seconds_and_clamps_it() {
@@ -1191,6 +1196,16 @@ public:
   explicit FakeScannerBytes(fakes::FakeClock& clock) : clock_(clock) {}
 
   void feed(const char* text) {
+    // COMPACT WHAT HAS BEEN READ. A scenario that feeds sixty-eight tokens with
+    // passes between them otherwise runs out of this buffer part-way through
+    // and silently feeds half of them — which reads as a loop that dropped
+    // scans rather than as a fake that ran dry, and cost a round here.
+    if (head_ > 0U && head_ == count_) {
+      head_ = 0U;
+      count_ = 0U;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(count_ + strlen(text) <= sizeof(buf_),
+                             "this fake's buffer cannot hold what the scenario fed it");
     for (size_t i = 0U; text[i] != '\0' && count_ < sizeof(buf_); ++i) {
       buf_[count_] = static_cast<uint8_t>(text[i]);
       ++count_;
@@ -1305,6 +1320,16 @@ public:
     state.standing.set(200U, "", latencyMs);
   }
 
+  /// The server answers `peerStatus` and the BODY does not arrive whole.
+  ///
+  /// What the port returns for a body that timed out, did not fit, or did not
+  /// frame: `status` 0 — every decision on this board treats it as a transport
+  /// failure — with `peerStatus` kept behind it, which is the only way to tell
+  /// a heartbeat whose roster push failed from a host that never answered.
+  void onPathBodyFailure(const char* path, uint16_t peerStatus, uint32_t latencyMs) {
+    pathReply(path).setBodyFailure(peerStatus, latencyMs);
+  }
+
   /// The answer for the `nth` call to `path` (0-based), overriding both the
   /// path's standing answer and the every-path default for that one call.
   void onCall(const char* path, uint16_t nth, uint16_t status, const char* body, uint32_t latencyMs) {
@@ -1351,7 +1376,7 @@ public:
     }
   }
 
-  uint16_t post(const char* path, const char* body, char* out, size_t outCap) override {
+  gatelogic::HttpOutcome post(const char* path, const char* body, char* out, size_t outCap) override {
     PathState& state = pathState(path);
     const Reply& reply = replyFor(state);
 
@@ -1388,7 +1413,8 @@ public:
       strncpy(out, body, outCap - 1U);
       out[outCap - 1U] = '\0';
     }
-    return reply.set_ ? reply.status : status_;
+    return reply.set_ ? gatelogic::HttpOutcome{reply.status, reply.peerStatus}
+                      : gatelogic::HttpOutcome{status_, status_};
   }
 
   /// Forgets the call WINDOW log and every per-path count, so a scenario's
@@ -1426,6 +1452,9 @@ private:
   struct Reply {
     void set(uint16_t st, const char* text, uint32_t lat) {
       status = st;
+      // A body that arrives: the two statuses agree. `setBodyFailure` is what
+      // pulls them apart.
+      peerStatus = st;
       latency = lat;
       body[0] = '\0';
       if (text != nullptr) {
@@ -1435,9 +1464,20 @@ private:
       set_ = true;
     }
 
+    /// THE SERVER ANSWERED AND THE BODY DID NOT ARRIVE — status 0 with a
+    /// peerStatus behind it, which is exactly what `Esp32HttpPort` returns for
+    /// a body that timed out, did not fit, or did not frame. It is the ONE
+    /// shape `no_push` distinguishes, and no fake could express it before
+    /// round G3 because the port returned a single number.
+    void setBodyFailure(uint16_t peer, uint32_t lat) {
+      set(0U, "", lat);
+      peerStatus = peer;
+    }
+
     char body[5120] = {};
     uint32_t latency = 0U;
     uint16_t status = 0U;
+    uint16_t peerStatus = 0U;
     bool set_ = false;
   };
 
@@ -1571,6 +1611,13 @@ struct Rig {
   /// thirty-second interval. The heartbeat happens in the SECOND of these two
   /// passes, because pumpLink runs before pumpHeartbeat.
   void forceHeartbeat() {
+    // PAST THE FLOOR FIRST. `kMinHeartbeatSpacingMs` bounds ATTEMPTS, not
+    // successes, so a scenario that wants a second heartbeat has to let the
+    // floor lapse — which is exactly what a real board does and is the whole
+    // point of E2. Before the floor existed, a link edge was a heartbeat on
+    // demand at any rate, which is what 179 999 calls in a simulated hour
+    // looked like from inside this helper.
+    clock.advance(gatelogic::kMinHeartbeatSpacingMs);
     link.set(false);
     tick();
     link.set(true);
@@ -2372,6 +2419,10 @@ void test_app_a_403_on_events_takes_the_board_out_of_service_too() {
 
     rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
     rig.http.onPath(gatelogic::kPathEvents, 403U, "", 0U);
+    // Past the heartbeat's spacing floor first (E2): a link edge arms a
+    // heartbeat, it does not exempt one, and this board took its last one
+    // during boot().
+    rig.clock.advance(gatelogic::kMinHeartbeatSpacingMs);
     rig.link.set(true);
     rig.tick(); // the link edge takes a heartbeat, which fills the roster
     rig.http.forget();
@@ -2507,6 +2558,321 @@ void test_app_a_permanently_busy_scanner_cannot_starve_the_heartbeat() {
                            "the roster aged out while the door was busy");
 }
 
+/// E3. AND THE EVENT DRAIN IS BOUNDED BY THE SAME COUNTER, which round G2's
+/// heartbeat-only bound left starving.
+///
+/// MEASURED, on the real GateApp, before the fix: a scan offered every 210 ms
+/// over a simulated hour produced 16 180 scans, 116 heartbeats — the heartbeat
+/// bound working exactly as designed — and **zero** event posts. A door that
+/// spent a night offline comes back with a ring full of entries and, on a busy
+/// morning, uploads none of them; the ring then overwrites its own oldest rows
+/// and `overflowed()` was read by nothing.
+///
+/// The fixture field that discriminates is the scan RATE. At 250 ms the drain
+/// gets a pass on its own and posts; at 210 ms — which is one scan per two
+/// eight-second... one scan per rather less than a decided pass — it never
+/// does. A test written at the comfortable rate passes against the broken code.
+void test_app_a_permanently_busy_scanner_cannot_starve_the_event_drain() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  queueOfflineEvents(rig, 3U);
+
+  // The per-path answers go in BEFORE the radio returns: boot()'s every-path
+  // default acknowledges through 0xFFFFFFFF, which would empty the whole ring
+  // on the first post and leave nothing to starve.
+  rig.http.onPath(gatelogic::kPathGate, 200U, "{\"opened\":false,\"reason\":\"not_recognised\"}", 200U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 200U);
+  // From the seq the ring actually holds, not from 1: the boot event took 1 and
+  // was released during boot(), so a server acknowledging 1 acknowledges
+  // nothing, arms the backoff, and the drain that is meant to be busy is idle.
+  eventq::Event head;
+  TEST_ASSERT_TRUE(rig.queue.peek(head));
+  rig.http.acknowledgeOneAtATime(gatelogic::kPathEvents, head.seq, 200U);
+  rig.link.set(true);
+  rig.tick();
+  rig.scanner.streamForever();
+  rig.http.forget();
+
+  const uint16_t held = rig.queue.size();
+  TEST_ASSERT_TRUE_MESSAGE(held > 0U, "the scenario needs a backlog to drain");
+
+  rig.runFor(600000UL); // ten simulated minutes of unbroken scanning
+
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathGate) > 0U,
+                           "the scenario has to keep the scanner busy to prove anything");
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathEvents) > 0U,
+                           "a busy scanner starved the event drain completely");
+  TEST_ASSERT_TRUE_MESSAGE(rig.queue.size() < held, "and the backlog actually moved");
+  // The heartbeat is still first when both are waiting, so bounding the drain
+  // did not cost the thing the bound was built for.
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathHeartbeat) > 0U,
+                           "bounding the drain must not starve the heartbeat");
+}
+
+/// E3. A LINK DROP CLEARS THE DEFERRAL DEBT.
+///
+/// Four deferred passes spent against an upload that could not have run are not
+/// a debt the member on the other side of an outage owes. Without the reset,
+/// the first pass after the radio returns takes the blocking call away from
+/// somebody standing at the door with a phone in their hand.
+void test_app_a_link_drop_clears_the_scan_deferral_debt() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, gatelogic::kWorstBlockingCallMs);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, gatelogic::kWorstBlockingCallMs);
+
+  // Run up a full debt: a heartbeat due and a scanner taking every pass.
+  rig.clock.advance(gatelogic::kGateConfig.heartbeatMs);
+  rig.scanner.streamForever();
+  for (uint8_t i = 0U; i < gatelogic::kMaxScanPassesBeforeUpload; ++i) {
+    rig.tick();
+  }
+
+  // The radio goes away and comes back.
+  rig.link.set(false);
+  rig.tick();
+  rig.link.set(true);
+  rig.http.forget();
+
+  // The FIRST pass after the link returns belongs to the member, not to the
+  // heartbeat the link edge just armed.
+  rig.tick();
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, rig.http.callsTo(gatelogic::kPathGate),
+                                   "the first pass after a link drop belongs to the door");
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, rig.http.callsTo(gatelogic::kPathHeartbeat),
+                                   "a deferral debt from before the outage must not be carried over");
+}
+
+/// E2 HIGH. A FLAPPING RADIO MUST NOT HAMMER THE API.
+///
+/// `pumpLink` arms the heartbeat for "now" on every link-UP edge, which is
+/// right: the heartbeat is what fills the roster, and until it has, an offline
+/// scan is refused. On a door at the edge of the AP's range — which is where
+/// doors are, at the end of a corridor in a steel frame — that was one
+/// heartbeat PER PASS.
+///
+/// MEASURED on the real GateApp before the fix, over one simulated hour with
+/// the link toggling every pass: **179 999** heartbeats against a cadence that
+/// says 120. With 50 ms of latency on each, 51 429. An API the club would read
+/// as an attack, and a board that spends its entire life inside a connect.
+///
+/// The bound is `kMinHeartbeatSpacingMs` between ATTEMPTS: 3 600 000 / 15 000 =
+/// 240 an hour, twice the healthy cadence, whatever the radio does.
+void test_app_a_flapping_link_cannot_hammer_the_heartbeat() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 50U);
+  rig.http.forget();
+
+  const uint32_t kHourMs = 3600000UL;
+  const uint32_t started = rig.clock.value();
+  bool up = true;
+  while (tb::since(rig.clock.value(), started) < kHourMs) {
+    up = !up;
+    rig.link.set(up);
+    rig.tick();
+  }
+
+  const uint32_t calls = rig.http.callsTo(gatelogic::kPathHeartbeat);
+  TEST_ASSERT_TRUE_MESSAGE(calls <= 240U,
+                           "a link flapping every pass must not buy more than one heartbeat per "
+                           "kMinHeartbeatSpacingMs");
+  // AND IT STILL HEARTBEATS. A floor that silenced the board would be a roster
+  // that ages out, which is the failure the arm-on-edge exists to prevent.
+  TEST_ASSERT_TRUE_MESSAGE(calls >= kHourMs / (gatelogic::kGateConfig.heartbeatMs * 2U),
+                           "the floor must not stop the board heartbeating at all");
+}
+
+/// E2. THE FLOOR IS ABOUT ATTEMPTS, NOT SUCCESSES.
+///
+/// A flapping radio is exactly the case that produces failing calls, so a floor
+/// armed only after a successful heartbeat would be no floor at all against the
+/// scenario it exists for.
+void test_app_the_heartbeat_floor_bounds_failing_calls_too() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  // A host that is there and refusing — the breaker never opens on a 503, it
+  // counts transport failures, so the drain keeps asking.
+  rig.http.onPath(gatelogic::kPathHeartbeat, 503U, "", 0U);
+  rig.http.forget();
+
+  const uint32_t kWindowMs = 300000UL; // five minutes
+  const uint32_t started = rig.clock.value();
+  bool up = true;
+  while (tb::since(rig.clock.value(), started) < kWindowMs) {
+    up = !up;
+    rig.link.set(up);
+    rig.tick();
+  }
+
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathHeartbeat) <=
+                               (kWindowMs / gatelogic::kMinHeartbeatSpacingMs) + 1U,
+                           "a refusing host must not be retried faster than a healthy one");
+}
+
+/// E3. THE RING'S OVERFLOW REACHES SOMEBODY.
+///
+/// `EventQueue.h` has promised since it was written that "an overflow is
+/// reported, never silent", and until round G3 `overflowed()` was read by
+/// NOTHING anywhere in this repository. 64 slots against a door doing 720 scans
+/// an hour is a counter that moves on the first bad night, and every row it
+/// counts is an entry the club never learns about.
+void test_app_events_the_ring_discarded_are_reported_in_the_next_heartbeat() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+
+  // Offline for long enough to overrun a 64-slot ring. `begin()` already put a
+  // boot event in it, so 64 more is a guaranteed overflow.
+  // One MORE than the ring holds: exactly `kGateEventSlots` pushes fill it
+  // without discarding anything, and a test that fills it exactly proves that
+  // the counter stays at zero.
+  queueOfflineEvents(rig, static_cast<uint16_t>(gatelogic::kGateEventSlots + 4U));
+  TEST_ASSERT_TRUE_MESSAGE(rig.queue.overflowed() > 0U, "the scenario needs the ring to overflow");
+  const uint32_t lost = rig.queue.overflowed();
+
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+  rig.forceHeartbeat();
+
+  char expected[48] = {};
+  snprintf(expected, sizeof(expected), "\"events_lost\":%lu", static_cast<unsigned long>(lost));
+  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rig.http.lastBody(), expected),
+                               "an overflow that nothing reports is an overflow that is silent");
+}
+
+/// E1(e). A HEARTBEAT WHOSE BODY NEVER ARRIVED IS A NO-PUSH, and round G2 made
+/// it the quietest path in the firmware.
+///
+/// Before G2 an over-long body was truncated, `applyRoster` refused it, and the
+/// counter moved. After G2 it became status 0 — correctly, a transport failure
+/// — and `adoptHeartbeat` returned early on a 0, so the one diagnostic that
+/// exists to say "this board's roster is not being refreshed" went silent in
+/// exactly the case it was built for.
+///
+/// The fixture field that discriminates is `peerStatus`. With the fake
+/// collapsing both to a single status — which is what `IHttpPort` returned
+/// before round G3 — a failed body and a dead host are the same event and no
+/// test can tell them apart.
+void test_app_a_heartbeat_whose_body_never_arrived_counts_as_a_no_push() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  TEST_ASSERT_EQUAL_UINT32(0U, rig.app.noPushHeartbeats());
+
+  // The server answered 200 and the body timed out, did not fit, or did not
+  // frame. Every decision treats it as a transport failure; the counter still
+  // has to move.
+  rig.http.onPathBodyFailure(gatelogic::kPathHeartbeat, 200U, 0U);
+  rig.forceHeartbeat();
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, rig.app.noPushHeartbeats(),
+                                   "a 200 whose roster never arrived is exactly what no_push counts");
+
+  // AND A HOST THAT NEVER ANSWERED IS NOT ONE. Inflating the number an admin
+  // reads off the device row with ordinary outages would make it useless.
+  rig.http.onPath(gatelogic::kPathHeartbeat, 0U, "", 0U);
+  rig.forceHeartbeat();
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, rig.app.noPushHeartbeats(),
+                                   "an unreachable host is an outage, not a failed roster push");
+
+  // Nor is a refusal the board could read.
+  rig.http.onPath(gatelogic::kPathHeartbeat, 401U, "", 0U);
+  rig.forceHeartbeat();
+  TEST_ASSERT_EQUAL_UINT32(1U, rig.app.noPushHeartbeats());
+
+  // And it reaches the wire, which is the whole point.
+  rig.http.onPathBodyFailure(gatelogic::kPathHeartbeat, 200U, 0U);
+  rig.forceHeartbeat();
+  TEST_ASSERT_EQUAL_UINT32(2U, rig.app.noPushHeartbeats());
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.forceHeartbeat();
+  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rig.http.lastBody(), "\"no_push\":2"),
+                               "the count has to reach somewhere a person can see it");
+}
+
+/// E3. A DRAINING BACKLOG STILL LETS THE MEMBER AT THE DOOR THROUGH.
+///
+/// The deferral counter is cleared by whichever upload TAKES the pass. Cleared
+/// only by the heartbeat — which is what round G2 wrote — a board with a full
+/// ring sits at the bound for ever: every pass has an upload waiting, the
+/// counter never falls back, and the forced branch takes the blocking call from
+/// the scanner on every single pass until the ring empties. A door back from a
+/// night offline has sixty-four events and would spend the first minutes of the
+/// morning talking about last night instead of opening.
+///
+/// The fixture field that discriminates is the BACKLOG SIZE together with the
+/// window: a ring that empties inside the window lets the scanner win
+/// afterwards, and the test passes against the broken code.
+void test_app_a_draining_backlog_still_lets_the_member_at_the_door_through() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  queueOfflineEvents(rig, static_cast<uint16_t>(gatelogic::kGateEventSlots));
+
+  rig.http.onPath(gatelogic::kPathGate, 200U, "{\"opened\":false,\"reason\":\"not_recognised\"}", 200U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 200U);
+  // From the seq the ring actually holds: the boot event took 1 and was
+  // released during boot(), so a server acknowledging 1 acknowledges nothing
+  // and arms the backoff instead of draining.
+  eventq::Event head;
+  TEST_ASSERT_TRUE(rig.queue.peek(head));
+  rig.http.acknowledgeOneAtATime(gatelogic::kPathEvents, head.seq, 200U);
+  rig.link.set(true);
+  rig.tick();
+  rig.scanner.streamForever();
+  rig.http.forget();
+
+  // Ten seconds: far less than the ring takes to drain at one event per post,
+  // so there is an upload waiting on every pass throughout.
+  rig.runFor(10000UL);
+  TEST_ASSERT_FALSE_MESSAGE(rig.queue.empty(),
+                            "the ring has to still be draining for this to prove anything");
+
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathEvents) > 0U, "the backlog has to be moving");
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathGate) > 15U,
+                           "a draining backlog must not take every pass from the scanner");
+}
+
+/// E4. A 404 ON `/events` KEEPS THE EVENT.
+///
+/// `devapi::react` classes a 404 as `Rejected` — "a 4xx the box caused, drop
+/// it" — which is right for the court box and is SHARED, so it is not changed.
+/// On this route a 404 has one production meaning: the API did not recognise
+/// this MAC, because the device row was deleted in the console. The board
+/// re-registers on its next heartbeat and the very same event is then accepted,
+/// so dropping it throws away an evening of door entries to save twelve
+/// requests an hour.
+///
+/// Before this, one 404 emptied the whole backlog, silently, one event per
+/// pass.
+void test_app_a_404_on_events_keeps_the_backlog_and_retries_it() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  queueOfflineEvents(rig, 3U);
+
+  // Before the radio returns, for the reason above: the every-path default
+  // would acknowledge the whole ring on the first post.
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.http.onPath(gatelogic::kPathEvents, 404U, "", 0U);
+  rig.link.set(true);
+  rig.tick();
+  const uint16_t held = rig.queue.size();
+  TEST_ASSERT_TRUE(held >= 3U);
+
+  // Long enough that a drop-per-pass would have emptied the ring thousands of
+  // times over.
+  rig.runFor(120000UL);
+
+  TEST_ASSERT_EQUAL_UINT16_MESSAGE(held, rig.queue.size(),
+                                   "a 404 on /events must not discard the audit backlog");
+  // AND IT IS NOT A HOT LOOP EITHER: the backoff paces it, exactly as a 429 is
+  // paced. Two minutes at 15 s doubling to 5 min is a handful of posts.
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathEvents) <= 8U,
+                           "a refusing endpoint must be paced by the backoff");
+
+  // And when the row comes back, so does the backlog.
+  rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+  rig.runFor(600000UL);
+  TEST_ASSERT_TRUE_MESSAGE(rig.queue.empty(), "the kept events have to actually get through in the end");
+}
+
 // ---------------------------------------------------------------------------
 // E3 — the response body, bounded by the caller's buffer and the call's clock
 // ---------------------------------------------------------------------------
@@ -2556,7 +2922,9 @@ public:
 
 private:
   fakes::FakeClock& clock_;
-  char body_[512] = {};
+  /// Big enough for the REAL captured heartbeat: one chunk of 0x5d1 = 1489
+  /// bytes plus its framing. 512 was enough while every fixture was invented.
+  char body_[8192] = {};
   size_t len_ = 0U;
   size_t at_ = 0U;
   size_t perWait_ = 0U;
@@ -2567,21 +2935,80 @@ private:
 
 constexpr char kScanOk[] = "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3}";
 
-/// E3. A body that FITS arrives whole, however it is chunked and at whatever
-/// clock base.
-void test_body_a_body_that_fits_arrives_whole_however_it_is_chunked() {
-  const size_t chunks[] = {1U, 3U, 16U, 512U};
+// ---------------------------------------------------------------------------
+// E1 — THE FRAMING, AND THE BYTES ARE THE ONES A REAL SERVER SENT
+// ---------------------------------------------------------------------------
+//
+// Every fixture in this section that is called a capture IS one, taken off the
+// wire against the real API under Kestrel during round G3. They matter because
+// nothing in this repository had ever read a real socket, and the round-G2
+// reader — which asked only `http.getSize()` and treated -1 as "read until the
+// peer closes" — passed every invented fixture and timed out on EVERY call
+// against the actual server. No roster, and a door that refused everyone.
+//
+// What was observed:
+//   * HTTP/1.1: `Transfer-Encoding: chunked`, NO Content-Length, and the socket
+//     HELD OPEN afterwards (HTTPClient defaults to keep-alive). A 61-byte gate
+//     response arrives as `3d\r\n<61 bytes>\r\n0\r\n\r\n`;
+//   * a full 48-entry heartbeat is ONE chunk of 0x5d1 = 1489 bytes;
+//   * HTTP/1.0: close-delimited, no Content-Length, `Connection: close`.
+
+/// The `/api/v1/device/gate` 200, exactly as Kestrel framed it over HTTP/1.1.
+constexpr char kCapturedGatePayload[] =
+    "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3,\"court\":null}";
+constexpr char kCapturedGateChunked[] =
+    "3d\r\n{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3,\"court\":null}\r\n0\r\n\r\n";
+
+/// `3d` is 61, and the payload had better be 61 bytes or the capture has been
+/// edited and stopped being a capture.
+static_assert(sizeof(kCapturedGatePayload) - 1U == 0x3dU,
+              "the captured chunk-size line and the captured payload disagree");
+
+/// Wraps `payload` as ONE chunk with a correctly-sized hex length line, the way
+/// Kestrel frames a whole document it rendered in one go.
+size_t wrapAsOneChunk(const char* payload, char* out, size_t cap) {
+  const int written =
+      snprintf(out, cap, "%lx\r\n%s\r\n0\r\n\r\n", static_cast<unsigned long>(strlen(payload)), payload);
+  TEST_ASSERT_TRUE(written > 0 && static_cast<size_t>(written) < cap);
+  return static_cast<size_t>(written);
+}
+
+/// A heartbeat body of exactly `bytes` characters that is still a document the
+/// roster parser would accept: the padding rides in a key nothing reads.
+void buildHeartbeatOfSize(char* out, size_t cap, size_t bytes) {
+  const char* head = "{\"kind\":\"gate\",\"roster\":[],\"pad\":\"";
+  const char* tail = "\"}";
+  TEST_ASSERT_TRUE(bytes > strlen(head) + strlen(tail) && bytes < cap);
+  const size_t padding = bytes - strlen(head) - strlen(tail);
+  strncpy(out, head, cap - 1U);
+  for (size_t i = 0U; i < padding; ++i) {
+    out[strlen(head) + i] = 'p';
+  }
+  strncpy(out + strlen(head) + padding, tail, cap - strlen(head) - padding - 1U);
+  out[bytes] = '\0';
+  TEST_ASSERT_EQUAL_size_t(bytes, strlen(out));
+}
+
+/// E1. A body that FITS arrives whole however the TCP SEGMENTS fall.
+///
+/// RENAMED. This was `..._however_it_is_chunked`, which read as though it
+/// covered `Transfer-Encoding: chunked` — the one framing nothing tested and
+/// the one the real server uses. It is about segmentation: the same bytes
+/// handed over one, three, sixteen or five hundred at a time. The chunked
+/// coding is three tests below this one.
+void test_body_a_body_that_fits_arrives_whole_however_the_segments_fall() {
+  const size_t perWaits[] = {1U, 3U, 16U, 512U};
 
   for (size_t b = 0U; b < kBaseCount; ++b) {
-    for (size_t perWait : chunks) {
+    for (size_t perWait : perWaits) {
       fakes::FakeClock clock(kBases[b]);
       FakeResponseStream stream(clock, 1U);
       stream.deliver(kScanOk, perWait);
 
       char out[gatelogic::kScanResponseCap] = {};
       const gatelogic::BodyResult result =
-          gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
-                              static_cast<int>(strlen(kScanOk)), out, sizeof(out));
+          gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                              gatelogic::knownLength(static_cast<int>(strlen(kScanOk))), out, sizeof(out));
 
       TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Ok);
       TEST_ASSERT_EQUAL_STRING(kScanOk, out);
@@ -2589,22 +3016,240 @@ void test_body_a_body_that_fits_arrives_whole_however_it_is_chunked() {
   }
 }
 
-/// E3. A body with NO declared length ends when the peer hangs up.
+/// E1. A body with NO declared length and a peer that HANGS UP ends when it
+/// does — which is what HTTP/1.0 with `Connection: close` produces, and what
+/// the port now asks the server for.
 void test_body_an_undeclared_length_ends_when_the_peer_closes() {
   fakes::FakeClock clock(kBaseWrapSoon);
   FakeResponseStream stream(clock, 1U);
   stream.deliver(kScanOk, 4U);
 
   char out[gatelogic::kScanResponseCap] = {};
-  const gatelogic::BodyResult result =
-      gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
-                          gatelogic::kUnknownBodyLength, out, sizeof(out));
+  const gatelogic::BodyResult result = gatelogic::readBody(
+      stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs, gatelogic::untilClose(), out, sizeof(out));
 
   TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Ok);
   TEST_ASSERT_EQUAL_STRING(kScanOk, out);
 }
 
-/// E3, AND THE REASON IT IS A SAFETY FIX RATHER THAN A HYGIENE ONE.
+/// E1, THE CRITICAL, AS TWO READS OF ONE CAPTURE.
+///
+/// The SAME bytes the real server sent, read two ways:
+///
+///   * as round G2 read them — no declared length, so "until the peer closes" —
+///     against a peer that does NOT close, because HTTPClient defaults to
+///     keep-alive and Kestrel holds the socket. The read spends its whole
+///     budget and reports a transport failure. On a real board that happened on
+///     EVERY call: the roster never loaded and the door refused everyone;
+///   * as the framing says to read them. The document comes out, the framing
+///     does not, and the peer staying connected is irrelevant because the
+///     zero-size chunk is what ends the body.
+///
+/// The fixture field that discriminates is `closesWhenDone(false)`. With it
+/// true — which is what every invented fixture had — BOTH readings return Ok
+/// and this test proves nothing at all.
+void test_body_a_chunked_keep_alive_capture_is_read_by_its_framing_or_not_at_all() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    // The round-G2 reading: no framing, a peer that never hangs up.
+    {
+      fakes::FakeClock clock(kBases[b]);
+      FakeResponseStream stream(clock, 100U);
+      stream.deliver(kCapturedGateChunked, 64U);
+      stream.closesWhenDone(false);
+
+      char out[gatelogic::kScanResponseCap] = {};
+      const gatelogic::BodyResult result =
+          gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                              gatelogic::untilClose(), out, sizeof(out));
+
+      TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::BodyResult::Timeout,
+                               "a keep-alive peer with no declared length has no end marker at all");
+      TEST_ASSERT_EQUAL_STRING("", out);
+    }
+
+    // The framed reading, same bytes, same peer.
+    {
+      fakes::FakeClock clock(kBases[b]);
+      FakeResponseStream stream(clock, 100U);
+      stream.deliver(kCapturedGateChunked, 64U);
+      stream.closesWhenDone(false);
+
+      char out[gatelogic::kScanResponseCap] = {};
+      const gatelogic::BodyResult result =
+          gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                              gatelogic::chunkedBody(), out, sizeof(out));
+
+      TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Ok);
+      TEST_ASSERT_EQUAL_STRING_MESSAGE(kCapturedGatePayload, out,
+                                       "the parser must never see a chunk-size line");
+    }
+  }
+}
+
+/// E1. The chunk framing survives the stream stopping between ANY two bytes.
+///
+/// A chunk split across reads, a SIZE LINE split across reads, and the trailing
+/// `0\r\n\r\n` arriving long after the data — all three are what a 1489-byte
+/// chunk on a 1460-byte MTU does in ordinary service, and all three are the
+/// same fixture with a different `perWait`. One byte at a time is the hostile
+/// end of it and splits the two-character size line as well as the payload.
+void test_body_chunk_framing_survives_every_split() {
+  const size_t perWaits[] = {1U, 2U, 3U, 7U, 64U, 4096U};
+
+  for (size_t perWait : perWaits) {
+    fakes::FakeClock clock(kBaseMid);
+    FakeResponseStream stream(clock, 1U);
+    stream.deliver(kCapturedGateChunked, perWait);
+    stream.closesWhenDone(false);
+
+    char out[gatelogic::kScanResponseCap] = {};
+    const gatelogic::BodyResult result =
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                            gatelogic::chunkedBody(), out, sizeof(out));
+
+    TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Ok);
+    TEST_ASSERT_EQUAL_STRING(kCapturedGatePayload, out);
+  }
+}
+
+/// E1. The capture that matters most: a FULL 48-entry heartbeat is one chunk of
+/// 0x5d1 = 1489 bytes, which is the largest thing this board ever reads and the
+/// one whose loss empties the roster.
+void test_body_a_full_heartbeat_arrives_as_one_1489_byte_chunk() {
+  char payload[2048] = {};
+  buildHeartbeatOfSize(payload, sizeof(payload), 1489U);
+
+  char framed[2176] = {};
+  static_cast<void>(wrapAsOneChunk(payload, framed, sizeof(framed)));
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("5d1", strtok(framed, "\r"), "the captured size line is 5d1");
+  // strtok wrote a NUL into the buffer; build it again for the read.
+  static_cast<void>(wrapAsOneChunk(payload, framed, sizeof(framed)));
+
+  fakes::FakeClock clock(kBaseMid);
+  FakeResponseStream stream(clock, 1U);
+  // 1460 at a time: one MTU, so the chunk genuinely spans two reads.
+  stream.deliver(framed, 1460U);
+  stream.closesWhenDone(false);
+
+  char out[gatelogic::kGateResponseCap] = {};
+  const gatelogic::BodyResult result =
+      gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                          gatelogic::chunkedBody(), out, sizeof(out));
+
+  TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Ok);
+  TEST_ASSERT_EQUAL_STRING(payload, out);
+}
+
+/// E1. A 204 and an empty body. `Content-Length: 0` is a body that is over
+/// before it starts, and a zero-size chunk with no data is the same thing said
+/// the other way.
+void test_body_an_empty_body_is_a_whole_body() {
+  {
+    fakes::FakeClock clock(kBaseMid);
+    FakeResponseStream stream(clock, 1U);
+    stream.deliver("", 1U);
+    char out[32] = {'x'};
+    const gatelogic::BodyResult result =
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                            gatelogic::knownLength(0), out, sizeof(out));
+    TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Ok);
+    TEST_ASSERT_EQUAL_STRING("", out);
+  }
+  {
+    fakes::FakeClock clock(kBaseMid);
+    FakeResponseStream stream(clock, 1U);
+    stream.deliver("0\r\n\r\n", 1U);
+    stream.closesWhenDone(false);
+    char out[32] = {'x'};
+    const gatelogic::BodyResult result =
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                            gatelogic::chunkedBody(), out, sizeof(out));
+    TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Ok);
+    TEST_ASSERT_EQUAL_STRING("", out);
+  }
+}
+
+/// E1. A SIZE LINE THAT IS NOT A SIZE LINE IS A FAILURE, NOT A GUESS.
+///
+/// Every one of these is a stream that is not what it claims, and for each of
+/// them the only honest answer is "this board learned nothing" — which sends a
+/// scan to the roster. Salvaging what parsed would hand the roster parser a
+/// document assembled out of somebody else's framing.
+void test_body_malformed_chunk_framing_is_a_failure_not_garbage() {
+  struct Row {
+    const char* label;
+    const char* bytes;
+  };
+
+  const Row rows[] = {
+      {"a size line that is not hexadecimal", "zz\r\nabc\r\n0\r\n\r\n"},
+      {"a size line with no digits at all", "\r\nabc\r\n0\r\n\r\n"},
+      {"a chunk not followed by its CRLF", "3\r\nabcX0\r\n\r\n"},
+      {"a chunk followed by CR and then rubbish", "3\r\nabc\rX0\r\n\r\n"},
+      // THE ONE THAT DISCRIMINATES A CHECKED CR FROM A CONSUMED BYTE. A
+      // decoder that skips a byte where the CR should be, rather than
+      // REQUIRING one, parses this into a perfectly plausible "abc" — and
+      // every other row here still fails, so without it the check can be
+      // deleted and the suite stays green.
+      {"a chunk followed by one wrong byte and a LF", "3\r\nabcX\n0\r\n\r\n"},
+      {"a size line longer than a uint32", "123456789\r\nabc\r\n0\r\n\r\n"},
+      {"a trailer line that never ends", "0\r\nX-Trailer: 1\r\rrubbish"},
+  };
+
+  for (const Row& row : rows) {
+    fakes::FakeClock clock(kBaseMid);
+    FakeResponseStream stream(clock, 1U);
+    stream.deliver(row.bytes, 4U);
+    stream.closesWhenDone(false);
+
+    char out[gatelogic::kScanResponseCap] = {};
+    const gatelogic::BodyResult result =
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                            gatelogic::chunkedBody(), out, sizeof(out));
+
+    TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::BodyResult::Malformed, row.label);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("", out, row.label);
+    TEST_ASSERT_EQUAL_UINT16(0U, gatelogic::statusForBody(200U, result));
+  }
+}
+
+/// E1. A chunked peer that HANGS UP before its zero-size line sent a body that
+/// was CUT, not one that ended. Reported rather than handed up: that is exactly
+/// the truncation this whole file exists to refuse, and the reason `{"opened":
+/// true,` cut after the comma is a door that opens.
+void test_body_a_chunked_peer_that_hangs_up_early_is_not_a_short_body() {
+  fakes::FakeClock clock(kBaseMid);
+  FakeResponseStream stream(clock, 1U);
+  // The captured framing with everything from the closing brace onwards lost.
+  stream.deliver("3d\r\n{\"opened\":true,", 4U);
+  stream.closesWhenDone(true);
+
+  char out[gatelogic::kScanResponseCap] = {};
+  const gatelogic::BodyResult result =
+      gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                          gatelogic::chunkedBody(), out, sizeof(out));
+
+  TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Malformed);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("", out, "half a de-chunked document is not a document");
+}
+
+/// E1. The framing is DERIVED from the two facts the core will report, in one
+/// place, so the driver holds no opinion of its own.
+void test_body_the_framing_comes_from_content_length_and_transfer_encoding() {
+  static_assert(gatelogic::frameFromHeaders(61, false).framing == gatelogic::BodyFraming::KnownLength, "");
+  static_assert(gatelogic::frameFromHeaders(61, false).length == 61, "");
+  static_assert(gatelogic::frameFromHeaders(0, false).framing == gatelogic::BodyFraming::KnownLength, "");
+  // -1 is BOTH chunked and close-delimited, and telling them apart is the whole
+  // of E1: the collected `Transfer-Encoding` is the only thing that can.
+  static_assert(gatelogic::frameFromHeaders(-1, true).framing == gatelogic::BodyFraming::Chunked, "");
+  static_assert(gatelogic::frameFromHeaders(-1, false).framing == gatelogic::BodyFraming::UntilClose, "");
+  // A response claiming both: the declared length wins, because stopping at a
+  // stated number of bytes is safer than parsing framing that may not be there.
+  static_assert(gatelogic::frameFromHeaders(61, true).framing == gatelogic::BodyFraming::KnownLength, "");
+  TEST_PASS();
+}
+
+/// E1, AND THE REASON IT IS A SAFETY FIX RATHER THAN A HYGIENE ONE.
 ///
 /// The driver used to `getString()` the whole body onto the heap and then
 /// `memcpy` the first `outCap - 1` bytes of it into the caller's buffer. An
@@ -2614,7 +3259,8 @@ void test_body_an_undeclared_length_ends_when_the_peer_closes() {
 ///
 /// It is refused now, and the refusal is a TRANSPORT failure rather than a
 /// short body, so the scan goes to the roster instead of to a parser holding
-/// half an object.
+/// half an object. All three framings, because a chunked body can outgrow the
+/// buffer across several chunks that are each small enough.
 void test_body_a_body_over_the_cap_is_refused_rather_than_truncated() {
   // A body that would open the door if its first bytes were believed.
   char over[256] = {};
@@ -2630,23 +3276,47 @@ void test_body_a_body_over_the_cap_is_refused_rather_than_truncated() {
     stream.deliver(over, 8U);
     char out[32] = {};
     const gatelogic::BodyResult result =
-        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
-                            static_cast<int>(strlen(over)), out, sizeof(out));
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                            gatelogic::knownLength(static_cast<int>(strlen(over))), out, sizeof(out));
     TEST_ASSERT_TRUE(result == gatelogic::BodyResult::TooLarge);
     TEST_ASSERT_EQUAL_STRING_MESSAGE("", out, "a refused body must be EMPTY, never a plausible prefix");
     TEST_ASSERT_EQUAL_UINT16(0U, gatelogic::statusForBody(200U, result));
   }
 
-  // ...and undeclared, so it is refused at the byte that would not fit.
+  // ...undeclared, so it is refused at the byte that would not fit...
   {
     fakes::FakeClock clock(kBaseMid);
     FakeResponseStream stream(clock, 8U);
     stream.deliver(over, 8U);
     char out[32] = {};
     const gatelogic::BodyResult result =
-        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
-                            gatelogic::kUnknownBodyLength, out, sizeof(out));
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                            gatelogic::untilClose(), out, sizeof(out));
     TEST_ASSERT_TRUE(result == gatelogic::BodyResult::TooLarge);
+    TEST_ASSERT_EQUAL_STRING("", out);
+  }
+
+  // ...and chunked, where NO single chunk is over the cap and the total is.
+  {
+    fakes::FakeClock clock(kBaseMid);
+    char framed[512] = {};
+    // Ten chunks of sixteen bytes: 160 into a 32-byte buffer.
+    size_t at = 0U;
+    for (int chunk = 0; chunk < 10; ++chunk) {
+      at +=
+          static_cast<size_t>(snprintf(framed + at, sizeof(framed) - at, "10\r\n%s\r\n", "0123456789abcdef"));
+    }
+    static_cast<void>(snprintf(framed + at, sizeof(framed) - at, "0\r\n\r\n"));
+
+    FakeResponseStream stream(clock, 8U);
+    stream.deliver(framed, 8U);
+    stream.closesWhenDone(false);
+    char out[32] = {};
+    const gatelogic::BodyResult result =
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                            gatelogic::chunkedBody(), out, sizeof(out));
+    TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::BodyResult::TooLarge,
+                             "chunks that each fit can still be a body that does not");
     TEST_ASSERT_EQUAL_STRING("", out);
   }
 
@@ -2662,22 +3332,26 @@ void test_body_a_body_over_the_cap_is_refused_rather_than_truncated() {
     stream.deliver(exact, 4U);
     char out[32] = {};
     const gatelogic::BodyResult result =
-        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
-                            static_cast<int>(strlen(exact)), out, sizeof(out));
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs,
+                            gatelogic::knownLength(static_cast<int>(strlen(exact))), out, sizeof(out));
     TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::BodyResult::Ok, "outCap - 1 bytes must fit");
     TEST_ASSERT_EQUAL_size_t(sizeof(out) - 1U, strlen(out));
   }
 }
 
-/// E3. A DRIBBLING PEER IS BOUNDED BY THE CALL'S OWN DEADLINE.
+/// E1. A DRIBBLING PEER IS BOUNDED BY THE BODY PHASE'S OWN DEADLINE.
 ///
 /// `HTTPClient::setTimeout` is an INTER-BYTE timeout: a peer sending one byte
 /// every three seconds resets it on every byte and keeps a read alive for ever,
-/// so no number of four-second timeouts bounds it and
-/// `kWorstBlockingCallMs` was not true of the port. The deadline here is
-/// absolute and is computed from the instant the whole call started, so it
-/// cannot be reset by the peer's generosity.
-void test_body_a_dribbling_peer_is_bounded_by_the_calls_deadline() {
+/// so no number of four-second timeouts bounds it. The deadline here is
+/// absolute and cannot be reset by the peer's generosity.
+///
+/// AND IT IS THE BODY'S OWN BUDGET, NOT WHAT IS LEFT OF THE CALL'S. Round G2
+/// computed it from the instant the whole call started, so a header phase that
+/// spent the connect and response timeouts handed the body a deadline already
+/// in the past. `kHttpBodyBudgetMs` is what the port samples after `POST()`
+/// returns.
+void test_body_a_dribbling_peer_is_bounded_by_the_body_budget() {
   for (size_t b = 0U; b < kBaseCount; ++b) {
     fakes::FakeClock clock(kBases[b]);
     // One byte per three seconds, which is the classic slow-loris rate.
@@ -2685,10 +3359,10 @@ void test_body_a_dribbling_peer_is_bounded_by_the_calls_deadline() {
     stream.deliver(kScanOk, 1U);
 
     const uint32_t started = clock.nowMs();
-    const uint32_t deadline = started + gatelogic::kWorstBlockingCallMs;
+    const uint32_t deadline = started + gatelogic::kHttpBodyBudgetMs;
     char out[gatelogic::kScanResponseCap] = {};
-    const gatelogic::BodyResult result =
-        gatelogic::readBody(stream, clock, deadline, static_cast<int>(strlen(kScanOk)), out, sizeof(out));
+    const gatelogic::BodyResult result = gatelogic::readBody(
+        stream, clock, deadline, gatelogic::knownLength(static_cast<int>(strlen(kScanOk))), out, sizeof(out));
 
     TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::BodyResult::Timeout, "a dribbling peer must be cut off");
     TEST_ASSERT_EQUAL_STRING_MESSAGE("", out, "and what did arrive is not a body");
@@ -2696,12 +3370,31 @@ void test_body_a_dribbling_peer_is_bounded_by_the_calls_deadline() {
                                      "a body that did not arrive is a transport failure, not a 200");
     // AND IT STOPPED AT THE DEADLINE, not at some multiple of it.
     const uint32_t spent = tb::since(clock.nowMs(), started);
-    TEST_ASSERT_TRUE_MESSAGE(spent <= gatelogic::kWorstBlockingCallMs + 3000U,
+    TEST_ASSERT_TRUE_MESSAGE(spent <= gatelogic::kHttpBodyBudgetMs + 3000U,
                              "the read outlived its deadline by more than one wait");
   }
 }
 
-/// E3. A call that has already spent its whole budget before the body starts
+/// E1. THE WORST CALL IS THREE PHASES, AND THE WATCHDOG IS ASSERTED AGAINST IT.
+///
+/// The arithmetic the release-overrun sentence and the watchdog both rest on,
+/// written out here so a change to any one of the three budgets shows up as a
+/// failing test with the numbers in it rather than as a comment nobody re-read.
+void test_config_the_worst_call_is_connect_plus_headers_plus_body() {
+  TEST_ASSERT_EQUAL_UINT32(4000UL, gatelogic::kHttpConnectTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT32(4000UL, gatelogic::kHttpResponseTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT32(4000UL, gatelogic::kHttpBodyBudgetMs);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(12000UL, gatelogic::kWorstBlockingCallMs,
+                                   "connect + headers + body, and README says 12 010 ms of overrun");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(15U, gatelogic::kGateConfig.watchdogSeconds,
+                                  "a 12 s watchdog against a 12 s worst call is a reset loop");
+  // The overrun sentence in GateApp.h and README.md, as a number.
+  TEST_ASSERT_EQUAL_UINT32(12010UL, gatelogic::kWorstBlockingCallMs + gatelogic::kIdleDelayMs);
+  TEST_ASSERT_EQUAL_UINT32(42010UL, gatelogic::kGateConfig.unlockHardCapMs + gatelogic::kWorstBlockingCallMs +
+                                        gatelogic::kIdleDelayMs);
+}
+
+/// E1. A call that has already spent its whole budget before the body starts
 /// has none left for it, and says so rather than borrowing more.
 void test_body_a_deadline_already_passed_is_a_transport_failure() {
   fakes::FakeClock clock(kBaseMid);
@@ -2709,14 +3402,15 @@ void test_body_a_deadline_already_passed_is_a_transport_failure() {
   stream.deliver(kScanOk, 1U);
 
   char out[gatelogic::kScanResponseCap] = {};
-  // Chunked one byte at a time, so the first wait meets the deadline.
-  const gatelogic::BodyResult result = gatelogic::readBody(
-      stream, clock, clock.nowMs() - 1U, static_cast<int>(strlen(kScanOk)), out, sizeof(out));
+  // One byte at a time, so the first wait meets the deadline.
+  const gatelogic::BodyResult result =
+      gatelogic::readBody(stream, clock, clock.nowMs() - 1U,
+                          gatelogic::knownLength(static_cast<int>(strlen(kScanOk))), out, sizeof(out));
   TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Timeout);
   TEST_ASSERT_EQUAL_STRING("", out);
 }
 
-/// E3. The mapping, in the words the door uses. A whole body keeps whatever
+/// E1. The mapping, in the words the door uses. A whole body keeps whatever
 /// status the peer sent — including a refusal, which is authoritative — and
 /// anything else is 0, which is the one answer that sends a scan to the roster.
 void test_body_only_a_whole_body_keeps_the_servers_status() {
@@ -2724,9 +3418,15 @@ void test_body_only_a_whole_body_keeps_the_servers_status() {
   static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Ok) == 403U, "");
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::TooLarge) == 0U, "");
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Timeout) == 0U, "");
+  static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Malformed) == 0U, "");
   // A 403 whose body did not arrive is NOT an out-of-service verdict. The
   // verdict is the status, and a status nobody finished reading is not one.
   static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Timeout) == 0U, "");
+
+  // AND THE PEER'S STATUS SURVIVES ANYWAY, for the one reader that needs it.
+  static_assert(gatelogic::bodyFailed(gatelogic::HttpOutcome{0U, 200U}), "");
+  static_assert(!gatelogic::bodyFailed(gatelogic::HttpOutcome{200U, 200U}), "");
+  static_assert(!gatelogic::bodyFailed(gatelogic::noCall()), "");
   TEST_PASS();
 }
 
@@ -2734,37 +3434,64 @@ void test_body_only_a_whole_body_keeps_the_servers_status() {
 // E4 — the two things a board could not say
 // ---------------------------------------------------------------------------
 
-/// E4. `no_push` is OMITTED at zero and present otherwise.
+/// E3/E4. THE TWO DIAGNOSTIC COUNTERS ARE OMITTED AT ZERO AND SATURATE.
 ///
 /// Omitted because a healthy board is the overwhelming case and the contract
-/// corpus's request vector has no such field: a board that sent `"no_push":0`
+/// corpus's request vector has neither field: a board that sent `"no_push":0`
 /// for ever would put a key in every request nothing on the wire has agreed to.
 /// `test_every_request_vector_is_rendered_byte_for_byte` is what would notice,
 /// and it is asserted here too so the reason is written down beside the rule.
-void test_heartbeat_body_carries_no_push_only_when_there_is_one() {
+///
+/// Saturating because the API binds both as a signed 64-bit value and IGNORES a
+/// negative or oversized one rather than answering 400 — so a counter that
+/// wrapped past INT32_MAX would report a board that has lost four billion
+/// events as a healthy one, silently.
+void test_heartbeat_body_carries_its_counters_only_when_there_are_some() {
   char body[gatelogic::kGateHeartbeatBodyCap] = {};
 
-  TEST_ASSERT_TRUE(
-      gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 86400000ULL, 0U) > 0U);
+  TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
+                                                      86400000ULL, gatelogic::quietDiagnostics()) > 0U);
   TEST_ASSERT_EQUAL_STRING_MESSAGE(
       "{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,\"kind\":\"gate\"}",
       body, "a healthy board's body is the corpus vector, byte for byte");
 
-  TEST_ASSERT_TRUE(
-      gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 86400000ULL, 4U) > 0U);
+  TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
+                                                      86400000ULL, gatelogic::GateDiagnostics{4U, 0U}) > 0U);
   TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,"
                            "\"kind\":\"gate\",\"no_push\":4}",
                            body);
 
-  // The widest value the counter can reach still fits, and is still refused
-  // rather than truncated in a buffer that cannot hold it.
+  // `events_lost` alone, and then both, in that order — the order is part of
+  // the shape, not an accident of the renderer.
   TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
-                                                      4295187295ULL, 4294967295UL) > 0U);
-  TEST_ASSERT_NOT_NULL(strstr(body, "\"no_push\":4294967295}"));
+                                                      86400000ULL,
+                                                      gatelogic::GateDiagnostics{0U, 720U}) > 0U);
+  TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,"
+                           "\"kind\":\"gate\",\"events_lost\":720}",
+                           body);
+  TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
+                                                      86400000ULL,
+                                                      gatelogic::GateDiagnostics{4U, 720U}) > 0U);
+  TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,"
+                           "\"kind\":\"gate\",\"no_push\":4,\"events_lost\":720}",
+                           body);
+
+  // SATURATED, not wrapped: a counter already at the ceiling stays there, and
+  // one handed a value past it is rendered at the ceiling.
+  TEST_ASSERT_EQUAL_UINT32(gatelogic::kMaxDiagnosticCount,
+                           gatelogic::saturatingIncrement(gatelogic::kMaxDiagnosticCount));
+  TEST_ASSERT_EQUAL_UINT32(gatelogic::kMaxDiagnosticCount,
+                           gatelogic::saturatingIncrement(gatelogic::kMaxDiagnosticCount - 1U));
+  TEST_ASSERT_TRUE(
+      gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 4295187295ULL,
+                                         gatelogic::GateDiagnostics{4294967295UL, 4294967295UL}) > 0U);
+  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"no_push\":2147483647,\"events_lost\":2147483647}"),
+                               "a counter over INT32_MAX is what the API silently ignores");
 
   char tiny[96] = {};
-  TEST_ASSERT_EQUAL_size_t(0U, gatelogic::renderGateHeartbeatBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "1.0.0",
-                                                                  4295187295ULL, 4294967295UL));
+  TEST_ASSERT_EQUAL_size_t(
+      0U, gatelogic::renderGateHeartbeatBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "1.0.0", 4295187295ULL,
+                                             gatelogic::GateDiagnostics{4294967295UL, 4294967295UL}));
   TEST_ASSERT_EQUAL_STRING("", tiny);
 }
 
@@ -2970,13 +3697,29 @@ int main(int, char**) {
   RUN_TEST(test_app_a_403_on_events_takes_the_board_out_of_service_too);
   RUN_TEST(test_app_a_boot_event_the_server_never_acknowledges_is_not_a_hot_loop);
   RUN_TEST(test_app_a_permanently_busy_scanner_cannot_starve_the_heartbeat);
-  RUN_TEST(test_body_a_body_that_fits_arrives_whole_however_it_is_chunked);
+  RUN_TEST(test_app_a_permanently_busy_scanner_cannot_starve_the_event_drain);
+  RUN_TEST(test_app_a_link_drop_clears_the_scan_deferral_debt);
+  RUN_TEST(test_app_a_flapping_link_cannot_hammer_the_heartbeat);
+  RUN_TEST(test_app_the_heartbeat_floor_bounds_failing_calls_too);
+  RUN_TEST(test_app_events_the_ring_discarded_are_reported_in_the_next_heartbeat);
+  RUN_TEST(test_app_a_heartbeat_whose_body_never_arrived_counts_as_a_no_push);
+  RUN_TEST(test_app_a_draining_backlog_still_lets_the_member_at_the_door_through);
+  RUN_TEST(test_app_a_404_on_events_keeps_the_backlog_and_retries_it);
+  RUN_TEST(test_body_a_body_that_fits_arrives_whole_however_the_segments_fall);
   RUN_TEST(test_body_an_undeclared_length_ends_when_the_peer_closes);
+  RUN_TEST(test_body_a_chunked_keep_alive_capture_is_read_by_its_framing_or_not_at_all);
+  RUN_TEST(test_body_chunk_framing_survives_every_split);
+  RUN_TEST(test_body_a_full_heartbeat_arrives_as_one_1489_byte_chunk);
+  RUN_TEST(test_body_an_empty_body_is_a_whole_body);
+  RUN_TEST(test_body_malformed_chunk_framing_is_a_failure_not_garbage);
+  RUN_TEST(test_body_a_chunked_peer_that_hangs_up_early_is_not_a_short_body);
+  RUN_TEST(test_body_the_framing_comes_from_content_length_and_transfer_encoding);
   RUN_TEST(test_body_a_body_over_the_cap_is_refused_rather_than_truncated);
-  RUN_TEST(test_body_a_dribbling_peer_is_bounded_by_the_calls_deadline);
+  RUN_TEST(test_body_a_dribbling_peer_is_bounded_by_the_body_budget);
+  RUN_TEST(test_config_the_worst_call_is_connect_plus_headers_plus_body);
   RUN_TEST(test_body_a_deadline_already_passed_is_a_transport_failure);
   RUN_TEST(test_body_only_a_whole_body_keeps_the_servers_status);
-  RUN_TEST(test_heartbeat_body_carries_no_push_only_when_there_is_one);
+  RUN_TEST(test_heartbeat_body_carries_its_counters_only_when_there_are_some);
   RUN_TEST(test_app_a_heartbeat_that_pushed_no_roster_is_counted_and_reported);
   RUN_TEST(test_led_a_watchdog_that_would_not_arm_blinks_four_times_as_fast);
   RUN_TEST(test_app_a_refused_watchdog_changes_nothing_about_the_door);

@@ -89,8 +89,14 @@
 /// silently-dropping API host: the board would panic before the call it was
 /// waiting on could return, boot, and do it again, never loading a roster and
 /// admitting nobody.
+///
+/// TWELVE WAS RIGHT FOR A TWO-PHASE CALL AND IS NOT RIGHT FOR A THREE-PHASE
+/// ONE. Round G3 gave the response BODY its own budget, sampled after the
+/// headers return, because sharing one budget with the header phase is how a
+/// slow evening left a 4.6 KB roster no time at all. The worst call is
+/// therefore connect + headers + body, and the assert below moved with it.
 #ifndef GATE_WATCHDOG_SECONDS
-#define GATE_WATCHDOG_SECONDS 12
+#define GATE_WATCHDOG_SECONDS 15
 #endif
 #ifndef HEARTBEAT_INTERVAL_MS
 #define HEARTBEAT_INTERVAL_MS 30000UL
@@ -146,19 +152,44 @@ inline constexpr uint32_t kScanDebounceMs = 2000UL;
 /// call gets planned for as a four-second one.
 inline constexpr uint16_t kHttpConnectTimeoutMs = 4000U;
 
-/// The RESPONSE half. A genuinely slow answer is retried on the next heartbeat
+/// The HEADER half: how long `HTTPClient::POST` may wait for the status line
+/// and the headers. A genuinely slow answer is retried on the next heartbeat
 /// rather than allowed to hold the loop — and therefore the release deadline
 /// and the watchdog — for the core's five-second default.
+///
+/// It is an INTER-BYTE timeout, which is why it bounds the header phase only
+/// nominally: a peer that dribbles headers resets it on every byte and no
+/// number here bounds that. See kWorstBlockingCallMs's precondition.
 inline constexpr uint16_t kHttpResponseTimeoutMs = 4000U;
 
-/// The longest ONE blocking call can take while the port honours its timeouts.
+/// THE BODY PHASE'S OWN BUDGET, sampled AFTER the headers return.
+///
+/// It used to have none of its own. Round G2 gave `readBody` an absolute
+/// deadline computed from the instant the WHOLE call started, so a connect and
+/// a header phase that between them spent eight seconds left the body a
+/// deadline already in the past — and a 4.6 KB roster that was arriving
+/// perfectly well was reported as a transport failure before a byte of it was
+/// read. Three phases on one peer, three budgets of the same size, and their
+/// sum is what the watchdog is asserted against.
+///
+/// Four seconds is ~37 kbit/s for the largest response the contract allows
+/// (4096 bytes), which is a club WiFi having a genuinely bad day rather than a
+/// club WiFi being busy.
+inline constexpr uint16_t kHttpBodyBudgetMs = 4000U;
+
+/// The longest ONE blocking call can take while the port honours its budgets.
 ///
 /// This number is the spine of three separate guarantees: the watchdog assert
 /// below, the bound on how far a physical release may overrun its deadline
 /// (GateApp.h), and the size of the scanner's receive buffer. It is derived and
-/// never written out, so changing a timeout moves all three together.
-inline constexpr uint32_t kWorstBlockingCallMs =
-    static_cast<uint32_t>(kHttpConnectTimeoutMs) + static_cast<uint32_t>(kHttpResponseTimeoutMs);
+/// never written out, so changing a budget moves all three together.
+///
+/// THREE PHASES, not two: the TCP connect, the status line and headers, and the
+/// body. The core applies the first two itself, through `setConnectTimeout` and
+/// `setTimeout`; the third is this firmware's own, in `gatelogic::readBody`.
+inline constexpr uint32_t kWorstBlockingCallMs = static_cast<uint32_t>(kHttpConnectTimeoutMs) +
+                                                 static_cast<uint32_t>(kHttpResponseTimeoutMs) +
+                                                 static_cast<uint32_t>(kHttpBodyBudgetMs);
 
 /// What the watchdog must have left over the worst call: enough for a whole
 /// pass, the ESP32's own housekeeping and the idle delay, several times over.
@@ -188,7 +219,7 @@ inline constexpr uint32_t kEventRetryStartMs = 15000UL;
 inline constexpr uint32_t kEventRetryMaxMs = 300000UL;
 
 /// The most CONSECUTIVE passes a scan may take the pass's one blocking call
-/// while a heartbeat is already due.
+/// while an UPLOAD — a due heartbeat or a ready event drain — is waiting for it.
 ///
 /// The member at the door wins the pass — that is the whole reason the scanner
 /// is drained first — but a scanner that never stops talking would otherwise
@@ -196,7 +227,40 @@ inline constexpr uint32_t kEventRetryMaxMs = 300000UL;
 /// roster ages out. Four passes is at most four worst-case calls of delay on a
 /// cadence measured in tens of seconds, which no door can notice, and it is a
 /// bound rather than a hope.
-inline constexpr uint8_t kMaxScanPassesBeforeHeartbeat = 4U;
+///
+/// IT SAID `Heartbeat` AND COVERED ONLY THE HEARTBEAT, which round G2 asked for
+/// and round G3 measured: with a scan offered every 210 ms the heartbeat kept
+/// its cadence (116 in an hour) and the EVENT DRAIN posted nothing at all for
+/// the whole hour, so an evening of offline entries sat in a ring that then
+/// overflowed silently. Both uploads are bounded by this one counter now.
+inline constexpr uint8_t kMaxScanPassesBeforeUpload = 4U;
+
+/// THE FLOOR UNDER THE HEARTBEAT, whatever armed it.
+///
+/// `pumpLink` re-arms the heartbeat to "now" on every link-UP edge, because the
+/// heartbeat is what fills the roster and until it has, an offline scan is
+/// refused. On a board whose radio is flapping — a door at the edge of the AP's
+/// range, which is where doors are — that is one heartbeat PER PASS: measured
+/// at 179 999 in a simulated hour against a cadence of 120, an API the club
+/// would read as an attack and a board that spends its whole life in a connect.
+///
+/// So no heartbeat is ATTEMPTED within this of the previous ATTEMPT — attempt,
+/// not success, because a failing call must not be retried faster than a
+/// succeeding one. Fifteen seconds bounds the flapping case at 240 an hour,
+/// twice the healthy cadence, and equals `devlink::kMinHeartbeatMs`, which is
+/// the shortest interval the server is allowed to push: the floor can therefore
+/// never make the board disobey a cadence it was told to keep.
+inline constexpr uint32_t kMinHeartbeatSpacingMs = 15000UL;
+
+/// The ceiling on every diagnostic counter that rides in the heartbeat request.
+///
+/// `no_push` and `events_lost` are both since-boot totals bound as a signed
+/// 64-bit value by the API, which ignores a negative or oversized one rather
+/// than answering 400. A counter that wrapped would report a board that has
+/// lost 4 billion events as a healthy one, so they saturate here instead: a
+/// count pinned at this number means "at least this many", which is the honest
+/// reading and the one nobody has to check.
+inline constexpr uint32_t kMaxDiagnosticCount = 2147483647UL;
 
 /// The longest idle the loop ever takes. Ten milliseconds of doing nothing
 /// costs nothing a door can notice and keeps the ESP32's own housekeeping tasks
@@ -322,24 +386,31 @@ static_assert(kGateConfig.rosterMaxAgeMs > 0UL,
 static_assert(kEventRetryMaxMs < kGateConfig.rosterMaxAgeMs,
               "the event backoff cap must be well inside ROSTER_MAX_AGE_MS");
 
-/// The bound a busy scanner may put on the heartbeat, stated against what the
+/// The bound a busy scanner may put on an upload, stated against what the
 /// heartbeat is FOR rather than against its own cadence.
 ///
-/// The worst case is kMaxScanPassesBeforeHeartbeat whole blocking calls — 32 s
+/// The worst case is kMaxScanPassesBeforeUpload whole blocking calls — 48 s
 /// with this image's numbers — so a permanently busy door heartbeats at roughly
 /// twice its cadence rather than, as it used to, never. Stating it against the
 /// cadence would be the wrong comparison and would not hold: the server may
 /// push an interval as short as `devlink::kMinHeartbeatMs`. What the heartbeat
-/// protects is the roster's age and hearing a 403, and thirty-two seconds is
+/// protects is the roster's age and hearing a 403, and forty-eight seconds is
 /// under half a percent of ROSTER_MAX_AGE_MS.
-static_assert(static_cast<uint32_t>(kMaxScanPassesBeforeHeartbeat) * kWorstBlockingCallMs <
+static_assert(static_cast<uint32_t>(kMaxScanPassesBeforeUpload) * kWorstBlockingCallMs <
                   kGateConfig.rosterMaxAgeMs / 100UL,
-              "a busy scanner may delay the heartbeat by a fraction of the staleness window, never by a "
+              "a busy scanner may delay an upload by a fraction of the staleness window, never by a "
               "meaningful part of it");
 static_assert(kGateConfig.heartbeatMs >= devlink::kMinHeartbeatMs &&
                   kGateConfig.heartbeatMs <= devlink::kMaxHeartbeatMs,
               "HEARTBEAT_INTERVAL_MS is outside what devlink::Cadence will adopt, so the board would "
               "start at a cadence it can never return to");
+
+/// The spacing floor may never be longer than the shortest cadence the server
+/// is allowed to push. If it were, a board told to heartbeat every 15 s would
+/// quietly heartbeat at the floor instead and nothing would say so.
+static_assert(kMinHeartbeatSpacingMs <= devlink::kMinHeartbeatMs,
+              "kMinHeartbeatSpacingMs is longer than the shortest interval devlink::Cadence will adopt, "
+              "so the board would silently disobey a cadence the server pushed");
 
 static_assert(kGateConfig.eventQueueSlots >= 1U, "a queue of nothing records nothing");
 

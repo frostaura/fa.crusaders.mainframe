@@ -190,18 +190,34 @@ private:
   WiFiClient& client_;
 };
 
+/// The one response header this port collects.
+///
+/// `HTTPClient` parses `Transfer-Encoding` for its own `writeToStream()` and
+/// exposes the result NOWHERE — `getSize()` is -1 for a chunked body and for a
+/// close-delimited one alike, which is precisely the ambiguity that took every
+/// door offline. `collectHeaders` is the only way to ask, and it must be called
+/// before the request.
+/// Not `const char* const[]`: the core's `collectHeaders` takes `const char*[]`
+/// and a pointer-to-const-pointer does not convert to it.
+const char* kCollectedHeaders[] = {"Transfer-Encoding"};
+
+/// Whether a collected `Transfer-Encoding` names the chunked coding.
+///
+/// Case-insensitive and tolerant of a `chunked` at the END of a coding list
+/// (`gzip, chunked`), which is where RFC 7230 §3.3.1 requires it to be if it is
+/// present at all. `indexOf` rather than an equality test for that reason.
+bool headerSaysChunked(const String& value) {
+  String lowered = value;
+  lowered.toLowerCase();
+  return lowered.indexOf("chunked") >= 0;
+}
+
 } // namespace
 
-uint16_t Esp32HttpPort::post(const char* path, const char* body, char* out, size_t outCap) {
+gatelogic::HttpOutcome Esp32HttpPort::post(const char* path, const char* body, char* out, size_t outCap) {
   if (baseUrl_ == nullptr || authorization_ == nullptr || authorization_[0] == '\0') {
-    return 0U;
+    return gatelogic::noCall();
   }
-
-  // THE WHOLE CALL'S DEADLINE, sampled before anything can spend any of it.
-  // The body phase gets whatever is left of kWorstBlockingCallMs after the
-  // connect and the headers, which is what makes that number true of this port
-  // rather than an aspiration about two timeouts the peer can reset.
-  const uint32_t deadlineAtMs = clock_.nowMs() + gatelogic::kWorstBlockingCallMs;
 
   // Sized from the grammar main.cpp static_asserts API_BASE_URL against, so
   // "the base URL fits" is a compile-time fact rather than a runtime 0 that
@@ -209,26 +225,51 @@ uint16_t Esp32HttpPort::post(const char* path, const char* body, char* out, size
   char url[gatelogic::kUrlBufSize];
   const int written = snprintf(url, sizeof(url), "%s%s", baseUrl_, path);
   if (written < 0 || static_cast<size_t>(written) >= sizeof(url)) {
-    return 0U;
+    return gatelogic::noCall();
   }
 
   WiFiClient client;
   HTTPClient http;
   if (!http.begin(client, url)) {
-    return 0U;
+    return gatelogic::noCall();
   }
-  // TWO timeouts, and a call can spend BOTH: setConnectTimeout bounds the TCP
-  // handshake, setTimeout bounds waiting for bytes afterwards. Their sum is
+
+  // ASK FOR HTTP/1.0, AND THIS IS THE WHOLE OF THE ROUND-G3 CRITICAL.
+  //
+  // Kestrel answers every device route `Transfer-Encoding: chunked` with no
+  // Content-Length and HOLDS THE SOCKET OPEN, because HTTPClient's default is
+  // keep-alive. A reader that stops when the peer closes therefore never
+  // stopped: every call on a real board spent its whole budget and returned a
+  // transport failure, the roster never loaded, and the door refused everyone.
+  // Nothing in this repository could see it — no test read a real socket.
+  //
+  // Over HTTP/1.0 the same server answers close-delimited: no chunking, and
+  // `Connection: close`. `useHTTP10(true)` ALSO sets `_reuse = false` in this
+  // core; `setReuse(false)` is written out anyway so the intent survives a core
+  // that stops doing that, and so the two facts a reader needs — how the body
+  // is framed, and that the socket will close — are both asked for here rather
+  // than inherited.
+  //
+  // BELT AND BRACES, not belt alone: `gatelogic::readBody` de-chunks too. A
+  // proxy in front of the API may re-chunk to a 1.0 client even though it may
+  // not, and that proxy would otherwise take every door in the club out of
+  // service with nothing to say why.
+  http.useHTTP10(true);
+  http.setReuse(false);
+  http.collectHeaders(kCollectedHeaders, sizeof(kCollectedHeaders) / sizeof(kCollectedHeaders[0]));
+  // THREE PHASES, AND A CALL CAN SPEND ALL THREE: setConnectTimeout bounds the
+  // TCP handshake, setTimeout bounds waiting for header bytes afterwards, and
+  // the BODY phase below is this firmware's own. Their sum is
   // gatelogic::kWorstBlockingCallMs, which the watchdog period is asserted
   // against and the release-overrun bound is stated in terms of.
   //
-  // NEITHER OF THEM BOUNDS A PEER THAT DRIBBLES, because setTimeout is an
+  // NONE OF THEM BOUNDS A PEER THAT DRIBBLES, because setTimeout is an
   // INTER-BYTE timeout: one byte every three seconds resets it for ever. The
-  // BODY phase is bounded by `deadlineAtMs` above, which the peer cannot reset.
+  // BODY phase is bounded by an absolute deadline the peer cannot reset.
   // HTTPClient's own HEADER loop, inside POST(), still is not — there is no way
   // to interrupt it from here — and that case is the watchdog's, deliberately.
-  // It is the one precondition on the 8 010 ms release-overrun sentence, and it
-  // is why the watchdog exists rather than being belt and braces.
+  // It is the one precondition on the 12 010 ms release-overrun sentence, and
+  // it is why the watchdog exists rather than being belt and braces.
   http.setConnectTimeout(gatelogic::kHttpConnectTimeoutMs);
   http.setTimeout(gatelogic::kHttpResponseTimeoutMs);
   http.addHeader("Content-Type", "application/json");
@@ -240,22 +281,43 @@ uint16_t Esp32HttpPort::post(const char* path, const char* body, char* out, size
   // in the driver rather than anywhere a decision lives.
   const int status = http.POST(const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(body)), strlen(body));
 
+  // THE BODY'S DEADLINE IS SAMPLED HERE, AFTER THE HEADERS.
+  //
+  // Round G2 sampled it before `POST()` from the whole call's budget, so a
+  // connect and a header phase that between them spent eight seconds handed the
+  // body a deadline already in the past — a perfectly good roster reported as a
+  // transport failure before a byte of it was read. Each phase gets its own
+  // budget and `kWorstBlockingCallMs` is their sum.
+  const uint32_t bodyDeadlineAtMs = clock_.nowMs() + gatelogic::kHttpBodyBudgetMs;
+
   // NO String, NO getString(). The body goes into the caller's buffer a byte at
-  // a time, under the caller's cap and this call's deadline, and one that does
-  // not fit is refused rather than truncated — see gatelogic/ResponseBody.h for
-  // what the truncation used to cost.
+  // a time, under the caller's cap and the body phase's own deadline, and one
+  // that does not fit is refused rather than truncated — see
+  // gatelogic/ResponseBody.h for what the truncation used to cost.
+  //
+  // AND THE FRAMING IS PASSED IN RATHER THAN GUESSED. `getSize()` is the
+  // Content-Length or -1, and -1 means chunked OR close-delimited — two bodies
+  // that end in completely different places. The collected `Transfer-Encoding`
+  // is what tells them apart.
   gatelogic::BodyResult read = gatelogic::BodyResult::Ok;
   if (status > 0 && out != nullptr && outCap > 0U) {
+    const gatelogic::BodyFrame frame =
+        gatelogic::frameFromHeaders(http.getSize(), headerSaysChunked(http.header("Transfer-Encoding")));
     HttpResponseStream stream(client);
-    read = gatelogic::readBody(stream, clock_, deadlineAtMs, http.getSize(), out, outCap);
+    read = gatelogic::readBody(stream, clock_, bodyDeadlineAtMs, frame, out, outCap);
   }
   http.end();
 
   // A negative status is an HTTPClient error code, not an HTTP status. It maps
   // to 0 — "the request never completed" — which is the one answer that says
   // nothing about what the server thinks, and the only one the breaker counts.
-  // So does a body that did not fit or did not arrive.
-  return gatelogic::statusForBody(status > 0 ? static_cast<uint16_t>(status) : 0U, read);
+  // So does a body that did not fit, did not arrive, or did not frame.
+  //
+  // `peerStatus` keeps what the server said regardless, for the ONE caller that
+  // needs to tell a failed body apart from a silent host: the heartbeat's
+  // `no_push`. Nothing else may branch on it — see gatelogic/HttpPort.h.
+  const uint16_t peerStatus = status > 0 ? static_cast<uint16_t>(status) : 0U;
+  return gatelogic::HttpOutcome{gatelogic::statusForBody(peerStatus, read), peerStatus};
 }
 
 // --- link -------------------------------------------------------------------
