@@ -32,7 +32,25 @@ import { test as base, type Page } from "@playwright/test";
  * </p>
  */
 
-export type ApiRoute = { method?: string; path: string; status?: number; body: unknown };
+/**
+ * `respond` answers from the REQUEST rather than from a canned body, and wins over `body`.
+ *
+ * <p>
+ * A canned body pins nothing about what was sent. The Devices screen cleared a door's name
+ * with a wire value the API treats as "leave it alone", and both the unit test and this spec
+ * stayed green because each answered the PATCH with an already-cleared row whatever it was
+ * handed. A route that applies the API's own rule makes the wrong value fail here for the
+ * reason it fails in production.
+ * </p>
+ */
+export type ApiRoute = {
+  method?: string;
+  path: string;
+  status?: number;
+  /** The canned answer. Optional only when `respond` supplies one instead. */
+  body?: unknown;
+  respond?: (request: { method: string; path: string; body: unknown }) => unknown;
+};
 
 export const SESSION_ADMIN = {
   tenant_slug: "crusaders",
@@ -70,10 +88,18 @@ export async function serveApi(page: Page, routes: ApiRoute[]) {
       return;
     }
 
+    let body = match.body;
+    if (match.respond) {
+      const raw = route.request().postData();
+      let parsed: unknown;
+      try { parsed = raw ? JSON.parse(raw) : undefined; } catch { parsed = raw; }
+      body = match.respond({ method, path: url.pathname, body: parsed });
+    }
+
     await route.fulfill({
       status: match.status ?? 200,
       contentType: "application/json",
-      body: JSON.stringify(match.body),
+      body: JSON.stringify(body),
     });
   });
 }
