@@ -63,6 +63,12 @@ ScanDecision onGateResponse(uint16_t status, const char* body, size_t len, uint3
   // none, and a proxy's error page must not be able to open a door.
   if (status == 403U) {
     setReason(decision, kReasonOutOfService);
+    // And the ROSTER goes, not just this scan. Denying the scan in front of us
+    // and keeping the roster would leave the next link drop admitting every
+    // rostered member again — which is the window the whole 403 rule exists to
+    // close, and the scan path is often the first one a board speaks on after
+    // an admin presses the button.
+    decision.outOfService = true;
     return decision;
   }
 

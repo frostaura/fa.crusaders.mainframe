@@ -3,6 +3,31 @@
 #include "timebase/TimeBase.h"
 
 namespace gatelogic {
+namespace {
+
+/// A declared length this buffer could never hold.
+///
+/// Refused BEFORE a byte is read: the peer has already said how long it is, and
+/// pulling a megabyte through a 4.6 KB buffer to discover it does not fit spends
+/// the call's whole deadline learning something the first header line said.
+/// `<` and not `<=`: the terminator needs a byte too.
+bool declaredLengthFits(int expectedLength, size_t outCap) {
+  return expectedLength == kUnknownBodyLength ||
+         (expectedLength > kUnknownBodyLength && static_cast<size_t>(expectedLength) < outCap);
+}
+
+/// Whether the body is over.
+///
+/// A declared length is over when it is in. One the peer never declared is over
+/// when the peer has hung up AND has nothing left buffered — a socket closed
+/// with bytes still readable is the end of the connection, not the end of the
+/// body.
+bool bodyIsComplete(IResponseStream& stream, int expectedLength, size_t have) {
+  return expectedLength == kUnknownBodyLength ? (!stream.connected() && stream.available() <= 0)
+                                              : have >= static_cast<size_t>(expectedLength);
+}
+
+} // namespace
 
 BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadlineAtMs, int expectedLength,
                     char* out, size_t outCap) {
@@ -10,43 +35,29 @@ BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadli
     return BodyResult::TooLarge;
   }
   out[0] = '\0';
-
-  // REFUSED BEFORE A BYTE IS READ. The peer has already said how long it is,
-  // and pulling a megabyte through a 4.6 KB buffer to discover it does not fit
-  // spends the call's whole deadline learning something the first header line
-  // said. `>=` and not `>`: the terminator needs a byte too.
-  if (expectedLength != kUnknownBodyLength &&
-      (expectedLength < 0 || static_cast<size_t>(expectedLength) >= outCap)) {
+  if (!declaredLengthFits(expectedLength, outCap)) {
     return BodyResult::TooLarge;
   }
 
-  size_t n = 0U;
-  for (;;) {
-    if (expectedLength != kUnknownBodyLength && n == static_cast<size_t>(expectedLength)) {
-      break;
-    }
-
+  size_t have = 0U;
+  while (!bodyIsComplete(stream, expectedLength, have)) {
     if (stream.available() > 0) {
       const int value = stream.read();
       if (value >= 0) {
-        if (n + 1U >= outCap) {
+        if (have + 1U >= outCap) {
           // NEVER TRUNCATED. Emptied, so a caller that ignores the result reads
           // an absent body rather than a plausible half of one.
           out[0] = '\0';
           return BodyResult::TooLarge;
         }
-        out[n] = static_cast<char>(value);
-        ++n;
+        out[have] = static_cast<char>(value);
+        ++have;
         continue;
       }
-      // available() said yes and read() said no. Not a spin: this falls into
-      // the wait below, where the deadline is checked.
+      // available() said yes and read() said no. Not a spin: this falls through
+      // to the wait below, where the deadline is checked.
     }
 
-    // Nothing to read. Either the body is over, or this is waiting for it.
-    if (expectedLength == kUnknownBodyLength && !stream.connected() && stream.available() <= 0) {
-      break;
-    }
     if (tb::reached(clock.nowMs(), deadlineAtMs)) {
       out[0] = '\0';
       return BodyResult::Timeout;
@@ -54,7 +65,7 @@ BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadli
     stream.idle();
   }
 
-  out[n] = '\0';
+  out[have] = '\0';
   return BodyResult::Ok;
 }
 

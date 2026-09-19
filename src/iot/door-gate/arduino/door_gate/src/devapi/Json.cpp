@@ -252,67 +252,94 @@ bool nextUnsignedElement(const char* body, size_t len, size_t& at, uint32_t& out
   return readUnsigned(body, len, at, out);
 }
 
-bool isCompleteObject(const char* body, size_t len) {
-  if (body == nullptr) {
-    return false;
-  }
-  size_t at = skipSpace(body, len, 0U);
-  if (at >= len || body[at] != '{') {
-    return false;
-  }
+namespace {
 
-  // THE OPENERS, not just how many of them. One bit per level: 1 is an object,
-  // 0 is an array. Counting alone let `{"a":1]` close the document, which is
-  // the cut-body case this whole function exists to refuse.
+/// The opener stack, as one word.
+///
+/// Bit `depth` is 1 when the container opened at that level was `{` and 0 when
+/// it was `[`. Remembering the KIND is the whole difference between this and a
+/// depth counter, which let `{"a":1]` reach zero and declare a cut body whole.
+struct Nesting {
   uint32_t openers = 0U;
   uint32_t depth = 0U;
-  size_t past = 0U;
-  bool closed = false;
-  while (at < len && !closed) {
-    if (body[at] == '"') {
+
+  /// False when the document nests deeper than the stack holds.
+  bool open(char opener) {
+    if (depth >= kMaxNesting) {
+      return false;
+    }
+    if (opener == '{') {
+      openers |= (1UL << depth);
+    } else {
+      openers &= ~(1UL << depth);
+    }
+    ++depth;
+    return true;
+  }
+
+  /// False when nothing is open, or when `closer` does not match its opener.
+  bool close(char closer) {
+    if (depth == 0U) {
+      return false;
+    }
+    --depth;
+    return ((openers & (1UL << depth)) != 0U) == (closer == '}');
+  }
+
+  bool balanced() const { return depth == 0U; }
+};
+
+/// Scans from the `{` at `at` to its matching `}` and answers the position just
+/// past it. kNotFound when the body was cut short, when a closer does not match
+/// its opener, or when it nests deeper than Nesting holds.
+size_t pastBalancedObject(const char* body, size_t len, size_t at) {
+  Nesting nesting;
+  while (at < len) {
+    const char c = body[at];
+    if (c == '"') {
       // Through endOfString, the one authority on where a string ends, so a
       // brace inside a value — or an escaped quote — cannot be miscounted here
       // in a way the field readers would not miscount.
       const size_t end = endOfString(body, len, at);
       if (end == kNotFound) {
-        return false; // unterminated: the body was cut inside a string
+        return kNotFound; // unterminated: the body was cut inside a string
       }
       at = end + 1U;
       continue;
     }
-    if (body[at] == '{' || body[at] == '[') {
-      if (depth >= kMaxNesting) {
-        // Deeper than the stack holds. Refused rather than guessed at: the
-        // caller is about to replace something with this.
-        return false;
+    if (c == '{' || c == '[') {
+      if (!nesting.open(c)) {
+        return kNotFound;
       }
-      if (body[at] == '{') {
-        openers |= (1UL << depth);
-      } else {
-        openers &= ~(1UL << depth);
+    } else if (c == '}' || c == ']') {
+      if (!nesting.close(c)) {
+        return kNotFound;
       }
-      ++depth;
-    } else if (body[at] == '}' || body[at] == ']') {
-      if (depth == 0U) {
-        return false; // a closer with nothing open
-      }
-      --depth;
-      const bool wasObject = (openers & (1UL << depth)) != 0U;
-      if (wasObject != (body[at] == '}')) {
-        return false; // a closer that does not match its opener
-      }
-      if (depth == 0U) {
-        past = at + 1U;
-        closed = true;
+      if (nesting.balanced()) {
+        return at + 1U;
       }
     }
     ++at;
   }
+  return kNotFound;
+}
 
+} // namespace
+
+bool isCompleteObject(const char* body, size_t len) {
+  if (body == nullptr) {
+    return false;
+  }
+  const size_t at = skipSpace(body, len, 0U);
+  if (at >= len || body[at] != '{') {
+    return false;
+  }
+
+  const size_t past = pastBalancedObject(body, len, at);
   // Nothing after the outermost `}` but whitespace. A second document, or any
   // trailing byte, is a buffer this reader does not understand — and the caller
   // asking is about to replace something with it.
-  return closed && skipSpace(body, len, past) >= len;
+  return past != kNotFound && skipSpace(body, len, past) >= len;
 }
 
 } // namespace json

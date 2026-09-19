@@ -2387,6 +2387,40 @@ void test_app_a_403_on_events_takes_the_board_out_of_service_too() {
     TEST_ASSERT_TRUE_MESSAGE(rig.roster.everLoaded(), "empty, not never-loaded");
   }
 
+  // AND THE SCAN PATH, which is often the first one of all: an admin presses
+  // the button while a member is at the door. Denying that one scan and keeping
+  // the roster would leave the NEXT link drop admitting every rostered member
+  // again, which is the window the whole 403 rule exists to close.
+  //
+  // Found by probing the claim "a 403 on any of the three device paths commits
+  // an empty roster" against the code, where it was true of two of them.
+  {
+    Rig rig(kBaseMid);
+    rig.boot(true);
+    const roster::Entry entries[] = {booking("MEMBERTOKEN1", 0U, 86399000U)};
+    loadRoster(rig.roster, rig.clock.value(), entries, 1U);
+
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathGate, 403U, "", 0U);
+    rig.http.forget();
+
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.tick();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, rig.http.callsTo(gatelogic::kPathGate), "the scan has to have gone");
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "a 403 on the scan path denies");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, rig.roster.size(),
+                                    "and empties the roster, like the same word anywhere else");
+    TEST_ASSERT_TRUE(rig.roster.everLoaded());
+
+    // So the link drop that follows finds nothing to admit anybody with.
+    rig.link.set(false);
+    rig.tick();
+    rig.debounce.reset();
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.tick();
+    TEST_ASSERT_FALSE(rig.lock.released());
+  }
+
   // AND THE WHOLE SEQUENCE, which is what made the round-G2 critical dangerous
   // rather than merely wasteful: a board with an event in its ring — every
   // board, after `begin()` — that the club disables, and then a link drop.

@@ -150,6 +150,16 @@ struct ScanDecision {
   /// tell it later.
   bool queueEvent = false;
 
+  /// THE CLUB TOOK THIS BOARD OUT OF SERVICE, said on the scan path.
+  ///
+  /// Carried as a flag rather than inferred from `reason`, because the caller
+  /// has to act on it — it EMPTIES THE ROSTER, exactly as the same word on the
+  /// heartbeat and the event drain does. Denying only this scan would leave the
+  /// roster intact, so the next link drop is a door admitting every rostered
+  /// member again; and the scan path is often the first one a board speaks on
+  /// after an admin presses the button.
+  bool outOfService = false;
+
   /// Only meaningful when queueEvent. GateOpen for an open this board decided,
   /// UnknownScan for a refusal it decided.
   eventq::Kind eventKind = eventq::Kind::UnknownScan;

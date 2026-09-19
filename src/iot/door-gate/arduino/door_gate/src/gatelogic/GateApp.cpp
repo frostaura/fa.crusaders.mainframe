@@ -232,6 +232,11 @@ void GateApp::decideScan(const char* token) {
   // round trip on a three-second grant a 100-millisecond relay pulse: the door
   // did not open, and the server logged an entry.
   const uint32_t now = clock_.nowMs();
+  if (decision.outOfService) {
+    // The same authoritative word as on the heartbeat and the event drain, on
+    // whichever of the three paths this board happened to speak on first.
+    commitEmptyRoster();
+  }
   if (decision.fallbackToRoster) {
     decision = fromRoster(roster_.decide(token, roster::CourtCount(1U), now), unlockMs_,
                           kGateConfig.unlockHardCapMs);
