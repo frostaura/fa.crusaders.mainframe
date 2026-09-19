@@ -1,0 +1,219 @@
+#include "bridgelogic/ScanFlow.h"
+
+#include <stdio.h>
+#include <string.h>
+
+namespace bridgelogic {
+
+namespace {
+
+/// Every refusal the contract can name, and what a member reads for it. Held
+/// as a table so the strings sit in one place and the host suite can assert
+/// each one; a `reason` this build does not know falls to the last row.
+struct ReasonLines {
+  const char* reason;
+  const char* line1;
+  const char* line2;
+};
+
+constexpr ReasonLines kReasons[] = {
+    {"no_booking", "NO BOOKING", "SEE THE DESK"},
+    {"insufficient_balance", "TOO FEW CREDITS", "TOP UP & RETRY"},
+    {"wrong_court", "WRONG COURT", "SEE THE DESK"},
+    {"not_recognised", "NOT RECOGNISED", "SEE THE DESK"},
+    {"not_chargeable", "SEE THE DESK", ""},
+    // A scan inside the grace window after the slot ended: stamped as
+    // attendance, nothing left to light. The same screen granted() paints for
+    // an older API's activated:true with zero seconds — one situation, one
+    // screen, whichever way the API says it. A decision, never a fallback: the
+    // roster still holds the booking and would light the court the API just
+    // said was over.
+    {"ended", "SLOT ENDED", "SEE THE DESK"},
+};
+
+/// The one reason that says the API did NOT identify anybody. Every other
+/// reason is a verdict about a known member — no booking, no credit, wrong
+/// court, too early — and a known member may still buy time at the buttons.
+constexpr char kNotRecognised[] = "not_recognised";
+
+court::Outcome refusal(const char* line1, const char* line2, bool recognised) {
+  court::Outcome outcome;
+  outcome.action = court::Action::Refuse;
+  outcome.court = eventq::Event::kNoCourt;
+  outcome.recognised = recognised;
+  court::detail::setLine(outcome.line1, line1);
+  court::detail::setLine(outcome.line2, line2);
+  return outcome;
+}
+
+/// "TOO EARLY" is the one refusal with a number in it: how long to wait, from
+/// `starts_in_seconds`. The same wording as the roster's own TooEarly, so a
+/// member sees one screen for one situation whichever path decided it.
+court::Outcome tooEarly(const char* body, size_t len) {
+  uint32_t startsIn = 0U;
+  if (!devapi::json::unsignedField(body, len, "starts_in_seconds", startsIn)) {
+    return refusal("TOO EARLY", "SEE THE DESK", true);
+  }
+  court::Outcome outcome = refusal("TOO EARLY", "", true);
+  const uint32_t ms = startsIn > UINT32_MAX / 1000U ? UINT32_MAX : startsIn * 1000U;
+  court::detail::setLineWithMinutes(outcome.line2, "WAIT ", ms, " MIN");
+  return outcome;
+}
+
+court::Outcome refusedFor(const char* body, size_t len) {
+  char reason[24] = {};
+  if (devapi::json::stringField(body, len, "reason", reason, sizeof(reason))) {
+    if (strcmp(reason, "too_early") == 0) {
+      return tooEarly(body, len);
+    }
+    for (const ReasonLines& row : kReasons) {
+      if (strcmp(reason, row.reason) == 0) {
+        return refusal(row.line1, row.line2, strcmp(reason, kNotRecognised) != 0);
+      }
+    }
+    // A reason this build does not know is still a reason ABOUT somebody: the
+    // API only has verdicts for members it identified.
+    return refusal("SEE THE DESK", "", true);
+  }
+  // No reason at all. Nothing says who scanned, so nobody is recognised.
+  return refusal("SEE THE DESK", "", false);
+}
+
+ActivationResult fallback() {
+  ActivationResult result;
+  result.fallbackToRoster = true;
+  return result;
+}
+
+ActivationResult granted(uint32_t grantedSeconds, uint8_t relay) {
+  ActivationResult result;
+
+  if (grantedSeconds == 0U) {
+    // Activated with nothing left to grant: a rescan inside the post-slot
+    // grace window. The wire clamps every ON up to one second, so passing this
+    // through was a one-second relay pulse, a "1 MIN" screen and a spent scan.
+    // It is a refusal, and the member is told which one.
+    result.outcome = refusal("SLOT ENDED", "SEE THE DESK", true);
+    return result;
+  }
+
+  // Clamp the SECONDS before the multiply, for the reason RelayGuard does: a
+  // value that wraps on conversion turns the longest grant into the shortest.
+  const uint32_t seconds =
+      grantedSeconds > proto::kRelayHardCapSeconds ? proto::kRelayHardCapSeconds : grantedSeconds;
+
+  result.outcome.action = court::Action::TurnOn;
+  result.outcome.court = relay;
+  result.outcome.durationMs = seconds * 1000U;
+  result.outcome.recognised = true;
+  // What the API actually granted, uncapped and saturating: the number an
+  // `!EXT` will have to honour once the ninety-minute relay cap runs out.
+  result.outcome.bookingRemainingMs =
+      grantedSeconds > UINT32_MAX / 1000U ? UINT32_MAX : grantedSeconds * 1000U;
+
+  char line1[court::kLineLen + 1U] = "COURT ?";
+  line1[6] = static_cast<char>('A' + relay);
+  court::detail::setLine(result.outcome.line1, line1);
+  court::detail::setLineWithMinutes(result.outcome.line2, "", result.outcome.durationMs, " MIN");
+
+  // Derived from the outcome, not set beside it, so the online path cannot
+  // disagree with the roster path about when a scan is spent.
+  result.disarmAuth = spendsScan(result.outcome);
+  return result;
+}
+
+} // namespace
+
+bool spendsScan(const court::Outcome& outcome) {
+  return outcome.action == court::Action::TurnOn;
+}
+
+uint32_t displayMinutes(uint32_t grantedMinutes) {
+  return grantedMinutes > kMaxDisplayMinutes ? kMaxDisplayMinutes : grantedMinutes;
+}
+
+bool relayForCourtNumber(int16_t courtNumber, const int16_t courtNumbers[devlink::kMaxCourts],
+                         uint8_t courtCount, uint8_t& relay) {
+  const uint8_t count = courtCount > devlink::kMaxCourts ? devlink::kMaxCourts : courtCount;
+  for (uint8_t i = 0U; i < count; ++i) {
+    if (courtNumbers[i] == courtNumber) {
+      relay = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool regrantsHeldCourt(const roster::Decision& decision, const HeldState held[kStateCourts],
+                       court::Outcome& out) {
+  if (decision.verdict != roster::Verdict::Allow || decision.entry.court >= kStateCourts ||
+      !held[decision.entry.court].held) {
+    return false;
+  }
+  char line1[court::kLineLen + 1U] = "COURT ? IS ON";
+  line1[6] = static_cast<char>('A' + decision.entry.court);
+  out = refusal(line1, "ALREADY LIT", true);
+  // The refusal helper has no court to attribute a scan to; this one does, and
+  // the caller binds the button window to it.
+  out.court = decision.entry.court;
+  return true;
+}
+
+size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* token) {
+  if (out == nullptr || cap == 0U || token == nullptr || mac == nullptr || mac[0] == '\0') {
+    return 0U;
+  }
+  const int n = snprintf(out, cap, "{\"mac\":\"%s\",\"method\":\"qr\",\"token\":\"%s\"}", mac, token);
+  if (n <= 0 || static_cast<size_t>(n) >= cap) {
+    out[0] = '\0';
+    return 0U;
+  }
+  return static_cast<size_t>(n);
+}
+
+Attempt ScanFlow::onScan(const LinkState& link) const {
+  const bool canAsk = link.wifiUp && !link.apiDown;
+  const bool canAct = link.courtCount > 0U;
+  return canAsk && canAct ? Attempt::Online : Attempt::RosterOnly;
+}
+
+ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body, size_t len,
+                                              const int16_t courtNumbers[devlink::kMaxCourts],
+                                              uint8_t courtCount) const {
+  if (status != 200U || body == nullptr) {
+    // Includes 0, 401, 429 and every 5xx. Only a 200 carries a decision.
+    return fallback();
+  }
+
+  bool activated = false;
+  if (!devapi::json::boolField(body, len, "activated", activated)) {
+    return fallback();
+  }
+  if (!activated) {
+    ActivationResult result;
+    result.outcome = refusedFor(body, len);
+    return result;
+  }
+
+  uint32_t grantedSeconds = 0U;
+  if (!devapi::json::unsignedField(body, len, "granted_seconds", grantedSeconds)) {
+    return fallback();
+  }
+
+  uint32_t courtNumber = 0U;
+  uint8_t relay = 0U;
+  if (!devapi::json::unsignedField(body, len, "court_number", courtNumber) ||
+      courtNumber > static_cast<uint32_t>(INT16_MAX) ||
+      !relayForCourtNumber(static_cast<int16_t>(courtNumber), courtNumbers, courtCount, relay)) {
+    // The API lit a court this box does not drive, or did not say which. It has
+    // already recorded the activation, so the roster must not be asked to light
+    // a second one; the desk untangles it.
+    ActivationResult result;
+    result.outcome = refusal("SEE THE DESK", "", true);
+    return result;
+  }
+
+  return granted(grantedSeconds, relay);
+}
+
+} // namespace bridgelogic

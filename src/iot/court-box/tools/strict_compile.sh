@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Strict compile gate for EVERY firmware project under src/iot.
+#
+# PlatformIO applies build_flags to every translation unit it compiles, including
+# vendored dependencies like the Unity test framework. Those do not survive
+# -Wconversion -Werror, and globally suppressing the warnings they trip would
+# defeat the gate for our own code as well.
+#
+# So strictness lives here instead: a syntax-only compile of OUR sources with the
+# full pedantic set as errors. Nothing third-party is in scope, so nothing
+# third-party can dilute it.
+#
+# SCOPE — why this one script covers several projects
+# ---------------------------------------------------
+# `src/iot` holds one directory per firmware project plus `shared/`, and every
+# one of them has a `lib/` under the same purity rule. A gate that covered only
+# the project it happens to live in would leave the shared libraries — the ones
+# compiled into ALL of them, where a defect is widest — checked by nothing.
+#
+# Project directories are discovered, not listed: any sibling of this project
+# that holds a `platformio.ini` and a `lib/` is in scope, so a firmware added
+# tomorrow is covered the day it appears rather than the day somebody remembers
+# this file. Pass explicit project directories (relative to src/iot) to narrow
+# it; the Makefile does that from its own IOT_PROJECTS list.
+#
+#     tools/strict_compile.sh                 every project under src/iot
+#     tools/strict_compile.sh shared court-box    just these two
+set -euo pipefail
+
+# src/iot — the parent of every firmware project, not this project's own root.
+cd "$(dirname "$0")/../.."
+
+# `mapfile` is NOT used anywhere in this file, deliberately. macOS ships bash
+# 3.2 and has since 2007 — `mapfile` arrived in bash 4 — so a `mapfile` here is a
+# gate that cannot run on the machine this firmware is developed on, which is
+# how `make lint-iot` was red locally and green in CI at the same time. Plain
+# `while read` loops work on both.
+PROJECTS=()
+if [ "$#" -gt 0 ]; then
+  for p in "$@"; do PROJECTS+=("$p"); done
+else
+  while IFS= read -r d; do
+    PROJECTS+=("$d")
+  done < <(
+    for d in */; do
+      d="${d%/}"
+      if [ -f "$d/platformio.ini" ] && [ -d "$d/lib" ]; then echo "$d"; fi
+    done | sort
+  )
+fi
+
+if [ ${#PROJECTS[@]} -eq 0 ]; then
+  # Same rule as the empty-SOURCES check below: a gate that found nothing to
+  # check has not passed, it has stopped being a gate.
+  echo "strict_compile: FAILED — no project with a platformio.ini and a lib/ under src/iot." >&2
+  exit 1
+fi
+
+LIB_ROOTS=()
+for p in "${PROJECTS[@]}"; do
+  if [ ! -d "$p/lib" ]; then
+    echo "strict_compile: FAILED — $p has no lib/ directory." >&2
+    exit 1
+  fi
+  LIB_ROOTS+=("$p/lib")
+done
+echo "strict_compile: projects: ${PROJECTS[*]}"
+
+CXX="${CXX:-g++}"
+STD="-std=gnu++17"
+STRICT=(
+  -fsyntax-only
+  -Wall -Wextra -Werror
+  -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion
+  -Wcast-align -Wcast-qual -Wnon-virtual-dtor -Woverloaded-virtual
+  -Wold-style-cast -Wswitch-enum -Wundef -Wpointer-arith
+  -Wnull-dereference -Wformat=2
+)
+
+# Pure modules only. arduino_hal/ and posix_hal/ need platform headers and are
+# covered by `pio run` for their real targets instead. The include roots are the
+# UNION across every project in scope, because a court-box library includes a
+# shared one by the same `<ns>/X.h` path PlatformIO's LDF gives it.
+INCLUDES=()
+while IFS= read -r d; do
+  INCLUDES+=("-I$d")
+done < <(find "${LIB_ROOTS[@]}" -mindepth 2 -maxdepth 2 -type d -name include \
+         -not -path '*/arduino_hal/*' -not -path '*/posix_hal/*' | sort)
+
+# hal_fakes/ IS in scope. It was excluded when this gate was written and should not
+# have been: the fakes are pure host-compilable headers, and they are test
+# infrastructure — a bug in a fake is silent and poisons every test that trusts it.
+# The one place strictness matters most is the code nothing else checks.
+SOURCES=()
+while IFS= read -r f; do
+  SOURCES+=("$f")
+done < <(find "${LIB_ROOTS[@]}" -type f \( -name '*.cpp' -o -name '*.h' \) \
+  -not -path '*/arduino_hal/*' \
+  -not -path '*/posix_hal/*' | sort)
+
+if [ ${#SOURCES[@]} -eq 0 ]; then
+  # Not a pass. A gate that reports success when it found nothing to check is the
+  # third silent-pass escape hatch this repo would have had, and the other two had
+  # both rotted into gates that could not fail.
+  echo "strict_compile: FAILED — no sources found under ${LIB_ROOTS[*]}." >&2
+  echo "  Either the tree moved or the find filters are wrong. Either way this gate" >&2
+  echo "  checked nothing, and reporting that as success is how it stops being a gate." >&2
+  exit 1
+fi
+
+echo "strict_compile: ${#SOURCES[@]} file(s), ${#INCLUDES[@]} include dir(s)"
+fail=0
+for f in "${SOURCES[@]}"; do
+  if ! "$CXX" "$STD" "${STRICT[@]}" "${INCLUDES[@]}" -x c++ "$f" 2>&1; then
+    echo "  FAIL $f"
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo "strict_compile: FAILED"
+  exit 1
+fi
+echo "strict_compile: all clean"

@@ -1,0 +1,10 @@
+{
+  "name": "devlink",
+  "version": "1.0.0",
+  "description": "Device-agnostic API-link logic every Crusaders firmware needs: the heartbeat body and the interval it adopts, one queued event as the upload body, the roster push parsed out of a heartbeat response, and the circuit breaker in front of every call. Knows nothing about relays, serial protocols or which box it is running on. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
+  "keywords": "device, api, heartbeat, roster, breaker, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": { "devapi": "*", "eventq": "*", "roster": "*", "timebase": "*" },
+  "build": { "flags": ["-I include"] }
+}
