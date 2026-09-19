@@ -244,12 +244,21 @@ jobs:
       - name: Strict compile — full pedantic set as errors
         run: src/iot/court-box/tools/strict_compile.sh
 
+      # The exclusions are the HAL-IMPLEMENTATION directories, by name: one per
+      # board family. A new firmware's HAL has to be added here, to the same list
+      # in the Makefile's lint-iot, and to the one in strict_compile.sh.
+      #
+      # The header families are per board family too. ESP32 brought four the
+      # ESP8266 never had — HTTPClient, Preferences, HardwareSerial and the whole
+      # esp_* / driver/ / soc/ IDF set — and a regex that only knew the 8266's
+      # would have let an esp_task_wdt.h into pure lib/ and broken the host build
+      # of every project at once.
       - name: Purity gate — pure lib/ must not include Arduino headers
         run: |
           if grep -rn --include=*.h --include=*.cpp \
-               -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal)' \
-               src/iot/shared/lib src/iot/court-box/lib \
-               --exclude-dir=arduino_hal --exclude-dir=posix_hal; then
+               -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal|HTTPClient|Preferences|HardwareSerial|EEPROM|SPI|esp_|driver/|soc/)' \
+               src/iot/shared/lib src/iot/court-box/lib src/iot/door-gate/lib \
+               --exclude-dir=arduino_hal --exclude-dir=posix_hal --exclude-dir=esp32_hal; then
             echo "::error::pure lib/ modules must stay free of Arduino headers so they compile for the host"
             exit 1
           fi
@@ -267,6 +276,7 @@ jobs:
         run: |
           if grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)|millis\(\) *(>=|<=|>|<)|(>=|<=|>|<) *millis\(\)|(>=|<=|>|<) *[A-Za-z_][A-Za-z0-9_]*\.at\b' \
                src/iot/shared/lib src/iot/court-box/lib src/iot/court-box/src \
+               src/iot/door-gate/lib src/iot/door-gate/src \
                --include=*.cpp --include=*.h 2>/dev/null \
                | grep -v 'lib/timebase'; then
             echo "::error::use tb::reached() or tb::Deadline — a direct comparison breaks at the 49.7-day millis() wrap"
@@ -291,6 +301,7 @@ jobs:
       - name: Complexity (C++, C# and TypeScript)
         run: |
           lizard src/iot/shared/lib src/iot/court-box/lib src/iot/court-box/src \
+            src/iot/door-gate/lib src/iot/door-gate/src \
             src/backend/Crusaders.Mainframe.Api src/frontend/src \
             -C 15 -L 200 -a 6 -W whitelizard.txt \
             -x '*/Migrations/*' -x '*/node_modules/*' -x '*/.pio/*' -x '*/.venv/*' \
@@ -344,25 +355,39 @@ jobs:
       - name: Install pinned toolchain
         run: pip install -r src/iot/requirements.txt
 
-      # court_bridge now #errors without secrets.h, and secrets.h is gitignored
-      # because it holds a real WiFi password and the club's device API key. CI has
-      # neither and needs neither: the four values only have to EXIST for the
-      # preprocessor, and a build made from them is a compile check, never an
-      # artifact anybody flashes. Written here rather than committed as an example
-      # copy so that a developer who forgets their own still gets the #error.
-      - name: Write a throwaway secrets.h
+      # court_bridge and door_gate both #error without their project's own
+      # secrets.h, and secrets.h is gitignored because it holds a real WiFi
+      # password and the club's device API key. CI has neither and needs neither:
+      # the four values only have to EXIST for the preprocessor, and a build made
+      # from them is a compile check, never an artifact anybody flashes. Written
+      # here rather than committed as an example copy so that a developer who
+      # forgets their own still gets the #error.
+      #
+      # ONE FILE PER PROJECT. They are not shared and must not be: a symlink or a
+      # single file reached from both would make a change to one board's
+      # credentials a change to the other's.
+      - name: Write a throwaway secrets.h for each board project
         run: |
           set -euo pipefail
-          cat > src/iot/court-box/src/common/secrets.h <<'SECRETS'
+          for project in court-box door-gate; do
+            cat > "src/iot/$project/src/common/secrets.h" <<'SECRETS'
           #pragma once
           #define WIFI_SSID "ci-build-only"
           #define WIFI_PASSWORD "ci-build-only"
           #define API_BASE_URL "http://127.0.0.1:8088"
           #define DEVICE_API_KEY "ci-build-only-not-a-real-key"
           SECRETS
+          done
 
       - name: Build court_mega, court_bridge and the simulator
         run: pio run -d src/iot/court-box -e court_mega -e court_bridge -e simulator
+
+      # A separate step from the court box's so a red gate names the board that
+      # broke. The espressif32 platform is a few hundred megabytes of Xtensa
+      # toolchain on a cold cache; the pio-boards cache entry above is keyed on
+      # every project's platformio.ini, so a pin change is what re-downloads it.
+      - name: Build door_gate
+        run: pio run -d src/iot/door-gate -e door_gate
 
       # The Arduino IDE is the DEPLOYMENT route and src/iot/court-box/arduino/ is generated,
       # so a source or platformio.ini change that was not re-exported would leave a

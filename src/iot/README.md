@@ -9,6 +9,7 @@ libraries, and nothing else.
 |---|---|
 | [`shared/`](shared/) | The libraries every Crusaders device needs and no device owns: rollover-safe time, the HAL ports and their fakes, hex, the firmware-version string, the device API client, the event queue, the roster cache, and `devlink` — the heartbeat body, the event-upload body, the roster push and the API circuit breaker. Builds for **no board at all**; its `platformio.ini` carries host test environments only. |
 | [`court-box/`](court-box/) | The **court light box**: WeMos Mega 2560 + onboard ESP8266, four court-light relays, an LCD, a button panel and a QR scanner — plus the native simulator and the generated Arduino IDE sketches that are the flashing route. Everything here is true of *this* hardware. Start at [`court-box/README.md`](court-box/README.md). |
+| [`door-gate/`](door-gate/) | The **door gate**: one ESP32 per door, a QR scanner on `Serial2`, one relay on the lock and one LED. Pull-only, online-first with a roster fallback, and a lock asserted LOCKED before its pin is ever an output. Start at [`door-gate/README.md`](door-gate/README.md). |
 
 A firmware project reaches the shared libraries with one line in its own
 `platformio.ini`:
@@ -69,20 +70,56 @@ make arduino-check   # regenerate and fail if the committed sketches are stale
 Flashing, the wiring, the DIP block and everything else about the court box is
 in [`court-box/README.md`](court-box/README.md).
 
-## Adding a third firmware project
+## Adding a fourth firmware project
 
-1. Create `src/iot/<name>/` with its own `platformio.ini` (copy `court-box`'s
+1. Create `src/iot/<name>/` with its own `platformio.ini` (copy `door-gate`'s
    `[platformio]`, `[common]`, `[strict_host]` and `[env]` blocks — `[env]` is
-   the `lib_extra_dirs` line), plus `src/`, `lib/` and `test/`.
-2. Append `<name>` to **`IOT_PROJECTS`** in the repository `Makefile`, and to
-   `IOT_BUILD_PROJECTS` if it compiles for a board. That is the whole of it:
-   lint, both host suites, the purity and rollover gates and the complexity
-   gate all follow the list.
-3. Add its jobs' paths to `.github/workflows/ci.yml` where a step names a
-   project directly — the board build, the Arduino compile and the simulator
-   smoke test are per-project by nature; the host-test and lint steps are not.
+   the `lib_extra_dirs` line). `[common]` and `[strict_host]` are kept
+   **byte-identical across every project**: the shared libraries are compiled by
+   all of them, and a flag that differs between them is a library that behaves
+   differently depending on which suite ran it. A firmware with its own version
+   number unflags `[common]`'s `FW_VERSION_*` in its BOARD environment rather
+   than editing that block — see `door-gate`'s `[env:door_gate]`.
+2. Add `src/`, `lib/` and `test/`.
+3. Append `<name>` to **`IOT_PROJECTS`** in the repository `Makefile`, and to
+   `IOT_BUILD_PROJECTS` if it compiles for a board. That covers lint, every host
+   suite, the purity and rollover gates and the complexity gate, which all follow
+   the list — but NOT `build-iot`, whose environments are named per project
+   because they are per project by nature.
+4. Add its steps to `.github/workflows/ci.yml` where one names a project
+   directly: the board build, the throwaway `secrets.h`, the purity, rollover and
+   complexity path lists, the Arduino compile and the simulator smoke test. The
+   host-test and lint steps follow the Makefile's list and need nothing.
+5. If it has a HAL-implementation directory, add that directory's NAME to the
+   purity exclusions in **three** places — `Makefile`'s `lint-iot`,
+   `ci.yml`'s purity step, and `court-box/tools/strict_compile.sh` — and extend
+   the forbidden-include regex with any header family the new board brings.
+   ESP32 brought `HTTPClient`, `Preferences`, `HardwareSerial` and the whole
+   `esp_*` / `driver/` / `soc/` IDF set, none of which the ESP8266 pattern knew.
 
-The purity rule (no Arduino headers anywhere under any `lib/` except
-`arduino_hal/` and `posix_hal/`) and the rollover rule (never compare `millis()`
+The purity rule (no Arduino headers anywhere under any `lib/` except the HAL
+implementations named above) and the rollover rule (never compare `millis()`
 values directly — use `tb::reached` or `tb::Deadline`) apply to every project in
 this tree and are gated for all of them at once.
+
+### The Arduino IDE export covers the court box only
+
+`make arduino-export` generates `court-box/arduino/` and nothing else. The
+generator, `court-box/tools/arduino_export.py`, reads a hard-coded `PROJECT`
+(its own parent directory), a hard-coded two-entry `TARGETS` list, a hard-coded
+`BRIDGE_SUBS` rewrite table, a `CORES` pin naming `arduino:avr` and
+`esp8266:esp8266`, and a `render_readme()` that is ~135 lines of court-box prose
+— DIP-switch tables, LCD screens, two sketch folders.
+
+Its mechanical half — the `platformio.ini` reader, the `#include` closure across
+both library roots, the include rewriting, the `lib_deps` vendoring, the
+`build_config.h` emitter and the iCloud duplicate sweep — is fully generic and
+needs no change. **Generalising it to a third target in another project means:**
+making `PROJECT` a `--project` argument and threading it through the eight places
+it is used; moving `TARGETS`, the secrets rewrite table, `CORES` and the board
+index URL into a per-project table; replacing `render_readme()` with one template
+per project; extending `make arduino-export` / `arduino-check` to run and diff
+both trees; and adding an `esp32:esp32` core install plus an `arduino-cli
+compile --fqbn esp32:esp32:esp32` step to the `iot-build` job, whose core
+download is a few hundred megabytes on a cold cache. Until all of that is done
+the gate is flashed from PlatformIO, which `door-gate/README.md` documents.

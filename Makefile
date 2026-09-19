@@ -17,8 +17,8 @@
 # host suites, ASAN, complexity — covers it. IOT_BUILD_PROJECTS is the subset
 # that has boards to compile; `shared` has none, which is the whole point of it.
 IOT_DIR = src/iot
-IOT_PROJECTS = shared court-box
-IOT_BUILD_PROJECTS = court-box
+IOT_PROJECTS = shared court-box door-gate
+IOT_BUILD_PROJECTS = court-box door-gate
 IOT_PROJECT_DIRS = $(addprefix $(IOT_DIR)/,$(IOT_PROJECTS))
 IOT_LIB_DIRS = $(addsuffix /lib,$(IOT_PROJECT_DIRS))
 IOT_SRC_DIRS = $(wildcard $(addsuffix /src,$(IOT_PROJECT_DIRS)))
@@ -102,11 +102,22 @@ IOT_FORMAT_FILES = git ls-files -co --exclude-standard \
 # arduino_hal and posix_hal, which live under court-box/lib, and a gate that
 # looked at one project would leave the shared libraries — the ones compiled
 # into ALL the firmwares — checked by nothing.
+#
+# The purity exclusions are the HAL-IMPLEMENTATION directories, by name: one per
+# board family. A new firmware's HAL has to be added to this list AND to the same
+# list in .github/workflows/ci.yml, or the gate fails on the one directory that
+# is allowed to include what it includes.
+#
+# The header families are likewise per-board. ESP32 brought four the ESP8266
+# never had — HTTPClient, Preferences, HardwareSerial and the whole esp_* IDF
+# set — and a regex that only knew the 8266's would have let an esp_task_wdt.h
+# into pure lib/ and broken the host build of every project at once.
 lint-iot:
 	$(CLANG_FORMAT) --dry-run -Werror $$($(IOT_FORMAT_FILES))
 	$(IOT_TOOLS)/strict_compile.sh $(IOT_PROJECTS)
-	@! grep -rn --include=*.h --include=*.cpp -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal)' \
-	    $(IOT_LIB_DIRS) --exclude-dir=arduino_hal --exclude-dir=posix_hal \
+	@! grep -rn --include=*.h --include=*.cpp \
+	    -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal|HTTPClient|Preferences|HardwareSerial|EEPROM|SPI|esp_|driver/|soc/)' \
+	    $(IOT_LIB_DIRS) --exclude-dir=arduino_hal --exclude-dir=posix_hal --exclude-dir=esp32_hal \
 	  || (echo 'pure lib/ must not include Arduino headers' && exit 1)
 	@! grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)|millis\(\) *(>=|<=|>|<)|(>=|<=|>|<) *millis\(\)|(>=|<=|>|<) *[A-Za-z_][A-Za-z0-9_]*\.at\b' \
 	    $(IOT_LIB_DIRS) $(IOT_SRC_DIRS) --include=*.cpp --include=*.h 2>/dev/null | grep -v 'lib/timebase' \
@@ -124,8 +135,18 @@ build: lint build-iot
 #
 # Only IOT_BUILD_PROJECTS: `shared` compiles for no board by design, and asking
 # PlatformIO to `run` it would be asking it to build nothing and say so.
+#
+# The ENVIRONMENTS are named per project rather than looped, because they are
+# per project by nature — the court box has three targets and the gate has one,
+# and `pio run` with no `-e` would also build each project's native environments
+# for nothing. A fourth project is a fourth line here.
+#
+# Both board projects `#error` without their own src/common/secrets.h, which is
+# gitignored. That is what stops an image being built with a blank in it; it also
+# means this target cannot run on a fresh checkout until both exist.
 build-iot:
 	$(PIO) run -d $(IOT_DIR)/court-box -e court_mega -e court_bridge -e simulator
+	$(PIO) run -d $(IOT_DIR)/door-gate -e door_gate
 
 # Tests — unit
 test: test-iot
