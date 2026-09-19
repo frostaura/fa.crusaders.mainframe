@@ -510,6 +510,48 @@ public class DeviceGateTests
     }
 
     /// <summary>
+    /// <b>The admin carve-out does not leak into the booking code's own window.</b> A club
+    /// admin presenting a booking code before that booking opens is <c>too_early</c> like
+    /// anybody else.
+    ///
+    /// <para>
+    /// Found by probing the claim rather than by a finder: "club admins always pass" is true
+    /// of the POLICY check and the spec says so, but a reader — or the next person to move
+    /// the carve-out "somewhere more central" — will read it as "admins always get in". They
+    /// do not: an admin is held to the membership check (above) and to the credential's own
+    /// scope (here), and only the booking check is waived. Without this the sentence had one
+    /// of its two limits pinned.
+    /// </para>
+    ///
+    /// <para>
+    /// The admin's own ident code at the same instant is the probe: it opens, so the refusal
+    /// is the CODE's window and not something about being an admin at a door.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(GateAccessPolicies.ActiveMember)]
+    [InlineData(GateAccessPolicies.BookingWindow)]
+    public async Task A_club_admins_booking_code_is_bounded_by_its_own_window_too(string policy)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var now = DateTimeOffset.UtcNow;
+        var booking = await BookAsync(f, f.Host.Courts[0], now.AddHours(6), userId: f.Host.AdminUser.Id);
+        var settings = Policy(f, policy);
+
+        var decision = await DecideAsync(f, GateOn(f), settings, await BookingCodeAsync(f, booking), now);
+        Assert.False(decision.Opened);
+        Assert.Equal(GateAccess.TooEarly, decision.Reason);
+
+        // …and the same admin, same instant, with an ident code, walks in — under
+        // booking_window that is the carve-out, and under active_member it is the default.
+        var ident = await IdentCodeAsync(f, f.Host.AdminUser.Id, now.AddMinutes(1));
+        Assert.True((await DecideAsync(f, GateOn(f), settings, ident, now)).Opened);
+    }
+
+    /// <summary>
     /// A member with neither a membership row nor a booking is still refused. The staff
     /// carve-out is for club admins, and "no membership row" on its own must not become a
     /// way in.

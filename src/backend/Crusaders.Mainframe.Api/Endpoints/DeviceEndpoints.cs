@@ -103,7 +103,9 @@ public static class DeviceEndpoints
             // booking in the roster window, each of which opens every door in the club for
             // the length of its booking. Naming the door is the admin's acknowledgement that
             // the board is one of theirs, and it is the cheapest possible gate on the only
-            // call that hands out credentials.
+            // call that hands a caller OTHER MEMBERS' live codes in bulk. (/me/qr/generate
+            // hands a member their own, one at a time, authenticated as them — a different
+            // thing, and not this risk.)
             //
             // Online scans are unaffected, so an install stays plug-and-play: what waits for
             // the admin is the OFFLINE fallback. The list is still always present and still

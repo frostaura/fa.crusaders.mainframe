@@ -34,8 +34,9 @@ Oracle: `docs/specs/door-gate.md` §5, §7 and §10a.
   `roster: []`). *Why:* auto-registration is the whole provisioning story, so anything holding the
   club key can invent a MAC, register a "gate", and be answered with the club's live access codes
   for every booking in the roster window. Naming the door is the admin's acknowledgement, and it
-  is the cheapest gate available on the only call that hands out credentials. Online scans work
-  from the first heartbeat, so an install stays plug-and-play; what waits is the fallback.
+  is the cheapest gate available on the only call that hands a caller OTHER members' live codes
+  in bulk. Online scans work from the first heartbeat, so an install stays plug-and-play; what
+  waits is the fallback.
 - **`403` is authoritative and nothing else is.** It means the club took the board out of service:
   deny the scan with no roster fallback, and commit an empty roster on a 403 heartbeat.
   401/404/408/429/5xx/0/malformed-200 all fall back, because they are evidence about the link

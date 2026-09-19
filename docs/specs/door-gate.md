@@ -150,8 +150,9 @@ door in the club for the length of its booking. Self-registering a "gate" was a 
 server for the club-wide code set on demand, and nothing about it looked like an attack.
 
 Naming the door is the admin's acknowledgement that the board is one of theirs. It is the
-cheapest gate available on the only call that hands out credentials, and it costs a real
-install nothing, because:
+cheapest gate available on **the only call that hands a caller other members' live codes in
+bulk** — `/me/qr/generate` hands a member their own, one at a time, authenticated as them,
+which is a different thing — and it costs a real install nothing, because:
 
 - **online scans work from the first heartbeat**, so the board is useful the moment it is
   powered; and
@@ -290,9 +291,12 @@ passed only because it deleted the row first. There is **no operator role in thi
 where earlier versions of this document said "operator", the answer is "club admin" or
 nothing.
 
-The carve-out is on the booking check alone. An admin is held to step 4 exactly as everybody
-is: a club that has suspended an admin's membership has said something about that person, and
-a door is not where it gets quietly undone.
+**The carve-out is on step 6 alone, and it has two limits, both pinned.** An admin is held to
+step 4 exactly as everybody is — a club that has suspended an admin's membership has said
+something about that person, and a door is not where it gets quietly undone — and to step 5
+exactly as everybody is, so an admin presenting a booking code before that booking opens gets
+`too_early` like anyone. "Club admins always pass" is a sentence about the booking check, not
+about doors.
 
 ### A booking code is not a standing building key
 
@@ -759,6 +763,7 @@ new sentence above with no row is the defect this table exists to expose.
 | Only a `Booked` booking counts | `DeviceGateTests.A_booking_that_is_not_live_does_not_open_the_door` |
 | Club admins always pass the booking check, and nobody else does | `DeviceGateTests.A_club_admin_passes_the_booking_check_and_nobody_else_does`, `DeviceGateHttpTests.A_club_admin_with_a_membership_and_no_booking_still_opens_the_door`, `DeviceGateTests.A_non_admin_with_no_membership_and_no_booking_is_still_refused` |
 | An admin is still held to the membership check | `DeviceGateTests.A_suspended_club_admin_is_refused_by_name_under_either_policy` |
+| An admin is still held to a booking code's own window | `DeviceGateTests.A_club_admins_booking_code_is_bounded_by_its_own_window_too` |
 | A booking code opens the booking it names | `DeviceGateTests.A_booking_code_opens_the_door_for_the_booking_it_names` |
 | A booking code opens only inside its own booking's window, under either policy | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` |
 | `too_early` before the window, `not_recognised` after it | same test, and `DeviceGateHttpTests.A_booking_code_presented_too_early_is_refused_as_a_200_and_audited` |
@@ -797,10 +802,12 @@ new sentence above with no row is the defect this table exists to expose.
   them off.
 - The pre-`setup()` reset window in §11.1, for the same reason: it is decided by the relay
   module's input bias and is measured on a bench, not asserted in a test.
-- Every sentence in §11 about what the *firmware* does — the release deadline's overrun bound,
-  the polarity combinations, the watchdog budget. Those are pinned in
-  `src/iot/door-gate`'s own host tests; restating the claim here and pinning it there is the
-  split this table is honest about rather than hiding.
+- Every sentence about what the *firmware* does: §11's release-deadline overrun bound, the
+  polarity combinations and the watchdog budget, and §7's right-hand column — what a board
+  does with a `403` versus with a timeout. Those are pinned in `src/iot/door-gate`'s own host
+  tests. What is pinned here is the SERVER half: that a board out of service really is
+  refused `403` on the heartbeat and the scan. Restating the claim here and pinning it there
+  is the split this table is honest about rather than hiding.
 - §7's residual and all of §10a: they are statements about what the system does **not**
   guarantee, and a test cannot pin an absence of a guarantee. They are here so that nobody
   infers the guarantee from the surrounding text.
