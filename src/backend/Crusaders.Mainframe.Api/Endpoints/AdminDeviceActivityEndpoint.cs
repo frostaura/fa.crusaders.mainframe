@@ -170,9 +170,20 @@ public static class AdminDeviceActivityEndpoint
     /// <c>device.updated</c> an offline open, and keying it on the kind would need a list that
     /// goes stale the first time a board learns a new one.
     /// </para>
+    ///
+    /// <para>
+    /// Block body, not an expression one: lizard's C# parser mis-scopes an expression-bodied
+    /// member containing braces — <c>details is { } root</c> is enough — into a <c>*global*</c>
+    /// pseudo-function the length of the file, which then fails the length gate. See
+    /// <c>memory/gotchas.md</c>.
+    /// </para>
     /// </summary>
-    private static bool Offline(JsonElement? details) =>
-        details is { } root && root.ValueKind == JsonValueKind.Object && root.TryGetProperty("seq", out _);
+    private static bool Offline(JsonElement? details)
+    {
+        return details is { } root
+            && root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("seq", out _);
+    }
 
     /// <summary>Who the row named, with the name the club knows them by — or null.</summary>
     private static object? Member(Guid? subjectUserId, IReadOnlyDictionary<Guid, string> names)
