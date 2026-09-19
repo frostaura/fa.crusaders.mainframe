@@ -1286,6 +1286,23 @@ public:
     reply.set(status, body, latencyMs);
   }
 
+  /// An `/events` endpoint that acknowledges exactly ONE event per call,
+  /// counting up from `firstSeq` — which is how the queue numbers them.
+  ///
+  /// The obvious fixture answers `accepted_through: 4294967295` and empties the
+  /// whole ring in a single post, which is a drain that STOPS rather than one
+  /// that is busy. A board back from an outage has sixty-four events and posts
+  /// them one at a time, and that — not a refusal — is the case where the
+  /// drain's position in the pass is the only thing keeping the heartbeat
+  /// alive. A per-call override table cannot express it either: it would need
+  /// one row per event.
+  void acknowledgeOneAtATime(const char* path, uint32_t firstSeq, uint32_t latencyMs) {
+    PathState& state = pathState(path);
+    state.countingFrom = firstSeq;
+    state.counting = true;
+    state.standing.set(200U, "", latencyMs);
+  }
+
   /// The answer for the `nth` call to `path` (0-based), overriding both the
   /// path's standing answer and the every-path default for that one call.
   void onCall(const char* path, uint16_t nth, uint16_t status, const char* body, uint32_t latencyMs) {
@@ -1347,13 +1364,25 @@ public:
     if (calls_ < kMaxCalls) {
       exited_[calls_] = clock_.value();
     }
+
+    // The counting body is rendered from THIS call's index, before it is
+    // counted. A per-call override still wins: a scenario that scripts one call
+    // of a counting path is asking for that one to be different.
+    char counted[64] = {};
+    const bool scripted = scriptedFor(state) != nullptr;
+    if (state.counting && !scripted) {
+      snprintf(counted, sizeof(counted), "{\"accepted_through\":%u}",
+               static_cast<unsigned>(state.countingFrom + state.calls));
+    }
+
     ++calls_;
     ++state.calls;
 
     strncpy(lastPath_, path, sizeof(lastPath_) - 1U);
     lastPath_[sizeof(lastPath_) - 1U] = '\0';
     if (out != nullptr && outCap > 0U) {
-      strncpy(out, reply.set_ ? reply.body : answer_, outCap - 1U);
+      const char* body = counted[0] != '\0' ? counted : (reply.set_ ? reply.body : answer_);
+      strncpy(out, body, outCap - 1U);
       out[outCap - 1U] = '\0';
     }
     return reply.set_ ? reply.status : status_;
@@ -1365,6 +1394,12 @@ public:
   void forget() {
     calls_ = 0U;
     for (size_t i = 0U; i < paths_; ++i) {
+      // A counting path is RE-BASED rather than restarted. Forgetting the count
+      // is about the scenario's assertions; restarting the acknowledgements
+      // would have the server re-acknowledge an event it already took, which is
+      // "no progress" and would silently turn a busy drain into a backed-off
+      // one.
+      path_[i].countingFrom += path_[i].calls;
       path_[i].calls = 0U;
     }
   }
@@ -1403,6 +1438,8 @@ private:
     char path[64] = {};
     Reply standing;
     uint32_t calls = 0U;
+    uint32_t countingFrom = 0U;
+    bool counting = false;
   };
 
   struct Scripted {
@@ -1426,15 +1463,20 @@ private:
 
   Reply& pathReply(const char* path) { return pathState(path).standing; }
 
+  const Reply* scriptedFor(const PathState& state) const {
+    for (size_t i = 0U; i < scripted_; ++i) {
+      if (strcmp(script_[i].path, state.path) == 0 && script_[i].nth == state.calls) {
+        return &script_[i].reply;
+      }
+    }
+    return nullptr;
+  }
+
   /// Per-call beats per-path beats every-path. An empty Reply falls through to
   /// the every-path default in post().
   const Reply& replyFor(const PathState& state) const {
-    for (size_t i = 0U; i < scripted_; ++i) {
-      if (strcmp(script_[i].path, state.path) == 0 && script_[i].nth == state.calls) {
-        return script_[i].reply;
-      }
-    }
-    return state.standing;
+    const Reply* scripted = scriptedFor(state);
+    return scripted != nullptr ? *scripted : state.standing;
   }
 
   fakes::FakeClock& clock_;
@@ -2199,6 +2241,13 @@ void test_app_a_refusing_events_endpoint_never_starves_the_heartbeat() {
 /// E1(b). The backoff RESETS once the drain makes progress, so a transient
 /// refusal does not leave a healthy board posting one event every five minutes
 /// for the rest of the evening.
+///
+/// THE ACKNOWLEDGEMENT IS ONE EVENT AT A TIME, DELIBERATELY. The obvious
+/// fixture answers `accepted_through: 4294967295`, which empties the whole ring
+/// in a single post — and a single post cannot show whether the NEXT one would
+/// have waited out another backoff window. A mutation that never reset the
+/// backoff survived that fixture. One event per acknowledgement is what makes
+/// the second post's timing the thing under test.
 void test_app_the_event_backoff_resets_once_the_drain_moves_again() {
   Rig rig(kBaseMid);
   rig.boot(true);
@@ -2215,11 +2264,78 @@ void test_app_the_event_backoff_resets_once_the_drain_moves_again() {
   const uint32_t refusals = rig.http.callsTo(gatelogic::kPathEvents);
   TEST_ASSERT_TRUE_MESSAGE(refusals >= 1U && refusals <= 8U, "a minute of refusals is a handful of posts");
 
-  // The rate limiter lifts. The queue must drain at the loop's own pace from
-  // the next attempt, not at the backoff's.
-  rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
-  rig.runFor(60000UL);
-  TEST_ASSERT_TRUE_MESSAGE(rig.queue.empty(), "the queue must drain once the endpoint recovers");
+  // The rate limiter lifts. Each post from here acknowledges exactly its own
+  // head — the queue numbers events consecutively — so each one is progress and
+  // each one must clear the backoff.
+  eventq::Event head;
+  TEST_ASSERT_TRUE(rig.queue.peek(head));
+  rig.http.forget(); // per-call indices count from here
+  for (uint16_t n = 0U; n < 3U; ++n) {
+    char ack[64] = {};
+    snprintf(ack, sizeof(ack), "{\"accepted_through\":%u}", head.seq + n);
+    rig.http.onCall(gatelogic::kPathEvents, n, 200U, ack, 0U);
+  }
+
+  // WHEN each event left, not just that it did. The whole property is a gap:
+  // three events that leave 15 s, 30 s and 60 s apart have also "drained".
+  uint32_t leftAt[3] = {};
+  uint16_t seen = 0U;
+  uint16_t size = rig.queue.size();
+  for (uint32_t i = 0U; i < 200000U && seen < 3U; ++i) {
+    rig.tick();
+    if (rig.queue.size() < size) {
+      size = rig.queue.size();
+      leftAt[seen] = rig.clock.value();
+      ++seen;
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT16_MESSAGE(3U, seen, "three acknowledged events must leave");
+
+  // The FIRST waits out whatever window the refusals armed — that is the
+  // backoff working. The SECOND and THIRD must not: progress cleared it, so
+  // they go out on the passes that follow rather than 15 s and 30 s later.
+  TEST_ASSERT_TRUE_MESSAGE(tb::since(leftAt[1], leftAt[0]) < gatelogic::kEventRetryStartMs,
+                           "the drain stayed on its backoff after making progress");
+  TEST_ASSERT_TRUE_MESSAGE(tb::since(leftAt[2], leftAt[1]) < gatelogic::kEventRetryStartMs,
+                           "the drain stayed on its backoff after making progress");
+}
+
+/// E1(a) ON ITS OWN, WITHOUT THE BACKOFF DOING THE WORK.
+///
+/// The backoff pins the REFUSING drain. It says nothing about a drain that is
+/// succeeding — every post moves the queue, so the backoff never arms — and a
+/// board back from an outage has a full ring and every reason to be slow.
+/// Sixty-four events at a worst-case round trip apiece is eight and a half
+/// minutes in which, with the drain ahead of the heartbeat, the board would not
+/// heartbeat once. Its roster would go on ageing throughout, and a link drop in
+/// the middle of it is a door deciding from an hours-old cache.
+///
+/// MUTATION-PROVED, and it is the reason this test exists: swapping
+/// `pumpHeartbeat()` and `pumpEvents()` back left every other test in this file
+/// green, because the backoff alone was enough for all of them.
+void test_app_a_full_ring_draining_slowly_still_lets_the_heartbeat_through() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  queueOfflineEvents(rig, 24U);
+  TEST_ASSERT_TRUE_MESSAGE(rig.queue.size() >= 20U, "the scenario needs a ring with real work in it");
+
+  // Every post succeeds and takes a worst-case call, so the backoff never arms
+  // and the drain is the only thing competing for the pass.
+  eventq::Event head;
+  TEST_ASSERT_TRUE(rig.queue.peek(head));
+  rig.http.acknowledgeOneAtATime(gatelogic::kPathEvents, head.seq, gatelogic::kWorstBlockingCallMs);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, gatelogic::kWorstBlockingCallMs);
+  rig.link.set(true);
+  rig.tick();
+  rig.http.forget();
+
+  // Four minutes, in which eight heartbeats are due.
+  rig.runFor(240000UL);
+
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathEvents) > 0U,
+                           "the drain has to be working for this to prove anything");
+  TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathHeartbeat) >= 4U,
+                           "a busy but healthy event drain took every pass and the heartbeat never ran");
 }
 
 /// E1(c). A 403 on `/events` is the SAME authoritative word as a 403 on
@@ -2232,34 +2348,66 @@ void test_app_the_event_backoff_resets_once_the_drain_moves_again() {
 /// heard its own 403, kept its roster, and admitted every rostered member for
 /// the next six hours from behind a door the admin believed was shut.
 void test_app_a_403_on_events_takes_the_board_out_of_service_too() {
-  Rig rig(kBaseMid);
-  rig.boot(true);
-  const roster::Entry entries[] = {booking("MEMBERTOKEN1", 0U, 86399000U)};
-  loadRoster(rig.roster, rig.clock.value(), entries, 1U);
-  queueOfflineEvents(rig, 2U);
+  // THE DRAIN HEARS IT FIRST, which is the half a heartbeat-only rule misses.
+  //
+  // The club disables a board a second after its last heartbeat, so for the
+  // rest of that interval the only path this board speaks on is the event
+  // drain. A healthy heartbeat sitting beside a 403 `/events` is not a state
+  // the API produces — the device route group's 403 means one thing and means
+  // it everywhere — which is precisely what makes it the right probe: it
+  // isolates whether the DRAIN acts on the word, or whether the roster survives
+  // until the heartbeat happens to ask thirty seconds later.
+  {
+    Rig rig(kBaseMid);
+    rig.boot(true);
+    queueOfflineEvents(rig, 2U);
 
-  // Out of service: every device path answers 403.
-  rig.http.answer(403U, "");
-  rig.link.set(true);
-  rig.tick();
-  rig.http.forget();
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 403U, "", 0U);
+    rig.link.set(true);
+    rig.tick(); // the link edge takes a heartbeat, which fills the roster
+    rig.http.forget();
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, rig.roster.size(), "the scenario needs a roster to empty");
 
-  // One heartbeat interval, with slack for the pass the link edge costs.
-  rig.runFor(2U * gatelogic::kGateConfig.heartbeatMs);
+    // A tenth of a heartbeat interval: nowhere near the next one.
+    rig.runFor(gatelogic::kGateConfig.heartbeatMs / 10U);
+    TEST_ASSERT_TRUE_MESSAGE(rig.http.callsTo(gatelogic::kPathEvents) > 0U, "the drain has to have posted");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, rig.http.callsTo(gatelogic::kPathHeartbeat),
+                                     "and the heartbeat must NOT be what heard it");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, rig.roster.size(),
+                                    "a 403 on the event drain is the same word as on the heartbeat");
+    TEST_ASSERT_TRUE_MESSAGE(rig.roster.everLoaded(), "empty, not never-loaded");
+  }
 
-  TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, rig.roster.size(),
-                                  "a 403 anywhere on the device API empties the roster");
-  TEST_ASSERT_TRUE_MESSAGE(rig.roster.everLoaded(), "empty, not never-loaded");
+  // AND THE WHOLE SEQUENCE, which is what made the round-G2 critical dangerous
+  // rather than merely wasteful: a board with an event in its ring — every
+  // board, after `begin()` — that the club disables, and then a link drop.
+  {
+    Rig rig(kBaseMid);
+    rig.boot(true);
+    const roster::Entry entries[] = {booking("MEMBERTOKEN1", 0U, 86399000U)};
+    loadRoster(rig.roster, rig.clock.value(), entries, 1U);
+    queueOfflineEvents(rig, 2U);
 
-  // And now the link drops — the residual case D4 names, where the board can no
-  // longer be told anything. It must already know.
-  rig.link.set(false);
-  rig.tick();
-  rig.debounce.reset();
-  rig.scanner.feed("MEMBERTOKEN1\n");
-  rig.tick();
-  TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(),
-                            "a board taken out of service must refuse a rostered member after a drop");
+    rig.http.answer(403U, ""); // out of service: every device path
+    rig.link.set(true);
+    rig.tick();
+    rig.http.forget();
+    rig.runFor(2U * gatelogic::kGateConfig.heartbeatMs);
+
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, rig.roster.size(),
+                                    "a 403 anywhere on the device API empties the roster");
+
+    // Now the link drops — the residual case D4 names, where the board can no
+    // longer be told anything. It must already know.
+    rig.link.set(false);
+    rig.tick();
+    rig.debounce.reset();
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.tick();
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(),
+                              "a board taken out of service must refuse a rostered member after a drop");
+  }
 }
 
 /// E1(b), the normal path for a board nobody has done anything to. `begin()`
@@ -2420,6 +2568,7 @@ int main(int, char**) {
 
   RUN_TEST(test_app_a_refusing_events_endpoint_never_starves_the_heartbeat);
   RUN_TEST(test_app_the_event_backoff_resets_once_the_drain_moves_again);
+  RUN_TEST(test_app_a_full_ring_draining_slowly_still_lets_the_heartbeat_through);
   RUN_TEST(test_app_a_403_on_events_takes_the_board_out_of_service_too);
   RUN_TEST(test_app_a_boot_event_the_server_never_acknowledges_is_not_a_hot_loop);
   RUN_TEST(test_app_a_permanently_busy_scanner_cannot_starve_the_heartbeat);
