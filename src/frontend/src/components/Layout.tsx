@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { DoorClosed, LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
 import { ShutDoorsBanner } from "./doors/ShutDoorsBanner";
 import { useDoorsChrome } from "./doors/useDoorsChrome";
@@ -60,13 +60,10 @@ export default function Layout() {
   const location = useLocation();
   const { balance, loading } = useBalance();
   const { profile } = useProfile();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const pendingApplications = usePendingApplicationCount(
     auth.status === "authenticated" && auth.isAdmin,
     location.pathname,
   );
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
   /**
    * doors: admin — the chrome's half of the doors surface (A1.5, A2.6).
    *
@@ -119,31 +116,6 @@ export default function Layout() {
   const publicLanding =
     location.pathname === "/" && auth.status !== "authenticated" && !probablySignedIn;
 
-  // Every way out of the settings menu, including the keyboard one.
-  //
-  // Escape did nothing: only the mousedown listener existed, so a keyboard user who opened the
-  // menu could tab into it and choose an item, or tab back out, but could not dismiss it without
-  // reaching for the mouse. WAI-ARIA's menu pattern makes Escape the way out, and it also has to
-  // put focus back on the button that opened the menu — closing it while focus sits on a node
-  // that no longer exists drops the keyboard user at the top of the document.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      setMenuOpen(false);
-      menuButtonRef.current?.focus();
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
-
   if (publicLanding) {
     // No chrome, no width cap and no inner scroll container: the page lays itself out, and the
     // DOCUMENT scrolls. The app's own shell scrolls a nested <main> instead, which on a long
@@ -165,12 +137,60 @@ export default function Layout() {
 
   return (
     <div className="h-full flex flex-col">
+      {/*
+        B11 — the first thing in the DOM, and the first thing a keyboard reaches.
+        <p>
+        Nine tab stops stood between the top of the document and the page's own content: the
+        club name, five section tabs, the wallet chip, the avatar and the gear — on EVERY
+        route, so a keyboard user paid for the whole header again after every navigation.
+        </p>
+        <p>
+        `sr-only focus:not-sr-only` is the standard shape: no pixels until it is focused,
+        which is why it costs a sighted mouse user nothing. `focus:fixed` rather than
+        `focus:absolute` deliberately — the header is `sticky` and the shell has no
+        positioned ancestor here, so an absolutely-positioned link would resolve against the
+        initial containing block anyway and scroll away from the reader who just focused it.
+        </p>
+        <p>
+        The click handler is not decoration. `href="#main-content"` alone leaves the browser
+        to decide, and a fragment jump only moves FOCUS (rather than just the scroll
+        position) when the target is focusable — which is why `<main>` carries
+        `tabIndex={-1}` below. Focusing it here as well makes the behaviour the same in every
+        engine and, more to the point, testable: jsdom performs no fragment navigation at
+        all, so a skip link resting on the browser's good behaviour is a skip link nothing
+        can hold to its promise.
+        </p>
+      */}
+      <a
+        href="#main-content"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("main-content")?.focus();
+        }}
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:inline-flex focus:min-h-11 focus:items-center focus:rounded-lg focus:border focus:border-accent-strong focus:bg-bg-surface focus:px-4 focus:text-sm focus:font-medium focus:text-accent-strong focus:shadow-md"
+      >
+        Skip to main content
+      </a>
       <header className="bg-bg-surface border-b border-border sticky top-0 z-30">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-4">
-          <NavLink to="/" className="font-semibold tracking-tight whitespace-nowrap min-w-0 truncate">Crusaders Squash</NavLink>
+        {/*
+          A10 / C14 / D6 — the row WRAPS rather than overflowing.
+
+          At 200 % browser zoom on a phone, and at a 32 px root font size on a 360 px screen,
+          this row's contents are wider than the screen and every one of them is
+          `whitespace-nowrap`. It had `h-14` and no wrap, so the surplus went sideways: the
+          whole document scrolled, and the thing sliced by the right edge was the gear — the
+          only route to Doors and to Sign out.
+
+          `flex-wrap` + `min-h-[3.5rem]` is the same 56 px row at every ordinary width (the
+          content is 44 px tall, well inside the minimum) and a second line instead of a
+          horizontal scrollbar when it genuinely cannot fit. The club name still truncates
+          first, because it is the only item here that carries no action.
+        */}
+        <div className="max-w-5xl mx-auto px-4 min-h-[3.5rem] py-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <NavLink to="/" className="font-semibold tracking-tight whitespace-nowrap min-w-0 truncate [@media(pointer:coarse)]:py-2.5">Crusaders Squash</NavLink>
           {auth.status === "authenticated" && (
             // `lg`, not `md`. The inline nav switched on at 768 and the row it sits in needs
-            // 800: an admin has five tabs, and at 768 the header measured a 795px scrollWidth
+            // 800: an admin had five tabs, and at 768 the header measured a 795px scrollWidth
             // against a 768px viewport on all ten routes — 27px of whole-page sideways scroll
             // with the gear button (`Open menu`, and the only route to Sign out) running from
             // 751 to 795 and therefore sliced by the right edge. A member, with three tabs,
@@ -179,20 +199,63 @@ export default function Layout() {
             // Between 768 and 1023 the scrolling tab strip below takes over instead. It is
             // the same nav, it announces its own overflow, and it is what a phone already
             // gets — a strip that scrolls beats a gear you cannot press.
-            <nav className="hidden lg:flex items-center gap-1 text-sm min-w-0">
-              <NavTab to="/schedule" label="Bookings" />
-              <NavTab to="/my-code" label="My code" />
-              {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
-              {auth.isAdmin && <NavTab to="/admin/members" label="Members" badge={pendingApplications} />}
-              <NavTab to="/reports" label="Reports" />
+            //
+            // A20 — there are SIX admin tabs now, Doors among them, and the breakpoint did
+            // not move. Re-measured in Chromium against this build rather than reasoned
+            // about, because the five-tab number above is exactly the measurement somebody
+            // would otherwise have argued from. At 1024, with all six tabs rendered and a
+            // door needing attention (so the Doors badge is showing too): the nav measures
+            // 511–537px, the whole row uses 813–892px of the 992px its content box has, the
+            // header's scrollWidth is 1024 against a 1024px clientWidth, and the six tabs
+            // share one line. 100px of slack at the worst of several runs — the spread is
+            // the web font arriving or not before the measurement, which is why the number
+            // quoted is the widest seen rather than the prettiest. The measurement is pinned
+            // — and printed — by `e2e/narrow-viewport.spec.ts`, so a seventh tab has to
+            // argue with a number rather than with this paragraph.
+            //
+            // Below `lg` the sixth tab costs nothing at all: the strip is a scroll container
+            // by design and announces its own overflow, and the 360px volunteer admin who
+            // could not find Doors is precisely who it is there for.
+            <nav className="hidden lg:flex flex-wrap items-center gap-1 text-sm min-w-0">
+              <SectionTabs
+                isAdmin={auth.isAdmin}
+                pendingApplications={pendingApplications}
+                doorsNeedingAttention={doorsNeedingAttention}
+              />
             </nav>
           )}
-          <div className="ml-auto flex items-center gap-2 shrink-0">
+          {/*
+            `min-w-0`, where this used to say `shrink-0`.
+
+            The 795 px lesson in the nav comment above was this cluster being squeezed by the
+            nav until the gear ran past the right edge, and `shrink-0` was the fix for it.
+            With `flex-wrap` on the row that job is done better by the row itself: a cluster
+            that cannot fit beside the nav now moves to a line of its own at full width
+            rather than being compressed on a line it does not fit.
+
+            And `shrink-0` had become the thing CAUSING the overflow at the extreme. It sizes
+            this box to its max-content width and never gives it a narrower one, so the
+            `flex-wrap` on it could never fire: measured in Chromium at a 180 px CSS viewport
+            (a 360 px phone at 200 % zoom, which is exactly reviewer A's setup) the cluster
+            stayed one 167 px line inside a 148 px content box. `min-w-0` lets it take the
+            width it is given and wrap the gear onto a second line, which is the whole point:
+            the club name may truncate and the wallet chip may wrap, the gear may not vanish.
+          */}
+          <div className="ml-auto flex flex-wrap justify-end items-center gap-2 min-w-0">
             {auth.status === "authenticated" && (
               <NavLink
                 to="/wallet"
                 className={({ isActive }) => cn(
-                  "inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium tabular-nums whitespace-nowrap transition-colors",
+                  // C16 — 36 px is not a touch target. `h-11` (44 px) on a coarse pointer
+                  // only: the constraint is a fingertip, and a 44 px chip in a desktop
+                  // header is a chip that has stopped being a chip.
+                  //
+                  // D6 — `max-w-[35vw]` with the figure truncating. Every length here is
+                  // rem-based, so at a 32 px root font size this chip alone measured wider
+                  // than a third of a 360 px screen and the cluster holding it overflowed.
+                  // A viewport-relative cap is the one bound that does not scale with the
+                  // text it is bounding.
+                  "inline-flex items-center gap-1.5 h-9 [@media(pointer:coarse)]:h-11 px-3 rounded-lg text-sm font-medium tabular-nums whitespace-nowrap transition-colors min-w-0 max-w-[35vw]",
                   balance !== null && balance < LOW_BALANCE_CREDITS
                     ? "bg-warning-soft text-warning-strong hover:bg-warning-soft/80"
                     : "bg-success-soft text-success-strong hover:bg-success-soft/80",
@@ -213,10 +276,12 @@ export default function Layout() {
                 aria-label={walletLabel(balance, loading)}
                 title={loading ? "Refreshing balance…" : "Wallet balance — tap to top up"}
               >
-                <WalletIcon size={14} strokeWidth={2.25} />
+                <WalletIcon size={14} strokeWidth={2.25} className="shrink-0" />
                 {/* aria-hidden: the label above already says the number, and the visible text
-                    abbreviates it to "cr", which is not a word. */}
-                <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(balance)}</span>
+                    abbreviates it to "cr", which is not a word. `truncate` so the cap above
+                    shortens the figure rather than pushing the gear off the screen — the
+                    whole number is still in the chip's accessible name either way. */}
+                <span aria-hidden="true" className="truncate">{balance === null ? "— cr" : formatCredits(balance)}</span>
               </NavLink>
             )}
             {auth.status === "authenticated" && (
@@ -225,10 +290,14 @@ export default function Layout() {
                 aria-label="Edit profile"
                 title={profile?.full_name ?? profile?.email ?? "Profile"}
                 className={({ isActive }) => cn(
-                  "shrink-0 rounded-full overflow-hidden border-2 transition-all",
+                  // C16 / D6 — 36 px on a mouse, 44 px on a fingertip, and PIXELS rather
+                  // than the rem scale, because this was an inline `style={{width: 36}}`
+                  // and everything around it grew to 2× at a 32 px root font size while it
+                  // did not. Both halves of that are wrong: the target was too small to hit
+                  // and the cluster around it was too wide to fit.
+                  "shrink-0 rounded-full overflow-hidden border-2 transition-all w-[36px] h-[36px] [@media(pointer:coarse)]:w-[44px] [@media(pointer:coarse)]:h-[44px]",
                   isActive ? "border-accent-strong" : "border-border hover:border-accent-strong/60",
                 )}
-                style={{ width: 36, height: 36 }}
               >
                 {profile?.photo_url ? (
                   <img src={profile.photo_url} alt="" className="w-full h-full object-cover" />
@@ -240,77 +309,11 @@ export default function Layout() {
               </NavLink>
             )}
             {auth.status === "authenticated" ? (
-              <div className="relative" ref={menuRef}>
-                <button
-                  ref={menuButtonRef}
-                  onClick={() => setMenuOpen((v) => !v)}
-                  /* doors: admin — the count goes in the NAME, because a number inside a 44 px
-                     circular icon button is unreadable at 360 and a dot is not, and because
-                     colour alone is never the signal. */
-                  aria-label={doorsNeedingAttention === 0
-                    ? "Open menu"
-                    : `Open menu — ${doorsNeedingAttention} ${doorsNeedingAttention === 1 ? "door needs" : "doors need"} attention`}
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  className="relative inline-flex items-center justify-center w-11 h-11 rounded-full text-text-secondary hover:text-text-primary hover:bg-bg-muted"
-                >
-                  <SettingsIcon size={26} strokeWidth={1.75} />
-                  {doorsNeedingAttention > 0 && (
-                    <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-danger-strong" />
-                  )}
-                </button>
-                {menuOpen && (
-                  <div
-                    role="menu"
-                    className="absolute right-0 mt-2 w-56 rounded-lg border border-border bg-bg-surface shadow-lg z-40 overflow-hidden"
-                  >
-                    {auth.isAdmin && (
-                      <>
-                        {/* doors: admin — first, above Devices, and NOT a sixth tab. This file
-                            already carries the cost of the alternative in the nav comment above:
-                            five admin tabs measured a 795 px scrollWidth against a 768 px
-                            viewport, which is why the inline nav switches at `lg`. Ordered by
-                            urgency of use rather than alphabetically — Doors is opened standing
-                            in a club with a member waiting, Webhooks twice a year. `DoorClosed`,
-                            not `DoorOpen`: an open door is a state claim this product cannot
-                            make, two lines above the page whose whole discipline is not making
-                            it. */}
-                        <MenuItem
-                          onClick={() => { setMenuOpen(false); nav("/admin/doors"); }}
-                          icon={<DoorClosed size={16} />}
-                          label="Doors"
-                          badge={{
-                            count: doorsNeedingAttention,
-                            label: `${doorsNeedingAttention} ${doorsNeedingAttention === 1 ? "door needs" : "doors need"} attention`,
-                          }}
-                        />
-                        <MenuItem
-                          onClick={() => { setMenuOpen(false); nav("/admin/devices"); }}
-                          icon={<Cpu size={16} />}
-                          label="Devices"
-                        />
-                        <MenuItem
-                          onClick={() => { setMenuOpen(false); nav("/admin/settings"); }}
-                          icon={<SettingsIcon size={16} />}
-                          label="Admin settings"
-                        />
-                        <MenuItem
-                          onClick={() => { setMenuOpen(false); nav("/admin/webhooks"); }}
-                          icon={<WebhookIcon size={16} />}
-                          label="Webhooks"
-                        />
-                        <div className="border-t border-border" />
-                      </>
-                    )}
-                    <MenuItem
-                      onClick={() => { setMenuOpen(false); auth.logout(); nav("/login"); }}
-                      icon={<LogOut size={16} />}
-                      label="Sign out"
-                      tone="danger"
-                    />
-                  </div>
-                )}
-              </div>
+              <SettingsMenu
+                isAdmin={auth.isAdmin}
+                doorsNeedingAttention={doorsNeedingAttention}
+                onSignOut={() => { auth.logout(); nav("/login"); }}
+              />
             ) : auth.status === "anonymous" ? (
               <NavLink to="/login" className="text-sm font-medium text-accent-strong hover:underline">Sign in</NavLink>
             ) : null}
@@ -326,12 +329,12 @@ export default function Layout() {
           <nav className="lg:hidden border-t border-border" aria-label="Sections">
             <ScrollArea label="Section tabs">
               <div className="flex items-center gap-1 px-2 py-1 text-sm w-max">
-              <NavTab to="/schedule" label="Bookings" />
-              <NavTab to="/my-code" label="My code" />
-              {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
-              {auth.isAdmin && <NavTab to="/admin/members" label="Members" badge={pendingApplications} />}
-              <NavTab to="/reports" label="Reports" />
-            </div>
+                <SectionTabs
+                  isAdmin={auth.isAdmin}
+                  pendingApplications={pendingApplications}
+                  doorsNeedingAttention={doorsNeedingAttention}
+                />
+              </div>
             </ScrollArea>
           </nav>
         )}
@@ -346,16 +349,34 @@ export default function Layout() {
         5xl on purpose: the booking grid, the wallet and the top-up flow are mobile-first
         reading widths, and stretching them to 1280px makes them worse, not better.
       */}
-      <main className="flex-1 min-h-0 flex flex-col overflow-auto"><div className={cn(
+      {/* B11 — `id` and `tabIndex={-1}` are the skip link's other half. A fragment target
+          that is not focusable moves the SCROLL POSITION and leaves focus at the top of the
+          document, so the next Tab lands back on the club name and the skip link has
+          achieved nothing. */}
+      <main id="main-content" tabIndex={-1} className="flex-1 min-h-0 flex flex-col overflow-auto"><div className={cn(
         "w-full mx-auto px-4 py-6 flex-1 min-h-0 flex flex-col",
         location.pathname.startsWith("/admin/") ? "max-w-7xl" : "max-w-5xl",
       )}>
-        {/* doors: admin — the club-wide shut banner (A1.5 / D5), on EVERY admin route rather
-            than only the doors pages. Shut-all has no timed auto-reopen, so without this a
-            club that shut every door after an incident discovers it at 05:50 the next
-            morning with thirty members outside. */}
-        {location.pathname.startsWith("/admin/") && (
-          <ShutDoorsBanner shut={doors.shut} total={doors.total} />
+        {/*
+          doors: admin — the club-wide shut banner (A1.5 / D5), on every route an ADMIN is
+          on, not on every route whose path begins `/admin/`.
+
+          C8: those are not the same set, and the difference is the landing screen. An admin
+          signs in and arrives at `/schedule`, which is a member route by path; so are
+          `/reports`, `/wallet` and `/my-code`. A club that shut every door after an incident
+          could sign in the next morning, look at the bookings for the day and be told
+          nothing at all. Shut-all has no timed auto-reopen, so the banner is the only thing
+          that puts the state back in front of somebody.
+
+          `print:hidden` is B14 — the door card is printed and put in a cupboard beside the
+          board, and a sheet of paper carrying "the doors are shut" plus a button is a sheet
+          that will still say it in March. If the rule belongs on the banner itself, move it
+          there and drop this wrapper; hiding it twice is harmless either way.
+        */}
+        {auth.status === "authenticated" && auth.isAdmin && (
+          <div className="print:hidden">
+            <ShutDoorsBanner chrome={doors} />
+          </div>
         )}
         <Outlet />
       </div></main>
@@ -363,42 +384,311 @@ export default function Layout() {
   );
 }
 
-function NavTab({ to, label, badge = 0 }: { to: string; label: string; badge?: number }) {
+/** The count of waiting applications, as a sentence. Two call sites, one wording. */
+function pendingApplicationsLabel(count: number): string {
+  return `${count} membership ${count === 1 ? "application" : "applications"} awaiting review`;
+}
+
+/**
+ * doors: admin — the attention count, as a sentence.
+ *
+ * Three call sites now say it: the gear's accessible name, the Doors menu item's badge and
+ * the Doors tab's badge. It was written out twice before and the third copy is what turned
+ * a wording into a function.
+ */
+function doorsAttentionLabel(count: number): string {
+  return `${count} ${count === 1 ? "door needs" : "doors need"} attention`;
+}
+
+/**
+ * The section tabs, rendered twice — inline at `lg`, in the scrolling strip below it.
+ *
+ * <p>
+ * One list, not two. The two copies were written out separately and are asserted in pairs by
+ * `Layout.test.tsx` precisely because a divergence between them is invisible at any single
+ * width: whichever copy you are looking at is the one that looks right.
+ * </p>
+ */
+function SectionTabs({ isAdmin, pendingApplications, doorsNeedingAttention }: {
+  isAdmin: boolean;
+  pendingApplications: number;
+  doorsNeedingAttention: number;
+}) {
+  return (
+    <>
+      <NavTab to="/schedule" label="Bookings" />
+      <NavTab to="/my-code" label="My code" />
+      {isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
+      {isAdmin && (
+        <NavTab
+          to="/admin/members"
+          label="Members"
+          badge={{ count: pendingApplications, label: pendingApplicationsLabel(pendingApplications) }}
+        />
+      )}
+      {/* A20 — Doors is a named destination rather than a 6 px dot on a cog.
+          See the measurement note on the `lg` nav in `Layout`. */}
+      {isAdmin && (
+        <NavTab
+          to="/admin/doors"
+          label="Doors"
+          badge={{ count: doorsNeedingAttention, label: doorsAttentionLabel(doorsNeedingAttention) }}
+        />
+      )}
+      <NavTab to="/reports" label="Reports" />
+    </>
+  );
+}
+
+function NavTab({ to, label, badge }: {
+  to: string;
+  label: string;
+  /**
+   * The count and its sentence travel together, because they are one thing: the digits are
+   * decoration and the sentence is the accessible name. A zero renders nothing.
+   */
+  badge?: { count: number; label: string };
+}) {
   return (
     <NavLink
       to={to}
+      // C16 — `h-9` is 36 px, and 36 px is not a touch target. 44 px on a coarse pointer
+      // only: this strip is what a phone gets, and the same tab in a desktop header row at
+      // 44 px crowds a 56 px row for no gain.
       className={({ isActive }) =>
-        `px-3 h-9 inline-flex items-center gap-1.5 rounded-lg ${isActive ? "bg-accent-soft text-accent-strong font-medium" : "text-text-secondary hover:bg-bg-muted"}`}
+        `px-3 h-9 [@media(pointer:coarse)]:h-11 inline-flex items-center gap-1.5 rounded-lg whitespace-nowrap ${isActive ? "bg-accent-soft text-accent-strong font-medium" : "text-text-secondary hover:bg-bg-muted"}`}
     >
       {label}
-      {badge > 0 && (
+      {badge && badge.count > 0 && (
         // The number alone means nothing to a screen reader beside the word "Members", so the
         // count carries the sentence and the digits are decoration.
         <span
           className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-info-soft text-info-strong text-xs font-semibold tabular-nums"
-          aria-label={`${badge} membership ${badge === 1 ? "application" : "applications"} awaiting review`}
-          title={`${badge} awaiting review`}
+          aria-label={badge.label}
+          title={badge.label}
         >
-          {badge}
+          {badge.count}
         </span>
       )}
     </NavLink>
   );
 }
 
-function MenuItem({
-  onClick, icon, label, tone = "default", badge,
-}: {
+/** Where the next roving focus goes, or null when this key is not the menu's business. */
+function nextMenuItem(key: string, from: number, count: number): number | null {
+  if (key === "ArrowDown") return (from + 1) % count;
+  if (key === "ArrowUp") return (from - 1 + count) % count;
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
+
+/**
+ * The settings menu — a real WAI-ARIA menu button, and real links inside it.
+ *
+ * <p>
+ * B15. It declared <code>role="menu"</code> and had none of the behaviour that goes with
+ * one. Three separate failures, and the third is the one a mouse user hits too:
+ * </p>
+ *
+ * <ul>
+ * <li><b>Focus never moved into it.</b> Opening the menu from the keyboard left focus on the
+ * gear, so the first Tab went to the first item and the second left the menu — and the menu
+ * stayed open behind you, over the page, with nothing focused inside it.</li>
+ * <li><b>Tab out did not close it.</b> Escape did (and still does, returning focus to the
+ * gear), but Tab is the key a keyboard user actually presses. Closing on focusout is what
+ * handles Shift+Tab as well, and it does it AFTER the browser has moved focus, so nothing
+ * is dropped at the top of the document.</li>
+ * <li><b>The items were buttons.</b> Four of the five are navigations, and a button that
+ * navigates cannot be middle-clicked, cmd-clicked or copied — an admin who wants Doors in a
+ * second tab while keeping the page they are on simply cannot have it. They are
+ * <code>Link</code>s now; Sign out stays a button, because it is not a destination.</li>
+ * </ul>
+ *
+ * <p>
+ * Having picked the menu pattern rather than dropping <code>role="menu"</code>, the keyboard
+ * contract is implemented in full: ArrowDown / ArrowUp wrap, Home / End jump, Escape closes
+ * and restores focus. A half-implemented <code>role="menu"</code> is worse than no role at
+ * all, because a screen-reader user is told to expect arrow keys that do nothing.
+ * </p>
+ */
+function SettingsMenu({ isAdmin, doorsNeedingAttention, onSignOut }: {
+  isAdmin: boolean;
+  doorsNeedingAttention: number;
+  onSignOut: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  // Focus into the menu on open. Queried from the DOM rather than plumbed through refs:
+  // the items are conditional on `isAdmin`, so a ref array would have to be rebuilt on
+  // every render anyway and would disagree with the rendered order the moment one moves.
+  useEffect(() => {
+    if (!open) return;
+    containerRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open]);
+
+  // Escape, and a click anywhere outside. Escape puts focus back on the gear — closing the
+  // menu while focus sits on a node that is about to be unmounted drops the keyboard user
+  // at the top of the document, several tab stops from where they were.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  function onMenuKeyDown(e: React.KeyboardEvent) {
+    const items = Array.from(containerRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    if (items.length === 0) return;
+    const to = nextMenuItem(e.key, items.indexOf(document.activeElement as HTMLElement), items.length);
+    if (to === null) return;
+    e.preventDefault();
+    items[to].focus();
+  }
+
+  return (
+    <div
+      className="relative"
+      ref={containerRef}
+      /*
+        Tab-out, Shift+Tab-out, and focus leaving for any other reason.
+        <p>
+        A `relatedTarget` is REQUIRED rather than merely checked: `.focus()` moves focus
+        within the menu too, and an implementation that closed on a null relatedTarget would
+        close itself the moment the open effect above focused the first item. The cost is
+        that Tab from the last item into the browser's own chrome — which reports no
+        relatedTarget at all — leaves the menu open; the mousedown listener and Escape still
+        close it, and that is the whole of what this does not cover.
+        </p>
+      */
+      onBlur={(e) => {
+        const to = e.relatedTarget as Node | null;
+        if (to && !containerRef.current?.contains(to)) setOpen(false);
+      }}
+    >
+      <button
+        ref={buttonRef}
+        onClick={() => setOpen((v) => !v)}
+        /* doors: admin — the count goes in the NAME, because a number inside a 44 px
+           circular icon button is unreadable at 360 and a dot is not, and because
+           colour alone is never the signal. */
+        aria-label={doorsNeedingAttention === 0
+          ? "Open menu"
+          : `Open menu — ${doorsAttentionLabel(doorsNeedingAttention)}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        // 44 px in PIXELS, not `w-11`/`h-11`. The rem form doubled to 88 px at a 32 px root
+        // font size and was a third of the reason the header cluster overflowed a 360 px
+        // screen (D6) — and this is the one control in the header that must never be the
+        // thing pushed off the edge, because it is the only route to Doors and to Sign out.
+        className="relative inline-flex items-center justify-center w-[44px] h-[44px] rounded-full text-text-secondary hover:text-text-primary hover:bg-bg-muted"
+      >
+        <SettingsIcon size={26} strokeWidth={1.75} />
+        {doorsNeedingAttention > 0 && (
+          <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-danger-strong" />
+        )}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          onKeyDown={onMenuKeyDown}
+          // `max-w-[calc(100vw-16px)]`: `w-56` is 14 rem, which is 448 px at a 32 px root
+          // font size — wider than the phone it is anchored to the right edge of.
+          className="absolute right-0 mt-2 w-56 max-w-[calc(100vw-16px)] rounded-lg border border-border bg-bg-surface shadow-lg z-40 overflow-hidden"
+        >
+          {isAdmin && (
+            <>
+              {/* doors: admin — first, above Devices. Ordered by urgency of use rather than
+                  alphabetically: Doors is opened standing in a club with a member waiting,
+                  Webhooks twice a year. `DoorClosed`, not `DoorOpen` — an open door is a
+                  state claim this product cannot make, two lines above the page whose whole
+                  discipline is not making it. */}
+              <MenuLink
+                to="/admin/doors"
+                onNavigate={() => setOpen(false)}
+                icon={<DoorClosed size={16} />}
+                label="Doors"
+                badge={{ count: doorsNeedingAttention, label: doorsAttentionLabel(doorsNeedingAttention) }}
+              />
+              <MenuLink to="/admin/devices" onNavigate={() => setOpen(false)} icon={<Cpu size={16} />} label="Devices" />
+              <MenuLink to="/admin/settings" onNavigate={() => setOpen(false)} icon={<SettingsIcon size={16} />} label="Admin settings" />
+              <MenuLink to="/admin/webhooks" onNavigate={() => setOpen(false)} icon={<WebhookIcon size={16} />} label="Webhooks" />
+              <div className="border-t border-border" />
+            </>
+          )}
+          {/* A button, not a link: signing out is not a destination, and a `Link` to
+              `/login` would be openable in a new tab without ending the session. */}
+          <MenuAction
+            onClick={() => { setOpen(false); onSignOut(); }}
+            icon={<LogOut size={16} />}
+            label="Sign out"
+            tone="danger"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MENU_ITEM_CLASS = "w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition min-h-11";
+
+/** The badge shared by both kinds of menu item — a zero renders nothing. */
+function MenuBadge({ badge }: { badge?: { count: number; label: string } }) {
+  if (!badge || badge.count === 0) return null;
+  // The digits are decoration; the sentence is the name. Same rule as NavTab's badge —
+  // "2" beside the word "Doors" means nothing to a screen reader.
+  return (
+    <span
+      className="ml-auto inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-info-soft text-info-strong text-xs font-semibold tabular-nums"
+      aria-label={badge.label}
+      title={badge.label}
+    >
+      {badge.count}
+    </span>
+  );
+}
+
+/** A navigating menu item: a real anchor, so middle-click and cmd-click work (B15). */
+function MenuLink({ to, onNavigate, icon, label, badge }: {
+  to: string;
+  onNavigate: () => void;
+  icon: React.ReactNode;
+  label: string;
+  badge?: { count: number; label: string };
+}) {
+  return (
+    <Link
+      to={to}
+      role="menuitem"
+      onClick={onNavigate}
+      className={cn(MENU_ITEM_CLASS, "text-text-primary hover:bg-bg-muted")}
+    >
+      <span className="text-text-muted">{icon}</span>
+      <span>{label}</span>
+      <MenuBadge badge={badge} />
+    </Link>
+  );
+}
+
+/** A menu item that DOES something rather than going somewhere. */
+function MenuAction({ onClick, icon, label, tone = "default" }: {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
   tone?: "default" | "danger";
-  /**
-   * doors: admin — the same numeric pill NavTab uses, on the same terms: a zero renders
-   * nothing. The count and its sentence travel together because they are one thing and
-   * because two flat props put this signature over the complexity gate's parameter bound.
-   */
-  badge?: { count: number; label: string };
 }) {
   return (
     <button
@@ -406,25 +696,12 @@ function MenuItem({
       role="menuitem"
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition",
-        tone === "danger"
-          ? "text-danger-strong hover:bg-danger-soft/50"
-          : "text-text-primary hover:bg-bg-muted",
+        MENU_ITEM_CLASS,
+        tone === "danger" ? "text-danger-strong hover:bg-danger-soft/50" : "text-text-primary hover:bg-bg-muted",
       )}
     >
       <span className="text-text-muted">{icon}</span>
       <span>{label}</span>
-      {badge && badge.count > 0 && (
-        // The digits are decoration; the sentence is the name. Same rule as NavTab's badge —
-        // "2" beside the word "Doors" means nothing to a screen reader.
-        <span
-          className="ml-auto inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-info-soft text-info-strong text-xs font-semibold tabular-nums"
-          aria-label={badge.label}
-          title={badge.label}
-        >
-          {badge.count}
-        </span>
-      )}
     </button>
   );
 }
