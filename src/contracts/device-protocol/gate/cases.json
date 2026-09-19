@@ -1,0 +1,209 @@
+{
+  "device_api_key": "k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+  "device_mac": "5ccf7f0a1b2c",
+  "requests": [
+    {
+      "id": "gate-heartbeat-request",
+      "note": "the one field the court box's heartbeat does not carry: `kind`. It is a HINT, honoured only when the MAC is unknown — a board cannot re-kind a row that already exists. Absent or \"court_box\" is today's behaviour exactly; anything else is 400 kind_unknown.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/heartbeat",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226669726d776172655f76657273696f6e223a22312e302e30222c22757074696d655f6d73223a38363430303030302c226b696e64223a2267617465227d"
+    },
+    {
+      "id": "gate-scan-request",
+      "note": "a scan the gate could not answer from its roster, or chose not to. Same three fields as /device/activate minus `court` — a door is not on a court, and the row's gate_key is the server's business, not the board's.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/gate",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d6574686f64223a227172222c22746f6b656e223a2237513346394b4d32585a3842227d"
+    },
+    {
+      "id": "gate-events-request-gate-open",
+      "note": "an open the gate decided from its own roster while offline. `court` is -1 because there is no relay bank to index; `duration_ms` is how long the lock was released. The API already knows about online opens, so this kind is queued for offline ones only.",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/events",
+      "authorization": "Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU",
+      "body_hex": "7b226d6163223a22356363663766306131623263222c22757074696d655f6d73223a38363430303030302c226576656e7473223a5b7b22736571223a372c22757074696d655f6d73223a38363339303030302c226b696e64223a22676174655f6f70656e222c22636f757274223a2d312c226d6574686f64223a227172222c227375626a656374223a2237513346394b4d32585a3842222c226475726174696f6e5f6d73223a333030307d5d7d"
+    }
+  ],
+  "responses": [
+    {
+      "id": "gate-heartbeat-response-empty-roster",
+      "kind": "heartbeat",
+      "note": "`roster` is present and empty rather than absent. The firmware replaces its cache wholesale on every push, so an omitted key would leave a stale roster live — a cancelled booking is expressed by its absence from the NEXT push.",
+      "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22676174652d306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a2266726f6e742d646f6f72222c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a337d2c22726f73746572223a5b5d7d",
+      "expect": {
+        "kind": "gate",
+        "gate_key": "front-door",
+        "roster": [],
+        "heartbeat_seconds": 60,
+        "gate": {
+          "unlock_seconds": 3
+        }
+      }
+    },
+    {
+      "id": "gate-heartbeat-response-null-gate-key",
+      "kind": "heartbeat",
+      "note": "a gate nobody has named yet — auto-registration leaves gate_key null and an admin sets it. The key is still PRESENT on the wire as null: a firmware that reads an absent key as an empty string and a null one as an error would diverge here.",
+      "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22676174652d306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a6e756c6c2c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a337d2c22726f73746572223a5b5d7d",
+      "expect": {
+        "kind": "gate",
+        "gate_key": null,
+        "roster": []
+      }
+    },
+    {
+      "id": "gate-heartbeat-response-roster-single",
+      "kind": "heartbeat",
+      "note": "one rostered booking, 30 minutes from its early-entry window opening and 90 minutes from its slot ending. Same TOKEN|relay|opens_in|closes_in grammar as the court box so devlink::parseRosterElement and roster::Roster are reused unchanged; the relay field is always 0.",
+      "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22676174652d306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a2266726f6e742d646f6f72222c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a337d2c22726f73746572223a5b2237513346394b4d32585a38427c307c313830307c35343030225d7d",
+      "expect": {
+        "kind": "gate",
+        "roster": [
+          "7Q3F9KM2XZ8B|0|1800|5400"
+        ]
+      }
+    },
+    {
+      "id": "gate-heartbeat-response-roster-negative-opens",
+      "kind": "heartbeat",
+      "note": "opens_in is SIGNED and goes negative once the early-entry window is open — this member may already come in. A firmware that parsed it unsigned would read -900 as an enormous positive wait and lock out somebody whose court starts in five minutes.",
+      "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22676174652d306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a2266726f6e742d646f6f72222c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a337d2c22726f73746572223a5b224b345451384e325a5637424d7c307c2d3930307c32373030225d7d",
+      "expect": {
+        "kind": "gate",
+        "roster": [
+          "K4TQ8N2ZV7BM|0|-900|2700"
+        ]
+      }
+    },
+    {
+      "id": "gate-heartbeat-response-roster-full",
+      "kind": "heartbeat",
+      "note": "GateRosterMaxEntries = 48 is a CONTRACT CONSTANT, not a tenant setting: it bounds Roster<48> on the board and, through it, the 4608-byte static response buffer the gate has to hold this in. max_bytes is the budget for the WHOLE body, not the roster alone, and every field in this vector is at the widest the server can emit — a 64-character slug and gate key, the long device_code auto-registration falls back to, and six-digit relative seconds. A budget pinned by a comfortable vector is not pinned.",
+      "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a2277777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777222c226465766963655f636f6465223a22676174652d356363663766306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a2267676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767222c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a337d2c22726f73746572223a5b22534336544b54503954564a577c307c2d38363430307c383939303030222c22413852374257364854374a4a7c307c2d38363236337c383939313337222c225633414d335a4e53534b4a387c307c2d38363132367c383939323734222c224359563156313532525a4a597c307c2d38353938397c383939343131222c22585444464b334e4152424a4d7c307c2d38353835327c383939353438222c22454e5a574236344a51514a417c307c2d38353731357c383939363835222c225a48483933384d5650334b307c307c2d38353537387c383939383232222c2247433350564133334e464b507c307c2d38353434317c383939393539222c2231384d334b434b424e564b437c307c2d38353330347c393030303936222c224a3336474246334d4d374b327c307c2d38353136377c393030323333222c22335a525933484a574b4b4b527c307c2d38353033307c393030333730222c224d544142564b32344b5a4b457c307c2d38343839337c393030353037222c22355056524b504a444a424b347c307c2d38343735367c393030363434222c22504844354252314e48514b547c307c2d38343631397c393030373831222c2237445a4a3354485847334b477c307c2d38343438327c393030393138222c225238485a5658303547464b367c307c2d38343334357c393031303535222c22393433444b5a474546564d577c307c2d38343230387c393031313932222c22545a4d544331305045374d4a7c307c2d38343037317c393031333239222c224256363734344659454b4d387c307c2d38333933347c393031343636222c225750524d57365a37445a4d597c307c2d38333739377c393031363033222c22444a41314d38454643434d4d7c307c2d38333636307c393031373430222c22594457454342595142524d417c307c2d38333532337c393031383737222c22463844573444453042344d307c307c2d38333338367c393032303134222c2230345a395746583841474d507c307c2d38333234397c393032313531222c22485a48504d48444739574d437c307c2d38333131327c393032323838222c2232563333434d575339384d327c307c2d38323937357c393032343235222c224b504d4734504331384d4e527c307c2d38323833387c393032353632222c22344a36585752573937304e457c307c2d38323730317c393032363939222c224e4452424d56424a36434e347c307c2d38323536347c393032383336222c22363941524358565436524e547c307c2d38323432377c393032393733222c2251345735345a423235344e477c307c2d38323239307c393033313130222c223830444a5732544234474e367c307c2d38323135337c393033323437222c2253565a5a4d34414b34574e577c307c2d38323031367c393033333834222c22415148434336535633384e4a7c307c2d38313837397c393033353231222c22564a335434393933324d4e387c307c2d38313734327c393033363538222c2243454e375742534331304e597c307c2d38313630357c393033373935222c225839364d4d44384d3143504d7c307c2d38313436387c393033393332222c224535523143475257305250417c307c2d38313333317c393034303639222c225a304145344a37355a3450307c307c2d38313139347c393034323036222c2247575756574d5144594750507c307c2d38313035377c393034333433222c22315144394d50374e595750437c307c2d38303932307c393034343830222c224a4a5a5043535059583850327c307c2d38303738337c393034363137222c223345483334563636574d50517c307c2d38303634367c393034373534222c224d39334757584e45573050447c307c2d38303530397c393034383931222c2235354e584d303551564350337c307c2d38303337327c393035303238222c225030364143324e5a545250537c307c2d38303233357c393035313635222c223757525235343437533451467c307c2d38303039387c393035333032222c225251413558374d47534751357c307c2d37393936317c393035343339225d7d",
+      "expect": {
+        "kind": "gate",
+        "gate_key": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+        "roster": [
+          "SC6TKTP9TVJW|0|-86400|899000",
+          "A8R7BW6HT7JJ|0|-86263|899137",
+          "V3AM3ZNSSKJ8|0|-86126|899274",
+          "CYV1V152RZJY|0|-85989|899411",
+          "XTDFK3NARBJM|0|-85852|899548",
+          "ENZWB64JQQJA|0|-85715|899685",
+          "ZHH938MVP3K0|0|-85578|899822",
+          "GC3PVA33NFKP|0|-85441|899959",
+          "18M3KCKBNVKC|0|-85304|900096",
+          "J36GBF3MM7K2|0|-85167|900233",
+          "3ZRY3HJWKKKR|0|-85030|900370",
+          "MTABVK24KZKE|0|-84893|900507",
+          "5PVRKPJDJBK4|0|-84756|900644",
+          "PHD5BR1NHQKT|0|-84619|900781",
+          "7DZJ3THXG3KG|0|-84482|900918",
+          "R8HZVX05GFK6|0|-84345|901055",
+          "943DKZGEFVMW|0|-84208|901192",
+          "TZMTC10PE7MJ|0|-84071|901329",
+          "BV6744FYEKM8|0|-83934|901466",
+          "WPRMW6Z7DZMY|0|-83797|901603",
+          "DJA1M8EFCCMM|0|-83660|901740",
+          "YDWECBYQBRMA|0|-83523|901877",
+          "F8DW4DE0B4M0|0|-83386|902014",
+          "04Z9WFX8AGMP|0|-83249|902151",
+          "HZHPMHDG9WMC|0|-83112|902288",
+          "2V33CMWS98M2|0|-82975|902425",
+          "KPMG4PC18MNR|0|-82838|902562",
+          "4J6XWRW970NE|0|-82701|902699",
+          "NDRBMVBJ6CN4|0|-82564|902836",
+          "69ARCXVT6RNT|0|-82427|902973",
+          "Q4W54ZB254NG|0|-82290|903110",
+          "80DJW2TB4GN6|0|-82153|903247",
+          "SVZZM4AK4WNW|0|-82016|903384",
+          "AQHCC6SV38NJ|0|-81879|903521",
+          "VJ3T49932MN8|0|-81742|903658",
+          "CEN7WBSC10NY|0|-81605|903795",
+          "X96MMD8M1CPM|0|-81468|903932",
+          "E5R1CGRW0RPA|0|-81331|904069",
+          "Z0AE4J75Z4P0|0|-81194|904206",
+          "GWWVWMQDYGPP|0|-81057|904343",
+          "1QD9MP7NYWPC|0|-80920|904480",
+          "JJZPCSPYX8P2|0|-80783|904617",
+          "3EH34V66WMPQ|0|-80646|904754",
+          "M93GWXNEW0PD|0|-80509|904891",
+          "55NXM05QVCP3|0|-80372|905028",
+          "P06AC2NZTRPS|0|-80235|905165",
+          "7WRR5447S4QF|0|-80098|905302",
+          "RQA5X7MGSGQ5|0|-79961|905439"
+        ],
+        "max_bytes": 4096
+      }
+    },
+    {
+      "id": "gate-scan-response-ok",
+      "kind": "gate",
+      "note": "unlock_seconds is what goes on the lock's release timer — the tenant's gate_unlock_seconds clamped to [1, 30]. Never 0 on an open: a zero-second release is a door that clicks and stays shut.",
+      "body_hex": "7b226f70656e6564223a747275652c22726561736f6e223a226f6b222c22756e6c6f636b5f7365636f6e6473223a337d",
+      "expect": {
+        "opened": true,
+        "reason": "ok",
+        "unlock_seconds": 3
+      }
+    },
+    {
+      "id": "gate-scan-response-denied-not-recognised",
+      "kind": "gate",
+      "note": "unknown, expired, or another club's code — one reason for all three on purpose, because telling them apart at a door turns it into an oracle for which codes are real. 200, not 4xx: a refusal the firmware can act on must never look like an outage it should fall back from.",
+      "body_hex": "7b226f70656e6564223a66616c73652c22726561736f6e223a226e6f745f7265636f676e69736564222c22756e6c6f636b5f7365636f6e6473223a307d",
+      "expect": {
+        "opened": false,
+        "reason": "not_recognised",
+        "unlock_seconds": 0
+      }
+    },
+    {
+      "id": "gate-scan-response-denied-member-not-active",
+      "kind": "gate",
+      "note": "the club has suspended, rejected or not yet approved this member. Named rather than collapsed into not_recognised because a door has no LCD to explain itself and the distinction is what the desk needs from the audit row afterwards.",
+      "body_hex": "7b226f70656e6564223a66616c73652c22726561736f6e223a226d656d6265725f6e6f745f616374697665222c22756e6c6f636b5f7365636f6e6473223a307d",
+      "expect": {
+        "opened": false,
+        "reason": "member_not_active",
+        "unlock_seconds": 0
+      }
+    },
+    {
+      "id": "gate-scan-response-denied-no-booking",
+      "kind": "gate",
+      "note": "policy booking_window only: an active member with nothing booked inside [StartsAt - gate_early_entry_minutes, EndsAt]. Unreachable under the default active_member policy, which is why the policy is a tenant setting and this is a vector.",
+      "body_hex": "7b226f70656e6564223a66616c73652c22726561736f6e223a226e6f5f626f6f6b696e67222c22756e6c6f636b5f7365636f6e6473223a307d",
+      "expect": {
+        "opened": false,
+        "reason": "no_booking",
+        "unlock_seconds": 0
+      }
+    },
+    {
+      "id": "gate-scan-response-denied-method-not-supported",
+      "kind": "gate",
+      "note": "anything but qr or code. A PIN against the whole membership roll is an oracle rather than an identification, and a door has no candidate set to check one against.",
+      "body_hex": "7b226f70656e6564223a66616c73652c22726561736f6e223a226d6574686f645f6e6f745f737570706f72746564222c22756e6c6f636b5f7365636f6e6473223a307d",
+      "expect": {
+        "opened": false,
+        "reason": "method_not_supported",
+        "unlock_seconds": 0
+      }
+    },
+    {
+      "id": "gate-scan-response-denied-not-a-gate",
+      "kind": "gate",
+      "note": "the MAC resolved to a CourtBox row. 200 with opened:false rather than a 404 or a 400, so a misconfigured board shows a refusal and stops rather than retrying an endpoint that will never answer it differently.",
+      "body_hex": "7b226f70656e6564223a66616c73652c22726561736f6e223a226e6f745f615f67617465222c22756e6c6f636b5f7365636f6e6473223a307d",
+      "expect": {
+        "opened": false,
+        "reason": "not_a_gate",
+        "unlock_seconds": 0
+      }
+    }
+  ]
+}
