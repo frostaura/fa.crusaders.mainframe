@@ -213,11 +213,10 @@ public static class DeviceEventEndpoints
             // is what lets the box release it and move on.
             if (!alreadyRecorded.Contains(e.Seq))
             {
-                var time = TimeOf(batch, e, now);
-                var kind = AuditKind(e.Kind);
+                var time = TimeOf(batch, e, now) with { Kind = AuditKind(e.Kind) };
 
                 // Attendance BEFORE the receipt. See the summary for why this order.
-                var outcome = Unusable(e.Kind) ? new ActivationOutcome(Malformed, null, kind) : e.Kind switch
+                var outcome = Unusable(e.Kind) ? new ActivationOutcome(Malformed, null, time.Kind) : e.Kind switch
                 {
                     // A door reporting a court event. Refused explicitly rather than left to
                     // fail the relay-index check against an empty court list — see
@@ -242,7 +241,7 @@ public static class DeviceEventEndpoints
                     _ => null,
                 };
 
-                if (await RecordAsync(services, device!, e, kind, time, outcome, ct)) recorded++;
+                if (await RecordAsync(services, device!, e, time, outcome, ct)) recorded++;
             }
 
             acceptedThrough = e.Seq;
@@ -277,10 +276,23 @@ public static class DeviceEventEndpoints
     public static readonly TimeSpan MaxEventAge = TimeSpan.FromDays(30);
 
     /// <summary>
-    /// When an event happened, and — if the box's arithmetic could not be believed — the
-    /// value it claimed. <see cref="ClampedFrom"/> is null for an ordinary event.
+    /// What the server could establish about one uploaded event before deciding anything:
+    /// when it happened, whether the box's arithmetic had to be overruled to say so, and the
+    /// kind as it is safe to store. <see cref="ClampedFrom"/> is null for an ordinary event.
+    ///
+    /// <para>
+    /// <see cref="Kind"/> is here rather than a seventh parameter on <c>RecordAsync</c>, which
+    /// is where the complexity gate caps a signature — and the right pressure, because the
+    /// three of these are one question. An init property rather than a positional parameter
+    /// so <see cref="TimeOf"/>, which answers only the first two, is not asked to invent the
+    /// third.
+    /// </para>
     /// </summary>
-    private sealed record EventTime(DateTimeOffset OccurredAt, DateTimeOffset? ClampedFrom);
+    private sealed record EventFacts(DateTimeOffset OccurredAt, DateTimeOffset? ClampedFrom)
+    {
+        /// <summary>The event's <c>kind</c>, trimmed, bounded and never empty — see <see cref="AuditKind"/>.</summary>
+        public string Kind { get; init; } = "unknown";
+    }
 
     /// <summary>
     /// The event's time from uptime arithmetic: the box's uptime at upload minus its uptime
@@ -292,12 +304,12 @@ public static class DeviceEventEndpoints
     /// clamped to the upload instant and the claimed value is kept on the audit row
     /// (<c>device.event_time_clamped</c>) so the desk can see the counter is broken.
     /// </summary>
-    private static EventTime TimeOf(DeviceEventBatch batch, DeviceEventDto e, DateTimeOffset now)
+    private static EventFacts TimeOf(DeviceEventBatch batch, DeviceEventDto e, DateTimeOffset now)
     {
         var claimed = now.AddMilliseconds(-(double)(batch.UptimeMs - e.UptimeMs));
         return claimed > now || now - claimed > MaxEventAge
-            ? new EventTime(now, claimed)
-            : new EventTime(claimed, null);
+            ? new EventFacts(now, claimed)
+            : new EventFacts(claimed, null);
     }
 
     /// <summary>
@@ -699,7 +711,7 @@ public static class DeviceEventEndpoints
     /// request got there first.
     /// </summary>
     private static async Task<bool> RecordAsync(
-        DeviceEventServices services, Device device, DeviceEventDto e, string kind, EventTime time,
+        DeviceEventServices services, Device device, DeviceEventDto e, EventFacts time,
         ActivationOutcome? outcome, CancellationToken ct)
     {
         var (db, tenant, _, _, _, _) = services;
@@ -709,7 +721,7 @@ public static class DeviceEventEndpoints
             TenantId = tenant.TenantId,
             DeviceId = device.Id,
             Seq = e.Seq,
-            Kind = kind,
+            Kind = time.Kind,
             OccurredAt = time.OccurredAt,
 
             // The relay and the booking are on the receipt so a later `release` — which
@@ -725,7 +737,7 @@ public static class DeviceEventEndpoints
             device_id = device.Id,
             device_code = device.DeviceCode,
             seq = e.Seq,
-            kind,
+            kind = time.Kind,
             court = e.Court,
             method = e.Method,
             subject = SubjectFor(e),
@@ -746,7 +758,7 @@ public static class DeviceEventEndpoints
 
         var rows = new List<AuditLog>(3)
         {
-            new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{kind}", DetailsJson = detailsJson },
+            new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{time.Kind}", DetailsJson = detailsJson },
         };
         if (outcome is not null && outcome.Code != ActivationOutcome.Ok)
         {
