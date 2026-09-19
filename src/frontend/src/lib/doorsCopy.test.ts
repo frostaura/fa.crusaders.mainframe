@@ -6,7 +6,7 @@ import {
   doorMayNotBeReleasingNotice, doorNeedsAttention, doorOutcomeChip, doorQuietNotice,
   doorRefusalSpikeNotice, doorRetentionNotice, doorScanCountHeading, doorScanCountLine,
   doorSetupChip, doorSignalChip, doorStaleChecksNotice, doorStateChip, doorStateNotice,
-  doorsAttentionSummary, describePowerLoss,
+  doorsAttentionSummary, describePowerLoss, spellAge,
 } from "./doorsCopy";
 import { doorShutNotice } from "./gateCopy";
 import { type AdminDoorDevice, type DeviceActivityEntry } from "./api";
@@ -52,6 +52,7 @@ function door(overrides: Partial<AdminDoorDevice> = {}): AdminDoorDevice {
 
 /** Every generator on this surface, called with an arm of each of its conditionals. */
 function everySentence(): string[] {
+  const said = (value: string | null) => value ?? "";
   const reachable = door();
   const silent = door({ last_seen_at: "2026-09-19T04:12:00Z" });
   return [
@@ -84,7 +85,7 @@ function everySentence(): string[] {
     doorExhaustedNotice(null),
     doorLogEmptyOneDoor("side door", "Mon 00:00"),
     doorsAttentionSummary(["Side door has not been heard from since 04:12."]) ?? "",
-    doorStaleChecksNotice(2, 47),
+    said(doorStaleChecksNotice(2, 47)),
     DOORS_READ_FAILED, DOORS_EMPTY_NOTICE, DOORS_EMPTY_HINT,
     LOG_READ_FAILED, LOG_EMPTY_FILTERED, LOG_EMPTY_FILTERED_HINT, LOG_EMPTY_NOTHING,
     LOG_OLDER_FAILED,
@@ -612,5 +613,21 @@ describe("the whole surface's vocabulary", () => {
         expect(sentence, sentence).not.toContain(leak);
       }
     }
+  });
+});
+
+describe("spellAge", () => {
+  /** A screen reader reads "6m ago" as "six em ago". An accessible name is not a label. */
+  it("spells the unit out, singular and plural", () => {
+    expect(spellAge("12s ago")).toBe("12 seconds ago");
+    expect(spellAge("1s ago")).toBe("1 second ago");
+    expect(spellAge("6m ago")).toBe("6 minutes ago");
+    expect(spellAge("3h ago")).toBe("3 hours ago");
+    expect(spellAge("1d ago")).toBe("1 day ago");
+  });
+
+  /** "never" is already a word, and anything unrecognised is passed through rather than mangled. */
+  it("leaves anything that is not an abbreviation alone", () => {
+    expect(spellAge("never")).toBe("never");
   });
 });

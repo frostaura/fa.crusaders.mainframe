@@ -1,0 +1,132 @@
+import { useCallback, useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { Printer } from "lucide-react";
+import { Button } from "../components/Button";
+import { Alert } from "../components/Alert";
+import { PrintSheet } from "../components/doors/PrintSheet";
+import { DOORS_READ_FAILED, describePowerLoss } from "../lib/doorsCopy";
+import { UNNAMED_GATE } from "../lib/gateCopy";
+import { doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings } from "../lib/api";
+
+/**
+ * The card that goes in the cupboard beside the board.
+ *
+ * <p>
+ * It is what somebody standing at a door at six in the morning needs, and none of it is on
+ * their phone — which is the whole argument for printing anything from a web app.
+ * </p>
+ *
+ * <p>
+ * <b>What is never on this sheet, and it is a refusal rather than an omission:</b> the club's
+ * device API key, the WiFi password, any member name, any scan. The key is the club's master
+ * credential — it registers boards, reads heartbeats and, once a door is named, pulls the
+ * whole current roster — and the entire point of this card is that it lives on a wall in a
+ * corridor. The temptation to print it so a re-flash is easy is exactly the wrong trade.
+ * </p>
+ *
+ * <p>
+ * The printed date and "check it is still right" are there because a card in a cupboard
+ * outlives the fact it states, and an undated one is read as current for ever.
+ * </p>
+ */
+export function AdminDoorsCardPage() {
+  const { id = "" } = useParams();
+  const [door, setDoor] = useState<AdminDoorDevice | null>(null);
+  const [settings, setSettings] = useState<AdminSettings | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const view = await doorEndpoints.doors();
+      const row = view.doors.find((d) => d.device.id === id);
+      setDoor(row?.device ?? null);
+      setFailed(false);
+    } catch {
+      setFailed(true);
+      setDoor(null);
+    } finally {
+      setLoading(false);
+    }
+    try { setSettings(await endpoints.adminSettingsGet()); } catch { /* the contact line takes its unset arm */ }
+  }, [id]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
+  useEffect(() => { void load(); }, [load]);
+
+  if (loading) return <p className="text-sm text-text-secondary">Loading this door's card…</p>;
+  if (failed || !door) {
+    return (
+      <div className="space-y-3">
+        <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
+        <Alert tone="danger">{DOORS_READ_FAILED}</Alert>
+        <Button variant="outline" onClick={() => void load()}>Try again</Button>
+      </div>
+    );
+  }
+
+  const contact = [settings?.club_contact_phone?.trim(), settings?.club_contact_email?.trim()]
+    .filter((part) => part).join(" · ");
+  const printedOn = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
+  return (
+    <div className="space-y-4">
+      <div data-print-hide className="space-y-3">
+        <Link to={`/admin/doors/${door.id}`} className="inline-flex min-h-11 items-center text-sm text-accent-strong">
+          {`← ${door.name}`}
+        </Link>
+        <p className="text-sm text-text-secondary">
+          Print this and put it in the cupboard beside the board. It is what somebody standing at the
+          door at six in the morning needs, and none of it is on their phone.
+        </p>
+        <Button variant="outline" onClick={() => window.print()}>
+          <Printer size={16} aria-hidden="true" /> Print
+        </Button>
+      </div>
+
+      <PrintSheet>
+        <p className="text-sm">Crusaders Squash</p>
+        <h1 className="mt-4 break-words text-4xl font-bold uppercase tracking-tight">
+          {door.gate_key ?? UNNAMED_GATE}
+        </h1>
+        <dl className="mt-6 space-y-1 text-sm">
+          <CardFact label="Board" value={door.device_code} />
+          <CardFact label="MAC" value={door.mac_address ?? "not reported"} />
+        </dl>
+        <CardBlock title="Where this board is">
+          {door.location_note ?? "Nobody has written down where this board is."}
+        </CardBlock>
+        <CardBlock title="With no power, this door is">
+          {`${describePowerLoss(door.power_loss_behaviour).toUpperCase()} — this is a property of the lock, not of the app.`}
+        </CardBlock>
+        <CardBlock title="If this door is not working">
+          Check its power and the club WiFi, then open Doors in the Crusaders app.
+        </CardBlock>
+        <CardBlock title="Club contact">
+          {contact || "No club contact is recorded. Ask at the club."}
+        </CardBlock>
+        <p className="mt-6 text-xs">
+          {`Printed ${printedOn} from Crusaders Mainframe. Check it is still right.`}
+        </p>
+      </PrintSheet>
+    </div>
+  );
+}
+
+function CardFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex gap-3">
+      <dt className="w-24 shrink-0">{label}</dt>
+      <dd className="min-w-0 break-words font-medium">{value}</dd>
+    </div>
+  );
+}
+
+function CardBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="mt-5">
+      <h2 className="text-sm font-semibold">{title}</h2>
+      <p className="min-w-0 break-words text-sm">{children}</p>
+    </section>
+  );
+}

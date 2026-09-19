@@ -751,7 +751,12 @@ export function doorsServer(
       .sort((a, b) => String(a.name).localeCompare(String(b.name)))
       .map((device) => ({
         device,
-        today: rows[String(device.id)]?.today ?? { released: 0, refused: 0 },
+        // `?? ` would turn an EXPLICIT null — the count failed — back into a zero, which
+        // is the very defect the page's copy exists to avoid. Absent means "not
+        // interesting to this test"; null means "the server could not count".
+        today: "today" in (rows[String(device.id)] ?? {})
+          ? rows[String(device.id)].today
+          : { released: 0, refused: 0 },
         signals: rows[String(device.id)]?.signals ?? [],
       })),
   });

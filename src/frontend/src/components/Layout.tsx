@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
+import { DoorClosed, LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
+import { ShutDoorsBanner } from "./doors/ShutDoorsBanner";
+import { useDoorsChrome } from "./doors/useDoorsChrome";
 import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { tokenStore } from "../lib/api";
@@ -65,6 +67,20 @@ export default function Layout() {
     location.pathname,
   );
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  /**
+   * doors: admin — the chrome's half of the doors surface (A1.5, A2.6).
+   *
+   * Two things ride on one read: the attention cue on the gear and its menu item, and the
+   * club-wide banner while any door is shut. Both take the `usePendingApplicationCount`
+   * posture — re-read on navigation, and a failed read shows nothing rather than an error,
+   * so the banner's absence has never meant "no doors are shut" and a failed read cannot
+   * produce a false all-clear.
+   */
+  const doors = useDoorsChrome(
+    auth.status === "authenticated" && auth.isAdmin,
+    location.pathname,
+  );
+  const doorsNeedingAttention = doors.attention.length;
 
   // Hide the chrome on auth-flow routes — login/register/verify/welcome/reset — so the
   // user only sees the auth modal itself.
@@ -228,12 +244,20 @@ export default function Layout() {
                 <button
                   ref={menuButtonRef}
                   onClick={() => setMenuOpen((v) => !v)}
-                  aria-label="Open menu"
+                  /* doors: admin — the count goes in the NAME, because a number inside a 44 px
+                     circular icon button is unreadable at 360 and a dot is not, and because
+                     colour alone is never the signal. */
+                  aria-label={doorsNeedingAttention === 0
+                    ? "Open menu"
+                    : `Open menu — ${doorsNeedingAttention} ${doorsNeedingAttention === 1 ? "door needs" : "doors need"} attention`}
                   aria-haspopup="menu"
                   aria-expanded={menuOpen}
-                  className="inline-flex items-center justify-center w-11 h-11 rounded-full text-text-secondary hover:text-text-primary hover:bg-bg-muted"
+                  className="relative inline-flex items-center justify-center w-11 h-11 rounded-full text-text-secondary hover:text-text-primary hover:bg-bg-muted"
                 >
                   <SettingsIcon size={26} strokeWidth={1.75} />
+                  {doorsNeedingAttention > 0 && (
+                    <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-danger-strong" />
+                  )}
                 </button>
                 {menuOpen && (
                   <div
@@ -242,15 +266,31 @@ export default function Layout() {
                   >
                     {auth.isAdmin && (
                       <>
+                        {/* doors: admin — first, above Devices, and NOT a sixth tab. This file
+                            already carries the cost of the alternative in the nav comment above:
+                            five admin tabs measured a 795 px scrollWidth against a 768 px
+                            viewport, which is why the inline nav switches at `lg`. Ordered by
+                            urgency of use rather than alphabetically — Doors is opened standing
+                            in a club with a member waiting, Webhooks twice a year. `DoorClosed`,
+                            not `DoorOpen`: an open door is a state claim this product cannot
+                            make, two lines above the page whose whole discipline is not making
+                            it. */}
                         <MenuItem
-                          onClick={() => { setMenuOpen(false); nav("/admin/settings"); }}
-                          icon={<SettingsIcon size={16} />}
-                          label="Admin settings"
+                          onClick={() => { setMenuOpen(false); nav("/admin/doors"); }}
+                          icon={<DoorClosed size={16} />}
+                          label="Doors"
+                          badge={doorsNeedingAttention}
+                          badgeLabel={`${doorsNeedingAttention} ${doorsNeedingAttention === 1 ? "door needs" : "doors need"} attention`}
                         />
                         <MenuItem
                           onClick={() => { setMenuOpen(false); nav("/admin/devices"); }}
                           icon={<Cpu size={16} />}
                           label="Devices"
+                        />
+                        <MenuItem
+                          onClick={() => { setMenuOpen(false); nav("/admin/settings"); }}
+                          icon={<SettingsIcon size={16} />}
+                          label="Admin settings"
                         />
                         <MenuItem
                           onClick={() => { setMenuOpen(false); nav("/admin/webhooks"); }}
@@ -308,6 +348,13 @@ export default function Layout() {
         "w-full mx-auto px-4 py-6 flex-1 min-h-0 flex flex-col",
         location.pathname.startsWith("/admin/") ? "max-w-7xl" : "max-w-5xl",
       )}>
+        {/* doors: admin — the club-wide shut banner (A1.5 / D5), on EVERY admin route rather
+            than only the doors pages. Shut-all has no timed auto-reopen, so without this a
+            club that shut every door after an incident discovers it at 05:50 the next
+            morning with thirty members outside. */}
+        {location.pathname.startsWith("/admin/") && (
+          <ShutDoorsBanner shut={doors.shut} total={doors.total} />
+        )}
         <Outlet />
       </div></main>
     </div>
@@ -338,12 +385,15 @@ function NavTab({ to, label, badge = 0 }: { to: string; label: string; badge?: n
 }
 
 function MenuItem({
-  onClick, icon, label, tone = "default",
+  onClick, icon, label, tone = "default", badge = 0, badgeLabel,
 }: {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
   tone?: "default" | "danger";
+  /** doors: admin — the same numeric pill NavTab uses, on the same terms: zero renders nothing. */
+  badge?: number;
+  badgeLabel?: string;
 }) {
   return (
     <button
@@ -359,6 +409,17 @@ function MenuItem({
     >
       <span className="text-text-muted">{icon}</span>
       <span>{label}</span>
+      {badge > 0 && (
+        // The digits are decoration; the sentence is the name. Same rule as NavTab's badge —
+        // "2" beside the word "Doors" means nothing to a screen reader.
+        <span
+          className="ml-auto inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-info-soft text-info-strong text-xs font-semibold tabular-nums"
+          aria-label={badgeLabel}
+          title={badgeLabel}
+        >
+          {badge}
+        </span>
+      )}
     </button>
   );
 }

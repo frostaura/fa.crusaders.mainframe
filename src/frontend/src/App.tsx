@@ -25,6 +25,11 @@ import ProfilePage from "./pages/Profile";
 import CourtCodePage from "./pages/CourtCode";
 import ReportsPage from "./pages/Reports";
 import { AdminDevicesPage } from "./pages/AdminDevices";
+// doors: admin — the four doors routes and their pages, in one block.
+import { AdminDoorsPage } from "./pages/AdminDoors";
+import { AdminDoorsDetailPage } from "./pages/AdminDoorsDetail";
+import { AdminDoorsLogPage } from "./pages/AdminDoorsLog";
+import { AdminDoorsCardPage } from "./pages/AdminDoorsCard";
 import NotFoundPage from "./pages/NotFound";
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
@@ -60,6 +65,13 @@ export default function App() {
             <Route path="/admin/webhooks" element={<RequireAuth admin><AdminWebhooksPage /></RequireAuth>} />
             <Route path="/admin/biometric" element={<Navigate to="/admin/members" replace />} />
             <Route path="/admin/devices" element={<RequireAuth admin><AdminDevicesPage /></RequireAuth>} />
+            {/* doors: admin. `/log` is declared BEFORE `/:id` or it resolves as a door id and
+                the club log becomes a 404 nobody can explain. `/card` is a child of a door
+                because it is that door's card, and its back link says so. */}
+            <Route path="/admin/doors" element={<RequireAuth admin><AdminDoorsPage /></RequireAuth>} />
+            <Route path="/admin/doors/log" element={<RequireAuth admin><AdminDoorsLogPage /></RequireAuth>} />
+            <Route path="/admin/doors/:id" element={<RequireAuth admin><AdminDoorsDetailPage /></RequireAuth>} />
+            <Route path="/admin/doors/:id/card" element={<RequireAuth admin><AdminDoorsCardPage /></RequireAuth>} />
             <Route path="/admin/settings" element={<RequireAuth admin><AdminSettingsPage /></RequireAuth>} />
             <Route path="/admin/ledger" element={<RequireAuth admin><AdminLedgerPage /></RequireAuth>} />
             {/* A real 404, not a redirect. The catch-all used to send every unknown path to the

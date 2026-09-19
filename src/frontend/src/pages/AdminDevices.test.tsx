@@ -1358,628 +1358,89 @@ describe("AdminDevices", () => {
    * that the page renders the real generator rather than a hand-built copy of it.
    * </p>
    */
-  describe("a door gate", () => {
-    it("reads as a gate, with the door it is on and the same liveness badge as a box", async () => {
-      stubFetch(withDevices([gateFixture({ gate_key: "front-door" })]));
+  /**
+   * A door, on the Devices page, read-only (A2.5 / D5).
+   *
+   * <p>
+   * <b>Every editing test that used to live here has moved to `AdminDoors.test.tsx`</b>,
+   * with the controls: naming a door, clearing its name, the four kind refusals, the length
+   * bound, the new-badge clear, shutting, reopening and deleting. None was deleted — each
+   * has an equivalent on the surface that now owns it.
+   * </p>
+   *
+   * <p>
+   * The reason for the move is the one `lib/gateCopy.ts`'s header records: the out-of-service
+   * consequence had three call sites and shipped three rounds running with the three of them
+   * disagreeing about what the click had just done. Two screens is two call sites. So this
+   * page shows a door and links to it, and Doors owns every control.
+   * </p>
+   */
+  describe("a door gate, read-only", () => {
+    it("shows a door with its liveness, its door name and a link, under its own heading", async () => {
+      stubFetch(withDevices([gateFixture({ gate_key: "front-door", name: "Front door" })]));
 
       renderPage(<AdminDevicesPage />);
 
-      expect(await screen.findByText("Door gate")).toBeInTheDocument();
-      // "Door gate", then which door. Not a court list, and not the empty gap a box's
-      // describeCourts would have left.
-      expect(screen.getByText(/gate-0a1b2c · Door gate · front-door/)).toBeInTheDocument();
-      expect(screen.queryByText(/no courts/)).not.toBeInTheDocument();
-      // Online exactly as a box is: same threshold, same badge, same words.
-      expect(screen.getByText("online")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Doors" })).toBeInTheDocument();
+      expect(screen.getByText("Front door")).toBeInTheDocument();
+      expect(screen.getByText(/front-door · gate-0a1b2c/)).toBeInTheDocument();
+      // The liveness word is the doors surface's, not the box list's: this product knows the
+      // board answered N seconds ago and nothing more.
+      expect(screen.getByText("Reporting")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Manage on Doors" }))
+        .toHaveAttribute("href", "/admin/doors/99999999-9999-9999-9999-999999999999");
     });
 
-    /**
-     * A gate self-registers with a null key, so unnamed is the state every door in the club
-     * is in the first time an admin opens this screen. An empty gap where a box's courts go
-     * reads as a rendering fault rather than as the job it is.
-     */
     it("says a door has no name yet rather than showing a gap", async () => {
       stubFetch(withDevices([gateFixture({ gate_key: null })]));
 
       renderPage(<AdminDevicesPage />);
 
-      expect(await screen.findByText(/Door gate · no door name yet/)).toBeInTheDocument();
+      expect(await screen.findByText(/no door name yet · gate-0a1b2c/)).toBeInTheDocument();
     });
 
-    it("goes offline on the club's cadence, exactly as a box does", async () => {
+    it("goes not-reporting on the club's cadence, exactly as a box does", async () => {
       stubFetch(withDevices([
         gateFixture({ last_seen_at: new Date(Date.now() - 10 * 60_000).toISOString() }),
       ]));
 
       renderPage(<AdminDevicesPage />);
 
-      // 10 minutes against three beats of the club's 60 s heartbeat. No door-specific
-      // arithmetic: a door that has stopped calling in is the same problem as a box that has.
-      expect(await screen.findByText(/not reporting — last seen 10m ago/)).toBeInTheDocument();
+      // Ten minutes against three beats of the club's 60 s heartbeat. No door-specific
+      // arithmetic: one formula, in lib/deviceLiveness, with the 180 s floor.
+      expect(await screen.findByText("Not reporting")).toBeInTheDocument();
+      expect(screen.getByText("10m ago")).toBeInTheDocument();
     });
 
     /**
-     * The badge a box wears says "check court numbers", and on a door that sends an admin
-     * looking for an editor this row does not have and must not have. What a new door needs
-     * is a name: one firmware runs every door, nothing is compiled in per door, and until
-     * somebody names it every audit row for a scan at it carries a null gate_key.
+     * <b>The claim this whole describe exists for.</b> Not one control on this page edits,
+     * names, shuts, reopens or deletes a door — asserted as an absence, because the failure
+     * mode is a control quietly surviving a refactor rather than a control being added back
+     * on purpose.
      */
-    it("badges a new door with the job it actually has", async () => {
-      stubFetch(withDevices([gateFixture({ auto_registered: true })]));
+    it("offers no control at all that edits, shuts or deletes a door", async () => {
+      stubFetch(withDevices([gateFixture({ gate_key: "front-door" })]));
 
       renderPage(<AdminDevicesPage />);
+      await screen.findByRole("heading", { name: "Doors" });
 
-      expect(await screen.findByText("New — name this door")).toBeInTheDocument();
-      expect(screen.queryByText("New — check court numbers")).not.toBeInTheDocument();
+      for (const name of [
+        /Edit name and door/, /Save door/, /^Delete$/, /Take out of service/,
+        /Put back in service/, /Shut this door/, /Reopen this door/,
+      ]) {
+        expect(screen.queryByRole("button", { name })).toBeNull();
+      }
+      expect(screen.queryByLabelText("Door name")).toBeNull();
+      // And it says where those controls went, rather than leaving an admin hunting.
+      expect(screen.getByText("Doors are set up and shut under Doors.")).toBeInTheDocument();
     });
 
     /**
-     * The absence is the point rather than an omission. The API refuses `court_numbers` and
-     * `button_map` on a Gate row outright, so an editor offering either would be a form
-     * whose save can only fail — and `kind` is on neither this request nor the API's, so a
-     * kind selector would report a save that did nothing.
+     * The box's own controls are untouched by any of that — the arrangement a club actually
+     * has is one page with both kinds on it, and that is the only arrangement that proves
+     * the split is per row rather than per page.
      */
-    it("offers no court list, no button map and no kind selector", async () => {
-      stubFetch(withDevices([gateFixture({ button_map: null })]));
-
-      renderPage(<AdminDevicesPage />);
-
-      await screen.findByText("Door gate");
-      expect(screen.queryByRole("button", { name: /Edit name and courts/ })).not.toBeInTheDocument();
-      // `button_map` is present on the payload, which is what would otherwise have opened
-      // the per-box editor: the gate branch closes it on kind, not on presence.
-      expect(screen.queryByRole("button", { name: /Edit buttons/ })).not.toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole("button", { name: /Edit name and door/ }));
-      expect(screen.queryByLabelText(/relay A court/)).not.toBeInTheDocument();
-      // The per-board editors are labelled by the board, which is what distinguishes them
-      // from the CLUB button-map card at the foot of the page — that one stays, because it
-      // belongs to the tenant and not to any row.
-      expect(screen.queryByLabelText(/^Door gate button /)).not.toBeInTheDocument();
-      expect(screen.queryByLabelText(/kind/i)).not.toBeInTheDocument();
-    });
-
-    it("saves a door's name and its door name together, as name and gate_key", async () => {
-      const stub = stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        { path: "/api/v1/admin/devices/", body: [gateFixture({ auto_registered: true })] },
-        {
-          method: "PATCH",
-          path: "/api/v1/admin/devices/",
-          body: gateFixture({ name: "Front door", gate_key: "front-door" }),
-        },
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Front door" } });
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "front-door" } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
-
-      await waitFor(() => {
-        const patch = stub.calls.find((c) => c.method === "PATCH");
-        expect(patch?.path).toBe("/api/v1/admin/devices/99999999-9999-9999-9999-999999999999");
-        // Exactly these two, and no court_numbers: the API refuses that field on a Gate row.
-        expect(patch?.body).toEqual({ name: "Front door", gate_key: "front-door" });
-        expect(patch?.raw).not.toContain("court_numbers");
-      });
-      expect(await screen.findByText(/Front door is the front-door door/)).toBeInTheDocument();
-    });
-
-    /** Trimmed here as well as on the API, so the row that comes back is the row typed. */
-    it("trims the door name before sending it", async () => {
-      const stub = stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        { path: "/api/v1/admin/devices/", body: [gateFixture()] },
-        { method: "PATCH", path: "/api/v1/admin/devices/", body: gateFixture({ gate_key: "front-door" }) },
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "  front-door  " } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
-
-      await waitFor(() => {
-        expect(stub.calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ gate_key: "front-door" });
-      });
-    });
-
-    /**
-     * Clearing the field is `""` on the wire, not `null`.
-     *
-     * <p>
-     * This test used to pin the opposite, and the page obliged: `null` on this field means
-     * "leave the door's name alone" (`DeviceRegistryService.UpdateAsync` applies it only
-     * <code>if (cmd.GateKey is not null)</code>), so clearing a door name was a silent
-     * no-op that reported success. The test could not see it because the PATCH route
-     * answered with an unnamed row whatever it was sent — a canned answer pins the wire
-     * value and nothing about whether the server would have honoured it.
-     * </p>
-     *
-     * <p>
-     * So the server here applies the API's own rule and the assertion is on the OUTCOME:
-     * the row after the reload, and the row the server is holding. Sending `null` leaves
-     * both saying "front-door", which is what production did.
-     * </p>
-     */
-    it("clears a door name by sending an empty string, and the door really loses it", async () => {
-      const server = deviceServer(gateFixture({ name: "Front door", gate_key: "front-door" }));
-      const stub = stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        ...server.routes,
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
-      expect(screen.getByLabelText("Door name")).toHaveValue("front-door");
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "   " } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
-
-      await waitFor(() => {
-        expect(stub.calls.find((c) => c.method === "PATCH")?.raw).toBe('{"name":"Front door","gate_key":""}');
-      });
-      // The row the server is now holding, and the row the screen shows after its reload.
-      // Either one alone would still pass against a stub that always answers "cleared".
-      await waitFor(() => expect(server.current().gate_key).toBeNull());
-      expect(await screen.findByText(/Door gate · no door name yet/)).toBeInTheDocument();
-      // And the toast says what has actually been given up, rather than reporting a success
-      // that reads as if the door were now named something.
-      expect(await screen.findByText(/has no door name/))
-        .toHaveTextContent(/only works while it can reach the server/);
-    });
-
-    /**
-     * <b>An unnamed door has no offline fallback, and the row has to say so.</b>
-     *
-     * <p>
-     * A heartbeat for a Gate row whose key is null answers `roster: []`. Online scans work
-     * from the moment the board is plugged in — the install stays plug-and-play — but the
-     * cached-roster fallback does not exist until an admin has named the door, because any
-     * holder of the club's one device key can self-register a "gate" with a random MAC and
-     * before this that handed them the club-wide code set on demand.
-     * </p>
-     *
-     * <p>
-     * The "New" badge beside it says only that the row is new, which is a different claim
-     * and one that stops being true the moment anything on the row is edited.
-     * </p>
-     */
-    it("says an unnamed door has no offline fallback, on the row itself", async () => {
-      stubFetch(withDevices([gateFixture({ gate_key: null })]));
-
-      renderPage(<AdminDevicesPage />);
-
-      const notice = await screen.findByText(/Until you name this door/);
-      expect(notice).toHaveTextContent("only works while it can reach the server");
-      expect(notice).toHaveTextContent("sent an empty roster");
-      expect(notice).toHaveTextContent("opens nothing at all while it is offline");
-    });
-
-    /**
-     * And it is keyed on the NAME, not on the badge: a named door has a roster whether or not
-     * anybody has edited the row since it registered itself.
-     */
-    it("says nothing of the sort once the door has a name", async () => {
-      stubFetch(withDevices([gateFixture({ gate_key: "front-door", auto_registered: true })]));
-
-      renderPage(<AdminDevicesPage />);
-
-      // The badge is still there — the row IS new — and the roster warning is not.
-      expect(await screen.findByText("New — name this door")).toBeInTheDocument();
-      expect(screen.queryByText(/Until you name this door/)).not.toBeInTheDocument();
-    });
-
-    /**
-     * And it stands down while the editor is open, because the door-name field's own hint
-     * carries the same sentence there. Seen at phone width before this: the identical
-     * paragraph twice inside one card, which reads as a rendering fault rather than emphasis.
-     */
-    it("says it once, not twice, while the door editor is open", async () => {
-      stubFetch(withDevices([gateFixture({ gate_key: null })]));
-
-      renderPage(<AdminDevicesPage />);
-
-      expect(await screen.findAllByText(/Until you name this door/)).toHaveLength(1);
-      fireEvent.click(screen.getByRole("button", { name: /Edit name and door/ }));
-      // Still exactly one — the hint's — and it is the hint, not the row notice.
-      const said = screen.getAllByText(/Until you name this door/);
-      expect(said).toHaveLength(1);
-      expect(said[0]).toHaveTextContent("Which door this board is on");
-    });
-
-    /**
-     * A door name past the column's bound. The field's own maxLength stops it at the
-     * keyboard, so this reaches an admin through a paste or a row edited elsewhere — and it
-     * had no entry in the error table at all, falling through to the underscore swap, which
-     * reads "gate key too long" and names neither the field nor the bound.
-     */
-    it("turns a door name that is too long into a sentence with the bound in it", async () => {
-      stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        { path: "/api/v1/admin/devices/", body: [gateFixture()] },
-        { method: "PATCH", path: "/api/v1/admin/devices/", status: 400, body: { error: "gate_key_too_long", max_length: 64 } },
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "x".repeat(65) } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
-
-      expect(await screen.findByText(/A door name is at most 64 characters/)).toBeInTheDocument();
-      expect(screen.queryByText(/gate key too long/)).not.toBeInTheDocument();
-    });
-
-    /**
-     * <b>The four refusals, driven by a server that actually refuses them.</b>
-     *
-     * <p>
-     * Until now the stateful mock applied the API's patch rule and refused nothing, so every
-     * one of these was pinned only by a canned 400 — a route that would have answered the
-     * same 400 to a request the API takes happily, and would have gone on answering it after
-     * the contract changed. `refuseDevicePatch` mirrors `KindFieldsRefusal`, so what follows
-     * is the screen meeting the refusal for the reason production produces it.
-     * </p>
-     *
-     * <p>
-     * A row's KIND is the thing none of these PATCHes can change and all of them turn on: the
-     * API has no member for it, and the reset is to delete the row and let the board register
-     * itself again. That is also the one legitimate way a screen with an open form meets
-     * `gate_key_not_a_gate` or `court_fields_on_a_gate` — the row was re-kinded while the
-     * editor was open — which is what `replace` stages.
-     * </p>
-     */
-    it("says a door name belongs on a door when the row turned out to be a box", async () => {
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }));
-      stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        ...server.routes,
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
-      // Deleted and re-registered as a court box while the form sat open.
-      server.replace(deviceFixture({ id: gateFixture().id }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "side-door" } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
-
-      expect(await screen.findByText(/A door name only belongs on a door gate, and this row is a court box/))
-        .toHaveTextContent(/delete the row and let it register itself again/);
-      // Not the underscore swap, and the editor stays open because the save did not go through.
-      expect(screen.queryByText(/gate key not a gate/)).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /Save door/ })).toBeInTheDocument();
-    });
-
-    it("says courts belong on a box when the row turned out to be a door", async () => {
-      const server = deviceServer(deviceFixture({ court_numbers: [1] }));
-      stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        ...server.routes,
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and courts/ }));
-      server.replace(gateFixture({ id: deviceFixture().id }));
-      fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "2" } });
-      fireEvent.click(screen.getByRole("button", { name: /Save box/ }));
-
-      expect(await screen.findByText(/Courts and button maps belong on a court box, and this row is a door gate/))
-        .toHaveTextContent(/A door drives no courts/);
-      expect(screen.queryByText(/court fields on a gate/)).not.toBeInTheDocument();
-    });
-
-    /**
-     * The same refusal through the other field. A present-but-null `button_map` counts as
-     * sent — it binds as a `JsonElement` and the API asks `ValueKind != Undefined` — so
-     * "back to the club's map", which is a real instruction on a box, is as refused on a gate
-     * as a list would be. That is the difference from `gate_key`, whose null IS an absence.
-     */
-    it("says the same of a button map, including the one that clears an override", async () => {
-      const server = deviceServer(deviceFixture({ button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "minutes:60"] }));
-      stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        ...server.routes,
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit buttons/ }));
-      server.replace(gateFixture({ id: deviceFixture().id }));
-      fireEvent.change(screen.getByLabelText("Court 1 box button 1 court"), { target: { value: "B" } });
-      fireEvent.click(screen.getByRole("button", { name: /Save buttons/ }));
-
-      expect(await screen.findByText(/Courts and button maps belong on a court box/)).toBeInTheDocument();
-    });
-
-    /**
-     * And the length bound, refused by the mock rather than by a canned status — which is
-     * what proves the bound the mock holds is the API's 64 and not a number the test picked.
-     */
-    it("refuses a door name past 64 characters at the server, not only at the keyboard", async () => {
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }));
-      stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        ...server.routes,
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "x".repeat(65) } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
-
-      expect(await screen.findByText(/A door name is at most 64 characters/)).toBeInTheDocument();
-      // The row kept its old name: a refused PATCH applies nothing.
-      expect(server.current().gate_key).toBe("front-door");
-
-      // And exactly 64 goes through, so the bound is the API's and not one off it.
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "y".repeat(64) } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
-      await waitFor(() => expect(server.current().gate_key).toBe("y".repeat(64)));
-    });
-
-    /**
-     * <b>The "New" badge is the API's to clear, and the API clears it on any edit at all.</b>
-     * `UpdateAsync` sets `AutoRegistered = false` unconditionally — not guarded by which
-     * field changed — so a mock that left it alone would let this screen keep showing "New —
-     * name this door" over a row the server had already stopped calling new.
-     */
-    it("drops the new badge after a save, because the API drops it", async () => {
-      const server = deviceServer(gateFixture({ auto_registered: true }));
-      stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        ...server.routes,
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      expect(await screen.findByText("New — name this door")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: /Edit name and door/ }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "front-door" } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
-
-      await waitFor(() => expect(server.current().auto_registered).toBe(false));
-      await waitFor(() => expect(screen.queryByText("New — name this door")).not.toBeInTheDocument());
-    });
-
-    /** The API's own bound, on the field, so a long name is stopped where it is typed. */
-    it("holds the door name to the 64 characters the API stores", async () => {
-      stubFetch(withDevices([gateFixture()]));
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
-      expect(screen.getByLabelText("Door name")).toHaveAttribute("maxLength", "64");
-    });
-
-    /**
-     * Why the field is worth filling in, and the claim it must NOT make.
-     *
-     * <p>
-     * The first draft of this hint said the door name was "the only thing that tells one
-     * door from another in the audit trail". The grep that settles it says otherwise: a gate
-     * decision is audited with `{device_id, device_code, gate_key, reason, method}`, and
-     * `device_code` is per board. What is actually true — and what an admin needs — is that
-     * the code is `gate-` plus six hex digits of a MAC, so an unnamed door is identified in
-     * the audit trail by something nobody can match to a corridor without walking to it.
-     * </p>
-     */
-    it("says why the door name matters without claiming it is the only identifier", async () => {
-      stubFetch(withDevices([gateFixture()]));
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
-      const hint = screen.getByText(/Which door this board is on/);
-      expect(hint).toHaveTextContent("this is how the audit trail names the door");
-      expect(hint).toHaveTextContent("Without it a scan is recorded against the board code alone");
-      expect(hint).not.toHaveTextContent("only thing that tells one");
-      // And that clearing it is a thing the field can do, which is not obvious from a text
-      // input with a value already in it — together with what clearing it costs, which is no
-      // longer only the audit trail: an unnamed door is sent an empty roster.
-      expect(hint).toHaveTextContent("Leave it empty to take the name away again");
-      expect(hint).toHaveTextContent("only works while it can reach the server");
-    });
-
-    /**
-     * A 64-character door name and a long device name are the two things on this row that
-     * can be arbitrarily wide, and this page has pushed itself wider than a phone on a long
-     * name before (R2 I-F6). Neither the name nor the identity line may set the row's width.
-     */
-    it("wraps a long name and a 64-character door name instead of widening the row", async () => {
-      const longKey = "a".repeat(64);
-      stubFetch(withDevices([
-        gateFixture({ name: "The changing room corridor door by the back staircase", gate_key: longKey }),
-      ]));
-
-      renderPage(<AdminDevicesPage />);
-
-      const name = await screen.findByText("The changing room corridor door by the back staircase");
-      expect(name.className).toContain("break-words");
-      expect(name.className).toContain("min-w-0");
-      const identity = screen.getByText(new RegExp(longKey));
-      expect(identity.className).toContain("break-words");
-    });
-
-    /**
-     * The row notice, which has to be the door's own. Every sentence the box side says is
-     * about courts going dark and no-show penalties being waived, and a door waives none of
-     * it — rendering the box copy here would have told a club its refunds had changed when
-     * nothing had.
-     */
-    it("says what out of service costs a DOOR, and none of what it costs a box", async () => {
-      stubFetch(withDevices([gateFixture({ enabled: false, gate_key: "front-door" })]));
-
-      renderPage(<AdminDevicesPage />);
-
-      const notice = await screen.findByText(/the API refuses every scan at this door/);
-      expect(notice).toHaveTextContent("Out of service.");
-      expect(notice).toHaveTextContent("not alerted about its silence");
-      // Both halves, because a 403 is now authoritative for a gate: a board that reaches the
-      // API and is refused denies the scan with NO roster fallback, so a door on a working
-      // network really does open for nobody — while a board that has also lost the network
-      // never hears the refusal and keeps admitting booked members for up to six hours.
-      // Either half alone is a sentence an admin cannot reconcile with what they will see.
-      expect(notice).toHaveTextContent("can still reach the API hears that refusal and opens for nobody");
-      expect(notice).toHaveTextContent("has also lost the network never hears it");
-      expect(notice).toHaveTextContent("up to six hours");
-      // And that nothing settles, said out loud because the identical control on a box row
-      // does move money.
-      expect(notice).toHaveTextContent(
-        "Bookings, check-ins, refunds and no-show penalties are untouched either way");
-
-      // None of the court-box copy, at all.
-      expect(notice).not.toHaveTextContent("refunded in full");
-      expect(notice).not.toHaveTextContent("judged as normal");
-      expect(notice).not.toHaveTextContent("No box in service drives");
-      expect(screen.queryByText(/The API refuses this box/)).not.toBeInTheDocument();
-    });
-
-    it("confirms taking a door out of service with the door's own consequence", async () => {
-      const stub = stubFetch([
-        ...withDevices([gateFixture({ gate_key: "front-door" })]),
-        {
-          method: "PATCH",
-          path: "/api/v1/admin/devices/99999999-9999-9999-9999-999999999999",
-          body: gateFixture({ enabled: false }),
-        },
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
-      expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
-
-      const confirm = await screen.findByRole("button", {
-        name: "Out of service? A door that can reach the API opens for nobody from this click. One that"
-          + " has also lost the network keeps admitting booked members from its cached roster for up to"
-          + " six hours. No booking, check-in or no-show penalty changes.",
-      });
-      // Never the box's, which promises a court's no-shows stop being penalised.
-      expect(screen.queryByRole("button", { name: /Nothing else drives/ })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /The box stops switching lights on/ })).not.toBeInTheDocument();
-
-      fireEvent.click(confirm);
-      await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
-      expect(stub.calls.find((c) => c.method === "PATCH")!.raw).toBe('{"enabled":false}');
-    });
-
-    /**
-     * The toast is the half an admin actually reads, because the row is behind it — and on
-     * the box side round 8 shipped the two saying different things about one click. Asserted
-     * as one exact string against the notice's own generator.
-     */
-    it("says in the toast exactly what the row says about the door", async () => {
-      stubFetch([
-        ...withDevices([gateFixture({ gate_key: "front-door", name: "Front door" })]),
-        {
-          method: "PATCH",
-          path: "/api/v1/admin/devices/99999999-9999-9999-9999-999999999999",
-          body: gateFixture({ name: "Front door", enabled: false }),
-        },
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
-      fireEvent.click(await screen.findByRole("button", { name: /can reach the API opens for nobody/ }));
-
-      expect(await screen.findByText(
-        "Front door is out of service. The club is not alerted about its silence, and the API refuses"
-        + " every scan at this door from the instant the switch is thrown. A door that can still reach"
-        + " the API hears that refusal and opens for nobody, with no fall back to its roster. A door"
-        + " that has also lost the network never hears it, and keeps admitting members with a booking"
-        + " from the roster it last downloaded until that goes stale, which takes up to six hours."
-        + " Bookings, check-ins, refunds and no-show penalties are untouched either way: opening a"
-        + " door is not attendance.",
-      )).toBeInTheDocument();
-    });
-
-    it("puts a door back in service in one tap, and says scans are answered again", async () => {
-      const stub = stubFetch([
-        ...withDevices([gateFixture({ enabled: false, name: "Front door" })]),
-        {
-          method: "PATCH",
-          path: "/api/v1/admin/devices/99999999-9999-9999-9999-999999999999",
-          body: gateFixture({ name: "Front door" }),
-        },
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: "Put back in service" }));
-
-      await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
-      expect(stub.calls.find((c) => c.method === "PATCH")!.raw).toBe('{"enabled":true}');
-      // Not "it works again" — what resumes on a door is scans being answered.
-      expect(await screen.findByText(/Front door is back in service/))
-        .toHaveTextContent("Scans at it are answered again from its next call");
-    });
-
-    /**
-     * Deleting is not a revocation on either kind of board; what differs is what comes back.
-     * A gate self-registers with a null key, so the door's NAME is what is actually lost —
-     * and this is also the only way to change a row's kind at all.
-     */
-    it("says a deleted door comes back unnamed", async () => {
-      const stub = stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        { path: "/api/v1/admin/devices/", sequence: [[gateFixture({ name: "Front door" })], []], body: [] },
-        { method: "DELETE", path: "/api/v1/admin/devices/", body: { deleted: true } },
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
-      const armed = await screen.findByRole("button", {
-        name: "Delete? The door re-registers on its next heartbeat with no name.",
-      });
-      expect(screen.queryByRole("button", { name: /The box re-registers/ })).not.toBeInTheDocument();
-
-      fireEvent.click(armed);
-      await waitFor(() => {
-        expect(stub.calls.find((c) => c.method === "DELETE")?.path)
-          .toBe("/api/v1/admin/devices/99999999-9999-9999-9999-999999999999");
-      });
-      expect(await screen.findByText(/Front door deleted/))
-        .toHaveTextContent("it re-registers on its next heartbeat as a new door with no name");
-    });
-
-    /**
-     * A refusal the screen should never be able to provoke — the editors are gated on kind —
-     * but the API answers it, and a token rendered with its underscores swapped for spaces
-     * tells an admin nothing about what to do. It reaches a real admin one way: a row deleted
-     * and re-registered as the other kind while their form was open.
-     */
-    it("turns a kind mismatch into a sentence rather than a token", async () => {
-      stubFetch([
-        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        { path: "/api/v1/admin/devices/", body: [gateFixture()] },
-        { method: "PATCH", path: "/api/v1/admin/devices/", status: 400, body: { error: "gate_key_not_a_gate" } },
-      ]);
-
-      renderPage(<AdminDevicesPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "front-door" } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
-
-      expect(await screen.findByText(/A door name only belongs on a door gate/))
-        .toHaveTextContent(/delete the row and let it register itself again/);
-      // And the editor stays open, since the save did not go through.
-      expect(screen.getByRole("button", { name: /Save door/ })).toBeInTheDocument();
-    });
-
-    /**
-     * A gate and a box on one screen, which is the club's real shape and the only arrangement
-     * that proves the branch is per row rather than per page.
-     */
-    it("keeps a box a box when a gate is on the same list", async () => {
+    it("keeps a box's editors when a gate is on the same list", async () => {
       stubFetch(withDevices([
         deviceFixture({ court_numbers: [1, 2] }),
         gateFixture({ gate_key: "front-door" }),
@@ -1988,16 +1449,15 @@ describe("AdminDevices", () => {
       renderPage(<AdminDevicesPage />);
 
       expect(await screen.findByText(/A: court 1, B: court 2/)).toBeInTheDocument();
-      expect(screen.getByText(/Door gate · front-door/)).toBeInTheDocument();
       expect(screen.getAllByRole("button", { name: /Edit name and courts/ })).toHaveLength(1);
-      expect(screen.getAllByRole("button", { name: /Edit name and door/ })).toHaveLength(1);
+      expect(screen.getAllByRole("button", { name: "Take out of service" })).toHaveLength(1);
     });
 
     /**
      * And the money half of the same arrangement: a door on a court's wall is not the box
-     * that covers that court. Without the kind filter in `deviceCoverage` this row's confirm
-     * would drop to the plain "the box stops switching lights on" — telling an admin that
-     * taking the club's only court box out of service strands nothing.
+     * that covers that court. Without the kind filter in `deviceCoverage` this confirm would
+     * drop to the plain "the box stops switching lights on" — telling an admin that taking
+     * the club's only court box out of service strands nothing.
      */
     it("never lets a gate count as cover for a court box", async () => {
       stubFetch(withDevices([
@@ -2009,10 +1469,9 @@ describe("AdminDevices", () => {
 
       renderPage(<AdminDevicesPage />);
 
-      // Both rows offer the control, so the box's is taken by position — it is first in the
-      // list — rather than by a name both of them answer to.
       const controls = await screen.findAllByRole("button", { name: "Take out of service" });
-      expect(controls).toHaveLength(2);
+      // One control, because only the box has one now.
+      expect(controls).toHaveLength(1);
       fireEvent.click(controls[0]);
 
       expect(await screen.findByRole("button", { name: /Nothing else drives court 1/ })).toBeInTheDocument();
@@ -2022,11 +1481,13 @@ describe("AdminDevices", () => {
 
   // --- a board's own trail ------------------------------------------------------
   //
-  // Round G3, F2. The door has written an audit row for every scan since it shipped and
-  // no screen read one, so "why was I turned away at the front door last night" had a
-  // database query as its only answer — and the seven refusal reasons had travelled
-  // through the firmware, the wire corpus and the spec for three rounds without ever
-  // becoming a sentence anybody could read.
+  // Round G3, F2. The board has written an audit row for every decision since it shipped
+  // and no screen read one.
+  //
+  // A2.5 moved the DOOR's half of this to /admin/doors/:id, where the feed is open on
+  // arrival, chip-first, and renders an offline row three distinct ways. What is tested
+  // here is the panel this page still has — a court box's — and every claim below is one
+  // the panel makes whatever kind of board it is reading.
 
   describe("a board's activity", () => {
     const activityCalls = (stub: ReturnType<typeof stubFetch>) =>
@@ -2038,12 +1499,12 @@ describe("AdminDevices", () => {
      * seconds, for a panel nobody has opened.
      */
     it("stays shut until an admin asks, and reads the trail only then", async () => {
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [activityFixture()]);
+      const server = deviceServer(deviceFixture(), [activityFixture()]);
       const stub = stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
 
-      const toggle = await screen.findByRole("button", { name: "Door activity" });
+      const toggle = await screen.findByRole("button", { name: "Box activity" });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
       expect(activityCalls(stub)).toHaveLength(0);
       expect(screen.queryByText("Ada Lovelace")).toBeNull();
@@ -2055,7 +1516,7 @@ describe("AdminDevices", () => {
       // default happens to become.
       expect(activityCalls(stub)[0].path).toContain("limit=50");
       expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Door activity" })).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("button", { name: "Box activity" })).toHaveAttribute("aria-expanded", "true");
     });
 
     /**
@@ -2063,13 +1524,13 @@ describe("AdminDevices", () => {
      * that booking" is the answer to the question the admin was actually asked.
      */
     it("says who was refused and why, in words rather than tokens", async () => {
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+      const server = deviceServer(deviceFixture(), [
         activityFixture({ action: "gate.denied_too_early", reason: "too_early" }),
       ]);
       const stub = stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       expect(await screen.findByText("Refused")).toBeInTheDocument();
       expect(screen.getByText(/Ada Lovelace/)).toBeInTheDocument();
@@ -2086,13 +1547,13 @@ describe("AdminDevices", () => {
      * and over at my door", which is the question an admin actually has.
      */
     it("shows an unresolved code as a fingerprint and says the door cannot name anybody", async () => {
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+      const server = deviceServer(deviceFixture(), [
         activityFixture({ action: "device.unknown_scan", reason: null, offline: true, member: null, fingerprint: "9ab0cd12" }),
       ]);
       stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       expect(await screen.findByText(/Unknown code · 9ab0cd12/)).toBeInTheDocument();
       expect(screen.getByText(/the door cannot say who/)).toBeInTheDocument();
@@ -2106,13 +1567,13 @@ describe("AdminDevices", () => {
      * the difference between "the door is behaving" and "the door was on its own".
      */
     it("says an open that happened while the door was offline was the board's own", async () => {
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+      const server = deviceServer(deviceFixture(), [
         activityFixture({ action: "device.gate_open", reason: null, offline: true }),
       ]);
       stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       expect(await screen.findByText(/Opened while offline/)).toBeInTheDocument();
       expect(screen.getByText("Door opened")).toBeInTheDocument();
@@ -2124,13 +1585,13 @@ describe("AdminDevices", () => {
      * complete while hiding the one new row somebody is looking for.
      */
     it("renders an action nobody wrote copy for rather than dropping the row", async () => {
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+      const server = deviceServer(deviceFixture(), [
         activityFixture({ action: "device.tamper_detected", reason: null }),
       ]);
       stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       expect(await screen.findByText("Tamper detected")).toBeInTheDocument();
       // The raw token stays reachable for whoever has to report it upstream.
@@ -2144,11 +1605,11 @@ describe("AdminDevices", () => {
      */
     it("gives each row a relative age and the exact instant behind it", async () => {
       const at = "2026-09-19T18:04:00Z";
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [activityFixture({ at })]);
+      const server = deviceServer(deviceFixture(), [activityFixture({ at })]);
       stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       const when = await screen.findByText(/ago$/);
       expect(when).toHaveAttribute("datetime", at);
@@ -2156,13 +1617,13 @@ describe("AdminDevices", () => {
     });
 
     it("says nothing is recorded yet rather than showing an empty panel", async () => {
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }), []);
+      const server = deviceServer(deviceFixture(), []);
       stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
-      expect(await screen.findByText("Nothing recorded for this door yet.")).toBeInTheDocument();
+      expect(await screen.findByText("Nothing recorded for this box yet.")).toBeInTheDocument();
     });
 
     /**
@@ -2171,12 +1632,12 @@ describe("AdminDevices", () => {
      */
     it("says so when the trail cannot be read, rather than reading as an empty one", async () => {
       stubFetch([
-        ...withDevices([gateFixture({ gate_key: "front-door" })]),
-        { path: "/api/v1/admin/devices/99999999-9999-9999-9999-999999999999/activity", status: 500, body: {} },
+        ...withDevices([deviceFixture()]),
+        { path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111/activity", status: 500, body: {} },
       ]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       expect(await screen.findByText(/Could not read that board's activity/)).toBeInTheDocument();
       // The claim that matters: a failed READ must not render as a claim about the DOOR.
@@ -2191,16 +1652,16 @@ describe("AdminDevices", () => {
      */
     it("prefers the server's own word for a refused read", async () => {
       stubFetch([
-        ...withDevices([gateFixture({ gate_key: "front-door" })]),
+        ...withDevices([deviceFixture()]),
         {
-          path: "/api/v1/admin/devices/99999999-9999-9999-9999-999999999999/activity",
+          path: "/api/v1/admin/devices/11111111-1111-1111-1111-111111111111/activity",
           status: 403,
           body: { message: "Your session has expired." },
         },
       ]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       expect(await screen.findByText("Your session has expired.")).toBeInTheDocument();
       expect(screen.queryByText(/Could not read that board's activity/)).toBeNull();
@@ -2214,7 +1675,7 @@ describe("AdminDevices", () => {
       stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
-      expect(screen.queryByRole("button", { name: "Door activity" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Box activity" })).toBeNull();
       fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       expect(await screen.findByText("Court activated")).toBeInTheDocument();
@@ -2229,13 +1690,13 @@ describe("AdminDevices", () => {
      */
     it("wraps a long member name instead of widening the row", async () => {
       const longName = "Bartholomew Fitzgerald-Montgomery-Wetherby-Ashcombe-Pemberton III";
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }), [
+      const server = deviceServer(deviceFixture(), [
         activityFixture({ member: { id: "44444444-4444-4444-4444-444444444444", name: longName } }),
       ]);
       stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       const line = await screen.findByText(new RegExp(longName.slice(0, 20)));
       expect(line.className).toContain("break-words");
@@ -2249,11 +1710,11 @@ describe("AdminDevices", () => {
         reason: "no_booking",
         at: new Date(Date.now() - i * 60_000).toISOString(),
       }));
-      const server = deviceServer(gateFixture({ gate_key: "front-door" }), rows);
+      const server = deviceServer(deviceFixture(), rows);
       stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
 
       renderPage(<AdminDevicesPage />);
-      fireEvent.click(await screen.findByRole("button", { name: "Door activity" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       await screen.findAllByText("Refused");
       expect(screen.getAllByText("Refused")).toHaveLength(50);

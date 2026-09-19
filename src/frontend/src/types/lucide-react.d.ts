@@ -91,6 +91,11 @@ declare module "lucide-react" {
   export const Facebook: LucideIcon;
   export const Instagram: LucideIcon;
   export const MapPin: LucideIcon;
+  // doors: admin. `DoorClosed`, not `DoorOpen` — an open door is a state claim this product
+  // cannot make, and the icon sits two lines above a page whose whole discipline is not
+  // making it. `Printer` is the door card's one control.
+  export const DoorClosed: LucideIcon;
+  export const Printer: LucideIcon;
 }
 
 // NOTE FOR THE NEXT PERSON WHO ADDS AN ICON: you have to add it above.

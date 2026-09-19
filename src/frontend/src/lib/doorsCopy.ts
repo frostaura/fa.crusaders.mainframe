@@ -25,6 +25,23 @@ import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal, type D
  * </p>
  */
 
+/**
+ * "6m ago" spelled out, for an accessible name.
+ *
+ * <p>
+ * A screen reader reads "6m ago" as "six em ago". The abbreviation is right on screen, where
+ * space is the constraint and the reader can see the pattern, and wrong in a name, where the
+ * whole point is that the fact arrives once and completely.
+ * </p>
+ */
+const AGE_UNITS: Record<string, string> = { s: "second", m: "minute", h: "hour", d: "day" };
+
+export function spellAge(ago: string): string {
+  const match = /^(\d+)([smhd]) ago$/.exec(ago);
+  if (!match) return ago;
+  return `${plural(Number(match[1]), AGE_UNITS[match[2]])} ago`;
+}
+
 /** A chip is a word and a tone. Colour is never the signal; the word is. */
 export type DoorChip = { label: string; tone: "success" | "danger" | "muted" | "warning" };
 

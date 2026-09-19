@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Cpu, Wifi, WifiOff } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Cpu, DoorClosed, Wifi, WifiOff } from "lucide-react";
 import {
   endpoints, isGate, type AdminCourt, type AdminDevice, type AdminSettings, type DeviceActivityEntry,
 } from "../lib/api";
+import { isOnline, offlineAfterSecondsFor, relative } from "../lib/deviceLiveness";
+import { useTicker } from "../lib/useTicker";
+import { doorStateChip } from "../lib/doorsCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
 import {
   ACTIVITY_READ_FAILED, activityEmptyNotice, activityPanelTitle, describeActivityAction,
@@ -12,10 +16,7 @@ import { formatInstant } from "../lib/utils";
 import {
   coverageWithout, outOfServiceConfirm, outOfServiceConsequences, type CourtCoverage,
 } from "../lib/deviceCoverage";
-import {
-  GATE_KEY_MAX_LENGTH, NEW_GATE_BADGE, describeGate, gateDeleteConfirm,
-  doorShutConfirm, doorShutNotice, unnamedGateOfflineNotice,
-} from "../lib/gateCopy";
+import { UNNAMED_GATE, describeGate } from "../lib/gateCopy";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -66,79 +67,24 @@ import { useToast } from "../components/Toast";
  */
 
 /**
- * The heartbeat interval a box will actually run, whatever the tenant setting says.
- *
- * <p>
- * The firmware clamps its cadence to this range (`Cadence.h`), so a club that sets 600
- * has boxes calling in every 300 and a club that sets 5 has them calling in every 15.
- * Reading the raw setting as if it were the interval is how "offline" gets decided
- * against a number no box is using.
- * </p>
- */
-const HEARTBEAT_MIN_S = 15;
-const HEARTBEAT_MAX_S = 300;
-
-/** What a box runs when nothing says otherwise — the tenant default. */
-const HEARTBEAT_FALLBACK_S = 60;
-
-/**
- * Missed beats before a box is called offline, when the API does not say.
- *
- * <p>
- * Three, so one slow request or one dropped datagram is not an outage. It used to be
- * three beats of an assumed 30-second cadence, frozen as a literal 180 000 ms — and the
- * settings page then grew an editable interval offering up to 3600 s, at which point a
- * club that raised it to reduce chatter watched the whole fleet read offline for most
- * of every interval and started power-cycling boxes mid-league-night (review finding 22).
- * The threshold is the API's own `offline_after_seconds` where it is sent, and derived
- * from the cadence the box actually runs where it is not.
- * </p>
- */
-const MISSED_BEATS_BEFORE_OFFLINE = 3;
-
-/**
- * How often the page re-reads the boxes, milliseconds.
+ * How often the page re-reads the boards, milliseconds.
  *
  * <p>
  * This screen's entire content is liveness — "online" / "last seen Nm ago" — and the
  * peripheral-health email tells an admin to open it and watch a box recover. It loaded once
  * on mount and never again, so the page the alert LINKS TO showed the state at the moment
  * it was opened: a tab left open read "online" for a box six and a half minutes dark, more
- * than double the offline threshold and long after the club had been emailed about it,
- * while a second tab on the same URL opened two seconds later read "last seen 6m ago"
+ * than double the offline threshold and long after the club had been emailed about it
  * (finding M-F2).
  * </p>
  *
  * <p>
- * Fifteen seconds is the firmware's own minimum heartbeat interval
- * (`bridgelogic::kMinHeartbeatMs`, mirrored in HEARTBEAT_MIN_S above), so the page cannot
- * be more than one beat behind the fastest box a club can configure. Only the device list
- * is re-read; the settings and courts behind it change when an admin changes them.
+ * Fifteen seconds is the firmware's own minimum heartbeat interval, so the page cannot be
+ * more than one beat behind the fastest box a club can configure. Only the device list is
+ * re-read; the settings and courts behind it change when an admin changes them.
  * </p>
  */
 const REFRESH_MS = 15_000;
-
-/** How long since the last beat before this box counts as offline, seconds. */
-function offlineAfterSeconds(device: AdminDevice, tenantSeconds: number | null): number {
-  if (device.offline_after_seconds) return device.offline_after_seconds;
-  const declared = device.effective_heartbeat_seconds ?? tenantSeconds ?? HEARTBEAT_FALLBACK_S;
-  const clamped = Math.min(Math.max(declared, HEARTBEAT_MIN_S), HEARTBEAT_MAX_S);
-  return clamped * MISSED_BEATS_BEFORE_OFFLINE;
-}
-
-function isOnline(device: AdminDevice, offlineAfter: number) {
-  if (!device.last_seen_at) return false;
-  return Date.now() - new Date(device.last_seen_at).getTime() < offlineAfter * 1000;
-}
-
-function relative(iso: string | null) {
-  if (!iso) return "never";
-  const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
-  return `${Math.round(seconds / 86400)}d ago`;
-}
 
 /** "A: court 1, B: court 2" — the relay bank as an admin reads it off the box. */
 function describeCourts(courtNumbers: number[]) {
@@ -294,11 +240,6 @@ function DeviceButtonMapPanel({
 /** Everything a row can ask the page to do to its device. */
 type DeviceActions = {
   details: (name: string, courtNumbers: number[]) => Promise<boolean>;
-  /**
-   * A gate's half of `details`: its name and the door it is on. Never sent for a box.
-   * `gateKey` is `""` to clear the door's name — see {@link GateDetailsEditor}.
-   */
-  gateDetails: (name: string, gateKey: string) => Promise<boolean>;
   buttonMap: (map: string[] | null) => Promise<boolean>;
   /** Out of service, or back in. See DeviceRow for what the switch actually does. */
   setEnabled: (enabled: boolean) => Promise<void>;
@@ -360,97 +301,10 @@ function DeviceDetailsEditor({
   );
 }
 
-/**
- * A door's name and its gate key, saved together.
- *
- * <p>
- * The same one-save argument as {@link DeviceDetailsEditor}: a gate arrives named "Door
- * gate" with no key at all, so both are wrong at the same moment and splitting them would
- * be two saves and two chances to clear the "New" badge with half the job done.
- * </p>
- *
- * <p>
- * There is no court list and no button map here, and their absence is the point rather
- * than an omission: the API refuses either on a Gate row outright, so an editor offering
- * them would be a form whose save can only fail.
- * </p>
- */
-function GateDetailsEditor({
-  device, onSave, onClose,
-}: {
-  device: AdminDevice;
-  /**
-   * An empty key clears the door's name, and `""` is what the API reads as a clear — `null`
-   * on that field means "leave it alone", which is what this used to send.
-   */
-  onSave: (name: string, gateKey: string) => Promise<boolean>;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState(device.name);
-  const [key, setKey] = useState(device.gate_key ?? "");
-  const [saving, setSaving] = useState(false);
-  const nameId = `${device.id}-name`;
-  const keyId = `${device.id}-gate-key`;
-
-  async function save() {
-    setSaving(true);
-    try {
-      // Trimmed here as well as on the API, so the row that comes back is the row the
-      // admin will see — a key saved with a trailing space would otherwise render with an
-      // invisible difference from the one they typed. An empty field goes as `""`, which
-      // is the API's clear; it used to go as `null`, which the API discards.
-      if (await onSave(name.trim() || device.name, key.trim())) onClose();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="mt-3 space-y-3 rounded-lg bg-slate-50 p-3">
-      <div>
-        <Label htmlFor={nameId}>Name</Label>
-        <Input id={nameId} value={name} onChange={(e) => setName(e.target.value)} placeholder="Door gate" disabled={saving} />
-      </div>
-      <div>
-        <Label htmlFor={keyId}>Door name</Label>
-        {/* NOT "the only thing that tells one door from another": a gate decision is audited
-            with the board's device code as well as its gate key, and the code is per board.
-            What is true, and what an admin needs, is that the code is a fragment of a MAC
-            address — so without a name here the audit trail identifies the door by something
-            nobody can match to a corridor without walking to it. */}
-        <p className="mb-2 text-xs text-slate-500">
-          Which door this board is on. Every door runs the same firmware and nothing is
-          compiled in per door, so this is how the audit trail names the door. Without it a
-          scan is recorded against the board code alone. Leave it empty to take the name away
-          again. {unnamedGateOfflineNotice()}
-        </p>
-        <Input
-          id={keyId}
-          value={key}
-          // The API's own bound, on the field, so a long name is stopped where it is typed
-          // rather than after a save the admin has to decode.
-          maxLength={GATE_KEY_MAX_LENGTH}
-          onChange={(e) => setKey(e.target.value)}
-          placeholder="front-door"
-          disabled={saving}
-        />
-      </div>
-      <div className="flex gap-2">
-        <Button className="h-8 px-3 text-xs" onClick={() => void save()} disabled={saving}>
-          {saving ? "Saving…" : "Save door"}
-        </Button>
-        <Button variant="ghost" className="h-8 px-3 text-xs" onClick={onClose} disabled={saving}>Cancel</Button>
-      </div>
-    </div>
-  );
-}
-
 /** The badges and the identity line — everything about a row that is read-only. */
-function DeviceRowHeader({ device, online }: { device: AdminDevice; online: boolean }) {
-  const isBox = !isGate(device);
-  // Presence-gated AND kind-gated: a gate has no buttons, so the override badge cannot be
-  // true of one however the payload is shaped.
-  const hasOwnMapField = isBox && device.button_map !== undefined;
+function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online: boolean; now: number }) {
+  // Presence-gated: an API that does not send the field cannot have an override.
+  const hasOwnMapField = device.button_map !== undefined;
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
@@ -469,7 +323,7 @@ function DeviceRowHeader({ device, online }: { device: AdminDevice; online: bool
           ? <Badge tone="muted">out of service</Badge>
           : (
             <Badge tone={online ? "success" : "danger"}>
-              {online ? "online" : `not reporting — last seen ${relative(device.last_seen_at)}`}
+              {online ? "online" : `not reporting — last seen ${relative(device.last_seen_at, now)}`}
             </Badge>
           )}
         {/* A box registers itself with a generated name and default courts. Until an
@@ -477,15 +331,11 @@ function DeviceRowHeader({ device, online }: { device: AdminDevice; online: bool
             wrong courts — which is a league night with the wrong lights on, not a
             cosmetic gap. The badge clears when the row is edited.
 
-            A gate is the same badge and a different job: it registers with no courts at
-            all and no door name, so telling its admin to "check court numbers" would send
-            them looking for an editor this row does not have and must not have. What a
-            new door needs is a name — until it has one, every audit row for a scan at it
-            carries a null gate_key and names the door only by its board code, which is a
-            fragment of a MAC address. */}
-        {device.auto_registered && (
-          <Badge tone="warning">{isBox ? "New — check court numbers" : NEW_GATE_BADGE}</Badge>
-        )}
+            A DOOR's equivalent badge is not here any more (A2.5): a doors-first page keys
+            the job on the missing NAME rather than on the new-board flag, because a door
+            that was named months ago and never edited is fine and one whose name somebody
+            cleared is not. See doorSetupChip in lib/doorsCopy. */}
+        {device.auto_registered && <Badge tone="warning">New — check court numbers</Badge>}
         {hasOwnMapField && device.button_map != null && <Badge tone="info">own button map</Badge>}
       </div>
 
@@ -496,39 +346,6 @@ function DeviceRowHeader({ device, online }: { device: AdminDevice; online: bool
           with a larger token. */}
       <div className="mt-1 break-words text-xs text-slate-500">{identityLine(device)}</div>
     </>
-  );
-}
-
-/**
- * What an unnamed door cannot do, on the row rather than only inside the editor.
- *
- * <p>
- * A gate whose `gate_key` is null is sent an empty roster on every heartbeat, so it has no
- * offline fallback at all. That is a functional gap rather than a cosmetic one, and the
- * badge beside it says only that the row is NEW — a different claim, and one that stops
- * being true the moment anything on the row is edited.
- * </p>
- *
- * <p>
- * Keyed on the name being absent rather than on `auto_registered`, because clearing a name
- * takes the roster away from a row that is no longer new. Its own component rather than a
- * conditional inside {@link DeviceRow}, which the complexity gate already holds at its
- * bound — and because the condition is then stated once, beside the reason for it.
- * </p>
- *
- * <p>
- * Silent while the door editor is open, because the field's own hint carries the same
- * sentence there and the two render one above the other. Seen at phone width: the identical
- * paragraph twice inside one card, which reads as a rendering fault rather than as emphasis.
- * </p>
- */
-function UnnamedGateNotice({ device, editing }: { device: AdminDevice; editing: boolean }) {
-  if (editing) return null;
-  if (!isGate(device) || device.gate_key !== null) return null;
-  return (
-    <p className="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
-      {unnamedGateOfflineNotice()}
-    </p>
   );
 }
 
@@ -565,20 +382,19 @@ function UnnamedGateNotice({ device, editing }: { device: AdminDevice; editing: 
  * </p>
  *
  * <p>
- * <b>The GATE branch shares none of those words, on purpose.</b> A door drives no courts, so
- * every clause above about a court going dark and its no-shows being waived is simply not
- * true of one, and letting the box copy render on a gate row would have told a club its
- * refunds had changed when nothing had. The gate's own sentence is generated by
- * {@link doorShutNotice}, which the toast reads too.
+ * <b>A GATE never reaches this notice at all (A2.5).</b> A door drives no courts, so every
+ * clause above about a court going dark and its no-shows being waived is simply not true of
+ * one — and rather than a second branch here, a door is shut on /admin/doors, where
+ * `doorStateNotice` says the door's own consequence. Two call sites for one 403 path is the
+ * failure `lib/gateCopy.ts`'s header documents.
  * </p>
  */
 function OutOfServiceNotice({ device, coverage }: { device: AdminDevice; coverage: CourtCoverage }) {
   return (
     <p className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
-      {isGate(device)
-        ? `Out of service. ${doorShutNotice()}`
-        : "Out of service. The API refuses this box, so it switches nothing on, and the club is not"
-          + ` alerted about its silence. ${outOfServiceConsequences(coverage).join(" ")}`}
+      {`Out of service. The API refuses this box, so it switches nothing on, and the club is not`
+        + ` alerted about its silence. ${outOfServiceConsequences(coverage).join(" ")}`}
+      <span className="sr-only">{device.name}</span>
     </p>
   );
 }
@@ -606,7 +422,7 @@ function OutOfServiceNotice({ device, coverage }: { device: AdminDevice; coverag
  * unknown unsearchable.
  * </p>
  */
-function ActivityRow({ entry }: { entry: DeviceActivityEntry }) {
+function ActivityRow({ entry, now }: { entry: DeviceActivityEntry; now: number }) {
   const who = describeActivityWho(entry);
   const why = describeActivityReason(entry);
   const detail = [who, why].filter((part) => part !== null).join(" · ");
@@ -619,7 +435,7 @@ function ActivityRow({ entry }: { entry: DeviceActivityEntry }) {
         {/* Relative for the glance, exact on hover or long-press for the reconciliation —
             the pair the liveness line above and the ledger both already use. */}
         <time dateTime={entry.at} title={formatInstant(entry.at)} className="ml-auto shrink-0 text-slate-400">
-          {relative(entry.at)}
+          {relative(entry.at, now)}
         </time>
       </div>
       {/* min-w-0 AND break-words: a member's display name is the one arbitrarily wide
@@ -631,11 +447,12 @@ function ActivityRow({ entry }: { entry: DeviceActivityEntry }) {
 }
 
 /** What the panel is showing right now, once the four states are collapsed into one read. */
-function ActivityBody({ entries, loading, error, gate }: {
+function ActivityBody({ entries, loading, error, gate, now }: {
   entries: DeviceActivityEntry[] | null;
   loading: boolean;
   error: string | null;
   gate: boolean;
+  now: number;
 }) {
   if (loading) return <p className="text-xs text-slate-500">Loading…</p>;
   // Before empty, deliberately. A failed read that rendered "nothing recorded yet" would
@@ -645,7 +462,7 @@ function ActivityBody({ entries, loading, error, gate }: {
   if (!entries || entries.length === 0) return <p className="text-xs text-slate-500">{activityEmptyNotice(gate)}</p>;
   return (
     <ul className="text-xs">
-      {entries.map((entry, i) => <ActivityRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} />)}
+      {entries.map((entry, i) => <ActivityRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} now={now} />)}
     </ul>
   );
 }
@@ -681,7 +498,7 @@ function ActivityBody({ entries, loading, error, gate }: {
  * screen-reader user has to re-find after every press.
  * </p>
  */
-function DeviceActivityPanel({ device }: { device: AdminDevice }) {
+function DeviceActivityPanel({ device, now }: { device: AdminDevice; now: number }) {
   const gate = isGate(device);
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<DeviceActivityEntry[] | null>(null);
@@ -715,7 +532,7 @@ function DeviceActivityPanel({ device }: { device: AdminDevice }) {
       </Button>
       {open && (
         <div className="mt-2 rounded-lg bg-slate-50 p-3">
-          <ActivityBody entries={entries} loading={loading} error={error} gate={gate} />
+          <ActivityBody entries={entries} loading={loading} error={error} gate={gate} now={now} />
         </div>
       )}
     </div>
@@ -741,33 +558,32 @@ type BoxEditing = {
 };
 
 function DeviceRow({
-  device, boxEditing, actions, offlineAfter, coverage,
+  device, boxEditing, actions, offlineAfter, coverage, now,
 }: {
   device: AdminDevice;
   boxEditing: BoxEditing;
   actions: DeviceActions;
-  /** Seconds since the last beat before this board is offline. See offlineAfterSeconds. */
+  /** Seconds since the last beat before this board is offline. See offlineAfterSecondsFor. */
   offlineAfter: number;
   /** What each of this box's courts would be left with without it. See lib/deviceCoverage. */
   coverage: CourtCoverage;
+  /** One instant per paint, from the page's single ticker. */
+  now: number;
 }) {
-  const online = isOnline(device, offlineAfter);
+  const online = isOnline(device, offlineAfter, now);
   const [editing, setEditing] = useState<"details" | "buttons" | null>(null);
-  const isBox = !isGate(device);
-  // Presence-gated AND kind-gated: an API that does not send the field gets no editor for
-  // it, and a gate has no buttons to edit however the payload is shaped.
-  const hasOwnMapField = isBox && device.button_map !== undefined;
+  // Presence-gated: an API that does not send the field gets no editor for it.
+  const hasOwnMapField = device.button_map !== undefined;
 
   return (
     <div className="rounded-lg border border-slate-200 p-3">
-      <DeviceRowHeader device={device} online={online} />
+      <DeviceRowHeader device={device} online={online} now={now} />
 
-      {editing === "details" && (isBox
-        ? <DeviceDetailsEditor device={device} courts={boxEditing.courts} onSave={actions.details} onClose={() => setEditing(null)} />
-        : <GateDetailsEditor device={device} onSave={actions.gateDetails} onClose={() => setEditing(null)} />
+      {editing === "details" && (
+        <DeviceDetailsEditor device={device} courts={boxEditing.courts} onSave={actions.details} onClose={() => setEditing(null)} />
       )}
 
-      {editing === "buttons" && isBox && (
+      {editing === "buttons" && (
         <DeviceButtonMapPanel
           device={device}
           clubMap={boxEditing.clubMap}
@@ -777,23 +593,21 @@ function DeviceRow({
         />
       )}
 
-      <UnnamedGateNotice device={device} editing={editing === "details"} />
-
       {!device.enabled && <OutOfServiceNotice device={device} coverage={coverage} />}
 
       {/* Above the action strip, because it is the one control on this row that reads
           rather than writes — and an admin usually opens it to decide whether to press
           one of the others. */}
-      <DeviceActivityPanel device={device} />
+      <DeviceActivityPanel device={device} now={now} />
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {editing === null && (
           <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => setEditing("details")}>
-            {isBox ? "Edit name and courts" : "Edit name and door"}
+            Edit name and courts
           </Button>
         )}
 
-        {isBox && hasOwnMapField && editing === null && (
+        {hasOwnMapField && editing === null && (
           <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => setEditing("buttons")}>
             Edit buttons
           </Button>
@@ -811,18 +625,18 @@ function DeviceRow({
             Confirmed on the way out, because a live box stops working; plain on the way
             back, because restoring a box is not a decision anyone regrets.
 
-            A gate gets the same control and a different label, because none of the above is
-            what it costs: no court goes dark, no penalty is waived, and the honest caveat is
-            the opposite one — the door may keep opening from its cached roster for a while
-            after the API stops answering it. See doorShutConfirm in lib/gateCopy. */}
+            A DOOR is not offered this control at all any more (A2.5): its own vocabulary is
+            "Shut" and "Reopen", the consequence is the opposite one, and two call sites for
+            one 403 path is the failure lib/gateCopy's header documents. Doors are shut on
+            /admin/doors. */}
         {device.enabled ? (
           <ConfirmButton
             idleLabel="Take out of service"
             // The confirm names the consequence that is hardest to undo knowing about, per
             // court and only where it is true — see outOfServiceConfirm in lib/deviceCoverage.
-            // An admin taking a
-            // spare out of service beside a box that is reporting gets the plain sentence.
-            confirmLabel={isBox ? outOfServiceConfirm(coverage) : doorShutConfirm()}
+            // An admin taking a spare out of service beside a box that is reporting gets the
+            // plain sentence.
+            confirmLabel={outOfServiceConfirm(coverage)}
             onConfirm={() => actions.setEnabled(false)}
             className="h-8 px-3"
           />
@@ -835,18 +649,78 @@ function DeviceRow({
         {/* Deleting is not a revocation and locks nothing out — the box still holds the
             club's key. It forgets the row, and the box makes a new one on its next call.
             The confirm label says exactly that, because "Really delete?" would let an
-            admin think they had just taken a box off the network.
-
-            For a gate it is also the only way to change a row's kind, and what comes back
-            is a door with no name — so its label says that instead. */}
+            admin think they had just taken a box off the network. */}
         <ConfirmButton
           idleLabel="Delete"
-          confirmLabel={isBox ? "Delete? The box re-registers on its next heartbeat." : gateDeleteConfirm()}
+          confirmLabel="Delete? The box re-registers on its next heartbeat."
           onConfirm={actions.remove}
           tone="danger"
           className="h-8 px-3"
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * The club's doors, read-only, under their own heading (A2.5 / D5).
+ *
+ * <p>
+ * <b>Visible here, edited only on Doors.</b> W1.1 says court boxes stay on this page and
+ * gates appear on both, which is right about VISIBILITY and wrong about control: if
+ * `GateDetailsEditor`, the gate branch of the out-of-service notice and the gate delete
+ * confirm have two call sites, this repo has already documented what happens next —
+ * `lib/gateCopy.ts` exists because the court-box consequence "was written three times at
+ * three call sites and shipped three rounds running with the three of them disagreeing about
+ * what the click had just done". Two screens is two call sites.
+ * </p>
+ *
+ * <p>
+ * So a door is one line here: its liveness, its door name, a ticking age and a link. Nothing
+ * on this page edits, names, shuts, reopens or deletes a door.
+ * </p>
+ */
+function GateRows({ gates, tenantHeartbeat, now }: {
+  gates: AdminDevice[];
+  tenantHeartbeat: number | null;
+  now: number;
+}) {
+  if (gates.length === 0) return null;
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <div className="mb-2 flex items-center gap-2">
+        <DoorClosed className="h-4 w-4 text-slate-400" aria-hidden="true" />
+        <h3 className="text-sm font-semibold">Doors</h3>
+      </div>
+      <ul className="space-y-2">
+        {gates.map((gate) => {
+          const online = isOnline(gate, offlineAfterSecondsFor(gate, tenantHeartbeat), now);
+          const chip = doorStateChip(gate, online);
+          return (
+            <li key={gate.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3">
+              <Badge tone={chip.tone}>{chip.label}</Badge>
+              <span className="min-w-0 break-words text-sm font-medium">{gate.name}</span>
+              <span className="min-w-0 break-words text-xs text-slate-500">
+                {`${gate.gate_key ?? UNNAMED_GATE} · ${gate.device_code}`}
+              </span>
+              <time
+                dateTime={gate.last_seen_at ?? undefined}
+                aria-live="off"
+                className="text-xs text-slate-500"
+              >
+                {relative(gate.last_seen_at, now)}
+              </time>
+              <Link
+                to={`/admin/doors/${gate.id}`}
+                className="ml-auto inline-flex min-h-11 items-center rounded-lg border border-control px-4 text-sm font-medium"
+              >
+                Manage on Doors
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-2 text-xs text-slate-500">Doors are set up and shut under Doors.</p>
     </div>
   );
 }
@@ -877,11 +751,6 @@ function DeviceRow({
  * </p>
  */
 function enabledToast(device: AdminDevice, coverage: CourtCoverage, enabled: boolean): string {
-  if (isGate(device)) {
-    return enabled
-      ? `${device.name} is back in service. Scans at it are answered again from its next call, and the club is alerted if it goes quiet.`
-      : `${device.name} is out of service. ${doorShutNotice()}`;
-  }
   return enabled
     ? `${device.name} is back in service. It works again on its next call, and the club is alerted if it goes quiet.`
     : [`${device.name} is out of service. It switches nothing on, and the club is not alerted about its silence.`,
@@ -896,10 +765,7 @@ function enabledToast(device: AdminDevice, coverage: CourtCoverage, enabled: boo
  * with a null key — which is the part an admin has to redo.
  */
 function deletedToast(device: AdminDevice): string {
-  const comesBack = isGate(device)
-    ? "as a new door with no name"
-    : "as a new box";
-  return `${device.name} deleted. It still has the club's key, so it re-registers on its next heartbeat ${comesBack} — unplug it if you meant to retire it.`;
+  return `${device.name} deleted. It still has the club's key, so it re-registers on its next heartbeat as a new box — unplug it if you meant to retire it.`;
 }
 
 /**
@@ -944,39 +810,6 @@ function useDeviceActions(reload: () => Promise<void>) {
         return true;
       } catch (e) {
         toast.push({ tone: "danger", text: describeDeviceError(e, "Could not save that box."), durationMs: 8000 });
-        return false;
-      }
-    },
-    /**
-     * A door's name and key, in one PATCH.
-     *
-     * <p>
-     * `gate_key` does NOT bind three-valued the way `button_map` does, which is what this
-     * comment used to say and what the code did: clearing a door's name is `""` on the wire,
-     * because the API applies the field only when it is not null and reads an empty string
-     * as the clear. Sending `null` was a silent no-op that reported success.
-     * </p>
-     *
-     * <p>
-     * `court_numbers` is never sent, because the API refuses it on a Gate row.
-     * </p>
-     */
-    gateDetails: async (name, gateKey) => {
-      try {
-        await endpoints.adminDeviceUpdate(device.id, { name, gate_key: gateKey });
-        toast.push({
-          tone: "success",
-          // A cleared name is not a cosmetic loss any more: an unnamed gate is sent an empty
-          // roster, so it stops working the moment it loses the network. The toast used to
-          // say "scans at it still work", which is true only while the API is reachable.
-          text: gateKey === ""
-            ? `${name} has no door name. ${unnamedGateOfflineNotice()} The audit trail cannot say which door a scan was, either.`
-            : `${name} is the ${gateKey} door. It picks that up on its next heartbeat.`,
-        });
-        await reload();
-        return true;
-      } catch (e) {
-        toast.push({ tone: "danger", text: describeDeviceError(e, "Could not save that door."), durationMs: 8000 });
         return false;
       }
     },
@@ -1037,6 +870,14 @@ export function AdminDevicesPage() {
   const [loading, setLoading] = useState(true);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  /**
+   * One instant per paint, from one timer (A2.7's extraction).
+   *
+   * Every age on this page used to read `Date.now()` for itself, so three rows rendered
+   * across a second boundary could print two different numbers for one moment — and the page
+   * only re-rendered on a poll, so the ages stepped in fifteen-second jumps.
+   */
+  const now = useTicker(true);
 
   /**
    * Re-reads the boxes and nothing else — this is the only thing on the page that goes
@@ -1128,6 +969,10 @@ export function AdminDevicesPage() {
   /** The club's declared heartbeat, for boxes that do not carry their own. */
   const tenantHeartbeat = settings?.heartbeat_seconds ?? null;
 
+  // Boxes get the editors; doors get a read-only row and a link (A2.5).
+  const boxes = devices.filter((d) => !isGate(d));
+  const gates = devices.filter((d) => isGate(d));
+
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4">
       <h1 className="text-2xl font-bold">Devices</h1>
@@ -1152,7 +997,7 @@ export function AdminDevicesPage() {
           </Button>
         </div>
         <p className="mb-3 text-xs text-slate-500">
-          {checkedAt ? `Checked ${relative(checkedAt)}` : "Checking…"} · this page re-reads the boards every {REFRESH_MS / 1000} seconds while this tab is in front.
+          {checkedAt ? `Checked ${relative(checkedAt, now)}` : "Checking…"} · this page re-reads the boards every {REFRESH_MS / 1000} seconds while this tab is in front.
         </p>
 
         <UnacknowledgedBoardsNotice devices={devices} />
@@ -1167,21 +1012,26 @@ export function AdminDevicesPage() {
             No boards have called in yet. Flash one with the key above and power it on — it registers itself.
           </p>
         ) : (
-          <div className="space-y-3">
-            {devices.map((device) => {
-              // One coverage per row: the confirm, the notice and the toast all read it.
-              const coverage = coverageWithout(device, devices,
-                (d) => isOnline(d, offlineAfterSeconds(d, tenantHeartbeat)));
-              return (
-                <DeviceRow
-                  key={device.id} device={device}
-                  boxEditing={{ courts, clubMap: buttonMap, walkUpMax: walkUpCap }}
-                  actions={actionsFor(device, coverage)} coverage={coverage}
-                  offlineAfter={offlineAfterSeconds(device, tenantHeartbeat)}
-                />
-              );
-            })}
-          </div>
+          <>
+            <div className="space-y-3">
+              {boxes.map((device) => {
+                // One coverage per row: the confirm, the notice and the toast all read it.
+                const coverage = coverageWithout(device, devices,
+                  (d) => isOnline(d, offlineAfterSecondsFor(d, tenantHeartbeat), now));
+                return (
+                  <DeviceRow
+                    key={device.id} device={device}
+                    boxEditing={{ courts, clubMap: buttonMap, walkUpMax: walkUpCap }}
+                    actions={actionsFor(device, coverage)} coverage={coverage}
+                    offlineAfter={offlineAfterSecondsFor(device, tenantHeartbeat)}
+                    now={now}
+                  />
+                );
+              })}
+            </div>
+            {/* A2.5: gates are VISIBLE here and editable only on Doors. */}
+            <GateRows gates={gates} tenantHeartbeat={tenantHeartbeat} now={now} />
+          </>
         )}
       </Card>
 

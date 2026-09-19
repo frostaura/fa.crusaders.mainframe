@@ -4,6 +4,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { Card } from "../components/Card";
+// doors: admin
+import { AdminDoorsHomeRow } from "../components/doors/AdminDoorsHomeRow";
 
 /**
  * The club's front door, and — while both of Northwood Crusaders' own domains are parked — very
@@ -338,6 +340,13 @@ function SignedInHome({ isAdmin }: { isAdmin: boolean }) {
         <p className="mt-1 text-text-secondary">What would you like to do?</p>
       </header>
       <div className="grid gap-3 sm:grid-cols-2">
+        {/* doors: admin — one row, and ONLY when a door is silent, shut or unnamed (A2.6).
+            On a normal day Home says nothing about doors at all: P7 is a rule about email and
+            it is the right rule for a home screen too, because a panel that is always there is
+            one an admin skims past and is therefore worth nothing on the morning it matters.
+            The component renders null unless there is something to act on, and a failed read
+            renders null too. */}
+        {isAdmin && <AdminDoorsHomeRow />}
         {links.map(({ to, label, hint, icon: Icon, primary }) => (
           <Link
             key={to}

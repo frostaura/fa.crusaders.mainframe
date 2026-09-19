@@ -191,3 +191,32 @@
     box-shadow: none;
   }
 }
+
+/*
+ * doors: admin — the product's only print stylesheet.
+ *
+ * A door card is printed and put in the cupboard beside the board, for somebody standing
+ * at a door at six in the morning with a phone that is no use to them. Nothing else in
+ * this product has ever been printed, so there was no `@media print` block at all: a
+ * browser printing an app screen prints the sticky header, the tab strip, the gear menu
+ * and a page of chrome around a card that is 80 mm tall.
+ *
+ * A5 because that is the paper a club actually has and because the card is short. The
+ * rules are deliberately structural — hide the chrome, set the page, let the sheet fill
+ * it — rather than a re-skin: a print stylesheet that restyles text is one that drifts
+ * from the screen it is supposed to be a copy of.
+ */
+@media print {
+  @page { size: A5; margin: 12mm; }
+
+  /* The app's shell scrolls a nested <main>; printing that clips the sheet to one
+     viewport, so the overflow has to go as well as the chrome. */
+  header, nav { display: none !important; }
+  html, body, #root { height: auto !important; overflow: visible !important; background: #FFFFFF !important; }
+  main { overflow: visible !important; }
+  main > div { max-width: none !important; padding: 0 !important; }
+
+  /* Anything the page marks as screen-only: the Print button itself, the back link and
+     the sentence explaining what the sheet is for. None of it means anything on paper. */
+  [data-print-hide] { display: none !important; }
+}
