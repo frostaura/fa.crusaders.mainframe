@@ -1,15 +1,26 @@
 ---
 name: crusaders-mainframe-decisions-door-gate-io
-description: "The door gate's edges: a compiler-checked API_BASE_URL, what a UART overrun costs, a response body read into the caller's buffer under a cap and a deadline, the no_push counter, and the Arduino-IDE flash route."
+description: "The door gate's edges: a compiler-checked API_BASE_URL that refuses the example file's own placeholder, every secrets value guarded, what a UART overrun costs, and the Arduino-IDE flash route with its version trap."
 type: decision
 last_verified: 2026-09-19
 ---
 
 # Live decisions — the door gate's edges
 
-What the loop does with these is in [`decisions-door-gate-loop.md`](decisions-door-gate-loop.md);
-the toolchain traps around building them are in [`gotchas-build.md`](gotchas-build.md).
+The HTTP call itself — framing, the three budgets, the two diagnostic counters — is its own
+topic: [`decisions-door-gate-http.md`](decisions-door-gate-http.md). What the loop does with
+these is in [`decisions-door-gate-loop.md`](decisions-door-gate-loop.md); the toolchain traps
+around building them are in [`gotchas-build.md`](gotchas-build.md).
 
+- **Every value in `secrets.h.example` is a placeholder and every placeholder is a compile
+  error** (round G3). The file shipped `WIFI_SSID "ClubWiFi"` and a real-looking LAN address —
+  values that compile, flash, and produce a board that joins nothing and posts to a machine
+  that is not the club's. With one LED and no console, that board and a board whose server is
+  down are the same slow blink. `main.cpp` asserts the three string values against the
+  example's own literals **character for character** (change one, change both) and the URL's
+  placeholder is the reserved host `0.0.0.0`, refused by the grammar with `255.255.255.255`.
+  Proved in both directions on BOTH flash routes. CI's throwaway secrets moved to
+  `192.0.2.10` (RFC 5737 TEST-NET-1); the court box has no such guard and is unaffected.
 - **`API_BASE_URL` is checked by the compiler** (2026-09-19): `http://` + an IPv4 literal + an
   optional `:port`, no trailing slash, and it must fit the URL buffer. *Why each:* a **hostname**
   resolves through lwIP DNS, which NEITHER HTTP timeout bounds (~16 s then ~15 s), so every
@@ -33,25 +44,6 @@ the toolchain traps around building them are in [`gotchas-build.md`](gotchas-bui
   halves was swallowed. `setRxBufferSize(1024)` and `onReceiveError` are still installed BEFORE
   `Serial2.begin`, where they are honoured, and the assembler is still reset at boot and on a link
   edge as its header had always promised.
-- **The response body is read into the caller's buffer, capped and on the call's own deadline**
-  (round G2). `http.getString()` heap-allocated the WHOLE body — sized by whatever the peer sends —
-  under two comments promising it did not, then TRUNCATED it into `out` and returned the peer's 200.
-  `isCompleteObject` is the only reason that was not a silent roster replacement; the scan parser
-  has no such guard, and `{"opened":true,` cut after the comma is a door that opens. A body that
-  does not fit or does not arrive is status 0 — a transport failure, so the scan goes to the roster
-  rather than to a parser holding half an object. `setTimeout` is an INTER-BYTE timeout a dribbling
-  peer resets on every byte, so the deadline is absolute and sampled before the call starts.
-  **Residual:** HTTPClient's own header loop inside `POST()` still cannot be interrupted, so a peer
-  that dribbles HEADERS can outlast `kWorstBlockingCallMs`. That is the watchdog's case, and it is
-  the one precondition on the 8 010 ms release-overrun sentence.
-- **A truncated heartbeat body is no push at all** (`devlink::applyRoster`, shared with the court
-  box): the element walk cannot tell a short roster from a cut one, so committing what arrived
-  discarded every booking whose bytes were lost AND re-stamped the cache fresh. An accepted
-  heartbeat that pushed nothing is now COUNTED and sent back as an optional `no_push` in the next
-  request — it is otherwise wholly unobservable, and a diagnostic blink was rejected because this
-  lamp is what tells a member their scan was seen. **Omitted at zero**, so a healthy board's body
-  stays byte-identical to the corpus request vector. The backend's acceptance and its corpus vector
-  (B7) had not landed when this shipped.
 - **The gate is flashed from the Arduino IDE, like every other board here.** Carl flashes the boards
   and has no PlatformIO. `src/iot/tools/arduino_export.py --project` generates
   `door-gate/arduino/door_gate/`; `make arduino-check` covers both projects. **Verified by compiling

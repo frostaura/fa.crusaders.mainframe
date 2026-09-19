@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas
-description: "The test suite lies in specific ways: it cannot pass in the last half-hour of a UTC day, some tests cannot fail on this Mac by construction, a test can be green because of one fixture field, and the in-memory provider has no transactions."
+description: "The test suite lies in specific ways: no fixture here reads a real socket, it cannot pass in the last half-hour of a UTC day, some tests cannot fail on this Mac, a test can be green because of one fixture field."
 type: gotcha
-last_verified: 2026-09-11
+last_verified: 2026-09-19
 ---
 
 # Gotchas — the test suite and its fixtures
@@ -27,6 +27,13 @@ Why a green suite is not evidence at all is a decision, not a gotcha:
   and green here every time. Diagnosing it needs the CI log and a deliberately tick-offset fixture,
   not another local run. **`-v q` suppresses the assertion message in CI**, leaving only `[FAIL]`
   and a name; pass `-v n` when a CI-only failure has to be read rather than guessed.
+- **NO TEST IN THIS REPOSITORY READS A REAL SOCKET, and round G3 found what that hides.** Every
+  firmware HTTP fixture is a string a fake hands over; the real API frames its responses
+  `Transfer-Encoding: chunked` on a keep-alive connection, and a reader that was correct against
+  every invented fixture timed out on **every** call against the actual server — no roster, and a
+  door that refused everyone. The fixtures are real captured bytes now, and the e2e-device lane
+  reads responses the way the board does. A fixture nobody took off a wire proves the parser, not
+  the protocol.
 - **A test can be green because of its FIXTURE, not its code.** Flipping one boolean on a stale
   device fixture exposed a live money rule — a stale-but-enabled box beside a healthy one waiving
   no-show penalties indefinitely — that no test discriminated. Mutate the rule *and* vary the

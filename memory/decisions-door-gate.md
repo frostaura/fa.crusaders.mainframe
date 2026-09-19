@@ -25,8 +25,9 @@ unchanged: [`decisions-device.md`](decisions-device.md). What follows is the gat
   second-guessed against the roster; and a **403**, which is the club taking this board out of
   service — it denies with `out_of_service`, and a 403 on **any** of the three device paths (scan,
   heartbeat, event drain — all three since round G2) commits an EMPTY roster.
-  Everything else — 0, 401, 404, 408, 429, any 5xx, and a 200 whose body cannot be parsed or did not
-  fit — falls back to the roster. *Why the 403:* falling back after one would keep the door
+  Everything else — 0, 401, 404, 408, 429, any 5xx, and a 200 whose body cannot be parsed, did
+  not fit or did not FRAME — falls back to the roster. (On `/events` a 404 is read differently
+  again: see the cadence topic.) *Why the 403:* falling back after one would keep the door
   admitting rostered members for the full six-hour staleness window after an admin pressed the
   button that exists to stop exactly that; and whichever path a board speaks on first has to be the
   one that hears it, or a disabled board keeps its roster until its next heartbeat. *Why the rest:*
@@ -58,6 +59,8 @@ unchanged: [`decisions-device.md`](decisions-device.md). What follows is the gat
   measures both failures and asks Carl the two facts. **Fire egress must be mechanical and
   independent of this board; nothing here is a life-safety device.**
 - **How the pass is ordered, and what shares its one blocking call**, is its own topic:
-  [`decisions-door-gate-loop.md`](decisions-door-gate-loop.md). The edges it talks through — the
-  URL check, the UART, the HTTP body, the flash route — are in
-  [`decisions-door-gate-io.md`](decisions-door-gate-io.md).
+  [`decisions-door-gate-loop.md`](decisions-door-gate-loop.md); how often it speaks and what a
+  refusal costs it is [`decisions-door-gate-cadence.md`](decisions-door-gate-cadence.md). The
+  edges it talks through — the URL check, the UART, the secrets guard, the flash route — are in
+  [`decisions-door-gate-io.md`](decisions-door-gate-io.md), and the HTTP call itself is in
+  [`decisions-door-gate-http.md`](decisions-door-gate-http.md).

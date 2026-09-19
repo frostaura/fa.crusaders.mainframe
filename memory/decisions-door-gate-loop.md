@@ -1,15 +1,17 @@
 ---
 name: crusaders-mainframe-decisions-door-gate-loop
-description: "The door gate's pass and what shares its one blocking call: the step order, the 12 s watchdog relation and its lamp fault, the event drain's backoff, a 403 that empties the roster on every path, and the true release-overrun bound."
+description: "The door gate's pass and what shares its one blocking call: why the loop left main.cpp, the load-bearing step order, at most one call with the 15 s watchdog relation and its lamp fault, and the true release-overrun bound."
 type: decision
 last_verified: 2026-09-19
 ---
 
 # Live decisions — the door gate's pass
 
-Behaviour and safety: [`decisions-door-gate.md`](decisions-door-gate.md). The edges this loop
-talks through — the URL, the UART, the HTTP body, the flash route — are in
-[`decisions-door-gate-io.md`](decisions-door-gate-io.md).
+Behaviour and safety: [`decisions-door-gate.md`](decisions-door-gate.md). How often it speaks
+and what a refusal costs it: [`decisions-door-gate-cadence.md`](decisions-door-gate-cadence.md).
+The edges this loop talks through — the URL and the UART — are in
+[`decisions-door-gate-io.md`](decisions-door-gate-io.md), and the call itself is in
+[`decisions-door-gate-http.md`](decisions-door-gate-http.md).
 
 - **The loop lives in `gatelogic::GateApp`, not in `main.cpp`** (round G1). *Why:*
   `build_src_filter = -<*>` means the host suite cannot see `main.cpp`, and an adversarial review
@@ -35,17 +37,11 @@ talks through — the URL, the UART, the HTTP body, the flash route — are in
     rostered member arriving afterwards went from REFUSED to admitted. Backoff starts at 15 s and
     doubles to a 5 min cap, cleared by the queue actually MOVING rather than by the status — a 200
     that acknowledges nothing leaves the head exactly where a 429 does.
-  - **The member at the door wins the pass, but bounded.** A scanner streaming forever would
-    otherwise win every pass; after `kMaxScanPassesBeforeHeartbeat` (4) consecutive passes in which
-    a scan took the call with a heartbeat due, the heartbeat goes first.
-- **A 403 on ANY of the three device paths commits an EMPTY roster** — scan, heartbeat and event
-  drain alike (G2). Two of the three did; a claim probe on the README sentence found the third.
-  Denying only the scan in front of you leaves the next link drop admitting every rostered member
-  for the rest of the staleness window.
 - **At most ONE blocking call per pass**, watchdog kicked immediately before and after each.
-  - **`GATE_WATCHDOG_SECONDS` is 12, not 8**, and `watchdogSeconds * 1000 >= kWorstBlockingCallMs +
-    2 s` is a `static_assert`. The two HTTP timeouts are separate numbers summing to 8 s, and 8 s of
-    watchdog against an 8 s worst-case call is a guaranteed reset loop.
+  - **`GATE_WATCHDOG_SECONDS` is 15**, and `watchdogSeconds * 1000 >= kWorstBlockingCallMs +
+    2 s` is a `static_assert`. It was 8 against an 8 s call — a guaranteed reset loop — then 12
+    against 8; G3 gave the response body its own budget, so a call is three 4 s phases and the
+    worst case is 12 s.
   - **`esp_task_wdt_init` is a RECONFIGURATION** over the core's own 5 s TWDT — IDF 4.4 documents it
     and returns `ESP_OK`. It is retried three times and the result is reported on the boot log line
     AND (G2) by a **4 Hz lamp blink** for as long as it is false, because the boot log has scrolled
@@ -53,5 +49,7 @@ talks through — the URL, the UART, the HTTP body, the flash route — are in
     a missing watchdog is a door that admits nobody, far worse than one running on 5 s.
   - **The true release bound, which replaced a false "can never" sentence:** a blocking call in
     flight when the deadline passes delays the relay write, so `physical release <= granted window +
-    kWorstBlockingCallMs + kIdleDelayMs` = **8 010 ms over the deadline, a worst case of 38.01 s**
-    against the 30 s cap. Its one precondition is in `decisions-door-gate-io.md`.
+    kWorstBlockingCallMs + kIdleDelayMs` = **12 010 ms over the deadline, a worst case of
+    42.01 s** against the 30 s cap. It went UP at G3 because the old number was measured
+    against a call whose body phase could be handed no time at all. One precondition, in
+    `decisions-door-gate-io.md`.
