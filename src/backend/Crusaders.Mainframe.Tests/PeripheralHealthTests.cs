@@ -341,7 +341,7 @@ public class PeripheralHealthTests
         using var scope = host.NewScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateWorker(host).TickAsync(default);
 
@@ -382,7 +382,7 @@ public class PeripheralHealthTests
         var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
         var worker = CreateWorker(host);
         await worker.TickAsync(default);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         gate.LastSeenAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
@@ -408,7 +408,7 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20), true, null, 1, 2);
         var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateWorker(host).TickAsync(default);
 
@@ -510,7 +510,7 @@ public class PeripheralHealthTests
 
         var start = DateTimeOffset.UtcNow.AddHours(-6);
         var box = await AddBoxAsync(host, db, start, enabled: true, installedAt: start.AddDays(-30));
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         // Six flaps at nine-minute intervals, so every detection lands inside one
         // sixty-minute cooldown of the first — the first is detected at +4 and the last at
@@ -564,7 +564,7 @@ public class PeripheralHealthTests
 
         var start = DateTimeOffset.UtcNow.AddHours(-6);
         var box = await AddBoxAsync(host, db, start, enabled: true, installedAt: start.AddDays(-30));
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         for (var i = 0; i < 3; i++)
         {
@@ -604,7 +604,7 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 
         var unnamed = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1), gateKey: null);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateWorker(host).TickAsync(default);
 
@@ -653,13 +653,13 @@ public class PeripheralHealthTests
         var registry = scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
 
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1));
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateWorker(host).TickAsync(default);
         var outage = Assert.Single(await db.DeviceOutages.IgnoreQueryFilters().Where(o => o.DeviceId == box.Id).ToListAsync());
         Assert.Null(outage.EndedAt);
         Assert.Single(host.EmailService.Sent);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         // The admin takes it out of service.
         await registry.UpdateAsync(box, new UpdateDeviceCommand(null, false, null, null, null), host.AdminUser.Id, default);
