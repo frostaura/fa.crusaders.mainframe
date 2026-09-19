@@ -7,9 +7,10 @@ libraries, and nothing else.
 
 | Directory | What it is |
 |---|---|
+| [`tools/`](tools/) | Project-neutral firmware tooling: the Arduino IDE exporter (`--project`, or every project) and the iCloud duplicate sweep. Nothing here knows about one board. |
 | [`shared/`](shared/) | The libraries every Crusaders device needs and no device owns: rollover-safe time, the HAL ports and their fakes, hex, the firmware-version string, the device API client, the event queue, the roster cache, and `devlink` — the heartbeat body, the event-upload body, the roster push and the API circuit breaker. Builds for **no board at all**; its `platformio.ini` carries host test environments only. |
 | [`court-box/`](court-box/) | The **court light box**: WeMos Mega 2560 + onboard ESP8266, four court-light relays, an LCD, a button panel and a QR scanner — plus the native simulator and the generated Arduino IDE sketches that are the flashing route. Everything here is true of *this* hardware. Start at [`court-box/README.md`](court-box/README.md). |
-| [`door-gate/`](door-gate/) | The **door gate**: one ESP32 per door, a QR scanner on `Serial2`, one relay on the lock and one LED. Pull-only, online-first with a roster fallback, and a lock asserted LOCKED before its pin is ever an output. Start at [`door-gate/README.md`](door-gate/README.md). |
+| [`door-gate/`](door-gate/) | The **door gate**: one ESP32 per door, a QR scanner on `Serial2`, one relay on the lock and one LED — plus the generated Arduino IDE sketch that is its flashing route. Pull-only, online-first with a roster fallback, and a lock asserted LOCKED before its pin is ever an output. Start at [`door-gate/README.md`](door-gate/README.md). |
 
 A firmware project reaches the shared libraries with one line in its own
 `platformio.ini`:
@@ -63,12 +64,15 @@ make lint-iot        # clang-format, strict compile, purity + rollover gates —
 make build-iot       # compile every target board plus the native simulator
 make complexity      # cyclomatic complexity, all three languages
 make corpus-check    # regenerate the corpus-baked headers, fail if stale
-make arduino-export  # regenerate court-box/arduino/ from the sources
+make arduino-export  # regenerate EVERY project's arduino/ from the sources
 make arduino-check   # regenerate and fail if the committed sketches are stale
 ```
 
 Flashing, the wiring, the DIP block and everything else about the court box is
-in [`court-box/README.md`](court-box/README.md).
+in [`court-box/README.md`](court-box/README.md); the gate's equivalent is in
+[`door-gate/README.md`](door-gate/README.md). Each project's **generated**
+`arduino/README.md` is the one to hand somebody who is standing at the club with
+a screwdriver — it is written for them and for the board in front of them.
 
 ## Adding a fourth firmware project
 
@@ -88,9 +92,15 @@ in [`court-box/README.md`](court-box/README.md).
    because they are per project by nature.
 4. Add its steps to `.github/workflows/ci.yml` where one names a project
    directly: the board build, the throwaway `secrets.h`, the purity, rollover and
-   complexity path lists, the Arduino compile and the simulator smoke test. The
-   host-test and lint steps follow the Makefile's list and need nothing.
-5. If it has a HAL-implementation directory, add that directory's NAME to the
+   complexity path lists, the Arduino core install and compile, and the simulator
+   smoke test. The host-test and lint steps follow the Makefile's list and need
+   nothing.
+5. If it is flashed from the Arduino IDE — which it is, unless nobody at the
+   club will ever flash it — give it an entry in `tools/arduino_export.py`'s
+   `PROJECTS` table and add its directory name to the Makefile's
+   `IOT_ARDUINO_PROJECTS`. See *The Arduino IDE export covers every board*
+   below.
+6. If it has a HAL-implementation directory, add that directory's NAME to the
    purity exclusions in **three** places — `Makefile`'s `lint-iot`,
    `ci.yml`'s purity step, and `court-box/tools/strict_compile.sh` — and extend
    the forbidden-include regex with any header family the new board brings.
@@ -102,24 +112,44 @@ implementations named above) and the rollover rule (never compare `millis()`
 values directly — use `tb::reached` or `tb::Deadline`) apply to every project in
 this tree and are gated for all of them at once.
 
-### The Arduino IDE export covers the court box only
+### The Arduino IDE export covers every board
 
-`make arduino-export` generates `court-box/arduino/` and nothing else. The
-generator, `court-box/tools/arduino_export.py`, reads a hard-coded `PROJECT`
-(its own parent directory), a hard-coded two-entry `TARGETS` list, a hard-coded
-`BRIDGE_SUBS` rewrite table, a `CORES` pin naming `arduino:avr` and
-`esp8266:esp8266`, and a `render_readme()` that is ~135 lines of court-box prose
-— DIP-switch tables, LCD screens, two sketch folders.
+`make arduino-export` generates a sketch folder for **every** firmware project
+that has one — `court-box/arduino/` (two sketches) and `door-gate/arduino/`
+(one) — and `make arduino-check` regenerates both and fails on a diff or on an
+uncommitted generated file. The IDE is the deployment route for all of them,
+because the people who flash boards at the club do not have PlatformIO.
 
-Its mechanical half — the `platformio.ini` reader, the `#include` closure across
-both library roots, the include rewriting, the `lib_deps` vendoring, the
-`build_config.h` emitter and the iCloud duplicate sweep — is fully generic and
-needs no change. **Generalising it to a third target in another project means:**
-making `PROJECT` a `--project` argument and threading it through the eight places
-it is used; moving `TARGETS`, the secrets rewrite table, `CORES` and the board
-index URL into a per-project table; replacing `render_readme()` with one template
-per project; extending `make arduino-export` / `arduino-check` to run and diff
-both trees; and adding an `esp32:esp32` core install plus an `arduino-cli
-compile --fqbn esp32:esp32:esp32` step to the `iot-build` job, whose core
-download is a few hundred megabytes on a cold cache. Until all of that is done
-the gate is flashed from PlatformIO, which `door-gate/README.md` documents.
+The generator is [`tools/arduino_export.py`](tools/), **not** a court-box file:
+it takes `--project` (repeatable; no flag means every project) and keeps
+everything project-specific — the target list, the secrets rewrite tables, the
+core pins, the board index URL and the README template — in the one
+`project_configs()` table. Its mechanical half is shared: the `platformio.ini`
+reader, the `#include` closure across both library roots, the include rewriting,
+the `lib_deps` vendoring, the `build_config.h` emitter and the iCloud duplicate
+sweep.
+
+**Adding a fourth project's sketch** is one entry in that table — targets (env,
+`src/` subdirectory, sketch name, secrets rewrites, FQBN), the core pin beside
+its PlatformIO platform, the board index URL, and a README renderer — plus its
+directory name in the Makefile's `IOT_ARDUINO_PROJECTS` and an `arduino-cli
+core install` and `compile` line in `ci.yml`'s `iot-build` job.
+
+Two rules the generator enforces rather than documents:
+
+- **`build_unflags` is applied by exact token, exactly as PlatformIO applies
+  it**, and a name left defined twice with different values fails the export.
+  That is what makes the gate's `build_config.h` say `FW_VERSION_MAJOR 1` while
+  `[common]` pins 2 for the court box. It also means a flag whose unflag token
+  matches it exactly is removed *entirely* — the gate's `FW_VERSION_MINOR=0` and
+  `FW_VERSION_PATCH=0` are unflagged and re-set to the same value, so neither
+  reaches the compiler on either build and `fwversion/Version.h`'s `#ifndef`
+  fallback of 0 supplies both. Verified against the real `pio run -v` compile
+  line, which carries `-DFW_VERSION_MAJOR=1` and neither of the other two.
+- **The forbidden host-only libraries (`posix_hal`, `hal_fakes`) fail the
+  export from any project**, not only from the one whose `lib/` owns them. Their
+  include namespaces are derived by scanning every project under `src/iot`,
+  because `posix_hal` lives in `court-box/lib` and was therefore invisible to
+  the gate's closure — an `#include "posix_hal/…"` there was silently not
+  vendored rather than refused, and surfaced later as a missing header from
+  `arduino-cli`.

@@ -396,11 +396,17 @@ certified as one, and no combination of the build flags turns it into one.
       machine, with all four values. It is gitignored, and the build `#error`s on a missing
       one and `static_assert`s on an empty one — there is no way to produce an image with a
       blank in it.
-- [ ] Flashed with `pio run -d src/iot/door-gate -e door_gate -t upload`. **There is no
-      Arduino IDE sketch folder for this board**, unlike the court box's — so the person who
-      flashes a gate needs the PlatformIO toolchain, which the court box's technician does
-      not. If Carl is to flash gates, the exporter has to be generalised first; what that
-      takes is in `src/iot/README.md`.
+- [ ] Flashed **from the Arduino IDE**, out of `src/iot/door-gate/arduino/door_gate/` — board
+      *ESP32 Dev Module*, pick the port, Upload — with `secrets.h` copied from the `.example`
+      beside the `.ino` and filled in. That folder is generated, carries its own README written
+      for the person doing the flashing, and vendors every library it needs, so the technician
+      needs no terminal and no PlatformIO. `pio run -d src/iot/door-gate -e door_gate -t upload`
+      remains the developer route and is what the tests and gates run against.
+- [ ] **The `esp32` core installed from the Boards Manager is exactly 2.0.17**, added through
+      the `package_esp32_index.json` URL in the sketch folder's README. Only one version of a
+      core installs at a time, and 3.x is not a small difference — the sketch is not expected to
+      compile against it. It is the version CI compiles this sketch with, and it matches the
+      `espressif32@6.9.0` platform `platformio.ini` pins.
 - [ ] The board appears on the admin **Devices** page by itself within one heartbeat, as
       `Kind=Gate`, with `DeviceCode` `gate-<last six of MAC>` — auto-registered, nothing
       claimed or provisioned.

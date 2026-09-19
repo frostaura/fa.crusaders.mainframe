@@ -20,12 +20,16 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
   that knows a relay, a DIP switch, a court or the Mega↔ESP dialect stays in the device's own project, and
   where the two sides must agree on a constant the `static_assert` lives on the device side
   (`court-box/lib/bridgelogic/RosterTokenFits.h`).
-  **PlatformIO is the tested build; the Arduino IDE is the deployment route.** `src/iot/court-box/arduino/`
-  holds two generated sketch folders and is never hand-edited — `make arduino-export` writes it from both
-  `lib/` directories, `src/` and the `-D` flags in `platformio.ini`, and `make arduino-check` regenerates
-  and fails on a diff.
-  A consequence binds the sources: the Arduino AVR core hard-codes `-std=gnu++11` and the IDE cannot
-  override it, so **anything `court_mega` links must be valid C++11 as well as C++17.**
+  **PlatformIO is the tested build; the Arduino IDE is the deployment route for every board.** Each
+  firmware project's `arduino/` holds its generated sketch folders and is never hand-edited —
+  `make arduino-export` writes them from both `lib/` directories, `src/` and the `-D` flags in
+  `platformio.ini` (with `build_unflags` applied), and `make arduino-check` regenerates and fails on a
+  diff. The generator is project-neutral and takes `--project`: `src/iot/tools/arduino_export.py`.
+  A consequence binds the sources: the Arduino AVR core **and the ESP32 core** hard-code
+  `-std=gnu++11` and the IDE cannot override it, so **anything a generated sketch links must be valid
+  C++11 as well as C++17** — `court_mega` and `door_gate` alike. `inline constexpr` variables survive as
+  a GCC extension; a multi-statement `constexpr` function does not. Only the `arduino-cli compile` step
+  in CI catches this; no PlatformIO build can, because PlatformIO unflags the core's standard.
 - **`src/contracts/device-protocol`** — the wire-protocol fixture corpus, consumed by *both* the C++ and the
   .NET tests. Neutral ground: neither side may drift from the other without a test going red.
 

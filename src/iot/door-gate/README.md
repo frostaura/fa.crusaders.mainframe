@@ -237,6 +237,24 @@ as bench checks.
 
 ## Flashing
 
+**The Arduino IDE is the deployment route**, exactly as it is for the court box.
+[`arduino/door_gate/`](arduino/door_gate/) is a ready-to-open sketch folder —
+board *ESP32 Dev Module*, pick the port, Upload — needing no terminal, no `make`
+and nothing from the Library Manager. Its own
+[`arduino/README.md`](arduino/README.md) is written for the person holding the
+screwdriver and carries the core version to install, the polarity truth table
+and every flag in `build_config.h` that is safe to change.
+
+That folder is **generated** and is never hand-edited: `make arduino-export`
+writes it from `lib/`, `../shared/lib/`, `src/` and the `-D` flags in
+[`platformio.ini`](platformio.ini) (with `build_unflags` applied, which is what
+makes the sketch report **1.0.0** rather than the 2.0.0 `[common]` pins for the
+court box), and `make arduino-check` regenerates and fails on a diff. A hand-edit
+there is deleted by the next export, not flagged.
+
+The developer route is PlatformIO, and it is what the tests and the gates run
+against:
+
 ```bash
 make install-iot                 # once: creates src/iot/.venv
 cp src/iot/door-gate/src/common/secrets.h.example \
@@ -247,18 +265,16 @@ src/iot/.venv/bin/pio run -d src/iot/door-gate -e door_gate -t upload
 src/iot/.venv/bin/pio device monitor -d src/iot/door-gate -e door_gate
 ```
 
-The build **refuses** without `secrets.h` and `static_assert`s on an empty value
-in it. That is deliberate: an image that joins an empty SSID, or posts to an
-empty base URL with an empty bearer key, looks identical to a working one until
-it is screwed to a wall.
+Either route **refuses** without `secrets.h` and `static_assert`s on an empty
+value in it. That is deliberate: an image that joins an empty SSID, or posts to
+an empty base URL with an empty bearer key, looks identical to a working one
+until it is screwed to a wall. Each route reads its own copy — the PlatformIO
+build `src/common/secrets.h`, the sketch `arduino/door_gate/secrets.h` — and
+both are gitignored.
 
 The monitor runs at 115200 — unlike the court bridge, whose UART0 *is* its link
 to the Mega. On this board UART0 is the USB console and nothing else; the scanner
 is on `Serial2`.
-
-There is no Arduino IDE sketch folder for this board yet, unlike the court box's
-`arduino/`. What that would take is recorded in
-[`../README.md`](../README.md#the-arduino-ide-export-covers-the-court-box-only).
 
 ## Layout
 

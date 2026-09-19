@@ -49,9 +49,22 @@ The gates that check this firmware have traps of their own:
 - **The ESP32 Arduino builder appends `-std=gnu++11` too**, exactly as the AVR one does, so
   `[env:door_gate]` needs `build_unflags = -std=gnu++11` or nothing in `lib/` compiles for the
   board: `inline constexpr` variables and multi-statement `constexpr` functions are both C++17.
-  Unlike the court box, **nothing in the gate has to stay C++11-clean** — there is no AVR half.
-  `build_unflags` is also how that environment overrides `[common]`'s `FW_VERSION_*` without
-  editing the byte-identical block.
+  **The gate's `lib/` must be C++11-clean, the same as the court box's**, and the claim that it
+  need not be was wrong (corrected 2026-09-19): that unflag is a PlatformIO mechanism, the esp32
+  core hard-codes the standard in `platform.txt` for every variant, and the generated
+  `arduino/door_gate/` sketch is the deployment route. A multi-statement `constexpr` function in
+  `LockDriver.h` was green under `pio run` and red under `arduino-cli compile` with "body of
+  'constexpr' function not a return-statement". `inline constexpr` VARIABLES survive, as a GCC
+  extension. **Only the arduino-cli compile in CI's `iot-build` catches this** — no PlatformIO
+  gate can, and that step now covers all three sketches.
+- **`build_unflags` removes EVERY matching token, including the environment's own.**
+  `[env:door_gate]` unflags `-DFW_VERSION_MINOR=0` and then sets `-DFW_VERSION_MINOR=0` — the
+  identical token — so *neither* survives and the define never reaches the compiler;
+  `fwversion/Version.h`'s `#ifndef` fallback of 0 supplies it. Verified on the real `pio run -v`
+  compile line, which carries `-DFW_VERSION_MAJOR=1` and no MINOR or PATCH at all. The version is
+  still 1.0.0 on both builds, by luck rather than design: the fallback happens to equal the
+  intended value. The Arduino exporter mirrors the same rule and fails the export if a name
+  survives twice with different values.
 - **`devapi::json::findKey` matches a quoted key ANYWHERE, including as a VALUE.** A gate heartbeat
   opens `{"kind":"gate",…}`, so the first `"gate"` is the value of `kind`, not the key of the `gate`
   object; reading from there passes the corpus and breaks the moment a field is added between them.
