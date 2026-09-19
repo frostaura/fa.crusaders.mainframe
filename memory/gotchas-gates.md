@@ -36,3 +36,11 @@ failures are in [`gotchas-env.md`](gotchas-env.md).
   iot requirements before trusting any gate result there. Postgres starts without Docker from the
   distro's `postgresql/16/bin`; the superuser on a locally-initialised cluster is **`crusaders`**,
   and `pg_ctl` refuses to run as root.
+- **The purity gate's exclusions are HAL directory NAMES, in three places.** `arduino_hal`,
+  `posix_hal` and now `esp32_hal` are listed in the Makefile's `lint-iot`, in `ci.yml`'s purity step
+  AND in `court-box/tools/strict_compile.sh` — each runs in a context the others cannot read, so a
+  new firmware's HAL has to be added to all three. **The forbidden-include regex is per board family
+  too**: ESP32 brought `HTTPClient`, `Preferences`, `HardwareSerial` and the whole `esp_*` /
+  `driver/` / `soc/` IDF set, none of which the ESP8266 pattern matched — without extending it an
+  `esp_task_wdt.h` in pure `lib/` would have broken the host build of every project at once with the
+  gate green.

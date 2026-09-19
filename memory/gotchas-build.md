@@ -40,5 +40,21 @@ The gates that check this firmware have traps of their own:
   bytes, from board defaults rather than our code.
 - **PlatformIO compiles only the files inside each `test_<name>/` directory**, so a shared helper in
   `test/support/` compiles and then fails to link, once per suite — which is why the corpus reader is
-  header-only with everything `inline`. It is also **per project**: `court-box/test/support/` is
-  invisible from `shared/test/`, which is why every corpus-bound assertion stayed in `court-box`.
+  header-only with everything `inline`. **PlatformIO also puts only a project's OWN `test_dir` on
+  the include path**, which is why `court-box/test/support/` was invisible to every other project.
+  The reader now lives in `shared/test/support/` and every project reaches it by the same
+  `-I$PROJECT_DIR/../shared/test` line in its `[strict_host]` block — that expression names the
+  same directory from any of them, including from `shared` itself, where it is redundant and kept so
+  the blocks stay byte-identical (2026-09-19).
+- **The ESP32 Arduino builder appends `-std=gnu++11` too**, exactly as the AVR one does, so
+  `[env:door_gate]` needs `build_unflags = -std=gnu++11` or nothing in `lib/` compiles for the
+  board: `inline constexpr` variables and multi-statement `constexpr` functions are both C++17.
+  Unlike the court box, **nothing in the gate has to stay C++11-clean** — there is no AVR half.
+  `build_unflags` is also how that environment overrides `[common]`'s `FW_VERSION_*` without
+  editing the byte-identical block.
+- **`devapi::json::findKey` matches a quoted key ANYWHERE, including as a VALUE.** A gate heartbeat
+  opens `{"kind":"gate",…}`, so the first `"gate"` is the value of `kind`, not the key of the `gate`
+  object; reading from there passes the corpus and breaks the moment a field is added between them.
+  The gate uses a local helper requiring a colon after the closing quote. **The sharp edge is still
+  in `devapi`** and is worth fixing there deliberately — found 2026-09-19 by a one-field probe, not
+  by the corpus.

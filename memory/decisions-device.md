@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-device
-description: "The device contract is hobby-grade by founder decision — one per-tenant API key, auto-registration, no OTA or discovery; the brains are on the ESP8266 because the Mega cannot be flashed over WiFi; the firmware tree is split shared/ + one project per device; the wiring is fixed and untouchable."
+description: "The device contract is hobby-grade by founder decision — one per-tenant API key, auto-registration, no OTA or discovery; the brains are on the ESP8266 because the Mega cannot be flashed over WiFi; the wiring is fixed and untouchable."
 type: decision
 last_verified: 2026-09-19
 ---
@@ -59,6 +59,5 @@ that needs a wire moved is the wrong fix.
 - **Authentication runs before the rate limiter**, and the policy partitions per member. The Court
   Code page refreshes on a timer for everyone who has it open, so behind the gateway the whole club
   shared one bucket keyed on the proxy address — ten opens a minute took login club-wide.
-- **Gates are parked.** Hardware undecided, possibly a plain ESP per gate. The tree is ready for
-  one: `src/iot/door-gate/` beside `court-box/`, `lib_extra_dirs = ../shared/lib`, and its name
-  appended to `IOT_PROJECTS`.
+- **The door gate is its own topic** now that it exists as firmware —
+  [`decisions-door-gate.md`](decisions-door-gate.md).
