@@ -46,7 +46,7 @@
     {
       "id": "gate-heartbeat-response-null-gate-key",
       "kind": "heartbeat",
-      "note": "a gate nobody has named yet — auto-registration leaves gate_key null and an admin sets it. The key is still PRESENT on the wire as null: a firmware that reads an absent key as an empty string and a null one as an error would diverge here.",
+      "note": "a gate nobody has named yet — auto-registration leaves gate_key null and an admin sets it. The key is still PRESENT on the wire as null: a firmware that reads an absent key as an empty string and a null one as an error would diverge here. It is also the UNNAMED half of the named/unnamed pair: an unnamed gate's roster is ALWAYS empty, whatever the club has booked, so the offline fallback does not start until an admin has named the door. Online scans work from the first heartbeat. Pair this with gate-heartbeat-response-roster-single, which is the named half and is the only shape that may carry entries.",
       "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22676174652d306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a6e756c6c2c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a337d2c22726f73746572223a5b5d7d",
       "expect": {
         "kind": "gate",
@@ -57,7 +57,7 @@
     {
       "id": "gate-heartbeat-response-roster-single",
       "kind": "heartbeat",
-      "note": "one rostered booking, 30 minutes from its early-entry window opening and 90 minutes from its slot ending. Same TOKEN|relay|opens_in|closes_in grammar as the court box so devlink::parseRosterElement and roster::Roster are reused unchanged; the relay field is always 0.",
+      "note": "one rostered booking, 30 minutes from its early-entry window opening and 90 minutes from its slot ending. Same TOKEN|relay|opens_in|closes_in grammar as the court box so devlink::parseRosterElement and roster::Roster are reused unchanged; the relay field is always 0. The NAMED half of the pair above: gate_key is set, so this board is allowed a roster at all. A non-empty roster beside a null gate_key is a body the server does not emit.",
       "body_hex": "7b227365727665725f74696d65223a22323032332d31312d31345432323a31333a32302b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22676174652d306131623263222c226b696e64223a2267617465222c22676174655f6b6579223a2266726f6e742d646f6f72222c226865617274626561745f7365636f6e6473223a36302c2267617465223a7b22756e6c6f636b5f7365636f6e6473223a337d2c22726f73746572223a5b2237513346394b4d32585a38427c307c313830307c35343030225d7d",
       "expect": {
         "kind": "gate",
@@ -153,7 +153,7 @@
     {
       "id": "gate-scan-response-denied-not-recognised",
       "kind": "gate",
-      "note": "unknown, expired, or another club's code — one reason for all three on purpose, because telling them apart at a door turns it into an oracle for which codes are real. 200, not 4xx: a refusal the firmware can act on must never look like an outage it should fall back from.",
+      "note": "unknown, expired, or another club's code — one reason for all three on purpose, because telling them apart at a door turns it into an oracle for which codes are real. It also covers a booking code presented AFTER its own booking has ended, or for a booking that is no longer Booked: the AccessCode row outlives the slot by the grace window, and a door that distinguished 'spent' from 'never existed' would be that same oracle. 200, not 4xx: a refusal the firmware can act on must never look like an outage it should fall back from.",
       "body_hex": "7b226f70656e6564223a66616c73652c22726561736f6e223a226e6f745f7265636f676e69736564222c22756e6c6f636b5f7365636f6e6473223a307d",
       "expect": {
         "opened": false,
@@ -180,6 +180,17 @@
       "expect": {
         "opened": false,
         "reason": "no_booking",
+        "unlock_seconds": 0
+      }
+    },
+    {
+      "id": "gate-scan-response-denied-too-early",
+      "kind": "gate",
+      "note": "a BOOKING-ACTIVATION code presented before its own booking's entry window opens. A booking code is not a standing building key: under EVERY policy it opens a door only while now is inside [StartsAt - H, EndsAt] of the booking it names, where H is gate_early_entry_minutes under booking_window and max(gate_early_entry_minutes, roster_window_minutes + activation_cue_window_minutes) under active_member — the same horizon in which the member's own phone would show that code at all. Distinct from not_recognised because this one is worth telling a member apart from a dead code: they are early, not refused, and the door will open later. A sixty-second MemberIdent code never answers this — it names no booking.",
+      "body_hex": "7b226f70656e6564223a66616c73652c22726561736f6e223a22746f6f5f6561726c79222c22756e6c6f636b5f7365636f6e6473223a307d",
+      "expect": {
+        "opened": false,
+        "reason": "too_early",
         "unlock_seconds": 0
       }
     },
