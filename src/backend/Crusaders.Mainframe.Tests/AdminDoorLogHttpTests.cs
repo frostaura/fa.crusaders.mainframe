@@ -356,14 +356,16 @@ public sealed class AdminDoorLogHttpTests
         var feed = await client.GetFromJsonAsync<JsonElement>($"/api/v1/admin/devices/{doorId}/activity");
         var feedRow = feed.GetProperty("items").EnumerateArray().Single();
 
-        foreach (var key in new[] { "at", "action", "reason", "offline", "fingerprint" })
+        foreach (var key in new[] { "at", "delivered_at", "action", "reason", "offline", "fingerprint" })
         {
             Assert.Equal(feedRow.GetProperty(key).GetRawText(), logRow.GetProperty(key).GetRawText());
         }
         Assert.Equal(feedRow.GetProperty("member").GetRawText(), logRow.GetProperty("member").GetRawText());
 
-        // …and the per-board feed stays exactly six keys. WIRE-W1 lists it as unchanged.
-        Assert.Equal(6, feedRow.EnumerateObject().Count());
+        // …and the per-board feed stays exactly seven keys: WIRE-W1's six plus `delivered_at`,
+        // which A4 added because an offline row's `at` is the SCAN and the row was written when
+        // the board next called in. A page that had only one of the two could not say which.
+        Assert.Equal(7, feedRow.EnumerateObject().Count());
     }
 
     /// <summary>A registration and an admin edit are the BOARD's story, not the door's log.</summary>

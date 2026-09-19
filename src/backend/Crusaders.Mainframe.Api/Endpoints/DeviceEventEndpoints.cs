@@ -768,6 +768,14 @@ public static class DeviceEventEndpoints
         {
             device_id = device.Id,
             device_code = device.DeviceCode,
+
+            // The club's own label for the door, as the ONLINE gate path has always written
+            // it and this one did not. Every reader resolves the name by `device_id` at reply
+            // time — the row is not the authority and a rename must not leave a history
+            // stranded on an old label — so this is purely the fallback for a board DELETED
+            // since the scan, which is the one case resolution cannot answer. Null on a court
+            // box, which has no key. See MeDoorEndpoints.DoorNameOf, and S1.
+            gate_key = device.GateKey,
             seq = e.Seq,
             kind = time.Kind,
             court = e.Court,

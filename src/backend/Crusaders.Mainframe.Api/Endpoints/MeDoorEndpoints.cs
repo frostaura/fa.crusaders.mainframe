@@ -163,10 +163,11 @@ public static class MeDoorEndpoints
             .ToListAsync(ct);
 
         var items = page.Take(limit).ToList();
+        var doors = await DoorNamesAsync(db, items.Select(r => r.DetailsJson), ct);
 
         return Results.Ok(new
         {
-            items = items.Select(r => Entry(r.Action, r.CreatedAt, r.DetailsJson)).ToList(),
+            items = items.Select(r => Entry(r.Action, r.CreatedAt, r.DetailsJson, doors)).ToList(),
             next_cursor = page.Count > limit && items.Count > 0
                 ? new DoorLogCursor(items[^1].CreatedAt, items[^1].Id).Encode()
                 : null,
@@ -221,15 +222,76 @@ public static class MeDoorEndpoints
             ? await TooEarlyOpensAtAsync(db, settings, userId, now, ct)
             : null;
 
+        var doors = await DoorNamesAsync(db, [row.DetailsJson], ct);
+
         return new
         {
-            at = row.CreatedAt,
-            door_name = details is { } root ? DoorActivityView.Text(root, "gate_key") : null,
+            at = DoorActivityView.ScannedAt(details, row.CreatedAt),
+            delivered_at = DoorActivityView.DeliveredAt(details, row.CreatedAt),
+            door_name = DoorNameOf(details, doors),
             released = DoorTrail.IsRelease(row.Action),
             reason,
             offline = DoorActivityView.Offline(details),
             opens_at = opensAt,
         };
+    }
+
+    /// <summary>
+    /// The club's own label for each door these rows name, read at REPLY time rather than off
+    /// the row.
+    ///
+    /// <para>
+    /// <b>The row is not a reliable place to find it and never was.</b> The online gate path
+    /// writes <c>gate_key</c> into its details and the offline upload path did not, so a
+    /// member's history showed six releases at a null door — at a door the club had named
+    /// "Side door" — and the page then told her the club had not named it (S1, D7). The admin
+    /// log has always resolved the door by its id; this does the same, so the two surfaces
+    /// cannot disagree about what a door is called. A rename is reflected in the history the
+    /// moment it happens, which is the right answer: the member is being shown the door they
+    /// will see next time, not the one the sign used to say.
+    /// </para>
+    ///
+    /// <para>
+    /// Tenant-filtered by the context's global query filter, like every other read here — a
+    /// device id inside a jsonb document proves nothing about whose board it is.
+    /// </para>
+    /// </summary>
+    private static async Task<Dictionary<Guid, string>> DoorNamesAsync(
+        MainframeDbContext db, IEnumerable<string?> detailsJson, CancellationToken ct)
+    {
+        var ids = detailsJson
+            .Select(d => DoorTrail.DeviceIdOf(DoorActivityView.Details(d)))
+            .Where(d => d is not null).Select(d => d!.Value).Distinct().ToList();
+        if (ids.Count == 0) return [];
+
+        // The club's own label for the DOOR first, the board's display name second.
+        //
+        // `gate_key` is what a club writes on a door and what A2.2 keys "Needs a door name"
+        // on; `Name` is the board's label and starts life as the auto-registration's
+        // placeholder, which is a worse thing to show somebody standing outside than the slug
+        // the club chose. A door with neither is the club's own gap and the page has its own
+        // sentence for it.
+        return await db.Devices.AsNoTracking()
+            .Where(d => ids.Contains(d.Id))
+            .Select(d => new { d.Id, Label = d.GateKey ?? d.Name })
+            .ToDictionaryAsync(d => d.Id, d => d.Label, ct);
+    }
+
+    /// <summary>
+    /// What to call the door on this row: the club's own label for it, resolved now, then the
+    /// key the row stored, then nothing.
+    ///
+    /// <para>
+    /// The stored key is the fallback for a board that has been DELETED since the scan, which
+    /// is the one case resolution cannot answer and the one case where a history row would
+    /// otherwise lose the only thing that made it readable. Block body for the lizard reason
+    /// in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static string? DoorNameOf(JsonElement? details, IReadOnlyDictionary<Guid, string> doors)
+    {
+        if (DoorTrail.DeviceIdOf(details) is { } id && doors.TryGetValue(id, out var name)) return name;
+        return details is { } root ? DoorActivityView.Text(root, "gate_key") : null;
     }
 
     /// <summary>
@@ -242,13 +304,19 @@ public static class MeDoorEndpoints
     /// for the lizard reason in <c>memory/gotchas.md</c>.
     /// </para>
     /// </summary>
-    private static object Entry(string action, DateTimeOffset at, string? detailsJson)
+    private static object Entry(
+        string action, DateTimeOffset at, string? detailsJson, IReadOnlyDictionary<Guid, string> doors)
     {
         var details = DoorActivityView.Details(detailsJson);
         return new
         {
-            at,
-            door_name = details is { } root ? DoorActivityView.Text(root, "gate_key") : null,
+            // The scan, and when the club heard about it. See DoorActivityView.ScannedAt: an
+            // offline row is written at the upload and the scan's own instant is on the row,
+            // so a history stamped with `at` alone told a member they had walked in at the
+            // moment their door's board came back from an outage.
+            at = DoorActivityView.ScannedAt(details, at),
+            delivered_at = DoorActivityView.DeliveredAt(details, at),
+            door_name = DoorNameOf(details, doors),
             released = DoorTrail.IsRelease(action),
             reason = DoorActivityView.Reason(details) ?? (DoorTrail.IsRelease(action) ? GateAccess.Ok : null),
             offline = DoorActivityView.Offline(details),

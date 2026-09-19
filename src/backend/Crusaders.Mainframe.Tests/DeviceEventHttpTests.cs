@@ -299,6 +299,15 @@ public sealed class DeviceEventHttpTests
                 .Where(o => o.DeviceId == box.DeviceId).ToListAsync());
             Assert.Equal(wentQuietAt, outage.StartedAt, TimeSpan.FromSeconds(1));
             Assert.NotNull(outage.EndedAt);
+
+            // A4: an upload IS contact, so "last heard from" is the UPLOAD — not the scan the
+            // upload carried, which may be hours older. The doors page says both and neither
+            // is inferred from the other: `last_seen_at` is when the board called in, the
+            // row's `at` is when somebody stood at the door, and its `delivered_at` is this
+            // same instant. A page that read the scan as contact would report a board healthy
+            // while it was still dark.
+            var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == box.DeviceId);
+            Assert.Equal(DateTimeOffset.UtcNow, device.LastSeenAt!.Value, TimeSpan.FromMinutes(1));
         }
     }
 

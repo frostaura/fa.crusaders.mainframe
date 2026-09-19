@@ -37,7 +37,8 @@ public static class DoorActivityView
         var details = Details(detailsJson);
         return new
         {
-            at,
+            at = ScannedAt(details, at),
+            delivered_at = DeliveredAt(details, at),
             action,
             reason = Reason(details),
             offline = Offline(details),
@@ -65,7 +66,8 @@ public static class DoorActivityView
         var details = Details(detailsJson);
         return new
         {
-            at,
+            at = ScannedAt(details, at),
+            delivered_at = DeliveredAt(details, at),
             action,
             reason = Reason(details),
             offline = Offline(details),
@@ -73,6 +75,60 @@ public static class DoorActivityView
             fingerprint = Fingerprint(details),
             door,
         };
+    }
+
+    /// <summary>
+    /// When somebody stood at the door — which for an offline row is NOT when the row was
+    /// written.
+    ///
+    /// <para>
+    /// <b>The two instants were one field, and the field held the wrong one.</b> A board that
+    /// loses the network decides scans from its cache and uploads them when it comes back, so
+    /// the audit row is created at the upload; the scan's own instant is on the row as
+    /// <c>occurred_at</c>, which the upload path has written since it shipped and no reader
+    /// looked at. W1.2 says offline opens are scan-time stamped, and a club reading a 06:40
+    /// entry as 09:00 has the wrong answer to the only question it asked.
+    /// </para>
+    ///
+    /// <para>
+    /// Falls back to the row's own instant, which is right for every online row — the server
+    /// decided it as it wrote it — and is the only honest answer for an offline row whose
+    /// details will not parse.
+    /// </para>
+    /// </summary>
+    public static DateTimeOffset ScannedAt(JsonElement? details, DateTimeOffset createdAt)
+    {
+        if (!Offline(details)) return createdAt;
+        return Instant(details, "occurred_at") ?? createdAt;
+    }
+
+    /// <summary>
+    /// When the club heard about it — the row's own instant, on offline rows only.
+    ///
+    /// <para>
+    /// Null on an online row rather than a copy of <see cref="ScannedAt"/>, because a page
+    /// showing a delivery time for a decision the server made as it happened would be
+    /// inventing a delay. An upload IS contact — it moves <c>LastSeenAt</c> like a heartbeat
+    /// does — so this is also the instant that reconciles "last heard from" with a row the
+    /// board reported hours after the fact.
+    /// </para>
+    /// </summary>
+    public static DateTimeOffset? DeliveredAt(JsonElement? details, DateTimeOffset createdAt)
+    {
+        if (!Offline(details)) return null;
+        return createdAt;
+    }
+
+    /// <summary>An instant property of the details, or null when it is absent or is not one.</summary>
+    public static DateTimeOffset? Instant(JsonElement? details, string name)
+    {
+        if (details is not { } root || root.ValueKind != JsonValueKind.Object) return null;
+        if (!root.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String) return null;
+        return DateTimeOffset.TryParse(
+            value.GetString(), System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : null;
     }
 
     /// <summary>

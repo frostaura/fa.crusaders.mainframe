@@ -150,7 +150,8 @@ public sealed record DoorClub(
     public async Task WriteRowAsync(
         TestWebAppFactory factory, Guid deviceId, string action, DateTimeOffset at,
         Guid? subjectUserId = null, string? reason = null, string? fingerprint = null,
-        long? seq = null, string? gateKey = null, string? deviceCode = null)
+        long? seq = null, string? gateKey = null, string? deviceCode = null,
+        DateTimeOffset? occurredAt = null)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -163,6 +164,11 @@ public sealed record DoorClub(
         if (reason is not null) details["reason"] = reason;
         if (fingerprint is not null) details["subject"] = fingerprint;
         if (seq is not null) details["seq"] = seq;
+
+        // The upload path stamps the SCAN's instant here while the row itself is written when
+        // the board next called in. An offline row where the two differ is the only way to
+        // test the difference, and the difference is the whole of A4.
+        if (occurredAt is not null) details["occurred_at"] = occurredAt;
 
         db.AuditLogs.Add(new AuditLog
         {

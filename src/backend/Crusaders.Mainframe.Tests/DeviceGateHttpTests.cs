@@ -2415,9 +2415,16 @@ public sealed class DeviceGateHttpTests
         var body = await BodyAsync(response);
         var items = body.GetProperty("items").EnumerateArray().ToList();
 
-        // Newest first: the offline upload is the last thing that happened.
-        var times = items.Select(i => i.GetProperty("at").GetDateTimeOffset()).ToList();
-        Assert.Equal(times.OrderByDescending(t => t), times);
+        // Newest first — by when the CLUB heard about it, which is the trail's own order and
+        // the axis the keyset cursor is total over. An offline row's `at` is the scan, which
+        // is older than its delivery by the length of the outage, so the two axes are not the
+        // same list and the feed is explicit about which one it is sorted on (A4).
+        var delivered = items
+            .Select(i => i.GetProperty("delivered_at").ValueKind == JsonValueKind.Null
+                ? i.GetProperty("at").GetDateTimeOffset()
+                : i.GetProperty("delivered_at").GetDateTimeOffset())
+            .ToList();
+        Assert.Equal(delivered.OrderByDescending(t => t), delivered);
 
         var open = Assert.Single(items, i => i.GetProperty("action").GetString() == DeviceGateEndpoint.OpenedAction);
         Assert.Equal(GateAccess.Ok, open.GetProperty("reason").GetString());
