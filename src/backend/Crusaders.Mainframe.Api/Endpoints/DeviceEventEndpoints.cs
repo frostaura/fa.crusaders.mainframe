@@ -140,8 +140,34 @@ public static class DeviceEventEndpoints
         string.IsNullOrWhiteSpace(kind) || kind.Trim().Length > MaxKindLength;
 
     /// <summary>
-    /// The <c>kind</c> as it is safe to write: trimmed, <c>unknown</c> when there was none,
-    /// and cut to <see cref="MaxKindLength"/>.
+    /// The <c>kind</c> as it is safe to write AND as every decision below reads it: trimmed,
+    /// ordinal lower-cased, <c>unknown</c> when there was none, and cut to
+    /// <see cref="MaxKindLength"/>.
+    ///
+    /// <para>
+    /// <b>Normalising ONCE, at the top, is the fix — not the lower-casing on its own.</b> This
+    /// method already trimmed, and the audit action and the receipt were written from it; the
+    /// dispatch switch, the kind guards and the fingerprint were written from
+    /// <c>e.Kind</c> RAW. Two readings of one field on one request is a gap, and it was a
+    /// credential-sized one: <c>" gate_open "</c> stored and audited as <c>device.gate_open</c>
+    /// — indistinguishable in the trail from an honest event — while
+    /// <c>e.Kind is not (GateOpenKind or UnknownScanKind)</c> was false for it, so the subject
+    /// guard fell through and wrote the live access code into <c>DetailsJson</c> in full. One
+    /// space, added by anything holding the club key, undid the whole of G2's B4.
+    /// </para>
+    ///
+    /// <para>
+    /// The same spelling stepped around <c>GateOpenKind when device.Kind != Gate</c>, so a
+    /// COURT BOX could post a door open and skip the <c>not_a_gate</c> refusal that exists
+    /// to stop a false record of who was in the building.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Ordinal, and not the current culture.</b> <c>ToLower()</c> on a Turkish locale maps
+    /// <c>I</c> to a dotless <c>ı</c>, so a server's regional settings would decide whether a
+    /// board's events were recognised — the class of bug that is invisible everywhere it is
+    /// developed.
+    /// </para>
     ///
     /// <para>
     /// A literal rather than an empty string for the missing case, because the audit action is
@@ -151,7 +177,7 @@ public static class DeviceEventEndpoints
     /// </summary>
     private static string AuditKind(string? kind)
     {
-        var trimmed = kind?.Trim();
+        var trimmed = kind?.Trim().ToLowerInvariant();
         if (string.IsNullOrEmpty(trimmed)) return "unknown";
         return trimmed.Length > MaxKindLength ? trimmed[..MaxKindLength] : trimmed;
     }
@@ -215,8 +241,14 @@ public static class DeviceEventEndpoints
             {
                 var time = TimeOf(batch, e, now) with { Kind = AuditKind(e.Kind) };
 
+                // EVERY decision below reads the normalised kind, never e.Kind. See AuditKind:
+                // two readings of one field on one request is what let one space around
+                // "gate_open" both defeat the not_a_gate guard and put a live access code in
+                // the audit trail.
+                var kind = time.Kind;
+
                 // Attendance BEFORE the receipt. See the summary for why this order.
-                var outcome = Unusable(e.Kind) ? new ActivationOutcome(Malformed, null, time.Kind) : e.Kind switch
+                var outcome = Unusable(e.Kind) ? new ActivationOutcome(Malformed, null, kind) : kind switch
                 {
                     // A door reporting a court event. Refused explicitly rather than left to
                     // fail the relay-index check against an empty court list — see
@@ -224,7 +256,7 @@ public static class DeviceEventEndpoints
                     // Recorded and acknowledged like every other outcome, never 4xx: an
                     // event the board cannot change is a board retrying for ever.
                     ActivationKind or ReleaseKind when device!.Kind != DeviceKind.CourtBox
-                        => new ActivationOutcome(GateAccess.NotACourtBox, null, e.Kind),
+                        => new ActivationOutcome(GateAccess.NotACourtBox, null, kind),
 
                     // And the mirror: a court box reporting a door it does not have. Guarded
                     // for the same reason the two above are and not because anything settles
@@ -811,18 +843,33 @@ public static class DeviceEventEndpoints
     /// </para>
     ///
     /// <para>
-    /// Keyed on the KIND rather than on the row's kind, which is wider than the finding asked
-    /// for and deliberately so: a court box posting <c>gate_open</c> is refused
-    /// <c>not_a_gate</c>, but the token it posted is just as live, and a guard that depended
-    /// on the sender being honest about itself is not a guard. A court box's own
-    /// <c>activation</c> events are untouched — that token is the roster token for a booking
-    /// the receipt already names, and narrowing it is a separate decision about the court-box
-    /// trail rather than a door fix smuggled in here.
+    /// <b>It is keyed on nothing, which is the point.</b> It was keyed on the event's KIND —
+    /// the two door kinds only — and that was wrong twice over. It was wrong MECHANICALLY,
+    /// because it read <c>e.Kind</c> raw while everything else on this route read the trimmed
+    /// value, so <c>" gate_open "</c> was audited as a door event and had its token written
+    /// out in full; that half is fixed by normalising once, at the top (see
+    /// <see cref="AuditKind"/>). And it was wrong in SUBSTANCE, which is why the guard is now
+    /// unconditional rather than merely corrected.
+    /// </para>
+    ///
+    /// <para>
+    /// The narrow version reasoned that a court box's own <c>activation</c> token "is the
+    /// roster token for a booking the receipt already names", so nothing was gained by hiding
+    /// it. That was true when it was written and stopped being true the moment the gate
+    /// shipped: since D2 the same roster token <b>opens every door in the club</b> for the
+    /// length of its booking's window. The receipt naming the booking does not make the bytes
+    /// less live, and an unknown kind — a board ahead of this server, or one with a bug — has
+    /// no claim to be trusted with them either. There is no kind whose subject is safe to
+    /// write down, so there is no test to get wrong.
+    /// </para>
+    ///
+    /// <para>
+    /// Resolution is unaffected: every handler above resolves <c>e.Subject</c> in memory, and
+    /// only this value ever reaches a row.
     /// </para>
     /// </summary>
     private static string? SubjectFor(DeviceEventDto e)
     {
-        if (e.Kind is not (GateOpenKind or UnknownScanKind)) return e.Subject;
         if (string.IsNullOrWhiteSpace(e.Subject)) return null;
 
         var digest = System.Security.Cryptography.SHA256.HashData(

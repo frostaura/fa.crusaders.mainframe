@@ -1419,6 +1419,221 @@ public sealed class DeviceGateHttpTests
     };
 
     /// <summary>
+    /// <b>The fingerprint guard was keyed on the RAW <c>kind</c>, and every other decision on
+    /// this route was keyed on the trimmed one.</b> A single space is the whole exploit.
+    ///
+    /// <para>
+    /// <c>AuditKind</c> trims, so <c>" gate_open "</c> is stored, receipted and audited as
+    /// <c>device.gate_open</c> — indistinguishable in the trail from an honest one. The
+    /// subject guard did not: <c>e.Kind is not (GateOpenKind or UnknownScanKind)</c> is false
+    /// for the padded spelling, so the branch fell through and wrote <b>the live access code
+    /// in full</b> into <c>DetailsJson</c>. That is the exact credential-in-a-log the G2 fix
+    /// removed, available to anything holding the club key by adding one character.
+    /// </para>
+    ///
+    /// <para>
+    /// The dispatch switch was keyed on the raw value too, which makes the same spelling a
+    /// SECOND bypass: <c>GateOpenKind when device.Kind != Gate</c> never matched
+    /// <c>" gate_open "</c>, so a COURT BOX could post a door open, skip the
+    /// <c>not_a_gate</c> refusal that exists to stop a false record of who was in the
+    /// building, and land in the <c>_ => null</c> arm with the token beside it.
+    /// </para>
+    ///
+    /// <para>
+    /// Upper case is the same hole by a different route — a scanner or a firmware branch that
+    /// shouts — and it has a second cost the padding does not: it fragments the trail, because
+    /// <c>device.GATE_OPEN</c> is a row the console's activity query does not find.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(" gate_open ")]
+    [InlineData("GATE_OPEN")]
+    [InlineData("Gate_Open")]
+    [InlineData("\tunknown_scan\n")]
+    [InlineData("UNKNOWN_SCAN")]
+    public async Task A_door_event_kind_is_normalised_before_anything_is_decided_from_it(string spelling)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+        var canonical = spelling.Trim().ToLowerInvariant();
+
+        var upload = await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(DoorEvent(21, spelling, token)),
+        }));
+        Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        // The receipt and the audit row carry the canonical spelling, so the trail is one
+        // stream rather than one per way of writing the word.
+        var receipt = Assert.Single(await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .Where(r => r.TenantId == club.TenantId).ToListAsync());
+        Assert.Equal(canonical, receipt.Kind);
+
+        var row = Assert.Single(await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == $"device.{canonical}").ToListAsync());
+
+        // And the token is nowhere in it.
+        Assert.DoesNotContain(token, row.DetailsJson, StringComparison.OrdinalIgnoreCase);
+        var subject = JsonDocument.Parse(row.DetailsJson!).RootElement.GetProperty("subject").GetString()!;
+        Assert.Equal(8, subject.Length);
+    }
+
+    /// <summary>
+    /// The second half of the same bypass, stated as the refusal it defeats: a COURT BOX
+    /// posting a door open must be told <c>not_a_gate</c> whatever spelling it uses.
+    ///
+    /// <para>
+    /// The guard exists because the row this writes NAMES A MEMBER, and a false record of who
+    /// was in the building is a worse artefact than a refusal. A guard a sender can step
+    /// around by shouting is not a guard.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(" gate_open ")]
+    [InlineData("GATE_OPEN")]
+    public async Task A_court_box_cannot_post_a_door_open_by_respelling_the_kind(string spelling)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var boxMac = await CourtBoxAsync(club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = boxMac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(DoorEvent(31, spelling, token)),
+        }))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var rows = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action.StartsWith("device.gate_open")).ToListAsync();
+
+        // The refusal is recorded, and the row names nobody.
+        Assert.Contains(rows, a => a.Action == $"device.{DeviceEventEndpoints.GateOpenKind}_{GateAccess.NotAGate}");
+        Assert.All(rows, a => Assert.Null(a.SubjectUserId));
+        Assert.All(rows, a => Assert.DoesNotContain(token, a.DetailsJson, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// <b>A court box's own <c>activation</c> token is a door key too, and the trail wrote it
+    /// in full.</b>
+    ///
+    /// <para>
+    /// The G2 fix narrowed the fingerprint to the two DOOR kinds and said so in as many words:
+    /// a court box's activation token "is the roster token for a booking the receipt already
+    /// names, and narrowing it is a separate decision about the court-box trail". That
+    /// reasoning was true when it was written and stopped being true the moment the gate
+    /// shipped — since D2, that same roster token opens <b>every door in the club</b> for the
+    /// length of its booking's window. The receipt naming the booking does not make the bytes
+    /// less live.
+    /// </para>
+    ///
+    /// <para>
+    /// So the fingerprint is now unconditional. Resolution still uses the raw subject, in
+    /// memory, where it never reaches a row: this asserts the activation was really applied —
+    /// <c>CheckedInAt</c> stamped — so the fix cannot be read as having broken attendance to
+    /// hide a token.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_court_boxs_activation_event_fingerprints_its_token_as_well()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var boxMac = await CourtBoxAsync(club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-5));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        var activation = DoorEvent(41, DeviceEventEndpoints.ActivationKind, token);
+        activation["court"] = 0;            // relay A, which this box drives for court 1
+        activation["uptime_ms"] = 3_599_000; // a second before the upload, so the scan is inside the cue window
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = boxMac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(activation),
+        }))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        // The control: the activation really was applied, so this is a fingerprint over a
+        // token the handler resolved rather than one it failed to.
+        Assert.NotNull((await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.Id == booking.Id)).CheckedInAt);
+
+        var rows = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action.StartsWith("device.activation")).ToListAsync();
+        Assert.NotEmpty(rows);
+        Assert.All(rows, a => Assert.DoesNotContain(token, a.DetailsJson, StringComparison.OrdinalIgnoreCase));
+        Assert.All(rows, a => Assert.Equal(
+            8, JsonDocument.Parse(a.DetailsJson!).RootElement.GetProperty("subject").GetString()!.Length));
+    }
+
+    /// <summary>
+    /// A kind this server has never heard of is recorded as it was normalised — it is
+    /// evidence, and the board cannot edit what it has queued — but its subject is
+    /// fingerprinted like every other, because "we do not recognise this word" is not a reason
+    /// to write a live credential into the trail.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_unknown_kind_is_recorded_as_normalised_and_still_fingerprinted()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(DoorEvent(51, "  Turnstile_Spun  ", token)),
+        }))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var receipt = Assert.Single(await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .Where(r => r.TenantId == club.TenantId).ToListAsync());
+        Assert.Equal("turnstile_spun", receipt.Kind);
+
+        var row = Assert.Single(await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == "device.turnstile_spun").ToListAsync());
+        Assert.DoesNotContain(token, row.DetailsJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            8, JsonDocument.Parse(row.DetailsJson!).RootElement.GetProperty("subject").GetString()!.Length);
+    }
+
+    /// <summary>
     /// <b>One malformed event must not pin the board's queue for ever.</b>
     ///
     /// <para>

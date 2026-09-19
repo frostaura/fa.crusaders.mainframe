@@ -563,16 +563,34 @@ a log — and this path wrote it in full under `subject`, for a `gate_open` and 
 `DetailsJson`, so those bytes stayed readable for as long as the row did, and they open every
 door in the club for the length of that booking's window.
 
-What `subject` now carries for those two kinds is the **first eight hex characters of SHA-256
-over the normalised code**. Not reversible, not a lookup key, and it keeps the one property
-worth keeping: two scans of one code still produce the same value, so "the same badge tried
-the side door eleven times" is still a question the trail answers. The identity lives on
-`SubjectUserId`, which the resolved `gate_open` path sets. The guard is keyed on the **kind**
-rather than on the sending row's kind, which is wider than it needs to be on purpose: a court
-box posting `gate_open` is refused `not_a_gate`, but the token it posted is just as live, and
-a guard that depends on the sender being honest about itself is not a guard. A court box's own
-`activation` events are untouched — that token is the roster token for a booking the receipt
-already names, and narrowing it is a decision about the court-box trail rather than a door fix.
+What `subject` carries is the **first eight hex characters of SHA-256 over the normalised
+code**. Not reversible, not a lookup key, and it keeps the one property worth keeping: two
+scans of one code still produce the same value, so "the same badge tried the side door eleven
+times" is still a question the trail answers. The identity lives on `SubjectUserId`, which the
+resolved `gate_open` path sets.
+
+**It is keyed on nothing at all: every kind is fingerprinted, including the court box's own
+`activation` and `release`.** It was keyed on the two door kinds, and that was wrong twice.
+
+- **Mechanically.** The guard read the `kind` RAW while the receipt, the audit action and the
+  malformed test all read it trimmed. So `" gate_open "` — one space — was stored, receipted
+  and audited as `device.gate_open`, indistinguishable in the trail from an honest event,
+  while the guard did not recognise it and wrote **the live access code in full**. The same
+  spelling stepped around the `gate_open`-from-a-court-box refusal below. Anything holding the
+  club key could do it by adding a character.
+- **In substance.** The narrow version reasoned that an activation token "is the roster token
+  for a booking the receipt already names", so hiding it gained nothing. That was true when it
+  was written and stopped being true the moment this document existed: since §5, that same
+  roster token opens **every door in the club** for the length of its booking's window. The
+  receipt naming the booking does not make the bytes less live.
+
+**So the `kind` is normalised ONCE, at the top of `/events` — trimmed and ordinal
+lower-cased — and every decision after it reads that value**: the dispatch, the kind guards,
+the fingerprint, the receipt's `kind` column and the audit action. A kind this server has
+never heard of is recorded as it normalised (it is evidence, and a board cannot edit what it
+has queued) and fingerprinted like every other. Lower-casing is ordinal and not the current
+culture, because `ToLower()` on a Turkish locale maps `I` to a dotless `ı` and a server's
+regional settings would then decide whether a board's events were recognised.
 
 **Rows written before this change still hold their tokens.** Nothing rewrites them and
 nothing here pretends otherwise; the remedy is the one the console already offers for a
@@ -1080,6 +1098,9 @@ new sentence above with no row is the defect this table exists to expose.
 | `gate_open` is receipted, names the subject at the scan, settles nothing | `DeviceGateHttpTests.An_offline_gate_open_is_receipted_and_names_the_member_without_checking_them_in` |
 | An unresolvable `gate_open` is still recorded | `DeviceGateHttpTests.An_offline_gate_open_with_an_unresolvable_token_is_still_recorded` |
 | An offline door event fingerprints its token instead of logging it, and two scans of one code still correlate | `DeviceGateHttpTests.An_offline_door_event_fingerprints_the_token_instead_of_logging_it` |
+| EVERY kind's subject is fingerprinted, the court box's `activation` included | `DeviceGateHttpTests.A_court_boxs_activation_event_fingerprints_its_token_as_well`, `DeviceEventHttpTests.Activation_event_with_unknown_token_is_acked_and_audited` |
+| `kind` is normalised once and every later decision reads that value | `DeviceGateHttpTests.A_door_event_kind_is_normalised_before_anything_is_decided_from_it` (five spellings), `…An_unknown_kind_is_recorded_as_normalised_and_still_fingerprinted` |
+| A respelt `gate_open` cannot step around the court-box refusal | `DeviceGateHttpTests.A_court_box_cannot_post_a_door_open_by_respelling_the_kind` |
 | A missing, empty or over-long `kind` is receipted as `malformed`, never 500, and the queue drains past it | `DeviceGateHttpTests.A_malformed_event_kind_is_receipted_rather_than_five_hundred` |
 | `no_push` is accepted, logged, stored nowhere, and changes nothing | `DeviceGateHttpTests.A_no_push_counter_is_accepted_and_changes_nothing`, `DeviceGateProtocolCorpusTests.Request_vectors_bind_to_the_records_the_endpoints_take` |
 | A `gate_open` from a court box is `not_a_gate` and names nobody | `DeviceGateHttpTests.A_gate_open_uploaded_by_a_court_box_names_nobody_and_says_not_a_gate` |

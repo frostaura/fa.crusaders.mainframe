@@ -1939,6 +1939,17 @@ public sealed class DeviceEventHttpTests
     /// A token the server does not know — expired, never minted, or another club's — is
     /// still acknowledged, so the box can release its queue, and the refusal is preserved
     /// as an audit row: the evidence the box is about to discard.
+    ///
+    /// <para>
+    /// <b>The row carries the token's FINGERPRINT and not the token</b>, which is a change
+    /// this test used to assert the opposite of. It asserted the raw bytes were in
+    /// <c>DetailsJson</c> — reasonable while an activation token was only a court's roster
+    /// token for a booking the receipt already named, and wrong since the door shipped: that
+    /// same token now opens every door in the club for the length of its booking's window,
+    /// and a trail an admin can read is not where a live credential belongs. What the field
+    /// was worth is kept — the fingerprint still correlates two scans of one code — and a
+    /// token nobody can resolve is exactly the one somebody will want to correlate.
+    /// </para>
     /// </summary>
     [SkippableFact]
     public async Task Activation_event_with_unknown_token_is_acked_and_audited()
@@ -1958,7 +1969,14 @@ public sealed class DeviceEventHttpTests
 
         Assert.Null((await BookingAsync(factory, booked.BookingId)).CheckedInAt);
         var audit = Assert.Single(await AuditAsync(factory, box.TenantId, "device.activation_unresolved"));
-        Assert.Contains("ZZZZZZZZZZZZ", audit.DetailsJson);
+        Assert.DoesNotContain("ZZZZZZZZZZZZ", audit.DetailsJson);
+
+        // The eight-hex fingerprint of the normalised token, which is what makes "the same
+        // unknown badge, eleven times" a question the trail still answers.
+        Assert.Equal(
+            "bb134d48",
+            System.Text.Json.JsonDocument.Parse(audit.DetailsJson!).RootElement.GetProperty("subject").GetString());
+
         Assert.Empty(await AuditAsync(factory, box.TenantId, "court.activated"));
     }
 
