@@ -553,6 +553,59 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// <b>A board an admin has taken out of service is 403 on the heartbeat as well as on the
+    /// scan</b>, which is what makes 403 authoritative for a gate: the firmware treats it as
+    /// "the club has withdrawn this board" and denies the scan outright rather than falling
+    /// back to its roster, and a 403 on the heartbeat commits an empty roster.
+    ///
+    /// <para>
+    /// It is worth its own pin because it is the one refusal a gate must NOT recover from.
+    /// Every other failure — a timeout, a 401, a 404, a 5xx, a malformed 200 — means the
+    /// server could not be reached or could not answer, and the board is right to fall back.
+    /// A 403 is the club speaking.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>And the residual is real, so it is stated rather than implied:</b> this only reaches
+    /// a board that can still reach us. A gate that has been cut off entirely never hears the
+    /// 403 and goes on admitting whatever its cached roster still carries, for up to the six
+    /// hours until that roster goes stale. Taking a door out of service is not the same as
+    /// locking it.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_gate_taken_out_of_service_is_refused_on_the_heartbeat_too()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client, "front-door");
+        var token = await IdentCodeAsync(factory, club.TenantId, club.MemberId);
+
+        // The control: in service, both routes answer.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac, DeviceKinds.Gate))).StatusCode);
+        Assert.True((await BodyAsync(await client.SendAsync(Scan(club.Key, mac, token)))).GetProperty("opened").GetBoolean());
+
+        var (gateId, _) = await IdsAsync(factory, mac, mac);
+        var admin = await AdminClientAsync(factory, club);
+        Assert.Equal(HttpStatusCode.OK,
+            (await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { enabled = false })).StatusCode);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Heartbeat(club.Key, mac, DeviceKinds.Gate))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Scan(club.Key, mac, token))).StatusCode);
+
+        // Not re-registered around the switch: the row is still there and still disabled, so
+        // the board cannot get back in by pretending to be new.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var row = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+        Assert.False(row.Enabled);
+        Assert.NotNull(row.OutOfServiceSince);
+    }
+
+    /// <summary>
     /// <b>Tenant B's code at tenant A's gate is <c>not_recognised</c>.</b> The code is real,
     /// live, and in the same database — everything but the tenant matches — so the refusal
     /// is the query filter and not an empty table. Cross-tenant leakage here is somebody
@@ -1252,6 +1305,60 @@ public sealed class DeviceGateHttpTests
         var renamed = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { name = "Front door", enabled = false });
         Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
         Assert.Equal("Front door", (await BodyAsync(renamed)).GetProperty("name").GetString());
+    }
+
+    /// <summary>
+    /// <b><c>gate_key</c> is two-valued, and both values are pinned here.</b> An explicit
+    /// <c>null</c> — and an absent key, which binds to the same thing — means "leave the
+    /// door's name alone"; <c>""</c> clears it. There is no third state, because a door either
+    /// has a name or has not.
+    ///
+    /// <para>
+    /// The clearing half has been pinned since the field shipped and the LEAVING-ALONE half
+    /// had not been, which is the half a client gets wrong for free: send <c>null</c> meaning
+    /// "clear it" and the API answers 200 having changed nothing, and nothing anywhere says
+    /// so. Pinning both sides is what makes the console's choice of <c>""</c> a contract
+    /// rather than a coincidence.
+    /// </para>
+    ///
+    /// <para>
+    /// The name is changed by a PATCH that also carries <c>name</c>, so the request is one the
+    /// server definitely acted on — a null <c>gate_key</c> surviving an otherwise empty PATCH
+    /// would prove nothing.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_null_gate_key_leaves_the_door_named_and_an_empty_string_clears_it()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var deviceClient = factory.CreateClient();
+        var gateMac = await GateAsync(factory, club, deviceClient, "front-door");
+        var (gateId, _) = await IdsAsync(factory, gateMac, gateMac);
+        var admin = await AdminClientAsync(factory, club);
+
+        // An explicit null, on a PATCH that definitely did something else.
+        var renamed = await admin.PatchAsJsonAsync(
+            $"/api/v1/admin/devices/{gateId}", new { name = "Front door", gate_key = (string?)null });
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+
+        var body = await BodyAsync(renamed);
+        Assert.Equal("Front door", body.GetProperty("name").GetString());
+        Assert.Equal("front-door", body.GetProperty("gate_key").GetString());
+
+        // An absent key is the same instruction.
+        var untouched = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { name = "Side door" });
+        Assert.Equal("front-door", (await BodyAsync(untouched)).GetProperty("gate_key").GetString());
+
+        // …and the empty string is the one that clears it, which is what the console sends.
+        var cleared = await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { gate_key = "" });
+        Assert.Equal(JsonValueKind.Null, (await BodyAsync(cleared)).GetProperty("gate_key").ValueKind);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Null((await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == gateMac)).GateKey);
     }
 
     /// <summary>

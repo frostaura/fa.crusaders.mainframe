@@ -186,14 +186,26 @@ public sealed class Device : ITenantScoped
     /// <para>
     /// <b>It exists because <see cref="Enabled"/> carries no history, and the money needs one.</b>
     /// Taking the last board off a court takes that court's own door away for good:
-    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 for a disabled board on all four
-    /// <c>/api/v1/device/*</c> routes — <c>/heartbeat</c>, <c>/activate</c>, <c>/walkup</c> and
-    /// <c>/events</c> — so the box admits nobody, is no longer sent the roster that says which
-    /// bookings it may open, and can never report anyone who played, and
-    /// <c>settlement-model.md</c> S5a waives the no-show penalty for the bookings that fall after
-    /// it. Deciding whether the door was shut from <see cref="Enabled"/> alone answers "was this
-    /// court shut at <c>T</c>?" with today's value of a boolean, so one click re-priced every
-    /// unsettled deadline behind it.
+    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 for a disabled board on all five
+    /// <c>/api/v1/device/*</c> routes — <c>/heartbeat</c>, <c>/activate</c>, <c>/walkup</c>,
+    /// <c>/events</c> and <c>/gate</c> — so the board is refused everything it calls, is no
+    /// longer sent the roster that says which bookings it may open, and can never report anyone
+    /// who played, and <c>settlement-model.md</c> S5a waives the no-show penalty for the bookings
+    /// that fall after it. Deciding whether the door was shut from <see cref="Enabled"/> alone
+    /// answers "was this court shut at <c>T</c>?" with today's value of a boolean, so one click
+    /// re-priced every unsettled deadline behind it.
+    ///
+    /// <para>
+    /// <b>"So the box admits nobody" is what this said for two rounds, and it is false.</b> The
+    /// 403 only reaches a board that can still reach us. A board that has been CUT OFF — the
+    /// uplink pulled, the switch dead, the club's line down — never hears it, and goes on
+    /// admitting whatever its cached roster still carries until that roster goes stale six hours
+    /// after it was fetched. Taking a board out of service is therefore a withdrawal that takes
+    /// effect at the server immediately and at the board only when the board next asks. The
+    /// money above is unaffected — it is decided here, from this column — but anybody reading
+    /// this to answer "can somebody still get in?" was reading a sentence that was not true. The
+    /// same correction applies to a gate, where the question is literally about a door.
+    /// </para>
     /// Deciding it from <see cref="LastSeenAt"/> instead — the board's last heartbeat — is not the
     /// same instant: the switch is thrown some seconds or minutes AFTER the last heartbeat, and
     /// reading the two as one moves money in whichever direction the gap happens to point.
