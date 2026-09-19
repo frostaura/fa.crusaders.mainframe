@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Fingerprint, Loader2 } from "lucide-react";
+import { Children, isValidElement, useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
 
 export type ConfirmTone = "info" | "danger";
@@ -15,19 +15,32 @@ type ConfirmButtonProps = {
   /** Armed (confirm) variant. Defaults to a warm orange alert. */
   armedClassName?: string;
   /**
-   * ms to keep the armed state before snapping back. **Off by default.**
+   * ms to keep the armed state before snapping back. **8000 by default.**
    *
-   * It used to default to 3000, and that silently broke the one control it most
-   * needed to get right. A member who took longer than three seconds to read
-   * "Reserve for 50.00 cr?" tapped a button that had already gone back to idle,
-   * so the second tap re-armed instead of confirming — a slow reader could tap
-   * for ever and never book anything, with no request leaving the browser and
-   * nothing on screen to explain it. A confirmation exists to be read; a
-   * confirmation with a stopwatch on it punishes the people who read it.
+   * <p>
+   * It defaulted to 3000 once, and that silently broke the one control it most needed to
+   * get right. A member who took longer than three seconds to read "Reserve for 50.00 cr?"
+   * tapped a button that had already gone back to idle, so the second tap re-armed instead
+   * of confirming — a slow reader could tap for ever and never book anything, with no
+   * request leaving the browser and nothing on screen to explain it. The default was then
+   * taken off altogether, which traded that defect for the opposite one: an armed control
+   * on an admin screen in a club office stayed armed indefinitely, one tap from whoever
+   * walked past next.
+   * </p>
    *
-   * Clicking elsewhere and pressing Escape still disarm, which is what actually
-   * addresses the concern the timer was reaching for — an armed control left on
-   * screen for the next person to touch.
+   * <p>
+   * <b>8000 is not a re-run of 3000.</b> Three things are different. The booking grid — the
+   * control the timer broke — no longer uses this component at all. The armed control now
+   * GROWS to fit its consequence at 14 px instead of clipping it to a 44 px box, so the
+   * sentence can actually be read inside the window. And a visible Cancel stands beside it,
+   * so leaving is a control you can see rather than a gesture you have to know. Eight
+   * seconds is long enough to read a four-line consequence and short enough that an
+   * abandoned screen is not left loaded.
+   * </p>
+   *
+   * <p>
+   * Escape, a click outside and a blur all still disarm, and none of them wait for a timer.
+   * </p>
    */
   armedTimeoutMs?: number;
   disabled?: boolean;
@@ -35,17 +48,18 @@ type ConfirmButtonProps = {
    * What this button acts ON, in a sentence, for assistive tech.
    *
    * <p>
-   * The visible label alone is often not a name. A booking grid is a hundred buttons all
-   * reading "Available", laid out so that the court and the time are conveyed by <em>visual
-   * position</em> against a column header and a row label — which is nothing at all to somebody
-   * tabbing through them. Passing "Book Court 1 at 12:45 for 50.00 credits" replaces the name
-   * with one that says which court and which time the credits are about to leave for.
+   * The visible label alone is often not a name. A list of doors is a column of controls all
+   * reading "Shut this door", laid out so that WHICH door is conveyed by visual position
+   * against a heading — which is nothing at all to somebody tabbing through them. Passing
+   * "Shut Side door" says which one.
    * </p>
    *
    * <p>
-   * The armed and working states are appended to it, because with an aria-label in place the
-   * visible label copies are no longer the accessible name and "confirm" would otherwise be
-   * invisible to the one person who most needs to hear it.
+   * <b>It is appended to the visible label, never substituted for it</b> — see
+   * {@link accessibleName}. It used to replace it, which broke WCAG 2.5.3: a control reading
+   * "Shut all doors" was named "Shut every door the club has open — 3 of 3", so speech
+   * control could not reach it by the words on it and a screen-reader user could not tell
+   * that what they heard and what they saw were the same control.
    * </p>
    */
   ariaLabel?: string;
@@ -73,16 +87,99 @@ const IDLE_BY_TONE: Record<ConfirmTone, string> = {
 };
 
 /**
- * The accessible name: what the button acts on, plus the state it is in.
+ * The words inside a label, whatever it is made of.
  *
- * Returns undefined when no context was given, which leaves the button named by its visible
- * text exactly as before — this is opt-in, and a call site that has nothing to add adds nothing.
+ * Most call sites pass a string; `Profile` passes an icon and a word in a span. The accessible
+ * name has to contain the VISIBLE label verbatim (WCAG 2.5.3), so it has to be read out of the
+ * node rather than assumed to be one.
  */
-function accessibleName(context: string | undefined, armed: boolean, pending: boolean): string | undefined {
+function textOf(node: React.ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (isValidElement<{ children?: React.ReactNode }>(node)) {
+    return Children.toArray(node.props.children).map(textOf).join("");
+  }
+  return "";
+}
+
+/**
+ * The accessible name: what the button says, then what it acts on, then the state it is in.
+ *
+ * <p>
+ * <b>The visible idle label is always the prefix.</b> `ariaLabel` used to be the whole name,
+ * which is the WCAG 2.5.3 failure described on the prop: "Shut all doors" on screen,
+ * "Shut every door the club has open — 3 of 3" to a screen reader and to speech control, and
+ * nothing tying the two together. Composing them costs a little redundancy on a long control
+ * and buys back the guarantee that whatever a person can read out, they can also say.
+ * </p>
+ *
+ * <p>
+ * Returns undefined when no context was given, which leaves the button named by its visible
+ * text exactly as before — the visible text IS the whole name then, so label-in-name holds
+ * trivially. This is opt-in, and a call site that has nothing to add adds nothing.
+ * </p>
+ */
+function accessibleName(
+  idleText: string, context: string | undefined, armed: boolean, pending: boolean,
+): string | undefined {
   if (!context) return undefined;
-  if (pending) return `${context} — working`;
-  if (armed) return `${context} — tap again to confirm`;
-  return context;
+  const base = composeName(idleText, context);
+  if (pending) return `${base} — working`;
+  if (armed) return `${base} — tap again to confirm`;
+  return base;
+}
+
+/**
+ * The visible label, then the context — unless the context already opens with the label.
+ *
+ * <p>
+ * "Delete" with the context "Delete Front door" is already a name that begins with the words
+ * on the control, and composing it would produce "Delete — Delete Front door": a stutter that
+ * buys nothing, on a control a speech-control user reaches by saying "Delete" either way.
+ * "Shut this door" with "Shut Side door" is the case the rule exists for — neither contains
+ * the other, and it is the one that failed WCAG 2.5.3.
+ * </p>
+ *
+ * <p>
+ * The test is `startsWith`, not "contains": the requirement is that what you can read out is
+ * what the name STARTS with, so a label buried in the middle of a sentence does not count.
+ * </p>
+ */
+function composeName(idleText: string, context: string): string {
+  if (!idleText) return context;
+  return context.startsWith(idleText) ? context : `${idleText} — ${context}`;
+}
+
+/**
+ * The caller's classes, with any FIXED height taken out of them.
+ *
+ * <p>
+ * Every doors call site passed `h-11`, and that one class is most of B7/C6: on a 360 px phone
+ * the armed fleet confirm measured `clientHeight 44, scrollHeight 106`, four lines of
+ * consequence in a box built for one. Ordering cannot fix it — `min-h-11` after `h-11` does
+ * not win, because they are different properties and tailwind-merge rightly keeps both, and
+ * a height is not a floor.
+ * </p>
+ *
+ * <p>
+ * So the component refuses the height rather than arguing with it. `min-h-11` below then
+ * governs, which also drags the `h-8` and `h-9` call sites up to a 44 px touch target. A
+ * caller that wants a taller control raises `min-h-*`; nothing in the product wants a
+ * shorter one, and a control that can be shorter than its own words is the defect this
+ * closes.
+ * </p>
+ */
+function withoutFixedHeight(className?: string): string | undefined {
+  if (!className) return className;
+  return className
+    .split(/\s+/)
+    .filter((token) => {
+      // `sm:h-11` and `[&:hover]:h-11` are heights too; `min-h-11` and `max-h-11` are not.
+      const utility = token.slice(token.lastIndexOf(":") + 1);
+      return !/^-?h-/.test(utility);
+    })
+    .join(" ");
 }
 
 export function ConfirmButton({
@@ -93,13 +190,15 @@ export function ConfirmButton({
   tone = "info",
   idleClassName = IDLE_BY_TONE[tone],
   armedClassName = "bg-armed-strong text-armed-ink",
-  armedTimeoutMs = 0,
+  armedTimeoutMs = 8000,
   disabled = false,
   ariaLabel,
 }: ConfirmButtonProps) {
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
-  const ref = useRef<HTMLButtonElement>(null);
+  // On the WRAPPER, not the button: the Cancel beside it is part of this control, and a
+  // pointerdown on it is not a click outside.
+  const ref = useRef<HTMLDivElement>(null);
   const timer = useRef<number | null>(null);
   const mounted = useRef(true);
   // Set on mount as well as cleared on unmount. Without the assignment this effect
@@ -121,7 +220,6 @@ export function ConfirmButton({
   useEffect(() => {
     // Only run idle-disarm bookkeeping when armed and NOT in flight.
     if (!armed || pending) return;
-    // A timeout only when a caller asked for one. See armedTimeoutMs above.
     if (armedTimeoutMs > 0) timer.current = window.setTimeout(disarm, armedTimeoutMs);
     const onDocPointerDown = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) disarm();
@@ -153,89 +251,142 @@ export function ConfirmButton({
     }
   };
 
-  return (
-    <button
-      ref={ref}
-      type="button"
-      disabled={disabled || pending}
-      aria-label={accessibleName(ariaLabel, armed, pending)}
-      aria-pressed={armed}
-      aria-busy={pending}
-      onClick={handleClick}
-      className={cn(
-        "relative overflow-hidden rounded-md text-xs font-medium transition-colors duration-200 ease-out",
-        // Never wider than what holds it. See the sentinel below.
-        "max-w-full min-w-0",
-        // The lift, the cursor and the focus ring come from the base layer in index.css;
-        // this control keeps only its own colour transition. `no-lift` because a grid
-        // cell that rises would shift the cells packed against it.
-        "no-lift",
-        // While pending we keep the armed visual instead of greying out via the disabled style.
-        (armed || pending) ? armedClassName : idleClassName,
-        pending && "cursor-wait",
-        className,
-      )}
-    >
-      <Fingerprint
-        aria-hidden
-        className={cn(
-          "pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 transition-opacity duration-200",
-          (armed || pending) ? "opacity-30 text-white" : "opacity-15",
-          pending && "opacity-0",
-        )}
-        size={28}
-        strokeWidth={1.5}
-      />
-      {/* Width sentinel: stack both labels in the same grid cell so the button sizes
-          to max(idleLabel, confirmLabel) intrinsic width, regardless of node type.
+  /**
+   * Focus leaving the control disarms it — unless it landed on the Cancel next to it.
+   *
+   * A browser moves focus on POINTERDOWN, so a press on Cancel fires this focusout before
+   * the Cancel's own click. Disarming on it would unmount the Cancel mid-press and the click
+   * would never land: a get-out control that does nothing when you press it.
+   */
+  const handleBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    if (!armed || pending) return;
+    const next = e.relatedTarget as Node | null;
+    if (next && ref.current?.contains(next)) return;
+    disarm();
+  };
 
-          `whitespace-nowrap` here was a phone-sized bug. The sentinel sized the button to
-          the confirm label as ONE unbreakable line, so the Devices page's "Delete? The box
-          re-registers on its next heartbeat." measured 319 px and, with the paddings around
-          it, pushed the whole page to 435 px inside a 375 px phone — far enough that the API
-          key's Copy button sat 23 px off the right edge, reachable only by a horizontal drag
-          macOS draws no scrollbar for. The label is a sentence; a sentence may wrap. Without
-          `nowrap` the sentinel still sizes to the wider label wherever there is room, so
-          nothing changes on a desktop, and `max-w-full` + `min-w-0` is what lets it give way
-          rather than push its container wide when there is not. */}
-      <span aria-hidden className="invisible px-3 py-2 grid">
-        <span className="col-start-1 row-start-1 flex items-center justify-center gap-2">{idleLabel}</span>
-        <span className="col-start-1 row-start-1 flex items-center justify-center gap-2">{confirmLabel}</span>
-      </span>
-      <span
-        // Hidden from assistive tech whenever it is not the label on show.
-        //
-        // The sibling spans already do this and this one did not, so the button's
-        // accessible name was every copy of the label concatenated — a screen-reader
-        // user heard "Revoke Really revoke?" on a control whose entire purpose is to
-        // say ONE of those two things at a time. Found by a test asserting the name.
-        aria-hidden={armed || pending}
+  const idleText = textOf(idleLabel);
+  const showingConfirm = armed && !pending;
+
+  return (
+    <div ref={ref} onBlur={handleBlur} className={cn("min-w-0", showingConfirm && "space-y-2")}>
+      <button
+        type="button"
+        disabled={disabled || pending}
+        aria-label={accessibleName(idleText, ariaLabel, armed, pending)}
+        // No `aria-pressed`. It was set to the armed flag, so a screen reader said "pressed"
+        // on a control that had done nothing yet — the word for "done" used for "about to".
+        // This is not a toggle either: the second press is a different action, not the off
+        // half of the first, so aria-pressed="false" would be its own lie. The armed prompt
+        // is ANNOUNCED instead, through the polite live region below.
+        aria-busy={pending}
+        onClick={handleClick}
         className={cn(
-          "absolute inset-0 flex items-center justify-center px-3 transition-transform duration-200 ease-out",
-          (armed || pending) ? "-translate-y-full opacity-0" : "translate-y-0 opacity-100",
+          "flex flex-col items-center justify-center rounded-md px-3 py-2 text-center text-sm font-medium",
+          "transition-colors duration-200 ease-out",
+          /**
+           * `min-h-11`, and no `overflow-hidden`.
+           *
+           * Both halves of B7/C6. The control carried `overflow-hidden` and stacked all three
+           * label states `absolute inset-0`, so the only thing contributing height was an
+           * invisible width sentinel — the armed consequence was simply cut off, mid-sentence,
+           * top and bottom. It grows now, and there is nothing left that could clip it if it
+           * did not.
+           */
+          "min-h-11",
+          // Never wider than what holds it. See the sentinel below.
+          "max-w-full min-w-0",
+          // The lift, the cursor and the focus ring come from the base layer in index.css;
+          // this control keeps only its own colour transition. `no-lift` because a grid
+          // cell that rises would shift the cells packed against it.
+          "no-lift",
+          // While pending we keep the armed visual instead of greying out via the disabled style.
+          (armed || pending) ? armedClassName : idleClassName,
+          pending && "cursor-wait",
+          withoutFixedHeight(className),
         )}
       >
-        {idleLabel}
+        {/* Width sentinel: both labels in one grid cell, so the button sizes to
+            max(idleLabel, confirmLabel) intrinsic width and does not resize as it arms.
+
+            `h-0` and clipped to itself, because it is a WIDTH sentinel and nothing else. It
+            used to be the only child in normal flow, which meant it was also the only thing
+            setting the control's height — so a one-line box was measured for a four-line
+            consequence and the absolutely-positioned armed label was cut off inside it. The
+            label on show is in flow below; this contributes width and no height at all.
+
+            `whitespace-nowrap` here was a phone-sized bug of its own. The sentinel sized the
+            button to the confirm label as ONE unbreakable line, so the Devices page's
+            "Delete? The box re-registers on its next heartbeat." measured 319 px and, with
+            the paddings around it, pushed the whole page to 435 px inside a 375 px phone —
+            far enough that the API key's Copy button sat 23 px off the right edge, reachable
+            only by a horizontal drag macOS draws no scrollbar for. The label is a sentence; a
+            sentence may wrap. */}
+        <span aria-hidden className="invisible grid h-0 overflow-hidden">
+          <span className="col-start-1 row-start-1 flex items-center justify-center gap-2">{idleLabel}</span>
+          <span className="col-start-1 row-start-1 flex items-center justify-center gap-2">{confirmLabel}</span>
+        </span>
+        {/* One label, in normal flow, so the control is as tall as what it is saying. */}
+        <span className="flex items-center justify-center gap-2">
+          {pending ? (
+            <>
+              {/* `motion-reduce:animate-none`: there is no global rule that stands Tailwind's
+                  animations down, only the lift and the transition durations in index.css. */}
+              <Loader2 className="animate-spin motion-reduce:animate-none" size={16} strokeWidth={2.5} />
+              <span>Working…</span>
+            </>
+          ) : armed ? confirmLabel : idleLabel}
+        </span>
+      </button>
+
+      {/**
+        * The way out, as a control rather than as folklore.
+        *
+        * Escape and a click outside both disarmed before this existed, and neither is
+        * discoverable: a phone has no Escape key, and "tap somewhere else" is a thing you
+        * either already know or do not. On a control whose armed state is a paragraph about
+        * something irreversible, the absence of a visible cancel reads as being committed.
+        *
+        * It has to live OUTSIDE the button — a button cannot contain a button — which is why
+        * this component is a wrapper rather than a single element. The primary control keeps
+        * its own name, so `getByRole("button", { name: ... })` still finds exactly it.
+        *
+        * <b>It is named by the visible label alone, never by the composed name.</b> "Cancel"
+        * on its own, heard in a list of controls, names nothing — but `Cancel — <the whole
+        * accessible name>` makes this button's name a superstring of the control's, and every
+        * `getByRole("button", { name: /…/ })` in the suite then matched two elements the
+        * moment the control armed. The action without the call site's context says what is
+        * being cancelled and cannot swallow the name of the thing it sits beside.
+        */}
+      {showingConfirm && (
+        <button
+          type="button"
+          aria-label={`Cancel — ${idleText}`}
+          onClick={(e) => { e.stopPropagation(); disarm(); }}
+          className="min-h-11 w-full rounded-md border border-control px-3 text-sm font-medium text-text-secondary"
+        >
+          Cancel
+        </button>
+      )}
+
+      {/**
+        * What replaced `aria-pressed`.
+        *
+        * Polite, because arming is something the person just did on purpose — it does not
+        * interrupt. Emptied on disarm, so the region does not sit holding a consequence for
+        * a control that is back at rest. It is outside the button on purpose: inside, its
+        * text would join the button's own accessible name and the name would become the
+        * whole paragraph.
+        *
+        * `aria-live` WITHOUT `role="status"`, deliberately. The role is the same live region
+        * plus a landmark, and a screen full of these controls — the doors overview renders
+        * one per door and two for the fleet — would carry a dozen status landmarks that are
+        * empty most of the time. It also collides with the one status region a page really
+        * does have: `getByRole("status")` on the doors overview started finding eleven.
+        */}
+      <span aria-live="polite" className="sr-only">
+        {showingConfirm ? `${textOf(confirmLabel)} Choose it again to confirm, or Cancel to stop.` : ""}
       </span>
-      <span
-        aria-hidden={!armed || pending}
-        className={cn(
-          "absolute inset-0 flex items-center justify-center px-3 transition-transform duration-200 ease-out",
-          armed && !pending ? "translate-y-0 opacity-100" : "translate-y-full opacity-0",
-        )}
-      >
-        {confirmLabel}
-      </span>
-      <span
-        aria-hidden={!pending}
-        className={cn(
-          "absolute inset-0 flex items-center justify-center gap-2 px-3 transition-opacity duration-200",
-          pending ? "opacity-100" : "opacity-0",
-        )}
-      >
-        <Loader2 className="animate-spin" size={16} strokeWidth={2.5} />
-        <span>Working…</span>
-      </span>
-    </button>
+    </div>
   );
 }
