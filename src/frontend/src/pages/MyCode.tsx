@@ -235,8 +235,8 @@ function describeKind(qr: MyQrCode, suppressDoorClause = false): { headline: str
  * the file already spends its odd one.
  * </p>
  */
-function subtitleFor(qr: MyQrCode | null): string {
-  if (qr?.doors !== true) {
+function subtitleFor(doors: boolean): string {
+  if (!doors) {
     return "Show this to the scanner on the court box. It switches the lights on and marks you as arrived.";
   }
   return "Show this to the scanner on the court box, or at the club door."
@@ -491,7 +491,7 @@ export default function MyCodePage() {
 
   const { doorsClub, contact, standing } = doorFacts(door, qr, cached);
   // The de-duplication rule, stated once. See describeDoor.
-  const meaning = qr ? describeKind(qr, !!standing?.hasClockWindow) : null;
+  const meaning = qr ? describeKind(qr, !!standing?.suppressesCodeClause) : null;
 
   // After every hook, so none is skipped. BarredCard says why it replaces the whole page.
   if (barred !== null) return <BarredCard reason={barred} error={error} loading={loading} onCheckAgain={refetch} />;
@@ -505,7 +505,7 @@ export default function MyCodePage() {
     <div className="max-w-xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Your code</h1>
-        <p className="text-sm text-text-secondary">{subtitleFor(qr)}</p>
+        <p className="text-sm text-text-secondary">{subtitleFor(qr?.doors === true || doorsClub)}</p>
       </div>
 
       {doorsClub && shownDecision && (
@@ -706,7 +706,12 @@ function OfflinePage(props: {
     <div className="max-w-xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Your code</h1>
-        <p className="text-sm text-text-secondary">{subtitleFor(null)}</p>
+        {/* The DOORS subtitle, always: this page is only ever reached at a doors club,
+            and the code card's own `doors` flag is unavailable here because the request
+            that carries it is the one that failed. Telling a member standing at a door
+            with no signal to go and find a court box is the whole of what this page
+            exists to stop. */}
+        <p className="text-sm text-text-secondary">{subtitleFor(true)}</p>
       </div>
 
       <Card className="space-y-5 border-l-4 border-warning-strong bg-warning-soft">

@@ -865,6 +865,47 @@ describe("MyCode at a club with a door", () => {
   });
 
   /**
+   * The screen must not argue with itself, which is the whole reason one response carries
+   * both blocks.
+   *
+   * <p>
+   * Found by looking at the rendered page, not by reading the design: a member the club
+   * has as not active read "no code of yours opens a door until they change that" with
+   * "It also opens the club door from 20:54 until 22:29." a centimetre above it, because
+   * the suppression rule keyed on the standing line having a CLOCK WINDOW and this arm
+   * has none. The rule is the contradiction, not the duplication.
+   * </p>
+   */
+  it("never promises a door window over a sentence saying no door will open", async () => {
+    renderBoth(memberDoorsOnFixture({ policy: "booking_window", membership: "not_active", next_booking: BOOKING }));
+
+    await screen.findByText(/no code of yours opens a door until they change that/);
+    expect(screen.queryByText(/It also opens the club door/)).toBeNull();
+  });
+
+  it("says the same for a member with nothing booked, whose code claims the club's rules allow it", async () => {
+    renderBoth(
+      memberDoorsOnFixture({ policy: "booking_window", membership: "active", next_booking: null }),
+      { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true },
+    );
+
+    await screen.findByText(/a door won't open for you/);
+    expect(screen.queryByText(/It also opens the club door/)).toBeNull();
+  });
+
+  /**
+   * And the arm where the clause EARNS its place: the active-member line carries no clock
+   * time at all, so deleting the code card's would leave the member without one.
+   */
+  it("keeps the code's own door window when the standing line has no clock of its own", async () => {
+    renderBoth(memberDoorsOnFixture({ policy: "active_member", membership: "active", next_booking: null }));
+
+    await screen.findByText(/Your club opens its doors for any active member/);
+    expect(screen.getByText(/It also opens the club door from \d{2}:\d{2} until \d{2}:\d{2}\./))
+      .toBeInTheDocument();
+  });
+
+  /**
    * And the other half of that rule, which is why it is a suppression rather than a
    * deletion: `/me/qr/generate` is a different request and survives a `/me/door` that did
    * not. The fallback sentence comes back, and the page says plainly that it could not
@@ -1245,6 +1286,23 @@ describe("MyCode at a club with a door", () => {
     ]);
     renderPage(<MyCodePage />);
   }
+
+  /**
+   * The subtitle on the page a member reads while standing at a door with no signal. It
+   * said "Show this to the scanner on the court box" and stopped — sending exactly that
+   * member to go and look for a court box.
+   */
+  it("still names the club door on the offline page", async () => {
+    rememberQr({ ...CODE, kind: "booking", expires_in_seconds: 900 } as never);
+    rememberDoor(memberDoorsOnFixture({ policy: "booking_window", next_booking: BOOKING }) as never);
+    renderOffline();
+
+    // The OFFLINE page's subtitle, which means waiting for the offline page. The first
+    // render is the ordinary one and its subtitle already names the door, so matching on
+    // the subtitle alone passes over a broken offline arm — which is exactly what it did.
+    await screen.findByText(/This is the code it last managed to get/);
+    expect(screen.getByText(/Show this to the scanner/)).toHaveTextContent(/or at the club door/);
+  });
 
   it("renders the code it last had, with its age, when the network is gone", async () => {
     rememberQr({ ...CODE, kind: "booking", expires_in_seconds: 900 } as never);

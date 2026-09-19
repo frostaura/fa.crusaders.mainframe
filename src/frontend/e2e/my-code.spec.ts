@@ -168,7 +168,10 @@ test("nothing scrolls sideways, and every control is big enough to hit in the da
 
   await page.setViewportSize({ width: 360, height: 640 });
   await page.goto("/my-code");
-  await expect(page.getByRole("status")).toBeVisible();
+  // Waited on by its own SENTENCE, not by `role="status"`: the boot splash carries that
+  // role too while the session is being confirmed, so under load the assertion passed
+  // over a page that had not rendered and the sweep then found no controls at all.
+  await expect(page.getByText("The door needs a court booked.").first()).toBeVisible();
 
   const overflow = await page.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth);

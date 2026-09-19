@@ -337,6 +337,34 @@ describe("memberDoorCopy", () => {
     expect(line.body).toMatch(/hasn't told this screen/i);
   });
 
+  /**
+   * The suppression rule has two reasons and only one of them was designed in.
+   *
+   * <p>
+   * Duplication was: a line carrying a clock window makes the code card's clause a
+   * second, vaguer copy. CONTRADICTION was not, and it is worse — a member the club has
+   * as not active, or one with no qualifying booking, reads here that no code of theirs
+   * opens a door while the code card, fed by a request that does not know the policy,
+   * promises a window a centimetre above. Found by looking at the rendered page.
+   * </p>
+   */
+  it("suppresses the code card's door clause on every arm that would contradict it", () => {
+    const booking = { starts_at: "2026-09-19T17:00:00Z", door_opens_at: "2026-09-19T16:30:00Z", door_closes_at: "2026-09-19T18:05:00Z" };
+    for (const policy of ["active_member", "booking_window"] as const) {
+      expect(describeStanding({ policy, membership: "not_active", next_booking: booking }).suppressesCodeClause).toBe(true);
+      expect(describeStanding({ policy, membership: "none", next_booking: null }).suppressesCodeClause).toBe(true);
+    }
+    expect(describeStanding({ policy: "booking_window", membership: "active", next_booking: null }).suppressesCodeClause).toBe(true);
+    expect(describeStanding({ policy: "booking_window", membership: "active", next_booking: booking }).suppressesCodeClause).toBe(true);
+  });
+
+  /** And the one arm where the clause earns its place, because this line has no clock. */
+  it("keeps the code card's door clause on the active-member arm, which has no clock of its own", () => {
+    const line = describeStanding({ policy: "active_member", membership: "active", next_booking: null });
+    expect(line.suppressesCodeClause).toBe(false);
+    expect(line.hasClockWindow).toBe(false);
+  });
+
   it("says it cannot check, and what it last heard, when the read failed", () => {
     const withCache = standingFailed({ body: "Your club opens its doors for any active member.", minutesAgo: 4 });
     expect(withCache).toMatch(/can't reach the club/i);
@@ -482,6 +510,13 @@ describe("memberDoorCopy", () => {
     expect(conclusion).toContain("18:30");
     expect(conclusion).toContain("27 minutes");
     expect(conclusion).toMatch(/everything else/i);
+  });
+
+  /** Through the shared formatter: "fresh, 900s left" is not a number anybody reads. */
+  it("says how long a code has left in minutes and seconds, not in raw seconds", () => {
+    const { rows } = buildDiagnosis({ ...HEALTHY, codeSecondsLeft: 900 });
+    const code = rows.find((r) => r.key === "code")!;
+    expect(code.value).toBe("fresh, 15m 00s left");
   });
 
   it("tells a member whose code had run out that there is a fresh one", () => {

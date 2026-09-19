@@ -1,5 +1,5 @@
 import { GATE_ROSTER_MAX_ENTRIES } from "./gateCopy";
-import { formatClock } from "./countdown";
+import { formatClock, formatCountdown } from "./countdown";
 import type { MemberDoorBooking, MemberDoorContact, MemberDoorMembership, MemberDoorPolicy } from "./api";
 
 /**
@@ -317,17 +317,30 @@ export const STANDING_LOADING = "Checking what opens the door for you…";
 
 export type StandingLine = {
   body: string;
+  /** Does this sentence carry a clock window of its own? */
+  hasClockWindow: boolean;
   /**
-   * Does this sentence carry a clock window of its own?
+   * Must the code card's own door clause be suppressed while this line is on screen?
    *
    * <p>
-   * When it does, the code card's own door clause is suppressed: it would be a second,
-   * vaguer copy of a fact already stated better ten pixels above. When it does not — and
-   * whenever this line is absent, stale or failed — the clause is restored, because it is
-   * the fallback source of door truth on the page rather than decoration.
+   * TWO reasons, and the second was found by looking at the rendered page rather than by
+   * reading the design. The first is duplication: a line that carries a clock window makes
+   * the code card's clause a second, vaguer copy of a fact already stated better ten
+   * pixels away. The second is CONTRADICTION, which is worse. A member the club has as
+   * not active, or one with no qualifying booking, is told here that no code of theirs
+   * opens a door — while `describeDoor()`, fed by a different request that does not know
+   * the policy, was promising "It also opens the club door from 20:54 until 22:29" a
+   * centimetre above. That is a screen arguing with itself, which is precisely what one
+   * response and one instant exist to prevent.
+   * </p>
+   *
+   * <p>
+   * When neither holds — the active-member arm, where the clause adds clock times this
+   * line does not have — and whenever this line is absent, stale or failed, the clause is
+   * restored. It is the FALLBACK SOURCE of door truth on the page, not decoration.
    * </p>
    */
-  hasClockWindow: boolean;
+  suppressesCodeClause: boolean;
   action: DecisionAction | null;
 };
 
@@ -339,6 +352,8 @@ function standingNotActive(rule: string): StandingLine {
   return {
     body: `${rule} The club has yours as not active, so no code of yours opens a door until they change that.`,
     hasClockWindow: false,
+    // The contradiction arm: the code card must not promise a window over this sentence.
+    suppressesCodeClause: true,
     action: null,
   };
 }
@@ -350,6 +365,9 @@ function standingBooking(booking: MemberDoorBooking): StandingLine {
       body: `${BOOKING_RULE} Yours starts at ${starts}, but the club hasn't told this screen when a door`
         + " starts opening for it.",
       hasClockWindow: false,
+      // Nothing to contradict and nothing to duplicate: if the code card knows the window
+      // this line does not, it is the only place the member can read it.
+      suppressesCodeClause: false,
       action: null,
     };
   }
@@ -359,7 +377,12 @@ function standingBooking(booking: MemberDoorBooking): StandingLine {
   const window = open
     ? `the door opens for you now${until}.`
     : `the door opens for you from ${formatClock(booking.door_opens_at)}.`;
-  return { body: `${BOOKING_RULE} Yours starts at ${starts}, and ${window}`, hasClockWindow: true, action: null };
+  return {
+    body: `${BOOKING_RULE} Yours starts at ${starts}, and ${window}`,
+    hasClockWindow: true,
+    suppressesCodeClause: true,
+    action: null,
+  };
 }
 
 /**
@@ -384,6 +407,9 @@ export function describeStanding(door: {
     return {
       body: `${ACTIVE_MEMBER_RULE} Yours is active, so the code on this screen opens the club door.`,
       hasClockWindow: false,
+      // The one arm where the clause EARNS its place: this line has no clock times and
+      // the code card does.
+      suppressesCodeClause: false,
       action: null,
     };
   }
@@ -392,6 +418,9 @@ export function describeStanding(door: {
       body: `${BOOKING_RULE} You have nothing booked soon enough for a door to open, so a door won't open`
         + " for you.",
       hasClockWindow: false,
+      // The other contradiction arm. An ident code's clause reads "whenever the club's
+      // door rules allow", directly over a sentence saying a door will not open at all.
+      suppressesCodeClause: true,
       action: { kind: "book_a_court", label: ACTION_LABELS.book_a_court },
     };
   }
@@ -545,8 +574,10 @@ function diagnosisRows(input: DiagnosisInput): DiagnosisRow[] {
     row("policy", "passed", input.policy === "active_member" ? "an active membership" : "a court booked"),
     bookingRow(input),
     windowRow(input),
+    // Through the shared formatter, not `${seconds}s`: a booking code has a quarter of an
+    // hour on it and "fresh, 900s left" is a number nobody reads as fifteen minutes.
     row("code", input.codeSecondsLeft > 0 ? "passed" : "failed",
-      input.codeSecondsLeft > 0 ? `fresh, ${input.codeSecondsLeft}s left` : "had run out"),
+      input.codeSecondsLeft > 0 ? `fresh, ${formatCountdown(input.codeSecondsLeft)} left` : "had run out"),
     row("connection", input.connectionOk ? "passed" : "failed",
       input.connectionOk ? "working" : "not reaching the club"),
   ];

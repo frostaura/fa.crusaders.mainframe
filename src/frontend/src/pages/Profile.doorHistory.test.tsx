@@ -131,9 +131,10 @@ describe("My door history", () => {
       { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
     ]);
 
-    await screen.findByText("My door history");
+    // The CARD appears before its rows do — it renders its own loading state first — so
+    // waiting for the heading and then reading synchronously is a race, and it lost one.
+    expect(await screen.findByText("Lock released")).toBeInTheDocument();
     expect(screen.getAllByText(/front-door/).length).toBe(2);
-    expect(screen.getByText("Lock released")).toBeInTheDocument();
     expect(screen.getByText("Too early")).toBeInTheDocument();
     expect(screen.getByText(/Your court hadn't opened the door yet/)).toBeInTheDocument();
     // A date as well as a clock time: two rows an hour apart on different days are
