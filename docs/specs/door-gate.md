@@ -280,8 +280,10 @@ The order is not arbitrary; each step exists to keep the one after it from being
    `too_early` before, `not_recognised` after. See *A booking code is not a standing
    building key* below.
 6. **The policy.** `active_member` opens. `booking_window` opens for a **club admin**
-   unconditionally, and otherwise only for a member with a `Booked` booking, on any court,
-   inside `[StartsAt − gate_early_entry_minutes, EndsAt]`; failing that, `no_booking`.
+   unconditionally, and otherwise only for a member with a qualifying booking, on any court,
+   inside `[StartsAt − gate_early_entry_minutes, the instant that booking's code dies]`;
+   failing that, `no_booking`. Same upper edge as step 5 and the same qualifying statuses —
+   one rule for the whole door.
 7. **The release** is `clamp(gate_unlock_seconds, 1, 30)`.
 
 **Club admins always pass step 6.** A club that switches to `booking_window` must not thereby
@@ -308,7 +310,8 @@ deciding offline needs, and exactly what made it dangerous at a door. Unbounded,
 member's phone showed them at 17:00 for a 19:00 court opened every door in the club at 03:00
 the same night, under the default policy, for as long as the row survived.
 
-So under **every** policy it is bounded by its own booking's window, `[StartsAt − H, EndsAt]`:
+So under **every** policy it is bounded by its own booking's window,
+`[StartsAt − H, the code's own expiry]`:
 
 | Policy | `H` |
 |---|---|
@@ -341,6 +344,44 @@ ceiling the member's screen still shows the code and the door answers `too_early
 honest, is actionable by the person standing outside, and is pinned. Hiding a booking's own
 code from the member who owns it would be the worse half of the trade.
 
+### The upper edge is the code's own liveness, and there is only one of it
+
+**A booking code opens a door until the CODE expires, not until the booking's `EndsAt`.**
+`AccessCodeService.ResolveAsync` is the only way a scan reaches this decision at all and it
+refuses anything that is not live, so the top of the window is the `AccessCode` row and
+nothing else has to enforce it. The previous rule tested `EndsAt` as well — a second, lower
+edge, wrong in two directions at once:
+
+- the no-show sweep **truncates `EndsAt`** to its own clock five minutes into a slot, so a
+  member six minutes late was refused on a booking that had not finished; and
+- a member whose court simply ran to its end was refused for the whole grace window, during
+  which the product was still holding a live code for them.
+
+The same edge governs the entitlement query behind step 5's relief and step 6's policy check,
+where it is written as arithmetic — `StartsAt + SliceMinutes × SliceCount + grace_window_minutes`
+— because a booking is minted lazily and may not have a code row yet. That expression is
+exactly what `StageForBookingAsync` sets `ExpiresAt` to. Two consequences, both stated rather
+than discovered:
+
+- **The door is a grace window WIDER at the top than the phone**, which stops offering a
+  booking's code at `EndsAt` (`POST /me/qr/generate?kind=auto`). That direction is intended
+  and is pinned: narrower would be the product refusing a credential it minted and has not
+  yet expired. Wider is a member walking back in after their court with a code the club has
+  not taken away.
+- **The offline roster still closes at `EndsAt`** (§4), so the cache is narrower at the top
+  than the online decision by the same grace window. That is the one place offline is stricter
+  than online; it is the roster's `closes_in` and changing it would change the firmware's
+  contract for a few minutes at the end of a slot.
+
+The arithmetic edge uses the club's **current** `grace_window_minutes`, while a code already
+minted carries the one that was in force when it was minted. The two agree except across a
+settings change, and the code's own row is the exact authority where there is one.
+
+**Nothing in this product extends a booking.** The only writers of `EndsAt` after a mint —
+the no-show sweep and the reversal narrowing in `BookingService` — shorten it or restore it
+toward the end it was sold to. If an extend-booking feature ever lands, the mint path must
+move with it or this edge silently narrows.
+
 ### A member is not a credential
 
 A booking code bounded by its own booking is the right rule about the **code**. It was the
@@ -365,14 +406,14 @@ exactly what it was. Qualifying means:
 | Status | Counts for a door | Because |
 |---|---|---|
 | `Booked` | yes | unchanged |
-| `NoShow` | yes, to the end the slot was **sold** to | a bet against attendance the member is in the middle of losing |
+| `NoShow` | yes | a bet against attendance the member is in the middle of losing |
 | `Cancelled` · `Completed` · `AdminBlock` | no | decisions about the booking, and final |
 
-The end a `NoShow` is measured against is `StartsAt + SliceMinutes × SliceCount` — the slot as
-sold. The sweep moves `EndsAt` and nothing else, so the sold length is still on the row; the
-booking's own access code corroborates it independently, because its `ExpiresAt` was minted
-from the original end plus the grace window and the sweep does not rewrite that either. The
-relief is therefore exactly as long as the court the member paid for, and not a minute more.
+The end they are measured against is the instant that booking's own code dies — see *The
+upper edge is the code's own liveness* above — which for a `NoShow` is measured from the slot
+as **sold**, because the sweep moves `EndsAt` and nothing else. The relief is therefore
+exactly as long as the product would have gone on showing that member their code, and not a
+minute more.
 
 **The rule lives in one query**, asked twice with two horizons: step 5 asks it with the door's
 own `H`, and step 6 asks it with `gate_early_entry_minutes`. It matches on the member and on
@@ -391,7 +432,7 @@ at all, so the two are the same person by construction.
   itself minted for them that they are early, about a booking that is already theirs, which
   the door will honour later the same day. "Not recognised" would send a member with a valid
   booking to a desk that may not be staffed.
-- **After `EndsAt`, or for a booking that is no longer live — `not_recognised`**, and
+- **After the code expires, or for a booking that is no longer live — `not_recognised`**, and
   deliberately indistinguishable from a code that never existed. The row outlives the slot by
   the grace window, so a door that told "spent" from "unknown" apart would be exactly the
   oracle the rest of this section avoids.
@@ -577,6 +618,7 @@ board, the answer is physical, the same way §11's is.
 | `gate_unlock_seconds` | 3 | 1–30 | how long the lock is released per open |
 | `gate_access_policy` | `active_member` | `active_member` \| `booking_window` | who may open a door |
 | `gate_early_entry_minutes` | 30 | 0–240 | how long before a booking its holder may enter |
+| `device_alert_cooldown_minutes` | 60 | 5–1440 | how long before the same board may mail the club again |
 
 Three seconds is long enough to push a door and short enough that it has shut again before
 the next person reaches it. Thirty minutes is the club's own habit — a member due on court at
@@ -625,6 +667,41 @@ So:
 The PUT refuses anything outside the closed set with `gate_access_policy_invalid` and writes
 **nothing at all**, including the fields that were valid.
 
+### `device_alert_cooldown_minutes` is not a door setting, and lives here anyway
+
+It bounds how often **any** board — court box or door — may mail the club about itself, and
+it is on this list because the door is what made its absence expensive.
+
+`PeripheralHealthWorker` had no cooldown and no minimum outage: every transition mailed every
+admin of the club. A board on a marginal uplink flapping every few minutes was a mailbox full
+of "not reporting" and "back online" until somebody muted the sender, and an alert nobody
+reads is worse than no alert because the club believes it has one. Auto-registration then
+makes it a capability rather than a nuisance: anything holding the club's device key can mint
+boards with invented MACs, and each one could mail the whole club on demand.
+
+Three rules, and the third is the door's:
+
+- **At most one outage mail per board per cooldown.** Derived by replaying that board's own
+  outage rows rather than stored on them, so it needs no migration; each row is announced iff
+  the cooldown has elapsed since the last *announced* one, not since the last row — otherwise
+  a board flapping just inside the window chains past it for ever.
+- **A recovery mail is sent only if its outage mail was.** Same replay, same rows, so the two
+  decisions cannot disagree. The one thing that can move between them is the setting itself,
+  and a club that changes it mid-outage may get an all-clear for an alarm it did not get; that
+  is the price of not adding a column and it is bounded to the boards in outage at that moment.
+- **A gate no admin has named mails nobody** (§4's acknowledgement, applied to alerts). The
+  outage row and the `peripheral.*` events are still written — the Devices page is where an
+  admin looks at a board on purpose, and what is withheld is the interruption, not the record.
+
+**Taking a board out of service closes whatever outage it is in, silently**, at the instant
+`OutOfServiceSince` records. The sweep skips disabled rows, so an outage open at that moment
+stayed open for as long as the board was out of service — switch it back on and the first
+heartbeat mailed the whole club "back after 43 200 minutes" about a board they had themselves
+unplugged. The close is at the switch rather than at the board's last heartbeat because that
+is the last moment the club was accountable for it, and because every settlement instant after
+the switch is decided by `OutOfServiceSince` instead (`DeviceOutageIndex.DoorWasShutFor`), so
+no deadline is re-priced by it.
+
 ### Both key spellings bind on the PUT
 
 This endpoint answers snake_case and binds camelCase, and the cost of a client picking the
@@ -632,7 +709,11 @@ wrong one is not an error — it is `null`, which the PUT reads as "omitted, lea
 so the save returns `{"saved": true}` and changes nothing. That is the silent write
 `Opening_the_settings_page_and_saving_it_changes_nothing` exists to prevent. For three
 settings that decide who gets into a building it is worth removing rather than documenting,
-so `gateUnlockSeconds` and `gate_unlock_seconds` both bind, and so on for the other two.
+so `gateUnlockSeconds` and `gate_unlock_seconds` both bind, and so on for the other three —
+`device_alert_cooldown_minutes` included, which the console requires on the GET and sends
+camelCase on the PUT. The GET serves it whether or not the club has ever set one: the
+console's type carries no client-side default, so an omitted key is a settings page that
+cannot render, on exactly the day a club's boards are misbehaving.
 
 ---
 
@@ -872,7 +953,8 @@ new sentence above with no row is the defect this table exists to expose.
 | Only `qr` and `code` identify | `DeviceGateTests.Only_a_method_that_identifies_globally_is_accepted`, `…A_code_read_or_typed_identifies` |
 | Not-`Active` is refused by name; no membership row is not barred | `DeviceGateTests.A_member_the_club_has_not_approved_is_refused_by_name`, `…A_user_with_no_membership_row_is_not_barred` |
 | Unknown and expired both answer `not_recognised` | `DeviceGateTests.An_unknown_or_expired_code_is_not_recognised_and_names_nobody` |
-| The booking window opens at early entry and shuts at the slot's end | `DeviceGateTests.The_booking_window_opens_at_early_entry_and_shuts_at_the_slots_end` |
+| The booking window opens at early entry and shuts when that booking's code dies | `DeviceGateTests.The_booking_window_opens_at_early_entry_and_shuts_at_the_slots_end` |
+| The door's upper edge is the code's liveness, and is never narrower than the phone's | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` (asserts the two agree on every late row), `DeviceGateHttpTests.The_door_still_opens_on_a_code_the_phone_has_stopped_offering` |
 | The window is the setting, not a constant | `DeviceGateTests.The_entry_window_is_the_clubs_setting_and_not_a_constant` |
 | Any court of the club counts | `DeviceGateTests.A_booking_on_any_court_opens_the_door` |
 | Only a `Booked` booking counts | `DeviceGateTests.A_booking_that_is_not_live_does_not_open_the_door` |
@@ -908,8 +990,12 @@ new sentence above with no row is the defect this table exists to expose.
 | A door darkens no court and waives no penalty — by rule, not because its court list happens to be empty | `PeripheralHealthTests.A_silent_gate_darkens_no_court_and_waives_no_penalty`, `…A_silent_gate_carrying_a_court_number_still_darkens_no_court`, `…A_healthy_gate_carrying_a_court_number_does_not_block_the_waiver` |
 | A presented token's length is checked before anything is allocated | `AccessCodeTests.An_absurdly_long_token_is_refused_before_anything_is_allocated` |
 | The three settings round-trip; omitted means unchanged | `AdminSettingsHttpTests.The_gate_settings_are_readable_and_writable_and_omitted_means_unchanged` |
-| Both key spellings bind | `AdminSettingsHttpTests.A_gate_setting_binds_under_either_spelling` |
-| The bounds are 1–30 and 0–240 | `AdminSettingsHttpTests.A_gate_number_outside_its_bounds_is_refused` |
+| Both key spellings bind | `AdminSettingsHttpTests.A_gate_setting_binds_under_either_spelling`, `…The_alert_cooldown_binds_under_either_spelling_and_is_always_served` |
+| The bounds are 1–30, 0–240 and 5–1440 | `AdminSettingsHttpTests.A_gate_number_outside_its_bounds_is_refused` |
+| `device_alert_cooldown_minutes` is served whether or not the club has set one | `AdminSettingsHttpTests.The_alert_cooldown_binds_under_either_spelling_and_is_always_served` |
+| One outage mail per board per cooldown, and the cooldown is the club's | `PeripheralHealthTests.A_flapping_board_mails_the_club_once_per_cooldown_and_not_once_per_flap`, `…The_cooldown_is_the_clubs_setting` |
+| A gate no admin has named alerts nobody, and still records its outage | `PeripheralHealthTests.A_gate_no_admin_has_named_alerts_nobody_and_still_records_its_outage` |
+| Taking a board out of service closes its outage silently | `PeripheralHealthTests.Taking_a_board_out_of_service_closes_its_outage_silently` |
 | The policy is a closed set; a refused save writes nothing | `AdminSettingsHttpTests.An_access_policy_outside_the_closed_set_is_refused`, `…Both_access_policies_are_accepted` |
 | An unreadable stored policy narrows the door | `DeviceGateTests.An_unreadable_access_policy_narrows_the_door_rather_than_widening_it` |
 | The admin PATCH holds each kind to its own fields | `DeviceGateHttpTests.The_admin_patch_holds_each_kind_to_its_own_fields` |

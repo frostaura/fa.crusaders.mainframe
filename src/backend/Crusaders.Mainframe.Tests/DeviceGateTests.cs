@@ -317,12 +317,21 @@ public class DeviceGateTests
 
     /// <summary>
     /// <c>booking_window</c> opens the door <c>gate_early_entry_minutes</c> before the slot
-    /// and shuts it at the end, and the two edges are checked a minute either side.
+    /// and shuts it when that booking's own code dies — the slot's end plus
+    /// <c>grace_window_minutes</c>. Both edges are checked a minute either side.
     ///
     /// <para>
     /// A minute rather than a second because the arithmetic is in minutes; a test that moved
     /// the clock by a second would pass against an implementation that had the comparison
     /// inverted for a whole minute at a time.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The upper edge used to be the slot's bare end and is now the code's liveness</b>,
+    /// which is one sentence for the whole door: the product goes on showing the member that
+    /// code for the grace window, the no-show sweep waits exactly that long before deciding
+    /// they did not come, and refusing them at the door inside it is the product
+    /// contradicting itself. Forty-five-minute slot, five-minute grace, so the edge is +50.
     /// </para>
     /// </summary>
     [Theory]
@@ -330,9 +339,11 @@ public class DeviceGateTests
     [InlineData(-30, true)]    // the instant it opens
     [InlineData(-29, true)]
     [InlineData(0, true)]      // the slot starts
-    [InlineData(44, true)]     // a minute before it ends
-    [InlineData(45, true)]     // the instant it ends
-    [InlineData(46, false)]    // a minute after
+    [InlineData(44, true)]
+    [InlineData(45, true)]     // the instant the slot ends — the code is still live
+    [InlineData(49, true)]     // a minute before the code dies
+    [InlineData(50, true)]     // the instant it dies
+    [InlineData(51, false)]    // a minute after
     public async Task The_booking_window_opens_at_early_entry_and_shuts_at_the_slots_end(
         int minutesFromStart, bool opens)
     {
@@ -649,20 +660,22 @@ public class DeviceGateTests
     /// </para>
     /// </summary>
     [Theory]
-    // active_member: H = max(30, roster 120 + cue 10) = 130 minutes.
+    // active_member: H = max(30, min(roster 120 + cue 10, 240)) = 130 minutes.
     [InlineData(GateAccessPolicies.ActiveMember, -131, false, GateAccess.TooEarly)]
     [InlineData(GateAccessPolicies.ActiveMember, -130, true, GateAccess.Ok)]
     [InlineData(GateAccessPolicies.ActiveMember, -30, true, GateAccess.Ok)]
     [InlineData(GateAccessPolicies.ActiveMember, 44, true, GateAccess.Ok)]
     [InlineData(GateAccessPolicies.ActiveMember, 45, true, GateAccess.Ok)]
-    [InlineData(GateAccessPolicies.ActiveMember, 46, false, GateAccess.NotRecognised)]
+    [InlineData(GateAccessPolicies.ActiveMember, 49, true, GateAccess.Ok)]
+    [InlineData(GateAccessPolicies.ActiveMember, 50, false, GateAccess.NotRecognised)]
     // booking_window: H = gate_early_entry_minutes = 30.
     [InlineData(GateAccessPolicies.BookingWindow, -131, false, GateAccess.TooEarly)]
     [InlineData(GateAccessPolicies.BookingWindow, -31, false, GateAccess.TooEarly)]
     [InlineData(GateAccessPolicies.BookingWindow, -30, true, GateAccess.Ok)]
     [InlineData(GateAccessPolicies.BookingWindow, 44, true, GateAccess.Ok)]
     [InlineData(GateAccessPolicies.BookingWindow, 45, true, GateAccess.Ok)]
-    [InlineData(GateAccessPolicies.BookingWindow, 46, false, GateAccess.NotRecognised)]
+    [InlineData(GateAccessPolicies.BookingWindow, 49, true, GateAccess.Ok)]
+    [InlineData(GateAccessPolicies.BookingWindow, 50, false, GateAccess.NotRecognised)]
     public async Task A_booking_code_opens_a_door_only_inside_its_own_bookings_window(
         string policy, int minutesFromStart, bool opens, string reason)
     {
@@ -678,17 +691,24 @@ public class DeviceGateTests
         var booking = await BookAsync(f, f.Host.Courts[0], startsAt);
         var token = await BookingCodeAsync(f, booking);
 
-        // The code itself is still live at every row here — it lives until EndsAt + grace (5)
-        // — so a refusal at +46 is this rule and not plain expiry.
-        Assert.True(
-            (await f.Db.AccessCodes.AsNoTracking().FirstAsync(c => c.Code == token)).IsLiveAt(now),
-            "the fixture must present a LIVE code, or the late rows would be testing expiry");
+        // The UPPER edge is the code's own liveness — 45-minute slot plus a 5-minute grace
+        // window, and `IsLiveAt` is a strict `ExpiresAt > now`, so +49 opens and +50 is
+        // already a dead code. Asserted rather than assumed, and asserted to AGREE with the
+        // expected outcome on every late row: that is what says the door's top edge and the
+        // code's expiry are ONE instant rather than two that happen to be near each other.
+        var live = (await f.Db.AccessCodes.AsNoTracking().FirstAsync(c => c.Code == token)).IsLiveAt(now);
+        if (minutesFromStart >= 0) Assert.Equal(opens, live);
+        else Assert.True(live, "the early rows must present a LIVE code, or they would be testing expiry");
 
         var decision = await DecideAsync(f, GateOn(f), Policy(f, policy), token, now);
 
         Assert.Equal(opens, decision.Opened);
         Assert.Equal(reason, decision.Reason);
-        Assert.Equal(f.Host.PlayerUser.Id, decision.SubjectUserId);
+
+        // A refusal names whoever the code identified — except past the top edge, where the
+        // code no longer identifies anybody at all. That is the same `not_recognised` an
+        // invented code gets, by construction rather than by coincidence.
+        Assert.Equal(live ? f.Host.PlayerUser.Id : null, decision.SubjectUserId);
     }
 
     /// <summary>
@@ -845,9 +865,11 @@ public class DeviceGateTests
         Assert.True(decision.Opened, $"a swept member was refused at the door: {decision.Reason}");
         Assert.Equal(GateAccess.Ok, decision.Reason);
 
-        // The probe: the SAME swept booking, past the end it was SOLD to, admits nobody. The
-        // relief is the length of the slot the member paid for, not a standing key.
-        var afterTheSlot = BookingService.OriginalEndsAt(booking).AddMinutes(1);
+        // The probe: the SAME swept booking, past the instant its own code dies — the slot as
+        // SOLD plus the grace window — admits nobody. The relief is exactly as long as the
+        // product would have gone on showing that member the code, not a standing key.
+        var afterTheSlot = BookingService.OriginalEndsAt(booking)
+            .AddMinutes(f.Settings.GraceWindowMinutes + 1);
         var late = await DecideAsync(f, GateOn(f), Policy(f, policy), token, afterTheSlot);
         if (bookingCode)
         {
@@ -997,21 +1019,23 @@ public class DeviceGateTests
     }
 
     /// <summary>
-    /// <b>A stale earlier QR still opens the door when the member is genuinely due.</b>
+    /// <b>A spent QR still opens the door when the member is genuinely due.</b>
     ///
     /// <para>
-    /// A booking code is bounded by its own booking's window, which is right — but the member
-    /// holding it is a person, not a credential. Somebody whose phone is still showing the
-    /// code for the court they played at 17:00, walking back in at 18:50 for the court they
-    /// have booked at 19:00, was told <c>not_recognised</c>: the code is fake. It is not fake;
-    /// it is theirs, it is live, and they are due on a court in ten minutes.
+    /// A booking code is bounded by its own booking, which is right — but the member holding
+    /// it is a person, not a credential. Somebody whose phone is still showing the code for
+    /// the court they played at 17:00, walking back in at 18:50 for the court they have booked
+    /// at 19:00, was told <c>not_recognised</c>: the code is fake. It is not fake; it is
+    /// theirs, it is live, and they are due on a court in ten minutes.
     /// </para>
     ///
     /// <para>
-    /// So the rule is "this member may come in", not "this credential names the booking they
-    /// are coming in for": a booking code outside its own window opens the door iff the SAME
-    /// member holds another qualifying booking whose door window contains now. Without such a
-    /// booking the refusal is exactly what it was.
+    /// The earlier booking is <c>Completed</c> here because that is what the product does to
+    /// it: <c>LightsCueWorker</c> promotes an attended-and-over booking, so this is the shape
+    /// a member who PLAYED their 17:00 court is actually left holding. Its code outlives the
+    /// promotion — nothing revokes one — which is exactly why the rule had to become "may this
+    /// member come in" rather than "does this credential name the booking they are coming in
+    /// for".
     /// </para>
     /// </summary>
     [Fact]
@@ -1021,20 +1045,23 @@ public class DeviceGateTests
         await using var _ = f.Host;
         using var __ = f.Scope;
 
-        // A club with a generous grace window, which is what keeps the earlier booking's code
-        // alive past its own slot — the row lives until EndsAt + grace.
-        var settings = Policy(f, GateAccessPolicies.ActiveMember) with { GraceWindowMinutes = 60 };
+        var settings = Policy(f, GateAccessPolicies.ActiveMember);
 
         var five = new DateTimeOffset(2024, 3, 10, 17, 0, 0, TimeSpan.Zero);
         var earlier = await BookAsync(f, f.Host.Courts[0], five, minutes: 60);
         var later = await BookAsync(f, f.Host.Courts[0], five.AddHours(2), minutes: 60);
 
+        // Minted with an hour of grace — a club that has since shortened the setting leaves
+        // exactly this in its members' hands — so the code is still live long after its own
+        // court is over and promoted.
         var spent = (await f.Codes.MintForBookingAsync(earlier, TimeSpan.FromMinutes(60), default)).Code;
-        var now = five.AddMinutes(110);   // 18:50 — the 17:00 slot is over, the 19:00 one is in reach.
+        earlier.Status = BookingStatus.Completed;
+        await f.Db.SaveChangesAsync();
+
+        var now = five.AddMinutes(110);   // 18:50 — the 17:00 court is done, the 19:00 one is in reach.
 
         Assert.True((await f.Db.AccessCodes.AsNoTracking().FirstAsync(c => c.Code == spent)).IsLiveAt(now),
             "the fixture must present a LIVE code, or this would be testing plain expiry");
-        Assert.True(now > earlier.EndsAt, "the earlier booking must be over, or this tests nothing");
         Assert.True(later.StartsAt <= BookingCodeWindow.LatestStart(
             now, BookingCodeWindow.DoorHorizonMinutes(settings)), "the later booking must be in reach");
 

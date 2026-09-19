@@ -903,6 +903,50 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// <b>The TOP edge, through both routes: the door is never narrower than the phone.</b>
+    ///
+    /// <para>
+    /// The test above is the bottom edge; this is the other end, and the two are not
+    /// symmetric. The phone stops offering a booking's code at <c>EndsAt</c>; the door goes on
+    /// accepting it until the code itself expires, which is <c>EndsAt</c> plus the grace
+    /// window. A member whose court has just finished is therefore still holding a code that
+    /// works on the way out and back in — and, critically, so is a member the no-show sweep is
+    /// about to write off, since the grace window is precisely how long the product waits
+    /// before deciding somebody did not come.
+    /// </para>
+    ///
+    /// <para>
+    /// Narrower would be the product refusing a credential it minted and has not yet expired.
+    /// The DIRECTION is what is asserted rather than the exact gap, because the gap is the
+    /// club's own <c>grace_window_minutes</c>.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_door_still_opens_on_a_code_the_phone_has_stopped_offering()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", SharedHorizonSettings);
+        var device = factory.CreateClient();
+        var mac = await GateAsync(factory, club, device, "front-door");
+        var phone = MemberClient(factory, club);
+
+        // A court that ended two minutes ago, against a five-minute grace window.
+        var over = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-17), minutes: 15);
+        var code = await BookingCodeAsync(factory, club, over);
+
+        // The phone has moved on: it offers an ident code, not this booking's.
+        var screen = await GenerateAsync(phone);
+        Assert.Equal("ident", screen.GetProperty("kind").GetString());
+        Assert.NotEqual(code, screen.GetProperty("code").GetString());
+
+        // The door has not. The code the club minted is still live, so it still opens.
+        Assert.True((await BodyAsync(await device.SendAsync(Scan(club.Key, mac, code))))
+            .GetProperty("opened").GetBoolean());
+    }
+
+    /// <summary>
     /// The default policy with the two horizon inputs stated rather than defaulted, because
     /// this is the one test whose arithmetic they decide: 120 + 10 = 130 minutes, against a
     /// thirty-minute entry window that the max leaves behind.
@@ -987,10 +1031,11 @@ public sealed class DeviceGateHttpTests
         var client = factory.CreateClient();
         var mac = await GateAsync(factory, club, client, "front-door");
 
-        // A slot that ended ten minutes ago, and the next one starting in twenty. One court,
-        // so they must not overlap — the exclusion constraint is real here. The earlier
-        // booking's code outlives its slot by the grace window, which is what puts a live
-        // code for a finished court in the member's hand at all.
+        // A court that ended ten minutes ago and has been promoted to `Completed` — which is
+        // what `LightsCueWorker` does to an attended-and-over booking, so this is the shape a
+        // member who PLAYED is left holding — and the next one starting in twenty. One court,
+        // so they must not overlap: the exclusion constraint is real here. The code outlives
+        // the promotion because nothing revokes one.
         var now = DateTimeOffset.UtcNow;
         var spentBooking = await BookAsync(factory, club, now.AddMinutes(-70), minutes: 60);
         var spent = await BookingCodeAsync(factory, club, spentBooking);
@@ -1000,6 +1045,10 @@ public sealed class DeviceGateHttpTests
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
             var row = await db.AccessCodes.IgnoreQueryFilters().SingleAsync(c => c.Code == spent);
             Assert.True(row.IsLiveAt(now), "the fixture must present a LIVE code, or this tests plain expiry");
+
+            var played = await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.Id == spentBooking.Id);
+            played.Status = BookingStatus.Completed;
+            await db.SaveChangesAsync();
         }
 
         // Without the next booking the code is exactly as dead as it was.

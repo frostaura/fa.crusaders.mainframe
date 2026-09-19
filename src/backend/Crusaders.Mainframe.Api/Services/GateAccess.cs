@@ -238,7 +238,27 @@ public static class GateAccess
 
     /// <summary>
     /// Why this code's OWN booking does not admit it right now, or null when it does — the
-    /// question about the CREDENTIAL, and unchanged.
+    /// question about the CREDENTIAL.
+    ///
+    /// <para>
+    /// <b>There is no upper-edge test here, and its absence is the rule rather than an
+    /// omission.</b> The window's top is <b>the code's own liveness</b>:
+    /// <c>AccessCodeService.ResolveAsync</c> is the only way this decision reaches a
+    /// <see cref="ResolvedAccessCode"/> at all and it refuses anything that is not
+    /// <c>IsLiveAt(now)</c>, so a code that is here is a code that is live. Testing
+    /// <c>booking.EndsAt</c> as well was a SECOND upper edge, lower than the first and wrong
+    /// in two directions at once: the no-show sweep truncates <c>EndsAt</c> to its own clock
+    /// five minutes into a slot, and a member whose court simply ran to its end was refused
+    /// for the grace window during which the product was still showing them that code.
+    /// </para>
+    ///
+    /// <para>
+    /// Nothing in this product extends a booking. The two writers of <c>EndsAt</c> after a
+    /// mint — the no-show sweep and <c>BookingService</c>'s reversal narrowing — only shorten
+    /// it or restore it toward the end it was sold to, so a code's <c>ExpiresAt</c> (minted
+    /// from the sold end plus the grace window) is never behind the row. If an extend-booking
+    /// feature ever lands, the mint path has to move with it or this edge silently narrows.
+    /// </para>
     ///
     /// <para>
     /// Whether the MEMBER may come in anyway is a different question and is deliberately not
@@ -256,7 +276,6 @@ public static class GateAccess
             : null;
 
         if (booking is null || booking.Status != BookingStatus.Booked) return NotRecognised;
-        if (context.Now > booking.EndsAt) return NotRecognised;
 
         var latestStart = BookingCodeWindow.LatestStart(
             context.Now, BookingCodeWindow.DoorHorizonMinutes(context.Settings));
@@ -291,15 +310,25 @@ public static class GateAccess
     /// </para>
     ///
     /// <para>
-    /// So the end is <see cref="BookingService.OriginalEndsAt"/> —
-    /// <c>StartsAt + SliceMinutes × SliceCount</c>, the slot as SOLD. The sweep moves
-    /// <c>EndsAt</c> and nothing else, so the sold length is still on the row; the booking's
-    /// access code corroborates it independently, since its <c>ExpiresAt</c> was minted from
-    /// the original end plus the grace window and the sweep does not rewrite that either. The
-    /// relief is therefore exactly as long as the court the member paid for, and not a minute
-    /// more. <c>Cancelled</c>, <c>Completed</c> and <c>AdminBlock</c> admit nobody: those are
-    /// decisions about the BOOKING, where a no-show is a bet against attendance that the
-    /// member standing at the door is in the middle of losing.
+    /// <b>The end is the instant that booking's own code dies</b> —
+    /// <c>StartsAt + SliceMinutes × SliceCount + grace_window_minutes</c>, which is exactly
+    /// what <c>AccessCodeService.StageForBookingAsync</c> mints <c>ExpiresAt</c> as. It is
+    /// written as arithmetic rather than read off the code row because a booking is lazily
+    /// minted and may not have one yet, and it is measured from the slot as SOLD because the
+    /// sweep truncates <c>EndsAt</c> and nothing else. So the door's upper edge is one
+    /// sentence — <i>while the member's code for that booking is still live</i> — whether the
+    /// code in their hand is that booking's or another's. <c>Cancelled</c>, <c>Completed</c>
+    /// and <c>AdminBlock</c> admit nobody: those are decisions about the BOOKING, where a
+    /// no-show is a bet against attendance that the member at the door is in the middle of
+    /// losing.
+    /// </para>
+    ///
+    /// <para>
+    /// The grace window is the CURRENT setting rather than the one in force when the code was
+    /// minted, so a club that shortens it narrows this edge for codes already in members'
+    /// hands. The code's own row is exact (<c>ResolveAsync</c> checks it); this arithmetic is
+    /// the club's present rule applied to a booking whose code nobody has asked for yet, and
+    /// the two agree except across a settings change.
     /// </para>
     ///
     /// <para>
@@ -324,12 +353,13 @@ public static class GateAccess
         MainframeDbContext db, GateContext context, Guid userId, int horizonMinutes, CancellationToken ct)
     {
         var latestStart = BookingCodeWindow.LatestStart(context.Now, horizonMinutes);
+        var tail = context.Settings.GraceWindowMinutes;
 
         return await db.Bookings.AnyAsync(
             b => b.UserId == userId
                  && (b.Status == BookingStatus.Booked || b.Status == BookingStatus.NoShow)
                  && b.StartsAt <= latestStart
-                 && b.StartsAt.AddMinutes(b.SliceMinutes * b.SliceCount) >= context.Now,
+                 && b.StartsAt.AddMinutes((b.SliceMinutes * b.SliceCount) + tail) >= context.Now,
             ct);
     }
 
@@ -348,6 +378,16 @@ public static class GateAccess
     /// <b>Club admins always pass.</b> A club that switches to <c>booking_window</c> must not
     /// thereby lock its own staff out of the building, and staff do not hold bookings for the
     /// hours they are working.
+    /// </para>
+    ///
+    /// <para>
+    /// The window's top is the same one step 5 uses — the instant that booking's own code
+    /// dies, i.e. the sold end plus the grace window — rather than the slot's bare end. One
+    /// upper edge for the whole door, so "while your code for that booking is still live" is
+    /// literally true whichever policy the club runs and whichever credential is presented.
+    /// It also matches the sweep: the grace window is precisely how long the product waits
+    /// before deciding somebody did not come, and refusing them at the door inside it is the
+    /// product contradicting itself.
     /// </para>
     ///
     /// <para>
