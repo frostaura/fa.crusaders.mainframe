@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-gotchas-build
-description: "Firmware toolchain traps: src/iot is several PlatformIO projects sharing one venv, court-box/arduino/ is GENERATED and self-asserting, anything court_mega links must be valid C++11 as well as C++17, and a library coordinate is owner/name."
+description: "Firmware toolchain traps: src/iot is several PlatformIO projects sharing one venv, every arduino/ tree is GENERATED and self-asserting, anything a sketch links must be valid C++11 as well as C++17, and a library coordinate is owner/name."
 type: gotcha
 last_verified: 2026-09-19
 ---
@@ -8,7 +8,8 @@ last_verified: 2026-09-19
 # Gotchas — the firmware toolchain
 
 The gates that check this firmware have traps of their own:
-[`gotchas-gates.md`](gotchas-gates.md).
+[`gotchas-gates.md`](gotchas-gates.md); the shared JSON scanner has its own:
+[`gotchas-json-scanner.md`](gotchas-json-scanner.md).
 
 - **`pio` is always `-d <project>`, never `-d src/iot`** — several PlatformIO projects (`shared/`,
   `court-box/`) share one venv there. `IOT_PROJECTS` in the Makefile is the one place a third is
@@ -46,28 +47,16 @@ The gates that check this firmware have traps of their own:
   `-I$PROJECT_DIR/../shared/test` line in its `[strict_host]` block — that expression names the
   same directory from any of them, including from `shared` itself, where it is redundant and kept so
   the blocks stay byte-identical (2026-09-19).
-- **The ESP32 Arduino builder appends `-std=gnu++11` too**, exactly as the AVR one does, so
-  `[env:door_gate]` needs `build_unflags = -std=gnu++11` or nothing in `lib/` compiles for the
-  board: `inline constexpr` variables and multi-statement `constexpr` functions are both C++17.
-  **The gate's `lib/` must be C++11-clean, the same as the court box's**, and the claim that it
-  need not be was wrong (corrected 2026-09-19): that unflag is a PlatformIO mechanism, the esp32
-  core hard-codes the standard in `platform.txt` for every variant, and the generated
-  `arduino/door_gate/` sketch is the deployment route. A multi-statement `constexpr` function in
-  `LockDriver.h` was green under `pio run` and red under `arduino-cli compile` with "body of
-  'constexpr' function not a return-statement". `inline constexpr` VARIABLES survive, as a GCC
-  extension. **Only the arduino-cli compile in CI's `iot-build` catches this** — no PlatformIO
-  gate can, and that step now covers all three sketches.
+- **The ESP32 core hard-codes `-std=gnu++11` too, so THE GATE'S `lib/` IS C++11-BOUND** — the
+  claim that it was not, because there is no AVR half, was wrong (corrected 2026-09-19).
+  `[env:door_gate]`'s `build_unflags = -std=gnu++11` is a PlatformIO mechanism the IDE never sees,
+  and the IDE is the deployment route. A multi-statement `constexpr` function in `LockDriver.h`
+  was green under `pio run` and red under `arduino-cli` ("body of 'constexpr' function not a
+  return-statement"); `inline constexpr` VARIABLES survive as a GCC extension. **Only the
+  arduino-cli compile in CI's `iot-build` catches this**, and it now covers all three sketches.
 - **`build_unflags` removes EVERY matching token, including the environment's own.**
-  `[env:door_gate]` unflags `-DFW_VERSION_MINOR=0` and then sets `-DFW_VERSION_MINOR=0` — the
-  identical token — so *neither* survives and the define never reaches the compiler;
-  `fwversion/Version.h`'s `#ifndef` fallback of 0 supplies it. Verified on the real `pio run -v`
-  compile line, which carries `-DFW_VERSION_MAJOR=1` and no MINOR or PATCH at all. The version is
-  still 1.0.0 on both builds, by luck rather than design: the fallback happens to equal the
-  intended value. The Arduino exporter mirrors the same rule and fails the export if a name
-  survives twice with different values.
-- **`devapi::json::findKey` matches a quoted key ANYWHERE, including as a VALUE.** A gate heartbeat
-  opens `{"kind":"gate",…}`, so the first `"gate"` is the value of `kind`, not the key of the `gate`
-  object; reading from there passes the corpus and breaks the moment a field is added between them.
-  The gate uses a local helper requiring a colon after the closing quote. **The sharp edge is still
-  in `devapi`** and is worth fixing there deliberately — found 2026-09-19 by a one-field probe, not
-  by the corpus.
+  `[env:door_gate]` unflags `-DFW_VERSION_MINOR=0` and then sets the identical token, so neither
+  survives and `fwversion/Version.h`'s `#ifndef` fallback of 0 supplies it — verified on the real
+  `pio run -v` line, which carries `-DFW_VERSION_MAJOR=1` and no MINOR or PATCH. 1.0.0 on both
+  builds, by luck: the fallback equals the intended value. The exporter mirrors the rule and fails
+  if a name survives twice with different values.

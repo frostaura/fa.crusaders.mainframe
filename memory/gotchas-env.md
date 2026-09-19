@@ -36,6 +36,13 @@ Verified on the founder's Mac 2026-09-11: the system `python3` is below gcovr's 
   `src/` recursively, so a stale duplicate is a second definition. `.gitignore` carries the
   load-bearing defence (the files appear after the generator has finished) and the exporter sweeps
   its own output. **Check `git status` for ` N.` names before any `git add` of a generated dir.**
+  **They break the LINK too, not only the sketch** (2026-09-19): 564 accumulated under
+  `src/iot/**/.pio/build` and the generated arduino tree, and every native suite then failed on
+  `duplicate symbol _unityOutputFlush` — which reads as a broken test harness, not a filesystem
+  artefact. `make sweep-icloud` now runs before `test-iot`, `test-iot-asan` and `build-iot`; it
+  asks git for the tracked set first, refuses to delete anything in it, and fails outright if git
+  cannot answer. By hand: `find src/iot -path src/iot/.venv -prune -o \( -name '* [0-9]' -o -name
+  '* [0-9].*' \) -print`, delete, then wipe the affected `.pio/build/<env>`.
 - **`dotnet test` fails MSB3021 "Access denied" copying `appsettings*.json` into `bin/`** on this
   iCloud path — the sources carry the protected `com.apple.provenance` xattr, and MSBuild's copy is
   denied on *create* but succeeds on *overwrite*. Recovery: `cp` the two files into each project's
