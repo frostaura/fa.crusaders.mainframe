@@ -248,6 +248,12 @@ export const SETTINGS_FIXTURE = {
   activation_cue_window_minutes: 10,
   qr_lifetime_seconds: 60,
   roster_window_minutes: 120,
+  // The three door-gate numbers, at the API's own defaults. `active_member` is the default
+  // policy, so a fixture that wanted the strict one has to say so — which is what makes the
+  // tests of `booking_window` prove something.
+  gate_unlock_seconds: 3,
+  gate_access_policy: "active_member",
+  gate_early_entry_minutes: 30,
 };
 
 export function deviceFixture(overrides: Record<string, unknown> = {}) {
@@ -268,6 +274,41 @@ export function deviceFixture(overrides: Record<string, unknown> = {}) {
     mega_version: "1.0.0",
     // False by default: most fixtures are boxes an admin has already configured. The
     // badge is the interesting case, so a test that wants it asks for it.
+    auto_registered: false,
+    created_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+/**
+ * A door gate, as `GET /admin/devices/` serves one.
+ *
+ * <p>
+ * Deliberately NOT `deviceFixture({ kind: "Gate" })`: that leaves `court_numbers: [1]` on a
+ * row the API guarantees has none, so a test written on it would prove the screen handles a
+ * shape the server never sends while saying nothing about the shape it does. The fields that
+ * differ from a box are the whole point of the fixture — `kind`, `court_numbers`, `gate_key`,
+ * the ESP32 hardware, and no `button_map` at all, because a heartbeat for a Gate row carries
+ * neither a button map nor a config block.
+ * </p>
+ */
+export function gateFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "99999999-9999-9999-9999-999999999999",
+    device_code: "gate-0a1b2c",
+    name: "Door gate",
+    kind: "Gate",
+    hardware: "Esp32",
+    court_numbers: [],
+    // Null by default: a gate self-registers with no key, so "unnamed" is the state every
+    // door is actually in when an admin first opens this screen.
+    gate_key: null,
+    mac_address: "5ccf7f0a1b2c",
+    enabled: true,
+    last_seen_at: new Date().toISOString(),
+    last_ip_address: "192.168.68.160",
+    running_version: "1.0.0",
+    mega_version: null,
     auto_registered: false,
     created_at: new Date().toISOString(),
     ...overrides,
