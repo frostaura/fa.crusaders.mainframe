@@ -155,7 +155,10 @@ jobs:
   backend-integration:
     name: Backend Integration (Postgres)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 25, not 10: the suite re-runs every in-memory test beside the Postgres ones and took
+    # 7 of its 10 minutes before the doors console added 146 tests; at 10 it was cancelled
+    # mid-run, which reads as a failure and names no test.
+    timeout-minutes: 25
     needs: [backend]
     services:
       postgres:
