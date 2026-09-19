@@ -52,6 +52,9 @@ dist-ssr/
 
 # Frontend env (real env files committed only as .env.example)
 .env
+# The conventional local-secrets escape hatch for compose. It was NOT ignored, so the first
+# person to use it for a real SMTP password or tunnel token would have committed it.
+docker-compose.override.yml
 .env.local
 .env.development.local
 .env.test.local
