@@ -27,6 +27,19 @@ import { type GateAccessPolicy } from "./api";
 export const GATE_KEY_MAX_LENGTH = 64;
 
 /**
+ * How many bookings a door's offline roster holds.
+ *
+ * <p>
+ * `Roster<48>` on the board (`gatelogic/GateConfig.h`'s `kGateRosterEntries`), and the API
+ * cuts to the same 48 after ordering by `StartsAt` then `Id` — so it is the LATEST-STARTING
+ * bookings that are left out, not a random 48. Named here because the settings copy states
+ * the number, and a copy module that spells a number the firmware owns is a number that
+ * drifts.
+ * </p>
+ */
+export const GATE_ROSTER_MAX_ENTRIES = 48;
+
+/**
  * What a door with no name is called.
  *
  * A gate self-registers with `GateKey = null`, so every door in the club arrives looking
@@ -320,10 +333,24 @@ export function describeDoorBookingHorizon(minutes: number): string {
  * empty roster, so "falls back to the roster it last downloaded" is flatly untrue of a door
  * nobody has named, and that is the state every door in the club is in on install day.
  * </p>
+ *
+ * <p>
+ * <b>And the cap, which is where "only members with a booking can get in" stops being the
+ * whole rule.</b> The roster is ordered by `StartsAt` then `Id` and cut to
+ * {@link GATE_ROSTER_MAX_ENTRIES} AFTER ordering, so the bookings that fall off are the
+ * LATEST-STARTING ones — the members who arrive last on the busiest night of the week. A
+ * club running sixty bookings through a league evening has twelve members holding a live
+ * booking and no way through a door that has lost the network, and the previous wording
+ * described that state as one in which they got in. Said as start order rather than as "the
+ * first 48", because "first" reads as first-booked and would send an admin to tell the
+ * wrong member to re-book.
+ * </p>
  */
 export function gateOfflineFallbackNotice(): string {
   return "When a door cannot reach the API it falls back to the roster it last downloaded, and"
     + " that roster holds bookings and nothing else. So while a door is offline, only members"
-    + " with an upcoming or running booking can get in — whichever policy is set below. A door"
+    + " with an upcoming or running booking can get in — whichever policy is set below. That list"
+    + ` holds at most ${GATE_ROSTER_MAX_ENTRIES} bookings, taken in start order, so on a busy night`
+    + " the latest-starting bookings beyond that cannot get in while the door is offline. A door"
     + " nobody has named yet is sent no roster at all, so it opens nothing while it is offline.";
 }
