@@ -167,6 +167,10 @@ public sealed class PayFastProvider : IPaymentProvider
     public Task<PaymentStatusSnapshot> GetStatusAsync(string checkoutId, PerTenantCredentials creds, CancellationToken ct)
         => Task.FromResult(new PaymentStatusSnapshot(false, "status_query_not_supported", null));
 
-    public static string ProcessUrlFor(string environment) =>
-        string.Equals(environment, "production", StringComparison.OrdinalIgnoreCase) ? Live : Sandbox;
+    /// <summary>
+    /// Delegates to <see cref="PayFastEnvironment"/>. This used to read
+    /// <c>Equals(environment, "production") ? Live : Sandbox</c> — one recognised value and a
+    /// silent sandbox for every near-miss, which is the side that takes no money.
+    /// </summary>
+    public static string ProcessUrlFor(string environment) => PayFastEnvironment.ProcessUrl(environment);
 }

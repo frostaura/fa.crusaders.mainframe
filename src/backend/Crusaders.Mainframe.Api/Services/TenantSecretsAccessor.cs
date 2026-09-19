@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Payments;
+using Crusaders.Mainframe.Api.Payments.PayFast;
 using Crusaders.Mainframe.Api.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,9 +17,11 @@ public sealed class TenantSecretsAccessor
     private readonly MainframeDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly IConfiguration _config;
+    private readonly ILogger<TenantSecretsAccessor> _logger;
 
-    public TenantSecretsAccessor(MainframeDbContext db, ITenantContext tenant, IConfiguration config)
-    { _db = db; _tenant = tenant; _config = config; }
+    public TenantSecretsAccessor(
+        MainframeDbContext db, ITenantContext tenant, IConfiguration config, ILogger<TenantSecretsAccessor> logger)
+    { _db = db; _tenant = tenant; _config = config; _logger = logger; }
 
     /// <summary>
     /// This tenant's payment-gateway credentials, or null when the tenant has not been
@@ -48,6 +51,28 @@ public sealed class TenantSecretsAccessor
 
         if (string.IsNullOrEmpty(merchantId) || string.IsNullOrEmpty(merchantKey)) return null;
 
-        return new PerTenantCredentials(merchantId, merchantKey, passphrase, string.IsNullOrEmpty(env) ? "test" : env);
+        /*
+         * An environment nobody can identify is a club that is NOT configured for payments.
+         *
+         * It used to be a club configured for the sandbox, because the selection was
+         * `Equals(env, "production") ? Live : Sandbox` and every near-miss — "Production " with
+         * a space, "live", "prod" — fell through to the sandbox. That is the worst possible
+         * default: a sandbox checkout looks completely normal to the member, no card is ever
+         * charged, and nobody learns about it from the software. Refusing here surfaces as
+         * "this club has not set up payments", which an admin can see and fix, instead of weeks
+         * of top-ups that took no money.
+         */
+        if (!PayFastEnvironment.IsRecognised(env))
+        {
+            _logger.LogError(
+                "Tenant {TenantId} has payfast.environment '{Environment}', which is not a value this "
+                + "build understands. Payments are refused for this tenant rather than silently routed to "
+                + "the sandbox. Set it to 'production' (or 'live'), or 'test' (or 'sandbox').",
+                _tenant.TenantId, env);
+            return null;
+        }
+
+        return new PerTenantCredentials(merchantId, merchantKey, passphrase,
+            string.IsNullOrEmpty(env) ? PayFastEnvironment.Test : env);
     }
 }

@@ -52,6 +52,26 @@ function usePendingApplicationCount(enabled: boolean, routeKey: string): number 
   return count;
 }
 
+/** How low a balance has to be before the chip warns, in credits. Mirrors the amber threshold. */
+const LOW_BALANCE_CREDITS = 50;
+
+/**
+ * What a screen reader says for the wallet chip.
+ *
+ * <p>
+ * Spelled out rather than reusing `formatCredits`, whose "cr" is an abbreviation a screen
+ * reader reads as letters. And the amber low-balance state is spoken, because it is otherwise
+ * carried entirely by the chip's colour.
+ * </p>
+ */
+export function walletLabel(balance: number | null, loading: boolean): string {
+  if (balance === null) return loading ? "Wallet balance, loading" : "Wallet balance unavailable";
+  const amount = `${balance.toFixed(2)} credits`;
+  return balance < LOW_BALANCE_CREDITS
+    ? `Wallet balance ${amount}, running low. Tap to top up.`
+    : `Wallet balance ${amount}. Tap to top up.`;
+}
+
 export default function Layout() {
   const auth = useAuth();
   const nav = useNavigate();
@@ -177,16 +197,30 @@ export default function Layout() {
                 to="/wallet"
                 className={({ isActive }) => cn(
                   "inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium tabular-nums whitespace-nowrap transition-colors",
-                  balance !== null && balance < 50
+                  balance !== null && balance < LOW_BALANCE_CREDITS
                     ? "bg-warning-soft text-warning-strong hover:bg-warning-soft/80"
                     : "bg-success-soft text-success-strong hover:bg-success-soft/80",
                   isActive && "ring-1 ring-accent-strong/30",
                 )}
-                aria-label="Wallet balance"
+                /*
+                  The NUMBER, in the name.
+
+                  This was `aria-label="Wallet balance"`, and an aria-label REPLACES an
+                  element's contents as its accessible name — so a screen reader announced
+                  "Wallet balance, link" and the balance itself, the only reason the chip
+                  exists, was never read out at all. It is also the only place in the chrome
+                  that says whether a member can afford to book.
+
+                  The low-balance state goes in too. It is carried visually by the chip turning
+                  amber, and a colour is not an announcement.
+                */
+                aria-label={walletLabel(balance, loading)}
                 title={loading ? "Refreshing balance…" : "Wallet balance — tap to top up"}
               >
                 <WalletIcon size={14} strokeWidth={2.25} />
-                <span>{balance === null ? "— cr" : formatCredits(balance)}</span>
+                {/* aria-hidden: the label above already says the number, and the visible text
+                    abbreviates it to "cr", which is not a word. */}
+                <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(balance)}</span>
               </NavLink>
             )}
             {auth.status === "authenticated" && (
