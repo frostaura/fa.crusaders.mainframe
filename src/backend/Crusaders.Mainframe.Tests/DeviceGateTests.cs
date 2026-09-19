@@ -419,23 +419,33 @@ public class DeviceGateTests
     }
 
     /// <summary>
-    /// A cancelled slot is not a reason to be in the building, a completed one is over, and
-    /// an <c>AdminBlock</c> is not a member's booking at all.
+    /// A cancelled slot is not a reason to be in the building, and an <c>AdminBlock</c> is not
+    /// a member's booking at all.
     ///
     /// <para>
     /// <b><c>NoShow</c> used to be on this list and is deliberately not any more.</b> A
     /// no-show is the club's bet that the member did not come, settled five minutes after
     /// the slot starts — and the member standing at the door six minutes late is in the
     /// middle of losing that bet, with the product's own way to reverse it waiting on a court
-    /// box INSIDE the building. The three statuses left here are decisions about the booking;
+    /// box INSIDE the building. The statuses left here are decisions about the booking;
     /// a no-show is a decision about attendance, and a door records none. See
     /// <c>A_member_the_sweep_has_just_written_off_can_still_get_into_the_building</c>, which
     /// is the row that replaced it and drives the real sweep to get there.
     /// </para>
+    ///
+    /// <para>
+    /// <b><c>Completed</c> has now left it for the mirror reason</b>, and a worse one: it was
+    /// the ATTENDED member's status. <c>LightsCueWorker</c> promotes a checked-in booking
+    /// within fifteen seconds of its end, so this row refused, at the door, the member who had
+    /// just played — while the row above let in the member who had not. It is pinned by
+    /// <c>A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building</c>,
+    /// which drives that worker rather than setting the status by hand: a <c>Completed</c> row
+    /// with no <c>CheckedInAt</c>, which is what this theory produced, is a fixture the
+    /// product cannot make.
+    /// </para>
     /// </summary>
     [Theory]
     [InlineData(BookingStatus.Cancelled)]
-    [InlineData(BookingStatus.Completed)]
     [InlineData(BookingStatus.AdminBlock)]
     public async Task A_booking_that_is_not_live_does_not_open_the_door(BookingStatus status)
     {
@@ -763,18 +773,18 @@ public class DeviceGateTests
     /// </para>
     ///
     /// <para>
-    /// <b><c>NoShow</c> is no longer on this list either</b>, for the reason
-    /// <c>A_booking_that_is_not_live_does_not_open_the_door</c> gives above. It is replaced by
-    /// <c>A_member_the_sweep_has_just_written_off_can_still_get_into_the_building</c>, which
-    /// pins both halves: the swept member gets in for the slot they PAID for, and not a
-    /// minute past it.
+    /// <b>Neither <c>NoShow</c> nor <c>Completed</c> is on this list any more</b>, for the
+    /// reasons <c>A_booking_that_is_not_live_does_not_open_the_door</c> gives above. They are
+    /// replaced by the two rows that drive the REAL workers —
+    /// <c>A_member_the_sweep_has_just_written_off_can_still_get_into_the_building</c> and
+    /// <c>A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building</c> —
+    /// each of which pins both halves: the member gets in for the slot they PAID for, and not
+    /// a minute past it.
     /// </para>
     /// </summary>
     [Theory]
     [InlineData(GateAccessPolicies.ActiveMember, BookingStatus.Cancelled)]
-    [InlineData(GateAccessPolicies.ActiveMember, BookingStatus.Completed)]
     [InlineData(GateAccessPolicies.BookingWindow, BookingStatus.Cancelled)]
-    [InlineData(GateAccessPolicies.BookingWindow, BookingStatus.Completed)]
     public async Task A_booking_code_for_a_booking_that_is_no_longer_booked_opens_nothing(
         string policy, BookingStatus status)
     {
@@ -884,13 +894,117 @@ public class DeviceGateTests
     }
 
     /// <summary>
-    /// The other three terminal statuses are untouched by that relief, and this is the probe
-    /// that says the <c>NoShow</c> carve-out is a carve-out rather than a hole. A cancelled
-    /// booking's code opens nothing even while the row's own code is still live.
+    /// <b>The lights sweep must not lock an ATTENDED member out of the building either.</b>
+    ///
+    /// <para>
+    /// <c>NoShow</c> was the relief the member who did not come got, and a member who DID
+    /// come got nothing: <see cref="LightsCueWorker"/> runs every fifteen seconds and promotes
+    /// a checked-in booking to <see cref="BookingStatus.Completed"/> the moment its
+    /// <c>EndsAt</c> passes, so within about fifteen seconds of a slot ending the attended
+    /// member's own live code answered <c>not_recognised</c> and their ident code answered
+    /// <c>no_booking</c>. The member who was refused is the one who was on the court. The
+    /// member who was let in for the whole grace window is the one the club had just decided
+    /// never turned up.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>This drives the REAL worker, and that is the whole reason the defect survived two
+    /// rounds.</b> The tests that pinned "a <c>Completed</c> booking opens nothing" set the
+    /// status by hand on a row with <c>CheckedInAt == null</c> — a state no production path
+    /// produces, because the only writer of <c>Completed</c> requires attendance. A fixture
+    /// the product cannot produce pins nothing; the fixture here is the one the worker itself
+    /// wrote, and it is asserted rather than assumed.
+    /// </para>
+    ///
+    /// <para>
+    /// Both policies and both credentials, because the refusal differed between them and
+    /// none of the four was right.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(GateAccessPolicies.ActiveMember, true)]
+    [InlineData(GateAccessPolicies.ActiveMember, false)]
+    [InlineData(GateAccessPolicies.BookingWindow, true)]
+    [InlineData(GateAccessPolicies.BookingWindow, false)]
+    public async Task A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building(
+        string policy, bool bookingCode)
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        // A forty-five minute court that ended a minute ago, played by somebody who was
+        // there. The worker reads its own clock, so the slot is placed relative to now.
+        var startsAt = DateTimeOffset.UtcNow.AddMinutes(-46);
+        var booking = await BookAsync(f, f.Host.Courts[0], startsAt, minutes: 45);
+        booking.CheckedInAt = startsAt.AddMinutes(1);
+        await f.Db.SaveChangesAsync();
+
+        var token = bookingCode
+            ? await BookingCodeAsync(f, booking)
+            : await IdentCodeAsync(f, f.Host.PlayerUser.Id, startsAt.AddHours(2));
+
+        await new LightsCueWorker(
+            f.Host.Services, f.Host.Services.GetRequiredService<IEventBus>(),
+            NullLogger<LightsCueWorker>.Instance).TickAsync(default);
+
+        // The fixture the worker itself produced, asserted: without the promotion this test
+        // is a re-statement of the Booked case and proves nothing.
+        await f.Db.Entry(booking).ReloadAsync();
+        Assert.Equal(BookingStatus.Completed, booking.Status);
+        Assert.NotNull(booking.CheckedInAt);
+
+        // At the door a minute later, still inside the five-minute grace window — which is
+        // exactly how long the product goes on holding a live code for this member.
+        var atTheDoor = booking.EndsAt.AddMinutes(1);
+        Assert.True(
+            atTheDoor < BookingService.OriginalEndsAt(booking).AddMinutes(f.Settings.GraceWindowMinutes),
+            "the door instant must be inside the grace window, or this tests the wrong edge");
+
+        var decision = await DecideAsync(f, GateOn(f), Policy(f, policy), token, atTheDoor);
+        Assert.True(decision.Opened, $"a member who played was refused at the door: {decision.Reason}");
+        Assert.Equal(GateAccess.Ok, decision.Reason);
+
+        // The probe, and the same one the swept member gets: past the instant that booking's
+        // own code dies, the relief is over. A completed court is not a building key either.
+        var afterTheGrace = BookingService.OriginalEndsAt(booking)
+            .AddMinutes(f.Settings.GraceWindowMinutes + 1);
+        var late = await DecideAsync(f, GateOn(f), Policy(f, policy), token, afterTheGrace);
+        if (bookingCode)
+        {
+            Assert.False(late.Opened);
+            Assert.Equal(GateAccess.NotRecognised, late.Reason);
+        }
+        else
+        {
+            // An ident code names no booking, so under the default policy it never needed one.
+            Assert.Equal(policy == GateAccessPolicies.ActiveMember, late.Opened);
+        }
+    }
+
+    /// <summary>
+    /// The terminal statuses that really are terminal, and the probe that says the relief
+    /// above is a carve-out rather than a hole. A cancelled booking's code opens nothing even
+    /// while the row's own code is still live.
+    ///
+    /// <para>
+    /// <b><c>Completed</c> used to be on this list and is deliberately not any more</b> — see
+    /// <c>A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building</c>.
+    /// It was here as a hand-set status on a row with no <c>CheckedInAt</c>, which is a state
+    /// the product cannot reach: <see cref="LightsCueWorker"/> is the only writer of
+    /// <c>Completed</c> and it requires attendance. So the row pinned a fixture rather than a
+    /// rule, and the rule it appeared to pin was wrong.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>AdminBlock</c> is not reachable through a booking CODE at all — an admin block
+    /// carries no user, and <c>AccessCodeService.StageForBookingAsync</c> refuses to stage a
+    /// code without one — so it is pinned on the policy path instead, in
+    /// <c>A_booking_that_is_not_live_does_not_open_the_door</c>.
+    /// </para>
     /// </summary>
     [Theory]
     [InlineData(BookingStatus.Cancelled)]
-    [InlineData(BookingStatus.Completed)]
     public async Task A_booking_the_member_did_not_lose_by_being_late_still_opens_nothing(BookingStatus status)
     {
         var f = await CreateAsync();

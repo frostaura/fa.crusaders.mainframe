@@ -287,15 +287,16 @@ The order is not arbitrary; each step exists to keep the one after it from being
    being admins — step 5.
 5. **The booking code's own window,** for a `BookingActivation` code and only for one. A
    booking code opens a door only while `now ∈ [StartsAt − H, EndsAt]` of **the booking it
-   names**, and only while that booking is still `Booked` — *or* while the member holding it
-   is due on some other court (*A member is not a credential*, below). Outside both:
-   `too_early` before, `not_recognised` after. See *A booking code is not a standing
-   building key* below.
+   names** and that booking is still `Booked` — *or* while the member holding it holds any
+   qualifying booking whose door window contains now (*A member is not a credential*, below),
+   which is how the code goes on working for the booking it names after a worker has moved
+   that booking's status. Outside both: `too_early` before, `not_recognised` after. See *A
+   booking code is not a standing building key* below.
 6. **The policy.** `active_member` opens. `booking_window` opens for a **club admin**
    unconditionally, and otherwise only for a member with a qualifying booking, on any court,
    inside `[StartsAt − gate_early_entry_minutes, the instant that booking's code dies]`;
-   failing that, `no_booking`. Same upper edge as step 5 and the same qualifying statuses —
-   one rule for the whole door.
+   failing that, `no_booking`. Same upper edge as step 5's relief and the same qualifying
+   statuses — one rule for the whole door.
 7. **The release** is `clamp(gate_unlock_seconds, 1, 30)`.
 
 **Club admins always pass step 6.** A club that switches to `booking_window` must not thereby
@@ -376,6 +377,17 @@ edge, wrong in two directions at once:
 - a member whose court simply ran to its end was refused for the whole grace window, during
   which the product was still holding a live code for them.
 
+**The booking's STATUS is a second upper edge, and it is reached first.** Step 5's own-window
+test refuses every status but `Booked`, and the two statuses a *worker* writes arrive long
+before the code expires — `NoShow` five minutes after a slot starts, `Completed` within
+fifteen seconds of its end. Neither is a refusal, because step 5's relief re-admits the member
+on that same booking out to the same instant the code dies; what the status test really
+decides is the club's own verdict on the booking, `Cancelled` and `AdminBlock`, which the
+relief does not carry either. So the sentence *there is only one upper edge* is true of the
+answer the door gives, and false of the code path that computes it — which is precisely how
+`Completed` went unnoticed for two rounds, with the credential test refusing and the relief
+silently not catching it.
+
 The same edge governs the entitlement query behind step 5's relief and step 6's policy check,
 where it is written as arithmetic — `StartsAt + SliceMinutes × SliceCount + grace_window_minutes`
 — because a booking is minted lazily and may not have a code row yet. That expression is
@@ -406,10 +418,20 @@ move with it or this edge silently narrows.
 A booking code bounded by its own booking is the right rule about the **code**. It was the
 wrong rule about the **person**, and twice over:
 
-- A member whose phone was still showing the QR for the court they played at 17:00, walking
-  back in at 18:50 for the court they have booked at 19:00, was told `not_recognised`: your
-  code is fake. It was not fake, it was theirs, it was live, and they were due on a court in
-  ten minutes.
+- A member holding the QR for the court they played at 17:00, walking back in for the court
+  they have booked at 19:00, was told `not_recognised`: your code is fake. It was not fake,
+  it was theirs, it was live, and they were due on a court shortly.
+
+  **How long that code lives is `grace_window_minutes` past the slot's end, and at the
+  default of five minutes that is 18:05** — so the reachable version of this complaint is a
+  member back at the door a minute or two after their court, not at 18:50. The relief cannot
+  reach further than the code does: past 18:05 `AccessCodeService.ResolveAsync` refuses the
+  token outright and the decision never gets here. 18:50 is the shape a club with a *long*
+  grace window produces, and it is the fixture
+  `A_spent_booking_code_still_opens_the_door_for_a_member_due_on_another_court` uses — minted
+  with sixty minutes of grace, which is what a club that has since shortened the setting
+  leaves in its members' hands. Read the example as "inside the life of the code they are
+  holding", not as a number.
 - A member **six minutes late** was told the same thing. The no-show sweep settles at
   `grace_window_minutes` past the start, sets `Status = NoShow` and truncates `EndsAt` to its
   own clock — so the booking QR answered `not_recognised` and the ident QR answered
@@ -426,7 +448,22 @@ exactly what it was. Qualifying means:
 |---|---|---|
 | `Booked` | yes | unchanged |
 | `NoShow` | yes | a bet against attendance the member is in the middle of losing |
-| `Cancelled` · `Completed` · `AdminBlock` | no | decisions about the booking, and final |
+| `Completed` | yes | the record that they were *on the court* — see below |
+| `Cancelled` · `AdminBlock` | no | decisions the CLUB took about the booking, and final |
+
+**`Completed` was the `NoShow` defect with the sign reversed, and it was the worse half.**
+`LightsCueWorker` runs every fifteen seconds and promotes a *checked-in* booking the moment
+its `EndsAt` passes, so within about fifteen seconds of a slot ending the member who had
+actually played was refused at the door — booking QR `not_recognised`, ident QR `no_booking` —
+while the member who had *not* turned up was still being let in for the whole grace window by
+the `NoShow` row above. The relief was reaching precisely the wrong one of the two.
+
+It survived two rounds because of its FIXTURE, not its rule: the tests that pinned "a
+completed booking's code opens nothing" set `Status = Completed` by hand on a row with
+`CheckedInAt == null`, and that row is a state the product cannot produce — the only writer of
+`Completed` requires attendance. `Completed` is not a decision about the booking at all; it is
+the record that the member was on the court, which is a better reason to be in the building
+than anything else this query can see.
 
 The end they are measured against is the instant that booking's own code dies — see *The
 upper edge is the code's own liveness* above — which for a `NoShow` is measured from the slot
@@ -469,7 +506,7 @@ needs a qualifying booking exactly as before.
 | `reason` | Means |
 |---|---|
 | `ok` | opened; the only reason carrying `opened:true` |
-| `not_recognised` | code unknown, expired, malformed, another club's — or a booking code presented after its slot ended or for a booking that is no longer `Booked` |
+| `not_recognised` | code unknown, expired, malformed, another club's — or a booking code presented past the life of the code it is, or for a booking the club has `Cancelled` or blocked, by a member who holds no other qualifying booking |
 | `member_not_active` | the club has suspended, rejected or not yet approved them |
 | `no_booking` | `booking_window` only: not a club admin, and nothing booked inside the entry window |
 | `too_early` | a booking code presented before its own booking's window opens |
@@ -1017,10 +1054,10 @@ new sentence above with no row is the defect this table exists to expose.
 | Not-`Active` is refused by name; no membership row is not barred | `DeviceGateTests.A_member_the_club_has_not_approved_is_refused_by_name`, `…A_user_with_no_membership_row_is_not_barred` |
 | Unknown and expired both answer `not_recognised` | `DeviceGateTests.An_unknown_or_expired_code_is_not_recognised_and_names_nobody` |
 | The booking window opens at early entry and shuts when that booking's code dies | `DeviceGateTests.The_booking_window_opens_at_early_entry_and_shuts_at_the_slots_end` |
-| The door's upper edge is the code's liveness, and is never narrower than the phone's | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` (asserts the two agree on every late row), `DeviceGateHttpTests.The_door_still_opens_on_a_code_the_phone_has_stopped_offering` |
+| The door's upper edge, once the relief is counted in, is the code's liveness, and is never narrower than the phone's | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` (asserts the two agree on every late row), `DeviceGateHttpTests.The_door_still_opens_on_a_code_the_phone_has_stopped_offering` |
 | The window is the setting, not a constant | `DeviceGateTests.The_entry_window_is_the_clubs_setting_and_not_a_constant` |
 | Any court of the club counts | `DeviceGateTests.A_booking_on_any_court_opens_the_door` |
-| Only a `Booked` booking counts | `DeviceGateTests.A_booking_that_is_not_live_does_not_open_the_door` |
+| `Cancelled` and `AdminBlock` never count; `Booked`, `NoShow` and `Completed` all do | `DeviceGateTests.A_booking_that_is_not_live_does_not_open_the_door` |
 | Club admins always pass the booking check, and nobody else does | `DeviceGateTests.A_club_admin_passes_the_booking_check_and_nobody_else_does`, `DeviceGateHttpTests.A_club_admin_with_a_membership_and_no_booking_still_opens_the_door`, `DeviceGateTests.A_non_admin_with_no_membership_and_no_booking_is_still_refused` |
 | An admin is still held to the membership check | `DeviceGateTests.A_suspended_club_admin_is_refused_by_name_under_either_policy` |
 | An admin is still held to a booking code's own window | `DeviceGateTests.A_club_admins_booking_code_is_bounded_by_its_own_window_too` |
@@ -1028,8 +1065,9 @@ new sentence above with no row is the defect this table exists to expose.
 | A booking code opens the booking it names | `DeviceGateTests.A_booking_code_opens_the_door_for_the_booking_it_names` |
 | A booking code opens only inside its own booking's window, under either policy | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` |
 | `too_early` before the window, `not_recognised` after it | same test, and `DeviceGateHttpTests.A_booking_code_presented_too_early_is_refused_as_a_200_and_audited` |
-| A cancelled or completed booking's code opens nothing | `DeviceGateTests.A_booking_code_for_a_booking_that_is_no_longer_booked_opens_nothing`, `…A_booking_the_member_did_not_lose_by_being_late_still_opens_nothing` |
+| A cancelled booking's code opens nothing, even while that code is still live | `DeviceGateTests.A_booking_code_for_a_booking_that_is_no_longer_booked_opens_nothing`, `…A_booking_the_member_did_not_lose_by_being_late_still_opens_nothing` |
 | A swept no-show still gets in, to the end the slot was SOLD and no further | `DeviceGateTests.A_member_the_sweep_has_just_written_off_can_still_get_into_the_building` (drives the real `NoShowWorker`) |
+| A member the lights sweep has just promoted to `Completed` still gets in, to the same end and no further | `DeviceGateTests.A_member_the_lights_sweep_has_just_completed_can_still_get_into_the_building` (drives the real `LightsCueWorker`, so the fixture is the one the product makes) |
 | A code outside its own window opens for a member due on another court | `DeviceGateTests.A_spent_booking_code_still_opens_the_door_for_a_member_due_on_another_court`, `…An_early_booking_code_opens_the_door_for_a_member_whose_court_is_running`, `DeviceGateHttpTests.A_spent_booking_code_opens_the_door_for_a_member_whose_next_court_is_due` |
 | An ident code has no booking window of its own | `DeviceGateTests.An_ident_code_has_no_booking_window_of_its_own` |
 | The door's horizon under `active_member` is the phone's, and cannot drift from it | `DeviceGateTests.The_doors_horizon_under_the_default_policy_is_the_one_the_phone_shows`, `DeviceGateHttpTests.The_door_accepts_a_booking_code_exactly_while_the_phone_would_show_it` |

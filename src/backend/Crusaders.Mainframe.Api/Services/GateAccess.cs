@@ -208,13 +208,14 @@ public static class GateAccess
     /// </para>
     ///
     /// <para>
-    /// <b>The two refusals are deliberately asymmetric.</b> Early is <see cref="TooEarly"/>:
-    /// the member holds a real booking and the door will honour it later, and telling them
-    /// "not recognised" sends somebody with a valid booking to a desk that may not be staffed.
-    /// Late — and a booking that is no longer <c>Booked</c> — is <see cref="NotRecognised"/>,
-    /// indistinguishable from a code that never existed, because the row outlives the slot by
-    /// the grace window and a door that told "spent" from "unknown" would be the oracle every
-    /// other refusal here avoids.
+    /// <b>The two refusals are deliberately asymmetric</b>, and both are
+    /// <see cref="OutsideItsOwnWindowAsync"/>'s — what this method adds is the chance to
+    /// discard either one. Early is <see cref="TooEarly"/>: the member holds a real booking
+    /// and the door will honour it later, and telling them "not recognised" sends somebody
+    /// with a valid booking to a desk that may not be staffed. Late, and a booking the club
+    /// has cancelled or blocked, is <see cref="NotRecognised"/>, indistinguishable from a code
+    /// that never existed, because the row outlives the slot by the grace window and a door
+    /// that told "spent" from "unknown" would be the oracle every other refusal here avoids.
     /// </para>
     ///
     /// <para>
@@ -250,6 +251,20 @@ public static class GateAccess
     /// in two directions at once: the no-show sweep truncates <c>EndsAt</c> to its own clock
     /// five minutes into a slot, and a member whose court simply ran to its end was refused
     /// for the grace window during which the product was still showing them that code.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The STATUS test below is a second upper edge of its own, and that is why it is
+    /// narrow.</b> It refuses every status but <c>Booked</c>, which for the two the WORKERS
+    /// write — <see cref="BookingStatus.NoShow"/> within grace of a slot's start,
+    /// <see cref="BookingStatus.Completed"/> within fifteen seconds of its end — closes the
+    /// window long before the code dies. Those two are not refusals: the caller's relief
+    /// re-admits the member through <see cref="HoldsALiveBookingAsync"/>, on the same booking,
+    /// out to the same instant the code expires. What survives here is the club's own
+    /// decision about the booking — <c>Cancelled</c> and <c>AdminBlock</c> — and it survives
+    /// the relief too, because that query lists the statuses that count rather than excluding
+    /// these. Merging the two tests would be tidier and would put the relief's arithmetic on
+    /// the credential path, where a code with no booking row has nothing to measure.
     /// </para>
     ///
     /// <para>
@@ -298,15 +313,28 @@ public static class GateAccess
     /// </para>
     ///
     /// <para>
-    /// <b>A booking the sweep has written off still counts, and that is the whole of B2.</b>
-    /// The no-show sweep sets <c>Status = NoShow</c> and truncates <c>EndsAt</c> to its own
-    /// clock five minutes after a slot starts, and both of those read at a door as "this
-    /// person has no reason to be here": a member six minutes late was refused
-    /// <c>not_recognised</c> on their booking QR and <c>no_booking</c> on their ident QR,
-    /// <b>outside the building</b> — while the product's own remedy for a wrong no-show is
-    /// that member scanning at the court box inside it. A door that enforces a penalty by
-    /// making it impossible to undo is the worst possible place for that rule to live, and a
-    /// door settles no money in any case.
+    /// <b>A booking the sweep has written off still counts, and a booking the member ATTENDED
+    /// counts in exactly the same way.</b> The no-show sweep sets <c>Status = NoShow</c> and
+    /// truncates <c>EndsAt</c> to its own clock five minutes after a slot starts, and both of
+    /// those read at a door as "this person has no reason to be here": a member six minutes
+    /// late was refused <c>not_recognised</c> on their booking QR and <c>no_booking</c> on
+    /// their ident QR, <b>outside the building</b> — while the product's own remedy for a
+    /// wrong no-show is that member scanning at the court box inside it. A door that enforces
+    /// a penalty by making it impossible to undo is the worst possible place for that rule to
+    /// live, and a door settles no money in any case.
+    /// </para>
+    ///
+    /// <para>
+    /// <b><c>Completed</c> was the same defect with the sign reversed, and it was worse.</b>
+    /// <c>LightsCueWorker</c> runs every fifteen seconds and promotes a CHECKED-IN booking to
+    /// <see cref="BookingStatus.Completed"/> the moment its <c>EndsAt</c> passes, so within
+    /// about fifteen seconds of a slot ending the member who had actually played was refused
+    /// here while the member who had not was still being let in. The relief was reaching
+    /// precisely the wrong one of the two. It is not a decision about the booking at all: it
+    /// is the record that the member was on the court, and being on the court is a better
+    /// reason to be in the building than anything else this method can see. A booking's
+    /// status now bears on the door only where the CLUB decided something about the booking —
+    /// <c>Cancelled</c> and <c>AdminBlock</c>.
     /// </para>
     ///
     /// <para>
@@ -317,10 +345,8 @@ public static class GateAccess
     /// minted and may not have one yet, and it is measured from the slot as SOLD because the
     /// sweep truncates <c>EndsAt</c> and nothing else. So the door's upper edge is one
     /// sentence — <i>while the member's code for that booking is still live</i> — whether the
-    /// code in their hand is that booking's or another's. <c>Cancelled</c>, <c>Completed</c>
-    /// and <c>AdminBlock</c> admit nobody: those are decisions about the BOOKING, where a
-    /// no-show is a bet against attendance that the member at the door is in the middle of
-    /// losing.
+    /// code in their hand is that booking's or another's, and whether they played, were late,
+    /// or never came.
     /// </para>
     ///
     /// <para>
@@ -357,7 +383,9 @@ public static class GateAccess
 
         return await db.Bookings.AnyAsync(
             b => b.UserId == userId
-                 && (b.Status == BookingStatus.Booked || b.Status == BookingStatus.NoShow)
+                 && (b.Status == BookingStatus.Booked
+                     || b.Status == BookingStatus.NoShow
+                     || b.Status == BookingStatus.Completed)
                  && b.StartsAt <= latestStart
                  && b.StartsAt.AddMinutes((b.SliceMinutes * b.SliceCount) + tail) >= context.Now,
             ct);
