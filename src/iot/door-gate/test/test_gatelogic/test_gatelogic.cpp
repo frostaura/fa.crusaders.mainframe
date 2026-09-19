@@ -841,7 +841,7 @@ void test_api_the_heartbeat_posts_the_gate_kind_and_hands_back_the_response() {
 
   http.answer(200U, "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":5},\"roster\":[]}");
   char response[gatelogic::kGateResponseCap] = {};
-  const uint16_t status = api.heartbeat("5ccf7f0a1b2c", "1.0.0", 86400000ULL, response, sizeof(response));
+  const uint16_t status = api.heartbeat("5ccf7f0a1b2c", "1.0.0", 86400000ULL, 0U, response, sizeof(response));
 
   TEST_ASSERT_EQUAL_UINT16(200U, status);
   TEST_ASSERT_EQUAL_STRING("/api/v1/device/heartbeat", http.lastPath());
@@ -856,21 +856,22 @@ void test_api_the_heartbeat_posts_the_gate_kind_and_hands_back_the_response() {
 void test_heartbeat_body_carries_kind_last_and_refuses_rather_than_truncating() {
   char body[gatelogic::kGateHeartbeatBodyCap] = {};
   TEST_ASSERT_TRUE(
-      gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 86400000ULL) > 0U);
+      gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 86400000ULL, 0U) > 0U);
   TEST_ASSERT_EQUAL_STRING(
       "{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,\"kind\":\"gate\"}",
       body);
 
   // 64-bit, past the 49.7-day wrap: 0xFFFFFFFF + 20000.
-  TEST_ASSERT_TRUE(
-      gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 4295187295ULL) > 0U);
+  TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
+                                                      4295187295ULL, 0U) > 0U);
   TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":4295187295,"));
 
   char tiny[16] = {};
   TEST_ASSERT_EQUAL_size_t(
-      0U, gatelogic::renderGateHeartbeatBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "1.0.0", 1000ULL));
+      0U, gatelogic::renderGateHeartbeatBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "1.0.0", 1000ULL, 0U));
   TEST_ASSERT_EQUAL_STRING("", tiny);
-  TEST_ASSERT_EQUAL_size_t(0U, gatelogic::renderGateHeartbeatBody(body, sizeof(body), "", "1.0.0", 1000ULL));
+  TEST_ASSERT_EQUAL_size_t(0U,
+                           gatelogic::renderGateHeartbeatBody(body, sizeof(body), "", "1.0.0", 1000ULL, 0U));
 }
 
 void test_heartbeat_adopts_the_gate_objects_unlock_seconds_and_clamps_it() {
@@ -1351,7 +1352,6 @@ public:
   }
 
   uint16_t post(const char* path, const char* body, char* out, size_t outCap) override {
-    static_cast<void>(body);
     PathState& state = pathState(path);
     const Reply& reply = replyFor(state);
 
@@ -1381,6 +1381,8 @@ public:
 
     strncpy(lastPath_, path, sizeof(lastPath_) - 1U);
     lastPath_[sizeof(lastPath_) - 1U] = '\0';
+    strncpy(lastBody_, body, sizeof(lastBody_) - 1U);
+    lastBody_[sizeof(lastBody_) - 1U] = '\0';
     if (out != nullptr && outCap > 0U) {
       const char* body = counted[0] != '\0' ? counted : (reply.set_ ? reply.body : answer_);
       strncpy(out, body, outCap - 1U);
@@ -1408,6 +1410,10 @@ public:
   uint16_t calls() const { return calls_; }
 
   const char* lastPath() const { return lastPath_; }
+
+  /// The last request body. The only place a scenario can see a field the board
+  /// SENDS — `no_push` has no other observer anywhere on this board.
+  const char* lastBody() const { return lastBody_; }
 
   uint32_t enteredAt(size_t i) const { return entered_[i]; }
 
@@ -1484,6 +1490,7 @@ private:
   FakeScannerBytes* arrivals_ = nullptr;
   char arrivalText_[64] = {};
   char lastPath_[64] = {};
+  char lastBody_[256] = {};
   char answer_[512] = {};
   PathState path_[kMaxPaths] = {};
   Scripted script_[kMaxScripted] = {};
@@ -2689,6 +2696,139 @@ void test_body_only_a_whole_body_keeps_the_servers_status() {
   TEST_PASS();
 }
 
+// ---------------------------------------------------------------------------
+// E4 — the two things a board could not say
+// ---------------------------------------------------------------------------
+
+/// E4. `no_push` is OMITTED at zero and present otherwise.
+///
+/// Omitted because a healthy board is the overwhelming case and the contract
+/// corpus's request vector has no such field: a board that sent `"no_push":0`
+/// for ever would put a key in every request nothing on the wire has agreed to.
+/// `test_every_request_vector_is_rendered_byte_for_byte` is what would notice,
+/// and it is asserted here too so the reason is written down beside the rule.
+void test_heartbeat_body_carries_no_push_only_when_there_is_one() {
+  char body[gatelogic::kGateHeartbeatBodyCap] = {};
+
+  TEST_ASSERT_TRUE(
+      gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 86400000ULL, 0U) > 0U);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE(
+      "{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,\"kind\":\"gate\"}",
+      body, "a healthy board's body is the corpus vector, byte for byte");
+
+  TEST_ASSERT_TRUE(
+      gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0", 86400000ULL, 4U) > 0U);
+  TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"1.0.0\",\"uptime_ms\":86400000,"
+                           "\"kind\":\"gate\",\"no_push\":4}",
+                           body);
+
+  // The widest value the counter can reach still fits, and is still refused
+  // rather than truncated in a buffer that cannot hold it.
+  TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "1.0.0",
+                                                      4295187295ULL, 4294967295UL) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"no_push\":4294967295}"));
+
+  char tiny[96] = {};
+  TEST_ASSERT_EQUAL_size_t(0U, gatelogic::renderGateHeartbeatBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", "1.0.0",
+                                                                  4295187295ULL, 4294967295UL));
+  TEST_ASSERT_EQUAL_STRING("", tiny);
+}
+
+/// E4. A heartbeat the board ACCEPTED that pushed no roster is counted, and the
+/// NEXT request says so.
+///
+/// It is otherwise completely unobservable: the roster silently does not
+/// change, its age silently keeps running, and the one feedback surface on this
+/// board is a lamp with nothing to say about it. Neither a technician at the
+/// door nor anybody reading the admin console can tell that case from a healthy
+/// one.
+void test_app_a_heartbeat_that_pushed_no_roster_is_counted_and_reported() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  TEST_ASSERT_EQUAL_UINT32(0U, rig.app.noPushHeartbeats());
+
+  // A 200 the board accepts whose roster key never arrived — a peer that hung
+  // up mid-body, which `isCompleteObject` refuses and `applyRoster` therefore
+  // treats exactly like an absent key.
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, "{\"kind\":\"gate\",\"roster\":[\"TOKBOB|0|0|3600\",\"TOK",
+                  0U);
+  rig.forceHeartbeat();
+  TEST_ASSERT_FALSE_MESSAGE(rig.app.lastSync().replaced,
+                            "the scenario needs a heartbeat that pushed nothing");
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, rig.app.noPushHeartbeats(), "a no-push heartbeat must be counted");
+
+  // And the NEXT request carries it, which is the whole point: there is
+  // nowhere else on this board it could be read.
+  rig.forceHeartbeat();
+  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rig.http.lastBody(), "\"no_push\":1"),
+                               "the count has to reach somewhere a person can see it");
+
+  // A healthy push does not count, and does not clear the total either: it is a
+  // count since boot, so a rising one is the signal.
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.forceHeartbeat();
+  TEST_ASSERT_TRUE(rig.app.lastSync().replaced);
+  TEST_ASSERT_EQUAL_UINT32(2U, rig.app.noPushHeartbeats());
+}
+
+/// E4. A watchdog that refused to arm shows on the lamp, at four times the link
+/// blink's rate, and outranks it — a board with no watchdog AND no radio is a
+/// board to look at for the first reason.
+void test_led_a_watchdog_that_would_not_arm_blinks_four_times_as_fast() {
+  gatelogic::LedPattern led;
+  led.setLinkUp(true);
+  led.setFault(true);
+
+  // 4 Hz: an eighth of a second lit, an eighth dark.
+  TEST_ASSERT_TRUE(led.on(2000U));
+  TEST_ASSERT_TRUE(led.on(2124U));
+  TEST_ASSERT_FALSE(led.on(2125U));
+  TEST_ASSERT_TRUE(led.on(2250U));
+
+  // It beats the link blink rather than hiding behind it. 2500 is a DARK half
+  // of the 1 Hz pattern and a LIT half of the 4 Hz one.
+  led.setLinkUp(false);
+  TEST_ASSERT_TRUE_MESSAGE(led.on(2500U), "the fault blink must outrank the link blink");
+
+  // But never a member-facing cue. A released door is solid whatever is wrong
+  // with the board, and a refusal still blinks three times.
+  led.setReleased(true);
+  TEST_ASSERT_TRUE(led.on(2125U));
+  led.setReleased(false);
+  led.cue(gatelogic::LedCue::Denied, 2125U);
+  TEST_ASSERT_TRUE(led.on(2125U));
+  TEST_ASSERT_FALSE_MESSAGE(led.on(2125U + gatelogic::kDeniedHalfMs), "the refusal pattern, not the fault");
+
+  // And it goes away when the watchdog finally takes.
+  gatelogic::LedPattern healthy;
+  healthy.setLinkUp(true);
+  healthy.setFault(false);
+  TEST_ASSERT_FALSE(healthy.on(2000U));
+  TEST_ASSERT_FALSE(healthy.on(2125U));
+}
+
+/// E4. THE DOOR IS UNAFFECTED BY THE FAULT, in either direction.
+///
+/// A board that refused to open because its watchdog would not arm would be a
+/// door that admits nobody, which is far worse than one running on the core's
+/// five seconds instead of twelve. And the fault must not open one either.
+void test_app_a_refused_watchdog_changes_nothing_about_the_door() {
+  Rig rig(kBaseMid);
+  rig.app.setWatchdogArmed(false);
+  rig.boot(true);
+  rig.http.answer(200U, kOpenThreeSeconds);
+  rig.http.forget();
+
+  // Nothing opened by declaring the fault.
+  TEST_ASSERT_FALSE(rig.lock.released());
+
+  // And a member still gets in.
+  rig.scanner.feed("7Q3F9KM2XZ8B\n");
+  rig.tick();
+  TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "a board with no watchdog must still open for a member");
+  TEST_ASSERT_EQUAL_UINT32(1U, rig.http.callsTo(gatelogic::kPathGate));
+}
+
 /// E5. The link is read BEFORE the scanner decides, not after it.
 ///
 /// `linkUp_` was a pass stale: `pumpLink()` ran after `pumpScanner()`, so the
@@ -2802,6 +2942,10 @@ int main(int, char**) {
   RUN_TEST(test_body_a_dribbling_peer_is_bounded_by_the_calls_deadline);
   RUN_TEST(test_body_a_deadline_already_passed_is_a_transport_failure);
   RUN_TEST(test_body_only_a_whole_body_keeps_the_servers_status);
+  RUN_TEST(test_heartbeat_body_carries_no_push_only_when_there_is_one);
+  RUN_TEST(test_app_a_heartbeat_that_pushed_no_roster_is_counted_and_reported);
+  RUN_TEST(test_led_a_watchdog_that_would_not_arm_blinks_four_times_as_fast);
+  RUN_TEST(test_app_a_refused_watchdog_changes_nothing_about_the_door);
   RUN_TEST(test_app_the_link_is_read_before_the_scanner_decides);
 
   return UNITY_END();

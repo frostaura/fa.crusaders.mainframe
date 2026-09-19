@@ -196,10 +196,22 @@ public:
   /// because "the watchdog is eight seconds" was assumed once already and the
   /// effective value was five.
   ///
+  /// RETRIED, kMaxArmAttempts times, before it gives up. The TWDT is shared
+  /// state the core set up on another task's schedule, and a single refusal is
+  /// not evidence that it will refuse again — a board that accepted one and ran
+  /// for a season under the core's five seconds is a board whose watchdog
+  /// assert was about an intention.
+  ///
   /// False means the board is running under a watchdog it did not choose. It is
-  /// reported on the boot log line; there is nothing else on this board to
-  /// report it to.
+  /// reported on the boot log line AND, for as long as it is false, by the
+  /// lamp's 4 Hz fault blink — the boot log has scrolled past by the time
+  /// anybody is standing at the door. The DOOR is unaffected: refusing to open
+  /// for a missing watchdog would be a door that admits nobody, which is far
+  /// worse than one running on five seconds instead of twelve.
   bool begin(uint8_t seconds);
+
+  /// How many times begin() asks before reporting failure.
+  static constexpr uint8_t kMaxArmAttempts = 3U;
 
   /// Restart the countdown. From the orchestration and never from inside a
   /// driver, where it would hide the stall it exists to end.

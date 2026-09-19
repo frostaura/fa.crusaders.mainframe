@@ -24,7 +24,7 @@ uint32_t unlockMsFromSeconds(uint32_t seconds, uint32_t hardCapMs) {
 }
 
 size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const char* firmwareVersion,
-                               uint64_t uptimeMs) {
+                               uint64_t uptimeMs, uint32_t noPush) {
   if (out == nullptr || cap == 0U) {
     return 0U;
   }
@@ -42,9 +42,21 @@ size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const cha
     return 0U;
   }
 
+  // Rendered as its own suffix rather than with a conditional format string, so
+  // the healthy body is one literal and stays byte-identical to the contract
+  // corpus's request vector.
+  char diagnostic[24] = {};
+  if (noPush != 0U) {
+    const int suffix =
+        snprintf(diagnostic, sizeof(diagnostic), ",\"no_push\":%lu", static_cast<unsigned long>(noPush));
+    if (suffix < 0 || static_cast<size_t>(suffix) >= sizeof(diagnostic)) {
+      return 0U;
+    }
+  }
+
   const int written =
-      snprintf(out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s,\"kind\":\"gate\"}",
-               mac, firmwareVersion, uptime);
+      snprintf(out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s,\"kind\":\"gate\"%s}",
+               mac, firmwareVersion, uptime, diagnostic);
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     out[0] = '\0';
     return 0U;

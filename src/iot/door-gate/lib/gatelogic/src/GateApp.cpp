@@ -20,6 +20,11 @@ GateApp::GateApp(const Ports& ports)
 
 // --- boot -------------------------------------------------------------------
 
+void GateApp::setWatchdogArmed(bool armed) {
+  // The lamp and nothing else. See the header for why the door is untouched.
+  led_.setFault(!armed);
+}
+
 void GateApp::beginOutputs() {
   lock_.begin();
   // The same level-before-mode rule the lock follows. A lamp is not a safety
@@ -422,8 +427,8 @@ void GateApp::pumpHeartbeat() {
   scanDeferrals_ = 0U;
   heartbeatBody_[0] = '\0';
   beforeBlocking();
-  const uint16_t status =
-      api_.heartbeat(mac_, firmwareVersion_, uptime_.value(), heartbeatBody_, heartbeatBodyCap_);
+  const uint16_t status = api_.heartbeat(mac_, firmwareVersion_, uptime_.value(), noPushHeartbeats_,
+                                         heartbeatBody_, heartbeatBodyCap_);
   afterBlocking();
 
   // ARMED AFTER THE CALL. Armed before it, the call's own duration comes out of
@@ -473,6 +478,16 @@ void GateApp::adoptHeartbeat(uint16_t status) {
   // re-anchors it, which is what resets staleness; ROSTER_MAX_AGE_MS only
   // governs how long the last one survives offline.
   lastSync_ = devlink::applyRoster(heartbeatBody_, len, roster_, clock_.nowMs());
+  if (!lastSync_.replaced) {
+    // AN ACCEPTED HEARTBEAT THAT PUSHED NOTHING. A body cut short by a peer
+    // that hung up, or one missing the `roster` key the contract says is
+    // always present. The roster silently does not change and its age silently
+    // keeps running, and the one feedback surface on this board is a lamp with
+    // nothing to say about it — so the count goes out in the next request,
+    // where an admin can read it off the device row. Counted rather than acted
+    // on: it changes no decision here.
+    ++noPushHeartbeats_;
+  }
   // Takes effect from the NEXT arm. The one above already used the old value,
   // which is a one-interval delay and not worth a re-arm that could shorten
   // this interval to nothing.

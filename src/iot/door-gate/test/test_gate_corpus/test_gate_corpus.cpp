@@ -134,7 +134,8 @@ void executeHeartbeatRequest(const char* expected, size_t expectedLen, const cha
   TEST_ASSERT_TRUE(devapi::json::unsignedField(expected, expectedLen, "uptime_ms", uptime));
 
   char rendered[gatelogic::kGateHeartbeatBodyCap] = {};
-  const size_t written = gatelogic::renderGateHeartbeatBody(rendered, sizeof(rendered), mac, version, uptime);
+  const size_t written =
+      gatelogic::renderGateHeartbeatBody(rendered, sizeof(rendered), mac, version, uptime, 0U);
   TEST_ASSERT_EQUAL_size_t(expectedLen, written);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
 }

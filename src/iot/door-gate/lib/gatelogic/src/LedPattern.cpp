@@ -39,6 +39,15 @@ bool LedPattern::on(uint32_t nowMs) const {
     // the link blink below, which is where it belongs once the cue is over.
   }
 
+  if (fault_) {
+    // Four times the link blink's rate, and it outranks it: a board with no
+    // watchdog AND no radio is a board to look at for the first reason, and a
+    // 1 Hz blink would hide it behind the second. Free-running off the raw
+    // clock for the same reason the link blink is — there is no start instant
+    // for "the watchdog still has not armed".
+    return ((nowMs / kFaultHalfMs) % 2U) == 0U;
+  }
+
   if (!linkUp_) {
     // Free-running off the raw clock rather than off a stored mark: there is no
     // start instant for "the WiFi is still down", and a mark would be one more

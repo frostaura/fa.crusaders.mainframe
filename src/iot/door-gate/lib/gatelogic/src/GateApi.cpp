@@ -38,10 +38,10 @@ ScanDecision GateApi::scan(const char* mac, const char* token, uint32_t adoptedU
   return onGateResponse(status, response, strlen(response), adoptedUnlockMs, hardCapMs);
 }
 
-uint16_t GateApi::heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs, char* out,
-                            size_t outCap) {
+uint16_t GateApi::heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs, uint32_t noPush,
+                            char* out, size_t outCap) {
   char body[kGateHeartbeatBodyCap] = {};
-  if (renderGateHeartbeatBody(body, sizeof(body), mac, firmwareVersion, uptimeMs) == 0U) {
+  if (renderGateHeartbeatBody(body, sizeof(body), mac, firmwareVersion, uptimeMs, noPush) == 0U) {
     return 0U;
   }
   return post(kPathHeartbeat, body, out, outCap);

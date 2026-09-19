@@ -275,9 +275,23 @@ bool Esp32Watchdog::begin(uint8_t seconds) {
   // CHECKED rather than assumed, because the last thing assumed about this
   // watchdog was its period and the effective value was the core's five
   // seconds.
-  const esp_err_t configured = esp_task_wdt_init(static_cast<uint32_t>(seconds), true);
-  const esp_err_t subscribed = esp_task_wdt_add(nullptr);
-  return configured == ESP_OK && subscribed == ESP_OK;
+  //
+  // RETRIED rather than asked once. The TWDT is shared state the core set up on
+  // another task's schedule, and one refusal is not evidence it will refuse
+  // again — while a board that quietly accepted a single refusal runs a whole
+  // season under five seconds with every sentence about twelve still written
+  // down. Three attempts, with a yield between them, then the lamp says so.
+  for (uint8_t attempt = 0U; attempt < kMaxArmAttempts; ++attempt) {
+    if (attempt != 0U) {
+      delay(10);
+    }
+    const esp_err_t configured = esp_task_wdt_init(static_cast<uint32_t>(seconds), true);
+    const esp_err_t subscribed = esp_task_wdt_add(nullptr);
+    if (configured == ESP_OK && subscribed == ESP_OK) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void Esp32Watchdog::kick() {
