@@ -25,6 +25,7 @@ import {
   decisionStamp,
   describeDecision,
   describeStanding,
+  formatWindowMinutes,
   historyChip,
   historyLine,
   historyRetention,
@@ -76,6 +77,44 @@ describe("memberDoorCopy", () => {
   const CONTACT = { phone: "021 555 0134", email: "info@crusaders.co.za" };
   const NO_CONTACT = { phone: null, email: null };
 
+  /** The decision context every arm that does not care about the clock can share. */
+  const DECIDED = {
+    countdown: null, opensAtClock: null, bookingStartsClock: null,
+    earlyEntryMinutes: 0, contact: CONTACT,
+  };
+
+  /** A booking with both edges of its door window on it, as the endpoint always sends it. */
+  const BOOKING = {
+    starts_at: "2026-09-19T17:00:00Z",
+    ends_at: "2026-09-19T17:45:00Z",
+    court_number: 3,
+    door_opens_at: "2026-09-19T16:30:00Z",
+    door_closes_at: "2026-09-19T18:05:00Z",
+  };
+
+  /**
+   * A standing-line input with every field the endpoint sends, so a test names only the
+   * one field it is about.
+   *
+   * <p>
+   * The default is the case that says the most with the least: an active member at a club
+   * that opens for any active member, with nothing booked. Anything a test does not
+   * override is a field it is asserting is IRRELEVANT to the rule under test, which is
+   * what makes a one-field probe mean something.
+   * </p>
+   */
+  function standingFor(overrides: Record<string, unknown> = {}) {
+    return describeStanding({
+      policy: "active_member",
+      membership: "active",
+      membership_detail: "active",
+      is_club_admin: false,
+      early_entry_minutes: 30,
+      next_booking: null,
+      ...overrides,
+    } as Parameters<typeof describeStanding>[0]);
+  }
+
   /** Every sentence this module can produce, for the probes that must sweep all of them. */
   function everySentence(): string[] {
     const out: string[] = [
@@ -92,13 +131,20 @@ describe("memberDoorCopy", () => {
       offlineNoCode(CONTACT), offlineNoCode(NO_CONTACT),
       offlineIdentDeadEnd(CONTACT), offlineIdentDeadEnd(NO_CONTACT),
     ];
-    for (const reason of Object.keys(DOOR_REFUSAL_REASONS)) {
+    // The reason axis includes `null`, which the endpoint returns for a non-release row
+    // whose details would not parse, and the offline axis forks the open.
+    for (const reason of [...Object.keys(DOOR_REFUSAL_REASONS), null, "some_new_token"]) {
       for (const released of [true, false]) {
-        for (const contact of [CONTACT, NO_CONTACT]) {
-          const copy = describeDecision({ reason, released }, {
-            countdown: "27m 12s", opensAtClock: "06:30", bookingStartsClock: "07:00", contact,
-          });
-          out.push(copy.headline, copy.body);
+        for (const offline of [true, false]) {
+          for (const contact of [CONTACT, NO_CONTACT]) {
+            for (const earlyEntryMinutes of [0, 30, 240]) {
+              const copy = describeDecision({ reason, released, offline }, {
+                countdown: "27m 12s", opensAtClock: "06:30", bookingStartsClock: "07:00",
+                earlyEntryMinutes, contact,
+              });
+              out.push(copy.headline, copy.body);
+            }
+          }
         }
       }
       for (const offline of [true, false]) {
@@ -106,10 +152,20 @@ describe("memberDoorCopy", () => {
         out.push(historyChip(row).label, historyLine(row) ?? "");
       }
     }
+    out.push(offlineDetailsBody(12), offlineDetailsBody(null));
     for (const policy of ["active_member", "booking_window"] as const) {
       for (const membership of ["active", "not_active", "none"] as const) {
-        for (const booking of [null, { starts_at: "2026-09-19T17:00:00Z", door_opens_at: "2026-09-19T16:30:00Z", door_closes_at: "2026-09-19T18:05:00Z" }]) {
-          out.push(describeStanding({ policy, membership, next_booking: booking }).body);
+        for (const detail of ["active", "pending_approval", "rejected", "suspended", "none", "lapsed_with_grace"]) {
+          for (const is_club_admin of [true, false]) {
+            for (const early_entry_minutes of [0, 1, 30, 90, 240]) {
+              for (const next_booking of [null, BOOKING]) {
+                out.push(standingFor({
+                  policy, membership, membership_detail: detail,
+                  is_club_admin, early_entry_minutes, next_booking,
+                }).body);
+              }
+            }
+          }
         }
       }
     }
@@ -171,9 +227,7 @@ describe("memberDoorCopy", () => {
 
   it("gives every reason a headline, a body and a tone", () => {
     for (const reason of Object.keys(DOOR_REFUSAL_REASONS)) {
-      const copy = describeDecision({ reason, released: reason === "ok" }, {
-        countdown: null, opensAtClock: null, bookingStartsClock: null, contact: CONTACT,
-      });
+      const copy = describeDecision({ reason, released: reason === "ok", offline: false }, DECIDED);
       expect(copy.headline.length).toBeGreaterThan(0);
       expect(copy.body.length).toBeGreaterThan(0);
       expect(["success", "info", "warning", "danger"]).toContain(copy.tone);
@@ -185,8 +239,8 @@ describe("memberDoorCopy", () => {
    * not a raw token. The same rule `describeActivityReason` follows on the admin side.
    */
   it("answers a reason it has never heard of without printing the token", () => {
-    const copy = describeDecision({ reason: "some_new_token", released: false }, {
-      countdown: null, opensAtClock: null, bookingStartsClock: null, contact: CONTACT,
+    const copy = describeDecision({ reason: "some_new_token", released: false, offline: false }, {
+      countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0, contact: CONTACT,
     });
     expect(copy.headline).not.toContain("some_new_token");
     expect(copy.body).not.toContain("some_new_token");
@@ -195,8 +249,8 @@ describe("memberDoorCopy", () => {
 
   /** Contract W1.7b: `too_early` is a clock fact, not a fault. Info tone, never danger. */
   it("gives too_early the info tone and a live countdown, never an error tone", () => {
-    const copy = describeDecision({ reason: "too_early", released: false }, {
-      countdown: "27m 12s", opensAtClock: "06:30", bookingStartsClock: "07:00", contact: CONTACT,
+    const copy = describeDecision({ reason: "too_early", released: false, offline: false }, {
+      countdown: "27m 12s", opensAtClock: "06:30", bookingStartsClock: "07:00", earlyEntryMinutes: 0, contact: CONTACT,
     });
     expect(copy.tone).toBe("info");
     expect(copy.headline).toContain("27m 12s");
@@ -205,8 +259,8 @@ describe("memberDoorCopy", () => {
   });
 
   it("says the door opens now once the countdown has run out, and does not change tone", () => {
-    const copy = describeDecision({ reason: "too_early", released: false }, {
-      countdown: "0s", opensAtClock: "06:30", bookingStartsClock: "07:00", contact: CONTACT,
+    const copy = describeDecision({ reason: "too_early", released: false, offline: false }, {
+      countdown: "0s", opensAtClock: "06:30", bookingStartsClock: "07:00", earlyEntryMinutes: 0, contact: CONTACT,
     });
     expect(copy.tone).toBe("info");
     expect(copy.headline).toMatch(/opens for you now/i);
@@ -219,8 +273,8 @@ describe("memberDoorCopy", () => {
    * 27m 12s" there would be inventing a clock time.
    */
   it("states too_early without a countdown when the server sent no window", () => {
-    const copy = describeDecision({ reason: "too_early", released: false }, {
-      countdown: null, opensAtClock: null, bookingStartsClock: null, contact: CONTACT,
+    const copy = describeDecision({ reason: "too_early", released: false, offline: false }, {
+      countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0, contact: CONTACT,
     });
     expect(copy.tone).toBe("info");
     expect(copy.headline).not.toMatch(/\d/);
@@ -228,16 +282,16 @@ describe("memberDoorCopy", () => {
   });
 
   it("offers a court to book when the door wanted one", () => {
-    const copy = describeDecision({ reason: "no_booking", released: false }, {
-      countdown: null, opensAtClock: null, bookingStartsClock: null, contact: CONTACT,
+    const copy = describeDecision({ reason: "no_booking", released: false, offline: false }, {
+      countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0, contact: CONTACT,
     });
     expect(copy.actions).toContainEqual({ kind: "book_a_court", label: "Book a court" });
     expect(copy.tone).toBe("warning");
   });
 
   it("sends a member the club has as not active to the club, not to their own settings", () => {
-    const copy = describeDecision({ reason: "member_not_active", released: false }, {
-      countdown: null, opensAtClock: null, bookingStartsClock: null, contact: CONTACT,
+    const copy = describeDecision({ reason: "member_not_active", released: false, offline: false }, {
+      countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0, contact: CONTACT,
     });
     expect(copy.tone).toBe("danger");
     expect(copy.actions).toContainEqual({ kind: "call_the_club", label: "Call the club", href: "tel:0215550134" });
@@ -246,8 +300,8 @@ describe("memberDoorCopy", () => {
 
   /** Both halves: a club with an address and no number gets the other control. */
   it("offers email when the club gave no phone number", () => {
-    const copy = describeDecision({ reason: "member_not_active", released: false }, {
-      countdown: null, opensAtClock: null, bookingStartsClock: null,
+    const copy = describeDecision({ reason: "member_not_active", released: false, offline: false }, {
+      countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0,
       contact: { phone: null, email: "info@crusaders.co.za" },
     });
     expect(copy.actions).toContainEqual({
@@ -256,8 +310,8 @@ describe("memberDoorCopy", () => {
   });
 
   it("offers neither, and says so, when the club gave no way to reach it", () => {
-    const copy = describeDecision({ reason: "member_not_active", released: false }, {
-      countdown: null, opensAtClock: null, bookingStartsClock: null, contact: NO_CONTACT,
+    const copy = describeDecision({ reason: "member_not_active", released: false, offline: false }, {
+      countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0, contact: NO_CONTACT,
     });
     expect(copy.actions).toEqual([]);
     expect(contactMissingNotice()).toMatch(/written on the door/i);
@@ -268,8 +322,8 @@ describe("memberDoorCopy", () => {
    * lock. It did not report that a door moved, and it cannot: there is no sensor on it.
    */
   it("says the lock released, and never that the door opened or that anyone went in", () => {
-    const copy = describeDecision({ reason: "ok", released: true }, {
-      countdown: null, opensAtClock: null, bookingStartsClock: null, contact: CONTACT,
+    const copy = describeDecision({ reason: "ok", released: true, offline: false }, {
+      countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0, contact: CONTACT,
     });
     expect(copy.tone).toBe("success");
     expect(`${copy.headline} ${copy.body}`).toMatch(/released/i);
@@ -294,7 +348,7 @@ describe("memberDoorCopy", () => {
   // --- the standing line ---------------------------------------------------------
 
   it("states the active-member rule and this member's own standing, with no clock time", () => {
-    const line = describeStanding({ policy: "active_member", membership: "active", next_booking: null });
+    const line = standingFor({ policy: "active_member" });
     expect(line.body).toMatch(/any active member/i);
     expect(line.body).not.toMatch(/\d{2}:\d{2}/);
     expect(line.hasClockWindow).toBe(false);
@@ -302,39 +356,37 @@ describe("memberDoorCopy", () => {
 
   it("states both halves when the club has the membership as not active", () => {
     for (const policy of ["active_member", "booking_window"] as const) {
-      const line = describeStanding({ policy, membership: "not_active", next_booking: null });
-      expect(line.body).toMatch(/not active/i);
+      const line = standingFor({ policy, membership: "not_active", membership_detail: "suspended" });
+      expect(line.body).toMatch(/suspended/i);
       expect(line.body).toMatch(/until they change that/i);
     }
   });
 
-  it("names the booking and the door's window under the booking-window rule", () => {
-    const line = describeStanding({
-      policy: "booking_window", membership: "active",
-      next_booking: { starts_at: "2026-09-19T17:00:00Z", door_opens_at: "2026-09-19T16:30:00Z", door_closes_at: "2026-09-19T18:05:00Z" },
-    });
+  it("names the booking, its court and the door's window under the booking-window rule", () => {
+    const line = standingFor({ policy: "booking_window", next_booking: BOOKING });
     expect(line.body).toMatch(/a court booked/i);
     expect(line.body).toMatch(/\d{2}:\d{2}/);
+    expect(line.body).toMatch(/on court 3/);
+    expect(line.hasClockWindow).toBe(true);
+  });
+
+  /**
+   * `court_number` is the one nullable half of the booking — the endpoint reads it with a
+   * `FirstOrDefaultAsync` against `Courts`, so a booking whose court has since been
+   * removed carries null. The sentence drops the clause rather than saying "court null".
+   */
+  it("drops the court clause for a booking whose court has gone", () => {
+    const line = standingFor({ policy: "booking_window", next_booking: { ...BOOKING, court_number: null } });
+    expect(line.body).toMatch(/\d{2}:\d{2}/);
+    expect(line.body).not.toMatch(/on court/i);
+    expect(line.body).not.toMatch(/null|undefined/i);
     expect(line.hasClockWindow).toBe(true);
   });
 
   it("offers a court to book when the booking-window rule has nothing to work with", () => {
-    const line = describeStanding({ policy: "booking_window", membership: "active", next_booking: null });
+    const line = standingFor({ policy: "booking_window" });
     expect(line.action).toEqual({ kind: "book_a_court", label: "Book a court" });
     expect(line.hasClockWindow).toBe(false);
-  });
-
-  /**
-   * The wave-1 wire shape may send a booking with no door window on it. The sentence has
-   * to survive that without inventing the missing half — and without claiming a window.
-   */
-  it("does not claim a clock window the server did not send", () => {
-    const line = describeStanding({
-      policy: "booking_window", membership: "active",
-      next_booking: { starts_at: "2026-09-19T17:00:00Z", door_opens_at: null, door_closes_at: null },
-    });
-    expect(line.hasClockWindow).toBe(false);
-    expect(line.body).toMatch(/hasn't told this screen/i);
   });
 
   /**
@@ -349,20 +401,33 @@ describe("memberDoorCopy", () => {
    * </p>
    */
   it("suppresses the code card's door clause on every arm that would contradict it", () => {
-    const booking = { starts_at: "2026-09-19T17:00:00Z", door_opens_at: "2026-09-19T16:30:00Z", door_closes_at: "2026-09-19T18:05:00Z" };
     for (const policy of ["active_member", "booking_window"] as const) {
-      expect(describeStanding({ policy, membership: "not_active", next_booking: booking }).suppressesCodeClause).toBe(true);
-      expect(describeStanding({ policy, membership: "none", next_booking: null }).suppressesCodeClause).toBe(true);
+      expect(standingFor({ policy, membership: "not_active", membership_detail: "suspended", next_booking: BOOKING })
+        .suppressesCodeClause).toBe(true);
     }
-    expect(describeStanding({ policy: "booking_window", membership: "active", next_booking: null }).suppressesCodeClause).toBe(true);
-    expect(describeStanding({ policy: "booking_window", membership: "active", next_booking: booking }).suppressesCodeClause).toBe(true);
+    expect(standingFor({ policy: "booking_window" }).suppressesCodeClause).toBe(true);
+    expect(standingFor({ policy: "booking_window", next_booking: BOOKING }).suppressesCodeClause).toBe(true);
   });
 
-  /** And the one arm where the clause earns its place, because this line has no clock. */
-  it("keeps the code card's door clause on the active-member arm, which has no clock of its own", () => {
-    const line = describeStanding({ policy: "active_member", membership: "active", next_booking: null });
-    expect(line.suppressesCodeClause).toBe(false);
-    expect(line.hasClockWindow).toBe(false);
+  /**
+   * And the arms where the clause earns its place, because none of these lines carries a
+   * clock of its own and none of them contradicts a door that does open.
+   *
+   * <p>
+   * The club-admin arm is the one added here and it is the interesting one: a door DOES
+   * open for that member, so suppressing the clause would take away the only clock times
+   * on the page for the booking they may well also have.
+   * </p>
+   */
+  it("keeps the code card's door clause on every arm where a door still opens", () => {
+    for (const line of [
+      standingFor({ policy: "active_member" }),
+      standingFor({ policy: "active_member", membership: "none", membership_detail: "none" }),
+      standingFor({ policy: "booking_window", is_club_admin: true }),
+    ]) {
+      expect(line.suppressesCodeClause).toBe(false);
+      expect(line.hasClockWindow).toBe(false);
+    }
   });
 
   it("says it cannot check, and what it last heard, when the read failed", () => {
@@ -433,6 +498,7 @@ describe("memberDoorCopy", () => {
 
   const HEALTHY = {
     membership: "active" as const,
+    membership_detail: "active",
     policy: "booking_window" as const,
     hasBooking: true,
     bookingStartsClock: "19:00",
@@ -468,8 +534,8 @@ describe("memberDoorCopy", () => {
   it("never concludes with nothing, whatever it is given", () => {
     const shapes = [
       HEALTHY,
-      { ...HEALTHY, membership: "not_active" as const },
-      { ...HEALTHY, membership: "none" as const },
+      { ...HEALTHY, membership: "not_active" as const, membership_detail: "suspended" },
+      { ...HEALTHY, membership: "none" as const, membership_detail: "none" },
       { ...HEALTHY, connectionOk: false },
       { ...HEALTHY, hasBooking: false, bookingStartsClock: null, doorWindowOpen: null, opensAtClock: null, opensInWords: null },
       { ...HEALTHY, doorWindowOpen: false },
@@ -486,7 +552,7 @@ describe("memberDoorCopy", () => {
 
   /** First failing row wins, so the member is given ONE thing to do rather than five. */
   it("names the membership and nothing else when the membership is the first failure", () => {
-    const { conclusion } = buildDiagnosis({ ...HEALTHY, membership: "not_active", connectionOk: false, codeSecondsLeft: 0 });
+    const { conclusion } = buildDiagnosis({ ...HEALTHY, membership: "not_active", membership_detail: "pending_approval", connectionOk: false, codeSecondsLeft: 0 });
     expect(conclusion).toMatch(/membership/i);
     expect(conclusion).not.toMatch(/had run out/i);
   });
@@ -604,6 +670,236 @@ describe("memberDoorCopy", () => {
       expect(sentence).not.toMatch(/[0-9a-f]{2}(:[0-9a-f]{2}){5}/i);
       expect(sentence).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/i);
       expect(sentence).not.toMatch(/fingerprint|token|device id|MAC address/i);
+    }
+  });
+
+  // --- what the real API carries that the stub never did -----------------------------
+  //
+  // Everything below this line exists because the wave-1 wire shape this module was
+  // written against is NARROWER than the endpoint that now serves it. Each rule names a
+  // field the page was previously guessing at, or saying nothing about.
+
+  // --- `ok` + `offline` — the other half of the open (§6.1) --------------------------
+
+  /**
+   * A door that could not reach the club decided from the list it had already downloaded.
+   * Saying only "the lock released" there drops the half of the conditional P6 exists for:
+   * the member's booking was checked against a snapshot, and the club's record of it
+   * arrived afterwards.
+   */
+  it("separates an open the club decided from one the door decided alone", () => {
+    const online = describeDecision({ reason: "ok", released: true, offline: false }, DECIDED);
+    const offline = describeDecision({ reason: "ok", released: true, offline: true }, DECIDED);
+
+    expect(offline.tone).toBe("success");
+    expect(offline.headline).not.toBe(online.headline);
+    expect(offline.body).toMatch(/couldn't reach the club/i);
+    expect(offline.body).toMatch(/downloaded/i);
+    expect(offline.actions).toEqual([]);
+  });
+
+  /** A1.2 binds the offline arm exactly as it binds the online one. */
+  it("still says the lock released rather than that the door opened, on the offline arm", () => {
+    const copy = describeDecision({ reason: "ok", released: true, offline: true }, DECIDED);
+    expect(`${copy.headline} ${copy.body}`).toMatch(/released/i);
+    expect(`${copy.headline} ${copy.body}`).not.toMatch(/door opened|went in|walked in|let you in|you are in/i);
+  });
+
+  /** A refusal a door decided alone is still that refusal. `offline` forks the OPEN only. */
+  it("leaves every refusal unchanged when the door decided it alone", () => {
+    for (const reason of Object.keys(DOOR_REFUSAL_REASONS).filter((r) => r !== "ok")) {
+      const online = describeDecision({ reason, released: false, offline: false }, DECIDED);
+      const offline = describeDecision({ reason, released: false, offline: true }, DECIDED);
+      expect(offline).toEqual(online);
+    }
+  });
+
+  // --- a reason the row never carried (nullability) ----------------------------------
+
+  /**
+   * `MeDoorEndpoints` returns `reason: null` for a non-release row whose details would not
+   * parse — `DoorActivityView.Details` swallows the `JsonException` and `Reason` then has
+   * nothing to read. The page met that shape for the first time here.
+   */
+  it("answers a decision that carries no reason at all", () => {
+    const copy = describeDecision({ reason: null, released: false, offline: false }, DECIDED);
+    expect(copy.headline.length).toBeGreaterThan(0);
+    expect(copy.body.length).toBeGreaterThan(0);
+    expect(`${copy.headline} ${copy.body}`).not.toMatch(/null|undefined/i);
+  });
+
+  it("chips and lines a history row that carries no reason", () => {
+    const chip = historyChip({ reason: null, released: false, offline: false });
+    expect(chip.label).toBe("Turned away");
+    expect(chip.tone).toBe("muted");
+    expect(historyLine({ reason: null, released: false, offline: false })).toBeNull();
+  });
+
+  /**
+   * P6 on a history row, and the arm the mutation pass found nothing was holding: a row a
+   * cut-off door decided alone says so, whatever it decided. `released` is checked FIRST
+   * everywhere else on this surface, so an open that was also offline is precisely the
+   * fixture that tells the two orderings apart — and it is the row a member is most likely
+   * to be puzzled by, because the club's own screens showed nothing at the time.
+   */
+  it.each([
+    ["an open", { reason: "ok", released: true }],
+    ["a refusal", { reason: "no_booking", released: false }],
+    ["a refusal with no reason on it", { reason: null, released: false }],
+  ])("marks %s the door decided from its own list", (_case, row) => {
+    expect(historyLine({ ...row, offline: true })).toBe(HISTORY_OFFLINE_LINE);
+    expect(historyLine({ ...row, offline: false })).not.toBe(HISTORY_OFFLINE_LINE);
+  });
+
+  // --- `early_entry_minutes` — the club's own number (§6.1, §6.2) ---------------------
+
+  /**
+   * "None starting soon enough for a door to open" was the sentence the thin wire forced:
+   * the page had no number to name. It has one now, the server clamps it, and the page
+   * never clamps — so what it is handed is what it says.
+   */
+  it("names the club's own early-entry window on the no-booking refusal", () => {
+    const copy = describeDecision({ reason: "no_booking", released: false, offline: false },
+      { ...DECIDED, earlyEntryMinutes: 30 });
+    expect(copy.body).toMatch(/in the next 30 minutes/i);
+  });
+
+  it("names the same window on the standing line's no-booking arm", () => {
+    const line = standingFor({ policy: "booking_window", early_entry_minutes: 30 });
+    expect(line.body).toMatch(/in the next 30 minutes/i);
+    expect(line.action).toEqual({ kind: "book_a_court", label: "Book a court" });
+  });
+
+  /**
+   * Both halves. `gate_early_entry_minutes` clamps to 0..240 and a club may genuinely have
+   * it at zero, where "nothing booked in the next 0 minutes" is not a sentence. The old
+   * wording is the floor, not a fallback nobody reaches.
+   */
+  it("falls back to the wordless window when the club's number is zero", () => {
+    const copy = describeDecision({ reason: "no_booking", released: false, offline: false },
+      { ...DECIDED, earlyEntryMinutes: 0 });
+    expect(copy.body).toMatch(/soon enough for a door to open/i);
+    expect(copy.body).not.toMatch(/\b0 minutes\b/);
+
+    const line = standingFor({ policy: "booking_window", early_entry_minutes: 0 });
+    expect(line.body).toMatch(/soon enough for a door to open/i);
+    expect(line.body).not.toMatch(/\b0 minutes\b/);
+  });
+
+  it.each([
+    [1, "1 minute"],
+    [30, "30 minutes"],
+    [59, "59 minutes"],
+    [60, "1 hour"],
+    [90, "1 hour 30 minutes"],
+    [120, "2 hours"],
+    [240, "4 hours"],
+  ])("says %i minutes as %s", (minutes, words) => {
+    expect(formatWindowMinutes(minutes)).toBe(words);
+  });
+
+  // --- `is_club_admin` — §6.2 row 7 --------------------------------------------------
+
+  /**
+   * §5's carve-out, which `GateAccess` makes at line 442: a club admin passes the BOOKING
+   * check under `booking_window` and is held to the membership check like everybody. The
+   * page was telling its own club admins to book a court.
+   */
+  it("tells a club admin under the booking rule that a door opens without a booking", () => {
+    const line = standingFor({ policy: "booking_window", is_club_admin: true });
+    expect(line.body).toMatch(/a court booked/i);
+    expect(line.body).toMatch(/club admin/i);
+    expect(line.body).toMatch(/without one/i);
+    expect(line.action).toBeNull();
+  });
+
+  /**
+   * P6 on the sentence that costs the most to leave out: the roster a cut-off door decides
+   * from holds BOOKINGS, and an admin is not in it.
+   */
+  it("states the offline half of the club-admin carve-out", () => {
+    const line = standingFor({ policy: "booking_window", is_club_admin: true });
+    expect(line.body).toMatch(/lost the network/i);
+    expect(line.body).toMatch(/bookings, not admins/i);
+  });
+
+  /** The carve-out is the booking check only — a suspended admin is still refused. */
+  it("does not let the club-admin arm outrank the membership one", () => {
+    const line = standingFor({
+      policy: "booking_window", is_club_admin: true,
+      membership: "not_active", membership_detail: "suspended",
+    });
+    expect(line.body).toMatch(/suspended/i);
+    expect(line.body).not.toMatch(/club admin/i);
+  });
+
+  /** Under `active_member` an admin is an active member and the carve-out says nothing. */
+  it("says nothing about being an admin when the club opens for any active member", () => {
+    const line = standingFor({ policy: "active_member", is_club_admin: true });
+    expect(line.body).not.toMatch(/club admin/i);
+    expect(line.body).toMatch(/any active member/i);
+  });
+
+  // --- `membership_detail` — which not-active this is (§6.2 row 3) --------------------
+
+  it.each([
+    ["pending_approval", /not yet approved/i],
+    ["suspended", /suspended/i],
+    ["rejected", /turned down/i],
+  ])("says which not-active %s is", (detail, expected) => {
+    for (const policy of ["active_member", "booking_window"] as const) {
+      const line = standingFor({ policy, membership: "not_active", membership_detail: detail });
+      expect(line.body).toMatch(expected);
+      expect(line.body).toMatch(/until they change that/i);
+      expect(line.suppressesCodeClause).toBe(true);
+    }
+  });
+
+  /**
+   * A detail this build has never heard of — `lapsed`, when the deferred grace-days work
+   * lands — must reach the sentence the wire shape used to force, not a blank.
+   */
+  it("falls back to not active for a detail it has never heard of", () => {
+    const line = standingFor({
+      policy: "active_member", membership: "not_active", membership_detail: "lapsed_with_grace",
+    });
+    expect(line.body).toMatch(/not active/i);
+    expect(line.body).not.toMatch(/lapsed_with_grace/);
+  });
+
+  /**
+   * `membership: "none"` is a user with no membership row, and `MembershipAccess` does NOT
+   * treat that as barred — `StatusIfBarredAsync` returns null for it and `GateAccess` walks
+   * straight past the check. Telling that member the club has them as not active is the
+   * page contradicting the door they are standing at.
+   */
+  it("does not tell a member with no membership row that theirs is not active", () => {
+    const line = standingFor({ policy: "active_member", membership: "none", membership_detail: "none" });
+    expect(line.body).not.toMatch(/not active|until they change that/i);
+    expect(line.body).toMatch(/opens the club door/i);
+  });
+
+  it("still applies the booking rule to a member with no membership row", () => {
+    const line = standingFor({ policy: "booking_window", membership: "none", membership_detail: "none" });
+    expect(line.body).not.toMatch(/not active/i);
+    expect(line.body).toMatch(/a court booked/i);
+  });
+
+  // --- `roster_max_entries` — the club's own cap -------------------------------------
+
+  /**
+   * The firmware and the API share this number and the response now carries it. The
+   * constant stays as the fallback for a response that predates the field, which is what
+   * `readLastKnown` can still hand back after a version bump nobody has written yet.
+   */
+  it("takes the roster cap from the wire when it is given one", () => {
+    expect(offlineDetailsBody(12)).toContain("first 12 bookings");
+    expect(offlineDetailsBody(12)).not.toContain(`${GATE_ROSTER_MAX_ENTRIES}`);
+  });
+
+  it("falls back to the shared constant when the wire carried no cap", () => {
+    for (const absent of [null, undefined, 0, -3]) {
+      expect(offlineDetailsBody(absent)).toContain(`first ${GATE_ROSTER_MAX_ENTRIES} bookings`);
     }
   });
 });

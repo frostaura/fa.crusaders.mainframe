@@ -76,16 +76,33 @@ export function DecisionCard(props: {
 }) {
   const { decision, door, onRefreshCode, onDismiss } = props;
   const contact = door?.contact ?? { phone: null, email: null };
-  const opensAt = door?.next_booking?.door_opens_at ?? null;
-  // The countdown belongs to the WINDOW, not to the decision: the wave-1 response carries
-  // no `opens_at` on a decision, so the only honest source is the booking the same
-  // response describes. No booking, no countdown — and a different sentence, rather than
-  // a countdown to an invented time.
+  /**
+   * The countdown belongs to the DECISION, and falls back to the booking only when the
+   * decision carried no instant of its own.
+   *
+   * <p>
+   * <b>The fallback used to be the only source, and it could almost never fire.</b>
+   * `too_early` means the booking's window has NOT opened, which is exactly the condition
+   * under which `NextBookingAsync` returns null — so a member watching a too-early card
+   * was shown a countdown drawn from a booking the same response had already declined to
+   * send them. The endpoint now computes the instant itself, through
+   * `BookingCodeWindow.DoorHorizonMinutes`, which is the function the DOOR decides with
+   * and is built from three settings no member's API surface carries.
+   * </p>
+   *
+   * <p>
+   * The fallback is kept for the one case that remains: a response that predates
+   * `opens_at`, where a booking whose window is open is the only clock the page has. It is
+   * a floor, not the source — hence `??` on a null rather than a choice between two.
+   * </p>
+   */
+  const opensAt = decision.opens_at ?? door?.next_booking?.door_opens_at ?? null;
   const seconds = useCountdownSeconds(decision.reason === "too_early" ? opensAt : null);
 
   const shared = {
     opensAtClock: opensAt ? formatClock(opensAt) : null,
     bookingStartsClock: door?.next_booking ? formatClock(door.next_booking.starts_at) : null,
+    earlyEntryMinutes: door?.early_entry_minutes ?? 0,
     contact,
   };
   const copy = describeDecision(decision, { ...shared, countdown: seconds === null ? null : formatCountdown(seconds) });

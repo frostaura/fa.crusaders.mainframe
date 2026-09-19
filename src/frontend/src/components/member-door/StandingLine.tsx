@@ -46,7 +46,7 @@ export function StandingLine(props: {
             {line.action.label}
           </Link>
         )}
-        <OfflineHalf />
+        <OfflineHalf rosterMaxEntries={door.roster_max_entries} />
       </section>
     );
   }
@@ -72,7 +72,7 @@ export function StandingLine(props: {
       <p className="text-sm text-text-secondary">
         {standingFailed(cachedLine ? { body: cachedLine.body, minutesAgo: cachedMinutesAgo } : null)}
       </p>
-      {cachedLine && <OfflineHalf />}
+      {cachedLine && <OfflineHalf rosterMaxEntries={cached?.value.roster_max_entries ?? null} />}
     </section>
   );
 }
@@ -87,13 +87,13 @@ export function StandingLine(props: {
  * night it matters.
  * </p>
  */
-function OfflineHalf() {
+function OfflineHalf({ rosterMaxEntries }: { rosterMaxEntries: number | null }) {
   return (
     <details className="text-sm">
       <summary className="inline-flex items-center min-h-11 cursor-pointer text-accent-strong">
         {OFFLINE_DETAILS_SUMMARY}
       </summary>
-      <p className="mt-1 text-text-secondary">{offlineDetailsBody()}</p>
+      <p className="mt-1 text-text-secondary">{offlineDetailsBody(rosterMaxEntries)}</p>
     </details>
   );
 }

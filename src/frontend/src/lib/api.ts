@@ -1048,13 +1048,51 @@ export type MemberDoorPolicy = "active_member" | "booking_window";
  */
 export type MemberDoorMembership = "active" | "not_active" | "none";
 
-/** The booking that bounds a door window, when there is one. UTC instants. */
+/**
+ * The club's own recorded status, at the resolution `membership` collapses away.
+ *
+ * <p>
+ * `MembershipStatus`'s own members, lowercased, plus `none` for a user with no membership
+ * row at all. The two fields are the SAME fact at two resolutions and both are wanted:
+ * `membership` is the three-valued answer to "may this person open a door", and this is
+ * what lets the page say WHICH not-active it is — "your application has not been approved
+ * yet" and "your membership is suspended" are two different things to do next.
+ * </p>
+ *
+ * <p>
+ * Typed as a plain string for the reason {@link MemberDoorDecision.reason} is: the API's
+ * own comment foresees a `lapsed` member arriving with the deferred grace-days work, and a
+ * value this build has not heard of must reach a sentence rather than a blank. The closed
+ * set this build knows is {@link MEMBER_DOOR_MEMBERSHIP_DETAILS}.
+ * </p>
+ */
+export type MemberDoorMembershipDetail = string;
+
+/** Every `membership_detail` this build has a sentence for. The API clamps to exactly these. */
+export const MEMBER_DOOR_MEMBERSHIP_DETAILS = [
+  "active", "pending_approval", "rejected", "suspended", "none",
+] as const;
+
+/**
+ * The booking that bounds a door window, when there is one. UTC instants.
+ *
+ * <p>
+ * Both edges of the window are non-null: `MeDoorEndpoints.NextBookingAsync` computes them
+ * from `BookingCodeWindow` on every booking it returns, so a booking with no window on it
+ * is a state the endpoint cannot produce. They were optional here while this page was
+ * written against a stub that could.
+ * </p>
+ */
 export type MemberDoorBooking = {
   starts_at: string;
+  /** The slot's own end — the club's grace window is NOT on it. See `door_closes_at`. */
+  ends_at: string;
+  /** Which court, or null for a booking whose court has since been removed. */
+  court_number: number | null;
   /** When this booking starts opening a door: `starts_at − H`, the horizon the DOOR applies. */
-  door_opens_at: string | null;
+  door_opens_at: string;
   /** When it stops: the code's own expiry — the booking's end plus the club's grace window. */
-  door_closes_at: string | null;
+  door_closes_at: string;
 };
 
 /** Who to call or write to when a door will not open. Either half may be unset at a club. */
@@ -1079,7 +1117,31 @@ export type MemberDoorDecision = {
   at: string;
   door_name: string | null;
   released: boolean;
-  reason: string;
+  /**
+   * Null for a row that recorded no reason this reader can find.
+   *
+   * <p>
+   * `DoorActivityView.Details` swallows a `JsonException` and answers null, and `Reason`
+   * then has neither a `reason` nor an `outcome` to read — so a refusal whose details were
+   * written malformed reaches the page with nothing on it. The row is still the evidence;
+   * refusing to show it because one field will not parse is the wrong way round.
+   * </p>
+   */
+  reason: string | null;
+  /** The board decided this from the list it had already downloaded, having lost the club's network. */
+  offline: boolean;
+  /**
+   * For a `too_early` refusal: when the door WOULD open for the booking behind it.
+   *
+   * <p>
+   * Server-computed through `BookingCodeWindow.DoorHorizonMinutes` and not derivable here:
+   * the horizon is `max(gate_early_entry, min(roster + cue, 240))` under one policy and
+   * `gate_early_entry` under the other, and none of those three settings is on a member's
+   * API surface. Null on every other reason, and null when the booking behind the refusal
+   * has since gone.
+   * </p>
+   */
+  opens_at: string | null;
 };
 
 export type MemberDoor = {
@@ -1087,8 +1149,33 @@ export type MemberDoor = {
   doors: boolean;
   policy: MemberDoorPolicy;
   membership: MemberDoorMembership;
+  /** The same fact as `membership`, at the resolution that says which not-active it is. */
+  membership_detail: MemberDoorMembershipDetail;
+  /**
+   * §5's carve-out: a club admin passes the BOOKING check under `booking_window`.
+   *
+   * <p>
+   * `GateAccess` grants it on `User.IsAdmin` alone, and it is the booking check only — an
+   * admin is held to the membership check like everybody, which is the order the standing
+   * line has to state it in.
+   * </p>
+   */
+  is_club_admin: boolean;
   next_booking: MemberDoorBooking | null;
+  /**
+   * `gate_early_entry_minutes`, clamped server-side to 0..240. The page never clamps it.
+   *
+   * <p>
+   * Zero is a real setting, not an absent one, and the sentence that names a window has to
+   * have a wordless arm for it.
+   * </p>
+   */
+  early_entry_minutes: number;
+  /** How many bookings a cut-off door's cached list holds. The firmware and the API share it. */
+  roster_max_entries: number;
   contact: MemberDoorContact;
+  /** `door_log_retention_days`, so a page stating the number states the club's own. */
+  door_log_retention_days: number;
   last_decision: MemberDoorDecision | null;
 };
 
@@ -1097,7 +1184,8 @@ export type MemberDoorHistoryRow = {
   at: string;
   door_name: string | null;
   released: boolean;
-  reason: string;
+  /** Null for the same malformed-details row {@link MemberDoorDecision.reason} describes. */
+  reason: string | null;
   offline: boolean;
 };
 
