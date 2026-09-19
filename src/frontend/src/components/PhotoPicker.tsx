@@ -168,12 +168,24 @@ export function PhotoPicker({
          */
         aria-labelledby={`${inputId}-label`}
         aria-describedby={`${inputId}-hint${problem ? ` ${inputId}-error` : ""}`}
-        className="sr-only"
+        /*
+         * `peer`, so the visible control can show this input's focus.
+         *
+         * The tile carried `focus-within:ring-2`, which never once fired: focus-within matches
+         * an ancestor of the focused element, and the input is the label's SIBLING, not its
+         * child. A keyboard user tabbing through the form reached the photo field and saw
+         * absolutely nothing change — the one control on the screen with no focus indicator,
+         * and the one that is not self-evidently a control. Confirmed by focusing it in a real
+         * browser and reading back a computed box-shadow of `none`.
+         *
+         * `peer-focus-visible` matches a later sibling of the peer, which is exactly this shape.
+         */
+        className="peer sr-only"
         onChange={e => accept(e.target.files?.[0])}
       />
 
       {chosen ? (
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-surface p-3">
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-surface p-3 peer-focus-visible:ring-2 peer-focus-visible:ring-accent-strong peer-focus-visible:ring-offset-2">
           {preview ? (
             <img
               src={preview}
@@ -226,7 +238,7 @@ export function PhotoPicker({
           onDrop={e => { e.preventDefault(); setDragging(false); accept(e.dataTransfer.files?.[0]); }}
           className={cn(
             "flex min-h-[7rem] w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-4 text-center",
-            "focus-within:ring-2 focus-within:ring-accent-strong",
+            "peer-focus-visible:ring-2 peer-focus-visible:ring-accent-strong peer-focus-visible:ring-offset-2",
             dragging ? "border-accent-strong bg-accent-soft" : "border-border bg-bg-muted hover:bg-bg-muted/70",
             (disabled || busy) && "opacity-60",
             problem && !dragging && "border-danger-strong",
