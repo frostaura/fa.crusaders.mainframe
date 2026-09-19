@@ -564,7 +564,15 @@ export function describeStanding(door: StandingInput): StandingLine {
   if (door.membership === "not_active") return standingNotActive(rule, door.membership_detail);
   if (door.policy === "active_member") {
     return {
-      body: `${ACTIVE_MEMBER_RULE} Yours is active, so the code on this screen opens the club door.`,
+      // Three states, and `none` gets its own rather than borrowing either neighbour's.
+      // "Yours is active" would be as false as "yours is not active" — the club has
+      // nothing on file at all — and the door opens regardless, so the sentence has to
+      // say both halves.
+      body: door.membership === "none"
+        ? `${ACTIVE_MEMBER_RULE} The club has no membership on file for you, which is not the same as one it`
+          + " has turned off — so the code on this screen still opens the club door. Worth asking the club to"
+          + " put that right."
+        : `${ACTIVE_MEMBER_RULE} Yours is active, so the code on this screen opens the club door.`,
       hasClockWindow: false,
       // The one arm where the clause EARNS its place: this line has no clock times and
       // the code card does.

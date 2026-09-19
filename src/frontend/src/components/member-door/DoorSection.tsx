@@ -74,7 +74,12 @@ export function DoorSection(props: {
             membership: standing?.membership ?? "active",
             membership_detail: standing?.membership_detail ?? "active",
             policy: standing?.policy ?? "active_member",
-            hasBooking: !!door?.next_booking,
+            // `opens_at` exists only because `TooEarlyOpensAtAsync` FOUND a booking — one
+            // whose window has not opened, which is precisely why `next_booking` is null
+            // beside it. Keying this row on the booking alone told the one member who is
+            // standing outside waiting for their court that they had nothing booked, and
+            // then sent them to book another.
+            hasBooking: !!door?.next_booking || !!door?.last_decision?.opens_at,
             bookingStartsClock: door?.next_booking ? formatClock(door.next_booking.starts_at) : null,
             doorWindowOpen: opensAt === null ? null : (opensIn ?? 0) <= 0,
             opensAtClock: opensAt ? formatClock(opensAt) : null,

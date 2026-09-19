@@ -1,10 +1,12 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import MyCodePage from "./MyCode";
 import { encodeQr, qrPath } from "../lib/qr";
 import {
+  memberDoorBookingFixture,
   memberDoorDecisionFixture,
   memberDoorFixture,
+  memberDoorNotActiveFixture,
   memberDoorsOnFixture,
   renderPage,
   stubFetch,
@@ -801,11 +803,7 @@ describe("MyCode at a club with a door", () => {
 
   const IDENT_CODE = { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true };
 
-  const BOOKING = {
-    starts_at: "2026-09-19T17:00:00Z",
-    door_opens_at: "2026-09-19T16:30:00Z",
-    door_closes_at: "2026-09-19T18:05:00Z",
-  };
+  const BOOKING = memberDoorBookingFixture();
 
   /** Renders with both reads answered. `door` is the whole `/me/door` document. */
   function renderBoth(door: Record<string, unknown>, code: Record<string, unknown> = CODE) {
@@ -942,6 +940,34 @@ describe("MyCode at a club with a door", () => {
     expect(said).toHaveTextContent(/That may have changed since/);
   });
 
+  /**
+   * The offline half, served from the cache, still carries the CLUB's cap.
+   *
+   * <p>
+   * The one reading where getting it wrong matters most: this sentence is about what
+   * happens when a door is cut off, and it is being shown to somebody whose phone is cut
+   * off too. Falling back to the shared constant here would print 48 at a club whose
+   * boards hold twelve — which is the page guessing on the one screen where it has a
+   * stored answer and a member has no way to check.
+   * </p>
+   */
+  it("keeps the club's own roster cap when the standing line comes from the cache", async () => {
+    rememberDoor(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: BOOKING, roster_max_entries: 12,
+    }) as never);
+    stubFetch([
+      { method: "POST", path: "/api/v1/me/qr/generate", body: CODE },
+      { path: "/api/v1/me/door", status: 500, body: { error: "boom" } },
+    ]);
+    renderPage(<MyCodePage />);
+
+    const summary = await screen.findByText("What if the door is offline?");
+    fireEvent.click(summary);
+    const body = screen.getByText(/decides from a list of bookings/);
+    expect(body).toHaveTextContent(/first 12 bookings/);
+    expect(body).not.toHaveTextContent(new RegExp(`first ${GATE_ROSTER_MAX_ENTRIES} bookings`));
+  });
+
   /** And with nothing cached, a different sentence — three silences, three sentences. */
   it("says it cannot tell the member anything when there is no cached copy either", async () => {
     stubFetch([
@@ -1026,9 +1052,10 @@ describe("MyCode at a club with a door", () => {
   });
 
   /**
-   * The wave-1 response carries no `opens_at` on a decision, so the ONLY honest source of
-   * a countdown is the booking in the same document. With no booking there is no window,
-   * and the card says so rather than counting down to a time nobody sent.
+   * Both sources of a countdown absent at once: no `opens_at` on the decision, and no
+   * booking in the same document. That is what the endpoint sends when the booking behind
+   * the refusal has since been cancelled — `TooEarlyOpensAtAsync` returns null — and the
+   * card says so rather than counting down to a time nobody sent.
    */
   it("states too early with no countdown when the server sent no window", async () => {
     renderBoth(memberDoorsOnFixture({
@@ -1222,7 +1249,7 @@ describe("MyCode at a club with a door", () => {
   });
 
   it("names the membership and nothing else when that is the first thing wrong", async () => {
-    renderBoth(memberDoorsOnFixture({ membership: "not_active", policy: "booking_window", next_booking: BOOKING }));
+    renderBoth(memberDoorNotActiveFixture("suspended", { policy: "booking_window", next_booking: BOOKING }));
     await screen.findByLabelText("Your code");
 
     fireEvent.click(screen.getByRole("button", { name: "The door didn't open" }));
@@ -1231,6 +1258,104 @@ describe("MyCode at a club with a door", () => {
     const panel = screen.getByRole("group", { name: /work out why/i });
     expect(panel).toHaveTextContent(/only the club can change it/i);
     expect(panel.textContent).not.toMatch(/had run out/i);
+  });
+
+  /**
+   * The checklist says WHICH not-active, exactly as the standing line does. A member who
+   * reads "suspended" in the line and "not active" two centimetres below it is reading a
+   * screen that has two answers to one question.
+   */
+  it.each([
+    ["pending_approval", "not yet approved"],
+    ["suspended", "suspended"],
+    ["rejected", "turned down"],
+  ] as const)("names %s on the checklist row and in its conclusion", async (detail, word) => {
+    renderBoth(memberDoorNotActiveFixture(detail, { policy: "booking_window", next_booking: BOOKING }));
+    await screen.findByLabelText("Your code");
+
+    fireEvent.click(screen.getByRole("button", { name: "The door didn't open" }));
+    await waitFor(() => expect(screen.queryByText("Checking…")).toBeNull());
+
+    const panel = screen.getByRole("group", { name: /work out why/i });
+    const row = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("Your membership"));
+    expect(row?.textContent).toContain(word);
+    expect(row?.textContent).toContain("Failed");
+    expect(panel).toHaveTextContent(new RegExp(`membership as ${word}`));
+  });
+
+  /**
+   * And the row that must NOT fail. A member with no membership row is not barred — the
+   * door lets them in — so failing this row would hand them "that's the whole reason"
+   * about a rule nothing applies to them, while whatever is really wrong goes unnamed.
+   */
+  it("passes the membership row for a member the club has nothing on file for", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: BOOKING,
+      membership: "none", membership_detail: "none",
+    }));
+    await screen.findByLabelText("Your code");
+
+    fireEvent.click(screen.getByRole("button", { name: "The door didn't open" }));
+    await waitFor(() => expect(screen.queryByText("Checking…")).toBeNull());
+
+    const panel = screen.getByRole("group", { name: /work out why/i });
+    const row = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("Your membership"));
+    expect(row?.textContent).toContain("Passed");
+    expect(row?.textContent).toContain("nothing barring you");
+    expect(panel.textContent).not.toMatch(/that's the whole reason/i);
+  });
+
+  /**
+   * The checklist's window row reads the same instant the decision card counts down from,
+   * and it has to: `too_early` is exactly the state in which `next_booking` is null, so a
+   * row fed only by the booking would answer "no window to wait for" to the one member
+   * who has a window and is waiting it out.
+   */
+  it("judges the door's window from the decision's own instant when there is no booking", async () => {
+    fakeClock();
+    vi.setSystemTime(new Date("2026-09-19T16:03:00Z"));
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: null,
+      last_decision: memberDoorDecisionFixture({
+        at: "2026-09-19T16:02:00Z", reason: "too_early", opens_at: "2026-09-19T16:30:00Z",
+      }),
+    }));
+    await advance(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "The door didn't open" }));
+    await advance(0);
+
+    const panel = screen.getByRole("group", { name: /work out why/i });
+    const row = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("The door's window"));
+    expect(row?.textContent).toContain("opens for you at 18:30");
+    expect(row?.textContent).not.toContain("no window to wait for");
+
+    // And the booking row must not fail either. `opens_at` is only ever computed BECAUSE
+    // a qualifying booking was found; telling this member they have none, and sending
+    // them to book another, is the checklist contradicting the countdown above it.
+    const booking = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("Your booking"));
+    expect(booking?.textContent).toContain("Passed");
+    expect(panel).toHaveTextContent(/window hasn't opened yet/i);
+    expect(panel).toHaveTextContent(/Everything else is fine/i);
+    expect(panel.textContent).not.toMatch(/Book one from the schedule/);
+  });
+
+  /** The other half: genuinely nothing booked, and the row fails and says so. */
+  it("fails the booking row when there is neither a booking nor a window to wait for", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: null,
+      last_decision: memberDoorDecisionFixture({ reason: "no_booking", opens_at: null }),
+    }));
+    await screen.findByLabelText("Your code");
+
+    fireEvent.click(screen.getByRole("button", { name: "The door didn't open" }));
+    await waitFor(() => expect(screen.queryByText("Checking…")).toBeNull());
+
+    const panel = screen.getByRole("group", { name: /work out why/i });
+    const booking = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("Your booking"));
+    expect(booking?.textContent).toContain("Failed");
+    expect(booking?.textContent).toContain("none starting soon");
+    expect(panel).toHaveTextContent(/Book one from the schedule/);
   });
 
   /** Colour is never the only signal: the failed row says "Failed" in words. */
@@ -1341,5 +1466,247 @@ describe("MyCode at a club with a door", () => {
     expect(said).toHaveTextContent(/a court booked/);
     expect(said).toHaveTextContent("021 555 0134");
     expect(screen.queryByRole("img", { name: /QR code/ })).toBeNull();
+  });
+
+  // --- what the real endpoint sends, on the rendered page -------------------------------
+
+  /**
+   * The fixture against the endpoint's own key set.
+   *
+   * <p>
+   * This page was built against a stub and the stub was narrower than the API. A fixture
+   * that is narrower than the response is the mechanism by which that happens twice: every
+   * assertion below it passes, and the field nobody stubbed is the field nobody renders.
+   * The list is `MeDoorEndpoints.DoorAsync`'s anonymous type, key for key.
+   * </p>
+   */
+  it("stubs every key GET /api/v1/me/door actually returns", () => {
+    expect(Object.keys(memberDoorFixture()).sort()).toEqual([
+      "contact", "door_log_retention_days", "doors", "early_entry_minutes", "is_club_admin",
+      "last_decision", "membership", "membership_detail", "next_booking", "policy",
+      "roster_max_entries",
+    ]);
+    expect(Object.keys(memberDoorBookingFixture()).sort()).toEqual([
+      "court_number", "door_closes_at", "door_opens_at", "ends_at", "starts_at",
+    ]);
+    expect(Object.keys(memberDoorDecisionFixture()).sort()).toEqual([
+      "at", "door_name", "offline", "opens_at", "reason", "released",
+    ]);
+  });
+
+  /**
+   * §6.2 row 7. `GateAccess` lets a club admin past the BOOKING check under
+   * `booking_window`, so the page was sending its own club's admins to book a court to
+   * open a door that would have opened anyway.
+   */
+  it("tells a club admin under the booking rule that a door opens without a booking", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", is_club_admin: true, next_booking: null,
+    }));
+
+    const line = await screen.findByText(/You're a club admin/);
+    expect(line).toHaveTextContent(/without one/);
+    // P6's half, which is the whole point of saying it here rather than nowhere.
+    expect(line).toHaveTextContent(/bookings, not admins/);
+    expect(screen.queryByRole("link", { name: "Book a court" })).toBeNull();
+  });
+
+  /** The carve-out is the booking check only. A suspended admin is still refused. */
+  it("does not offer the admin carve-out to an admin the club has suspended", async () => {
+    renderBoth(memberDoorNotActiveFixture("suspended", {
+      policy: "booking_window", is_club_admin: true, next_booking: null,
+    }));
+
+    expect(await screen.findByText(/as suspended/)).toBeInTheDocument();
+    expect(screen.queryByText(/club admin/i)).toBeNull();
+  });
+
+  // --- membership_detail: which not-active this is -------------------------------------
+
+  it.each([
+    ["pending_approval", /not yet approved/],
+    ["suspended", /as suspended/],
+    ["rejected", /turned down/],
+  ] as const)("says on the page which not-active %s is", async (detail, expected) => {
+    renderBoth(memberDoorNotActiveFixture(detail, { policy: "active_member" }));
+
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    // The old sentence, which said the same thing to all three, must be gone rather than
+    // sitting beside the new one.
+    expect(screen.queryByText(/as not active,/)).toBeNull();
+  });
+
+  /**
+   * `membership: "none"` — a user with no membership row — and the page must not
+   * contradict the door. `StatusIfBarredAsync` answers null for that member, so
+   * `GateAccess` walks past the check and the door opens.
+   */
+  it("does not tell a member with no membership row that theirs is not active", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "active_member", membership: "none", membership_detail: "none",
+    }));
+
+    const line = await screen.findByText(/no membership on file for you/);
+    expect(line).toHaveTextContent(/still opens the club door/);
+    // Neither neighbour's sentence: not "yours is active" and not "yours is not active".
+    expect(line).not.toHaveTextContent(/Yours is active/);
+    expect(screen.queryByText(/not active/i)).toBeNull();
+    // And the code card's clause is kept, because this line has no clock of its own and
+    // the door really does open.
+    expect(screen.getByText(/It also opens the club door from/)).toBeInTheDocument();
+  });
+
+  // --- early_entry_minutes: the club's own number --------------------------------------
+
+  it("names the club's own early-entry window when there is nothing booked", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: null, early_entry_minutes: 45,
+    }));
+
+    expect(await screen.findByText(/nothing booked in the next 45 minutes/)).toBeInTheDocument();
+  });
+
+  it("says it wordlessly when the club has no early-entry window set", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: null, early_entry_minutes: 0,
+    }));
+
+    expect(await screen.findByText(/nothing booked soon enough for a door to open/)).toBeInTheDocument();
+    expect(screen.queryByText(/next 0 minutes/)).toBeNull();
+  });
+
+  it("names it on the no_booking refusal card too", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: null, early_entry_minutes: 90,
+      last_decision: memberDoorDecisionFixture({ reason: "no_booking" }),
+    }));
+
+    expect(await screen.findByText(/none starting in the next 1 hour 30 minutes/)).toBeInTheDocument();
+  });
+
+  // --- last_decision.opens_at: the countdown that could not fire -----------------------
+
+  /**
+   * The countdown the page could almost never draw.
+   *
+   * <p>
+   * It used to come from `next_booking.door_opens_at`, and `too_early` means the booking's
+   * window has NOT opened — which is exactly the condition under which `NextBookingAsync`
+   * returns null. So the commonest too-early card on the product carried no countdown at
+   * all. This fixture is that case: a refusal with `opens_at` on it and NO booking beside
+   * it, which is what the endpoint really sends.
+   * </p>
+   */
+  it("counts down from the decision's own instant when there is no booking to fall back to", async () => {
+    fakeClock();
+    vi.setSystemTime(new Date("2026-09-19T16:03:00Z"));
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window",
+      next_booking: null,
+      last_decision: memberDoorDecisionFixture({
+        at: "2026-09-19T16:02:00Z", reason: "too_early", opens_at: "2026-09-19T16:30:00Z",
+      }),
+    }));
+    await advance(0);
+
+    const card = screen.getByRole("status");
+    expect(card).toHaveTextContent(/Too early — the door opens for you in 27m 00s\./);
+    await advance(60_000);
+    expect(card).toHaveTextContent(/26m 00s/);
+  });
+
+  /** The decision's instant outranks the booking's when both are there. */
+  it("prefers the decision's instant over the booking's window", async () => {
+    fakeClock();
+    vi.setSystemTime(new Date("2026-09-19T16:03:00Z"));
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window",
+      next_booking: memberDoorBookingFixture({ door_opens_at: "2026-09-19T16:10:00Z" }),
+      last_decision: memberDoorDecisionFixture({
+        at: "2026-09-19T16:02:00Z", reason: "too_early", opens_at: "2026-09-19T16:30:00Z",
+      }),
+    }));
+    await advance(0);
+
+    const card = screen.getByRole("status");
+    expect(card).toHaveTextContent(/opens for you in 27m 00s/);
+    // The booking's own window would have given 7m — a countdown to the wrong instant,
+    // which is a member watching a clock reach zero at a door that refuses them.
+    expect(card).not.toHaveTextContent(/\b7m 00s/);
+    expect(card).toHaveTextContent(/until 18:30/);
+  });
+
+  /**
+   * Only `too_early` gets a clock, and the difference is a running interval rather than
+   * anything on screen.
+   *
+   * <p>
+   * The mutation pass found nothing holding this: every other arm ignores `ctx.countdown`,
+   * so counting down on a `no_booking` card renders identically and costs a member a
+   * re-render a second for as long as the card is open. Measured rather than reasoned
+   * about — the two fixtures differ in one field, so the extra timer is the whole of the
+   * difference between them.
+   * </p>
+   */
+  it("starts no per-second clock on a refusal that is not a matter of waiting", async () => {
+    fakeClock();
+    vi.setSystemTime(new Date("2026-09-19T16:03:00Z"));
+    const opensAt = "2026-09-19T16:30:00Z";
+
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: null,
+      last_decision: memberDoorDecisionFixture({ at: "2026-09-19T16:02:00Z", reason: "too_early", opens_at: opensAt }),
+    }));
+    await advance(0);
+    const withClock = vi.getTimerCount();
+
+    cleanup();
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: null,
+      last_decision: memberDoorDecisionFixture({ at: "2026-09-19T16:02:00Z", reason: "no_booking", opens_at: opensAt }),
+    }));
+    await advance(0);
+
+    expect(vi.getTimerCount()).toBe(withClock - 1);
+  });
+
+  // --- last_decision.offline: the other half of the open -------------------------------
+
+  /**
+   * §6.1's second `ok` arm, and P6. A door that had lost the club's network matched the
+   * code against a list it downloaded earlier; the club's record of it arrived afterwards.
+   * A member told only "the lock released" has not been told either fact.
+   */
+  it("distinguishes an open the door decided alone from one the club answered", async () => {
+    renderBoth(memberDoorsOnFixture({
+      last_decision: memberDoorDecisionFixture({ reason: "ok", released: true, offline: true }),
+    }));
+
+    const card = await screen.findByRole("status");
+    expect(card).toHaveTextContent(/from the door's own list/);
+    expect(card).toHaveTextContent(/couldn't reach the club/);
+    expect(card).toHaveTextContent(/arrived afterwards/);
+    // A1.2 holds on this arm exactly as it does on the other.
+    expect(card).not.toHaveTextContent(/door opened|let you in|walked in/);
+  });
+
+  it("says the shorter sentence for an open the club was reachable for", async () => {
+    renderBoth(memberDoorsOnFixture({
+      last_decision: memberDoorDecisionFixture({ reason: "ok", released: true, offline: false }),
+    }));
+
+    const card = await screen.findByRole("status");
+    expect(card).toHaveTextContent(/The lock released\./);
+    expect(card).not.toHaveTextContent(/own list/);
+  });
+
+  // --- roster_max_entries: the club's own cap ------------------------------------------
+
+  it("takes the offline roster cap from the response rather than from its own constant", async () => {
+    renderBoth(memberDoorsOnFixture({ roster_max_entries: 12 }));
+
+    await screen.findByText(/What if the door is offline/);
+    expect(screen.getByText(/first 12 bookings by start time/)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(`first ${GATE_ROSTER_MAX_ENTRIES} bookings`))).toBeNull();
   });
 });
