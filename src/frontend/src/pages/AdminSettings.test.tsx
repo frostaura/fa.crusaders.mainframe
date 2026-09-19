@@ -875,4 +875,146 @@ describe("AdminSettings — alert cooldown", () => {
       .toHaveTextContent(/one “not reporting” email per board/);
     expect(screen.queryByText(/device alert cooldown minutes out of range/)).not.toBeInTheDocument();
   });
+
+  // --- doors: admin — W1's five tenant settings (WIRE-W1 section 6) --------------
+
+  describe("the door records block", () => {
+    const DOORS = {
+      door_log_retention_days: 90,
+      door_refusal_spike_count: 8,
+      door_refusal_spike_minutes: 20,
+      club_contact_phone: "076 226 1390",
+      club_contact_email: "squash@example.co.za",
+    };
+
+    const withDoors = (overrides: Record<string, unknown> = {}) => [
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...DOORS, ...overrides } },
+      { path: "/api/v1/admin/courts/", body: [] },
+    ];
+
+    it("puts all five on the screen, each labelled and each with its range in a hint", async () => {
+      stubFetch(withDoors());
+      renderPage(<AdminSettingsPage />);
+
+      expect(await screen.findByLabelText(/Keep door scans for/)).toHaveValue(90);
+      expect(screen.getByLabelText(/Refusal spike \(scans\)/)).toHaveValue(8);
+      expect(screen.getByLabelText(/Refusal spike window/)).toHaveValue(20);
+      expect(screen.getByLabelText(/Club contact number/)).toHaveValue("076 226 1390");
+      expect(screen.getByLabelText(/Club contact email/)).toHaveValue("squash@example.co.za");
+
+      // Each hint names its own bound, through aria-describedby rather than by proximity.
+      const retention = screen.getByLabelText(/Keep door scans for/);
+      const hint = document.getElementById(retention.getAttribute("aria-describedby")!);
+      expect(hint).toHaveTextContent("7-730");
+      expect(hint).toHaveTextContent("DELETED");
+    });
+
+    /** The consequence in the club's own words, so a number is not just a number. */
+    it("states what the retention number means in the words the log prints", async () => {
+      stubFetch(withDoors());
+      renderPage(<AdminSettingsPage />);
+
+      expect(await screen.findByText(/Door scans are kept for 90 days and then deleted/))
+        .toHaveTextContent("Money records follow a separate, longer rule.");
+    });
+
+    it("moves with the field, so an admin sees what they are choosing before Save", async () => {
+      stubFetch(withDoors());
+      renderPage(<AdminSettingsPage />);
+
+      fireEvent.change(await screen.findByLabelText(/Keep door scans for/), { target: { value: "8" } });
+      expect(screen.getByText(/kept for 8 days and then deleted/)).toBeInTheDocument();
+    });
+
+    /**
+     * A number input's min and max stop the spinner and nothing else — a typed or pasted
+     * value passes straight through, and Save here is not a native submit, so the browser
+     * never says a word. The same gap the credits-per-rand `step` fell through.
+     */
+    it("refuses an out-of-range number here rather than at the API", async () => {
+      stubFetch(withDoors());
+      renderPage(<AdminSettingsPage />);
+
+      fireEvent.change(await screen.findByLabelText(/Keep door scans for/), { target: { value: "3" } });
+      expect(screen.getByText(/between 7 and 730/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save settings" })).toBeDisabled();
+    });
+
+    it("refuses a spike count and a window outside their own bounds", async () => {
+      stubFetch(withDoors());
+      renderPage(<AdminSettingsPage />);
+
+      fireEvent.change(await screen.findByLabelText(/Refusal spike \(scans\)/), { target: { value: "1" } });
+      expect(screen.getByText(/between 3 and 100/)).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText(/Refusal spike \(scans\)/), { target: { value: "8" } });
+      fireEvent.change(screen.getByLabelText(/Refusal spike window/), { target: { value: "1" } });
+      expect(screen.getByText(/between 5 and 240/)).toBeInTheDocument();
+    });
+
+    /**
+     * <b>An empty contact is a real state, not a refusal.</b> A club that has not recorded a
+     * phone number is exactly what the door card and the member's refusal card have copy
+     * for, and refusing to save an empty one would make "no contact" impossible to express.
+     */
+    it("saves an empty club contact rather than refusing it", async () => {
+      const stub = stubFetch([
+        ...withDoors(),
+        { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
+      ]);
+      renderPage(<AdminSettingsPage />);
+
+      fireEvent.change(await screen.findByLabelText(/Club contact number/), { target: { value: "" } });
+      expect(screen.getByRole("button", { name: "Save settings" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+      await waitFor(() => {
+        const put = stub.calls.find((c) => c.method === "PUT");
+        expect(put?.body).toMatchObject({ clubContactPhone: "" });
+      });
+    });
+
+    /** Both spellings bind at the API; camelCase is what every other number here sends. */
+    it("sends every door key camelCase", async () => {
+      const stub = stubFetch([
+        ...withDoors(),
+        { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
+      ]);
+      renderPage(<AdminSettingsPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Save settings" }));
+
+      await waitFor(() => {
+        const put = stub.calls.find((c) => c.method === "PUT");
+        expect(put?.body).toMatchObject({
+          doorLogRetentionDays: 90,
+          doorRefusalSpikeCount: 8,
+          doorRefusalSpikeMinutes: 20,
+          clubContactPhone: "076 226 1390",
+          clubContactEmail: "squash@example.co.za",
+        });
+      });
+    });
+
+    /**
+     * <b>An absent key is not a complaint, and not a field either.</b> An older API that does
+     * not serve these leaves them undefined; omitted means unchanged on the way back, so
+     * there is nothing to refuse — and an input bound to undefined is an uncontrolled field
+     * that would report a save of a value nobody typed.
+     */
+    it("renders nothing and refuses nothing when the API does not serve the keys", async () => {
+      stubFetch([
+        { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+        { path: "/api/v1/admin/courts/", body: [] },
+      ]);
+      renderPage(<AdminSettingsPage />);
+
+      await screen.findByLabelText(/Unlock time/);
+      expect(screen.queryByLabelText(/Keep door scans for/)).toBeNull();
+      expect(screen.queryByLabelText(/Club contact number/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Save settings" })).toBeEnabled();
+      // And the retention sentence takes its no-number arm rather than guessing 90.
+      expect(screen.getByText(/the number of days set under Admin settings/)).toBeInTheDocument();
+    });
+  });
 });

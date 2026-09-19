@@ -4,14 +4,20 @@ import {
   DAY_KEYS, DAY_NAMES, DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
   GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
   GATE_UNLOCK_MAX_SECONDS, GATE_UNLOCK_MIN_SECONDS, OFFLINE_FLOOR_SECONDS, describeOfflineAfter,
-  deviceNumbersComplaint, doorBookingHorizonMinutes, formatDayHours, gateSettingsComplaint,
-  operatingHoursComplaint, parseDayHours, timezoneOptions,
+  CLUB_CONTACT_EMAIL_MAX_LENGTH, CLUB_CONTACT_PHONE_MAX_LENGTH,
+  DOOR_LOG_RETENTION_MAX_DAYS, DOOR_LOG_RETENTION_MIN_DAYS,
+  DOOR_REFUSAL_SPIKE_MAX_COUNT, DOOR_REFUSAL_SPIKE_MAX_MINUTES,
+  DOOR_REFUSAL_SPIKE_MIN_COUNT, DOOR_REFUSAL_SPIKE_MIN_MINUTES,
+  deviceNumbersComplaint, doorBookingHorizonMinutes, doorSettingsComplaint, formatDayHours,
+  gateSettingsComplaint, operatingHoursComplaint, parseDayHours, timezoneOptions,
   type DayHours, type DayKey,
 } from "../lib/tenantSettings";
 import {
   GATE_POLICY_LABELS, describeCourtSettingDoorReach, describeDoorBookingHorizon, describeEarlyEntry,
   describeGatePolicy, gateOfflineFallbackNotice,
 } from "../lib/gateCopy";
+// doors: admin
+import { doorRetentionNotice } from "../lib/doorsCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
 import { Card } from "../components/Card";
 import { Button, Input, Label, fieldClassName } from "../components/Button";
@@ -215,7 +221,7 @@ export default function AdminSettingsPage() {
           {/* Held on the gate block too, for the same reason it is held on the weekly
               table: a number input's min/max stop the spinner and nothing else, so a typed
               or pasted value would round-trip into a refusal the admin has to decode. */}
-          <Button onClick={save} disabled={saving || hoursComplaint !== null || gateSettingsComplaint(settings) !== null || deviceNumbersComplaint(settings) !== null}>{saving ? "Saving…" : "Save settings"}</Button>
+          <Button onClick={save} disabled={saving || hoursComplaint !== null || gateSettingsComplaint(settings) !== null || deviceNumbersComplaint(settings) !== null || doorSettingsComplaint(settings) !== null}>{saving ? "Saving…" : "Save settings"}</Button>
         </div>
       </Card>
 
@@ -512,7 +518,95 @@ function GateSection({ settings, onChange }: { settings: AdminSettings; onChange
         {describeDoorBookingHorizon(doorBookingHorizonMinutes(settings))}
       </p>
       {complaint && <p className="text-xs text-danger-strong">{complaint}</p>}
+      <DoorRecordsBlock settings={settings} set={set} />
     </Card>
+  );
+}
+
+/**
+ * doors: admin — W1's five numbers, behind a divider inside the Door gates card.
+ *
+ * <p>
+ * They are here rather than in a card of their own because they are still about doors, and
+ * behind a divider because they are about what the club KEEPS and what it tells a member,
+ * rather than about who may open one. Filing them beside "Who may open a door" would put a
+ * privacy setting next to an access setting, which is the shape of mistake the two
+ * activation windows on the Court boxes block already made once.
+ * </p>
+ *
+ * <p>
+ * Every field renders only when the API served the key: an older API leaves it `undefined`,
+ * omitted means unchanged on the way back, and an input bound to `undefined` is an
+ * uncontrolled field that reports a save of a value nobody typed.
+ * </p>
+ */
+function DoorRecordsBlock({ settings, set }: {
+  settings: AdminSettings;
+  set: (patch: Partial<AdminSettings>) => void;
+}) {
+  const complaint = doorSettingsComplaint(settings);
+  return (
+    <div className="border-t border-border pt-4 space-y-4">
+      <h3 className="text-sm font-semibold">Door records and contact</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {settings.door_log_retention_days !== undefined && (
+          <Field
+            label="Keep door scans for (days)"
+            hint={`${DOOR_LOG_RETENTION_MIN_DAYS}-${DOOR_LOG_RETENTION_MAX_DAYS}. Past this a door scan is DELETED, receipts and all, rather than anonymised. Money records follow the separate, longer rule above.`}
+          >
+            <Input type="number" min={DOOR_LOG_RETENTION_MIN_DAYS} max={DOOR_LOG_RETENTION_MAX_DAYS}
+              value={settings.door_log_retention_days}
+              onChange={(e) => set({ door_log_retention_days: Number(e.target.value) })} />
+          </Field>
+        )}
+        {settings.door_refusal_spike_count !== undefined && (
+          <Field
+            label="Refusal spike (scans)"
+            hint={`${DOOR_REFUSAL_SPIKE_MIN_COUNT}-${DOOR_REFUSAL_SPIKE_MAX_COUNT}. How many refusals at one door, inside the window beside this, before Doors says the door is refusing a lot. It counts SCANS: one person trying four times is four.`}
+          >
+            <Input type="number" min={DOOR_REFUSAL_SPIKE_MIN_COUNT} max={DOOR_REFUSAL_SPIKE_MAX_COUNT}
+              value={settings.door_refusal_spike_count}
+              onChange={(e) => set({ door_refusal_spike_count: Number(e.target.value) })} />
+          </Field>
+        )}
+        {settings.door_refusal_spike_minutes !== undefined && (
+          <Field
+            label="Refusal spike window (minutes)"
+            hint={`${DOOR_REFUSAL_SPIKE_MIN_MINUTES}-${DOOR_REFUSAL_SPIKE_MAX_MINUTES}. The window that count is measured over. It rolls, so the flag clears itself when the window empties and there is nothing to acknowledge.`}
+          >
+            <Input type="number" min={DOOR_REFUSAL_SPIKE_MIN_MINUTES} max={DOOR_REFUSAL_SPIKE_MAX_MINUTES}
+              value={settings.door_refusal_spike_minutes}
+              onChange={(e) => set({ door_refusal_spike_minutes: Number(e.target.value) })} />
+          </Field>
+        )}
+        {settings.club_contact_phone !== undefined && (
+          <Field
+            label="Club contact number"
+            hint={`At most ${CLUB_CONTACT_PHONE_MAX_LENGTH} characters. What a member sees when a door turns them away, and what goes on a printed door card. Leave it empty if the club has none — the screens say so rather than showing a blank.`}
+          >
+            <Input value={settings.club_contact_phone} maxLength={CLUB_CONTACT_PHONE_MAX_LENGTH}
+              placeholder="076 226 1390"
+              onChange={(e) => set({ club_contact_phone: e.target.value })} />
+          </Field>
+        )}
+        {settings.club_contact_email !== undefined && (
+          <Field
+            label="Club contact email"
+            hint={`At most ${CLUB_CONTACT_EMAIL_MAX_LENGTH} characters. The same, by mail. Also optional.`}
+          >
+            <Input type="email" value={settings.club_contact_email} maxLength={CLUB_CONTACT_EMAIL_MAX_LENGTH}
+              placeholder="squash@example.co.za"
+              onChange={(e) => set({ club_contact_email: e.target.value })} />
+          </Field>
+        )}
+      </div>
+      {/* The answer itself, in the words the door log prints, so an admin sees what they are
+          choosing rather than a number whose consequence they have to go and find. */}
+      <p className="text-sm font-medium text-text-primary">
+        {doorRetentionNotice(settings.door_log_retention_days ?? null)}
+      </p>
+      {complaint && <p className="text-xs text-danger-strong">{complaint}</p>}
+    </div>
   );
 }
 

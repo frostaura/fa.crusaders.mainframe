@@ -89,6 +89,17 @@ export function AdminDoorsLogPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [readAt, setReadAt] = useState<number | null>(null);
+  /**
+   * The filters the visible rows were actually read with.
+   *
+   * <p>
+   * <b>Not recomputed for the CSV.</b> `from` is "now minus 24 hours", so building it twice
+   * builds two different windows — and the export button's whole promise is that the file
+   * has the same rows as the page. Milliseconds most of the time; a boundary scan on a busy
+   * evening is a committee asking why the file and the screen disagree.
+   * </p>
+   */
+  const [activeFilters, setActiveFilters] = useState<DoorLogFilters | null>(null);
   const appendedRef = useRef<HTMLLIElement>(null);
   const appendedFrom = useRef(0);
   const base = useId();
@@ -99,7 +110,9 @@ export function AdminDoorsLogPage() {
     setLoading(true);
     setOlderFailed(false);
     try {
-      const page = await doorEndpoints.doorActivity(filtersOf(new URLSearchParams(query)));
+      const asked = filtersOf(new URLSearchParams(query));
+      const page = await doorEndpoints.doorActivity(asked);
+      setActiveFilters(asked);
       setRows(page.items);
       setCursor(page.next_cursor);
       setRetention(page.retention_days);
@@ -139,7 +152,7 @@ export function AdminDoorsLogPage() {
     setLoadingOlder(true);
     setOlderFailed(false);
     try {
-      const page = await doorEndpoints.doorActivity({ ...filtersOf(params), cursor });
+      const page = await doorEndpoints.doorActivity({ ...(activeFilters ?? filtersOf(params)), cursor });
       appendedFrom.current = rows?.length ?? 0;
       setRows([...(rows ?? []), ...page.items]);
       setCursor(page.next_cursor);
@@ -153,7 +166,7 @@ export function AdminDoorsLogPage() {
   const download = async () => {
     setDownloading(true);
     try {
-      const { blob, filename } = await doorEndpoints.doorActivityCsv(filtersOf(params));
+      const { blob, filename } = await doorEndpoints.doorActivityCsv(activeFilters ?? filtersOf(params));
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -226,9 +239,14 @@ export function AdminDoorsLogPage() {
                 <option value="">All outcomes</option>
                 <option value="released">Lock released</option>
                 <option value="refused">Refused (any)</option>
-                {Object.entries(DOOR_OUTCOME_CHIPS).map(([reason, label]) => (
-                  <option key={reason} value={reason}>{label}</option>
-                ))}
+                {/* `ok` is deliberately absent: it is the same set of rows as "Lock
+                    released" above, and two options with one label is a picker an admin
+                    cannot choose between. */}
+                {Object.entries(DOOR_OUTCOME_CHIPS)
+                  .filter(([reason]) => reason !== "ok")
+                  .map(([reason, label]) => (
+                    <option key={reason} value={reason}>{label}</option>
+                  ))}
               </Select>
             </div>
           </fieldset>

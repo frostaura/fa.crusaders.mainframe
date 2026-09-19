@@ -194,6 +194,71 @@ export function gateSettingsComplaint(settings: {
   return null;
 }
 
+/**
+ * The W1 door numbers, mirroring the API's own bounds (WIRE-W1 §6).
+ *
+ * <p>
+ * Every one of them binds camelCase AND snake_case on the PUT and is clamped again on read,
+ * which is this repo's standing rule for a reason: binding one spelling silently answers
+ * `{"saved": true}` and changes nothing, and a hand-edited settings document is not a PUT.
+ * </p>
+ */
+export const DOOR_LOG_RETENTION_MIN_DAYS = 7;
+export const DOOR_LOG_RETENTION_MAX_DAYS = 730;
+export const DOOR_REFUSAL_SPIKE_MIN_COUNT = 3;
+export const DOOR_REFUSAL_SPIKE_MAX_COUNT = 100;
+export const DOOR_REFUSAL_SPIKE_MIN_MINUTES = 5;
+export const DOOR_REFUSAL_SPIKE_MAX_MINUTES = 240;
+export const CLUB_CONTACT_PHONE_MAX_LENGTH = 32;
+export const CLUB_CONTACT_EMAIL_MAX_LENGTH = 254;
+
+/**
+ * Why the door settings cannot be saved, in a sentence, or null when they can.
+ *
+ * <p>
+ * <b>An absent key is not a complaint.</b> An older API that does not serve these leaves them
+ * `undefined`, and omitted means unchanged on the way back — so there is nothing to refuse,
+ * and a console that refused would be one nobody could save settings from at all.
+ * {@link deviceNumbersComplaint} established that rule; this follows it rather than
+ * inventing a second.
+ * </p>
+ *
+ * <p>
+ * The two contact fields may be EMPTY, deliberately: a club that has not set a phone number
+ * is a real state the member surface has copy for, and refusing to save an empty one would
+ * make "no contact" impossible to express.
+ * </p>
+ */
+export function doorSettingsComplaint(settings: {
+  door_log_retention_days?: number;
+  door_refusal_spike_count?: number;
+  door_refusal_spike_minutes?: number;
+  club_contact_phone?: string;
+  club_contact_email?: string;
+}): string | null {
+  const retention = settings.door_log_retention_days;
+  if (retention !== undefined && !inRange(retention, DOOR_LOG_RETENTION_MIN_DAYS, DOOR_LOG_RETENTION_MAX_DAYS)) {
+    return `Door scans have to be kept for a whole number of days between ${DOOR_LOG_RETENTION_MIN_DAYS} and ${DOOR_LOG_RETENTION_MAX_DAYS}.`;
+  }
+  const count = settings.door_refusal_spike_count;
+  if (count !== undefined && !inRange(count, DOOR_REFUSAL_SPIKE_MIN_COUNT, DOOR_REFUSAL_SPIKE_MAX_COUNT)) {
+    return `A refusal spike has to be a whole number of scans between ${DOOR_REFUSAL_SPIKE_MIN_COUNT} and ${DOOR_REFUSAL_SPIKE_MAX_COUNT}.`;
+  }
+  const minutes = settings.door_refusal_spike_minutes;
+  if (minutes !== undefined && !inRange(minutes, DOOR_REFUSAL_SPIKE_MIN_MINUTES, DOOR_REFUSAL_SPIKE_MAX_MINUTES)) {
+    return `The refusal-spike window has to be a whole number of minutes between ${DOOR_REFUSAL_SPIKE_MIN_MINUTES} and ${DOOR_REFUSAL_SPIKE_MAX_MINUTES}.`;
+  }
+  const phone = settings.club_contact_phone;
+  if (phone !== undefined && phone.trim().length > CLUB_CONTACT_PHONE_MAX_LENGTH) {
+    return `A club contact number is at most ${CLUB_CONTACT_PHONE_MAX_LENGTH} characters.`;
+  }
+  const email = settings.club_contact_email;
+  if (email !== undefined && email.trim().length > CLUB_CONTACT_EMAIL_MAX_LENGTH) {
+    return `A club contact email is at most ${CLUB_CONTACT_EMAIL_MAX_LENGTH} characters.`;
+  }
+  return null;
+}
+
 function inRange(value: number, min: number, max: number): boolean {
   return Number.isInteger(value) && value >= min && value <= max;
 }
