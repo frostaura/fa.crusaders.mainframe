@@ -9,9 +9,25 @@
 
 @layer base {
   :root {
-    /* Per-tenant accent — overridden at runtime from tenant.brand_accent_hex */
-    --accent-soft: #E0F2FE;
-    --accent-strong: #0369A1;
+    /*
+     * Crusaders' own colours, sampled from the club's crest: royal blue #00498D, with a light
+     * tint of it for soft surfaces. Measured against every background in tokens.test.ts — the
+     * tightest pair is text-muted on accent-soft at 4.80:1, clear of the 4.5:1 body floor.
+     *
+     * The comment here used to read "overridden at runtime from tenant.brand_accent_hex", and
+     * that was fiction. `brand_accent_hex` is written into tenant_settings by the seeder and by
+     * ProductionBootstrap, and NOTHING in this frontend has ever read it: there is no fetch, no
+     * setProperty, no consumer of any kind. The per-tenant accent is a value the database
+     * carries and the product ignores, so every tenant renders in whatever is written here.
+     *
+     * Wiring it up needs a public branding endpoint (tenant settings are behind auth, and this
+     * has to apply on the signed-out landing and sign-in screens too), which is more than a
+     * colour change. Until that exists these are the club's colours, stated honestly as
+     * constants rather than described as something they are not.
+     */
+    /* RGB channels, not hex — see the accent block in tailwind.config.ts for why. */
+    --accent-soft-rgb: 228 237 247;   /* #E4EDF7 */
+    --accent-strong-rgb: 0 73 141;    /* #00498D */
   }
 
   html, body, #root { height: 100%; }

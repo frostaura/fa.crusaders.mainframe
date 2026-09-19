@@ -74,6 +74,24 @@ export default function Layout() {
   // the card on /profile, with the chrome where they expect it.
   const headerless = /^\/(login|register|verify-email|welcome|forgot-password|reset-password|change-password)(\/|$)/.test(location.pathname);
 
+  /**
+   * The signed-out root is the club's public page, not a screen of the app.
+   *
+   * <p>
+   * It rendered inside the app chrome, which put a sticky bar over it carrying the club's name
+   * and a "Sign in" link — both of which the page's own hero already says, larger and better.
+   * A landing page wearing an application's toolbar reads as an intranet.
+   * </p>
+   *
+   * <p>
+   * Signed IN, the root is a member's home and the nav is the whole point, so this applies only
+   * while anonymous. During the initial auth probe it applies too: guessing "public" and being
+   * wrong costs a late-appearing bar, while guessing "app" and being wrong flashes chrome at
+   * every first-time visitor.
+   * </p>
+   */
+  const publicLanding = location.pathname === "/" && auth.status !== "authenticated";
+
   // Every way out of the settings menu, including the keyboard one.
   //
   // Escape did nothing: only the mousedown listener existed, so a keyboard user who opened the
@@ -98,6 +116,17 @@ export default function Layout() {
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpen]);
+
+  if (publicLanding) {
+    // No chrome, no width cap and no inner scroll container: the page lays itself out, and the
+    // DOCUMENT scrolls. The app's own shell scrolls a nested <main> instead, which on a long
+    // marketing page stops a phone's URL bar collapsing and breaks scroll-to-anchor.
+    return (
+      <main className="min-h-full">
+        <Outlet />
+      </main>
+    );
+  }
 
   if (headerless) {
     return (

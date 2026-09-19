@@ -19,9 +19,14 @@ describe("App", () => {
     localStorage.clear();
   });
 
-  it("renders the home heading for an anonymous visitor", async () => {
+  /**
+   * The heading is the CLUB's name, not the software's. An anonymous visitor at / is a squash
+   * player looking for their club; "Crusaders Mainframe" is what FrostAura calls the product
+   * they happen to be using, and it was the largest text on the page.
+   */
+  it("renders the club name as the heading for an anonymous visitor", async () => {
     render(<App />);
-    expect(await screen.findByRole("heading", { name: /Crusaders Mainframe/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Crusaders Squash/i, level: 1 })).toBeInTheDocument();
   });
 });
 

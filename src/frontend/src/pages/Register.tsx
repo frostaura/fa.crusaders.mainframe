@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { endpoints, uploadPhoto } from "../lib/api";
 import { describeFailure, isDeploymentFault } from "../lib/errors";
-import { Card } from "../components/Card";
+import { AuthShell } from "../components/AuthShell";
 import { Button, Input, Label } from "../components/Button";
 import { PhotoPicker } from "../components/PhotoPicker";
 
@@ -85,21 +85,32 @@ export default function RegisterPage() {
 
   if (submitted) {
     return (
-      <div className="max-w-md mx-auto pt-6">
-        <Card>
-          <h1 className="text-xl font-semibold mb-2">Check your inbox</h1>
-          <p className="text-sm text-text-secondary mb-4">We've emailed you a link to verify your address. After that, an admin reviews your application.</p>
+      <AuthShell className="my-auto" subline="Your application is in.">
+        <>
+          <h1 className="text-lg font-semibold mb-2">Check your inbox</h1>
+          <ol className="mb-5 space-y-2 text-sm text-text-secondary">
+            {/*
+              The three steps, because "an admin reviews your application" left an applicant with
+              no idea whether anything more was required of them, or how long to wait before
+              assuming it had failed.
+            */}
+            <li className="flex gap-2"><span aria-hidden="true">1.</span><span>We've emailed you a link — open it to confirm your address.</span></li>
+            <li className="flex gap-2"><span aria-hidden="true">2.</span><span>The club checks your membership number against its records.</span></li>
+            <li className="flex gap-2"><span aria-hidden="true">3.</span><span>You'll get a second email once you're approved, and then you can book.</span></li>
+          </ol>
           <Button variant="outline" onClick={() => nav("/login")} className="w-full">Back to sign in</Button>
-        </Card>
-      </div>
+        </>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="max-w-md mx-auto pt-6">
-      <Card>
-        <h1 className="text-xl font-semibold mb-1">Register</h1>
-        <p className="text-sm text-text-secondary mb-5">Join Crusaders Squash Club via Crusaders Mainframe.</p>
+    // Top-aligned, NOT centred. This card is tall, and centring it pushes the club band off the
+    // top of a 360x640 viewport on load — throwing away the one thing that tells an applicant
+    // whose page they are about to hand a photograph of their face to.
+    <AuthShell subline="Apply for a member account. It takes a minute.">
+      <>
+        <h1 className="text-lg font-semibold mb-4">Join the club</h1>
         <form onSubmit={submit} className="space-y-4">
           <div>
             <Label htmlFor="fullName">Full name</Label>
@@ -119,18 +130,27 @@ export default function RegisterPage() {
             <p className="text-xs text-text-muted mt-1">At least 8 characters.</p>
           </div>
           <PhotoPicker value={photo} onChange={setPhoto} onError={setError} onBusyChange={setPreparingPhoto} required />
-          {error && <p className="text-sm text-danger-strong">{error}</p>}
+          {error && (
+            <p role="alert" className="rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong">
+              {error}
+            </p>
+          )}
           {!blocked && (
-            <Button type="submit" disabled={loading || preparingPhoto} className="w-full">
+            <Button
+              type="submit"
+              variant="primary"
+              loading={loading || preparingPhoto}
+              className="w-full"
+            >
               {loading ? "Submitting…" : preparingPhoto ? "Preparing your photo…" : "Submit application"}
             </Button>
           )}
         </form>
         <p className="mt-4 text-sm text-text-secondary">
           Already have an account?{" "}
-          <Link to="/login" className="text-accent-strong hover:underline">Sign in</Link>
+          <Link to="/login" className="font-medium text-accent-strong underline underline-offset-2 hover:no-underline">Sign in</Link>
         </p>
-      </Card>
-    </div>
+      </>
+    </AuthShell>
   );
 }

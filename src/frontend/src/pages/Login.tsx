@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { ApiError, endpoints, errorCode } from "../lib/api";
 import { isPasskeySupported } from "../lib/webauthn";
-import { Card } from "../components/Card";
+import { AuthShell } from "../components/AuthShell";
 import { Button, Input, Label } from "../components/Button";
 
 // Seeded by Seeder.cs in Development. Hidden behind import.meta.env.DEV so it disappears in prod builds.
@@ -144,12 +144,13 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex-1 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <h1 className="text-xl font-semibold mb-1">Sign in</h1>
-        <p className="text-sm text-text-secondary mb-5">Crusaders Squash</p>
+    // `my-auto` centres the card inside Layout's headerless flex column. Sign-in is short
+    // enough to centre; register is not — see the note in that file.
+    <AuthShell className="my-auto" subline="Court bookings, credits and your club account.">
+      <>
+        <h1 className="text-lg font-semibold mb-4">Sign in</h1>
         {auth.sessionExpired && !error && (
-          <p className="text-sm text-warning-strong bg-warning-soft border border-warning-soft rounded-lg px-3 py-2 mb-4">
+          <p role="status" className="text-sm text-warning-strong bg-warning-soft border border-warning-soft rounded-lg px-3 py-2 mb-4">
             Your session ended, so we've signed you out. Sign in again to pick up where you left off.
           </p>
         )}
@@ -162,7 +163,15 @@ export default function LoginPage() {
             <Label htmlFor="password">Password</Label>
             <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
           </div>
-          {error && <p className="text-sm text-danger-strong">{error}</p>}
+          {/*
+            role="alert", and a left rule rather than a bare red sentence. A refusal that looks
+            like body copy is one a member skims past and then presses the button again.
+          */}
+          {error && (
+            <p role="alert" className="rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong">
+              {error}
+            </p>
+          )}
           {offerResend && (
             resendState === "sent" ? (
               <p className="text-sm text-text-secondary">
@@ -178,7 +187,9 @@ export default function LoginPage() {
               </Button>
             )
           )}
-          <Button type="submit" disabled={loading} className="w-full">{loading ? "Signing in…" : "Sign in"}</Button>
+          <Button type="submit" variant="primary" loading={loading} className="w-full">
+            {loading ? "Signing in…" : "Sign in"}
+          </Button>
         </form>
         <div className="mt-4 flex justify-between text-sm">
           <Link to="/register" className="text-accent-strong hover:underline">Register</Link>
@@ -192,18 +203,22 @@ export default function LoginPage() {
 
         {isPasskeySupported() && (
           <>
-            <hr className="my-6 border-border" />
-            <button
-              type="button"
-              onClick={passkeyLogin}
-              disabled={loading}
-              aria-label="Sign in with passkey"
-              title="Sign in with passkey"
-              className="mx-auto flex items-center justify-center w-14 h-14 rounded-full bg-info-soft text-info-strong hover:bg-info-soft/70 disabled:opacity-50 transition"
-            >
-              <Fingerprint size={28} />
-            </button>
-            <p className="text-center text-xs text-text-muted mt-2">Sign in with passkey</p>
+            {/*
+              A labelled full-width button, not a bare circular icon with a caption under it.
+              The circle was a 56px target with its name rendered as separate 11px grey text —
+              it read as decoration, and the fastest way to sign in was the thing that looked
+              least like a control.
+            */}
+            <div className="relative my-5">
+              <hr className="border-border" />
+              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-surface px-2 text-xs text-text-muted">
+                or
+              </span>
+            </div>
+            <Button type="button" variant="outline" onClick={passkeyLogin} disabled={loading} className="w-full">
+              <Fingerprint size={18} aria-hidden="true" />
+              Sign in with a passkey
+            </Button>
           </>
         )}
 
@@ -218,7 +233,7 @@ export default function LoginPage() {
             </p>
           </div>
         )}
-      </Card>
-    </div>
+      </>
+    </AuthShell>
   );
 }

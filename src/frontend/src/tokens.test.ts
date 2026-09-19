@@ -40,8 +40,9 @@ const text = colors.text as Record<string, string>;
 const bg = colors.bg as Record<string, string>;
 
 /**
- * Backgrounds text is actually set on. The per-tenant `accent.*` pair is a CSS variable rather
- * than a literal, so it cannot be measured from here — its default is included by hand.
+ * Backgrounds text is actually set on. The `accent.*` pair is a CSS variable rather than a
+ * literal, so it cannot be measured from here — the value index.css sets is repeated by hand.
+ * Change one without the other and this file silently stops measuring what ships.
  */
 const BACKGROUNDS: Record<string, string> = {
   "bg.app": bg.app,
@@ -51,7 +52,8 @@ const BACKGROUNDS: Record<string, string> = {
   "info.soft": (colors.info as Record<string, string>).soft,
   "warning.soft": (colors.warning as Record<string, string>).soft,
   "danger.soft": (colors.danger as Record<string, string>).soft,
-  "accent.soft (default)": "#E0F2FE",
+  "accent.soft (index.css)": "#E4EDF7",
+  "brand.soft": (colors.brand as Record<string, string>).soft,
 };
 
 /** AA for body text. The muted token is used at 11–12px, so the large-text 3:1 relaxation never applies. */
@@ -87,4 +89,35 @@ describe("the functional accents stay legible on their own soft backgrounds", ()
       expect(contrast(strong, soft)).toBeGreaterThanOrEqual(AA_BODY);
     });
   }
+});
+
+/**
+ * The club identity surface, measured as a FILL rather than as text on a page background.
+ *
+ * This is the pair the rest of the suite cannot catch: `brand.strong` is never a background
+ * for `text.*`, it is a background for white, and the largest text in the product sits on it.
+ */
+describe("the club identity surface is legible as a fill", () => {
+  const brand = colors.brand as Record<string, string>;
+
+  it("brand.ink on brand.strong", () => {
+    expect(contrast(brand.ink, brand.strong)).toBeGreaterThanOrEqual(AA_BODY);
+  });
+
+  it("brand.soft on brand.strong", () => {
+    expect(contrast(brand.soft, brand.strong)).toBeGreaterThanOrEqual(AA_BODY);
+  });
+
+  it("brand.strong reads on a white card", () => {
+    expect(contrast(brand.strong, bg.surface)).toBeGreaterThanOrEqual(AA_BODY);
+  });
+
+  /**
+   * docs/specs/design-system.md calls #7AB07A "the Crusaders green" and the seeder writes it
+   * into tenant_settings. It measures 2.52:1 on white. Pinned here so that nobody adopts it as
+   * a fill or a text colour on the strength of the doc.
+   */
+  it("refuses the #7AB07A the design spec names, which cannot carry text", () => {
+    expect(contrast("#7AB07A", "#FFFFFF")).toBeLessThan(AA_BODY);
+  });
 });
