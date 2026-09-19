@@ -432,7 +432,7 @@ test.describe("One door's page", () => {
     await expect(page.getByText(/The API refuses this box/)).toHaveCount(0);
 
     // A1.4: one name for the 403 path on a gate.
-    await expect(page.getByRole("button", { name: "Shut Front door" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Shut this door — Front door" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Take out of service/ })).toHaveCount(0);
   });
 
@@ -443,8 +443,8 @@ test.describe("One door's page", () => {
     ]);
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
-    await page.getByRole("button", { name: "Shut Front door" }).click();
-    await page.getByRole("button", { name: "Shut Front door — tap again to confirm" }).click();
+    await page.getByRole("button", { name: "Shut this door — Front door" }).click();
+    await page.getByRole("button", { name: "Shut this door — Front door — tap again to confirm" }).click();
 
     expect((await patch).postData()).toBe('{"enabled":false}');
   });
@@ -471,8 +471,8 @@ test.describe("One door's page", () => {
   test("says a deleted door comes back unnamed", async ({ page }) => {
     await openDoor(page, [door({ name: "Front door" })]);
 
-    await page.getByRole("button", { name: "Delete Front door" }).click();
-    await expect(page.getByRole("button", { name: "Delete Front door — tap again to confirm" })).toBeVisible();
+    await page.getByRole("button", { name: "Delete this door — Front door" }).click();
+    await expect(page.getByRole("button", { name: "Delete this door — Front door — tap again to confirm" })).toBeVisible();
     await expect(page.getByText("Delete? The door re-registers on its next heartbeat with no name.").first())
       .toBeVisible();
   });
@@ -652,4 +652,157 @@ test.describe("The printable door card", () => {
     await expect(page.getByRole("heading", { name: "side-door" })).toBeVisible();
     await page.emulateMedia({ media: "screen" });
   });
+});
+
+/**
+ * <b>B7 / C6 — the armed confirm was clipped, and only a browser can say so.</b>
+ *
+ * <p>
+ * Five reviewers drove the real product; two of them, independently, found that arming any
+ * destructive doors control produced a box of the same 44 px it had at rest with four lines of
+ * consequence inside it. Measured on a phone: `clientHeight 44, scrollHeight 106`. What was cut
+ * off was not decoration — it was the half of the sentence that says a door which has lost the
+ * network keeps admitting booked members for up to six hours, i.e. the part that decides whether
+ * shutting the door does what the admin thinks it does.
+ * </p>
+ *
+ * <p>
+ * <b>Why the vitest suite could not see it and this can.</b> jsdom computes no layout at all, so
+ * `scrollHeight` and `clientHeight` are both 0 there and any assertion about them passes on a
+ * component that clips everything. `components/confirm-button-armed.test.tsx` holds the three
+ * DOM properties the pixels depend on — no `overflow-hidden`, the showing label in normal flow,
+ * a caller's fixed `h-11` refused — and this is the measurement itself. Both are needed: the
+ * jsdom half runs on every commit and names the cause, this half proves the effect.
+ * </p>
+ *
+ * <p>
+ * Two widths, because the failure was width-dependent: the narrower the control, the more lines
+ * the consequence takes and the more of it a fixed height swallowed. 360 px is the narrowest
+ * phone the product supports and 768 px is where the doors grid becomes two columns, which makes
+ * each control narrow again on a screen nobody thinks of as small.
+ * </p>
+ */
+test.describe("An armed doors confirm fits the words it is showing", () => {
+  const WIDTHS = [
+    { label: "360 px", width: 360, height: 740 },
+    { label: "768 px", width: 768, height: 1024 },
+  ];
+
+  /**
+   * The control is armed; measure it rather than look at it.
+   *
+   * `scrollHeight <= clientHeight + 1` is the whole finding — a control whose content is taller
+   * than its box is a control hiding part of what it is about to do. The 1 px allowance is for
+   * sub-pixel rounding of a fractional line height, nothing more; the failure this catches was
+   * 52 to 62 px over.
+   *
+   * 14 px is the other half: the type was `text-xs`, and a 12 px consequence on a phone is the
+   * reason it needed four lines in the first place.
+   */
+  /**
+   * <b>Found by shape, not by wording.</b> Every `ConfirmButton` is a wrapper holding its
+   * control and the polite live region that replaced `aria-pressed`, so this selector is every
+   * two-step confirm on the page and nothing else.
+   *
+   * <p>
+   * An earlier draft of this sweep named each control by its label, and the labels changed
+   * under it inside one afternoon — "Delete Front door" became "Delete this door — Front door"
+   * while this was being written. A layout guarantee that only holds for the wording it was
+   * written against is not a guarantee; a control that arrives on this screen next month gets
+   * measured by this test without anybody remembering to add it.
+   * </p>
+   */
+  const CONFIRMS = 'div:has(> span[aria-live="polite"])';
+
+  /**
+   * Arm every confirm on the page in turn, measure it, and put it back.
+   *
+   * `scrollHeight <= clientHeight + 1` is the whole finding — a control whose content is taller
+   * than its box is a control hiding part of what it is about to do. The 1 px allowance is for
+   * sub-pixel rounding of a fractional line height, nothing more; the failure this catches was
+   * 52 to 62 px over. 14 px is the other half: the type was `text-xs`, and a 12 px consequence
+   * on a phone is the reason it needed four lines in the first place.
+   */
+  async function everyConfirmFits(page: Page, expected: number) {
+    const wrappers = page.locator(CONFIRMS);
+    await expect(wrappers).toHaveCount(expected);
+
+    for (let i = 0; i < expected; i += 1) {
+      const wrapper = wrappers.nth(i);
+      const control = wrapper.locator("> button").first();
+      // `innerText`, not `textContent`: the width sentinel inside the control is
+      // visibility-hidden and carries a copy of BOTH labels, which textContent would hand back.
+      const idleText = (await control.evaluate((el) => (el as HTMLElement).innerText)).trim();
+
+      await control.click();
+      // Armed: the wrapper now holds the control and its Cancel.
+      await expect(wrapper.locator("> button")).toHaveCount(2);
+
+      const measured = await control.evaluate((el) => ({
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        fontSize: Number.parseFloat(getComputedStyle(el).fontSize),
+        shown: (el as HTMLElement).innerText.trim(),
+        pressed: el.getAttribute("aria-pressed"),
+        name: el.getAttribute("aria-label"),
+      }));
+
+      expect(measured.shown, `confirm ${i} ("${idleText}") shows no consequence`).not.toBe(idleText);
+      expect(
+        measured.scrollHeight,
+        `confirm ${i} ("${idleText}") clips its own words: scrollHeight ${measured.scrollHeight}`
+        + ` > clientHeight ${measured.clientHeight}`,
+      ).toBeLessThanOrEqual(measured.clientHeight + 1);
+      expect(measured.fontSize, `confirm ${i} ("${idleText}") is smaller than 14 px`)
+        .toBeGreaterThanOrEqual(14);
+      // B6: "pressed" is the word for done, and nothing has been done yet.
+      expect(measured.pressed, `confirm ${i} ("${idleText}") claims a pressed state`).toBeNull();
+      // B16: whatever the call site adds, the words on the control come first.
+      if (measured.name !== null) {
+        expect(measured.name.startsWith(idleText), `"${measured.name}" does not open with "${idleText}"`)
+          .toBe(true);
+      }
+      // B6 again: the consequence is announced, not left to the visual alone.
+      expect((await wrapper.locator('span[aria-live="polite"]').innerText()).trim().length)
+        .toBeGreaterThan(0);
+
+      // C10: a visible way out, at a real touch size.
+      const cancel = wrapper.locator("> button").nth(1);
+      await expect(cancel).toBeVisible();
+      expect((await cancel.boundingBox())!.height, `confirm ${i}'s Cancel is under 44 px`)
+        .toBeGreaterThanOrEqual(44);
+
+      await cancel.click();
+      await expect(wrapper.locator("> button")).toHaveCount(1);
+    }
+  }
+
+  for (const size of WIDTHS) {
+    test(`every confirm on the doors overview does at ${size.label}`, async ({ page }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      // One door open and one already shut, so the fleet panel renders BOTH halves at once.
+      await openDoors(page, [
+        door(),
+        door({ id: OTHER_ID, name: "Front door", gate_key: "front-door", enabled: false }),
+      ]);
+
+      await everyConfirmFits(page, 2);
+    });
+
+    test(`every confirm on an open door's page does at ${size.label}`, async ({ page }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await openDoor(page, [door({ name: "Front door" })]);
+
+      // Shut this door, and Delete.
+      await everyConfirmFits(page, 2);
+    });
+
+    test(`a shut door's reopen confirm does at ${size.label}`, async ({ page }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await openDoor(page, [door({ name: "Front door", enabled: false })]);
+
+      // Reopen this door, and Delete.
+      await everyConfirmFits(page, 2);
+    });
+  }
 });
