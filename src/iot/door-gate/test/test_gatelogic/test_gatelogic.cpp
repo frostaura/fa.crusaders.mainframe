@@ -606,6 +606,22 @@ void test_flow_an_open_carries_the_servers_seconds_clamped_at_both_ends() {
   }
 }
 
+/// `reason` is a server-chosen string and it sits BEFORE `unlock_seconds` in
+/// every gate scan response. A scanner that matched a quoted string anywhere
+/// read the reason's VALUE as the key, found no digits after it, and fell back
+/// to the last adopted release time — a door open for the wrong number of
+/// seconds, on a 200 that was perfectly well formed.
+void test_flow_a_reason_that_names_the_unlock_key_does_not_hide_it() {
+  const char* body = "{\"opened\":true,\"reason\":\"unlock_seconds\",\"unlock_seconds\":7}";
+  const gatelogic::ScanDecision decision =
+      gatelogic::onGateResponse(200U, body, strlen(body), kDefaultMs, kCapMs);
+
+  TEST_ASSERT_FALSE(decision.fallbackToRoster);
+  TEST_ASSERT_TRUE(decision.released);
+  TEST_ASSERT_EQUAL_UINT32(7000U, decision.unlockMs);
+  TEST_ASSERT_EQUAL_STRING("unlock_seconds", decision.reason);
+}
+
 void test_flow_a_roster_open_is_queued_and_a_roster_refusal_is_too() {
   roster::Decision allow;
   allow.verdict = roster::Verdict::Allow;
@@ -818,15 +834,40 @@ void test_heartbeat_adopts_the_gate_objects_unlock_seconds_and_clamps_it() {
   }
 }
 
-/// The search starts at the `gate` key. A response that happened to carry an
-/// `unlock_seconds` somewhere else — a future field, a nested object — must not
-/// be read as this one.
+/// The read is BOUNDED TO THE `gate` OBJECT, at both ends. A response that
+/// happened to carry an `unlock_seconds` somewhere else — a future field, a
+/// nested object, before the gate object or after it — must not be read as this
+/// one. `devapi::json::findKey` is a flat scan by design, so bounding is the
+/// caller's job and this is where it is proved.
 void test_heartbeat_ignores_an_unlock_seconds_outside_the_gate_object() {
-  const char* body =
+  const char* before =
       "{\"kind\":\"gate\",\"legacy\":{\"unlock_seconds\":29},\"gate\":{\"unlock_seconds\":4},\"roster\":[]}";
   uint32_t unlockMs = 0U;
-  TEST_ASSERT_TRUE(gatelogic::adoptUnlockMs(body, strlen(body), unlockMs));
+  TEST_ASSERT_TRUE(gatelogic::adoptUnlockMs(before, strlen(before), unlockMs));
   TEST_ASSERT_EQUAL_UINT32(4000U, unlockMs);
+
+  // AFTER the object, which a scan that started at the `gate` key and ran to
+  // the end of the body would have adopted.
+  const char* after = "{\"kind\":\"gate\",\"gate\":{\"reason\":\"ok\"},\"unlock_seconds\":29,\"roster\":[]}";
+  unlockMs = 7777U;
+  TEST_ASSERT_FALSE(gatelogic::adoptUnlockMs(after, strlen(after), unlockMs));
+  TEST_ASSERT_EQUAL_UINT32(7777U, unlockMs);
+
+  // A nested object INSIDE the gate object is still inside it, and its brace
+  // must not close the gate object early.
+  const char* nested =
+      "{\"kind\":\"gate\",\"gate\":{\"limits\":{\"max\":9},\"unlock_seconds\":6},\"roster\":[]}";
+  unlockMs = 0U;
+  TEST_ASSERT_TRUE(gatelogic::adoptUnlockMs(nested, strlen(nested), unlockMs));
+  TEST_ASSERT_EQUAL_UINT32(6000U, unlockMs);
+
+  // The first `"gate"` in every gate heartbeat is the VALUE of `kind`. This is
+  // the decoy the local workaround existed for; it is held by the shared
+  // scanner now, and this test is what says so from the gate's side.
+  const char* valueDecoy = "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":5}}";
+  unlockMs = 0U;
+  TEST_ASSERT_TRUE(gatelogic::adoptUnlockMs(valueDecoy, strlen(valueDecoy), unlockMs));
+  TEST_ASSERT_EQUAL_UINT32(5000U, unlockMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -957,6 +998,7 @@ int main(int, char**) {
   RUN_TEST(test_flow_a_200_refusal_is_never_second_guessed_against_the_roster);
   RUN_TEST(test_flow_a_malformed_200_falls_back_rather_than_refusing);
   RUN_TEST(test_flow_an_open_carries_the_servers_seconds_clamped_at_both_ends);
+  RUN_TEST(test_flow_a_reason_that_names_the_unlock_key_does_not_hide_it);
   RUN_TEST(test_flow_a_roster_open_is_queued_and_a_roster_refusal_is_too);
   RUN_TEST(test_flow_a_stale_roster_admits_nobody);
   RUN_TEST(test_flow_a_gate_that_has_never_heard_from_the_api_admits_nobody);

@@ -1,48 +1,11 @@
 #include "gatelogic/GateHeartbeat.h"
 
 #include <stdio.h>
-#include <string.h>
 
 #include "devapi/Json.h"
 #include "timebase/TimeBase.h"
 
 namespace gatelogic {
-namespace {
-
-/// Position just past `"gate":`, or kNotFound.
-///
-/// NOT devapi::json::findKey. That looks for the quoted text anywhere in the
-/// body and returns the first hit — and a gate heartbeat response opens with
-/// `"kind":"gate"`, so the first `"gate"` in every single response is the VALUE
-/// of `kind`, not the key of the gate object. Reading from there happens to
-/// work on the corpus vectors, where the only `unlock_seconds` in the document
-/// is the right one; it stops working the moment any field is added between
-/// them, and the failure is a lock driven for somebody else's number.
-///
-/// So this requires a colon after the closing quote. It is a local helper
-/// rather than a change to devapi::json::findKey because that function's
-/// behaviour is relied on by another firmware's suite; the sharp edge is worth
-/// fixing there, deliberately, rather than as a side effect of this project.
-size_t findObjectKey(const char* body, size_t len, const char* key, size_t keyLen) {
-  if (body == nullptr || keyLen == 0U || len < keyLen + 3U) {
-    return devapi::json::kNotFound;
-  }
-  for (size_t i = 0U; i + keyLen + 2U <= len; ++i) {
-    if (body[i] != '"' || memcmp(body + i + 1U, key, keyLen) != 0 || body[i + keyLen + 1U] != '"') {
-      continue;
-    }
-    size_t at = i + keyLen + 2U;
-    while (at < len && (body[at] == ' ' || body[at] == '\t' || body[at] == '\n' || body[at] == '\r')) {
-      ++at;
-    }
-    if (at < len && body[at] == ':') {
-      return at + 1U;
-    }
-  }
-  return devapi::json::kNotFound;
-}
-
-} // namespace
 
 uint32_t clampUnlockMs(uint32_t requestedMs, uint32_t hardCapMs) {
   const uint32_t cap = hardCapMs < kMinUnlockMs ? kMinUnlockMs : hardCapMs;
@@ -93,13 +56,26 @@ bool adoptUnlockMs(const char* body, size_t len, uint32_t& unlockMs) {
   if (body == nullptr) {
     return false;
   }
-  const size_t at = findObjectKey(body, len, "gate", 4U);
-  if (at == devapi::json::kNotFound || at >= len) {
+
+  // BOUNDED TO THE `gate` OBJECT, both ends. devapi::json::findKey is a flat
+  // scan by design — the court box reads `button_map` out of the heartbeat's
+  // nested `config` with no path — so reading `unlock_seconds` from the whole
+  // body would adopt one from anywhere in the document, and reading from the
+  // `gate` key onward would adopt one added after the object closed. Either is
+  // a lock driven for somebody else's number.
+  //
+  // This used to be a local colon-requiring copy of findKey, because findKey
+  // itself matched a quoted string anywhere and a gate heartbeat opens
+  // `{"kind":"gate",…}`. That edge is fixed in devapi now and the copy is gone:
+  // one implementation, proven in ../shared/test/test_devapi.
+  size_t innerLen = 0U;
+  const size_t at = devapi::json::findObject(body, len, "gate", innerLen);
+  if (at == devapi::json::kNotFound) {
     return false;
   }
 
   uint32_t seconds = 0U;
-  if (!devapi::json::unsignedField(body + at, len - at, "unlock_seconds", seconds)) {
+  if (!devapi::json::unsignedField(body + at, innerLen, "unlock_seconds", seconds)) {
     return false;
   }
   // Clamped in SECONDS before the multiply, so a body claiming 4,300,000 cannot
