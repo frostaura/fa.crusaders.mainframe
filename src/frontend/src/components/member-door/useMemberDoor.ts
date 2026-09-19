@@ -134,11 +134,61 @@ export function useMemberDoor(enabled: boolean): MemberDoorRead {
 
   useEffect(() => {
     if (!enabled || !visible) return;
+    // A club with no door has nothing to poll for. One read settles it; polling on from
+    // there would be thirty seconds of nothing, forever, on every member's phone.
+    if (doorNow.current && !doorNow.current.doors) return;
     const timer = setTimeout(() => void refresh(), nextGap(failures.current, doorNow.current, openedAt));
     return () => clearTimeout(timer);
   }, [enabled, visible, settled, refresh, openedAt]);
 
   return { door, failed, loading, refresh };
+}
+
+/**
+ * Which decision is on screen, and what taking it off screen means.
+ *
+ * <p>
+ * Two minutes is the SERVER's fetch window, not a display window. A card that vanishes
+ * mid-sentence while a cold member is reading it is a defect, and on a five-second poll
+ * that boundary lands mid-read for somebody — so once a decision has been adopted it
+ * stays until a NEWER one supersedes it or the member dismisses it, whatever the response
+ * stops carrying.
+ * </p>
+ *
+ * <p>
+ * The second effect is the `not_recognised` arm. That reason means the code in the
+ * member's hand was dead, so the page fetches a fresh one on its own rather than waiting
+ * to be asked; the button on that card is for the member who wants to watch it happen.
+ * Once per decision, tracked by its own timestamp, never in a loop.
+ * </p>
+ */
+export function useShownDecision(door: MemberDoor | null, refreshCode: () => void) {
+  const [shown, setShown] = useState<MemberDoor["last_decision"]>(null);
+  const dismissedAt = useRef<string | null>(null);
+  const chased = useRef<string | null>(null);
+
+  useEffect(() => {
+    const latest = door?.last_decision;
+    if (!latest || dismissedAt.current === latest.at) return;
+    setShown((current) => (current?.at === latest.at ? current : latest));
+  }, [door]);
+
+  useEffect(() => {
+    const latest = door?.last_decision;
+    if (!latest || latest.released || latest.reason !== "not_recognised") return;
+    if (chased.current === latest.at) return;
+    chased.current = latest.at;
+    refreshCode();
+  }, [door, refreshCode]);
+
+  const dismiss = useCallback(() => {
+    setShown((current) => {
+      if (current) dismissedAt.current = current.at;
+      return null;
+    });
+  }, []);
+
+  return { shown, dismiss };
 }
 
 /**

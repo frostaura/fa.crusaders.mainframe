@@ -1,12 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QrCode as QrIcon, RefreshCw } from "lucide-react";
-import { endpoints, type MyQrCode, type MyQrKind } from "../lib/api";
+import {
+  endpoints,
+  type MemberDoor,
+  type MemberDoorContact,
+  type MyQrCode,
+  type MyQrKind,
+} from "../lib/api";
 import { describeCourtCodeFetchFailure, describeCourtCodeRefusal } from "../lib/bookingErrors";
 import { encodeQr, qrPath } from "../lib/qr";
-import { type Deadline, deadlineFor, formatCountdown, secondsUntil } from "../lib/countdown";
+import { type Deadline, deadlineFor, formatClock, formatCountdown, secondsUntil } from "../lib/countdown";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { cn } from "../lib/utils";
+// doors: member
+import { type LastKnown, minutesSince, readLastKnown, rememberQr } from "../lib/lastKnown";
+import {
+  describeStanding,
+  offlineIdentDeadEnd,
+  offlineNoCode,
+  offlineWithCode,
+} from "../lib/memberDoorCopy";
+import { ClubContact } from "../components/member-door/ClubContact";
+import { DecisionCard } from "../components/member-door/DecisionCard";
+import { FullScreenQr } from "../components/member-door/FullScreenQr";
+import { DoorSection } from "../components/member-door/DoorSection";
+import { useMemberDoor, useShownDecision } from "../components/member-door/useMemberDoor";
 
 /**
  * The member's code — what they hold up to the scanner on the court box, and at the
@@ -108,9 +127,12 @@ export function QrSvg({ value, className }: { value: string; className?: string 
   );
 }
 
-function formatStart(utc: string): string {
-  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(utc));
-}
+/**
+ * One clock face for the whole product, in `lib/countdown.ts` — not a second `Intl`
+ * formatter here. A hand-built sibling is what this repo already found once, disagreeing
+ * with its twin about midnight.
+ */
+const formatStart = formatClock;
 
 /**
  * What this code does at the club's DOOR, or nothing at all.
@@ -137,8 +159,18 @@ function formatStart(utc: string): string {
  * An opening time with no closing time still earns the first half. Inventing a clock time
  * the server did not send would be worse than a vaguer sentence that is true.
  * </p>
+ *
+ * <p>
+ * <b>`suppressed` is the de-duplication rule, and it is one line of logic.</b> When the
+ * standing line below the card is present AND carries a clock window of its own, this
+ * clause is a second, vaguer copy of a fact already stated better ten pixels away — so it
+ * is dropped. Whenever that line is absent, stale or failed, it comes back, because this
+ * function is the FALLBACK SOURCE of door truth on the page rather than decoration:
+ * `/me/qr/generate` is a different request and survives a `/me/door` that did not.
+ * </p>
  */
-function describeDoor(qr: MyQrCode): string {
+function describeDoor(qr: MyQrCode, suppressed = false): string {
+  if (suppressed) return "";
   if (qr.doors !== true) return "";
   if (qr.kind !== "booking") return " It also opens the club door whenever the club's door rules allow.";
   if (!qr.door_opens_at) return "";
@@ -167,19 +199,19 @@ function describeDoor(qr: MyQrCode): string {
  * or adds nothing at a club that has none.
  * </p>
  */
-function describeKind(qr: MyQrCode): { headline: string; detail: string } {
+function describeKind(qr: MyQrCode, suppressDoorClause = false): { headline: string; detail: string } {
   if (qr.kind === "booking") {
     const when = qr.starts_at ? ` · starts ${formatStart(qr.starts_at)}` : "";
     return {
       headline: qr.court_number != null ? `Booking code · court ${qr.court_number}${when}` : `Booking code${when}`,
       detail: "For your booking only — it works at that court, from a few minutes before your slot until it ends. "
-        + "At any other court it will not be recognised." + describeDoor(qr),
+        + "At any other court it will not be recognised." + describeDoor(qr, suppressDoorClause),
     };
   }
   return {
     headline: "Walk-up code · any court",
     detail: "Identifies you at any court box: start a walk-up on a free court, or pay for someone else's time. "
-      + "It is not tied to a booking." + describeDoor(qr),
+      + "It is not tied to a booking." + describeDoor(qr, suppressDoorClause),
   };
 }
 
@@ -362,6 +394,10 @@ export default function MyCodePage() {
       setDeadline(deadlineFor(next.expires_in_seconds));
       setSecondsLeft(next.expires_in_seconds);
       setError(null);
+      // doors: member — written on every success, with the lifetime resolved to an
+      // absolute instant, so a cold start with no signal has something to paint and can
+      // never paint it as live. See lib/lastKnown.ts.
+      rememberQr(next);
       // A code in hand is the club saying the bar is lifted; without this the page would
       // render the suspension sentence over a perfectly good code. The dead end, other side.
       setBarred(null);
@@ -437,12 +473,33 @@ export default function MyCodePage() {
     return () => clearTimeout(timer);
   }, [qr, loading, secondsLeft, walkUp, fetchCode]);
 
-  const meaning = qr ? describeKind(qr) : null;
+  // doors: member — one read carries the whole door picture, and every block it feeds is
+  // silent unless this club has a door. See `doorFacts` below.
+  const doorRead = useMemberDoor(true);
+  const door = doorRead.door;
+  /** Read ONCE, before the first fetch resolves, so a no-signal cold start paints something. */
+  const [cached] = useState(() => readLastKnown());
+
   /** Ask for a code now — Refresh, Try again and the barred card's Check again all mean this. */
-  const refetch = () => void fetchCode("replace", walkUp ? "ident" : undefined);
+  const refetchAsync = useCallback(
+    () => fetchCode("replace", walkUp ? "ident" : undefined),
+    [fetchCode, walkUp],
+  );
+  const refetch = useCallback(() => { void refetchAsync(); }, [refetchAsync]);
+
+  const { shown: shownDecision, dismiss } = useShownDecision(door, refetch);
+
+  const { doorsClub, contact, standing } = doorFacts(door, qr, cached);
+  // The de-duplication rule, stated once. See describeDoor.
+  const meaning = qr ? describeKind(qr, !!standing?.hasClockWindow) : null;
 
   // After every hook, so none is skipped. BarredCard says why it replaces the whole page.
   if (barred !== null) return <BarredCard reason={barred} error={error} loading={loading} onCheckAgain={refetch} />;
+
+  // Every read has failed and there is nothing live to show — see OfflinePage.
+  if (error && !qr && doorRead.failed && doorsClub) {
+    return <OfflinePage cached={cached} contact={contact} loading={loading} onTryAgain={refetch} />;
+  }
 
   return (
     <div className="max-w-xl mx-auto space-y-6">
@@ -451,46 +508,226 @@ export default function MyCodePage() {
         <p className="text-sm text-text-secondary">{subtitleFor(qr)}</p>
       </div>
 
+      {doorsClub && shownDecision && (
+        <DecisionCard decision={shownDecision} door={door} onRefreshCode={refetch} onDismiss={dismiss} />
+      )}
+
+      <CodeCard
+        qr={qr}
+        meaning={meaning}
+        error={error}
+        loading={loading}
+        secondsLeft={secondsLeft}
+        onRefresh={refetch}
+      />
+
+      {doorsClub && (
+        <DoorSection
+          door={door}
+          cached={cached}
+          doorRead={doorRead}
+          contact={contact}
+          codeSecondsLeft={qr ? secondsLeft : 0}
+          onRefreshCode={refetchAsync}
+        />
+      )}
+
+      {/* Below the QR now: a walk-up is a court concept, and it cost ~96px of the first
+          screen at 360 — where what a member at a door came for is the code. */}
       <WalkUpSwitch walkUp={walkUp} loading={loading} onChoose={chooseWalkUp} />
 
-      <Card className="space-y-5">
-        {error && !qr ? (
-          <div className="space-y-3">
-            <p className="text-sm text-danger-strong">{error}</p>
-            <Button onClick={refetch} disabled={loading}>Try again</Button>
+      {doorsClub && <ClubContact contact={contact} />}
+    </div>
+  );
+}
+
+/**
+ * The three door facts the page derives rather than reads.
+ *
+ * <p>
+ * Out here because they are pure, because the reasoning behind the first one is longer
+ * than the expression, and because a render that branches on eight optional chains is one
+ * nobody can check by reading.
+ * </p>
+ *
+ * <p>
+ * <b>Does this club have a door at all?</b> The live answer wins outright, including when
+ * it is `false` — a club that has just retired its gate must go silent. With no live
+ * answer either fallback will do, and they are ORed rather than ranked: both are the same
+ * claim from two different reads, and a member at a door is not served by the page
+ * forgetting one of them.
+ * </p>
+ */
+function doorFacts(door: MemberDoor | null, qr: MyQrCode | null, cached: LastKnown) {
+  const remembered = cached.door?.value ?? null;
+  return {
+    doorsClub: door ? door.doors : (qr?.doors === true || remembered?.doors === true),
+    contact: door?.contact ?? remembered?.contact ?? { phone: null, email: null },
+    standing: door ? describeStanding(door) : null,
+  };
+}
+
+/**
+ * The QR card — every behaviour it already had, plus one way to make it bigger.
+ *
+ * <p>
+ * Extracted from the page for the reason the complexity gate exists: the page grew four
+ * door blocks and a render that branches five ways is one nobody can check by reading.
+ * Nothing about the code's own lifecycle moved with it.
+ * </p>
+ */
+function CodeCard(props: {
+  qr: MyQrCode | null;
+  meaning: { headline: string; detail: string } | null;
+  error: string | null;
+  loading: boolean;
+  secondsLeft: number;
+  onRefresh: () => void;
+}) {
+  const { qr, meaning, error, loading, secondsLeft, onRefresh } = props;
+  // The overlay is this card's own state: it is the same symbol, bigger, and nothing
+  // above needs to know it is open.
+  const [full, setFull] = useState(false);
+  return (
+    <>
+    <Card className="space-y-5">
+      {error && !qr ? (
+        <div className="space-y-3">
+          <p className="text-sm text-danger-strong">{error}</p>
+          <Button onClick={onRefresh} disabled={loading}>Try again</Button>
+        </div>
+      ) : !qr ? (
+        <p className="text-sm text-text-secondary">Getting your code…</p>
+      ) : (
+        <>
+          {/* The whole symbol is the target. A scanner in a dark doorway wants area and
+              brightness before anything else, and a member holding a phone one-handed
+              should not have to find a small control to get them. */}
+          <button
+            type="button"
+            aria-label="Show your code full screen"
+            onClick={() => setFull(true)}
+            className={cn("mx-auto block w-full max-w-xs transition-opacity", secondsLeft === 0 && "opacity-40")}
+          >
+            <QrSvg value={qr.code} className="w-full h-auto rounded-lg border border-border" />
+          </button>
+          <p className="text-center text-xs text-text-muted">{"⤢ Tap the code to fill the screen"}</p>
+
+          <div className="text-center space-y-1">
+            <p className="font-mono text-2xl tracking-[0.25em]" aria-label="Your code">{qr.code}</p>
+            <p className="text-base font-medium">{meaning!.headline}</p>
+            <p className="text-sm text-text-secondary">{meaning!.detail}</p>
           </div>
-        ) : !qr ? (
-          <p className="text-sm text-text-secondary">Getting your code…</p>
-        ) : (
-          <>
-            <div className={cn("mx-auto w-full max-w-xs transition-opacity", secondsLeft === 0 && "opacity-40")}>
-              <QrSvg value={qr.code} className="w-full h-auto rounded-lg border border-border" />
-            </div>
 
-            <div className="text-center space-y-1">
-              <p className="font-mono text-2xl tracking-[0.25em]" aria-label="Your code">{qr.code}</p>
-              <p className="text-base font-medium">{meaning!.headline}</p>
-              <p className="text-sm text-text-secondary">{meaning!.detail}</p>
-            </div>
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
+            <p className="text-xs text-text-muted inline-flex items-center gap-1.5">
+              <QrIcon size={14} />
+              {secondsLeft > 0 ? `Refreshes in ${formatCountdown(secondsLeft)}` : loading ? "Refreshing…" : "Expired — refreshing"}
+            </p>
+            <Button
+              variant="outline"
+              className="h-9 px-3 text-xs"
+              onClick={onRefresh}
+              disabled={loading}
+            >
+              <RefreshCw size={14} className={cn("mr-1", loading && "animate-spin motion-reduce:animate-none")} /> Refresh
+            </Button>
+          </div>
+          {error && <p className="text-xs text-danger-strong">{error}</p>}
+        </>
+      )}
+    </Card>
+    {full && qr && (
+      <FullScreenQr code={qr.code} onClose={() => setFull(false)}>
+        <QrSvg value={qr.code} className="w-full h-full" />
+      </FullScreenQr>
+    )}
+    </>
+  );
+}
 
-            <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
-              <p className="text-xs text-text-muted inline-flex items-center gap-1.5">
-                <QrIcon size={14} />
-                {secondsLeft > 0 ? `Refreshes in ${formatCountdown(secondsLeft)}` : loading ? "Refreshing…" : "Expired — refreshing"}
-              </p>
-              <Button
-                variant="outline"
-                className="h-9 px-3 text-xs"
-                onClick={refetch}
-                disabled={loading}
-              >
-                <RefreshCw size={14} className={cn("mr-1", loading && "animate-spin")} /> Refresh
-              </Button>
-            </div>
-            {error && <p className="text-xs text-danger-strong">{error}</p>}
-          </>
-        )}
+/**
+ * Every read has failed. What the page can honestly still say, and what it must not.
+ *
+ * <p>
+ * This is the state the service worker cannot serve — `mayCache()` refuses `/api/` and
+ * refuses any request carrying an `authorization` header, and both guards are right — so
+ * it gets a page of its own rather than three cards each saying nothing. It is reached
+ * only at a doors club: every sentence here is about a door, and a club with no gate, or
+ * one this page has never yet heard has one, must stay silent about doors even when
+ * everything has failed. There the code card's own "Couldn't get a code" is the right and
+ * complete answer.
+ * </p>
+ *
+ * <p>
+ * Three arms, and the order between them is the design. A member at an `active_member`
+ * club holding an ident code with no booking cannot get in, whatever the code's clock
+ * says: an ident code lives about a minute, and a door that has also lost the network
+ * decides from a roster of BOOKINGS and nothing else. That arm comes first and draws no
+ * QR at all — showing a hopeful symbol to somebody in the dark is the cruellest thing
+ * this page could do.
+ * </p>
+ *
+ * <p>
+ * A booking code that has not yet expired is the common case and is drawn, at reduced
+ * opacity, with its age in words: it really will probably still work. An expired one, or
+ * none at all, is the second arm and again draws nothing.
+ * </p>
+ */
+function OfflinePage(props: {
+  cached: LastKnown;
+  contact: MemberDoorContact;
+  loading: boolean;
+  onTryAgain: () => void;
+}) {
+  const { cached, contact, loading, onTryAgain } = props;
+  const code = cached.qr;
+  // Read once, on mount, through a lazy initialiser: the clock is not pure to read in a
+  // render, and this page has nothing that should make a dead code come back to life
+  // halfway through somebody looking at it.
+  const [live] = useState(() => !!code && Date.parse(code.value.expiresAt) > Date.now());
+  const identDeadEnd = code?.value.kind === "ident"
+    && cached.door?.value.policy === "active_member"
+    && !cached.door?.value.next_booking;
+
+  const sentence = identDeadEnd
+    ? offlineIdentDeadEnd(contact)
+    : live
+      ? offlineWithCode({
+        fetchedAtClock: formatStart(code!.savedAt),
+        minutesAgo: minutesSince(code!.savedAt),
+        kind: code!.value.kind,
+      })
+      : offlineNoCode(contact);
+
+  const showQr = live && !identDeadEnd;
+
+  return (
+    <div className="max-w-xl mx-auto space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">Your code</h1>
+        <p className="text-sm text-text-secondary">{subtitleFor(null)}</p>
+      </div>
+
+      <Card className="space-y-5 border-l-4 border-warning-strong bg-warning-soft">
+        <p className="text-sm text-warning-strong">{sentence}</p>
+        <Button variant="outline" onClick={onTryAgain} disabled={loading}>Try again</Button>
       </Card>
+
+      {showQr && (
+        <Card className="space-y-5">
+          {/* The reduced opacity IS the message, and the sentence above says so in words:
+              colour and weight are never the only signal for anything on this page. */}
+          <div className="mx-auto w-full max-w-xs opacity-60">
+            <QrSvg value={code!.value.code} className="w-full h-auto rounded-lg border border-border" />
+          </div>
+          <div className="text-center space-y-1">
+            <p className="font-mono text-2xl tracking-[0.25em]" aria-label="Your code">{code!.value.code}</p>
+          </div>
+        </Card>
+      )}
+
+      <ClubContact contact={contact} />
     </div>
   );
 }
