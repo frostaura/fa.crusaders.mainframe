@@ -163,7 +163,6 @@ export default function LoginPage() {
   const doLogin = async (e: string, p: string) => {
     setError(null);
     setOfferResend(false);
-    setContact(null);
     setResendState("idle");
     setLoading(true);
     try {
@@ -174,6 +173,11 @@ export default function LoginPage() {
       setOfferResend(err instanceof ApiError && err.status === 403 && errorCode(err) === "email_not_verified");
       // Only on the refusal that tells the member to talk to the club, and only from that
       // refusal's own body. See `refusalContact`.
+      //
+      // Assigned unconditionally, so there is no second `setContact(null)` at the top of
+      // this function to keep in step: every path out of here that renders anything comes
+      // through this line, and a reset above it is a spelling of the same rule that a
+      // mutation pass proved inert. The success path navigates away.
       setContact(errorCode(err) === "not_approved" ? refusalContact(err) : null);
     } finally {
       setLoading(false);
@@ -247,15 +251,21 @@ export default function LoginPage() {
             like body copy is one a member skims past and then presses the button again.
           */}
           {error && (
-            <Alert>
-              <div className="space-y-2">
-                <p>{error}</p>
-                {/* D8. Each of the not_approved sentences ends by telling the member to
-                    speak to the club, on the one screen that used to give them no way to.
-                    Absent or null renders nothing — never a claim, never a dead link. */}
-                {contact && <RefusalContact contact={contact} />}
-              </div>
-            </Alert>
+            <div className="space-y-2">
+              <Alert>{error}</Alert>
+              {/* D8. Each of the not_approved sentences ends by telling the member to
+                  speak to the club, on the one screen that used to give them no way to.
+                  Absent or null renders nothing — never a claim, never a dead link.
+
+                  BESIDE the alert rather than inside it, and both halves of that matter.
+                  `Alert` renders a `<p>`, so a `<div>` of links inside it is markup the
+                  parser hoists back out — which is a DOM nobody wrote and a link a member
+                  may or may not be able to press. And the alert is `role="alert"`: a
+                  screen reader announces its contents the instant they appear, over
+                  whatever it was saying, which is right for the refusal and wrong for two
+                  links the member has not got to yet. */}
+              {contact && <RefusalContact contact={contact} />}
+            </div>
           )}
           {offerResend && (
             resendState === "sent" ? (

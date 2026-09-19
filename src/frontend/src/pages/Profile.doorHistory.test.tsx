@@ -60,6 +60,21 @@ describe("My door history", () => {
     );
   }
 
+
+  /**
+   * The calls the stub has recorded, read back after `renderProfile` has installed it.
+   *
+   * <p>
+   * `renderProfile` owns the stub and returns the render result rather than the stub, so
+   * a test that wants to count requests reaches the mock through the global it replaced.
+   * Cheaper than changing a helper eight tests already depend on.
+   * </p>
+   */
+  function stubFetchForRefresh(): () => { path: string }[] {
+    return () => (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([input]) => ({ path: String(input) }));
+  }
+
   const HISTORY = (over: Record<string, unknown> = {}) => ({
     items: [memberDoorHistoryRowFixture()],
     next_cursor: null,
@@ -319,5 +334,89 @@ describe("My door history", () => {
     // No text input inside the card at all — a search box is the first step of every one
     // of the above.
     expect(container.querySelector("#door-history input")).toBeNull();
+  });
+
+  // --- D14: a record with no date on it is one nobody can trust twice ---------------------
+
+  /**
+   * This card is read on mount and never polled, deliberately: a member scanning back
+   * through their own record should control every fetch. The cost of that decision is a
+   * page that can sit open for an hour showing rows from an hour ago with nothing on it
+   * to say so, and nothing short of a full reload to ask again. Both halves were missing.
+   */
+  it("says when the rows on screen were read", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    expect(await screen.findByText(/^As of \d{2}:\d{2}\./)).toBeInTheDocument();
+  });
+
+  it("lets the member ask again without reloading the page", async () => {
+    const stub = stubFetchForRefresh();
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+    await screen.findByText("My door history");
+
+    const before = stub().filter((c) => c.path.startsWith("/api/v1/me/door/history")).length;
+    fireEvent.click(await screen.findByRole("button", { name: /Refresh/ }));
+
+    await waitFor(() => {
+      expect(stub().filter((c) => c.path.startsWith("/api/v1/me/door/history")).length).toBeGreaterThan(before);
+    });
+  });
+
+  /**
+   * Refresh REPLACES, where Show more appends. A refresh that appended would double every
+   * row on screen — a member's own record apparently recording the same scan twice, which
+   * on this card of all cards is the worst possible way to be wrong.
+   */
+  it("replaces the rows on a refresh rather than appending them", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+    await screen.findByText("My door history");
+    const rows = () => [...document.querySelectorAll("#door-history li")].length;
+    await waitFor(() => expect(rows()).toBe(1));
+
+    const stub = stubFetchForRefresh();
+    const before = stub().filter((c) => c.path.startsWith("/api/v1/me/door/history")).length;
+    fireEvent.click(screen.getByRole("button", { name: /Refresh/ }));
+
+    // WAIT for the refresh to land before counting. A `waitFor` on "still one row" is
+    // satisfied by its first reading, which happens before the response has been applied
+    // — so it passes over an implementation that appends, which is what a mutation pass
+    // found. The request count is what says the answer has actually arrived.
+    await waitFor(() => {
+      expect(stub().filter((c) => c.path.startsWith("/api/v1/me/door/history")).length).toBeGreaterThan(before);
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Refresh/ })).toBeEnabled());
+    expect(rows()).toBe(1);
+  });
+
+  // --- D7: a member never reads about a door the club has not named ----------------------
+
+  /**
+   * The contradiction the reviewer photographed: six offline releases listed against "a
+   * door the club hasn't named yet", directly above a disclosure saying such a door
+   * "opens nothing while it is cut off". The name was being stripped from offline rows on
+   * the way out — the backend lane is fixing that — and the phrase itself is an admin fact
+   * a member cannot act on either way.
+   */
+  it("calls a row with no door name a club door", async () => {
+    renderProfile([
+      {
+        path: "/api/v1/me/door/history",
+        body: HISTORY({ items: [memberDoorHistoryRowFixture({ door_name: null, offline: true })] }),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    expect(await screen.findByText("a club door")).toBeInTheDocument();
+    expect(screen.queryByText(/hasn't named/i)).toBeNull();
   });
 });

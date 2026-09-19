@@ -24,9 +24,18 @@ export function FullScreenQr(props: { code: string; children: React.ReactNode; o
   const dialog = useRef<HTMLDivElement | null>(null);
   /** Our own history entry's marker while it is the current one. See the effect below. */
   const entry = useRef<number | null>(null);
-  /** `onClose` as the popstate listener sees it, so the listener is registered once. */
+  /**
+   * `onClose` as the popstate listener sees it, so the listener is registered once.
+   *
+   * <p>
+   * Kept current in an effect rather than assigned during render. A ref written in a
+   * render body is torn by a render React throws away — concurrent rendering does that
+   * routinely — and the lint rule that says so is right: the value that would survive is
+   * from a tree nobody mounted.
+   * </p>
+   */
   const close = useRef(onClose);
-  close.current = onClose;
+  useEffect(() => { close.current = onClose; }, [onClose]);
 
   // The dialog itself takes focus, not the Done button: `Button` spreads
   // ButtonHTMLAttributes and a ref is not one of those, and landing a screen-reader user

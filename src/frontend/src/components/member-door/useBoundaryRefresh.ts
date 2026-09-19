@@ -47,8 +47,11 @@ export function useBoundaryRefresh(instants: (string | null | undefined)[], onBo
   // Joined, so the effect re-arms when a boundary genuinely moves and not on every render
   // of an array literal built inline by the caller.
   const key = instants.filter((i): i is string => !!i).sort().join("|");
+  // Kept current in an effect rather than written during render: a ref assigned in a
+  // render body is torn by a render React throws away, which concurrent rendering does
+  // routinely. The timer below reads it at fire time, long after this has settled.
   const fire = useRef(onBoundary);
-  fire.current = onBoundary;
+  useEffect(() => { fire.current = onBoundary; }, [onBoundary]);
   /** Boundaries already acted on, so a re-render cannot replay one. */
   const done = useRef(new Set<number>());
 

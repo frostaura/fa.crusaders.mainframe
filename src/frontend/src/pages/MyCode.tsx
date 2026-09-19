@@ -1,22 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { QrCode as QrIcon, RefreshCw } from "lucide-react";
-import { endpoints, type MemberDoor, type MyQrCode, type MyQrKind } from "../lib/api";
-import { describeCourtCodeFetchFailure, describeCourtCodeRefusal } from "../lib/bookingErrors";
+import { type MemberDoor, type MyQrCode } from "../lib/api";
 import { encodeQr, qrPath } from "../lib/qr";
-import { type Deadline, deadlineFor, formatClock, formatCountdown, secondsUntil } from "../lib/countdown";
+import { formatClock, formatCountdown } from "../lib/countdown";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { cn } from "../lib/utils";
 // doors: member
-import {
-  type LastKnown,
-  minutesSince,
-  readLastKnown,
-  readWalkUpChoice,
-  rememberQr,
-  rememberWalkUpChoice,
-} from "../lib/lastKnown";
+import { type LastKnown, minutesSince, readLastKnown } from "../lib/lastKnown";
 import {
   BOOKING_DOOR_WINDOW_CLOSED,
   CONTACT_UNKNOWN,
@@ -41,6 +33,7 @@ import { FullScreenQr } from "../components/member-door/FullScreenQr";
 import { DoorSection } from "../components/member-door/DoorSection";
 import { useBoundaryRefresh } from "../components/member-door/useBoundaryRefresh";
 import { useCountdownSeconds } from "../components/member-door/useCountdownSeconds";
+import { useMemberCode } from "../components/member-door/useMemberCode";
 import { useMemberDoor, useShownDecision } from "../components/member-door/useMemberDoor";
 
 /**
@@ -75,10 +68,10 @@ import { useMemberDoor, useShownDecision } from "../components/member-door/useMe
  * locked in a pocket fires no ticks, and used to wake showing a live countdown over a
  * dead code. And the next code is fetched shortly <em>before</em> the current one runs
  * out and swapped in one state update, so a member at the box is never holding up a
- * code that has just died while the page fetches another. That pre-fetch is only worth
- * anything if the server actually rotates: it is allowed to answer with the code the
- * page already holds, and when it does, this page re-polls quickly rather than sitting
- * out the pacing gap over a dying QR (review finding 21).
+ * code that has just died while the page fetches another. Both of those, and the pacing
+ * that keeps them off the API's rate limiter, are in
+ * `components/member-door/useMemberCode.ts` — none of it is about doors, and inline it
+ * made this render a thirty-branch function the complexity gate was right to refuse.
  * </p>
  *
  * <p>
@@ -90,38 +83,6 @@ import { useMemberDoor, useShownDecision } from "../components/member-door/useMe
  * "walk up / pay for someone" switch asks for an ident code outright.
  * </p>
  */
-
-/**
- * The generate endpoint sits behind the API's auth rate-limit bucket, which is shared
- * with login — and, until forwarded headers are honoured, shared by everyone behind the
- * club's gateway. This gap bounds what one open page can cost it: at most one call
- * every ten seconds, whatever the server says a code's lifetime is.
- */
-const MIN_REFRESH_GAP_MS = 10_000;
-
-/** How long before expiry the next code is fetched. Ten seconds covers a slow fetch with room to spare. */
-const PREFETCH_LEAD_S = 10;
-
-/**
- * The gap between re-polls when the server answered a pre-fetch with the code the page
- * already holds.
- *
- * <p>
- * A code that is about to die and a server that keeps handing it back is the whole of
- * the dead-QR window: waiting {@link MIN_REFRESH_GAP_MS} between attempts guarantees
- * the code reaches zero first. The server mints a fresh one once the current has less
- * than the lead time left, so in practice this fires at most once — but the page must
- * not depend on that, because a server that reuses is exactly what shipped.
- * </p>
- */
-const NOT_ROTATED_GAP_MS = 2_000;
-
-/**
- * How many times in a row the page will chase a code the server would not rotate.
- * Bounded, so a server that will never rotate costs a handful of requests per code
- * rather than one every two seconds for as long as the page is open.
- */
-const MAX_NOT_ROTATED_TRIES = 3;
 
 const QUIET_ZONE = 4;
 
@@ -401,149 +362,12 @@ function DoorWindowClosed(props: { onUseMemberCode: () => void }) {
 // --- the page -------------------------------------------------------------------
 
 export default function MyCodePage() {
-  const [qr, setQr] = useState<MyQrCode | null>(null);
-  const [deadline, setDeadline] = useState<Deadline | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  /**
-   * On: ask for an ident code outright, whatever bookings the member has.
-   *
-   * <p>
-   * Seeded from the session rather than from `false`. A member who turned it on at the
-   * desk, put the phone away and opened the page again found it off and their booking
-   * code back — the switch having silently undone the decision they had just made. See
-   * `readWalkUpChoice`.
-   * </p>
-   */
-  const [walkUp, setWalkUp] = useState(readWalkUpChoice);
-  /** Barred: the page stops asking by itself. The member still can — see BarredCard. */
-  const [barred, setBarred] = useState<string | null>(null);
-  /** `barred`, read inside the fetch — state is a frame stale there, and which card is on
-   *  screen decides how a failure is worded. See `describeCourtCodeFetchFailure`. */
-  const barredNow = useRef<string | null>(null);
-  const lastFetchAt = useRef(0);
-  const inflight = useRef(false);
-  /** The code a pre-fetch was last made for, so the same code is not pre-fetched over and over as it runs out. */
-  const prefetchedFor = useRef<string | null>(null);
-  /** The code currently held, read inside the fetch — state would be a frame stale there. */
-  const held = useRef<string | null>(null);
-  /** Consecutive pre-fetches that answered with the code already held. See NOT_ROTATED_GAP_MS. */
-  const notRotated = useRef(0);
-
-  /**
-   * Gets a code. "replace" is what the member sees happening — first load, the Refresh
-   * button, the walk-up switch, or a code that died with nothing ready; "prefetch" is
-   * silent, and a failure is left for the expiry path to surface, by which time it may
-   * well have cleared.
-   */
-  const fetchCode = useCallback(async (mode: "replace" | "prefetch", kind: MyQrKind | undefined) => {
-    if (inflight.current) return;
-    inflight.current = true;
-    lastFetchAt.current = Date.now();
-    if (mode === "replace") {
-      setLoading(true);
-      setError(null);
-    }
-    try {
-      const next = await endpoints.meQrGenerate(kind);
-      // Did anything actually change hands? The server is entitled to answer with the
-      // code the page already holds — it reuses one that has not expired — and that
-      // answer is not a rotation however healthy the request looked. Counting it lets
-      // the pre-fetch effect chase it instead of declaring victory over a dying QR.
-      const rotated = next.code !== held.current;
-      notRotated.current = mode === "prefetch" && !rotated ? notRotated.current + 1 : 0;
-      held.current = next.code;
-      // One batch: code, deadline and countdown move together, so no render ever shows
-      // the new code with the old clock or the old code with the new one. The deadline
-      // is re-read even on a reused code: the server's remaining time is the truth, and
-      // it is what makes the countdown honest about how little is left.
-      setQr(next);
-      setDeadline(deadlineFor(next.expires_in_seconds));
-      setSecondsLeft(next.expires_in_seconds);
-      setError(null);
-      // doors: member — written on every success, with the lifetime resolved to an
-      // absolute instant, so a cold start with no signal has something to paint and can
-      // never paint it as live. See lib/lastKnown.ts.
-      rememberQr(next);
-      // A code in hand is the club saying the bar is lifted; without this the page would
-      // render the suspension sentence over a perfectly good code. The dead end, other side.
-      setBarred(null);
-      barredNow.current = null;
-    } catch (e) {
-      // Surfaced on BOTH modes. A pre-fetch is silent about every other failure, but a
-      // member suspended while this page was open must not go on holding a dead code.
-      const refused = describeCourtCodeRefusal(e);
-      if (refused !== null) {
-        setBarred(refused);
-        barredNow.current = refused;
-        setQr(null);
-        setDeadline(null);
-        setError(null);
-      } else if (mode === "replace") {
-        // Which card is asking decides the wording: see describeCourtCodeFetchFailure.
-        setError(describeCourtCodeFetchFailure(e, barredNow.current !== null ? "barred" : "code"));
-      }
-    } finally {
-      inflight.current = false;
-      if (mode === "replace") setLoading(false);
-    }
-  }, []);
-
-  /** The switch. A different code is wanted now, so one is fetched now. */
-  function chooseWalkUp(next: boolean) {
-    setWalkUp(next);
-    rememberWalkUpChoice(next);
-    prefetchedFor.current = null;
-    void fetchCode("replace", next ? "ident" : undefined);
-  }
-
-  // The FIRST fetch has to honour the remembered choice too, and re-reads it rather than
-  // closing over `walkUp`: this effect is a mount-only loader, and a reactive dependency
-  // on the switch would re-run it on every toggle beside `chooseWalkUp`'s own fetch.
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader, the house idiom
-  useEffect(() => { void fetchCode("replace", readWalkUpChoice() ? "ident" : undefined); }, [fetchCode]);
-
-  // The countdown is read off the clock, once a second while the page is visible and
-  // again the moment it becomes visible. A tick that never fired — the phone was
-  // locked — therefore costs nothing: the next read is right.
-  useEffect(() => {
-    if (!deadline) return;
-    const read = () => setSecondsLeft(secondsUntil(deadline));
-    const timer = setInterval(read, 1000);
-    document.addEventListener("visibilitychange", read);
-    window.addEventListener("focus", read);
-    window.addEventListener("pageshow", read);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", read);
-      window.removeEventListener("focus", read);
-      window.removeEventListener("pageshow", read);
-    };
-  }, [deadline]);
-
-  // The next code is fetched PREFETCH_LEAD_S before this one dies and swapped in at
-  // once, so the member is never holding up a dead code. A code that has already died
-  // — the pre-fetch failed, or the server handed one back already expired — is replaced
-  // visibly. Both are paced so neither can turn into a request storm.
-  useEffect(() => {
-    if (!qr || loading || secondsLeft > PREFETCH_LEAD_S) return;
-    const expired = secondsLeft === 0;
-    // A pre-fetch answered with the code already on screen: nothing rotated, the member
-    // is still holding one that is about to die, and waiting out the pacing gap is what
-    // guarantees it dies. Try again on the short gap, a bounded number of times.
-    const stalled = !expired && notRotated.current > 0;
-    if (stalled && notRotated.current > MAX_NOT_ROTATED_TRIES) return;
-    if (!expired && !stalled && prefetchedFor.current === qr.code) return;
-    const gap = stalled ? NOT_ROTATED_GAP_MS : MIN_REFRESH_GAP_MS;
-    const wait = Math.max(0, gap - (Date.now() - lastFetchAt.current));
-    const kind = walkUp ? "ident" : undefined;
-    const timer = setTimeout(() => {
-      if (!expired) prefetchedFor.current = qr.code;
-      void fetchCode(expired ? "replace" : "prefetch", kind);
-    }, wait);
-    return () => clearTimeout(timer);
-  }, [qr, loading, secondsLeft, walkUp, fetchCode]);
+  // The code's own lifecycle — fetching, pacing, the pre-fetch, the not-rotated chase and
+  // the barred dead end — is `useMemberCode`. None of it is about doors, and inline it
+  // made this function a thirty-branch render that nobody could check by reading.
+  const {
+    qr, secondsLeft, loading, error, barred, walkUp, refetch, refetchAsync, chooseWalkUp,
+  } = useMemberCode();
 
   // doors: member — one read carries the whole door picture, and every block it feeds is
   // silent unless this club has a door. See `doorFacts` below.
@@ -552,44 +376,14 @@ export default function MyCodePage() {
   /** Read ONCE, before the first fetch resolves, so a no-signal cold start paints something. */
   const [cached] = useState(() => readLastKnown());
 
-  /** Ask for a code now — Refresh, Try again and the barred card's Check again all mean this. */
-  const refetchAsync = useCallback(
-    () => fetchCode("replace", walkUp ? "ident" : undefined),
-    [fetchCode, walkUp],
-  );
-  const refetch = useCallback(() => { void refetchAsync(); }, [refetchAsync]);
-
   const { shown: shownDecision, dismiss } = useShownDecision(door, refetch);
+  const { doorsClub, contact, meaning } = doorFacts(door, qr, cached);
+  /** A decision is only ever about a door, so a club with none has none to show. */
+  const decisionToShow = doorsClub ? shownDecision : null;
 
-  const { doorsClub, contact, standing } = doorFacts(door, qr, cached);
-  // The de-duplication rule, stated once. See describeDoor.
-  const meaning = qr ? describeKind(qr, !!standing?.suppressesCodeClause) : null;
-
-  /**
-   * Every instant this page has been TOLD something changes at, re-read when it arrives.
-   *
-   * <p>
-   * The booking's end and both edges of its door window come from `/me/door`; the
-   * booking code's own door window comes from `/me/qr/generate`, which is a different
-   * request and survives a `/me/door` that did not. Both are listed, because a page that
-   * re-read only the boundaries of the response that happened to land is a page that
-   * still shows a finished booking's code when the other one failed.
-   * </p>
-   *
-   * <p>
-   * The code's own expiry is NOT here: the pre-fetch effect above already owns it, and
-   * two things arming a fetch at the same instant is a double request at the exact moment
-   * a member is holding the phone up.
-   * </p>
-   */
+  /** Re-read at every instant the page has been told something changes at. D4. */
   useBoundaryRefresh(
-    [
-      door?.next_booking?.ends_at,
-      door?.next_booking?.door_opens_at,
-      door?.next_booking?.door_closes_at,
-      qr?.door_opens_at,
-      qr?.door_closes_at,
-    ],
+    boundaryInstants(door, qr),
     useCallback(() => {
       void refetchAsync();
       void doorRead.refresh();
@@ -605,16 +399,16 @@ export default function MyCodePage() {
    * sleeps through.
    * </p>
    */
-  const doorWindowLeft = useCountdownSeconds(
-    qr?.kind === "booking" ? (qr.door_closes_at ?? null) : null,
-  );
+  /** Zero when there is no code at all, which the checklist reads as "had run out". */
+  const codeSecondsLeft = qr ? secondsLeft : 0;
+  const doorWindowLeft = useCountdownSeconds(bookingDoorWindowEnd(qr));
   const bookingDoorWindowClosed = doorWindowLeft !== null && doorWindowLeft <= 0;
 
   // After every hook, so none is skipped. BarredCard says why it replaces the whole page.
   if (barred !== null) return <BarredCard reason={barred} error={error} loading={loading} onCheckAgain={refetch} />;
 
   // Every read has failed and there is nothing live to show — see OfflinePage.
-  if (error && !qr && doorRead.failed && doorsClub) {
+  if (everythingFailed({ error, qr, doorFailed: doorRead.failed, doorsClub })) {
     return <OfflinePage cached={cached} contact={contact} loading={loading} onTryAgain={refetch} />;
   }
 
@@ -622,12 +416,12 @@ export default function MyCodePage() {
     <div className="max-w-xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Your code</h1>
-        <p className="text-sm text-text-secondary">{subtitleFor(qr?.doors === true || doorsClub)}</p>
+        <p className="text-sm text-text-secondary">{subtitleFor(doorsClub)}</p>
       </div>
 
-      {doorsClub && shownDecision && (
+      {decisionToShow && (
         <DecisionCard
-          decision={shownDecision}
+          decision={decisionToShow}
           door={door}
           contact={contact}
           onRefreshCode={refetch}
@@ -646,48 +440,98 @@ export default function MyCodePage() {
         onRefresh={refetch}
       />
 
-      {/* Only when there is something better to switch TO. A member already on an ident
-          code has nothing to offer, and a club with no door has no window to have closed. */}
-      {doorsClub && bookingDoorWindowClosed && !walkUp && (
-        <DoorWindowClosed onUseMemberCode={() => chooseWalkUp(true)} />
-      )}
-
-      {doorsClub ? (
-        <DoorSection
-          door={door}
-          cached={cached}
-          doorRead={doorRead}
-          contact={contact}
-          codeSecondsLeft={qr ? secondsLeft : 0}
-          onRefreshCode={refetchAsync}
-        />
-      ) : (
-        // D9. While the one read that answers "does this club even have a door" is still
-        // in flight, the page used to render the court-only page with total confidence and
-        // then grow a whole section under the member's thumb four seconds later. Saying
-        // that a question is being asked costs one muted line and claims nothing: the
-        // sentence works whichever way the answer comes back. See DOOR_SECTION_CHECKING.
-        doorRead.loading && <p className="text-sm text-text-muted">{DOOR_SECTION_CHECKING}</p>
-      )}
+      <DoorBlocks
+        doorsClub={doorsClub}
+        door={door}
+        cached={cached}
+        doorRead={doorRead}
+        contact={contact}
+        codeSecondsLeft={codeSecondsLeft}
+        windowClosedOffer={bookingDoorWindowClosed && !walkUp}
+        onUseMemberCode={() => chooseWalkUp(true)}
+        onRefreshCode={refetchAsync}
+      />
 
       {/* Below the QR now: a walk-up is a court concept, and it cost ~96px of the first
           screen at 360 — where what a member at a door came for is the code. */}
       <WalkUpSwitch walkUp={walkUp} loading={loading} onChoose={chooseWalkUp} />
 
-      {doorsClub && (
-        <>
-          {/* D14. The member's own record was three steps away — avatar, Profile, scroll
-              — from the screen where "did that actually work?" gets asked. */}
-          <Link
-            to={`/profile#${HISTORY_ANCHOR}`}
-            className="inline-flex items-center min-h-11 text-sm text-accent-strong underline underline-offset-2 hover:no-underline"
-          >
-            {HISTORY_LINK_LABEL}
-          </Link>
-          <ClubContact contact={contact} />
-        </>
-      )}
+      <DoorFooter doorsClub={doorsClub} contact={contact} />
     </div>
+  );
+}
+
+/**
+ * Everything on this page that exists only because the club has a door — and the one
+ * sentence that covers the seconds before the page knows whether it has.
+ *
+ * <p>
+ * Gathered out of the render for the reason the complexity gate exists. Four door blocks
+ * guarded by three different conditions, inline among the court blocks, is a render where
+ * the next one gets added to the wrong arm — and a page that says something about doors
+ * at a club that has none is the single failure this whole surface is designed around.
+ * One component, one guard, one place to check it.
+ * </p>
+ */
+function DoorBlocks(props: {
+  doorsClub: boolean;
+  door: MemberDoor | null;
+  cached: LastKnown;
+  doorRead: ReturnType<typeof useMemberDoor>;
+  contact: ContactKnowledge;
+  codeSecondsLeft: number;
+  /** Has the booking code on screen stopped opening a door, with a better one to offer? */
+  windowClosedOffer: boolean;
+  onUseMemberCode: () => void;
+  onRefreshCode: () => Promise<void>;
+}) {
+  const { doorsClub, doorRead, windowClosedOffer, onUseMemberCode } = props;
+
+  if (!doorsClub) {
+    // D9. While the one read that answers "does this club even have a door" is still in
+    // flight, the page used to render the court-only page with total confidence and then
+    // grow a whole section under the member thumb four seconds later. Saying that a
+    // question is being asked costs one muted line and claims nothing: the sentence is
+    // true whichever way the answer comes back. See DOOR_SECTION_CHECKING.
+    if (!doorRead.loading) return null;
+    return <p className="text-sm text-text-muted">{DOOR_SECTION_CHECKING}</p>;
+  }
+
+  return (
+    <>
+      {/* Only when there is something better to switch TO. A member already on an ident
+          code has nothing to offer, and a club with no door has no window to have closed. */}
+      {windowClosedOffer && <DoorWindowClosed onUseMemberCode={onUseMemberCode} />}
+      <DoorSection
+        door={props.door}
+        cached={props.cached}
+        doorRead={doorRead}
+        contact={props.contact}
+        codeSecondsLeft={props.codeSecondsLeft}
+        onRefreshCode={props.onRefreshCode}
+      />
+    </>
+  );
+}
+
+/**
+ * The two things at the foot of the page, both silent at a club with no door: the way to
+ * the member own record, and the way to a human.
+ */
+function DoorFooter({ doorsClub, contact }: { doorsClub: boolean; contact: ContactKnowledge }) {
+  if (!doorsClub) return null;
+  return (
+    <>
+      {/* D14. The member own record was three steps away — avatar, Profile, scroll — from
+          the screen where the question "did that actually work?" gets asked. */}
+      <Link
+        to={`/profile#${HISTORY_ANCHOR}`}
+        className="inline-flex items-center min-h-11 text-sm text-accent-strong underline underline-offset-2 hover:no-underline"
+      >
+        {HISTORY_LINK_LABEL}
+      </Link>
+      <ClubContact contact={contact} />
+    </>
   );
 }
 
@@ -724,11 +568,72 @@ function doorFacts(door: MemberDoor | null, qr: MyQrCode | null, cached: LastKno
   if (door) contact = liveContact(door.contact);
   else if (remembered) contact = staleContact(remembered.value.contact, minutesSince(remembered.savedAt));
 
+  const standing = door ? describeStanding(door) : null;
   return {
     doorsClub: door ? door.doors : (qr?.doors === true || remembered?.value.doors === true),
     contact,
-    standing: door ? describeStanding(door) : null,
+    // The de-duplication rule, stated once. See describeDoor.
+    meaning: qr ? describeKind(qr, !!standing?.suppressesCodeClause) : null,
   };
+}
+
+/**
+ * Every instant the page has been TOLD something changes at.
+ *
+ * <p>
+ * Out here rather than inline for the reason `doorFacts` is: five optional chains in an
+ * array literal is five branches the complexity gate counts against a render, and none of
+ * them is a decision anybody needs to read while following what the page draws.
+ * </p>
+ *
+ * <p>
+ * BOTH reads are listed on purpose. The booking's end and both edges of its door window
+ * come from `/me/door`; the booking code's own window comes from `/me/qr/generate`, which
+ * is a different request and survives a `/me/door` that did not. A page that re-read only
+ * the boundaries of the response that happened to land is a page that still shows a
+ * finished booking's code when the other one failed.
+ * </p>
+ *
+ * <p>
+ * The code's own expiry is NOT here: `useMemberCode`'s pre-fetch already owns it, and two
+ * things arming a fetch at the same instant is a double request at the exact moment a
+ * member is holding the phone up.
+ * </p>
+ */
+function boundaryInstants(door: MemberDoor | null, qr: MyQrCode | null): (string | null | undefined)[] {
+  const booking = door?.next_booking ?? null;
+  return [
+    booking?.ends_at,
+    booking?.door_opens_at,
+    booking?.door_closes_at,
+    qr?.door_opens_at,
+    qr?.door_closes_at,
+  ];
+}
+
+/** When the booking code on screen stops opening a door, or null if it never did. */
+function bookingDoorWindowEnd(qr: MyQrCode | null): string | null {
+  if (qr?.kind !== "booking") return null;
+  return qr.door_closes_at ?? null;
+}
+
+/**
+ * Has EVERY read failed, at a club that has a door to talk about?
+ *
+ * <p>
+ * All four halves matter and the last one most: this decides whether the whole page is
+ * replaced by {@link OfflinePage}, every sentence of which is about a door. At a club with
+ * no gate — or one this page has never yet heard has one — the code card's own "Couldn't
+ * get a code" is the right and complete answer.
+ * </p>
+ */
+function everythingFailed(state: {
+  error: string | null;
+  qr: MyQrCode | null;
+  doorFailed: boolean;
+  doorsClub: boolean;
+}): boolean {
+  return !!state.error && !state.qr && state.doorFailed && state.doorsClub;
 }
 
 /**
