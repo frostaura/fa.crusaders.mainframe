@@ -79,7 +79,9 @@ export function ChangePasswordForm({ onDone, forced }: { onDone?: () => void; fo
         />
       </div>
       {error && <p className="text-sm text-danger-strong">{error}</p>}
-      <Button type="submit" disabled={saving} className="w-full">{saving ? "Saving…" : "Change password"}</Button>
+      <Button type="submit" variant="primary" loading={saving} className="w-full">
+        {saving ? "Saving…" : "Change password"}
+      </Button>
     </form>
   );
 }
@@ -120,7 +122,12 @@ export default function ChangePasswordPage() {
         */}
         <p className="text-sm text-text-secondary mb-5">
           {forced
-            ? "An admin has reset your password, so the one on your account is a temporary one they issued. Choose your own to carry on — the temporary one stops working the moment you do."
+            // Deliberately does NOT say "an admin has reset your password". That is false for
+            // the first person who ever signs in to a club: ProductionBootstrap creates the
+            // opening admin account from the compose file with must-change-password set, and
+            // nobody reset anything — they ARE the admin. The forced change has exactly one
+            // meaning the screen can rely on, which is that the current password is temporary.
+            ? "Your account is on a temporary password. Choose your own to carry on — the temporary one stops working the moment you do."
             : "You'll need your current password to set a new one."}
         </p>
         <ChangePasswordForm forced={forced} onDone={() => nav(forced ? "/schedule" : "/profile")} />
