@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
 import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { tokenStore } from "../lib/api";
 import { useBalance } from "../lib/balance";
 import { useProfile } from "../lib/profile";
 import { ScrollArea } from "./ScrollArea";
@@ -85,12 +86,22 @@ export default function Layout() {
    *
    * <p>
    * Signed IN, the root is a member's home and the nav is the whole point, so this applies only
-   * while anonymous. During the initial auth probe it applies too: guessing "public" and being
-   * wrong costs a late-appearing bar, while guessing "app" and being wrong flashes chrome at
-   * every first-time visitor.
+   * while anonymous.
+   * </p>
+   *
+   * <p>
+   * The initial auth probe is the awkward case, and a stored token settles it without waiting.
+   * Guessing "public" for everybody flashes a late-arriving bar at every returning member;
+   * guessing "app" for everybody flashes chrome at every first-time visitor. `tokenStore.get()`
+   * is a synchronous localStorage read that says which of the two this almost certainly is, so
+   * neither group sees the flash. It only has to be right about intent, not about whether the
+   * token is still valid — an expired one resolves to anonymous a moment later and the bar goes
+   * away, which is the same thing signing out does.
    * </p>
    */
-  const publicLanding = location.pathname === "/" && auth.status !== "authenticated";
+  const probablySignedIn = auth.status === "loading" && Boolean(tokenStore.get());
+  const publicLanding =
+    location.pathname === "/" && auth.status !== "authenticated" && !probablySignedIn;
 
   // Every way out of the settings menu, including the keyboard one.
   //
