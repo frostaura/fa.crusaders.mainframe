@@ -97,13 +97,15 @@ requests = [
         "note": (
             "the diagnostic counter a board with one LED and no screen has nowhere else to put. "
             "`no_push` is how many heartbeats the board could not push — a body that did not fit "
-            "its buffer, or arrived incomplete — since it last reported one, plus its "
-            "watchdog-arm failures. Optional and additive: a board that sends nothing is a board "
-            "reporting zero, which is why it is not in the vector above. The server LOGS it "
-            "against the device code and stores nothing (a column would be an EF migration for a "
-            "diagnostic), and it never changes the response: a counter must not be able to take a "
-            "door out of service. A negative value is not a counter and is ignored rather than "
-            "refused, for the same reason."
+            "its buffer, arrived incomplete, or failed its read on an otherwise-200 response — "
+            "plus its watchdog-arm failures. It is a SINCE-BOOT TOTAL and is never reset by the "
+            "server acknowledging it: the board has no way to know which report the server kept, "
+            "so a counter reset on send would lose the whole count on any lost response. Read a "
+            "rise between two heartbeats, not the absolute value. Optional and additive: a board "
+            "that sends nothing is a board reporting zero, which is why it is not in the vector "
+            "above. The server LOGS it against the device code and stores nothing (a column would "
+            "be an EF migration for a diagnostic), and it never changes the response: a counter "
+            "must not be able to take a door out of service."
         ),
         "method": "POST",
         "path_and_query": "/api/v1/device/heartbeat",
@@ -114,6 +116,53 @@ requests = [
             "uptime_ms": 86400000,
             "kind": "gate",
             "no_push": 4,
+        }),
+    },
+    {
+        "id": "gate-heartbeat-request-events-lost",
+        "note": (
+            "`events_lost` joins `no_push` as the second diagnostic counter: how many queued "
+            "events the board's ring overwrote before they could be uploaded. Both are SINCE-BOOT "
+            "TOTALS, both are omitted at zero, and both SATURATE rather than wrap — the firmware "
+            "stops at INT32_MAX (2147483647), which is the value here, so a board that has been "
+            "losing events for a decade reports a ceiling rather than a small number. The server "
+            "binds both as 64-bit so a saturated or over-large value is still a clean 200; see "
+            "gate-heartbeat-request-counters-out-of-range. Omitted at zero is why the vector "
+            "above carries only one of them."
+        ),
+        "method": "POST",
+        "path_and_query": "/api/v1/device/heartbeat",
+        "authorization": BEARER,
+        "body_hex": body_hex({
+            "mac": MAC,
+            "firmware_version": "1.0.0",
+            "uptime_ms": 86400000,
+            "kind": "gate",
+            "no_push": 4,
+            "events_lost": 2147483647,
+        }),
+    },
+    {
+        "id": "gate-heartbeat-request-counters-out-of-range",
+        "note": (
+            "the counters at values no honest board emits, pinned because the answer must be a "
+            "clean 200 anyway. `no_push` here is INT32_MAX + 1, which an `int?` binding rejects "
+            "with a 400 for the WHOLE heartbeat — the roster included — so a diagnostic field "
+            "would have taken the door out of service, which is exactly what the vector above "
+            "says it must never do. `events_lost` here is negative, which is not a counter at "
+            "all. Both are IGNORED: not logged as counts, not stored, and not refused. The "
+            "binding is 64-bit for this reason, not because any board sends these."
+        ),
+        "method": "POST",
+        "path_and_query": "/api/v1/device/heartbeat",
+        "authorization": BEARER,
+        "body_hex": body_hex({
+            "mac": MAC,
+            "firmware_version": "1.0.0",
+            "uptime_ms": 86400000,
+            "kind": "gate",
+            "no_push": 2147483648,
+            "events_lost": -1,
         }),
     },
     {
@@ -343,8 +392,9 @@ cases = {
 
 manifest = {
     "description": (
-        "Door-gate HTTP request and response body shapes: the heartbeat's `kind` hint and its "
-        "gate-shaped answer, the scan decision, and the offline gate_open event."
+        "Door-gate HTTP request and response body shapes: the heartbeat's `kind` hint, its two "
+        "since-boot diagnostic counters and its gate-shaped answer, the scan decision, and the "
+        "offline gate_open event."
     ),
     "authority": (
         "docs/specs/door-gate.md — the behaviour oracle; "
