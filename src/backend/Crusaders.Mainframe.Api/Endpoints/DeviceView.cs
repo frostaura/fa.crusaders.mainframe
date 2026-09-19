@@ -33,6 +33,23 @@ public static class DeviceView
         // This box's own button map, or null when it runs the club's. See Device.ButtonMapJson.
         button_map = ButtonMap.FromJson(d.ButtonMapJson)?.ToWire(),
         gate_key = d.GateKey,
+
+        // The two door-card fields (W1.4) and the instant behind the out-of-service state.
+        //
+        // ALWAYS PRESENT, MEANINGFUL ONLY ON A GATE. A court box carries them empty rather
+        // than omitted, because the console types one device shape and an optional key is a
+        // second shape wearing the same name — the same argument DeviceView already makes
+        // about `doors` on the member's QR response. Neither is inferred from anything the
+        // board reports: see Device.LocationNote and DoorPowerLossBehaviour.
+        location_note = d.LocationNote,
+        power_loss_behaviour = DoorPowerLoss.Wire(d.PowerLossBehaviour),
+
+        // When an admin shut this board, or null while it is in service. Already recorded on
+        // the row for the settlement's sake (Device.OutOfServiceSince) and never readable, so
+        // the console could say "out of service" and not "you shut this on Tuesday at 19:40".
+        // It is evidence about the past, not a control.
+        out_of_service_since = d.OutOfServiceSince,
+
         mac_address = d.MacAddress,
         enabled = d.Enabled,
         last_seen_at = d.LastSeenAt,

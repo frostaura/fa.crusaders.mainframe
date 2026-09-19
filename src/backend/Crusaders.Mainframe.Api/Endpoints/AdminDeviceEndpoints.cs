@@ -129,9 +129,23 @@ public static class AdminDeviceEndpoints
             buttons = new Optional<ButtonMap?>(outcome.Override);
         }
 
+        // The behaviour has already been checked against the closed set by KindFieldsRefusal,
+        // so this parse cannot fail here; it is the same parse rather than a second reading of
+        // the element, so the value validated and the value stored are one value.
+        DoorPowerLossBehaviour? powerLoss = null;
+        if (req.EffectivePowerLossBehaviour.ValueKind == JsonValueKind.String
+            && DoorPowerLoss.TryParse(req.EffectivePowerLossBehaviour.GetString(), out var parsedPowerLoss))
+        {
+            powerLoss = parsedPowerLoss;
+        }
+
         var updated = await devices.UpdateAsync(
             device,
-            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, buttons, req.EffectiveGateKey?.Trim()),
+            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, buttons, req.EffectiveGateKey?.Trim())
+            {
+                LocationNote = req.EffectiveLocationNote?.Trim(),
+                PowerLossBehaviour = powerLoss,
+            },
             ctx.User.Id() ?? Guid.Empty, ct);
 
         return Results.Ok(DeviceView.Of(updated, await HeartbeatSecondsAsync(settingsAccessor, ct)));
@@ -145,6 +159,19 @@ public static class AdminDeviceEndpoints
 
     /// <summary>Error code for a <c>gate_key</c> longer than the column.</summary>
     public const string GateKeyTooLong = "gate_key_too_long";
+
+    /// <summary>
+    /// Error code for a door-card field — <c>location_note</c> or <c>power_loss_behaviour</c>
+    /// — sent to a court box. The mirror of <see cref="CourtFieldsOnAGate"/>, and refused for
+    /// the same reason: a box has no door to be located or to fall open.
+    /// </summary>
+    public const string DoorFieldsOnACourtBox = "door_fields_on_a_court_box";
+
+    /// <summary>Error code for a <c>location_note</c> longer than the column.</summary>
+    public const string LocationNoteTooLong = "location_note_too_long";
+
+    /// <summary>Error code for a <c>power_loss_behaviour</c> outside <see cref="DoorPowerLoss.All"/>.</summary>
+    public const string PowerLossBehaviourInvalid = "power_loss_behaviour_invalid";
 
     /// <summary>
     /// The fields that belong to one kind of board and not the other, refused rather than
@@ -176,7 +203,15 @@ public static class AdminDeviceEndpoints
     {
         if (device.Kind != DeviceKind.Gate)
         {
-            return req.EffectiveGateKey is null ? null : Results.BadRequest(new { error = GateKeyNotAGate });
+            if (req.EffectiveGateKey is not null) return Results.BadRequest(new { error = GateKeyNotAGate });
+
+            // The door card describes a DOOR: where it is, and what its lock does with the
+            // power off. A court box has neither. Refused rather than dropped, for the reason
+            // the summary gives — a 200 that changed nothing is the worst of the three
+            // available answers.
+            return req.SaysAnythingAboutTheDoorCard
+                ? Results.BadRequest(new { error = DoorFieldsOnACourtBox })
+                : null;
         }
 
         if (req.CourtNumbers is not null || req.ButtonMap.ValueKind != JsonValueKind.Undefined)
@@ -192,7 +227,44 @@ public static class AdminDeviceEndpoints
             return Results.BadRequest(new { error = GateKeyTooLong, max_length = Device.GateKeyMaxLength });
         }
 
-        return null;
+        return DoorCardRefusal(req);
+    }
+
+    /// <summary>
+    /// The door card's own bounds, on a row that is a gate: the note's length and the
+    /// behaviour's closed set. Null when both are acceptable, including when neither arrived.
+    ///
+    /// <para>
+    /// Separate from <see cref="KindFieldsRefusal"/> because that method answers "does this
+    /// field belong on this kind of row" and these two answer "is this value usable" — and
+    /// because <c>power_loss_behaviour</c> is a string enum whose validity is checked the same
+    /// STRICT way <c>gate_access_policy</c> is on the settings PUT. A console that invents a
+    /// fourth answer to "what does this lock do with no power" is a console publishing a
+    /// measurement nobody took.
+    /// </para>
+    ///
+    /// <para>
+    /// A present-but-null <c>power_loss_behaviour</c> is refused rather than read as absent,
+    /// unlike <c>gate_key</c>. There is no state a JSON null could mean here that
+    /// <c>"not_established"</c> does not already name, so a null is a client bug, and the one
+    /// thing this field must never do is quietly leave a stale measurement in place while
+    /// reporting success.
+    /// </para>
+    /// </summary>
+    private static IResult? DoorCardRefusal(UpdateDeviceRequest req)
+    {
+        if (req.EffectiveLocationNote is { } note && note.Trim().Length > Device.LocationNoteMaxLength)
+        {
+            return Results.BadRequest(new { error = LocationNoteTooLong, max_length = Device.LocationNoteMaxLength });
+        }
+
+        var behaviour = req.EffectivePowerLossBehaviour;
+        if (behaviour.ValueKind == JsonValueKind.Undefined) return null;
+
+        var wire = behaviour.ValueKind == JsonValueKind.String ? behaviour.GetString() : null;
+        return DoorPowerLoss.TryParse(wire, out _)
+            ? null
+            : Results.BadRequest(new { error = PowerLossBehaviourInvalid, allowed = DoorPowerLoss.All });
     }
 
     /// <summary>
@@ -293,7 +365,25 @@ public sealed record UpdateDeviceRequest(
     /// The camelCase spelling of <see cref="GateKey"/>, bound so that picking the wrong one is
     /// an answer rather than silence. Never read directly — see <see cref="EffectiveGateKey"/>.
     /// </summary>
-    [property: JsonPropertyName("gateKey")] string? GateKeyCamel = null)
+    [property: JsonPropertyName("gateKey")] string? GateKeyCamel = null,
+
+    /// <summary>
+    /// The door card's prose location (W1.4). Two-valued exactly like <see cref="GateKey"/> —
+    /// <c>""</c> clears it, absent leaves it alone — and bound under both spellings for the
+    /// reason <see cref="GateKeyCamel"/> records. Refused on a court box.
+    /// </summary>
+    [property: JsonPropertyName("location_note")] string? LocationNote = null,
+    [property: JsonPropertyName("locationNote")] string? LocationNoteCamel = null,
+
+    /// <summary>
+    /// What the lock does with no power (W1.4). A bare <see cref="JsonElement"/> rather than a
+    /// string, because the three answers this field must distinguish are "absent", "a value in
+    /// the closed set" and "anything else" — and a nullable string reads a JSON null, a
+    /// missing key and an empty document as one thing. The last of those three has to be a
+    /// refusal: see <c>DoorCardRefusal</c>.
+    /// </summary>
+    [property: JsonPropertyName("power_loss_behaviour")] JsonElement PowerLossBehaviour = default,
+    [property: JsonPropertyName("powerLossBehaviour")] JsonElement PowerLossBehaviourCamel = default)
 {
     /// <summary>
     /// The door's name as the caller asked for it, under either spelling — or null when
@@ -318,4 +408,24 @@ public sealed record UpdateDeviceRequest(
     /// </para>
     /// </summary>
     public string? EffectiveGateKey => GateKey ?? GateKeyCamel;
+
+    /// <summary>The door's location as the caller asked for it, under either spelling.</summary>
+    public string? EffectiveLocationNote => LocationNote ?? LocationNoteCamel;
+
+    /// <summary>
+    /// The power-loss behaviour as the caller sent it, under either spelling — snake_case
+    /// winning where both arrived, like every other pair here. <c>Undefined</c> when neither
+    /// did.
+    /// </summary>
+    public JsonElement EffectivePowerLossBehaviour
+        => PowerLossBehaviour.ValueKind != JsonValueKind.Undefined ? PowerLossBehaviour : PowerLossBehaviourCamel;
+
+    /// <summary>
+    /// Whether this PATCH says anything at all about the door card — the question a court box
+    /// is refused on. Either field, under either spelling, at any value including an explicit
+    /// null: sending a door's fields to a box is the mistake, not the value in them.
+    /// </summary>
+    public bool SaysAnythingAboutTheDoorCard
+        => EffectiveLocationNote is not null
+           || EffectivePowerLossBehaviour.ValueKind != JsonValueKind.Undefined;
 }

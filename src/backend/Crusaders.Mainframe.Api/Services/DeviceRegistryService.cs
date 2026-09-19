@@ -200,6 +200,15 @@ public sealed class DeviceRegistryService
             var switchedAt = DateTimeOffset.UtcNow;
             device.OutOfServiceSince = enabled ? null : switchedAt;
 
+            // A door going back INTO service was not shut by a fleet shut-all any more,
+            // whichever route reopened it. Cleared here rather than only in the fleet reopen,
+            // because an admin reopening ONE door from its own page is the case that would
+            // otherwise leave a stale flag behind — and the next "reopen all" would then
+            // report reopening a door that was already open. Note the asymmetry: shutting a
+            // door individually deliberately does NOT set it. That is the whole distinction
+            // the column exists to hold. See Device.ShutByShutAllAt.
+            if (enabled) device.ShutByShutAllAt = null;
+
             // Taking a board OUT of service closes whatever outage it is in, silently.
             //
             // PeripheralHealthWorker skips disabled rows — an admin who switches a box off has
@@ -237,6 +246,13 @@ public sealed class DeviceRegistryService
         // gone, which is the gesture worth honouring. Trimmed and bounded by the caller,
         // where there is a person to refuse.
         if (cmd.GateKey is not null) device.GateKey = cmd.GateKey.Length == 0 ? null : cmd.GateKey;
+
+        // The door card. Same two-valued rule as the name above, and the same reason for it.
+        if (cmd.LocationNote is not null)
+        {
+            device.LocationNote = cmd.LocationNote.Length == 0 ? null : cmd.LocationNote;
+        }
+        if (cmd.PowerLossBehaviour is { } powerLoss) device.PowerLossBehaviour = powerLoss;
 
         // An admin has now looked at this row, so it stops reading as "appeared by itself,
         // nobody has checked the courts it guessed". Deleting the row and letting the box
@@ -550,7 +566,22 @@ public sealed record UpdateDeviceCommand(
     bool? Enabled,
     IReadOnlyList<int>? CourtNumbers,
     Optional<ButtonMap?>? ButtonMap = null,
-    string? GateKey = null);
+    string? GateKey = null)
+{
+    /// <summary>
+    /// The door card's location, two-valued exactly like <see cref="GateKey"/>: null leaves it
+    /// alone, an empty string clears it. Init-only rather than positional so no existing
+    /// construction site — or its tests — changes.
+    /// </summary>
+    public string? LocationNote { get; init; }
+
+    /// <summary>
+    /// What the lock does with no power, or null to leave the recorded answer alone. There is
+    /// no "clear it" value because <see cref="DoorPowerLossBehaviour.NotEstablished"/> already
+    /// is one, and it is a real instruction rather than an absence.
+    /// </summary>
+    public DoorPowerLossBehaviour? PowerLossBehaviour { get; init; }
+}
 
 /// <summary>A value that is explicitly present, so "absent" and "present but null" can be told apart on a PATCH.</summary>
 /// <summary>

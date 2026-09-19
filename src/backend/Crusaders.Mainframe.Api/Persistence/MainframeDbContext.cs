@@ -285,6 +285,9 @@ public class MainframeDbContext : DbContext
             // reads and the width the column enforces cannot drift apart. Identical value,
             // so no migration: this names 64, it does not change it.
             e.Property(d => d.GateKey).HasMaxLength(Device.GateKeyMaxLength);
+            // Same rule, same reason, for the door card's prose field.
+            e.Property(d => d.LocationNote).HasMaxLength(Device.LocationNoteMaxLength);
+            e.Property(d => d.PowerLossBehaviour).HasConversion<int>();
             e.Property(d => d.MacAddress).HasMaxLength(12).IsRequired();
             e.Property(d => d.LastIpAddress).HasMaxLength(64);
             e.Property(d => d.RunningVersion).HasMaxLength(32);
