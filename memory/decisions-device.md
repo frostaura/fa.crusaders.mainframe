@@ -57,5 +57,5 @@ club's old working sketches exactly. Any fix that needs a wire moved is the wron
   Court Code page refreshes on a timer for every member who has it open, so behind the gateway the
   whole club shared one bucket keyed on the proxy address — ten opens in a minute took down login,
   PIN and board provisioning club-wide.
-- **Gates are parked.** Hardware undecided, possibly a plain ESP per gate; the device model stays
-  open so they slot in later without a redesign.
+- **Gates are no longer parked** (2026-09-19) — one ESP32 per door, built on this contract
+  unchanged. Their own decisions are in [`decisions-gate.md`](decisions-gate.md).
