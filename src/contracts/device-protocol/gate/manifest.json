@@ -3,6 +3,6 @@
   "authority": "docs/specs/door-gate.md — the behaviour oracle; src/backend/Crusaders.Mainframe.Api/Endpoints/DeviceGateEndpoint.cs and the gate branch of DeviceEndpoints.cs are the reference implementation the firmware must match.",
   "case_count": {
     "requests": 3,
-    "responses": 11
+    "responses": 12
   }
 }

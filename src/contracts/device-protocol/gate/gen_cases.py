@@ -167,7 +167,12 @@ responses = [
         "note": (
             "a gate nobody has named yet — auto-registration leaves gate_key null and an admin "
             "sets it. The key is still PRESENT on the wire as null: a firmware that reads an "
-            "absent key as an empty string and a null one as an error would diverge here."
+            "absent key as an empty string and a null one as an error would diverge here. "
+            "It is also the UNNAMED half of the named/unnamed pair: an unnamed gate's roster is "
+            "ALWAYS empty, whatever the club has booked, so the offline fallback does not start "
+            "until an admin has named the door. Online scans work from the first heartbeat. "
+            "Pair this with gate-heartbeat-response-roster-single, which is the named half and "
+            "is the only shape that may carry entries."
         ),
         "body_hex": body_hex(heartbeat("gate-0a1b2c", None, [])),
         "expect": {"kind": "gate", "gate_key": None, "roster": []},
@@ -179,7 +184,9 @@ responses = [
             "one rostered booking, 30 minutes from its early-entry window opening and 90 minutes "
             "from its slot ending. Same TOKEN|relay|opens_in|closes_in grammar as the court box "
             "so devlink::parseRosterElement and roster::Roster are reused unchanged; the relay "
-            "field is always 0."
+            "field is always 0. The NAMED half of the pair above: gate_key is set, so this board "
+            "is allowed a roster at all. A non-empty roster beside a null gate_key is a body the "
+            "server does not emit."
         ),
         "body_hex": body_hex(heartbeat("gate-0a1b2c", "front-door", [entry("7Q3F9KM2XZ8B", 1800, 5400)])),
         "expect": {"kind": "gate", "roster": ["7Q3F9KM2XZ8B|0|1800|5400"]},
@@ -232,8 +239,11 @@ responses = [
         "note": (
             "unknown, expired, or another club's code — one reason for all three on purpose, "
             "because telling them apart at a door turns it into an oracle for which codes are real. "
-            "200, not 4xx: a refusal the firmware can act on must never look like an outage it "
-            "should fall back from."
+            "It also covers a booking code presented AFTER its own booking has ended, or for a "
+            "booking that is no longer Booked: the AccessCode row outlives the slot by the grace "
+            "window, and a door that distinguished 'spent' from 'never existed' would be that "
+            "same oracle. 200, not 4xx: a refusal the firmware can act on must never look like an "
+            "outage it should fall back from."
         ),
         "body_hex": body_hex(scan(False, "not_recognised", 0)),
         "expect": {"opened": False, "reason": "not_recognised", "unlock_seconds": 0},
@@ -259,6 +269,23 @@ responses = [
         ),
         "body_hex": body_hex(scan(False, "no_booking", 0)),
         "expect": {"opened": False, "reason": "no_booking", "unlock_seconds": 0},
+    },
+    {
+        "id": "gate-scan-response-denied-too-early",
+        "kind": "gate",
+        "note": (
+            "a BOOKING-ACTIVATION code presented before its own booking's entry window opens. A "
+            "booking code is not a standing building key: under EVERY policy it opens a door only "
+            "while now is inside [StartsAt - H, EndsAt] of the booking it names, where H is "
+            "gate_early_entry_minutes under booking_window and "
+            "max(gate_early_entry_minutes, roster_window_minutes + activation_cue_window_minutes) "
+            "under active_member — the same horizon in which the member's own phone would show "
+            "that code at all. Distinct from not_recognised because this one is worth telling a "
+            "member apart from a dead code: they are early, not refused, and the door will open "
+            "later. A sixty-second MemberIdent code never answers this — it names no booking."
+        ),
+        "body_hex": body_hex(scan(False, "too_early", 0)),
+        "expect": {"opened": False, "reason": "too_early", "unlock_seconds": 0},
     },
     {
         "id": "gate-scan-response-denied-method-not-supported",
