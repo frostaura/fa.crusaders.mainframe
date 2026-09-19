@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-door-gate-loop
-description: "Door-gate firmware internals: the loop lives in host-testable GateApp, one blocking call per pass under a 12 s watchdog; API_BASE_URL is compiler-checked as http plus IPv4; UART overruns cost one line; truncated heartbeats are ignored; flashed from the Arduino IDE."
+description: "Door-gate firmware internals: loop in host-testable GateApp, one blocking call per pass under a 12 s watchdog; API_BASE_URL compiler-checked as http plus IPv4; UART overruns cost one line; flashed from the Arduino IDE."
 type: decision
 last_verified: 2026-09-19
 ---

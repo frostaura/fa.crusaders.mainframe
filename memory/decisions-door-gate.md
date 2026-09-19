@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-door-gate
-description: "One pull-only ESP32 per door, one image for every door; 200 and 403 are the two authoritative answers and everything else falls back to the roster; LOCKED is asserted before the pin drives; what the door does with no power is unmeasured and the owner expects it released."
+description: "One pull-only ESP32 per door; 200 and 403 are the only authoritative answers, all else falls back to the roster; LOCKED is asserted before the pin drives; what the door does with no power is unmeasured — the owner expects it released."
 type: decision
 last_verified: 2026-09-19
 ---
