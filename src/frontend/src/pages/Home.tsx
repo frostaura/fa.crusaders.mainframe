@@ -294,6 +294,20 @@ function SignedOutLanding() {
               </a>
             </li>
             <li>
+              {/*
+                UNVERIFIED, and deliberately recorded as such.
+
+                The other three links on this page were opened and confirmed. This one cannot
+                be: Facebook redirects a signed-out visitor to a login wall and answers 200
+                while doing it, so neither a status code nor a page fetch distinguishes "this
+                group exists and is the club's" from "this group was deleted years ago". The id
+                came from a search result, not from the club's own site, which is a weaker
+                source than everything else here.
+
+                Left in place rather than removed — a members' group is genuinely useful and
+                the id is plausible — but somebody at the club should open it once and either
+                delete this comment or delete the link.
+              */}
               <a className="inline-flex items-center gap-2 text-accent-strong underline underline-offset-2 hover:no-underline"
                  href="https://www.facebook.com/groups/235624123200990/" target="_blank" rel="noreferrer noopener">
                 <Facebook size={15} aria-hidden="true" /> Crusaders Squash &amp; Racketball group
