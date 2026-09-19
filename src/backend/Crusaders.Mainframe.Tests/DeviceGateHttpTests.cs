@@ -798,6 +798,102 @@ public sealed class DeviceGateHttpTests
         Assert.Empty(await db.LedgerEntries.IgnoreQueryFilters().Where(l => l.TenantId == club.TenantId).ToListAsync());
     }
 
+    /// <summary>
+    /// <b>The mirror of <c>not_a_court_box</c>, and it was missing.</b> A <c>gate_open</c>
+    /// uploaded by a COURT BOX row is receipted and acknowledged like any other event the
+    /// board cannot change, but its outcome is <c>not_a_gate</c> and its audit row names
+    /// nobody.
+    ///
+    /// <para>
+    /// The activation and release kinds have been guarded by the board's kind since the gate
+    /// landed; <c>gate_open</c> had no such guard, so a court box — or anything else holding
+    /// the club key with a box's MAC — could post an arbitrary access code and have the server
+    /// write <c>device.gate_open</c> naming whoever that code identified. Nothing settles on
+    /// that row, so no money moved; what it produced was a door-opening record, attributed to
+    /// a member, for a door that does not exist.
+    /// </para>
+    ///
+    /// <para>
+    /// Both boards are driven here with the SAME event and the SAME code, which is what makes
+    /// the assertion discriminate: one names the member and one does not, so a fix that simply
+    /// stopped naming anybody would fail the gate half.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_gate_open_uploaded_by_a_court_box_names_nobody_and_says_not_a_gate()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+
+        var gateMac = await GateAsync(factory, club, client);
+        var boxMac = NewMac();
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, boxMac))).StatusCode);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-5));
+        var bookingCode = await BookingCodeAsync(factory, club, booking);
+
+        var atGate = await client.SendAsync(Signed(club.Key, EventsPath, GateOpenBatch(gateMac, bookingCode, 11)));
+        var atBox = await client.SendAsync(Signed(club.Key, EventsPath, GateOpenBatch(boxMac, bookingCode, 12)));
+
+        // Acknowledged on both, because an event a board cannot change is a board retrying
+        // for ever — the refusal is in the outcome, never in the status.
+        Assert.Equal(HttpStatusCode.OK, atGate.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, atBox.StatusCode);
+        Assert.Equal(12, (await BodyAsync(atBox)).GetProperty("accepted_through").GetInt64());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var (gateId, boxId) = await IdsAsync(factory, gateMac, boxMac);
+
+        var rows = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action.StartsWith("device.gate_open"))
+            .ToListAsync();
+
+        // The gate's open is the control: same code, same instant, and it DOES name the member.
+        var fromGate = Assert.Single(rows, a =>
+            a.Action == $"device.{DeviceEventEndpoints.GateOpenKind}" && Names(a, gateId));
+        Assert.Equal(club.MemberId, fromGate.SubjectUserId);
+
+        var fromBox = Assert.Single(rows, a =>
+            a.Action == $"device.{DeviceEventEndpoints.GateOpenKind}" && Names(a, boxId));
+        Assert.Null(fromBox.SubjectUserId);
+
+        // …and the refusal is named, exactly as an activation from a gate is.
+        var refusal = Assert.Single(rows, a =>
+            a.Action == $"device.{DeviceEventEndpoints.GateOpenKind}_{GateAccess.NotAGate}");
+        Assert.True(Names(refusal, boxId), "the not_a_gate row must belong to the court box");
+        Assert.Null(refusal.SubjectUserId);
+
+        // A receipt each, and nothing settled by either.
+        Assert.Equal(2, await db.DeviceEventReceipts.IgnoreQueryFilters().CountAsync(r => r.TenantId == club.TenantId));
+        Assert.Null((await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.Id == booking.Id)).CheckedInAt);
+        Assert.Empty(await db.LedgerEntries.IgnoreQueryFilters().Where(l => l.TenantId == club.TenantId).ToListAsync());
+    }
+
+    /// <summary>Whether an audit row's details name this board. The device id is the only discriminator on the row.</summary>
+    private static bool Names(AuditLog row, Guid deviceId) =>
+        row.DetailsJson!.Contains(deviceId.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>One offline door open, as a board queues it. <c>court</c> is -1: there is no relay bank to index.</summary>
+    private static JsonObject GateOpenBatch(string mac, string subject, int seq) => new()
+    {
+        ["mac"] = mac,
+        ["uptime_ms"] = 120000,
+        ["events"] = new JsonArray(new JsonObject
+        {
+            ["seq"] = seq,
+            ["uptime_ms"] = 60000,
+            ["kind"] = DeviceEventEndpoints.GateOpenKind,
+            ["court"] = -1,
+            ["method"] = "qr",
+            ["subject"] = subject,
+            ["duration_ms"] = 3000,
+        }),
+    };
+
     /// <summary>A gate_open whose token resolves to nobody is still recorded — the door still opened.</summary>
     [SkippableFact]
     public async Task An_offline_gate_open_with_an_unresolvable_token_is_still_recorded()
