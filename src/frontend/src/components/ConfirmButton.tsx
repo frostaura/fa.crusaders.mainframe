@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Fingerprint, Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
 
+export type ConfirmTone = "info" | "danger";
+
 type ConfirmButtonProps = {
   idleLabel: React.ReactNode;
   confirmLabel?: React.ReactNode;
@@ -47,6 +49,27 @@ type ConfirmButtonProps = {
    * </p>
    */
   ariaLabel?: string;
+  /**
+   * What the idle button is for. `danger` is the treatment every destructive confirm in the
+   * product already used; `idleClassName` still overrides it for the one-off.
+   */
+  tone?: ConfirmTone;
+};
+
+/**
+ * What the button looks like before it is armed, by what it is about to do.
+ *
+ * <p>
+ * The destructive string was written out at six call sites — `Profile`, `AdminSettings`,
+ * `AdminDevices`, `AdminMembers`, `AdminWebhooks` and `DeviceApiKeyPanel` — which is six places
+ * to miss when the treatment changes and no way to tell from any one of them that the others
+ * exist. Naming it makes "this button deletes something" a choice the call site declares rather
+ * than a class string it copies.
+ * </p>
+ */
+const IDLE_BY_TONE: Record<ConfirmTone, string> = {
+  info: "bg-info-soft text-info-strong hover:bg-info-soft/80",
+  danger: "bg-danger-soft text-danger-strong hover:bg-danger-soft/70",
 };
 
 /**
@@ -67,8 +90,9 @@ export function ConfirmButton({
   confirmLabel = "Tap to confirm",
   onConfirm,
   className,
-  idleClassName = "bg-info-soft text-info-strong hover:bg-info-soft/80",
-  armedClassName = "bg-[#F97316] text-white",
+  tone = "info",
+  idleClassName = IDLE_BY_TONE[tone],
+  armedClassName = "bg-armed-strong text-armed-ink",
   armedTimeoutMs = 0,
   disabled = false,
   ariaLabel,

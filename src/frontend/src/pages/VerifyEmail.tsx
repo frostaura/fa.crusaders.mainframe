@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { endpoints } from "../lib/api";
-import { Card } from "../components/Card";
+import { AuthShell } from "../components/AuthShell";
 
 export default function VerifyEmailPage() {
   const { token } = useParams<{ token: string }>();
@@ -19,23 +19,23 @@ export default function VerifyEmailPage() {
   }, [token]);
 
   return (
-    <div className="max-w-md mx-auto pt-6">
-      <Card>
+    <AuthShell className="my-auto" subline="Confirming your email address.">
+      <>
         {state === "verifying" && <p>Verifying your email…</p>}
         {state === "ok" && (
           <>
-            <h1 className="text-xl font-semibold mb-2">Email verified</h1>
+            <h1 className="text-lg font-semibold mb-2">Email verified</h1>
             <p className="text-sm text-text-secondary">An admin will review your application and get back to you by email.</p>
           </>
         )}
         {state === "fail" && (
           <>
-            <h1 className="text-xl font-semibold mb-2">Link expired or already used</h1>
+            <h1 className="text-lg font-semibold mb-2">Link expired or already used</h1>
             <p className="text-sm text-text-secondary mb-4">Try registering again or contact the club admin.</p>
             <Link to="/register" className="text-accent-strong hover:underline text-sm">Re-register</Link>
           </>
         )}
-      </Card>
-    </div>
+      </>
+    </AuthShell>
   );
 }

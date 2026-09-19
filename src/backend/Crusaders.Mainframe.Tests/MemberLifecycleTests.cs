@@ -242,13 +242,14 @@ public class MemberLifecycleTests
         using var scope = host.NewScope();
         var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
         Drain(host);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         var created = Assert.IsType<RegistrationResult.Created>(
             await auth.RegisterAsync("newcomer@test.local", "Passw0rd!", "New Comer", "MEM-9001", null, default));
 
-        Assert.Contains(host.EmailService.Sent, m => m.To == host.AdminUser.Email && m.Subject.Contains("New membership application"));
-        Assert.Contains(host.EmailService.Sent, m => m.To == "newcomer@test.local");
+        // Dispatched in the background by AuthService; see StubEmailService.WaitFor.
+        Assert.NotNull(await host.EmailService.WaitFor(m => m.To == host.AdminUser.Email && m.Subject.Contains("New membership application")));
+        Assert.NotNull(await host.EmailService.WaitFor(m => m.To == "newcomer@test.local"));
 
         var evt = Assert.Single(Drain(host), e => e.Type == "member.registered");
         Assert.Equal(created.UserId, evt.Data["user_id"]);

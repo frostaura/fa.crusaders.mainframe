@@ -134,7 +134,7 @@ public class PeripheralHealthTests
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
         Drain(host);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         var worker = CreateWorker(host);
         await worker.TickAsync(default);
@@ -188,7 +188,7 @@ public class PeripheralHealthTests
         using var scope = host.NewScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20), true, null, 1, 2);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateWorker(host).TickAsync(default);
 
@@ -219,7 +219,7 @@ public class PeripheralHealthTests
         using var scope = host.NewScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateWorker(host).TickAsync(default);
 
@@ -242,7 +242,7 @@ public class PeripheralHealthTests
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
         var worker = CreateWorker(host);
         await worker.TickAsync(default);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         box.LastSeenAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
@@ -264,7 +264,7 @@ public class PeripheralHealthTests
         var worker = CreateWorker(host);
         await worker.TickAsync(default);
         Drain(host);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         // What the heartbeat endpoint does when the box calls in again.
         box.LastSeenAt = DateTimeOffset.UtcNow;
@@ -841,7 +841,7 @@ public class PeripheralHealthTests
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90));
         await AddOutageAsync(host, db, box, booking.StartsAt.AddMinutes(-10), endedAt: null);
         Drain(host);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateNoShowWorker(host).TickAsync(default);
 
@@ -1683,7 +1683,7 @@ public class PeripheralHealthTests
 
         await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90), enabled: false,
             installedAt: DateTimeOffset.UtcNow.AddDays(-30), outOfServiceSince: DateTimeOffset.UtcNow);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateNoShowWorker(host).TickAsync(default);
 
@@ -1716,7 +1716,7 @@ public class PeripheralHealthTests
         var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-90),
             installedAt: DateTimeOffset.UtcNow.AddDays(-30));
         await AddOutageAsync(host, db, box, booking.StartsAt.AddMinutes(-10), endedAt: null);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateNoShowWorker(host).TickAsync(default);
 
@@ -2064,7 +2064,7 @@ public class PeripheralHealthTests
 
         await AddBoxAsync(host, db, now.AddMinutes(-2), enabled: false,
             installedAt: now.AddDays(-30), outOfServiceSince: now.AddSeconds(-90));
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateNoShowWorker(host).TickAsync(default);
 

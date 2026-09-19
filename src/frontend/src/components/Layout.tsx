@@ -3,7 +3,8 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
 import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { useBalance } from "../lib/balance";
+import { tokenStore } from "../lib/api";
+import { LOW_BALANCE_CREDITS, useBalance, walletLabel } from "../lib/balance";
 import { useProfile } from "../lib/profile";
 import { ScrollArea } from "./ScrollArea";
 import { pendingApplicationsVersion, subscribePendingApplications } from "../lib/pendingApplications";
@@ -74,6 +75,34 @@ export default function Layout() {
   // the card on /profile, with the chrome where they expect it.
   const headerless = /^\/(login|register|verify-email|welcome|forgot-password|reset-password|change-password)(\/|$)/.test(location.pathname);
 
+  /**
+   * The signed-out root is the club's public page, not a screen of the app.
+   *
+   * <p>
+   * It rendered inside the app chrome, which put a sticky bar over it carrying the club's name
+   * and a "Sign in" link — both of which the page's own hero already says, larger and better.
+   * A landing page wearing an application's toolbar reads as an intranet.
+   * </p>
+   *
+   * <p>
+   * Signed IN, the root is a member's home and the nav is the whole point, so this applies only
+   * while anonymous.
+   * </p>
+   *
+   * <p>
+   * The initial auth probe is the awkward case, and a stored token settles it without waiting.
+   * Guessing "public" for everybody flashes a late-arriving bar at every returning member;
+   * guessing "app" for everybody flashes chrome at every first-time visitor. `tokenStore.get()`
+   * is a synchronous localStorage read that says which of the two this almost certainly is, so
+   * neither group sees the flash. It only has to be right about intent, not about whether the
+   * token is still valid — an expired one resolves to anonymous a moment later and the bar goes
+   * away, which is the same thing signing out does.
+   * </p>
+   */
+  const probablySignedIn = auth.status === "loading" && Boolean(tokenStore.get());
+  const publicLanding =
+    location.pathname === "/" && auth.status !== "authenticated" && !probablySignedIn;
+
   // Every way out of the settings menu, including the keyboard one.
   //
   // Escape did nothing: only the mousedown listener existed, so a keyboard user who opened the
@@ -98,6 +127,17 @@ export default function Layout() {
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpen]);
+
+  if (publicLanding) {
+    // No chrome, no width cap and no inner scroll container: the page lays itself out, and the
+    // DOCUMENT scrolls. The app's own shell scrolls a nested <main> instead, which on a long
+    // marketing page stops a phone's URL bar collapsing and breaks scroll-to-anchor.
+    return (
+      <main className="min-h-full">
+        <Outlet />
+      </main>
+    );
+  }
 
   if (headerless) {
     return (
@@ -137,16 +177,30 @@ export default function Layout() {
                 to="/wallet"
                 className={({ isActive }) => cn(
                   "inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium tabular-nums whitespace-nowrap transition-colors",
-                  balance !== null && balance < 50
+                  balance !== null && balance < LOW_BALANCE_CREDITS
                     ? "bg-warning-soft text-warning-strong hover:bg-warning-soft/80"
                     : "bg-success-soft text-success-strong hover:bg-success-soft/80",
                   isActive && "ring-1 ring-accent-strong/30",
                 )}
-                aria-label="Wallet balance"
+                /*
+                  The NUMBER, in the name.
+
+                  This was `aria-label="Wallet balance"`, and an aria-label REPLACES an
+                  element's contents as its accessible name — so a screen reader announced
+                  "Wallet balance, link" and the balance itself, the only reason the chip
+                  exists, was never read out at all. It is also the only place in the chrome
+                  that says whether a member can afford to book.
+
+                  The low-balance state goes in too. It is carried visually by the chip turning
+                  amber, and a colour is not an announcement.
+                */
+                aria-label={walletLabel(balance, loading)}
                 title={loading ? "Refreshing balance…" : "Wallet balance — tap to top up"}
               >
                 <WalletIcon size={14} strokeWidth={2.25} />
-                <span>{balance === null ? "— cr" : formatCredits(balance)}</span>
+                {/* aria-hidden: the label above already says the number, and the visible text
+                    abbreviates it to "cr", which is not a word. */}
+                <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(balance)}</span>
               </NavLink>
             )}
             {auth.status === "authenticated" && (

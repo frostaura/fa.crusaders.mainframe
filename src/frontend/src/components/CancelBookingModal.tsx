@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
-import { Button } from "./Button";
+import { Button, fieldClassName } from "./Button";
 import { endpoints, type CancellationQuote } from "../lib/api";
 import { formatCredits } from "../lib/utils";
 import { describeBookingError } from "../lib/bookingErrors";
@@ -157,7 +157,7 @@ function WaiveControl(props: {
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Court double-booked, injury, club decision…"
-            className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface"
+            className={fieldClassName}
           />
           {reasonMissing && (
             <p className="text-sm text-danger-strong">
