@@ -33,8 +33,9 @@ Why a green suite is not evidence at all is a decision, not a gotcha:
   thing neither could see was the FRAMING. The real API answers `Transfer-Encoding: chunked` on
   a keep-alive connection, and a reader that was correct against every invented fixture timed
   out on **every** call against the actual server: no roster, and a door that refused everyone.
-  The firmware fixtures are real captured bytes now. A fixture nobody took off a wire proves the
-  parser, not the protocol, and a client that handles the protocol for you proves neither.
+  The firmware fixtures are real captured bytes now, and `test/e2e-device/door_evening.py` reads
+  over a raw socket (HTTP/1.0, and 1.1 de-chunked by hand, direct and through nginx);
+  `scenario.py` still uses `urllib`. A client that handles the protocol for you proves neither.
 - **A test can be green because of its FIXTURE, not its code.** Flipping one boolean on a stale
   device fixture exposed a live money rule — a stale-but-enabled box beside a healthy one waiving
   no-show penalties indefinitely — that no test discriminated. Mutate the rule *and* vary the
