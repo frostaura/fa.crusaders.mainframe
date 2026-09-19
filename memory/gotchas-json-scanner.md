@@ -38,6 +38,14 @@ wide as this tree gets. The toolchain traps around it are in
   treats absence as "learned nothing", so **none of them would ever have been reported** — the
   club would have concluded the hardware was unreliable. Held by the scanner now and pinned at
   each caller as well as in the shared suite.
+- **`isCompleteObject` COUNTED braces and brackets rather than matching them — FIXED 2026-09-19
+  (round G2).** `{` and `[` both raised a depth, `}` and `]` both lowered it, so `{"a":1]` reached
+  zero and was declared a whole document. The wrong thing that admits is not a misparse — nothing
+  downstream reads a bracket as a brace — it is exactly **the cut body this function exists to
+  refuse**, arriving with a stray closer at the end of a buffer and being committed as a whole
+  roster. The opener KINDS are remembered now, one bit per level, and nesting past 32 levels is
+  refused on the same grounds. Both firmwares ask this before replacing a roster, so the tests are
+  in the shared suite.
 - **The escaped-quote cases could not be red before the fix, and their fixtures are load-bearing.**
   A properly escaped inner quote always leaves a backslash adjacent to the text, so it can never
   form the `"key"` byte sequence the old scan looked for — those two tests are regression guards on

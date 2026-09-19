@@ -23,15 +23,18 @@ unchanged: [`decisions-device.md`](decisions-device.md). What follows is the gat
   wrong for a door, so `gatelogic::onGateResponse` does not use it. **TWO statuses are answers**
   (2026-09-19, was one): a **200**, whose `opened:false` is authoritative and is NEVER
   second-guessed against the roster; and a **403**, which is the club taking this board out of
-  service — it denies with `out_of_service`, and a 403 on the *heartbeat* commits an EMPTY roster.
-  Everything else — 0, 401, 404, 408, 429, any 5xx, and a 200 whose body cannot be parsed — falls
-  back to the roster. *Why the 403:* falling back after one would keep the door admitting rostered
-  members for the full six-hour staleness window after an admin pressed the button that exists to
-  stop exactly that. *Why the rest:* both directions have a victim — second-guessing a refusal
-  admits the member barred this morning through a booking nobody cancelled; refusing on an outage
-  leaves a member with a valid booking outside because a container was restarting.
-  **Residual, and it cannot be closed:** a board that cannot REACH the server never hears the 403
-  and keeps admitting rostered bookings until its roster goes stale.
+  service — it denies with `out_of_service`, and a 403 on **any** of the three device paths (scan,
+  heartbeat, event drain — all three since round G2) commits an EMPTY roster.
+  Everything else — 0, 401, 404, 408, 429, any 5xx, and a 200 whose body cannot be parsed or did not
+  fit — falls back to the roster. *Why the 403:* falling back after one would keep the door
+  admitting rostered members for the full six-hour staleness window after an admin pressed the
+  button that exists to stop exactly that; and whichever path a board speaks on first has to be the
+  one that hears it, or a disabled board keeps its roster until its next heartbeat. *Why the rest:*
+  both directions have a victim — second-guessing a refusal admits the member barred this morning
+  through a booking nobody cancelled; refusing on an outage leaves a member with a valid booking
+  outside because a container was restarting.
+  **Residual, narrower than it was and still not closable:** ONLY a board that cannot REACH the
+  server never hears the 403, and it keeps admitting rostered bookings until its roster goes stale.
 - **A door is released for `gate.unlock_seconds`, never for what is left of the booking.** The
   roster's `grantMs` is 25 minutes for a late arrival, and a door held open for 25 minutes is not a
   door. The gate's offline degraded mode is also narrower than the court box's *by contract*: only a
@@ -54,5 +57,7 @@ unchanged: [`decisions-device.md`](decisions-device.md). What follows is the gat
   wiring-is-fixed rule. The defaults are Carl's own real-door-tested sketch; go-live §12 now
   measures both failures and asks Carl the two facts. **Fire egress must be mechanical and
   independent of this board; nothing here is a life-safety device.**
-- **How the loop, the watchdog, the URL check, the UART and the build are arranged** is its own
-  topic: [`decisions-door-gate-loop.md`](decisions-door-gate-loop.md).
+- **How the pass is ordered, and what shares its one blocking call**, is its own topic:
+  [`decisions-door-gate-loop.md`](decisions-door-gate-loop.md). The edges it talks through — the
+  URL check, the UART, the HTTP body, the flash route — are in
+  [`decisions-door-gate-io.md`](decisions-door-gate-io.md).
