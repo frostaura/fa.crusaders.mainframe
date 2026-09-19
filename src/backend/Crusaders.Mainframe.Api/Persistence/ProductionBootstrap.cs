@@ -71,10 +71,16 @@ public static class ProductionBootstrap
     /// real club a payment configuration that looks present and cannot work.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// The accent is the club's crest blue, not the #7AB07A that docs/specs/design-system.md
+    /// used to call "the Crusaders green" — that measures 2.52:1 on white and can carry
+    /// neither text nor a focus ring. Note that nothing reads this key today; it is written so
+    /// the row is honest about the club when something finally does.
+    /// </remarks>
     private const string InitialSettingsJson = """
         {
           "timezone": "Africa/Johannesburg",
-          "brand_accent_hex": "#7AB07A"
+          "brand_accent_hex": "#00498D"
         }
         """;
 
