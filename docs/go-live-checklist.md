@@ -450,13 +450,27 @@ certified as one, and no combination of the build flags turns it into one.
       report it as a fault. Solid outranks the refusal blinks by design, so the second
       member of a pair — refused while the first one's window is still running — sees a
       steady lamp. The door is open in front of them, which is the more useful thing for the
-      lamp to be saying.
-- [ ] **Take the door out of service in the admin console and scan again.** The board must
-      refuse (`out_of_service`) and must **not** fall back to its roster. Then put it back in
-      service and confirm the next scan works. **Known and accepted:** a board that cannot
-      reach the server at the moment you press the button never hears about it, and keeps
-      admitting rostered bookings until its roster goes stale (6 h). Nothing in the firmware
-      can close that window — if a door has to be shut immediately, shut it mechanically.
+      lamp to be saying. **A release window also runs to its end**: taking the door out of
+      service, or pulling the AP, while somebody's window is open does not cut it short.
+- [ ] **A 4 Hz blink — four times the offline rate — means the task watchdog refused to
+      arm**, three times over. The board still works and still opens doors; it is running
+      under the core's own 5 s watchdog instead of the 12 s this firmware asks for, which
+      makes a slow API host a possible reset loop. Note the board and read the boot line at
+      115200, which says the same thing. It is not a member-facing pattern and never
+      outranks one.
+- [ ] **Take the door out of service in the admin console and scan again.** What you can
+      verify at the door is that the board **refuses**, and — the part that matters — that it
+      **does not fall back to its roster**: pull the AP first, then scan a member who has a
+      rostered booking and confirm they are refused too. **You cannot observe the reason.**
+      `out_of_service` is a string that exists only inside the firmware; it goes nowhere,
+      and the lamp gives three blinks for every refusal whatever caused it. Do not expect
+      the door to tell you why, and do not report the absence of a distinct pattern as a
+      fault. Then put the board back in service and confirm the next scan works.
+      **Known and accepted:** only a board that cannot *reach* the server at the moment you
+      press the button fails to hear about it — every path it speaks on carries the 403 now,
+      not just the heartbeat — and such a board keeps admitting rostered bookings until its
+      roster goes stale (6 h). Nothing in the firmware can close that window; if a door has
+      to be shut immediately, shut it mechanically.
 - [ ] **Offline test, done deliberately**: pull the AP, wait for the slow blink, and confirm
       a member **with a rostered booking** still gets in and a member **without one** does
       not. That is the stated degraded mode and it is narrower than the court box's — a

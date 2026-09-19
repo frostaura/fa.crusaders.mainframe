@@ -284,9 +284,12 @@ arduino-check: arduino-export
 	  fi; \
 	  untracked="$$(git ls-files --others --exclude-standard -- "$$dir")"; \
 	  if [ -n "$$untracked" ]; then \
-	    echo "$$dir gained generated files that are not committed:"; \
-	    echo "$$untracked"; \
-	    echo "run 'git add $$dir' and commit"; \
+	    echo "$$dir gained generated files that are not committed."; \
+	    echo "Stage these files BY PATH and commit them:"; \
+	    echo "$$untracked" | sed 's/^/  /'; \
+	    echo "Do NOT 'git add' the directory: on an iCloud checkout it holds"; \
+	    echo "hundreds of fileprovider duplicates ('Name 2.h', 'program 3')"; \
+	    echo "that 'make sweep-icloud' deletes and nothing should ever commit."; \
 	    failed="$$failed $$dir"; \
 	  fi; \
 	done; \
