@@ -1,6 +1,6 @@
 # Deployment Specification
 
-Follows the FrostAura standard pattern (GitHub Actions → multi-arch images → Docker Hub → Portainer → Cloudflared). The project-specific consideration is that the deploy target is the **same on-premises machine the court boxes reach over the club LAN**, and that those boxes speak plain HTTP only — which is why the gateway is published on a LAN port and why nothing hands a box an `https` URL.
+Follows the FrostAura standard pattern as far as the registry (GitHub Actions → multi-arch images → Docker Hub), and stops there by decision: **CI publishes, it does not deploy.** Redeploying the club stack from the published `:latest` manifests is a manual step, and Cloudflared fronts it as before. The project-specific consideration is that the deploy target is the **same on-premises machine the court boxes reach over the club LAN**, and that those boxes speak plain HTTP only — which is why the gateway is published on a LAN port and why nothing hands a box an `https` URL.
 
 ## Topology
 ```
@@ -46,23 +46,19 @@ Gates, all of which must be green before an image is built:
 - `e2e-device` (`needs: backend, iot-build`) — the hardware-free end-to-end proof: the real API from source against a fresh Postgres, the firmware's native simulator as the Mega half over TCP, the PayFast mountebank imposter, with `test/e2e-device/scenario.py` playing the ESP8266 bridge, the member's phone, the admin and PayFast. Every review finding it pins is printed as `finding-id -> assertion`; any failed assertion fails the job. Locally: `make test-e2e-device`.
 - `security` — `npm audit` (high) + `dotnet list package --vulnerable`.
 
-Then, **only on a push to `main`**: `build-backend-{amd64,arm64}`, `build-frontend-{amd64,arm64}` and `build-gateway-{amd64,arm64}` (each `needs:` every gate above), the three `merge-*-manifests` jobs, and `deploy-portainer`, which waits 30 s for Docker Hub propagation and calls Portainer's stack endpoint with `pullImage: true`. A green run on a branch or a PR builds nothing.
+Then, **only on a push to `main`**: `build-backend-{amd64,arm64}`, `build-frontend-{amd64,arm64}` and `build-gateway-{amd64,arm64}` (each `needs:` every gate above), and the three `merge-*-manifests` jobs, which are the last jobs in the workflow. There is no deploy job. A green run on a branch or a PR builds nothing.
 
 **Three images, not two.** The gateway used to be stock `nginx:alpine` with `nginx/nginx.conf` bind-mounted from a checkout on the host. The deploy chain moves images and nothing else, so that config was a file the release could not deliver: a club merging a gateway fix got a new backend behind the *old* config, with every LAN member back in one rate-limit bucket, and the dashboard reporting a successful deploy. `nginx/Dockerfile` bakes the config in, so it ships by the same path as the code it belongs to.
 
-`deploy-portainer` **refuses to deploy** a Portainer stack that does not name `<user>/crusaders-mainframe-gateway`, or that still bind-mounts `./nginx/nginx.conf`. The deploy re-PUTs the stack Portainer already holds and re-pulls the images that stack *names*, so neither mistake is visible any other way: the tests exercise the API given forwarded headers and cannot tell a stale deployed gateway from a fresh one.
+**Check the stack by hand before every redeploy.** A redeploy re-pulls the images the stack *names*, so a stack that does not name `<user>/crusaders-mainframe-gateway`, or that still bind-mounts `./nginx/nginx.conf`, keeps its old gateway config while reporting a successful deploy. CI used to refuse a stack in either state; with the deploy job removed, nothing checks it — and nothing else can, because the tests exercise the API given forwarded headers and cannot tell a stale deployed gateway from a fresh one.
 
 ## Required GitHub secrets
 | Secret | Purpose |
 | --- | --- |
 | `DOCKERHUB_USERNAME` | Docker Hub account |
 | `DOCKERHUB_TOKEN` | Docker Hub access token |
-| `PORTAINER_URL` | e.g. `https://portainer.crusaders.local/` |
-| `PORTAINER_TOKEN` | Portainer API key |
-| `PORTAINER_ENDPOINT_ID` | Numeric endpoint ID in Portainer |
-| `PORTAINER_STACK_ID` | Numeric stack ID for crusaders.mainframe |
 
-**Six, not seven.** There was a seventh, `OTA_PRIVATE_KEY`, holding the PEM of a firmware signing key. Over-the-air updates are gone and so is it; a repository that still has the secret set should delete it, because a secret nothing reads is a credential nobody is watching.
+**Two, not six.** The four `PORTAINER_*` secrets were read only by the deploy job, which is gone; a repository that still has them set should delete them. The same goes for `OTA_PRIVATE_KEY`, which held the PEM of a firmware signing key back when over-the-air updates existed. A secret nothing reads is a credential nobody is watching.
 
 ## The court box's own configuration
 

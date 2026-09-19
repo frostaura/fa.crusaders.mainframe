@@ -3,8 +3,8 @@
 # Mirrors docker-compose.yml but pulls the published multi-arch images instead of building,
 # and carries its configuration INLINE: there is no .env behind a Portainer stack, and every
 # value a running club needs is in this one file. Edit the lines marked CHANGE-ME once, when the
-# stack is created; nothing else needs touching. CI's deploy-portainer job re-pulls and
-# redeploys this stack after every push to main.
+# stack is created; nothing else needs touching. CI stops at the Docker Hub push — it publishes
+# the images this file names and does NOT redeploy; the redeploy is a manual step.
 #
 # Topology, as agreed 2026-09-05: everything here runs on the one on-premises machine the court
 # box reaches over the club LAN. The gateway is the only published port. Cloudflared (outside
@@ -92,8 +92,9 @@ services:
       - backend
 
   gateway:
-    # A built image, not stock nginx:alpine with the config bind-mounted: the deploy chain moves
-    # images and nothing else. deploy-portainer refuses a stack that does not name this image.
+    # A built image, not stock nginx:alpine with the config bind-mounted: the release chain moves
+    # images and nothing else, so a stack that does not NAME this image keeps its old gateway
+    # config through every redeploy. CI no longer checks for that — it is on whoever redeploys.
     image: frostaura/crusaders-mainframe-gateway:latest
     restart: unless-stopped
     ports:

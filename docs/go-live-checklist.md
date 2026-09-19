@@ -33,27 +33,30 @@ the API. The box has no readback and cannot even detect it.
 
 ---
 
-## 2. Deploy secrets — the Portainer four are unset
+## 2. The publish chain is unproven, and the redeploy is manual
 
-The release chain builds multi-arch images, pushes to Docker Hub and redeploys through
-Portainer. It has never run, because the Portainer secrets are unset and
-`workflow_dispatch` cannot trigger a deploy — only a real push to `main`.
+CI builds multi-arch images and pushes them to Docker Hub. **It stops there** — the
+Portainer deploy job was removed by decision, so nothing in the pipeline touches the club
+stack. Only a real push to `main` builds anything; `workflow_dispatch` does not.
 
 - [x] `DOCKERHUB_USERNAME` — set 2026-09-05
 - [x] `DOCKERHUB_TOKEN` — set 2026-09-05
-- [ ] `PORTAINER_URL`
-- [ ] `PORTAINER_TOKEN`
-- [ ] `PORTAINER_STACK_ID`
-- [ ] `PORTAINER_ENDPOINT_ID`
+- [ ] One real push to `main` completed, with the six image jobs green and three `:latest`
+      manifests visible on Docker Hub.
+- [ ] A manual redeploy of the club stack performed once, end to end, and written down.
 
-There was a seventh, `OTA_PRIVATE_KEY`, read by an `iot-sign` firmware-signing job. The
-firmware no longer takes over-the-air updates; the job and the workflow's reference to the
-key are both gone. If the secret is still set on the repository, **delete it** — a secret
-nothing reads is a credential nobody is watching.
+Delete any `PORTAINER_URL`, `PORTAINER_TOKEN`, `PORTAINER_STACK_ID`, `PORTAINER_ENDPOINT_ID`
+or `OTA_PRIVATE_KEY` still set on the repository — nothing reads them, and a secret nothing
+reads is a credential nobody is watching.
 
-**If skipped:** the deploy job is skipped silently on every push and the club never gets a
-build. **The release chain stays unproven until these are set and one real push to `main`
-has completed** — a green CI run on a branch says nothing about it.
+**Before each manual redeploy, check the stack names `<user>/crusaders-mainframe-gateway`
+and does not bind-mount `./nginx/nginx.conf`.** CI used to refuse a stack in either state;
+it no longer can. A stack in either state keeps its old gateway config — every LAN member
+back in one rate-limit bucket — while reporting a successful deploy.
+
+**If skipped:** the club never gets a build, or gets one behind a stale gateway. **The
+chain stays unproven until one real push to `main` has completed and one manual redeploy
+has been done** — a green CI run on a branch says nothing about either.
 
 ---
 

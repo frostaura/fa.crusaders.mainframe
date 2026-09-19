@@ -55,7 +55,7 @@ State these honestly rather than repeating the aspiration:
 - **SSRF guard with a deliberate carve-out:** production rejects RFC1918 webhook destinations *unless* the endpoint is on an internal-LAN allow-list. That carve-out exists for legitimate LAN consumers a club points a webhook at — the court box itself is pull-only and never a webhook destination — do not close it.
 - **Webhook delivery:** HMAC-SHA256 in `X-Crusaders-Signature`, timestamp in `X-Crusaders-Timestamp`, per-endpoint queue, backoff 1m/5m/30m/2h/12h/24h, auto-disable after 6 failures plus an email to the owner. A missing template variable is a **config error, not a retryable failure**.
 - **Docker device passthrough:** the .NET service runs in a container but must reach a USB/serial biometric device on the host — needs `--device` passthrough or `privileged: true` with the specific device path.
-- Deploy follows the standard FrostAura pattern and this repo's own `.github/workflows/ci.yml` carries the full chain (multi-arch → Docker Hub → `deploy-portainer`); it is the reference to keep in sync, not `fa.startup`'s.
+- **CI publishes; it does not deploy.** `.github/workflows/ci.yml` carries the chain as far as multi-arch images on Docker Hub and stops there — there is no redeploy job, by decision. Redeploying the club stack is a manual step against the published `:latest` manifests. This repo's workflow is the reference to keep in sync, not `fa.startup`'s.
 
 ## Build / test / run
 

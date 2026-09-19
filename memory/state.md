@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-state
-description: "The whole build sits on claude/e2e-fix-programme, pushed 2026-09-16 and in sync; main is far behind it and the merge is the open act, with PR #2 still a draft, so the release half has never executed. No hardware, no deploy, no paying club."
+description: "PR #2 merged to main 2026-09-19; that run passed every gate and published all three multi-arch images, and its only failure was the Portainer deploy job, which has since been removed. No hardware, no deployed stack, no paying club."
 type: state
 last_verified: 2026-09-16
 ---
@@ -8,16 +8,18 @@ last_verified: 2026-09-16
 # Current state
 
 Verified 2026-09-11 against the repository, `ci.yml`, `gh run list` and `gh secret list`; the git
-topology was re-measured 2026-09-16 after the branch was pushed. **Two claims below decay on their
-own and must be re-measured, never inherited: the result of the latest CI run on the branch, and the
-Actions secrets inventory. Neither was re-run on 2026-09-16.**
+topology was re-measured 2026-09-16 after the branch was pushed, and again **2026-09-19** after PR #2
+merged — that pass also re-read run `35434498116` job by job, so the CI claims below are current as
+of 2026-09-19. **Two claims below decay on their own and must be re-measured, never inherited: the
+result of the latest CI run on `main`, and the Actions secrets inventory — the secrets inventory has
+not been re-run since 2026-09-11.**
 
-**The build.** All of it lives on `claude/e2e-fix-programme`, which was **pushed on 2026-09-16 and
-now matches its upstream exactly**, on a clean tree — **nothing in this repository exists only on
-this Mac**, including the context work that deleted the superseded review reports under
-`docs/reviews/` (deliberate — [`decisions-method.md`](decisions-method.md)). `main` is far behind the
-branch and the outstanding act is the merge: **PR #2 is still a draft** (PR #1 merged 2026-08-24). Delivery is
-one branch, one PR by founder decision.
+**The build.** **PR #2 merged into `main` on 2026-09-19** (`36b96ad`), carrying the whole
+`claude/e2e-fix-programme` history; the remote branch was deleted on merge, and `main` is now the
+only line. Verified by `gh pr view 2` and `git log` on 2026-09-19. The context work that deleted the
+superseded review reports under `docs/reviews/` went with it (deliberate —
+[`decisions-method.md`](decisions-method.md)). PR #1 merged 2026-08-24. Delivery is one branch, one
+PR by founder decision.
 
 **What the product does now.** The headline flow — book online, scan at the box, lights on —
 exists end to end in code and is pinned by `make test-e2e-device`, which drives the real device API
@@ -42,9 +44,16 @@ UTC day, so read any red run against that before blaming a diff ([`gotchas.md`](
 **Nothing has ever touched real hardware, nothing is deployed, and no money has moved through
 PayFast in production.** Crusaders Squash Club is a named, committed pilot that **pays nothing** —
 `docs/development-plan.md` records "Free for Crusaders, TBD for tenant 2", and no payment obligation
-is written anywhere. Image-build and Portainer jobs are gated on `push` to `main`, so every
-pull-request run skips them: **the release half of the chain has never executed once.** Docker Hub
-credentials are set; the four Portainer secrets are not ([`watch.md`](watch.md)).
+is written anywhere.
+
+**The publish half has now run, and it worked.** The merge of PR #2 triggered the first real push to
+`main`, run `35434498116` on 2026-09-19: **all eight gates green, all six image jobs green, all three
+multi-arch manifests created** — `crusaders-mainframe-{backend,frontend,gateway}:latest` are on
+Docker Hub. The run is recorded as a failure because of its **one** failing job, `deploy-portainer`,
+and **that job was removed the same day on Dean's instruction**: CI now stops at the Docker Hub push.
+So the next push to `main` should be the first fully green run in this repository's history.
+Redeploying the club stack is a manual step from here, and it has lost the stack checks that job
+carried ([`watch.md`](watch.md)).
 
 **The launch bar** — working set, agreed 2026-07-24 and never revised. Nothing instruments any of it yet:
 
@@ -57,7 +66,8 @@ credentials are set; the four Portainer secrets are not ([`watch.md`](watch.md))
 
 **What stands between here and a lit court at Crusaders** is founder and committee work, not code: the relay safety
 question ([`safety-relays.md`](safety-relays.md)), committee sign-off on charge-at-booking, PayFast production
-credentials, the Portainer secrets, and one supervised bench session with the real box.
+credentials, one manual redeploy of the published images, and one supervised bench session with the
+real box.
 `docs/go-live-checklist.md` is that list in order, each item carrying the consequence of skipping it.
 
 **`docs/system-blueprint.html`**, the one-page interactive design, was last **regenerated
