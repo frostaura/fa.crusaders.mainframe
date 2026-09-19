@@ -53,9 +53,18 @@ namespace gatelogic {
 ///
 /// Read it as: energise == (released == unlockEnergises), then the module's
 /// polarity turns "energise" into a level.
+///
+/// ONE return statement, and it has to stay one. The ESP32 Arduino core
+/// hard-codes `-std=gnu++11` in its `platform.txt` for every variant and a
+/// sketch cannot override it, so the generated `arduino/door_gate/` sketch —
+/// which is the DEPLOYMENT route — compiles this header at C++11, where a
+/// `constexpr` function body may be nothing but a return. The named `energise`
+/// local this used to carry is a C++14 feature and failed the IDE build with
+/// "body of 'constexpr' function not a return-statement". `arduino-cli compile`
+/// in CI is what keeps it honest; `make build-iot` alone cannot, because
+/// PlatformIO unflags the core's standard and gets C++17.
 constexpr hal::PinLevel lockPinLevel(bool released, bool relayActiveHigh, bool unlockEnergisesRelay) {
-  const bool energise = (released == unlockEnergisesRelay);
-  return (energise == relayActiveHigh) ? hal::PinLevel::kHigh : hal::PinLevel::kLow;
+  return ((released == unlockEnergisesRelay) == relayActiveHigh) ? hal::PinLevel::kHigh : hal::PinLevel::kLow;
 }
 
 /// Drives one lock relay, and knows nothing about when it should be open.
