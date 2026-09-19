@@ -457,6 +457,86 @@ public sealed class DeviceGateHttpTests
         Assert.Matches(DeviceProtocolCorpusTests.RosterEntryPattern, entry);
     }
 
+    /// <summary>
+    /// <b>Auto-registration is unbounded, and unbounded is a resource anybody with the club
+    /// key can spend.</b>
+    ///
+    /// <para>
+    /// Every invented MAC that heartbeats leaves a permanent row: on the Devices page, in the
+    /// audit trail as <c>device.auto_registered</c>, and — until the fix beside this one — in
+    /// every admin's inbox as soon as it went quiet. The rate limit is the only ceiling, which
+    /// is thousands of rows an hour. Nothing deletes them but an admin, one at a time.
+    /// </para>
+    ///
+    /// <para>
+    /// So a club may hold at most <see cref="DeviceRegistryService.MaxUnacknowledgedDevices"/>
+    /// boards nobody has looked at. It is deliberately a count of the UNACKNOWLEDGED rather
+    /// than of all rows: a club with forty real boards is never near it, and the way out is
+    /// the thing an admin was going to do anyway — open the page and edit or delete the rows
+    /// that appeared. A cap on the total would eventually stop a real installation.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>409 and not 403.</b> A 403 on this route group means one thing and one thing only —
+    /// this board is out of service — and the firmware acts on that word: it commits an empty
+    /// roster and stops falling back. A registration refusal answered 403 would take every
+    /// door in the club out of service the moment somebody flooded the registry, which is a
+    /// far worse outcome than the flood. `DeviceForbiddenMeansOutOfServiceTests` pins the
+    /// converse; this pins the case that would have broken it.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_club_cannot_be_filled_with_boards_nobody_has_acknowledged()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+
+        var macs = new List<string>();
+        for (var i = 0; i < DeviceRegistryService.MaxUnacknowledgedDevices; i++)
+        {
+            var mac = NewMac();
+            macs.Add(mac);
+            Assert.Equal(HttpStatusCode.OK,
+                (await client.SendAsync(Heartbeat(club.Key, mac, i % 2 == 0 ? DeviceKinds.Gate : null))).StatusCode);
+        }
+
+        // The one after the cap is refused — and the refusal is 409, never 403.
+        var flooded = await client.SendAsync(Heartbeat(club.Key, NewMac(), DeviceKinds.Gate));
+        Assert.Equal(HttpStatusCode.Conflict, flooded.StatusCode);
+        Assert.Equal(
+            DeviceRegistryService.TooManyUnacknowledgedDevices,
+            (await BodyAsync(flooded)).GetProperty("error").GetString());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            Assert.Equal(
+                DeviceRegistryService.MaxUnacknowledgedDevices,
+                await db.Devices.IgnoreQueryFilters().CountAsync(d => d.TenantId == club.TenantId));
+        }
+
+        // The boards that DID register are unaffected: the cap is on creating a row, never on
+        // serving one. A club at its limit must not have its installed doors stop working.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, macs[0], DeviceKinds.Gate))).StatusCode);
+
+        // The probe: ONE admin edit, which is what clears AutoRegistered, and the next board
+        // registers. The way out is the thing the admin was going to do anyway.
+        var admin = await AdminClientAsync(factory, club);
+        Guid firstId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            firstId = (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == macs[0])).Id;
+        }
+        Assert.Equal(HttpStatusCode.OK,
+            (await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{firstId}", new { gate_key = "front-door" })).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, NewMac(), DeviceKinds.Gate))).StatusCode);
+    }
+
     /// <summary>A charged booking for the club's member, written straight to the table.</summary>
     private static async Task<Booking> BookAsync(TestWebAppFactory factory, Club club, DateTimeOffset startsAt, int minutes = 45)
     {

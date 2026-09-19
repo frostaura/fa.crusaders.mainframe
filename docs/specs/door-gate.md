@@ -764,23 +764,45 @@ it is on this list because the door is what made its absence expensive.
 `PeripheralHealthWorker` had no cooldown and no minimum outage: every transition mailed every
 admin of the club. A board on a marginal uplink flapping every few minutes was a mailbox full
 of "not reporting" and "back online" until somebody muted the sender, and an alert nobody
-reads is worse than no alert because the club believes it has one. Auto-registration then
-makes it a capability rather than a nuisance: anything holding the club's device key can mint
-boards with invented MACs, and each one could mail the whole club on demand.
+reads is worse than no alert because the club believes it has one.
 
-Three rules, and the third is the door's:
+**The cooldown is per BOARD, and for one round this section claimed it also answered the
+fleet.** It does not. Auto-registration is unbounded, so anything holding the club's device
+key can mint boards with invented MACs — and twelve boards are twelve *first* outages, each
+inside its own cooldown, so the club still gets twelve mails in one thirty-second tick and the
+only ceiling is the tenant rate limit. The naming rule that was supposed to cover it was a
+DOOR rule, and a `kind`-less heartbeat registers a **court box**, which had no naming step at
+all. Four rules, and the last two are what actually bound the fleet:
 
 - **At most one outage mail per board per cooldown.** Derived by replaying that board's own
   outage rows rather than stored on them, so it needs no migration; each row is announced iff
   the cooldown has elapsed since the last *announced* one, not since the last row — otherwise
-  a board flapping just inside the window chains past it for ever.
+  a board flapping just inside the window chains past it for ever. This bounds a FLAPPING
+  board and nothing else.
 - **A recovery mail is sent only if its outage mail was.** Same replay, same rows, so the two
   decisions cannot disagree. The one thing that can move between them is the setting itself,
   and a club that changes it mid-outage may get an all-clear for an alarm it did not get; that
   is the price of not adding a column and it is bounded to the boards in outage at that moment.
-- **A gate no admin has named mails nobody** (§4's acknowledgement, applied to alerts). The
-  outage row and the `peripheral.*` events are still written — the Devices page is where an
-  admin looks at a board on purpose, and what is withheld is the interruption, not the record.
+- **A board NO ADMIN HAS ACKNOWLEDGED mails nobody**, whatever kind it is. `AutoRegistered`
+  means exactly "nobody has looked at this row", it is already on every kind, and the first
+  admin edit clears it — so a board a club genuinely installed becomes mailable the moment
+  anybody touches it, and an invented one never does. The gate's own naming rule survives as
+  the narrower of the two and is about a different thing: `gate_key` is what makes the message
+  identify a door at all, and §4 keys the offline roster on it. The outage row and the
+  `peripheral.*` events are still written — the Devices page is where an admin looks at a
+  board on purpose, and what is withheld is the interruption, not the record.
+- **A club may hold at most sixteen boards nobody has acknowledged** — the contract constant
+  `DeviceRegistryService.MaxUnacknowledgedDevices`. Past it, auto-registration answers
+  **`409 too_many_unacknowledged_devices`** and no row is created. It counts the
+  *unacknowledged* rows rather than all of them, because a cap on the total would eventually
+  refuse a club that genuinely has forty boards, at the worst possible moment; the way past it
+  is the thing an admin was going to do anyway. It bounds **creating** a row and never serving
+  one, so a flood cannot take a club's installed doors offline.
+
+  **409 and not 403**, and that is load-bearing rather than taste: on this route group a 403
+  means "this board is out of service" and nothing else (§7), and the firmware acts on it by
+  committing an empty roster and refusing to fall back. A registration refusal wearing a 403
+  would take every door in the club out of service for as long as the flood lasted.
 
 **Taking a board out of service closes whatever outage it is in, silently**, at the instant
 `OutOfServiceSince` records. The sweep skips disabled rows, so an outage open at that moment
@@ -1119,7 +1141,9 @@ new sentence above with no row is the defect this table exists to expose.
 | The bounds are 1–30, 0–240 and 5–1440 | `AdminSettingsHttpTests.A_gate_number_outside_its_bounds_is_refused` |
 | `device_alert_cooldown_minutes` is served whether or not the club has set one | `AdminSettingsHttpTests.The_alert_cooldown_binds_under_either_spelling_and_is_always_served` |
 | One outage mail per board per cooldown, and the cooldown is the club's | `PeripheralHealthTests.A_flapping_board_mails_the_club_once_per_cooldown_and_not_once_per_flap`, `…The_cooldown_is_the_clubs_setting` |
-| A gate no admin has named alerts nobody, and still records its outage | `PeripheralHealthTests.A_gate_no_admin_has_named_alerts_nobody_and_still_records_its_outage` |
+| A gate no admin has named alerts nobody, and still records its outage | `PeripheralHealthTests.A_gate_no_admin_has_named_alerts_nobody_and_still_records_its_outage`, `…An_acknowledged_but_unnamed_gate_still_mails_nobody` |
+| A board no admin has ACKNOWLEDGED alerts nobody, whatever kind, however many appear | `PeripheralHealthTests.A_board_no_admin_has_acknowledged_mails_nobody_however_many_of_them_appear` (twelve boards from the real `AutoRegisterAsync`) |
+| A club holds at most 16 unacknowledged boards; the 17th is `409`, never `403` | `DeviceGateHttpTests.A_club_cannot_be_filled_with_boards_nobody_has_acknowledged` |
 | Taking a board out of service closes its outage silently | `PeripheralHealthTests.Taking_a_board_out_of_service_closes_its_outage_silently` |
 | The policy is a closed set; a refused save writes nothing | `AdminSettingsHttpTests.An_access_policy_outside_the_closed_set_is_refused`, `…Both_access_policies_are_accepted` |
 | An unreadable stored policy narrows the door | `DeviceGateTests.An_unreadable_access_policy_narrows_the_door_rather_than_widening_it` |
