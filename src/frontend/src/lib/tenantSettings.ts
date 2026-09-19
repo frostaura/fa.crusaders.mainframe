@@ -165,7 +165,41 @@ export function deviceNumbersComplaint(settings: { device_alert_cooldown_minutes
 }
 
 /**
- * Why the door-gate settings cannot be saved, in a sentence, or null when they can.
+ * A complaint, tied to the settings key that caused it.
+ *
+ * <p>
+ * The string helpers below answer "can this be saved at all", which is everything a disabled
+ * button needed to know. It is not enough for a message that has to sit ON the offending
+ * input, or for a summary beside Save that links back to it — both of those need to know
+ * WHICH field, and on a page 5 400 px tall that is the whole difference between an
+ * explanation and a dead control (B5 / C11).
+ * </p>
+ *
+ * <p>
+ * The label deliberately does NOT travel with the complaint. The rule lives here; the words
+ * on the screen live on the screen, and the page looks the caption up from the same table it
+ * renders the field's label from. A second copy of "Unlock time (seconds)" in this module is
+ * a second vocabulary to keep in step.
+ * </p>
+ */
+export type SettingComplaint = { key: string; message: string };
+
+/**
+ * The element id a deep link to one setting lands on — <code>#setting-gate-unlock-seconds</code>.
+ *
+ * <p>
+ * Derived from the settings key rather than written out per field, so the mechanism covers
+ * every setting on the page instead of the one door signal that prompted it (A9). The doors
+ * page's "may not be releasing" link used to reach <code>/admin/settings</code> and drop the
+ * admin at the top of a very tall page with one number to find.
+ * </p>
+ */
+export function settingAnchorId(key: string): string {
+  return `setting-${key.replace(/_/g, "-")}`;
+}
+
+/**
+ * Why the door-gate settings cannot be saved, one complaint per offending field.
  *
  * <p>
  * The bounds are on the inputs too, but a number input's <code>min</code> and
@@ -177,21 +211,37 @@ export function deviceNumbersComplaint(settings: { device_alert_cooldown_minutes
  * this build does not know about is refused here rather than saved back as a blank select.
  * </p>
  */
+export function gateSettingComplaints(settings: {
+  gate_unlock_seconds: number;
+  gate_access_policy: string;
+  gate_early_entry_minutes: number;
+}): SettingComplaint[] {
+  const complaints: SettingComplaint[] = [];
+  if (!inRange(settings.gate_unlock_seconds, GATE_UNLOCK_MIN_SECONDS, GATE_UNLOCK_MAX_SECONDS)) {
+    complaints.push({
+      key: "gate_unlock_seconds",
+      message: `Unlock time has to be a whole number of seconds between ${GATE_UNLOCK_MIN_SECONDS} and ${GATE_UNLOCK_MAX_SECONDS}.`,
+    });
+  }
+  if (!inRange(settings.gate_early_entry_minutes, GATE_EARLY_ENTRY_MIN_MINUTES, GATE_EARLY_ENTRY_MAX_MINUTES)) {
+    complaints.push({
+      key: "gate_early_entry_minutes",
+      message: `Early entry has to be a whole number of minutes between ${GATE_EARLY_ENTRY_MIN_MINUTES} and ${GATE_EARLY_ENTRY_MAX_MINUTES}.`,
+    });
+  }
+  if (!GATE_ACCESS_POLICIES.includes(settings.gate_access_policy as GateAccessPolicy)) {
+    complaints.push({ key: "gate_access_policy", message: "Pick who may open a door." });
+  }
+  return complaints;
+}
+
+/** The first thing wrong with the door-gate settings, in a sentence, or null when they can be saved. */
 export function gateSettingsComplaint(settings: {
   gate_unlock_seconds: number;
   gate_access_policy: string;
   gate_early_entry_minutes: number;
 }): string | null {
-  if (!inRange(settings.gate_unlock_seconds, GATE_UNLOCK_MIN_SECONDS, GATE_UNLOCK_MAX_SECONDS)) {
-    return `Unlock time has to be a whole number of seconds between ${GATE_UNLOCK_MIN_SECONDS} and ${GATE_UNLOCK_MAX_SECONDS}.`;
-  }
-  if (!inRange(settings.gate_early_entry_minutes, GATE_EARLY_ENTRY_MIN_MINUTES, GATE_EARLY_ENTRY_MAX_MINUTES)) {
-    return `Early entry has to be a whole number of minutes between ${GATE_EARLY_ENTRY_MIN_MINUTES} and ${GATE_EARLY_ENTRY_MAX_MINUTES}.`;
-  }
-  if (!GATE_ACCESS_POLICIES.includes(settings.gate_access_policy as GateAccessPolicy)) {
-    return "Pick who may open a door.";
-  }
-  return null;
+  return gateSettingComplaints(settings)[0]?.message ?? null;
 }
 
 /**
@@ -213,7 +263,78 @@ export const CLUB_CONTACT_PHONE_MAX_LENGTH = 32;
 export const CLUB_CONTACT_EMAIL_MAX_LENGTH = 254;
 
 /**
- * Why the door settings cannot be saved, in a sentence, or null when they can.
+ * The characters a telephone number may be written with: digits, space, and
+ * <code>+ - ( ) ,</code> — the last for a club that lists two numbers on one line.
+ *
+ * <p>
+ * Deliberately a CHARACTER SET rather than a grammar. There is no free-tier dependency in
+ * this repo that parses international dialling plans (CLAUDE.md names libphonenumber as plan,
+ * not convention), and a homegrown grammar would refuse real numbers — which is a worse
+ * failure here than accepting an oddly-spaced one, because the field is optional and its only
+ * job is to be dialled by a member standing at a door.
+ * </p>
+ */
+export const CLUB_CONTACT_PHONE_PATTERN = /^[0-9 +\-(),]+$/;
+
+/**
+ * An address shape, not an RFC. A local part with no spaces or second <code>@</code>, then a
+ * dotted host whose labels are alphanumeric-with-hyphens and whose last label is alphabetic.
+ *
+ * <p>
+ * The bar that matters is the one a naive <code>includes("@")</code> fails: <code>a@b</code>
+ * has no dot, is not routable, and is exactly what gets typed and then PRINTED ON A WALL.
+ * Deliverability is the server's business and ultimately the mail system's; this is the
+ * client half, and it exists so the mistake is caught while the admin is still looking at
+ * the field.
+ * </p>
+ */
+const CLUB_CONTACT_EMAIL_PATTERN =
+  /^[^\s@]+@[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}$/;
+
+/**
+ * Why the club's contact number cannot be saved, or null.
+ *
+ * <p>
+ * <b>Empty is not invalid.</b> A club that has recorded no number is a real state the door
+ * card and the member's refusal card both have copy for, and refusing it would make "no
+ * contact" impossible to express.
+ * </p>
+ */
+export function clubContactPhoneComplaint(value: string): string | null {
+  const phone = value.trim();
+  if (phone.length === 0) return null;
+  if (phone.length > CLUB_CONTACT_PHONE_MAX_LENGTH) {
+    return `A club contact number is at most ${CLUB_CONTACT_PHONE_MAX_LENGTH} characters.`;
+  }
+  if (!CLUB_CONTACT_PHONE_PATTERN.test(phone)) {
+    return "A club contact number can only hold digits, spaces and + - ( ) , — this one goes on a printed door card.";
+  }
+  return null;
+}
+
+/** Why the club's contact email cannot be saved, or null. Empty is allowed, for the same reason. */
+export function clubContactEmailComplaint(value: string): string | null {
+  const email = value.trim();
+  if (email.length === 0) return null;
+  if (email.length > CLUB_CONTACT_EMAIL_MAX_LENGTH) {
+    return `A club contact email is at most ${CLUB_CONTACT_EMAIL_MAX_LENGTH} characters.`;
+  }
+  if (!CLUB_CONTACT_EMAIL_PATTERN.test(email)) {
+    return "A club contact email has to look like an address — squash@example.co.za.";
+  }
+  return null;
+}
+
+/** One bounded door number, as a complaint or nothing. Out here so the block below stays flat. */
+function doorNumberComplaint(
+  key: string, value: number | undefined, min: number, max: number, sentence: string,
+): SettingComplaint[] {
+  if (value === undefined || inRange(value, min, max)) return [];
+  return [{ key, message: sentence }];
+}
+
+/**
+ * Why the door settings cannot be saved, one complaint per offending field.
  *
  * <p>
  * <b>An absent key is not a complaint.</b> An older API that does not serve these leaves them
@@ -224,11 +345,42 @@ export const CLUB_CONTACT_EMAIL_MAX_LENGTH = 254;
  * </p>
  *
  * <p>
- * The two contact fields may be EMPTY, deliberately: a club that has not set a phone number
- * is a real state the member surface has copy for, and refusing to save an empty one would
- * make "no contact" impossible to express.
+ * <b>Every bad field, not only the first.</b> The one-sentence form below stops at one
+ * because a disabled button can carry one reason; the summary beside Save names them all, so
+ * an admin fixes the page once rather than once per mistake (C11).
  * </p>
  */
+export function doorSettingComplaints(settings: {
+  door_log_retention_days?: number;
+  door_refusal_spike_count?: number;
+  door_refusal_spike_minutes?: number;
+  club_contact_phone?: string;
+  club_contact_email?: string;
+}): SettingComplaint[] {
+  const complaints: SettingComplaint[] = [
+    ...doorNumberComplaint(
+      "door_log_retention_days", settings.door_log_retention_days,
+      DOOR_LOG_RETENTION_MIN_DAYS, DOOR_LOG_RETENTION_MAX_DAYS,
+      `Door scans have to be kept for a whole number of days between ${DOOR_LOG_RETENTION_MIN_DAYS} and ${DOOR_LOG_RETENTION_MAX_DAYS}.`),
+    ...doorNumberComplaint(
+      "door_refusal_spike_count", settings.door_refusal_spike_count,
+      DOOR_REFUSAL_SPIKE_MIN_COUNT, DOOR_REFUSAL_SPIKE_MAX_COUNT,
+      `A refusal spike has to be a whole number of scans between ${DOOR_REFUSAL_SPIKE_MIN_COUNT} and ${DOOR_REFUSAL_SPIKE_MAX_COUNT}.`),
+    ...doorNumberComplaint(
+      "door_refusal_spike_minutes", settings.door_refusal_spike_minutes,
+      DOOR_REFUSAL_SPIKE_MIN_MINUTES, DOOR_REFUSAL_SPIKE_MAX_MINUTES,
+      `The refusal-spike window has to be a whole number of minutes between ${DOOR_REFUSAL_SPIKE_MIN_MINUTES} and ${DOOR_REFUSAL_SPIKE_MAX_MINUTES}.`),
+  ];
+  const phone = settings.club_contact_phone === undefined
+    ? null : clubContactPhoneComplaint(settings.club_contact_phone);
+  if (phone) complaints.push({ key: "club_contact_phone", message: phone });
+  const email = settings.club_contact_email === undefined
+    ? null : clubContactEmailComplaint(settings.club_contact_email);
+  if (email) complaints.push({ key: "club_contact_email", message: email });
+  return complaints;
+}
+
+/** The first thing wrong with the door settings, in a sentence, or null when they can be saved. */
 export function doorSettingsComplaint(settings: {
   door_log_retention_days?: number;
   door_refusal_spike_count?: number;
@@ -236,27 +388,7 @@ export function doorSettingsComplaint(settings: {
   club_contact_phone?: string;
   club_contact_email?: string;
 }): string | null {
-  const retention = settings.door_log_retention_days;
-  if (retention !== undefined && !inRange(retention, DOOR_LOG_RETENTION_MIN_DAYS, DOOR_LOG_RETENTION_MAX_DAYS)) {
-    return `Door scans have to be kept for a whole number of days between ${DOOR_LOG_RETENTION_MIN_DAYS} and ${DOOR_LOG_RETENTION_MAX_DAYS}.`;
-  }
-  const count = settings.door_refusal_spike_count;
-  if (count !== undefined && !inRange(count, DOOR_REFUSAL_SPIKE_MIN_COUNT, DOOR_REFUSAL_SPIKE_MAX_COUNT)) {
-    return `A refusal spike has to be a whole number of scans between ${DOOR_REFUSAL_SPIKE_MIN_COUNT} and ${DOOR_REFUSAL_SPIKE_MAX_COUNT}.`;
-  }
-  const minutes = settings.door_refusal_spike_minutes;
-  if (minutes !== undefined && !inRange(minutes, DOOR_REFUSAL_SPIKE_MIN_MINUTES, DOOR_REFUSAL_SPIKE_MAX_MINUTES)) {
-    return `The refusal-spike window has to be a whole number of minutes between ${DOOR_REFUSAL_SPIKE_MIN_MINUTES} and ${DOOR_REFUSAL_SPIKE_MAX_MINUTES}.`;
-  }
-  const phone = settings.club_contact_phone;
-  if (phone !== undefined && phone.trim().length > CLUB_CONTACT_PHONE_MAX_LENGTH) {
-    return `A club contact number is at most ${CLUB_CONTACT_PHONE_MAX_LENGTH} characters.`;
-  }
-  const email = settings.club_contact_email;
-  if (email !== undefined && email.trim().length > CLUB_CONTACT_EMAIL_MAX_LENGTH) {
-    return `A club contact email is at most ${CLUB_CONTACT_EMAIL_MAX_LENGTH} characters.`;
-  }
-  return null;
+  return doorSettingComplaints(settings)[0]?.message ?? null;
 }
 
 function inRange(value: number, min: number, max: number): boolean {

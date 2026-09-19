@@ -1,4 +1,6 @@
-import { useEffect, useState, cloneElement, isValidElement, useId } from "react";
+import {
+  createContext, useCallback, useContext, useEffect, useState, cloneElement, isValidElement, useId,
+} from "react";
 import { endpoints, GATE_ACCESS_POLICIES, type AdminSettings, type AdminCourt, type GateAccessPolicy } from "../lib/api";
 import {
   DAY_KEYS, DAY_NAMES, DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
@@ -8,9 +10,9 @@ import {
   DOOR_LOG_RETENTION_MAX_DAYS, DOOR_LOG_RETENTION_MIN_DAYS,
   DOOR_REFUSAL_SPIKE_MAX_COUNT, DOOR_REFUSAL_SPIKE_MAX_MINUTES,
   DOOR_REFUSAL_SPIKE_MIN_COUNT, DOOR_REFUSAL_SPIKE_MIN_MINUTES,
-  deviceNumbersComplaint, doorBookingHorizonMinutes, doorSettingsComplaint, formatDayHours,
-  gateSettingsComplaint, operatingHoursComplaint, parseDayHours, timezoneOptions,
-  type DayHours, type DayKey,
+  deviceNumbersComplaint, doorBookingHorizonMinutes, doorSettingComplaints, formatDayHours,
+  gateSettingComplaints, operatingHoursComplaint, parseDayHours, settingAnchorId, timezoneOptions,
+  type DayHours, type DayKey, type SettingComplaint,
 } from "../lib/tenantSettings";
 import {
   GATE_POLICY_LABELS, describeCourtSettingDoorReach, describeDoorBookingHorizon, describeEarlyEntry,
@@ -30,12 +32,218 @@ const hhmmToMin = (s: string) => {
   return h * 60 + (m || 0);
 };
 
+/**
+ * <b>An empty box is not zero.</b> (B5 / C11)
+ *
+ * <p>
+ * Every numeric field on this page was bound with
+ * <code>onChange={(e) =&gt; set({ x: Number(e.target.value) })}</code>, and
+ * <code>Number("")</code> is <code>0</code>. Clearing a field to retype it therefore SET the
+ * setting to zero, silently: for <code>gate_early_entry_minutes</code> zero is in range and
+ * would have been saved — a club that quietly stopped letting anyone in before their booking
+ * — and for the rest it tripped a bound the admin had not typed, killed Save, and said
+ * nothing about why.
+ * </p>
+ *
+ * <p>
+ * <code>NaN</code> is the sentinel for "the box is empty". It renders as an empty input, it
+ * fails every <code>Number.isInteger</code> bound, and — because Save cannot be pressed while
+ * any field holds one — it can never reach the wire, where <code>JSON.stringify</code> would
+ * turn it into <code>null</code>.
+ * </p>
+ */
+const toNumber = (raw: string): number => (raw.trim() === "" ? Number.NaN : Number(raw));
+
+/** What a number input shows: its value, or an empty box for a field that has been cleared. */
+const shown = (value: number): number | string => (Number.isFinite(value) ? value : "");
+
+/** That same value where a NUMBER is needed — a hint, a bound on a neighbour — with a floor. */
+const orElse = (value: number | undefined, fallback: number): number =>
+  (Number.isFinite(value) ? (value as number) : fallback);
+
+/**
+ * Every settings key that has a field on this page, and the caption that field carries.
+ *
+ * <p>
+ * One table rather than a label written at the call site and a second copy wherever a
+ * complaint has to name the field. The error summary beside Save reads its link text from
+ * here, so an admin sent back to a field is sent back to it by the words the field actually
+ * shows — <code>settings-door-validation.test.tsx</code> pins that by reading each caption
+ * off the rendered <code>&lt;label for&gt;</code> rather than restating it.
+ * </p>
+ */
+const SETTING_LABELS: Record<string, string> = {
+  advance_booking_days: "Reserve window (days ahead)",
+  slice_minutes: "Slice length (minutes)",
+  timezone: "Timezone",
+  penalty_pct: "Penalty (% of slice price)",
+  grace_window_minutes: "Grace window (minutes)",
+  penalty_window_minutes: "Late-cancel window (minutes)",
+  credits_per_zar_regular: "Credits per R1 — members",
+  credits_per_zar_league: "Credits per R1 — league / over-65",
+  topup_block_zar: "Top-up block (R)",
+  topup_max_zar_per_member: "Top-up cap per member (R)",
+  member_per_day_max_minutes: "Court time per member per day (minutes)",
+  peak_hours: "Peak hours",
+  peak_advance_hours_for_regular: "Peak opens to everyone (hours before start)",
+  walk_up_max_minutes: "Walk-up maximum (minutes)",
+  heartbeat_seconds: "Heartbeat interval (seconds)",
+  activation_forward_window_minutes: "Booking lookahead at the box (minutes)",
+  activation_cue_window_minutes: "Lights on this early (minutes before a booking)",
+  qr_lifetime_seconds: "Court code lifetime (seconds)",
+  roster_window_minutes: "Offline roster reach (minutes)",
+  device_alert_cooldown_minutes: "Alert cooldown (minutes)",
+  gate_unlock_seconds: "Unlock time (seconds)",
+  gate_access_policy: "Who may open a door",
+  gate_early_entry_minutes: "Early entry (minutes before a booking)",
+  door_log_retention_days: "Keep door scans for (days)",
+  door_refusal_spike_count: "Refusal spike (scans)",
+  door_refusal_spike_minutes: "Refusal spike window (minutes)",
+  club_contact_phone: "Club contact number",
+  club_contact_email: "Club contact email",
+  retention_years: "Keep usage history for (years)",
+  no_show_lookback_days: "No-show sweep looks back (days)",
+};
+
+/** The five above that a person types words into rather than a number. */
+const TEXT_SETTINGS = new Set([
+  "timezone", "peak_hours", "gate_access_policy", "club_contact_phone", "club_contact_email",
+]);
+
+const NUMERIC_SETTING_KEYS = Object.keys(SETTING_LABELS).filter((key) => !TEXT_SETTINGS.has(key));
+
+/** A reason this page cannot be saved, with the field it belongs to and that field's caption. */
+type Blocker = SettingComplaint & { label: string };
+
+/** Which numeric fields have been emptied — the one complaint no bound-check can phrase. */
+function emptyNumberComplaints(settings: AdminSettings): SettingComplaint[] {
+  const document_ = settings as unknown as Record<string, unknown>;
+  return NUMERIC_SETTING_KEYS
+    .filter((key) => typeof document_[key] === "number" && !Number.isFinite(document_[key]))
+    .map((key) => ({
+      key,
+      message: `${SETTING_LABELS[key]} needs a number — an empty box is not the same as 0.`,
+    }));
+}
+
+/**
+ * Everything standing between this page and a save, in the order an admin would meet it
+ * reading down the page.
+ *
+ * <p>
+ * An emptied field WINS over the bound-check for the same key. Both are true of a cleared
+ * box — <code>Number.isInteger(NaN)</code> is false, so the range complaint fires too — but
+ * "Unlock time has to be a whole number between 1 and 30" is a confusing thing to be told
+ * about a field you have just emptied, and two messages on one input is worse than one.
+ * </p>
+ */
+function blockersOf(
+  settings: AdminSettings,
+  hours: { day: DayKey; message: string } | null,
+): Blocker[] {
+  const empties = emptyNumberComplaints(settings);
+  const emptied = new Set(empties.map((complaint) => complaint.key));
+  const cooldown = deviceNumbersComplaint(settings);
+  const rules: SettingComplaint[] = [
+    ...(cooldown ? [{ key: "device_alert_cooldown_minutes", message: cooldown }] : []),
+    ...gateSettingComplaints(settings),
+    ...doorSettingComplaints(settings),
+  ].filter((complaint) => !emptied.has(complaint.key));
+
+  const dayRow: Blocker[] = hours
+    ? [{
+        key: `operating_hours_${hours.day}`,
+        label: `${DAY_NAMES[hours.day]} opening hours`,
+        message: hours.message,
+      }]
+    : [];
+
+  return [
+    ...dayRow,
+    ...[...empties, ...rules].map((complaint) => ({
+      ...complaint,
+      label: SETTING_LABELS[complaint.key] ?? complaint.key,
+    })),
+  ];
+}
+
+/** What every {@link Field} on the page needs to know that its own props do not carry. */
+type FieldState = { errors: Record<string, string>; highlighted: string | null };
+
+const FieldStateContext = createContext<FieldState>({ errors: {}, highlighted: null });
+
+/** How long a deep-linked field stays ringed, in ms. Long enough to be seen, short enough to leave. */
+const HIGHLIGHT_MS = 2500;
+
+const HIGHLIGHT_CLASS = "rounded-lg ring-2 ring-accent-strong ring-offset-2";
+
+/**
+ * Put one setting in front of the admin: scroll to it, focus its control, and say which.
+ *
+ * <p>
+ * The checkbox is skipped deliberately. A weekday row's first control is "Monday has its own
+ * hours", and an admin sent there by a complaint about the CLOSING TIME wants the closing
+ * time, not the switch that would turn the row off altogether.
+ * </p>
+ */
+function focusSettingElement(anchorId: string): boolean {
+  const wrapper = document.getElementById(anchorId);
+  if (!wrapper) return false;
+  wrapper.scrollIntoView?.({ block: "center" });
+  const control = wrapper.querySelector<HTMLElement>('input:not([type="checkbox"]), select, textarea')
+    ?? wrapper.querySelector<HTMLElement>("input");
+  control?.focus({ preventScroll: true });
+  return true;
+}
+
+/**
+ * The <code>#setting-&lt;key&gt;</code> deep link, and the same jump used by the error summary. (A9)
+ *
+ * <p>
+ * The doors page's "may not be releasing" signal tells an admin to change the release under
+ * Admin settings. It linked to <code>/admin/settings</code>, which is about 5 400 px tall, and
+ * left them to find one number among thirty. A hash is the general mechanism — every field
+ * with a settings key has an anchor — rather than a special case for the one that prompted it.
+ * </p>
+ */
+function useSettingFocus(ready: boolean) {
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+
+  const focusSetting = useCallback((key: string) => {
+    const anchorId = settingAnchorId(key);
+    if (focusSettingElement(anchorId)) setHighlighted(anchorId);
+  }, []);
+
+  // An effect rather than a render-time read on purpose: the hash names an ELEMENT, and the
+  // element does not exist until the settings have loaded and the fields are committed.
+  useEffect(() => {
+    if (!ready) return;
+    const fromHash = () => {
+      const hash = window.location.hash.replace(/^#/, "");
+      if (!hash.startsWith("setting-")) return;
+      if (focusSettingElement(hash)) setHighlighted(hash);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, [ready]);
+
+  useEffect(() => {
+    if (!highlighted) return;
+    const timer = window.setTimeout(() => setHighlighted(null), HIGHLIGHT_MS);
+    return () => window.clearTimeout(timer);
+  }, [highlighted]);
+
+  return { highlighted, focusSetting };
+}
+
 export default function AdminSettingsPage() {
   const toast = useToast();
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [courts, setCourts] = useState<AdminCourt[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const { highlighted, focusSetting } = useSettingFocus(settings !== null);
 
   const load = async () => {
     setLoading(true);
@@ -81,151 +289,246 @@ export default function AdminSettingsPage() {
   // toast that has faded says nothing about which of seven rows to fix, and the row itself
   // is already saying it in red.
   const hoursComplaint = operatingHoursComplaint(settings.operating_hours ?? {});
+  const blockers = blockersOf(settings, hoursComplaint);
+  const fieldState: FieldState = {
+    errors: Object.fromEntries(blockers.map((blocker) => [blocker.key, blocker.message])),
+    highlighted,
+  };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Admin · Settings</h1>
-        <p className="text-sm text-text-secondary">Court schedule, booking limits, penalty policy and court-box behaviour for this tenant.</p>
-      </div>
+    <FieldStateContext.Provider value={fieldState}>
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-xl font-semibold">Admin · Settings</h1>
+          {/*
+            "Tenant" is our word for a row in our database. An admin here is a club
+            volunteer, and this is the first line of the screen they read (A9).
+          */}
+          <p className="text-sm text-text-secondary">Court schedule, booking limits, penalty policy and court-box behaviour for this club.</p>
+        </div>
 
-      <Card className="space-y-5">
-        <h2 className="text-base font-semibold">Booking</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Reserve window (days ahead)" hint="0–365. Members can only book up to this many days in advance.">
-            <Input type="number" min={0} max={365} value={settings.advance_booking_days}
-              onChange={(e) => setSettings({ ...settings, advance_booking_days: Number(e.target.value) })} />
-          </Field>
-          <Field label="Slice length (minutes)" hint="Each booking is one or more slices, e.g. 30 min.">
-            <Input type="number" min={5} max={240} step={5} value={settings.slice_minutes}
-              onChange={(e) => setSettings({ ...settings, slice_minutes: Number(e.target.value) })} />
-          </Field>
-          <Field label="Day starts">
-            <Input type="time" value={minToHHMM(settings.day_start_minute)}
-              onChange={(e) => setSettings({ ...settings, day_start_minute: hhmmToMin(e.target.value) })} />
-          </Field>
-          <Field label="Day ends">
-            <Input type="time" value={minToHHMM(settings.day_end_minute)}
-              onChange={(e) => setSettings({ ...settings, day_end_minute: hhmmToMin(e.target.value) })} />
-          </Field>
-          {/* The zone every wall-clock time on this page and every slot on the booking
-              grid is read in. It was served by the API and had nowhere to be set: a club
-              outside South Africa saw its whole schedule in Johannesburg time with no
-              correction short of an UPDATE on a JSON column. */}
-          <Field
-            label="Timezone"
-            hint="The zone the club's day is read in. Day start and end, the booking grid and every time a member sees are all in this zone."
-          >
-            <select
-              value={settings.timezone}
-              onChange={(e) => setSettings({ ...settings, timezone: e.target.value })}
-              className={fieldClassName}
+        <Card className="space-y-5">
+          <h2 className="text-base font-semibold">Booking</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field settingKey="advance_booking_days" label={SETTING_LABELS.advance_booking_days} hint="0–365. Members can only book up to this many days in advance.">
+              <Input type="number" min={0} max={365} value={shown(settings.advance_booking_days)}
+                onChange={(e) => setSettings({ ...settings, advance_booking_days: toNumber(e.target.value) })} />
+            </Field>
+            <Field settingKey="slice_minutes" label={SETTING_LABELS.slice_minutes} hint="Each booking is one or more slices, e.g. 30 min.">
+              <Input type="number" min={5} max={240} step={5} value={shown(settings.slice_minutes)}
+                onChange={(e) => setSettings({ ...settings, slice_minutes: toNumber(e.target.value) })} />
+            </Field>
+            <Field label="Day starts">
+              <Input type="time" value={minToHHMM(settings.day_start_minute)}
+                onChange={(e) => setSettings({ ...settings, day_start_minute: hhmmToMin(e.target.value) })} />
+            </Field>
+            <Field label="Day ends">
+              <Input type="time" value={minToHHMM(settings.day_end_minute)}
+                onChange={(e) => setSettings({ ...settings, day_end_minute: hhmmToMin(e.target.value) })} />
+            </Field>
+            {/* The zone every wall-clock time on this page and every slot on the booking
+                grid is read in. It was served by the API and had nowhere to be set: a club
+                outside South Africa saw its whole schedule in Johannesburg time with no
+                correction short of an UPDATE on a JSON column. */}
+            <Field
+              settingKey="timezone"
+              label={SETTING_LABELS.timezone}
+              hint="The zone the club's day is read in. Day start and end, the booking grid and every time a member sees are all in this zone."
             >
-              {timezoneOptions(settings.timezone).map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-            </select>
-          </Field>
+              <select
+                value={settings.timezone}
+                onChange={(e) => setSettings({ ...settings, timezone: e.target.value })}
+                className={fieldClassName}
+              >
+                {timezoneOptions(settings.timezone).map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+              </select>
+            </Field>
+          </div>
+        </Card>
+
+        <OperatingHoursSection settings={settings} onChange={setSettings} />
+
+        <Card className="space-y-5">
+          <h2 className="text-base font-semibold">No-show & cancellation policy</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Field settingKey="penalty_pct" label={SETTING_LABELS.penalty_pct}>
+              <Input type="number" min={0} max={100} value={shown(settings.penalty_pct)}
+                onChange={(e) => setSettings({ ...settings, penalty_pct: toNumber(e.target.value) })} />
+            </Field>
+            <Field settingKey="grace_window_minutes" label={SETTING_LABELS.grace_window_minutes} hint="After slot start, before a no-show triggers.">
+              <Input type="number" min={0} max={60} value={shown(settings.grace_window_minutes)}
+                onChange={(e) => setSettings({ ...settings, grace_window_minutes: toNumber(e.target.value) })} />
+            </Field>
+            <Field settingKey="penalty_window_minutes" label={SETTING_LABELS.penalty_window_minutes} hint="Cancellations within this many minutes of start incur the penalty.">
+              <Input type="number" min={0} max={1440} value={shown(settings.penalty_window_minutes)}
+                onChange={(e) => setSettings({ ...settings, penalty_window_minutes: toNumber(e.target.value) })} />
+            </Field>
+          </div>
+        </Card>
+
+        <Card className="space-y-5">
+          <h2 className="text-base font-semibold">Credits &amp; top-ups</h2>
+          {/* These four decide what a member's money is worth. Until now the only way to
+              change one was to hand-edit a JSON column on a live system — no validation,
+              no audit trail, and a typo away from making every top-up worthless. */}
+          <p className="text-sm text-text-secondary">
+            Credits are the unit of account. A member pays in rand and receives credits at the rate for their class.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* step 0.01, not 0.1.
+                A number input's valid values step from `min`, not from zero, so min=0.01 with
+                step=0.1 made the valid set 0.01, 0.11, … 1.51, 1.61 — and the club's own shipped
+                rates, 1.6 and 2.4, were both stepMismatch. Every round rate an admin would type
+                (1.5, 2.0, 2.5) was invalid, the arrows turned 1.6 into 1.61, and because Save is
+                not a native submit nothing ever said so: the field looked fine while the arrows
+                quietly moved the money conversion rate by a hundredth. Cents are the smallest unit
+                anyone would express a rand rate in, so 0.01 is both the granularity and the base. */}
+            <Field settingKey="credits_per_zar_regular" label={SETTING_LABELS.credits_per_zar_regular} hint="R100 at 1.6 gives 160 credits.">
+              <Input type="number" min={0.01} max={1000} step={0.01} value={shown(settings.credits_per_zar_regular)}
+                onChange={(e) => setSettings({ ...settings, credits_per_zar_regular: toNumber(e.target.value) })} />
+            </Field>
+            <Field settingKey="credits_per_zar_league" label={SETTING_LABELS.credits_per_zar_league} hint="R100 at 2.4 gives 240 credits.">
+              <Input type="number" min={0.01} max={1000} step={0.01} value={shown(settings.credits_per_zar_league)}
+                onChange={(e) => setSettings({ ...settings, credits_per_zar_league: toNumber(e.target.value) })} />
+            </Field>
+            <Field settingKey="topup_block_zar" label={SETTING_LABELS.topup_block_zar} hint="Members top up in multiples of this.">
+              <Input type="number" min={1} max={100000} value={shown(settings.topup_block_zar)}
+                onChange={(e) => setSettings({ ...settings, topup_block_zar: toNumber(e.target.value) })} />
+            </Field>
+            <Field settingKey="topup_max_zar_per_member" label={SETTING_LABELS.topup_max_zar_per_member} hint="Must be at least one block, or no top-up is ever legal.">
+              <Input type="number" min={1} max={100000} value={shown(settings.topup_max_zar_per_member)}
+                onChange={(e) => setSettings({ ...settings, topup_max_zar_per_member: toNumber(e.target.value) })} />
+            </Field>
+          </div>
+        </Card>
+
+        <Card className="space-y-5">
+          <h2 className="text-base font-semibold">Court access</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field settingKey="member_per_day_max_minutes" label={SETTING_LABELS.member_per_day_max_minutes} hint="0 turns the cap off. A slot starting today is allowed over the cap if the court is otherwise free.">
+              <Input type="number" min={0} max={1440} step={15} value={shown(settings.member_per_day_max_minutes)}
+                onChange={(e) => setSettings({ ...settings, member_per_day_max_minutes: toNumber(e.target.value) })} />
+            </Field>
+            <Field settingKey="peak_hours" label={SETTING_LABELS.peak_hours} hint="Reserved for league and over-65 members. Format 16:00-19:00.">
+              <Input type="text" value={settings.peak_hours}
+                onChange={(e) => setSettings({ ...settings, peak_hours: e.target.value })} />
+            </Field>
+            <Field settingKey="peak_advance_hours_for_regular" label={SETTING_LABELS.peak_advance_hours_for_regular} hint="An empty peak slot opens to all members this many hours before it begins.">
+              <Input type="number" min={0} max={336} value={shown(settings.peak_advance_hours_for_regular)}
+                onChange={(e) => setSettings({ ...settings, peak_advance_hours_for_regular: toNumber(e.target.value) })} />
+            </Field>
+          </div>
+        </Card>
+
+        <DeviceNumbersSection settings={settings} onChange={setSettings} />
+
+        <GateSection settings={settings} onChange={setSettings} />
+
+        <Card className="space-y-5">
+          <h2 className="text-base font-semibold">Records</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field settingKey="retention_years" label={SETTING_LABELS.retention_years}>
+              <Input type="number" min={1} max={50} value={shown(settings.retention_years)}
+                onChange={(e) => setSettings({ ...settings, retention_years: toNumber(e.target.value) })} />
+            </Field>
+            <Field settingKey="no_show_lookback_days" label={SETTING_LABELS.no_show_lookback_days} hint="Bounds how far back the sweep reaches, so switching it on cannot post a backlog of historical no-shows at once.">
+              <Input type="number" min={1} max={365} value={shown(settings.no_show_lookback_days)}
+                onChange={(e) => setSettings({ ...settings, no_show_lookback_days: toNumber(e.target.value) })} />
+            </Field>
+          </div>
+          <SaveBar blockers={blockers} saving={saving} onSave={save} onFocusSetting={focusSetting} />
+        </Card>
+
+        <CourtsSection courts={courts} reload={load} />
+      </div>
+    </FieldStateContext.Provider>
+  );
+}
+
+/**
+ * Save, and — when it cannot save — the reason, in reach of both the pointer and the keyboard.
+ *
+ * <p>
+ * <b>Why Save is not <code>disabled</code>.</b> A disabled button is removed from the tab
+ * order, so the one control carrying the explanation was the one control a keyboard user
+ * could not reach; it also took the browser's own "this is off" styling, which measured
+ * 2.27:1 on its label. <code>aria-disabled</code> says the same thing to a screen reader,
+ * keeps the button focusable, and leaves the press free to do something useful — which here
+ * is to take the admin to the field that stopped it. (B5)
+ * </p>
+ *
+ * <p>
+ * <b>Why the summary exists.</b> Save is roughly 5 400 px below the door fields. "It is off
+ * and you may scroll up to find out why" is not an explanation, so every bad field is named
+ * here, in the words its own caption uses, with a link that focuses it. (C11)
+ * </p>
+ *
+ * <p>
+ * The blocked treatment is <code>warning.strong</code> on <code>warning.soft</code> with a
+ * <code>warning.strong</code> boundary — 4.86:1 for the label and 5.07:1 for the edge against
+ * the white card, both measured in <code>tokens.test.ts</code>, against WCAG 2.1's 4.5:1 for
+ * text and 3:1 for a control's boundary.
+ * </p>
+ */
+function SaveBar({ blockers, saving, onSave, onFocusSetting }: {
+  blockers: Blocker[];
+  saving: boolean;
+  onSave: () => void;
+  onFocusSetting: (key: string) => void;
+}) {
+  const summaryId = useId();
+  const [announcement, setAnnouncement] = useState("");
+  const blocked = blockers.length > 0;
+
+  const press = () => {
+    if (!blocked) {
+      setAnnouncement("");
+      onSave();
+      return;
+    }
+    const first = blockers[0];
+    setAnnouncement(`Settings cannot be saved yet. Moved to ${first.label}.`);
+    onFocusSetting(first.key);
+  };
+
+  return (
+    <div className="space-y-3">
+      {blocked && (
+        <div id={summaryId} className="rounded-lg border border-warning-strong bg-warning-soft p-3 text-sm text-warning-strong">
+          <p className="font-medium">
+            {blockers.length} {blockers.length === 1 ? "setting needs" : "settings need"} fixing before this can be saved:
+          </p>
+          <ul className="mt-2 space-y-1 list-disc pl-5">
+            {blockers.map((blocker) => (
+              <li key={blocker.key}>
+                {/*
+                  A real link with a real href, so it can be tabbed to and read as a link —
+                  but the jump is ours, because focusing the input is the point and a bare
+                  fragment navigation only scrolls.
+                */}
+                <a
+                  href={`#${settingAnchorId(blocker.key)}`}
+                  className="underline font-medium"
+                  onClick={(e) => { e.preventDefault(); onFocusSetting(blocker.key); }}
+                >{blocker.label}</a>
+                {" — "}{blocker.message}
+              </li>
+            ))}
+          </ul>
         </div>
-      </Card>
-
-      <OperatingHoursSection settings={settings} onChange={setSettings} />
-
-      <Card className="space-y-5">
-        <h2 className="text-base font-semibold">No-show & cancellation policy</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Field label="Penalty (% of slice price)">
-            <Input type="number" min={0} max={100} value={settings.penalty_pct}
-              onChange={(e) => setSettings({ ...settings, penalty_pct: Number(e.target.value) })} />
-          </Field>
-          <Field label="Grace window (minutes)" hint="After slot start, before a no-show triggers.">
-            <Input type="number" min={0} max={60} value={settings.grace_window_minutes}
-              onChange={(e) => setSettings({ ...settings, grace_window_minutes: Number(e.target.value) })} />
-          </Field>
-          <Field label="Late-cancel window (minutes)" hint="Cancellations within this many minutes of start incur the penalty.">
-            <Input type="number" min={0} max={1440} value={settings.penalty_window_minutes}
-              onChange={(e) => setSettings({ ...settings, penalty_window_minutes: Number(e.target.value) })} />
-          </Field>
-        </div>
-      </Card>
-
-      <Card className="space-y-5">
-        <h2 className="text-base font-semibold">Credits &amp; top-ups</h2>
-        {/* These four decide what a member's money is worth. Until now the only way to
-            change one was to hand-edit a JSON column on a live system — no validation,
-            no audit trail, and a typo away from making every top-up worthless. */}
-        <p className="text-sm text-text-secondary">
-          Credits are the unit of account. A member pays in rand and receives credits at the rate for their class.
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* step 0.01, not 0.1.
-              A number input's valid values step from `min`, not from zero, so min=0.01 with
-              step=0.1 made the valid set 0.01, 0.11, … 1.51, 1.61 — and the club's own shipped
-              rates, 1.6 and 2.4, were both stepMismatch. Every round rate an admin would type
-              (1.5, 2.0, 2.5) was invalid, the arrows turned 1.6 into 1.61, and because Save is
-              not a native submit nothing ever said so: the field looked fine while the arrows
-              quietly moved the money conversion rate by a hundredth. Cents are the smallest unit
-              anyone would express a rand rate in, so 0.01 is both the granularity and the base. */}
-          <Field label="Credits per R1 — members" hint="R100 at 1.6 gives 160 credits.">
-            <Input type="number" min={0.01} max={1000} step={0.01} value={settings.credits_per_zar_regular}
-              onChange={(e) => setSettings({ ...settings, credits_per_zar_regular: Number(e.target.value) })} />
-          </Field>
-          <Field label="Credits per R1 — league / over-65" hint="R100 at 2.4 gives 240 credits.">
-            <Input type="number" min={0.01} max={1000} step={0.01} value={settings.credits_per_zar_league}
-              onChange={(e) => setSettings({ ...settings, credits_per_zar_league: Number(e.target.value) })} />
-          </Field>
-          <Field label="Top-up block (R)" hint="Members top up in multiples of this.">
-            <Input type="number" min={1} max={100000} value={settings.topup_block_zar}
-              onChange={(e) => setSettings({ ...settings, topup_block_zar: Number(e.target.value) })} />
-          </Field>
-          <Field label="Top-up cap per member (R)" hint="Must be at least one block, or no top-up is ever legal.">
-            <Input type="number" min={1} max={100000} value={settings.topup_max_zar_per_member}
-              onChange={(e) => setSettings({ ...settings, topup_max_zar_per_member: Number(e.target.value) })} />
-          </Field>
-        </div>
-      </Card>
-
-      <Card className="space-y-5">
-        <h2 className="text-base font-semibold">Court access</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Court time per member per day (minutes)" hint="0 turns the cap off. A slot starting today is allowed over the cap if the court is otherwise free.">
-            <Input type="number" min={0} max={1440} step={15} value={settings.member_per_day_max_minutes}
-              onChange={(e) => setSettings({ ...settings, member_per_day_max_minutes: Number(e.target.value) })} />
-          </Field>
-          <Field label="Peak hours" hint="Reserved for league and over-65 members. Format 16:00-19:00.">
-            <Input type="text" value={settings.peak_hours}
-              onChange={(e) => setSettings({ ...settings, peak_hours: e.target.value })} />
-          </Field>
-          <Field label="Peak opens to everyone (hours before start)" hint="An empty peak slot opens to all members this many hours before it begins.">
-            <Input type="number" min={0} max={336} value={settings.peak_advance_hours_for_regular}
-              onChange={(e) => setSettings({ ...settings, peak_advance_hours_for_regular: Number(e.target.value) })} />
-          </Field>
-        </div>
-      </Card>
-
-      <DeviceNumbersSection settings={settings} onChange={setSettings} />
-
-      <GateSection settings={settings} onChange={setSettings} />
-
-      <Card className="space-y-5">
-        <h2 className="text-base font-semibold">Records</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Keep usage history for (years)">
-            <Input type="number" min={1} max={50} value={settings.retention_years}
-              onChange={(e) => setSettings({ ...settings, retention_years: Number(e.target.value) })} />
-          </Field>
-          <Field label="No-show sweep looks back (days)" hint="Bounds how far back the sweep reaches, so switching it on cannot post a backlog of historical no-shows at once.">
-            <Input type="number" min={1} max={365} value={settings.no_show_lookback_days}
-              onChange={(e) => setSettings({ ...settings, no_show_lookback_days: Number(e.target.value) })} />
-          </Field>
-        </div>
-        <div className="flex justify-end">
-          {/* Held on the gate block too, for the same reason it is held on the weekly
-              table: a number input's min/max stop the spinner and nothing else, so a typed
-              or pasted value would round-trip into a refusal the admin has to decode. */}
-          <Button onClick={save} disabled={saving || hoursComplaint !== null || gateSettingsComplaint(settings) !== null || deviceNumbersComplaint(settings) !== null || doorSettingsComplaint(settings) !== null}>{saving ? "Saving…" : "Save settings"}</Button>
-        </div>
-      </Card>
-
-      <CourtsSection courts={courts} reload={load} />
+      )}
+      {/* The press itself, announced: a control that swallows a press with no feedback is
+          indistinguishable, from the person's side, from a broken page. */}
+      <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
+      <div className="flex justify-end">
+        <Button
+          onClick={press}
+          disabled={saving}
+          aria-disabled={blocked || undefined}
+          aria-describedby={blocked ? summaryId : undefined}
+          className={blocked ? "bg-warning-soft text-warning-strong border-warning-strong hover:bg-warning-soft/70" : undefined}
+        >{saving ? "Saving…" : "Save settings"}</Button>
+      </div>
     </div>
   );
 }
@@ -265,7 +568,9 @@ function OperatingHoursSection({ settings, onChange }: { settings: AdminSettings
       <p className="text-sm text-text-secondary">
         When members can book. A day left on the club default uses <strong className="text-text-primary">Day starts</strong> and{" "}
         <strong className="text-text-primary">Day ends</strong> above ({minToHHMM(settings.day_start_minute)}–{minToHHMM(settings.day_end_minute)}).
-        These are the hours the booking grid draws and the API enforces — a slot outside them is refused, and a walk-up at the box is cut short at closing.
+        {/* "the API enforces" is our word for our server. A club volunteer reads the booking
+            rules, not an interface. (A9) */}
+        {" "}These are the hours the booking grid draws and the booking rules enforce — a slot outside them is refused, and a walk-up at the box is cut short at closing.
       </p>
       <div className="space-y-2">
         {DAY_KEYS.map((day) => (
@@ -293,9 +598,16 @@ function DayHoursRow({ day, hours, fallback, error, onChange }: {
 }) {
   const name = DAY_NAMES[day];
   const custom = hours !== null;
-  const shown = hours ?? fallback;
+  const shownHours = hours ?? fallback;
+  const { highlighted } = useContext(FieldStateContext);
+  // The row is a setting too, as far as the summary beside Save is concerned: a bad Saturday
+  // is six cards above the button it switches off.
+  const anchorId = settingAnchorId(`operating_hours_${day}`);
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[120px_auto_1fr] gap-2 sm:items-center p-3 rounded-md border border-border">
+    <div
+      id={anchorId}
+      className={`scroll-mt-24 grid grid-cols-1 sm:grid-cols-[120px_auto_1fr] gap-2 sm:items-center p-3 rounded-md border border-border ${highlighted === anchorId ? HIGHLIGHT_CLASS : ""}`}
+    >
       <span className="text-sm font-medium text-text-primary">{name}</span>
       <label className="flex items-center gap-2 text-xs text-text-secondary">
         <input
@@ -304,7 +616,7 @@ function DayHoursRow({ day, hours, fallback, error, onChange }: {
           aria-label={`${name} has its own hours`}
           // Ticking a day starts it at the club default rather than at 00:00, so the
           // first thing an admin sees is the hours that are actually in force for it.
-          onChange={(e) => onChange(e.target.checked ? shown : null)}
+          onChange={(e) => onChange(e.target.checked ? shownHours : null)}
         />
         Own hours
       </label>
@@ -315,16 +627,18 @@ function DayHoursRow({ day, hours, fallback, error, onChange }: {
               type="time"
               className="h-9 w-32"
               aria-label={`${name} opens`}
-              value={shown.open}
-              onChange={(e) => onChange({ ...shown, open: e.target.value })}
+              aria-invalid={error ? true : undefined}
+              value={shownHours.open}
+              onChange={(e) => onChange({ ...shownHours, open: e.target.value })}
             />
             <span className="text-xs text-text-muted">to</span>
             <Input
               type="time"
               className="h-9 w-32"
               aria-label={`${name} closes`}
-              value={shown.close}
-              onChange={(e) => onChange({ ...shown, close: e.target.value })}
+              aria-invalid={error ? true : undefined}
+              value={shownHours.close}
+              onChange={(e) => onChange({ ...shownHours, close: e.target.value })}
             />
           </>
         ) : (
@@ -347,22 +661,26 @@ function DayHoursRow({ day, hours, fallback, error, onChange }: {
  */
 function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings; onChange: (next: AdminSettings) => void }) {
   const set = (patch: Partial<AdminSettings>) => onChange({ ...settings, ...patch });
-  const complaint = deviceNumbersComplaint(settings);
   // The two fields below that a door reads as well as a box, said on the fields themselves.
   // Both are named for courts and filed under this heading, and under the default door policy
   // the pair of them is how early a booking QR opens a DOOR — so an admin lengthening the
   // boxes' outage cushion widened every door in the club with nothing on screen saying so.
   const doorReach = describeCourtSettingDoorReach(settings.gate_access_policy);
+  // The cue window's ceiling follows the lookahead, so an emptied lookahead must not leave
+  // "0–NaN" on a hint or `max="NaN"` on an input while the admin retypes it.
+  const lookahead = orElse(settings.activation_forward_window_minutes, 1440);
   return (
     <Card className="space-y-5">
       <h2 className="text-base font-semibold">Court boxes &amp; identification</h2>
       <p className="text-sm text-text-secondary">
-        How the boxes at the courts behave. Boxes pick a change up on their next heartbeat.
+        {/* "Picks a change up on their next heartbeat" is a protocol detail wearing a
+            sentence. The interval below is where an admin who wants the detail finds it. */}
+        How the boxes at the courts behave. A box picks a change up the next time it calls in.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Field label="Walk-up maximum (minutes)" hint="1–90. The most court time a walk-up can buy at the box in one go; 90 is the relay's hard cap.">
-          <Input type="number" min={1} max={90} value={settings.walk_up_max_minutes}
-            onChange={(e) => set({ walk_up_max_minutes: Number(e.target.value) })} />
+        <Field settingKey="walk_up_max_minutes" label={SETTING_LABELS.walk_up_max_minutes} hint="1–90. The most court time a walk-up can buy at the box in one go; 90 is the relay's hard cap.">
+          <Input type="number" min={1} max={90} value={shown(settings.walk_up_max_minutes)}
+            onChange={(e) => set({ walk_up_max_minutes: toNumber(e.target.value) })} />
         </Field>
         {/* 3600 was offered and 300 was what the box ran: the firmware clamps its own
             cadence to 15-300, and the Devices page then reported the whole fleet
@@ -376,11 +694,12 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
             jitter), so the hint states it and the derived line below says what THIS value
             actually buys, rather than making the admin work it out. */}
         <Field
-          label="Heartbeat interval (seconds)"
-          hint={`15–300. How often a box calls in for its roster and button map. A box clamps anything outside 15–300 to that range, so a larger number here is not what it would run. The Devices page calls a box offline after three missed beats or ${OFFLINE_FLOOR_SECONDS / 60} minutes, whichever is longer — at ${settings.heartbeat_seconds}s that is ${describeOfflineAfter(settings.heartbeat_seconds)}.`}
+          settingKey="heartbeat_seconds"
+          label={SETTING_LABELS.heartbeat_seconds}
+          hint={`15–300. How often a box calls in for its roster and button map. A box clamps anything outside 15–300 to that range, so a larger number here is not what it would run. The Devices page calls a box offline after three missed beats or ${OFFLINE_FLOOR_SECONDS / 60} minutes, whichever is longer — at ${orElse(settings.heartbeat_seconds, 15)}s that is ${describeOfflineAfter(settings.heartbeat_seconds)}.`}
         >
-          <Input type="number" min={15} max={300} value={settings.heartbeat_seconds}
-            onChange={(e) => set({ heartbeat_seconds: Number(e.target.value) })} />
+          <Input type="number" min={15} max={300} value={shown(settings.heartbeat_seconds)}
+            onChange={(e) => set({ heartbeat_seconds: toNumber(e.target.value) })} />
         </Field>
         {/*
             These two were described the wrong way round, and the one whose hint promised to
@@ -400,29 +719,33 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
             describe the mechanism; only this screen described it backwards.
         */}
         <Field
-          label="Booking lookahead at the box (minutes)"
+          settingKey="activation_forward_window_minutes"
+          label={SETTING_LABELS.activation_forward_window_minutes}
           hint="1–1440. How far ahead the box recognises a booking at all. Outside this the box answers “no booking behind this code”; inside it, but before the lights cue below, it answers “too early” and says when to come back. This does NOT decide when the lights come on."
         >
-          <Input type="number" min={1} max={1440} value={settings.activation_forward_window_minutes}
-            onChange={(e) => set({ activation_forward_window_minutes: Number(e.target.value) })} />
+          <Input type="number" min={1} max={1440} value={shown(settings.activation_forward_window_minutes)}
+            onChange={(e) => set({ activation_forward_window_minutes: toNumber(e.target.value) })} />
         </Field>
         <Field
-          label="Lights on this early (minutes before a booking)"
-          hint={`0–${settings.activation_forward_window_minutes}. This is the one that decides how early a scan actually switches a booking's lights on. Must not exceed the booking lookahead. ${doorReach}`}
+          settingKey="activation_cue_window_minutes"
+          label={SETTING_LABELS.activation_cue_window_minutes}
+          hint={`0–${lookahead}. This is the one that decides how early a scan actually switches a booking's lights on. Must not exceed the booking lookahead. ${doorReach}`}
         >
-          <Input type="number" min={0} max={settings.activation_forward_window_minutes} value={settings.activation_cue_window_minutes}
-            onChange={(e) => set({ activation_cue_window_minutes: Number(e.target.value) })} />
+          <Input type="number" min={0} max={lookahead} value={shown(settings.activation_cue_window_minutes)}
+            onChange={(e) => set({ activation_cue_window_minutes: toNumber(e.target.value) })} />
         </Field>
-        <Field label="Court code lifetime (seconds)" hint="15–3600. How long a member's walk-up code stays valid; the app fetches a new one as it runs out.">
-          <Input type="number" min={15} max={3600} value={settings.qr_lifetime_seconds}
-            onChange={(e) => set({ qr_lifetime_seconds: Number(e.target.value) })} />
+        <Field settingKey="qr_lifetime_seconds" label={SETTING_LABELS.qr_lifetime_seconds} hint="15–3600. How long a member's walk-up code stays valid; the app fetches a new one as it runs out.">
+          <Input type="number" min={15} max={3600} value={shown(settings.qr_lifetime_seconds)}
+            onChange={(e) => set({ qr_lifetime_seconds: toNumber(e.target.value) })} />
         </Field>
         <Field
-          label="Offline roster reach (minutes)"
-          hint={`5–1440. How far ahead a box's cached roster lets it admit booked members when the API is unreachable. ${doorReach}`}
+          settingKey="roster_window_minutes"
+          label={SETTING_LABELS.roster_window_minutes}
+          // "when the API is unreachable" is our word for our server (A9).
+          hint={`5–1440. How far ahead a box's cached roster lets it admit booked members when it cannot reach the club's system. ${doorReach}`}
         >
-          <Input type="number" min={5} max={1440} value={settings.roster_window_minutes}
-            onChange={(e) => set({ roster_window_minutes: Number(e.target.value) })} />
+          <Input type="number" min={5} max={1440} value={shown(settings.roster_window_minutes)}
+            onChange={(e) => set({ roster_window_minutes: toNumber(e.target.value) })} />
         </Field>
         {/* Here rather than in the Door gates block: the cooldown bounds the "not reporting"
             mail for every board the club has, court boxes included, and filing it with the
@@ -431,15 +754,15 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
             and is said here because an admin who does not know it reads a silent unnamed door
             as a cooldown that is too long. */}
         <Field
-          label="Alert cooldown (minutes)"
+          settingKey="device_alert_cooldown_minutes"
+          label={SETTING_LABELS.device_alert_cooldown_minutes}
           hint={`${DEVICE_ALERT_COOLDOWN_MIN_MINUTES}–${DEVICE_ALERT_COOLDOWN_MAX_MINUTES}. At most one “not reporting” email per board in this many minutes; a door nobody has named never alerts.`}
         >
           <Input type="number" min={DEVICE_ALERT_COOLDOWN_MIN_MINUTES} max={DEVICE_ALERT_COOLDOWN_MAX_MINUTES}
-            value={settings.device_alert_cooldown_minutes}
-            onChange={(e) => set({ device_alert_cooldown_minutes: Number(e.target.value) })} />
+            value={shown(settings.device_alert_cooldown_minutes)}
+            onChange={(e) => set({ device_alert_cooldown_minutes: toNumber(e.target.value) })} />
         </Field>
       </div>
-      {complaint && <p className="text-xs text-danger-strong">{complaint}</p>}
     </Card>
   );
 }
@@ -466,25 +789,30 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
  */
 function GateSection({ settings, onChange }: { settings: AdminSettings; onChange: (next: AdminSettings) => void }) {
   const set = (patch: Partial<AdminSettings>) => onChange({ ...settings, ...patch });
-  const complaint = gateSettingsComplaint(settings);
+  // The copy below quotes this number back at the admin. An emptied box is flagged on the
+  // field itself; the sentences fall back to the floor the API clamps to on read, which is
+  // what `doorBookingHorizonMinutes` already does with the same value.
+  const earlyEntry = orElse(settings.gate_early_entry_minutes, GATE_EARLY_ENTRY_MIN_MINUTES);
   return (
     <Card className="space-y-5">
       <h2 className="text-base font-semibold">Door gates</h2>
       <p className="text-sm text-text-secondary">
-        How the doors behave. Doors pick a change up on their next heartbeat.{" "}
+        How the doors behave. A door picks a change up the next time it calls in.{" "}
         {gateOfflineFallbackNotice()}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field
-          label="Unlock time (seconds)"
+          settingKey="gate_unlock_seconds"
+          label={SETTING_LABELS.gate_unlock_seconds}
           hint={`${GATE_UNLOCK_MIN_SECONDS}–${GATE_UNLOCK_MAX_SECONDS}. How long the lock is released each time a door opens. A door never holds it open longer than ${GATE_UNLOCK_MAX_SECONDS} seconds, whatever is set here.`}
         >
-          <Input type="number" min={GATE_UNLOCK_MIN_SECONDS} max={GATE_UNLOCK_MAX_SECONDS} value={settings.gate_unlock_seconds}
-            onChange={(e) => set({ gate_unlock_seconds: Number(e.target.value) })} />
+          <Input type="number" min={GATE_UNLOCK_MIN_SECONDS} max={GATE_UNLOCK_MAX_SECONDS} value={shown(settings.gate_unlock_seconds)}
+            onChange={(e) => set({ gate_unlock_seconds: toNumber(e.target.value) })} />
         </Field>
         <Field
-          label="Who may open a door"
-          hint={describeGatePolicy(settings.gate_access_policy, settings.gate_early_entry_minutes)}
+          settingKey="gate_access_policy"
+          label={SETTING_LABELS.gate_access_policy}
+          hint={describeGatePolicy(settings.gate_access_policy, earlyEntry)}
         >
           <select
             value={settings.gate_access_policy}
@@ -503,11 +831,12 @@ function GateSection({ settings, onChange }: { settings: AdminSettings; onChange
             and what the member's phone shows. At the API's own defaults that made the screen
             say 30 while the door opened at 130. */}
         <Field
-          label="Early entry (minutes before a booking)"
+          settingKey="gate_early_entry_minutes"
+          label={SETTING_LABELS.gate_early_entry_minutes}
           hint={`${GATE_EARLY_ENTRY_MIN_MINUTES}–${GATE_EARLY_ENTRY_MAX_MINUTES}. ${describeEarlyEntry(settings.gate_access_policy)}`}
         >
-          <Input type="number" min={GATE_EARLY_ENTRY_MIN_MINUTES} max={GATE_EARLY_ENTRY_MAX_MINUTES} value={settings.gate_early_entry_minutes}
-            onChange={(e) => set({ gate_early_entry_minutes: Number(e.target.value) })} />
+          <Input type="number" min={GATE_EARLY_ENTRY_MIN_MINUTES} max={GATE_EARLY_ENTRY_MAX_MINUTES} value={shown(settings.gate_early_entry_minutes)}
+            onChange={(e) => set({ gate_early_entry_minutes: toNumber(e.target.value) })} />
         </Field>
       </div>
       {/* The answer itself, rather than three hints and an arithmetic exercise. Three fields on
@@ -517,7 +846,6 @@ function GateSection({ settings, onChange }: { settings: AdminSettings; onChange
       <p className="text-sm font-medium text-text-primary">
         {describeDoorBookingHorizon(doorBookingHorizonMinutes(settings))}
       </p>
-      {complaint && <p className="text-xs text-danger-strong">{complaint}</p>}
       <DoorRecordsBlock settings={settings} set={set} />
     </Card>
   );
@@ -544,55 +872,65 @@ function DoorRecordsBlock({ settings, set }: {
   settings: AdminSettings;
   set: (patch: Partial<AdminSettings>) => void;
 }) {
-  const complaint = doorSettingsComplaint(settings);
+  // Null rather than NaN while the box is empty: the sentence below has a no-number arm
+  // already — the one an older API without the key takes — and it is the honest one here too.
+  const retentionDays = Number.isFinite(settings.door_log_retention_days)
+    ? settings.door_log_retention_days as number
+    : null;
   return (
     <div className="border-t border-border pt-4 space-y-4">
       <h3 className="text-sm font-semibold">Door records and contact</h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {settings.door_log_retention_days !== undefined && (
           <Field
-            label="Keep door scans for (days)"
+            settingKey="door_log_retention_days"
+            label={SETTING_LABELS.door_log_retention_days}
             hint={`${DOOR_LOG_RETENTION_MIN_DAYS}-${DOOR_LOG_RETENTION_MAX_DAYS}. Past this a door scan is DELETED, receipts and all, rather than anonymised. Money records follow the separate, longer rule above.`}
           >
             <Input type="number" min={DOOR_LOG_RETENTION_MIN_DAYS} max={DOOR_LOG_RETENTION_MAX_DAYS}
-              value={settings.door_log_retention_days}
-              onChange={(e) => set({ door_log_retention_days: Number(e.target.value) })} />
+              value={shown(settings.door_log_retention_days)}
+              onChange={(e) => set({ door_log_retention_days: toNumber(e.target.value) })} />
           </Field>
         )}
         {settings.door_refusal_spike_count !== undefined && (
           <Field
-            label="Refusal spike (scans)"
+            settingKey="door_refusal_spike_count"
+            label={SETTING_LABELS.door_refusal_spike_count}
             hint={`${DOOR_REFUSAL_SPIKE_MIN_COUNT}-${DOOR_REFUSAL_SPIKE_MAX_COUNT}. How many refusals at one door, inside the window beside this, before Doors says the door is refusing a lot. It counts SCANS: one person trying four times is four.`}
           >
             <Input type="number" min={DOOR_REFUSAL_SPIKE_MIN_COUNT} max={DOOR_REFUSAL_SPIKE_MAX_COUNT}
-              value={settings.door_refusal_spike_count}
-              onChange={(e) => set({ door_refusal_spike_count: Number(e.target.value) })} />
+              value={shown(settings.door_refusal_spike_count)}
+              onChange={(e) => set({ door_refusal_spike_count: toNumber(e.target.value) })} />
           </Field>
         )}
         {settings.door_refusal_spike_minutes !== undefined && (
           <Field
-            label="Refusal spike window (minutes)"
+            settingKey="door_refusal_spike_minutes"
+            label={SETTING_LABELS.door_refusal_spike_minutes}
             hint={`${DOOR_REFUSAL_SPIKE_MIN_MINUTES}-${DOOR_REFUSAL_SPIKE_MAX_MINUTES}. The window that count is measured over. It rolls, so the flag clears itself when the window empties and there is nothing to acknowledge.`}
           >
             <Input type="number" min={DOOR_REFUSAL_SPIKE_MIN_MINUTES} max={DOOR_REFUSAL_SPIKE_MAX_MINUTES}
-              value={settings.door_refusal_spike_minutes}
-              onChange={(e) => set({ door_refusal_spike_minutes: Number(e.target.value) })} />
+              value={shown(settings.door_refusal_spike_minutes)}
+              onChange={(e) => set({ door_refusal_spike_minutes: toNumber(e.target.value) })} />
           </Field>
         )}
         {settings.club_contact_phone !== undefined && (
           <Field
-            label="Club contact number"
-            hint={`At most ${CLUB_CONTACT_PHONE_MAX_LENGTH} characters. What a member sees when a door turns them away, and what goes on a printed door card. Leave it empty if the club has none — the screens say so rather than showing a blank.`}
+            settingKey="club_contact_phone"
+            label={SETTING_LABELS.club_contact_phone}
+            hint={`Digits, spaces and + - ( ) , — at most ${CLUB_CONTACT_PHONE_MAX_LENGTH} characters. What a member sees when a door turns them away, and what goes on a printed door card. Leave it empty if the club has none — the screens say so rather than showing a blank.`}
           >
             <Input value={settings.club_contact_phone} maxLength={CLUB_CONTACT_PHONE_MAX_LENGTH}
+              inputMode="tel"
               placeholder="076 226 1390"
               onChange={(e) => set({ club_contact_phone: e.target.value })} />
           </Field>
         )}
         {settings.club_contact_email !== undefined && (
           <Field
-            label="Club contact email"
-            hint={`At most ${CLUB_CONTACT_EMAIL_MAX_LENGTH} characters. The same, by mail. Also optional.`}
+            settingKey="club_contact_email"
+            label={SETTING_LABELS.club_contact_email}
+            hint={`At most ${CLUB_CONTACT_EMAIL_MAX_LENGTH} characters. The same, by mail. Also optional — and printed on the same card, so it has to be an address that works.`}
           >
             <Input type="email" value={settings.club_contact_email} maxLength={CLUB_CONTACT_EMAIL_MAX_LENGTH}
               placeholder="squash@example.co.za"
@@ -603,9 +941,8 @@ function DoorRecordsBlock({ settings, set }: {
       {/* The answer itself, in the words the door log prints, so an admin sees what they are
           choosing rather than a number whose consequence they have to go and find. */}
       <p className="text-sm font-medium text-text-primary">
-        {doorRetentionNotice(settings.door_log_retention_days ?? null)}
+        {doorRetentionNotice(retentionDays)}
       </p>
-      {complaint && <p className="text-xs text-danger-strong">{complaint}</p>}
     </div>
   );
 }
@@ -618,22 +955,45 @@ function DoorRecordsBlock({ settings, set }: {
  * to a screen reader and unclickable by its caption. Cloning the child to attach a
  * generated id keeps the call sites as short as they were and makes the association
  * real; the hint is wired through `aria-describedby` for the same reason.
+ *
+ * <p>
+ * <b>And the error rides the same wire.</b> A refused value used to be reported by one
+ * sentence at the foot of the whole card and by Save going dead — nothing on the input
+ * itself, so a screen reader moving field by field met a form with nothing wrong with it.
+ * `aria-describedby` is a LIST, so the message JOINS the hint rather than replacing it: the
+ * bound is the context the complaint is read in. (B5)
+ * </p>
  */
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Field({ label, hint, settingKey, children }: {
+  label: string;
+  hint?: string;
+  /** The settings key this field edits, which gives it an anchor and an error to show. */
+  settingKey?: string;
+  children: React.ReactNode;
+}) {
   const id = useId();
   const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
+  const { errors, highlighted } = useContext(FieldStateContext);
+  const anchorId = settingKey ? settingAnchorId(settingKey) : undefined;
+  const error = settingKey ? errors[settingKey] : undefined;
 
+  // The error first: it is the news. A field with both reads "…is out of range. 1–30, how
+  // long the lock is released…", which is the order a person would want it in.
+  const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(" ");
   const control = isValidElement(children)
-    ? cloneElement(children as React.ReactElement<{ id?: string; "aria-describedby"?: string }>, {
+    ? cloneElement(children as React.ReactElement<{ id?: string; "aria-describedby"?: string; "aria-invalid"?: boolean }>, {
         id,
-        ...(hint ? { "aria-describedby": hintId } : {}),
+        ...(describedBy ? { "aria-describedby": describedBy } : {}),
+        ...(error ? { "aria-invalid": true } : {}),
       })
     : children;
 
   return (
-    <div>
+    <div id={anchorId} className={`scroll-mt-24 ${anchorId && highlighted === anchorId ? HIGHLIGHT_CLASS : ""}`}>
       <Label htmlFor={id}>{label}</Label>
       {control}
+      {error && <p id={errorId} className="text-xs text-danger-strong mt-1">{error}</p>}
       {hint && <p id={hintId} className="text-xs text-text-muted mt-1">{hint}</p>}
     </div>
   );

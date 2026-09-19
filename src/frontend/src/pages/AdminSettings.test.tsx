@@ -110,7 +110,10 @@ describe("AdminSettings", () => {
     // The hint is a separate <p> wired by aria-describedby, which is also what a screen
     // reader reads out with the field.
     const hintOf = (field: HTMLElement) =>
-      document.getElementById(field.getAttribute("aria-describedby")!)!.textContent!;
+      (field.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/).filter(Boolean)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
 
     const cueHint = hintOf(screen.getByLabelText(/Lights on this early/));
     expect(cueHint).toMatch(/decides how early a scan actually switches a booking's lights on/);
@@ -334,8 +337,13 @@ describe("AdminSettings — opening hours per weekday", () => {
     // Said where the mistake is. A club that means "shut on Saturday" has to say so by
     // some other means — the engine has no closed-all-day, and reading 20:00–07:00 as an
     // overnight club would sell the small hours.
-    expect(screen.getByText(/Closing time has to be after opening time/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+    //
+    // TWICE, deliberately (B5 / C11): on the row that carries the mistake, and again in the
+    // summary beside Save, which is six cards below it.
+    expect(screen.getAllByText(/Closing time has to be after opening time/)).toHaveLength(2);
+    // `aria-disabled`, not `disabled`: a disabled button leaves the tab order, so the one
+    // control that could explain the state was the one a keyboard user could not reach.
+    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
 
     fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
@@ -364,7 +372,10 @@ describe("AdminSettings — door gates", () => {
 
   /** The hint is a separate <p> wired by aria-describedby — what a screen reader reads out. */
   const hintOf = (field: HTMLElement) =>
-    document.getElementById(field.getAttribute("aria-describedby")!)!.textContent!;
+    (field.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/).filter(Boolean)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
 
   it("shows the three door settings with the API's own bounds on the inputs", async () => {
     stubFetch(routes());
@@ -492,13 +503,13 @@ describe("AdminSettings — door gates", () => {
    * so the one person a club is most certain can always get in is refused at a door that has
    * lost the network.
    */
-  it("bounds the admin carve-out to a door that can reach the API", async () => {
+  it("bounds the admin carve-out to a door that can reach the club", async () => {
     stubFetch(routes({ gate_access_policy: "booking_window" }));
     renderPage(<AdminSettingsPage />);
 
     const hint = hintOf(await screen.findByLabelText(/Who may open a door/));
     const sentence = hint.split(". ").find((s) => s.includes("Club admins always pass"))!;
-    expect(sentence).toContain("only at a door that can still reach the API");
+    expect(sentence).toContain("only at a door that can still reach the club");
     expect(sentence).toContain("an offline door holds bookings, not admins");
   });
 
@@ -526,8 +537,8 @@ describe("AdminSettings — door gates", () => {
     renderPage(<AdminSettingsPage />);
 
     const block = await screen.findByText(/How the doors behave/);
-    expect(block).toHaveTextContent("falls back to the roster it last downloaded");
-    expect(block).toHaveTextContent("that roster holds bookings and nothing else");
+    expect(block).toHaveTextContent("falls back to the list of bookings it last downloaded");
+    expect(block).toHaveTextContent("that list holds bookings and nothing else");
     expect(block).toHaveTextContent(
       "only members with an upcoming or running booking can get in — whichever policy is set below");
   });
@@ -566,18 +577,22 @@ describe("AdminSettings — door gates", () => {
     renderPage(<AdminSettingsPage />);
 
     fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "45" } });
-    expect(screen.getByText("Unlock time has to be a whole number of seconds between 1 and 30.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+    // On the field itself, through aria-describedby — not only at the foot of the card,
+    // where a screen reader moving field by field never meets it (B5).
+    expect(hintOf(screen.getByLabelText(/Unlock time/)))
+      .toContain("Unlock time has to be a whole number of seconds between 1 and 30.");
+    expect(screen.getByLabelText(/Unlock time/)).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
 
     // And zero, which is the other end and the one that reads as broken hardware: a door
     // that never releases the lock at all.
     fireEvent.change(screen.getByLabelText(/Unlock time/), { target: { value: "0" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
 
     fireEvent.change(screen.getByLabelText(/Unlock time/), { target: { value: "30" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Save settings/ })).not.toHaveAttribute("aria-disabled");
   });
 
   it("holds Save on an early-entry value past 240 minutes, and allows 0", async () => {
@@ -585,13 +600,14 @@ describe("AdminSettings — door gates", () => {
     renderPage(<AdminSettingsPage />);
 
     fireEvent.change(await screen.findByLabelText(/Early entry/), { target: { value: "300" } });
-    expect(screen.getByText("Early entry has to be a whole number of minutes between 0 and 240.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+    expect(hintOf(screen.getByLabelText(/Early entry/)))
+      .toContain("Early entry has to be a whole number of minutes between 0 and 240.");
+    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
 
     // Zero is legal — a club that wants nobody in before their booking starts — so it must
     // not be caught by a falsy check standing in for the range.
     fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "0" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Save settings/ })).not.toHaveAttribute("aria-disabled");
   });
 
   /**
@@ -643,12 +659,13 @@ describe("AdminSettings — door gates", () => {
     renderPage(<AdminSettingsPage />);
 
     expect(await screen.findByText("Pick who may open a door.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+    expect(hintOf(screen.getByLabelText(/Who may open a door/))).toContain("Pick who may open a door.");
+    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
 
     fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "booking_window" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Save settings/ })).not.toHaveAttribute("aria-disabled");
   });
 
   /**
@@ -790,7 +807,10 @@ describe("AdminSettings — alert cooldown", () => {
   ];
 
   const hintOf = (field: HTMLElement) =>
-    document.getElementById(field.getAttribute("aria-describedby")!)!.textContent!;
+    (field.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/).filter(Boolean)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
 
   it("shows the cooldown with the API's bounds, beside the device numbers", async () => {
     stubFetch(routes());
@@ -846,14 +866,15 @@ describe("AdminSettings — alert cooldown", () => {
     renderPage(<AdminSettingsPage />);
 
     fireEvent.change(await screen.findByLabelText(/Alert cooldown/), { target: { value: "1" } });
-    expect(screen.getByText("Alert cooldown has to be a whole number of minutes between 5 and 1440."))
-      .toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeDisabled();
+    expect(hintOf(screen.getByLabelText(/Alert cooldown/)))
+      .toContain("Alert cooldown has to be a whole number of minutes between 5 and 1440.");
+    expect(screen.getByLabelText(/Alert cooldown/)).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
 
     fireEvent.change(screen.getByLabelText(/Alert cooldown/), { target: { value: "5" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Save settings/ })).not.toHaveAttribute("aria-disabled");
   });
 
   /** The refusal, decoded through the shared dictionary rather than the underscore swap. */
@@ -936,8 +957,11 @@ describe("AdminSettings — alert cooldown", () => {
       renderPage(<AdminSettingsPage />);
 
       fireEvent.change(await screen.findByLabelText(/Keep door scans for/), { target: { value: "3" } });
-      expect(screen.getByText(/between 7 and 730/)).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Save settings" })).toBeDisabled();
+      // On the field, through aria-describedby — and again in the summary beside Save, which
+      // is why the page-wide text now matches twice (B5 / C11).
+      expect(hintOf(screen.getByLabelText(/Keep door scans for/))).toMatch(/between 7 and 730/);
+      expect(screen.getAllByText(/between 7 and 730/)).toHaveLength(2);
+      expect(screen.getByRole("button", { name: "Save settings" })).toHaveAttribute("aria-disabled", "true");
     });
 
     it("refuses a spike count and a window outside their own bounds", async () => {
@@ -945,11 +969,11 @@ describe("AdminSettings — alert cooldown", () => {
       renderPage(<AdminSettingsPage />);
 
       fireEvent.change(await screen.findByLabelText(/Refusal spike \(scans\)/), { target: { value: "1" } });
-      expect(screen.getByText(/between 3 and 100/)).toBeInTheDocument();
+      expect(hintOf(screen.getByLabelText(/Refusal spike \(scans\)/))).toMatch(/between 3 and 100/);
 
       fireEvent.change(screen.getByLabelText(/Refusal spike \(scans\)/), { target: { value: "8" } });
       fireEvent.change(screen.getByLabelText(/Refusal spike window/), { target: { value: "1" } });
-      expect(screen.getByText(/between 5 and 240/)).toBeInTheDocument();
+      expect(hintOf(screen.getByLabelText(/Refusal spike window/))).toMatch(/between 5 and 240/);
     });
 
     /**
