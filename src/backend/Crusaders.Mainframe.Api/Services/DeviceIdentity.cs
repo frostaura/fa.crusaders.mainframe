@@ -46,17 +46,31 @@ public static class DeviceIdentity
 
     /// <summary>
     /// The heartbeat's version: an unknown MAC creates the row rather than being refused.
-    /// A box appears on the Devices page by flashing it and switching it on, which is the
+    /// A board appears on the Devices page by flashing it and switching it on, which is the
     /// entire provisioning story now.
     /// </summary>
+    /// <param name="hintedKind">
+    /// What the board says it is, honoured <b>only</b> when the MAC is unknown.
+    ///
+    /// <para>
+    /// On a row that already exists the hint is ignored outright: the row's
+    /// <see cref="Device.Kind"/> is authoritative and a board cannot re-kind itself. A gate
+    /// that could turn its own row into a court box could hand itself the club's courts, and
+    /// a box that could turn itself into a gate would drop off the settlement model's map of
+    /// which courts have a working door. An admin cannot change a kind either — deleting the
+    /// row and letting the board register again is the way, which is the same reset that
+    /// already exists for a box whose configuration has been got into a mess.
+    /// </para>
+    /// </param>
     public static async Task<(Device? Device, IResult? Refusal)> ResolveOrRegisterAsync(
-        MainframeDbContext db, DeviceRegistryService devices, string? mac, CancellationToken ct)
+        MainframeDbContext db, DeviceRegistryService devices, string? mac, DeviceKind hintedKind,
+        CancellationToken ct)
     {
         var normalised = DeviceRegistryService.NormaliseMacAddress(mac);
         if (normalised is null) return (null, Results.BadRequest(new { error = MacRequired }));
 
         var device = await db.Devices.FirstOrDefaultAsync(d => d.MacAddress == normalised, ct);
-        if (device is null) return (await devices.AutoRegisterAsync(normalised, ct), null);
+        if (device is null) return (await devices.AutoRegisterAsync(normalised, hintedKind, ct), null);
 
         // A box an admin disabled is refused rather than silently re-registered: the row is
         // still there, and re-creating it around the disable would make the switch a lie.

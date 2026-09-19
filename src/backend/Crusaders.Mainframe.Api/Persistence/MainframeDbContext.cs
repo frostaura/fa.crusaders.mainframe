@@ -281,7 +281,10 @@ public class MainframeDbContext : DbContext
             e.HasIndex(d => new { d.TenantId, d.Kind });
             e.Property(d => d.DeviceCode).HasMaxLength(64).IsRequired();
             e.Property(d => d.Name).HasMaxLength(128).IsRequired();
-            e.Property(d => d.GateKey).HasMaxLength(64);
+            // The same constant the admin PATCH validates against, so the refusal an admin
+            // reads and the width the column enforces cannot drift apart. Identical value,
+            // so no migration: this names 64, it does not change it.
+            e.Property(d => d.GateKey).HasMaxLength(Device.GateKeyMaxLength);
             e.Property(d => d.MacAddress).HasMaxLength(12).IsRequired();
             e.Property(d => d.LastIpAddress).HasMaxLength(64);
             e.Property(d => d.RunningVersion).HasMaxLength(32);

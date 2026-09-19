@@ -1437,7 +1437,7 @@ public class PeripheralHealthTests
         // An unknown MAC announces itself and lands on the club's first four courts, enabled,
         // with nobody having confirmed that it drives any of them.
         var spare = await scope.ServiceProvider.GetRequiredService<DeviceRegistryService>()
-            .AutoRegisterAsync("5ccf7f9e9e9e", default);
+            .AutoRegisterAsync("5ccf7f9e9e9e", DeviceKind.CourtBox, default);
         Assert.Contains(host.Courts[0].CourtNumber, spare.CourtNumbers);
         Assert.True(spare.Enabled);
         spare.LastSeenAt = DateTimeOffset.UtcNow.AddSeconds(-20);

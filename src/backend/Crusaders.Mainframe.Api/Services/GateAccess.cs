@@ -1,0 +1,290 @@
+using System.Text.Json;
+using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Persistence;
+using Microsoft.EntityFrameworkCore;
+
+namespace Crusaders.Mainframe.Api.Services;
+
+/// <summary>
+/// Whether this code opens this door — the one rule, in one place, for the same reason
+/// <see cref="MembershipAccess"/> exists.
+///
+/// <para>
+/// A door is a smaller decision than a court and a wider one. Smaller because nothing here
+/// touches money: an open moves no booking, stamps no <c>CheckedInAt</c> and posts no ledger
+/// row, and walking through a door is not attendance — the member may be collecting a
+/// racquet. Wider because the default policy admits every active member, not only the ones
+/// with a court booked, so this is the first surface in the product where an active
+/// membership on its own is sufficient for anything.
+/// </para>
+///
+/// <para>
+/// <b>Everything the gate endpoint decides is decided here.</b> The endpoint resolves the
+/// board, records the contact and serialises the answer; it makes no judgements of its own.
+/// That is deliberate and it is the lesson <c>MembershipAccess</c> records: the rule had been
+/// written four times and enforced on three of them, and the fourth door was the expensive
+/// one. There will be a second gate surface eventually — an admin "open this door" button,
+/// or a second policy — and it has to arrive at this method rather than beside it.
+/// </para>
+/// </summary>
+public static class GateAccess
+{
+    /// <summary>The door opened. The only reason that comes with <c>opened: true</c>.</summary>
+    public const string Ok = "ok";
+
+    /// <summary>
+    /// Unknown, expired, or another club's code. One reason for all three on purpose: telling
+    /// them apart at a door turns it into an oracle for which codes are real, and there is
+    /// nobody standing at a door to be told anything more useful.
+    /// </summary>
+    public const string NotRecognised = "not_recognised";
+
+    /// <summary>
+    /// The club has suspended, rejected or not yet approved this member. Named rather than
+    /// folded into <see cref="NotRecognised"/> because the desk needs the distinction from the
+    /// audit row afterwards — "the scanner is broken" and "your membership is suspended" are
+    /// two different conversations, and the gate itself says neither out loud.
+    /// </summary>
+    public const string MemberNotActive = "member_not_active";
+
+    /// <summary>
+    /// Policy <see cref="GateAccessPolicies.BookingWindow"/> only: an active member with
+    /// nothing booked inside <c>[StartsAt − gate_early_entry_minutes, EndsAt]</c>. Unreachable
+    /// under the default policy.
+    /// </summary>
+    public const string NoBooking = "no_booking";
+
+    /// <summary>
+    /// Anything but <c>qr</c> or <c>code</c>. A PIN against the whole membership roll is an
+    /// oracle rather than an identification, and unlike a court there is no candidate set
+    /// here to check one against — see <see cref="IdentificationResolver"/>.
+    /// </summary>
+    public const string MethodNotSupported = "method_not_supported";
+
+    /// <summary>
+    /// The MAC resolved to a <see cref="DeviceKind.CourtBox"/> row. Answered rather than
+    /// 404'd so a board flashed with the wrong image shows a refusal and stops, instead of
+    /// retrying an endpoint that will never answer it differently.
+    /// </summary>
+    public const string NotAGate = "not_a_gate";
+
+    /// <summary>
+    /// The mirror refusal, for a <see cref="DeviceKind.Gate"/> row arriving at a court-box
+    /// route — <c>/activate</c>, <c>/walkup</c>, or an <c>activation</c>/<c>release</c> event
+    /// on <c>/events</c>.
+    ///
+    /// <para>
+    /// <b>It is explicit rather than incidental, and that is the whole point of it.</b> A gate
+    /// row carries no court numbers, so every one of those paths already refused it by
+    /// accident: the activation path fails its relay-index check against an empty list, and
+    /// the walk-up fails <c>court_not_on_device</c>. Both answers are wrong sentences — the
+    /// court was not the problem — and, worse, both stop being refusals the moment anybody
+    /// puts a court number on a gate row. The rule that matters is "a door never sells court
+    /// time and never checks anyone in", and a rule enforced by the emptiness of an unrelated
+    /// list is not enforced.
+    /// </para>
+    /// </summary>
+    public const string NotACourtBox = "not_a_court_box";
+
+    /// <summary>
+    /// Every reason this decision can answer. Pinned against the corpus, in both directions,
+    /// by <c>DeviceGateProtocolCorpusTests</c>: a reason with no vector is a refusal the
+    /// firmware has no screen for, and a vector with no reason is a screen for a refusal that
+    /// never comes.
+    /// </summary>
+    public static readonly string[] Reasons =
+        [Ok, NotRecognised, MemberNotActive, NoBooking, MethodNotSupported, NotAGate];
+
+    /// <summary>Shortest release the lock is ever given. A zero-second release is a door that clicks and stays shut.</summary>
+    public const int MinUnlockSeconds = 1;
+
+    /// <summary>
+    /// Longest release. The same number bounds <c>gate_unlock_seconds</c> on the settings PUT
+    /// and clamps it again on the way out, because the PUT is not the only way a value reaches
+    /// that column — a hand-edited settings document is, and a door held open for an hour by a
+    /// typo is the failure this is here to make impossible rather than unlikely.
+    /// </summary>
+    public const int MaxUnlockSeconds = 30;
+
+    /// <summary>How early a member may be let in for a booking, at the most. Four hours.</summary>
+    public const int MaxEarlyEntryMinutes = 240;
+
+    /// <summary>The release the lock is given, in seconds: the club's setting, clamped.</summary>
+    public static int UnlockSecondsFor(TenantSettingsView settings)
+        => Math.Clamp(settings.GateUnlockSeconds, MinUnlockSeconds, MaxUnlockSeconds);
+
+    /// <summary>
+    /// The decision for one scan at one door.
+    ///
+    /// <para>
+    /// The order is not arbitrary. The method is checked before the token is resolved, so an
+    /// unsupported method never reaches the code table at all; the membership is checked
+    /// before the policy, so a suspended member is told the same thing whichever policy the
+    /// club runs; and the board's kind is checked by the caller before any of it, because a
+    /// court box asking this question is a misconfiguration rather than a refusal.
+    /// </para>
+    /// </summary>
+    public static async Task<GateDecision> DecideAsync(
+        MainframeDbContext db, AccessCodeService codes, GateContext context, CancellationToken ct)
+    {
+        if (!IdentificationResolver.CanIdentifyGlobally(context.Method))
+        {
+            return Refused(MethodNotSupported);
+        }
+
+        // Tenant-filtered by the context's global query filter, so a code minted at another
+        // club resolves to nothing here — the isolation is structural, not a claim compared.
+        var resolved = await codes.ResolveAsync(context.Token, context.Now, ct);
+        if (resolved is null) return Refused(NotRecognised);
+
+        // Not-Active rather than Suspended, and a user with no membership row is not barred:
+        // both rules, and why they are stated that way round, live in MembershipAccess.
+        if (await MembershipAccess.IsBarredFromCourtsAsync(db, resolved.UserId, ct))
+        {
+            return Refused(MemberNotActive, resolved.UserId);
+        }
+
+        if (context.Settings.GateAccessPolicy == GateAccessPolicies.BookingWindow
+            && !await MayEnterOnABookingAsync(db, context, resolved, ct))
+        {
+            return Refused(NoBooking, resolved.UserId);
+        }
+
+        return new GateDecision(true, Ok, resolved.UserId, UnlockSecondsFor(context.Settings));
+    }
+
+    /// <summary>
+    /// The <see cref="GateAccessPolicies.BookingWindow"/> test: is this member due on a court?
+    ///
+    /// <para>
+    /// Any court of the club, because a door is not on a court — the member walking through
+    /// the front door has not chosen one yet. The window opens <c>gate_early_entry_minutes</c>
+    /// before the slot and closes at its end; the same window the roster is built from, so a
+    /// member admitted online and a member admitted from the gate's cache are admitted on one
+    /// rule rather than two that drift.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>An admin or operator with no membership row always passes.</b> Those accounts are
+    /// created by provisioning rather than by registration and never hold a booking, and a
+    /// club that switches to <c>booking_window</c> must not thereby lock its own staff out of
+    /// the building. It is deliberately "no membership row" and not "is an admin": an admin
+    /// who is also a member is a member, and is held to the same window as everybody else —
+    /// otherwise the policy has a hole shaped like whoever the club promoted last.
+    /// </para>
+    /// </summary>
+    private static async Task<bool> MayEnterOnABookingAsync(
+        MainframeDbContext db, GateContext context, ResolvedAccessCode resolved, CancellationToken ct)
+    {
+        if (!await db.Memberships.AnyAsync(m => m.UserId == resolved.UserId, ct))
+        {
+            return await db.Users.AnyAsync(u => u.Id == resolved.UserId && u.IsAdmin, ct);
+        }
+
+        // `StartsAt − early ≤ now` rearranged to `StartsAt ≤ now + early`: two constants the
+        // provider can translate, the same rearrangement DeviceRosterBuilder uses.
+        var latestStart = context.Now.AddMinutes(context.Settings.GateEarlyEntryMinutes);
+
+        // `b.Id == resolved.BookingId` is not redundant with the UserId match. A booking-
+        // activation code names the booking it was minted for, and a booking an admin made on
+        // a member's behalf can carry a different UserId from the code's; the code is the
+        // member's proof that this slot is theirs to walk in for.
+        return await db.Bookings.AnyAsync(
+            b => (b.UserId == resolved.UserId || b.Id == resolved.BookingId)
+                 && b.Status == BookingStatus.Booked
+                 && b.StartsAt <= latestStart
+                 && b.EndsAt >= context.Now,
+            ct);
+    }
+
+    /// <summary>
+    /// A refusal, which is always <c>unlock_seconds: 0</c>. Block body rather than an
+    /// expression one: lizard's C# parser mis-scopes an expression-bodied member containing
+    /// braces into a <c>*global*</c> pseudo-function the length of the file — see
+    /// <c>memory/gotchas.md</c>.
+    /// </summary>
+    public static GateDecision Refused(string reason, Guid? subjectUserId = null)
+    {
+        return new GateDecision(false, reason, subjectUserId, 0);
+    }
+}
+
+/// <summary>
+/// What the gate decision is asked about: the board, the club's settings, what was presented
+/// and when.
+///
+/// <para>
+/// <paramref name="Now"/> is threaded rather than read inside, so the window arithmetic can be
+/// driven at every minute of the day instead of at whatever minute the suite happens to run —
+/// the trap <c>memory/gotchas.md</c> records six live tests falling into.
+/// </para>
+///
+/// <para>
+/// Top-level and bodyless, like <c>CourtAssignment</c>, for the lizard reason recorded there.
+/// </para>
+/// </summary>
+public sealed record GateContext(
+    Device Device, TenantSettingsView Settings, string? Method, string? Token, DateTimeOffset Now);
+
+/// <summary>
+/// One door decision. <paramref name="SubjectUserId"/> is set as soon as the code resolved,
+/// including on the refusals after that point, because the audit row's whole value is naming
+/// who was turned away.
+/// </summary>
+public sealed record GateDecision(bool Opened, string Reason, Guid? SubjectUserId, int UnlockSeconds);
+
+/// <summary>
+/// Who may open a door: the <c>gate_access_policy</c> vocabulary.
+///
+/// <para>
+/// A closed string enum rather than a boolean because a third policy is foreseeable — by
+/// membership class, or by time of day — and a boolean named <c>gate_requires_booking</c>
+/// would have to be deprecated to get there.
+/// </para>
+/// </summary>
+public static class GateAccessPolicies
+{
+    /// <summary>The settings key. Named once, here, so the reader and the writer cannot disagree about it.</summary>
+    public const string Key = "gate_access_policy";
+
+    /// <summary>The default: any member the club has approved, booking or not.</summary>
+    public const string ActiveMember = "active_member";
+
+    /// <summary>Only a member with a booking whose entry window is open. See <see cref="GateAccess"/>.</summary>
+    public const string BookingWindow = "booking_window";
+
+    /// <summary>Every policy that exists, for validation and for the admin screen.</summary>
+    public static readonly string[] All = [ActiveMember, BookingWindow];
+
+    /// <summary>Whether this is one of the two. Strict — the settings PUT refuses anything else.</summary>
+    public static bool IsKnown(string? policy) => Array.IndexOf(All, policy) >= 0;
+
+    /// <summary>
+    /// The stored policy, or the default when the club has not set one.
+    ///
+    /// <para>
+    /// <b>This is the one setting in the tree that fails CLOSED rather than to its default,
+    /// and the asymmetry is deliberate.</b> Everywhere else — the button map, the operating
+    /// hours — a settings document somebody has broken falls back to something permissive,
+    /// because the alternative is a club whose courts all stop working over a typo and nobody
+    /// to ask. A door is the other way round: the two failure modes are "a member is sent to
+    /// the desk" and "the building is open to whoever has any live code", and only one of
+    /// those is recoverable by a person.
+    /// </para>
+    ///
+    /// <para>
+    /// So an ABSENT key is the documented default, <see cref="ActiveMember"/> — that is the
+    /// overwhelmingly common case and it is not a failure at all. A key that is PRESENT and is
+    /// not one of the two is corruption: the PUT validates strictly, so the only way such a
+    /// value exists is a hand-edited column, and the safe reading of a hand-edited door policy
+    /// is the narrower one.
+    /// </para>
+    /// </summary>
+    public static string FromSettings(JsonElement root)
+    {
+        if (!root.TryGetProperty(Key, out var value)) return ActiveMember;
+
+        var policy = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        return IsKnown(policy) ? policy! : BookingWindow;
+    }
+}

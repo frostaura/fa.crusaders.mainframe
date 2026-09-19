@@ -81,6 +81,15 @@ public sealed class TenantSettingsAccessor
             QrLifetimeSeconds = TryInt(root, "qr_lifetime_seconds", TenantSettingsView.DefaultQrLifetimeSeconds),
             RosterWindowMinutes = TryInt(root, "roster_window_minutes", TenantSettingsView.DefaultRosterWindowMinutes),
             OperatingHours = operatingHours,
+
+            // The three door-gate numbers. Same init-only pattern and the same
+            // constant-written-once rule as the six above; the policy is the one setting in
+            // this document that is a string enum, and the one that fails CLOSED rather than
+            // to its default when the stored value is not one of the two — see
+            // GateAccessPolicies.FromSettings for why a door is the exception.
+            GateUnlockSeconds = TryInt(root, "gate_unlock_seconds", TenantSettingsView.DefaultGateUnlockSeconds),
+            GateAccessPolicy = GateAccessPolicies.FromSettings(root),
+            GateEarlyEntryMinutes = TryInt(root, "gate_early_entry_minutes", TenantSettingsView.DefaultGateEarlyEntryMinutes),
         };
     }
 
@@ -129,6 +138,17 @@ public sealed record TenantSettingsView(
     public const int DefaultQrLifetimeSeconds = 60;
     public const int DefaultRosterWindowMinutes = 120;
 
+    // ---- The door-gate numbers ----
+    //
+    // Three seconds is long enough to push a door and short enough that it has shut again
+    // before the next person reaches it. Thirty minutes of early entry is the club's own
+    // habit — a member due on court at six arrives at half past five to change — and it is
+    // deliberately much longer than activation_cue_window_minutes, because getting into the
+    // BUILDING early is ordinary and getting the LIGHTS on early is somebody else's court.
+    public const int DefaultGateUnlockSeconds = 3;
+    public const string DefaultGateAccessPolicy = GateAccessPolicies.ActiveMember;
+    public const int DefaultGateEarlyEntryMinutes = 30;
+
     /// <summary>The longest walk-up a box may sell, minutes. Bounded above by <see cref="RelayHardCap.Minutes"/>; selling more than the relay can actuate is paying for darkness.</summary>
     public int WalkUpMaxMinutes { get; init; } = DefaultWalkUpMaxMinutes;
 
@@ -146,6 +166,27 @@ public sealed record TenantSettingsView(
 
     /// <summary>How far ahead the heartbeat roster (and the QR screen's booking lookup) reaches, minutes.</summary>
     public int RosterWindowMinutes { get; init; } = DefaultRosterWindowMinutes;
+
+    /// <summary>
+    /// How long a door's lock is released per open, seconds. Clamped again on the way out to
+    /// <c>[GateAccess.MinUnlockSeconds, GateAccess.MaxUnlockSeconds]</c>, because the settings
+    /// PUT is not the only way a number reaches this column.
+    /// </summary>
+    public int GateUnlockSeconds { get; init; } = DefaultGateUnlockSeconds;
+
+    /// <summary>
+    /// Who may open a door: one of <see cref="GateAccessPolicies.All"/>. A string enum rather
+    /// than a boolean because a third policy is foreseeable and a boolean cannot grow one.
+    /// </summary>
+    public string GateAccessPolicy { get; init; } = DefaultGateAccessPolicy;
+
+    /// <summary>
+    /// How long before a booking starts its holder may come into the building, minutes. Reads
+    /// two ways and they are the same window on purpose: it is how far ahead of a slot the
+    /// gate roster carries it, and it is the window the <c>booking_window</c> policy tests
+    /// online. A member let in offline and a member let in online are let in on one rule.
+    /// </summary>
+    public int GateEarlyEntryMinutes { get; init; } = DefaultGateEarlyEntryMinutes;
 
     /// <summary>
     /// When the club is open, per weekday. Empty means "no per-weekday map configured",

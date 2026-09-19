@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
@@ -33,11 +34,20 @@ public static class DeviceEndpoints
 
         g.MapPost("/heartbeat", HeartbeatAsync);
 
+        // The door gate's whole online surface is this group: heartbeat, and one scan
+        // decision. It has no walk-up (a door sells nothing) and no activation (a door
+        // starts nothing), which is why it sits here beside the heartbeat rather than on
+        // DeviceEventEndpoints' group with the court box's money paths.
+        g.MapPost("/gate", DeviceGateEndpoint.HandleAsync);
+
         return app;
     }
 
+    /// <summary>Error code for a <c>kind</c> hint naming a device kind this server does not have.</summary>
+    public const string KindUnknown = "kind_unknown";
+
     /// <summary>
-    /// A box calling home: last-seen and versions in, its configuration and the roster it
+    /// A board calling home: last-seen and versions in, its configuration and the roster it
     /// decides scans against out — and, the first time, the row itself.
     /// </summary>
     private static async Task<IResult> HeartbeatAsync(
@@ -48,7 +58,17 @@ public static class DeviceEndpoints
     {
         var (db, tenant, settings, registry, codes) = services;
 
-        var (device, refusal) = await DeviceIdentity.ResolveOrRegisterAsync(db, registry, req.Mac, ct);
+        // Validated BEFORE the MAC is resolved, so a firmware that believes in a device kind
+        // this server does not have is told so whether or not its row already exists. The
+        // alternative — ignoring the hint on a known MAC, including when it is nonsense —
+        // means a board sending `kind:"turnstile"` gets a clean 200 for as long as its row
+        // lives and discovers the problem only when somebody deletes the row.
+        if (!DeviceKinds.TryParseHint(req.Kind, out var hintedKind))
+        {
+            return Results.BadRequest(new { error = KindUnknown });
+        }
+
+        var (device, refusal) = await DeviceIdentity.ResolveOrRegisterAsync(db, registry, req.Mac, hintedKind, ct);
         if (refusal is not null) return refusal;
 
         // Read once. The roster's relative seconds are all measured from the same instant,
@@ -67,6 +87,19 @@ public static class DeviceEndpoints
         if (!string.IsNullOrWhiteSpace(req.MegaVersion)) device.MegaVersion = req.MegaVersion.Trim();
 
         await db.SaveChangesAsync(ct);
+
+        // A gate answers a different shape entirely — no court numbers, no relay config, no
+        // button map, because a door has none of them. Branched on the ROW's kind rather than
+        // on the request's hint: the hint only ever creates a row, and a board that started
+        // sending `kind:"gate"` at a box's MAC must not thereby be handed a gate's response.
+        // See GateHeartbeatView for what the shape is and DeviceGateRosterBuilder for why the
+        // gate's roster is the club's rather than this board's.
+        if (device.Kind == DeviceKind.Gate)
+        {
+            return Results.Ok(GateHeartbeatView.Of(
+                device, tenant.TenantSlug, s.HeartbeatSeconds, GateAccess.UnlockSecondsFor(s),
+                await DeviceGateRosterBuilder.BuildAsync(db, codes, s, now, ct), now));
+        }
 
         // The bookings this box may admit on its own, as TOKEN|relay|opens_in|closes_in.
         // Always present, even when empty: the firmware replaces its cache wholesale on
@@ -153,7 +186,16 @@ public sealed record HeartbeatRequest(
     /// its first two releases; taking both means a box on an older build reports a version
     /// rather than silently reporting none.
     /// </summary>
-    [property: JsonPropertyName("running_version")] string? RunningVersion = null)
+    [property: JsonPropertyName("running_version")] string? RunningVersion = null,
+    /// <summary>
+    /// What kind of board this is — <c>court_box</c> or <c>gate</c>, per
+    /// <see cref="DeviceKinds"/>. Optional, and a HINT rather than an instruction: it is
+    /// honoured only when the MAC is unknown, because it is the only moment the server has no
+    /// other answer. Absent means <c>court_box</c>, which is what every board in the field
+    /// sends today; an unrecognised string is a 400 rather than a silent court box. See
+    /// <see cref="DeviceIdentity.ResolveOrRegisterAsync"/>.
+    /// </summary>
+    [property: JsonPropertyName("kind")] string? Kind = null)
 {
     /// <summary>The reported version under either name, trimmed — or null when neither was sent.</summary>
     public string? EffectiveRunningVersion

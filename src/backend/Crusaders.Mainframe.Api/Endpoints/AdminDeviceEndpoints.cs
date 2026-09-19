@@ -106,6 +106,10 @@ public static class AdminDeviceEndpoints
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
 
+        // Before the button map is even parsed: a field that does not belong on this kind of
+        // row is refused rather than parsed and then ignored.
+        if (KindFieldsRefusal(device, req) is { } wrongKind) return wrongKind;
+
         if (ParseButtonMapPatch(req.ButtonMap, out var buttons) is { } badMap) return badMap;
 
         // The effective map after this PATCH — the override it sets, else the one the row
@@ -122,10 +126,67 @@ public static class AdminDeviceEndpoints
 
         var updated = await devices.UpdateAsync(
             device,
-            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, buttons),
+            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, buttons, req.GateKey?.Trim()),
             ctx.User.Id() ?? Guid.Empty, ct);
 
         return Results.Ok(DeviceView.Of(updated, await HeartbeatSecondsAsync(settingsAccessor, ct)));
+    }
+
+    /// <summary>Error code for <c>gate_key</c> sent to a court box.</summary>
+    public const string GateKeyNotAGate = "gate_key_not_a_gate";
+
+    /// <summary>Error code for <c>court_numbers</c> or <c>button_map</c> sent to a gate.</summary>
+    public const string CourtFieldsOnAGate = "court_fields_on_a_gate";
+
+    /// <summary>Error code for a <c>gate_key</c> longer than the column.</summary>
+    public const string GateKeyTooLong = "gate_key_too_long";
+
+    /// <summary>
+    /// The fields that belong to one kind of board and not the other, refused rather than
+    /// ignored.
+    ///
+    /// <para>
+    /// Silently dropping <c>court_numbers</c> on a gate is what the code did before this
+    /// existed — <see cref="AssignmentAsync"/> returns null for anything that is not a court
+    /// box — and a PATCH that reports success while changing nothing is the worst of the
+    /// three available answers: the admin believes the courts are assigned, the row says
+    /// otherwise, and nothing anywhere says which. The same argument in the other direction
+    /// for <c>gate_key</c> on a box.
+    /// </para>
+    ///
+    /// <para>
+    /// <b><c>kind</c> is not editable at all and is not a field here.</b> Changing it would
+    /// mean a row keeping a court list it can no longer use, or acquiring one it never had;
+    /// the reset is to delete the row and let the board re-register with its own hint, which
+    /// is the same reset a misconfigured box already has.
+    /// </para>
+    ///
+    /// <para>
+    /// A present-but-null <c>button_map</c> counts as sent. On a box that means "run the
+    /// club's map", which is a real instruction; on a gate there is no map to run, so the
+    /// request is as wrong as a list would be.
+    /// </para>
+    /// </summary>
+    private static IResult? KindFieldsRefusal(Device device, UpdateDeviceRequest req)
+    {
+        if (device.Kind != DeviceKind.Gate)
+        {
+            return req.GateKey is null ? null : Results.BadRequest(new { error = GateKeyNotAGate });
+        }
+
+        if (req.CourtNumbers is not null || req.ButtonMap.ValueKind != JsonValueKind.Undefined)
+        {
+            return Results.BadRequest(new { error = CourtFieldsOnAGate });
+        }
+
+        // Bounded here rather than truncated at the column: a door whose name is silently
+        // shortened is a door nobody can find in the audit trail afterwards.
+        if (req.GateKey is { } key && key.Trim().Length > Device.GateKeyMaxLength)
+        {
+            return Results.BadRequest(new { error = GateKeyTooLong, max_length = Device.GateKeyMaxLength });
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -204,9 +265,21 @@ public static class AdminDeviceEndpoints
 /// absent leaves the override alone, <c>null</c> clears it, a list sets it — hence a bare
 /// <see cref="JsonElement"/> (Undefined when absent, Null when null) rather than a
 /// nullable list, which reads both as null.
+///
+/// <para>
+/// <c>gate_key</c> needs only two values and so is a plain nullable string: absent leaves
+/// the door's name alone and an EMPTY STRING clears it. There is no "run the club's default"
+/// state for it to distinguish a JSON null from — a door either has a name or has not — and
+/// clearing a text field by emptying it is the gesture an admin already makes.
+/// </para>
+///
+/// <para>
+/// There is no <c>kind</c>. See <c>KindFieldsRefusal</c>.
+/// </para>
 /// </summary>
 public sealed record UpdateDeviceRequest(
     string? Name,
     bool? Enabled,
     [property: JsonPropertyName("court_numbers")] IReadOnlyList<int>? CourtNumbers,
-    [property: JsonPropertyName("button_map")] JsonElement ButtonMap = default);
+    [property: JsonPropertyName("button_map")] JsonElement ButtonMap = default,
+    [property: JsonPropertyName("gate_key")] string? GateKey = null);
