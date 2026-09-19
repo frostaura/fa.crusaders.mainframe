@@ -4,7 +4,7 @@ import { LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as Webh
 import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { tokenStore } from "../lib/api";
-import { useBalance } from "../lib/balance";
+import { LOW_BALANCE_CREDITS, useBalance, walletLabel } from "../lib/balance";
 import { useProfile } from "../lib/profile";
 import { ScrollArea } from "./ScrollArea";
 import { pendingApplicationsVersion, subscribePendingApplications } from "../lib/pendingApplications";
@@ -50,26 +50,6 @@ function usePendingApplicationCount(enabled: boolean, routeKey: string): number 
   }, [enabled, routeKey, changeVersion]);
 
   return count;
-}
-
-/** How low a balance has to be before the chip warns, in credits. Mirrors the amber threshold. */
-const LOW_BALANCE_CREDITS = 50;
-
-/**
- * What a screen reader says for the wallet chip.
- *
- * <p>
- * Spelled out rather than reusing `formatCredits`, whose "cr" is an abbreviation a screen
- * reader reads as letters. And the amber low-balance state is spoken, because it is otherwise
- * carried entirely by the chip's colour.
- * </p>
- */
-export function walletLabel(balance: number | null, loading: boolean): string {
-  if (balance === null) return loading ? "Wallet balance, loading" : "Wallet balance unavailable";
-  const amount = `${balance.toFixed(2)} credits`;
-  return balance < LOW_BALANCE_CREDITS
-    ? `Wallet balance ${amount}, running low. Tap to top up.`
-    : `Wallet balance ${amount}. Tap to top up.`;
 }
 
 export default function Layout() {

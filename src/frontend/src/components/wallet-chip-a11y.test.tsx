@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { walletLabel } from "./Layout";
+import { walletLabel } from "../lib/balance";
 
 /**
  * The wallet chip's accessible name.

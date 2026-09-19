@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import config from "../tailwind.config";
@@ -283,8 +283,6 @@ describe("nothing keeps its own copy of the palette", () => {
 /** The .ts/.tsx files directly under one of the frontend's source folders. */
 function listSources(folder: string): string[] {
   const dir = join(__dirname, folder);
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { readdirSync } = require("node:fs") as typeof import("node:fs");
   return readdirSync(dir)
     .filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"))
     .map((f) => join(dir, f));
