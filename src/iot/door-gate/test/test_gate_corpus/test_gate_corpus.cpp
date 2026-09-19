@@ -54,6 +54,17 @@ corpus::File g_manifest;
 
 using Cache = roster::Roster<gatelogic::kGateRosterEntries>;
 
+/// The longest `gate_key` the admin console accepts, as a CORPUS fact — the
+/// size of the buffer this suite reads one into, and nothing more.
+///
+/// It used to be `gatelogic::kMaxGateKeyLen`, a firmware constant that sized no
+/// firmware buffer, because nothing in this firmware parses `gate_key` at all:
+/// the board is identified by its MAC, the key is the admin's label for a door
+/// and the board never needs to know it. A constant in a library, named for a
+/// field the library does not read, is how "the board learns its name from the
+/// heartbeat" survived in four documents for as long as it did.
+constexpr size_t kMaxGateKeyLen = 64U;
+
 /// The clock the roster is anchored to. A base with the 49.7-day wrap just
 /// ahead, because a gate in a cupboard runs for months and the corpus's
 /// six-digit relative seconds are exactly the values that cross it.
@@ -284,14 +295,14 @@ void executeHeartbeatResponse(const char* id, const char* payload, size_t len, c
   // are different facts and a firmware that collapsed them would diverge here.
   const char* expectedGateKey = corpus::member(expect, "gate_key");
   if (expectedGateKey != nullptr) {
-    char gateKey[gatelogic::kMaxGateKeyLen + 1U] = {};
+    char gateKey[kMaxGateKeyLen + 1U] = {};
     const bool read = devapi::json::stringField(payload, len, "gate_key", gateKey, sizeof(gateKey));
     TEST_ASSERT_NOT_EQUAL_MESSAGE(devapi::json::kNotFound, devapi::json::findKey(payload, len, "gate_key"),
                                   id);
     if (corpus::skipWs(expectedGateKey)[0] == 'n') {
       TEST_ASSERT_FALSE_MESSAGE(read, id);
     } else {
-      char wanted[gatelogic::kMaxGateKeyLen + 1U] = {};
+      char wanted[kMaxGateKeyLen + 1U] = {};
       TEST_ASSERT_TRUE(corpus::stringValue(expectedGateKey, wanted, sizeof(wanted), nullptr));
       TEST_ASSERT_TRUE_MESSAGE(read, id);
       TEST_ASSERT_EQUAL_STRING_MESSAGE(wanted, gateKey, id);

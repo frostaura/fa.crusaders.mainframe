@@ -19,16 +19,31 @@
 // ----------------------------------------------------------------
 // The bridge maps a response through devapi::react(), whose `Rejected` class
 // means "a 4xx the box caused — drop it". For a DOOR that mapping is wrong:
-// every status except 200 says the board learned nothing about this member, so
-// 0, 401, 403, 404, 429, every 5xx and a 200 whose body cannot be read all fall
-// back to the roster. A 200 is the only authoritative answer — and a 200 that
-// says `opened:false` is authoritative too, so it is NEVER second-guessed
-// against the roster. That asymmetry is the whole safety argument:
+// almost every status says the board learned nothing about this member, so 0,
+// 401, 404, 408, 429, every 5xx and a 200 whose body cannot be read all fall
+// back to the roster. A 200 is an authoritative answer — and a 200 that says
+// `opened:false` is authoritative too, so it is NEVER second-guessed against
+// the roster. That asymmetry is the whole safety argument:
 //
 //   * treating a refusal as an outage would let a member the club barred this
 //     morning in through a booking the club has not cancelled;
 //   * treating an outage as a refusal would leave a member with a valid booking
 //     outside in the rain because a container was restarting.
+//
+// 403 IS THE SECOND AUTHORITATIVE ANSWER
+// --------------------------------------
+// A 403 on `/gate` is not an outage and not a fault this board can fix: it is
+// the club having taken this board OUT OF SERVICE in the admin console. Falling
+// back to the roster after one would keep the door admitting rostered members
+// for six hours after an admin pressed the button that was supposed to stop
+// exactly that — which is the whole point of the button. So a 403 denies, and
+// the roster never gets a turn.
+//
+// THE RESIDUAL, STATED HONESTLY: a board that cannot REACH the server never
+// hears the 403 at all. It keeps admitting rostered bookings until its roster
+// goes stale at ROSTER_MAX_AGE_MS. Taking a door out of service is therefore
+// not instantaneous for a board that is offline, and nothing in this firmware
+// can make it so.
 //
 // WHAT GETS QUEUED
 // ----------------
@@ -47,7 +62,9 @@
 #include <stdint.h>
 
 #include "eventq/Event.h"
+#include "gatelogic/ApiBaseUrl.h"
 #include "gatelogic/GateConfig.h"
+#include "gatelogic/StaticText.h"
 #include "roster/Roster.h"
 
 namespace gatelogic {
@@ -58,6 +75,14 @@ namespace gatelogic {
 inline constexpr char kPathHeartbeat[] = "/api/v1/device/heartbeat";
 inline constexpr char kPathGate[] = "/api/v1/device/gate";
 inline constexpr char kPathEvents[] = "/api/v1/device/events";
+
+/// A fourth endpoint may not outgrow the buffer the base URL and the path are
+/// concatenated into. `Esp32HttpPort::post` returns 0 — "the request never
+/// completed" — when the two do not fit, which on a door reads as an outage and
+/// sends every scan to the roster.
+static_assert(text::length(kPathHeartbeat) <= kMaxPathLen && text::length(kPathGate) <= kMaxPathLen &&
+                  text::length(kPathEvents) <= kMaxPathLen,
+              "a device path is longer than kMaxPathLen, which sizes the URL buffer");
 
 /// The smallest buffer renderScanBody is ever given: three keys, a 12-hex MAC
 /// and a token bounded by roster::kMaxTokenLen.
@@ -82,6 +107,13 @@ inline constexpr char kReasonNotRecognised[] = "not_recognised";
 inline constexpr char kReasonTooEarly[] = "too_early";
 inline constexpr char kReasonTooLate[] = "too_late";
 inline constexpr char kReasonRosterStale[] = "roster_stale";
+
+/// The club took this board out of service. Decided by the BOARD, from a 403,
+/// because the server sends no body it could read one out of.
+inline constexpr char kReasonOutOfService[] = "out_of_service";
+
+static_assert(text::length(kReasonOutOfService) <= kMaxReasonLen,
+              "a reason longer than the buffer reads as an empty reason at the door");
 
 /// Whether to ask the API at all.
 enum class Attempt : uint8_t {
@@ -132,6 +164,10 @@ size_t renderScanBody(char* out, size_t cap, const char* mac, const char* token)
 
 /// Interprets a `/gate` response.
 ///
+/// TWO statuses are answers and everything else is an outage: a 200, whose body
+/// carries the decision, and a 403, which is the club having taken this board
+/// out of service and is a refusal with no roster second-guess.
+///
 /// `adoptedUnlockMs` is what the last heartbeat said, used when a 200 opens the
 /// door without naming a duration. `hardCapMs` bounds whatever comes back.
 ScanDecision onGateResponse(uint16_t status, const char* body, size_t len, uint32_t adoptedUnlockMs,
@@ -153,6 +189,12 @@ ScanDecision fromRoster(const roster::Decision& decision, uint32_t adoptedUnlock
 /// match in the roster. `offline` decides only whether the refusal is queued,
 /// on the same rule as a roster refusal: while the API can be reached it can
 /// see for itself that nothing was asked.
+///
+/// `offline` is the SAME judgement a scan makes — `chooseAttempt(...) ==
+/// Attempt::RosterOnly`, the radio AND the breaker — not just the radio. A
+/// board whose breaker has opened cannot reach the API either, and asking only
+/// about the radio queued nothing while the host was down, which is the one
+/// window in which an unreadable scan is worth knowing about.
 ScanDecision refuseUnreadable(bool offline);
 
 } // namespace gatelogic
