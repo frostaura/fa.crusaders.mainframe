@@ -5,8 +5,55 @@ public enum DeviceKind
     /// <summary>The court-control panel: relays, LCD, keypad, QR scanner.</summary>
     CourtBox = 0,
 
-    /// <summary>A door/gate controller. Modelled now, not built — the hardware is undecided.</summary>
+    /// <summary>A door controller: one ESP32, a QR scanner on a UART, one relay on the lock, one LED.</summary>
     Gate = 1,
+}
+
+/// <summary>
+/// <see cref="DeviceKind"/> as it appears on the wire, and the parse of the heartbeat's
+/// <c>kind</c> hint.
+///
+/// <para>
+/// The enum is persisted as an int and the wire form is snake_case, so the two have to be
+/// mapped somewhere; doing it here rather than with <c>ToString()</c> means renaming the C#
+/// member is not silently an API change. (<c>DeviceView</c> still sends
+/// <c>Kind.ToString()</c> — "CourtBox", "Gate" — to the admin console, which is a separate,
+/// older wire shape the frontend is typed against. The device wire is these strings.)
+/// </para>
+/// </summary>
+public static class DeviceKinds
+{
+    /// <summary>What a court box calls itself. Sending it is the same as sending nothing.</summary>
+    public const string CourtBox = "court_box";
+
+    /// <summary>What a door gate calls itself, and the only hint that changes anything.</summary>
+    public const string Gate = "gate";
+
+    /// <summary>The wire name of a kind.</summary>
+    public static string Wire(DeviceKind kind) => kind == DeviceKind.Gate ? Gate : CourtBox;
+
+    /// <summary>
+    /// The kind a heartbeat's <c>kind</c> hint names, or false when it names nothing known.
+    ///
+    /// <para>
+    /// <b>Absent is not unknown.</b> Every court box in the field predates this field and
+    /// sends no <c>kind</c> at all, so absent has to mean <see cref="DeviceKind.CourtBox"/>
+    /// exactly — the hint is additive and the existing wire is untouched. An unrecognised
+    /// string is a different thing: it is a firmware that believes in a device kind this
+    /// server does not have, and answering 400 tells it so at the one moment somebody is
+    /// holding it. Silently registering such a board as a court box would give it a court
+    /// list, a button map and a place in the settlement model it has no business in.
+    /// </para>
+    /// </summary>
+    public static bool TryParseHint(string? hint, out DeviceKind kind)
+    {
+        kind = DeviceKind.CourtBox;
+        if (string.IsNullOrWhiteSpace(hint) || hint == CourtBox) return true;
+        if (hint != Gate) return false;
+
+        kind = DeviceKind.Gate;
+        return true;
+    }
 }
 
 public enum DeviceHardware
@@ -77,8 +124,26 @@ public sealed class Device : ITenantScoped
     /// </summary>
     public List<int> CourtNumbers { get; set; } = [];
 
-    /// <summary>Which gate this controller opens, for a <see cref="DeviceKind.Gate"/>. Null for court boxes.</summary>
+    /// <summary>
+    /// Which door this controller opens, for a <see cref="DeviceKind.Gate"/>. Null for court
+    /// boxes, and null on a gate until an admin names it.
+    ///
+    /// <para>
+    /// <b>It is a label, not an access-control input.</b> Every gate in a club is handed the
+    /// same roster and applies the same policy; this is what makes a <c>gate.opened</c> audit
+    /// row say "front door" rather than "gate-0a1b2c", and what a club would group doors by
+    /// if it ever had per-door rules. Nothing reads it to decide anything, and one firmware
+    /// image serves every door precisely because nothing per-door is compiled in.
+    /// </para>
+    /// </summary>
     public string? GateKey { get; set; }
+
+    /// <summary>
+    /// Longest <see cref="GateKey"/> accepted, matching the column. Named once so the
+    /// validation an admin meets and the width the database enforces cannot drift — a door
+    /// whose name is silently truncated is a door nobody can find in the audit trail.
+    /// </summary>
+    public const int GateKeyMaxLength = 64;
 
     /// <summary>
     /// This box's own button map, as the eight-entry wire array (<c>ButtonMap.ToWire()</c>)

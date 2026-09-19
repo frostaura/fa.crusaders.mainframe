@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
@@ -76,6 +77,15 @@ public static class AdminConfigEndpoints
                 activation_cue_window_minutes = GetInt(doc, "activation_cue_window_minutes", defaults.ActivationCueWindowMinutes),
                 qr_lifetime_seconds = GetInt(doc, "qr_lifetime_seconds", defaults.QrLifetimeSeconds),
                 roster_window_minutes = GetInt(doc, "roster_window_minutes", defaults.RosterWindowMinutes),
+
+                // The three door-gate numbers. The policy is rendered from the PARSED value
+                // rather than echoed from the stored document, for the same reason
+                // operating_hours is: a settings screen reads a value, shows it to a person
+                // and PUTs back whatever it was shown, so showing a stored value the engine
+                // does not honour would let the page report a policy that is not in force.
+                gate_unlock_seconds = GetInt(doc, "gate_unlock_seconds", defaults.GateUnlockSeconds),
+                gate_access_policy = defaults.GateAccessPolicy,
+                gate_early_entry_minutes = GetInt(doc, "gate_early_entry_minutes", defaults.GateEarlyEntryMinutes),
             });
         });
 
@@ -145,6 +155,9 @@ public static class AdminConfigEndpoints
 
             var deviceError = ValidateDeviceNumbers(req);
             if (deviceError is not null) return Results.BadRequest(new { error = deviceError });
+
+            var gateError = ValidateGateSettings(req);
+            if (gateError is not null) return Results.BadRequest(new { error = gateError });
 
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
@@ -216,6 +229,7 @@ public static class AdminConfigEndpoints
             if (buttons is not null) doc["button_map"] = ToElement(buttons.ToWire());
             WriteOptionalEconomics(doc, req);
             WriteOptionalDeviceNumbers(doc, req);
+            WriteOptionalGateSettings(doc, req);
             row.SettingsJson = JsonSerializer.Serialize(doc);
             // The column was written once, at construction, and never again — a dead audit
             // field on the one table that governs money and lights. Nothing reads it today,
@@ -357,6 +371,49 @@ public static class AdminConfigEndpoints
     }
 
     /// <summary>
+    /// Bounds on the three door-gate settings.
+    ///
+    /// <para>
+    /// Kept apart from <see cref="ValidateDeviceNumbers"/> rather than folded into it: that
+    /// method is the six court-box NUMBERS, and one of these three is a string enum, so a
+    /// reader looking for "what bounds gate_access_policy" would have to find it inside a
+    /// method whose name says it does not handle it.
+    /// </para>
+    ///
+    /// <para>
+    /// The unlock bound is <c>GateAccess</c>'s own clamp, named once so the number an admin
+    /// is refused at and the number the door is held open for cannot drift apart. The policy
+    /// is checked against the closed set STRICTLY, which is the whole reason the read side is
+    /// allowed to treat an unrecognised stored value as corruption rather than as a choice.
+    /// </para>
+    /// </summary>
+    private static string? ValidateGateSettings(UpdateSettingsRequest req)
+    {
+        var unlock = req.EffectiveGateUnlockSeconds;
+        if (unlock is not null && (unlock < GateAccess.MinUnlockSeconds || unlock > GateAccess.MaxUnlockSeconds))
+        {
+            return "gate_unlock_seconds_out_of_range";
+        }
+        if (req.EffectiveGateAccessPolicy is { } policy && !GateAccessPolicies.IsKnown(policy.Trim()))
+        {
+            return "gate_access_policy_invalid";
+        }
+        if (req.EffectiveGateEarlyEntryMinutes is < 0 or > GateAccess.MaxEarlyEntryMinutes)
+        {
+            return "gate_early_entry_minutes_out_of_range";
+        }
+        return null;
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the three gate settings.</summary>
+    private static void WriteOptionalGateSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.EffectiveGateUnlockSeconds is { } unlock) doc["gate_unlock_seconds"] = ToElement(unlock);
+        if (req.EffectiveGateAccessPolicy is { } policy) doc[GateAccessPolicies.Key] = ToElement(policy.Trim());
+        if (req.EffectiveGateEarlyEntryMinutes is { } early) doc["gate_early_entry_minutes"] = ToElement(early);
+    }
+
+    /// <summary>
     /// Whether the platform's IANA tzdb knows this zone id.
     ///
     /// <para>
@@ -477,7 +534,44 @@ public sealed record UpdateSettingsRequest(
     int? ActivationForwardWindowMinutes = null,
     int? ActivationCueWindowMinutes = null,
     int? QrLifetimeSeconds = null,
-    int? RosterWindowMinutes = null);
+    int? RosterWindowMinutes = null,
+
+    // The three door-gate keys, on the same omitted-means-unchanged terms. The policy is the
+    // one string enum on this endpoint; it is validated against the closed set and refused
+    // rather than coerced, because the read side treats an unrecognised stored value as
+    // corruption and narrows the door in response.
+    int? GateUnlockSeconds = null,
+    string? GateAccessPolicy = null,
+    int? GateEarlyEntryMinutes = null,
+
+    // ---- and the same three under their snake_case names ----
+    //
+    // This endpoint is asymmetric and always has been: the GET answers snake_case and the
+    // PUT binds camelCase, because the application configures no naming policy and the
+    // browser client absorbs the difference in its own save mapper. That asymmetry is
+    // survivable only while both sides agree on which way round it goes, and the cost of
+    // disagreeing is not an error — it is `null`, which this endpoint reads as
+    // "omitted, leave unchanged". A client that sent the wrong spelling would get
+    // `{"saved": true}` and no change, which is the silent-write failure
+    // `Opening_the_settings_page_and_saving_it_changes_nothing` exists to prevent.
+    //
+    // For a door that is worth removing rather than documenting, so both spellings bind and
+    // the reader below takes whichever arrived. The precedent is `HeartbeatRequest`'s
+    // running_version/firmware_version pair, and the reasoning is the same one: taking both
+    // means a client on either convention is heard, rather than silently ignored.
+    [property: JsonPropertyName("gate_unlock_seconds")] int? GateUnlockSecondsSnake = null,
+    [property: JsonPropertyName("gate_access_policy")] string? GateAccessPolicySnake = null,
+    [property: JsonPropertyName("gate_early_entry_minutes")] int? GateEarlyEntryMinutesSnake = null)
+{
+    /// <summary>The release the club asked for, under either spelling, or null when neither arrived.</summary>
+    public int? EffectiveGateUnlockSeconds => GateUnlockSeconds ?? GateUnlockSecondsSnake;
+
+    /// <summary>The policy the club asked for, under either spelling.</summary>
+    public string? EffectiveGateAccessPolicy => GateAccessPolicy ?? GateAccessPolicySnake;
+
+    /// <summary>The entry window the club asked for, under either spelling.</summary>
+    public int? EffectiveGateEarlyEntryMinutes => GateEarlyEntryMinutes ?? GateEarlyEntryMinutesSnake;
+}
 
 /// <summary>
 /// A new court. <c>SlicePriceCredits</c> is optional: left out, the court is priced at the

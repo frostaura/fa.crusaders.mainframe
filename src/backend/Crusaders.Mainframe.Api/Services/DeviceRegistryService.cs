@@ -204,6 +204,14 @@ public sealed class DeviceRegistryService
         if (cmd.CourtNumbers is not null) device.CourtNumbers = cmd.CourtNumbers.ToList();
         if (cmd.ButtonMap is { } buttons) device.ButtonMapJson = buttons.Value?.ToJson();
 
+        // Two-valued rather than three, unlike the button map: absent leaves the name alone
+        // and an EMPTY STRING clears it. A door's name has no "run the club's default" state
+        // to distinguish a JSON null from, so the extra value would only be a second way of
+        // saying the same thing — and an empty name is what an admin types when they want it
+        // gone, which is the gesture worth honouring. Trimmed and bounded by the caller,
+        // where there is a person to refuse.
+        if (cmd.GateKey is not null) device.GateKey = cmd.GateKey.Length == 0 ? null : cmd.GateKey;
+
         // An admin has now looked at this row, so it stops reading as "appeared by itself,
         // nobody has checked the courts it guessed". Deleting the row and letting the box
         // register again is what sets it back.
@@ -281,8 +289,49 @@ public sealed class DeviceRegistryService
     /// buttons or refused outright); and a name an admin will want to change. The row is
     /// flagged <see cref="Device.AutoRegistered"/> so the Devices page says so.
     /// </para>
+    ///
+    /// <para>
+    /// <b><paramref name="kind"/> is a required argument rather than a default</b>, and the
+    /// heartbeat's optional <c>kind</c> hint is where it comes from. Making it explicit is the
+    /// point: a gate that registered itself as a court box would be handed the club's courts,
+    /// a button map and a place in the settlement model — <c>DeviceOutageIndex</c> decides
+    /// whether a court is dark from the boxes that drive it — so a spare door controller
+    /// switched on in a cupboard would start waiving no-show penalties on real courts. The
+    /// compiler now asks every caller which it meant.
+    /// </para>
     /// </summary>
-    public async Task<Device> AutoRegisterAsync(string macAddress, CancellationToken ct)
+    public async Task<Device> AutoRegisterAsync(string macAddress, DeviceKind kind, CancellationToken ct)
+    {
+        var device = kind == DeviceKind.Gate
+            ? await NewGateAsync(macAddress, ct)
+            : await NewCourtBoxAsync(macAddress, ct);
+
+        _db.Devices.Add(device);
+
+        // ActorUserId is Guid.Empty: nobody did this. The audit row exists so a board that
+        // appeared is visible in the same trail as one an admin edited, not to name a person.
+        //
+        // `kind` is on the row because a club with both device kinds cannot otherwise tell
+        // from the trail which one turned up, and "a new board appeared" is a different
+        // sentence depending on the answer. `button_map_trimmed` is derived from the row
+        // rather than passed through: this is the only path that ever sets ButtonMapJson at
+        // registration, so a non-null one here means it was trimmed, and a gate has none.
+        Audit(Guid.Empty, "device.auto_registered", new
+        {
+            device_id = device.Id,
+            device_code = device.DeviceCode,
+            mac_address = device.MacAddress,
+            kind = DeviceKinds.Wire(device.Kind),
+            court_numbers = device.CourtNumbers,
+            button_map_trimmed = device.ButtonMapJson is not null,
+        });
+        await _db.SaveChangesAsync(ct);
+
+        return device;
+    }
+
+    /// <summary>The court box's guesses: the club's courts and the club's map, trimmed to fit.</summary>
+    private async Task<Device> NewCourtBoxAsync(string macAddress, CancellationToken ct)
     {
         var courtNumbers = await _db.Courts.AsNoTracking()
             .Select(c => c.CourtNumber)
@@ -295,11 +344,11 @@ public sealed class DeviceRegistryService
             ? null
             : settings.Buttons.TrimmedTo(courtNumbers.Count);
 
-        var device = new Device
+        return new Device
         {
             TenantId = _tenant.TenantId,
             MacAddress = macAddress,
-            DeviceCode = await AvailableDeviceCodeAsync(macAddress, ct),
+            DeviceCode = await AvailableDeviceCodeAsync(macAddress, DeviceKind.CourtBox, ct),
             Name = "Court box",
             Kind = DeviceKind.CourtBox,
             Hardware = DeviceHardware.Esp8266,
@@ -307,34 +356,45 @@ public sealed class DeviceRegistryService
             ButtonMapJson = trimmed?.ToJson(),
             AutoRegistered = true,
         };
-
-        _db.Devices.Add(device);
-
-        // ActorUserId is Guid.Empty: nobody did this. The audit row exists so a box that
-        // appeared is visible in the same trail as one an admin edited, not to name a person.
-        Audit(Guid.Empty, "device.auto_registered", new
-        {
-            device_id = device.Id,
-            device_code = device.DeviceCode,
-            mac_address = device.MacAddress,
-            court_numbers = device.CourtNumbers,
-            button_map_trimmed = trimmed is not null,
-        });
-        await _db.SaveChangesAsync(ct);
-
-        return device;
     }
 
     /// <summary>
-    /// <c>box-&lt;last six hex of the MAC&gt;</c>, or the full MAC when a row already holds
-    /// that code. The short form is what an admin reads off the board's label; the fallback
-    /// exists because <c>device_code</c> is uniquely indexed and a collision would otherwise
-    /// throw at the one moment nobody is watching — a box registering itself at 6am.
+    /// A gate has nothing to guess. No courts, no button map, and no name for the door it
+    /// opens — <see cref="Device.GateKey"/> is left null for an admin to fill in, because the
+    /// server cannot know which door a MAC is screwed to and a guessed one would read as
+    /// configuration somebody chose. The row is flagged <see cref="Device.AutoRegistered"/>
+    /// exactly as a box's is, which is how the Devices page asks for that name.
     /// </summary>
-    private async Task<string> AvailableDeviceCodeAsync(string macAddress, CancellationToken ct)
+    private async Task<Device> NewGateAsync(string macAddress, CancellationToken ct)
     {
-        var shortCode = $"box-{macAddress[^6..]}";
-        return await DeviceCodeTakenAsync(shortCode, ct) ? $"box-{macAddress}" : shortCode;
+        return new Device
+        {
+            TenantId = _tenant.TenantId,
+            MacAddress = macAddress,
+            DeviceCode = await AvailableDeviceCodeAsync(macAddress, DeviceKind.Gate, ct),
+            Name = "Door gate",
+            Kind = DeviceKind.Gate,
+            Hardware = DeviceHardware.Esp32,
+            CourtNumbers = [],
+            ButtonMapJson = null,
+            GateKey = null,
+            AutoRegistered = true,
+        };
+    }
+
+    /// <summary>
+    /// <c>box-</c> or <c>gate-</c> plus the last six hex of the MAC, or the full MAC when a
+    /// row already holds that code. The short form is what an admin reads off the board's
+    /// label; the fallback exists because <c>device_code</c> is uniquely indexed and a
+    /// collision would otherwise throw at the one moment nobody is watching — a board
+    /// registering itself at 6am. The prefix is the kind so the Devices list sorts and reads
+    /// as what it is.
+    /// </summary>
+    private async Task<string> AvailableDeviceCodeAsync(string macAddress, DeviceKind kind, CancellationToken ct)
+    {
+        var prefix = kind == DeviceKind.Gate ? "gate" : "box";
+        var shortCode = $"{prefix}-{macAddress[^6..]}";
+        return await DeviceCodeTakenAsync(shortCode, ct) ? $"{prefix}-{macAddress}" : shortCode;
     }
 
     /// <summary>Removes a device. Its board re-registers, with default courts, on its next heartbeat.</summary>
@@ -414,12 +474,15 @@ public sealed class DeviceRegistryService
 /// A null <paramref name="CourtNumbers"/> leaves the list alone; a list replaces it whole.
 /// <paramref name="ButtonMap"/> is three-valued: null leaves the override alone, a value
 /// holding null clears it (back to the club's map), a value holding a map sets it.
+/// <paramref name="GateKey"/> is two-valued: null leaves the door's name alone, an empty
+/// string clears it, anything else sets it — see <c>UpdateAsync</c> for why it needs no third.
 /// </summary>
 public sealed record UpdateDeviceCommand(
     string? Name,
     bool? Enabled,
     IReadOnlyList<int>? CourtNumbers,
-    Optional<ButtonMap?>? ButtonMap = null);
+    Optional<ButtonMap?>? ButtonMap = null,
+    string? GateKey = null);
 
 /// <summary>A value that is explicitly present, so "absent" and "present but null" can be told apart on a PATCH.</summary>
 /// <summary>

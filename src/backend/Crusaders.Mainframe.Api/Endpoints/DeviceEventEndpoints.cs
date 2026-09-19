@@ -86,6 +86,27 @@ public static class DeviceEventEndpoints
     public static readonly TimeSpan ReleasePairingTolerance = TimeSpan.FromMinutes(2);
 
     /// <summary>
+    /// The event kind a door gate queues when it opened a door from its cached roster —
+    /// <c>eventq::Kind::GateOpen</c>.
+    ///
+    /// <para>
+    /// <b>Queued for OFFLINE opens only.</b> An online open went through
+    /// <c>POST /api/v1/device/gate</c>, which wrote its own audit row; queuing it again would
+    /// put the same open in the trail twice with two different timestamps. So this kind is
+    /// evidence of the one case the API could not see for itself.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It is never attendance and it never touches money.</b> Walking through a door is
+    /// not playing a court — the member may be collecting a racquet, or coming in for
+    /// somebody else's league night — so nothing here stamps <c>CheckedInAt</c>, reverses a
+    /// no-show, charges lit time or writes a ledger row. That is not an omission to be
+    /// tidied up later: a gate has no court to attribute any of it to.
+    /// </para>
+    /// </summary>
+    public const string GateOpenKind = "gate_open";
+
+    /// <summary>
     /// Records a batch of events and reports the highest sequence number accepted.
     ///
     /// <para>
@@ -147,8 +168,16 @@ public static class DeviceEventEndpoints
                 // Attendance BEFORE the receipt. See the summary for why this order.
                 var outcome = e.Kind switch
                 {
+                    // A door reporting a court event. Refused explicitly rather than left to
+                    // fail the relay-index check against an empty court list — see
+                    // GateAccess.NotACourtBox for why an accidental refusal is not one.
+                    // Recorded and acknowledged like every other outcome, never 4xx: an
+                    // event the board cannot change is a board retrying for ever.
+                    ActivationKind or ReleaseKind when device!.Kind != DeviceKind.CourtBox
+                        => new ActivationOutcome(GateAccess.NotACourtBox, null, e.Kind),
                     ActivationKind => await ActivationOutcomeAsync(device!, e, time.OccurredAt, services, ct),
                     ReleaseKind => await ReleaseOutcomeAsync(device!, e, time.OccurredAt, services, ct),
+                    GateOpenKind => await GateOpenOutcomeAsync(e, time.OccurredAt, services, ct),
                     _ => null,
                 };
 
@@ -233,7 +262,8 @@ public static class DeviceEventEndpoints
     /// desk can answer "I scanned and it let me in — why am I a no-show?" from the record.
     /// </summary>
     private sealed record ActivationOutcome(
-        string Code, Guid? BookingId, string Kind = ActivationKind, Guid? RelatedBookingId = null)
+        string Code, Guid? BookingId, string Kind = ActivationKind, Guid? RelatedBookingId = null,
+        Guid? SubjectUserId = null)
     {
         public const string Ok = "ok";
 
@@ -332,6 +362,43 @@ public static class DeviceEventEndpoints
         var target = new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline", occurredAt, e.DurationMs);
         var settled = await SettleAsync(services, target, ct);
         return new ActivationOutcome(settled.Code, booking.Id, ActivationKind, settled.RelatedBookingId);
+    }
+
+    /// <summary>
+    /// What a <c>gate_open</c> event becomes: a receipt, and an audit row naming whoever the
+    /// code identified. Nothing else.
+    ///
+    /// <para>
+    /// Resolved at <paramref name="occurredAt"/> rather than at the upload, for the reason
+    /// <see cref="AccessCodeService.ResolveAsync(string?, DateTimeOffset, CancellationToken)"/>
+    /// records: a code that was live when the member held it up identified them THEN, and
+    /// judging it by the upload clock turns a member who walked in during an outage into a
+    /// stranger. The subject is what makes the row worth keeping — "somebody opened the side
+    /// door at 06:40" answers nothing anyone will ask.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The outcome code is always <c>ok</c>, including when the code resolved to nobody.</b>
+    /// A non-ok code would write a second <c>device.gate_open_&lt;code&gt;</c> audit row, and
+    /// there is nothing for a desk to do about an offline open whose token has since been
+    /// pruned: the door opened, the member is inside, and no money turns on it. The single row
+    /// records the open with whatever identity survived. This is the one place a gate's event
+    /// handling is deliberately quieter than a court box's, and it is quieter because there is
+    /// nothing at stake, not because nothing can go wrong.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>BookingId</c> is left null even when the token was a booking-activation code, so a
+    /// later <c>release</c> can never pair against this receipt: a door has no relay session
+    /// to settle and pairing one would re-price a court from a doorway.
+    /// </para>
+    /// </summary>
+    private static async Task<ActivationOutcome> GateOpenOutcomeAsync(
+        DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
+    {
+        var resolved = await services.Codes.ResolveAsync(e.Subject, occurredAt, ct);
+        return new ActivationOutcome(
+            ActivationOutcome.Ok, BookingId: null, Kind: GateOpenKind, SubjectUserId: resolved?.UserId);
     }
 
     /// <summary>
@@ -610,19 +677,25 @@ public static class DeviceEventEndpoints
         };
         var detailsJson = System.Text.Json.JsonSerializer.Serialize(details);
 
+        // Named when the handler could name them. Only the gate-open path sets this today:
+        // an activation names its member through the booking on the receipt, while a door
+        // open has no booking to reach one through, so the audit row is the only place the
+        // identity can live at all.
+        var subject = outcome?.SubjectUserId;
+
         var rows = new List<AuditLog>(3)
         {
-            new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = $"device.{e.Kind}", DetailsJson = detailsJson },
+            new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{e.Kind}", DetailsJson = detailsJson },
         };
         if (outcome is not null && outcome.Code != ActivationOutcome.Ok)
         {
-            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = $"device.{outcome.Kind}_{outcome.Code}", DetailsJson = detailsJson });
+            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = $"device.{outcome.Kind}_{outcome.Code}", DetailsJson = detailsJson });
         }
         if (time.ClampedFrom is not null)
         {
             // The box's uptime counter cannot be believed; the desk needs to know before
             // the next event from it, not after.
-            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, Action = "device.event_time_clamped", DetailsJson = detailsJson });
+            rows.Add(new() { TenantId = tenant.TenantId, ActorUserId = Guid.Empty, SubjectUserId = subject, Action = "device.event_time_clamped", DetailsJson = detailsJson });
         }
         db.AuditLogs.AddRange(rows);
 
@@ -723,6 +796,12 @@ public static class DeviceEventEndpoints
         // before the decision, so a refused purchase counts as liveness too — the box
         // called, whatever the answer was.
         await DeviceSilenceLog.NoteContactAsync(db, device, settings, DateTimeOffset.UtcNow, ct);
+
+        // A door sells nothing. Refused before the nonce, before the replay check and long
+        // before anything commits — see GateAccess.NotACourtBox for why this is stated rather
+        // than left to `court_not_on_device`, which is what a gate's empty court list answers
+        // today and which stops being a refusal the moment somebody puts a court on one.
+        if (device.Kind != DeviceKind.CourtBox) return Results.BadRequest(new { error = GateAccess.NotACourtBox });
 
         if (RefuseNonce(req) is { } badNonce) return badNonce;
         var reference = WalkUpReference(device.Id, req.Nonce!);

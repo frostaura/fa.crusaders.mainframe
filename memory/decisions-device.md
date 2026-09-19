@@ -59,5 +59,6 @@ that needs a wire moved is the wrong fix.
 - **Authentication runs before the rate limiter**, and the policy partitions per member. The Court
   Code page refreshes on a timer for everyone who has it open, so behind the gateway the whole club
   shared one bucket keyed on the proxy address — ten opens a minute took login club-wide.
-- **The door gate is its own topic** now that it exists as firmware —
-  [`decisions-door-gate.md`](decisions-door-gate.md).
+- **Gates are no longer parked** (2026-09-19) — one ESP32 per door, built on this contract
+  unchanged. Firmware decisions: [`decisions-door-gate.md`](decisions-door-gate.md); API and access
+  rules: [`decisions-gate.md`](decisions-gate.md).

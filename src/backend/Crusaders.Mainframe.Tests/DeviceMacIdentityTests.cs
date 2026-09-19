@@ -55,7 +55,7 @@ public class DeviceMacIdentityTests
         using var scope = host.NewScope();
         var devices = scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
 
-        var device = await devices.AutoRegisterAsync(Mac, default);
+        var device = await devices.AutoRegisterAsync(Mac, DeviceKind.CourtBox, default);
 
         Assert.Equal(Mac, device.MacAddress);
         Assert.Equal("box-1a2b3c", device.DeviceCode);
@@ -80,7 +80,7 @@ public class DeviceMacIdentityTests
         await db.SaveChangesAsync();
 
         var device = await scope.ServiceProvider.GetRequiredService<DeviceRegistryService>()
-            .AutoRegisterAsync(Mac, default);
+            .AutoRegisterAsync(Mac, DeviceKind.CourtBox, default);
 
         Assert.Equal(new[] { 1, 2, 3, 4 }, device.CourtNumbers);
     }
@@ -103,7 +103,7 @@ public class DeviceMacIdentityTests
         await db.SaveChangesAsync();
 
         var device = await scope.ServiceProvider.GetRequiredService<DeviceRegistryService>()
-            .AutoRegisterAsync(Mac, default);
+            .AutoRegisterAsync(Mac, DeviceKind.CourtBox, default);
 
         Assert.Equal(new[] { 1, 2 }, device.CourtNumbers);
         Assert.NotNull(device.ButtonMapJson);
@@ -123,8 +123,8 @@ public class DeviceMacIdentityTests
         using var scope = host.NewScope();
         var devices = scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
 
-        var first = await devices.AutoRegisterAsync("5ccf7f1a2b3c", default);
-        var second = await devices.AutoRegisterAsync("aabbcc1a2b3c", default);
+        var first = await devices.AutoRegisterAsync("5ccf7f1a2b3c", DeviceKind.CourtBox, default);
+        var second = await devices.AutoRegisterAsync("aabbcc1a2b3c", DeviceKind.CourtBox, default);
 
         Assert.Equal("box-1a2b3c", first.DeviceCode);
         Assert.Equal("box-aabbcc1a2b3c", second.DeviceCode);
@@ -138,7 +138,7 @@ public class DeviceMacIdentityTests
         using var scope = host.NewScope();
         var devices = scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
 
-        var device = await devices.AutoRegisterAsync(Mac, default);
+        var device = await devices.AutoRegisterAsync(Mac, DeviceKind.CourtBox, default);
         var updated = await devices.UpdateAsync(
             device, new UpdateDeviceCommand("Main box", null, null), host.AdminUser.Id, default);
 
@@ -155,7 +155,7 @@ public class DeviceMacIdentityTests
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
 
-        await scope.ServiceProvider.GetRequiredService<DeviceRegistryService>().AutoRegisterAsync(Mac, default);
+        await scope.ServiceProvider.GetRequiredService<DeviceRegistryService>().AutoRegisterAsync(Mac, DeviceKind.CourtBox, default);
 
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var audit = await db.AuditLogs.SingleAsync(a => a.Action == "device.auto_registered");

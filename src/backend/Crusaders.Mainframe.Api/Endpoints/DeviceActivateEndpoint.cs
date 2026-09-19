@@ -60,6 +60,12 @@ public static class DeviceActivateEndpoint
         // DeviceSilenceLog.NoteContactAsync for what judging a working box "silent" cost.
         await DeviceSilenceLog.NoteContactAsync(services.Db, device, await services.Settings.GetAsync(ct), now, ct);
 
+        // A door starts nothing. A gate arriving here has no court to light and no booking to
+        // stamp, and it must not be refused by the accident of having an empty court list —
+        // see GateAccess.NotACourtBox. 200 with activated:false, like every other refusal on
+        // this path, so a misflashed board shows it and stops.
+        if (device.Kind != DeviceKind.CourtBox) return Refused(GateAccess.NotACourtBox);
+
         // Same rule as the walk-up: only a method that identifies a member globally. A PIN
         // against the whole roll is an oracle, not an identification.
         if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return Refused("not_recognised");

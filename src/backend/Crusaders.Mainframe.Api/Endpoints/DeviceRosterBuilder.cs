@@ -184,8 +184,16 @@ public static class DeviceRosterBuilder
     /// The live activation code per booking — one read for the batch, then a mint for each
     /// booking that has none. Sixteen bookings must not be sixteen round trips four times a
     /// minute per box.
+    ///
+    /// <para>
+    /// Public because <see cref="DeviceGateRosterBuilder"/> uses it unchanged, and that reuse
+    /// is the point rather than an economy: the token a member's phone shows, the token in a
+    /// court box's cache and the token in a door gate's cache all have to be the same bytes,
+    /// minted under the same expiry rule. A second copy of this method is a second expiry
+    /// rule waiting to drift from this one.
+    /// </para>
     /// </summary>
-    private static async Task<Dictionary<Guid, string>> TokensForAsync(
+    public static async Task<Dictionary<Guid, string>> TokensForAsync(
         MainframeDbContext db, AccessCodeService codes, List<Booking> bookings, TenantSettingsView settings,
         DateTimeOffset now, CancellationToken ct)
     {
