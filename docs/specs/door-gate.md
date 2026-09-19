@@ -459,6 +459,55 @@ The receipt carries **no** `BookingId` even when the token was a booking code, s
 `release` — which pairs on device, relay and booking — can never pair against it. A door has
 no relay session to settle, and pairing one would re-price a court from a doorway.
 
+**The token is not in the details here either**, which it was. §5 leaves it out of
+`gate.opened` on purpose — a live access code in a trail an admin can read is a credential in
+a log — and this path wrote it in full under `subject`, for a `gate_open` and an
+`unknown_scan` alike. `RetentionWorker` anonymises a row's *subject* and never touches its
+`DetailsJson`, so those bytes stayed readable for as long as the row did, and they open every
+door in the club for the length of that booking's window.
+
+What `subject` now carries for those two kinds is the **first eight hex characters of SHA-256
+over the normalised code**. Not reversible, not a lookup key, and it keeps the one property
+worth keeping: two scans of one code still produce the same value, so "the same badge tried
+the side door eleven times" is still a question the trail answers. The identity lives on
+`SubjectUserId`, which the resolved `gate_open` path sets. The guard is keyed on the **kind**
+rather than on the sending row's kind, which is wider than it needs to be on purpose: a court
+box posting `gate_open` is refused `not_a_gate`, but the token it posted is just as live, and
+a guard that depends on the sender being honest about itself is not a guard. A court box's own
+`activation` events are untouched — that token is the roster token for a booking the receipt
+already names, and narrowing it is a decision about the court-box trail rather than a door fix.
+
+**Rows written before this change still hold their tokens.** Nothing rewrites them and
+nothing here pretends otherwise; the remedy is the one the console already offers for a
+leaked roster, which is rotating the club's device key and letting the codes expire.
+
+### A malformed `kind` is receipted, never refused
+
+A `kind` that is **missing, empty, or longer than 32 characters** is receipted and
+acknowledged with outcome `malformed`, and the audit action is truncated to fit its column.
+
+It is an outcome and not a 4xx, and that is the whole of the fix. A JSON null went straight
+into `e.Kind.Length` and answered `500`; a two-hundred-character kind overflowed
+`AuditLog.Action` (128) and answered `500` from the save. Either one is **permanent**: the
+board drains its ring only up to `accepted_through` and re-posts the rest, so one malformed
+event at the head stops every event behind it from ever arriving — including the `activation`
+the no-show sweep is waiting on, which is real money. A board cannot edit what it has already
+queued, so the only exit is a receipt.
+
+### The heartbeat request carries an optional `no_push`
+
+A board with one LED and a boot log has two failures it must report and must never show a
+member: a heartbeat body that did not fit its buffer or arrived incomplete, and a watchdog
+that would not arm. They ride the heartbeat request as one optional non-negative integer,
+`no_push` — additive, so a board that sends nothing is reporting zero, and the court box's
+wire is untouched.
+
+The server **logs it against the device code and stores nothing**: a column would be an EF
+migration for a counter nothing decides anything on, and §9's "no EF migration" still holds.
+It changes no part of the response, and a negative value is ignored rather than refused,
+because a diagnostic must not be able to take a door out of service. Corpus vector
+`gate-heartbeat-request-no-push`.
+
 **A `gate_open` uploaded by a `CourtBox` row is refused by name**, the mirror of §7: receipted
 and acknowledged, outcome `not_a_gate`, and the `device.gate_open` row **names nobody**.
 Nothing settles on this path either way, so no money turns on it; what the guard prevents is a
@@ -846,6 +895,9 @@ new sentence above with no row is the defect this table exists to expose.
 | Another club's bookings never reach this club's roster | `DeviceGateTests.Another_clubs_booking_never_appears_…`, `DeviceGateHttpTests.Another_clubs_bookings_never_reach_…` |
 | `gate_open` is receipted, names the subject at the scan, settles nothing | `DeviceGateHttpTests.An_offline_gate_open_is_receipted_and_names_the_member_without_checking_them_in` |
 | An unresolvable `gate_open` is still recorded | `DeviceGateHttpTests.An_offline_gate_open_with_an_unresolvable_token_is_still_recorded` |
+| An offline door event fingerprints its token instead of logging it, and two scans of one code still correlate | `DeviceGateHttpTests.An_offline_door_event_fingerprints_the_token_instead_of_logging_it` |
+| A missing, empty or over-long `kind` is receipted as `malformed`, never 500, and the queue drains past it | `DeviceGateHttpTests.A_malformed_event_kind_is_receipted_rather_than_five_hundred` |
+| `no_push` is accepted, logged, stored nowhere, and changes nothing | `DeviceGateHttpTests.A_no_push_counter_is_accepted_and_changes_nothing`, `DeviceGateProtocolCorpusTests.Request_vectors_bind_to_the_records_the_endpoints_take` |
 | A `gate_open` from a court box is `not_a_gate` and names nobody | `DeviceGateHttpTests.A_gate_open_uploaded_by_a_court_box_names_nobody_and_says_not_a_gate` |
 | A gate cannot activate or sell a walk-up | `DeviceGateHttpTests.A_gate_cannot_activate_a_court_or_sell_a_walk_up` |
 | A gate's `activation` upload settles nothing | `DeviceGateHttpTests.An_activation_uploaded_by_a_gate_is_recorded_and_settles_nothing` |

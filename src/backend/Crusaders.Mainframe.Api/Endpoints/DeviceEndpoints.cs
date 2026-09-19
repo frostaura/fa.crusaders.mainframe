@@ -54,6 +54,7 @@ public static class DeviceEndpoints
         HeartbeatRequest req,
         [AsParameters] HeartbeatServices services,
         HttpContext ctx,
+        ILoggerFactory logs,
         CancellationToken ct)
     {
         var (db, tenant, settings, registry, codes) = services;
@@ -81,6 +82,16 @@ public static class DeviceEndpoints
         // would otherwise erase and the no-show waiver is settled from it. DeviceSilenceLog
         // says why the health sweep alone cannot see this case.
         DeviceSilenceLog.NoteHeartbeat(db, device!, now, HeartbeatCadence.OfflineAfterSeconds(s.HeartbeatSeconds));
+
+        // The board's own diagnostic counter, to the log and no further. Warning rather than
+        // information: a board that could not push a heartbeat, or could not arm its
+        // watchdog, is a board somebody has to look at — and nobody at the door can see it.
+        if (req.NoPush is > 0 and { } noPush)
+        {
+            logs.CreateLogger(typeof(DeviceEndpoints)).LogWarning(
+                "Device {DeviceCode} reports {NoPush} heartbeat(s) it could not push since the last one it could",
+                device!.DeviceCode, noPush);
+        }
 
         device!.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
         if (req.EffectiveRunningVersion is { } running) device.RunningVersion = running;
@@ -218,7 +229,29 @@ public sealed record HeartbeatRequest(
     /// sends today; an unrecognised string is a 400 rather than a silent court box. See
     /// <see cref="DeviceIdentity.ResolveOrRegisterAsync"/>.
     /// </summary>
-    [property: JsonPropertyName("kind")] string? Kind = null)
+    [property: JsonPropertyName("kind")] string? Kind = null,
+    /// <summary>
+    /// How many heartbeats the board could not push since it last reported one, plus its
+    /// watchdog-arm failures. Optional, additive, and a DIAGNOSTIC — a board that sends
+    /// nothing is a board reporting zero.
+    ///
+    /// <para>
+    /// A door has one LED and a boot log, and the two failures it needs to report are ones a
+    /// member must never be shown: a heartbeat body that did not fit the board's buffer or
+    /// arrived incomplete, and a watchdog that would not arm. A distinct LED cue for either
+    /// means nothing to the person standing at the door, so they ride the request instead.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It is logged and not stored.</b> A column on <see cref="Device"/> would be an EF
+    /// migration for a counter nothing decides anything on, and this repository's rule is
+    /// that a schema change needs one; the log line carries the device code, which is what a
+    /// technician searches by. It changes nothing about the response, and a negative value is
+    /// ignored rather than refused — a diagnostic must not be able to take a door out of
+    /// service. Corpus vector <c>gate-heartbeat-request-no-push</c>.
+    /// </para>
+    /// </summary>
+    [property: JsonPropertyName("no_push")] int? NoPush = null)
 {
     /// <summary>The reported version under either name, trimmed — or null when neither was sent.</summary>
     public string? EffectiveRunningVersion

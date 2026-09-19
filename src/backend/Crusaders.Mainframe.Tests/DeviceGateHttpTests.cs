@@ -1199,6 +1199,209 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// <b>The offline trail must not carry the code itself.</b>
+    ///
+    /// <para>
+    /// §5 leaves the token out of <c>gate.opened</c> on purpose — a live access code in a
+    /// trail an admin can read is a credential in a log — and the OFFLINE path wrote it in
+    /// full, under <c>subject</c>, for a <c>gate_open</c> and an <c>unknown_scan</c> alike.
+    /// Those are the bytes the member held up at the door: they open every door in the club
+    /// for the length of that booking's window, and <c>RetentionWorker</c> anonymises a row's
+    /// SUBJECT while never touching its <c>DetailsJson</c>, so they stayed readable for as
+    /// long as the row did.
+    /// </para>
+    ///
+    /// <para>
+    /// A fingerprint rather than nothing, because the field was worth something: two scans of
+    /// one code still correlate, so "the same badge tried the side door eleven times" remains
+    /// answerable. The identity lives on <c>SubjectUserId</c>, which is asserted here too so
+    /// the fix cannot be read as having thrown the identity away with the token.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(DeviceEventEndpoints.GateOpenKind)]
+    [InlineData(DeviceEventEndpoints.UnknownScanKind)]
+    public async Task An_offline_door_event_fingerprints_the_token_instead_of_logging_it(string kind)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        // The same code twice, so the correlation property is asserted rather than assumed.
+        var upload = await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(
+                DoorEvent(11, kind, token), DoorEvent(12, kind, token)),
+        }));
+        Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var rows = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == $"device.{kind}")
+            .ToListAsync();
+        Assert.Equal(2, rows.Count);
+
+        var fingerprints = new List<string>();
+        foreach (var row in rows)
+        {
+            Assert.DoesNotContain(token, row.DetailsJson, StringComparison.OrdinalIgnoreCase);
+
+            var subject = JsonDocument.Parse(row.DetailsJson!).RootElement.GetProperty("subject").GetString()!;
+            Assert.Equal(8, subject.Length);
+            Assert.DoesNotContain(subject, token, StringComparison.OrdinalIgnoreCase);
+            fingerprints.Add(subject);
+        }
+
+        // Two scans of one code still correlate, which is the only reason to keep the field.
+        Assert.Equal(fingerprints[0], fingerprints[1]);
+
+        // …and a DIFFERENT code fingerprints differently, so the field still discriminates.
+        var other = await BookingCodeAsync(
+            factory, club, await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-200)));
+        await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(DoorEvent(13, kind, other)),
+        }));
+
+        var third = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == $"device.{kind}")
+            .OrderBy(a => a.CreatedAt).ToListAsync();
+        Assert.Equal(3, third.Count);
+        Assert.DoesNotContain(
+            JsonDocument.Parse(third[^1].DetailsJson!).RootElement.GetProperty("subject").GetString(),
+            fingerprints);
+
+        // The identity was not thrown away with the token: a resolvable gate_open still names
+        // its member on the row itself.
+        if (kind == DeviceEventEndpoints.GateOpenKind) Assert.Equal(club.MemberId, rows[0].SubjectUserId);
+    }
+
+    private static JsonObject DoorEvent(long seq, string kind, string token) => new()
+    {
+        ["seq"] = seq,
+        ["uptime_ms"] = 600_000,
+        ["kind"] = kind,
+        ["court"] = -1,
+        ["method"] = "qr",
+        ["subject"] = token,
+        ["duration_ms"] = 3000,
+    };
+
+    /// <summary>
+    /// <b>One malformed event must not pin the board's queue for ever.</b>
+    ///
+    /// <para>
+    /// A JSON null in <c>kind</c> went straight into <c>e.Kind.Length</c> and answered 500; a
+    /// kind of 200 characters overflowed <c>AuditLog.Action</c> (128) and answered 500 from
+    /// the save. Either one is permanent: the firmware drains only up to
+    /// <c>accepted_through</c> and re-posts the rest, so a malformed event at the head of a
+    /// ring stops every event behind it from ever arriving — including the activations the
+    /// no-show sweep is waiting on, which is real money. A board cannot edit what it has
+    /// already queued, so the only exit is a receipt.
+    /// </para>
+    ///
+    /// <para>
+    /// The second event in each batch is a good one, and the assertion that it was recorded is
+    /// what says the batch got PAST the bad one rather than merely surviving it.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("gate_open_but_very_much_longer_than_the_column_will_take_and_then_some_more_again")]
+    public async Task A_malformed_event_kind_is_receipted_rather_than_five_hundred(string? kind)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+
+        var booking = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(-105));
+        var token = await BookingCodeAsync(factory, club, booking);
+
+        var bad = DoorEvent(21, DeviceEventEndpoints.GateOpenKind, token);
+        bad["kind"] = kind is null ? null : JsonValue.Create(kind);
+
+        var upload = await client.SendAsync(Signed(club.Key, EventsPath, new JsonObject
+        {
+            ["mac"] = mac,
+            ["uptime_ms"] = 3_600_000,
+            ["events"] = new JsonArray(bad, DoorEvent(22, DeviceEventEndpoints.GateOpenKind, token)),
+        }));
+
+        Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+        // Acknowledged THROUGH the good event behind it: this is the assertion that says the
+        // queue drains rather than stalls.
+        var body = await BodyAsync(upload);
+        Assert.Equal(22, body.GetProperty("accepted_through").GetInt64());
+        Assert.Equal(2, body.GetProperty("recorded").GetInt32());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var receipt = await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .SingleAsync(r => r.TenantId == club.TenantId && r.Seq == 21);
+        Assert.True(receipt.Kind.Length <= DeviceEventEndpoints.MaxKindLength);
+        Assert.False(string.IsNullOrEmpty(receipt.Kind));
+
+        // Its own audit row, so the desk can see a board is sending rubbish rather than
+        // inferring it from a gap in the sequence numbers.
+        var malformed = await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action.EndsWith($"_{DeviceEventEndpoints.Malformed}"))
+            .ToListAsync();
+        Assert.Single(malformed);
+        Assert.All(malformed, a => Assert.True(a.Action.Length <= 128));
+    }
+
+    /// <summary>
+    /// The board's diagnostic counter is accepted, changes nothing, and cannot take a door out
+    /// of service — including when it arrives negative, which is not a counter.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(4)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task A_no_push_counter_is_accepted_and_changes_nothing(int noPush)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = NewMac();
+
+        var body = new JsonObject
+        {
+            ["mac"] = mac,
+            ["firmware_version"] = "1.0.0",
+            ["uptime_ms"] = 60000,
+            ["kind"] = DeviceKinds.Gate,
+            ["no_push"] = noPush,
+        };
+
+        var json = await BodyAsync(await client.SendAsync(Signed(club.Key, HeartbeatPath, body)));
+
+        Assert.Equal(DeviceKinds.Gate, json.GetProperty("kind").GetString());
+        Assert.Equal(3, json.GetProperty("gate").GetProperty("unlock_seconds").GetInt32());
+        Assert.False(json.TryGetProperty("no_push", out _));
+    }
+
+    /// <summary>
     /// <b>The mirror of <c>not_a_court_box</c>, and it was missing.</b> A <c>gate_open</c>
     /// uploaded by a COURT BOX row is receipted and acknowledged like any other event the
     /// board cannot change, but its outcome is <c>not_a_gate</c> and its audit row names
