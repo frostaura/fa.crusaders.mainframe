@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-state
-description: "PR #2 merged to main 2026-09-19; that run passed every gate and published all three multi-arch images, and its only failure was the Portainer deploy job, which has since been removed. No hardware, no deployed stack, no paying club."
+description: "PR #2 merged to main 2026-09-19 and the Portainer deploy job was removed the same day, making run 35435320324 the first fully green run here; all three images publish. No hardware, no deployed stack, no paying club."
 type: state
 last_verified: 2026-09-16
 ---
@@ -51,7 +51,8 @@ is written anywhere.
 multi-arch manifests created** — `crusaders-mainframe-{backend,frontend,gateway}:latest` are on
 Docker Hub. The run is recorded as a failure because of its **one** failing job, `deploy-portainer`,
 and **that job was removed the same day on Dean's instruction**: CI now stops at the Docker Hub push.
-So the next push to `main` should be the first fully green run in this repository's history.
+The next push to `main` — run **`35435320324`, 2026-09-19** — was then **green on all seventeen jobs,
+the first fully green run in this repository's history**, verified job by job.
 Redeploying the club stack is a manual step from here, and it has lost the stack checks that job
 carried ([`watch.md`](watch.md)).
 
