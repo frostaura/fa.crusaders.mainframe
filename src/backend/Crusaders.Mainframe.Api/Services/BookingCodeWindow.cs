@@ -33,10 +33,42 @@ public static class BookingCodeWindow
     /// when its activation window — from the cue before it starts until it ends — overlaps the
     /// next roster window, which is the same horizon a court box's cached roster looks ahead.
     /// </para>
+    ///
+    /// <para>
+    /// <b>Both terms are clamped on read, like every other window in this type.</b> This one
+    /// was left raw when <see cref="DoorHorizonMinutes"/> gained its clamps, which made the
+    /// two disagree about the same settings document — the door bounded and the phone not —
+    /// and the phone is what the door's horizon is defined as being equal to. A hand-edited
+    /// <c>roster_window_minutes: -600</c> stopped the member's screen offering a booking code
+    /// at all, silently, while the door went on accepting one; the reverse of the drift the
+    /// sharing of this arithmetic exists to prevent.
+    /// </para>
     /// </summary>
     public static int DisplayHorizonMinutes(TenantSettingsView settings)
     {
-        return settings.RosterWindowMinutes + settings.ActivationCueWindowMinutes;
+        return RosterReachMinutes(settings) + CueMinutes(settings);
+    }
+
+    /// <summary>
+    /// <c>roster_window_minutes</c>, clamped to the range the settings PUT declares. The one
+    /// place that number is read — by this type, by both roster builders and by the phone —
+    /// so a hand-edited column cannot mean three different things.
+    /// </summary>
+    public static int RosterReachMinutes(TenantSettingsView settings)
+    {
+        return Math.Clamp(
+            settings.RosterWindowMinutes,
+            TenantSettingsView.MinRosterWindowMinutes,
+            TenantSettingsView.MaxRosterWindowMinutes);
+    }
+
+    /// <summary>
+    /// <c>activation_cue_window_minutes</c>, clamped to the range the settings PUT declares.
+    /// </summary>
+    public static int CueMinutes(TenantSettingsView settings)
+    {
+        return Math.Clamp(
+            settings.ActivationCueWindowMinutes, 0, TenantSettingsView.MaxActivationCueWindowMinutes);
     }
 
     /// <summary>
@@ -101,14 +133,8 @@ public static class BookingCodeWindow
         var early = EntryWindowMinutes(settings);
         if (settings.GateAccessPolicy == GateAccessPolicies.BookingWindow) return early;
 
-        var roster = Math.Clamp(
-            settings.RosterWindowMinutes,
-            TenantSettingsView.MinRosterWindowMinutes,
-            TenantSettingsView.MaxRosterWindowMinutes);
-        var cue = Math.Clamp(
-            settings.ActivationCueWindowMinutes, 0, TenantSettingsView.MaxActivationCueWindowMinutes);
-
-        return Math.Max(early, Math.Min(roster + cue, GateAccess.MaxEarlyEntryMinutes));
+        return Math.Max(
+            early, Math.Min(DisplayHorizonMinutes(settings), GateAccess.MaxEarlyEntryMinutes));
     }
 
     /// <summary>

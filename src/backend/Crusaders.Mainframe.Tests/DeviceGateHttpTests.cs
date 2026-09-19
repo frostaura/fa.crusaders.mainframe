@@ -402,6 +402,52 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// A settings document nobody could have produced through the console: a negative roster
+    /// window. Everything else is the default.
+    /// </summary>
+    private const string NegativeRosterWindowSettings =
+        """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","roster_window_minutes":-600,"activation_cue_window_minutes":10,"gate_early_entry_minutes":30}""";
+
+    /// <summary>
+    /// <b>A hand-edited settings column emptied every door's cache in the club, silently.</b>
+    ///
+    /// <para>
+    /// G2's B1 clamped the three numbers the online decision reads and left both roster
+    /// builders reading the window raw. <c>TenantSettingsAccessor.TryInt</c> bounds nothing on
+    /// the way in, so <c>roster_window_minutes: -600</c> produced a `latestStart` ten hours in
+    /// the past and matched no booking at all: a clean 200, a present-and-empty <c>roster</c>
+    /// key, no error and no log — and every door in the club admitting nobody the moment its
+    /// link dropped. The failure mode the clamp exists for is exactly this one, because a
+    /// value the PUT would refuse still reaches the reader.
+    /// </para>
+    ///
+    /// <para>
+    /// Both builders, in one test, because they are two copies of the same arithmetic and the
+    /// court box's is the one that turns lights on.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_hand_edited_roster_window_cannot_silently_empty_a_boards_cache()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", NegativeRosterWindowSettings);
+        var client = factory.CreateClient();
+        var gateMac = await GateAsync(factory, club, client, "front-door");
+        var boxMac = await CourtBoxAsync(club, client);
+
+        // Ten minutes out, which is inside BOTH clamped windows and outside a ten-hour
+        // negative one. The two builders reach differently — a gate adds the entry window
+        // (5 + 30) and a box the lights-on cue (5 + 10) — so the booking has to clear the
+        // narrower of the two for this to say anything about both.
+        await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(10));
+
+        Assert.Single(await RosterAsync(client, club, gateMac, DeviceKinds.Gate));
+        Assert.Single(await RosterAsync(client, club, boxMac, null));
+    }
+
+    /// <summary>
     /// <b>A board nobody has named gets no roster.</b> Online scans work from its first
     /// heartbeat, so the install stays plug-and-play; the offline fallback starts when an
     /// admin names the door.

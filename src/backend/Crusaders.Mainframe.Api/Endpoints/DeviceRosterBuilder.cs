@@ -142,7 +142,12 @@ public static class DeviceRosterBuilder
     {
         if (device.CourtNumbers.Count == 0) return [];
 
-        var cue = TimeSpan.FromMinutes(settings.ActivationCueWindowMinutes);
+        // Both windows clamped on read, through the same functions the door and the phone
+        // read them with — see BookingCodeWindow. TenantSettingsAccessor bounds nothing on the
+        // way in, so a hand-edited roster_window_minutes: -600 put `latestStart` ten hours in
+        // the past and emptied every box's cache in the club on a clean 200, with no error and
+        // no log; a negative cue moved the roster's own opens_in the wrong way.
+        var cue = TimeSpan.FromMinutes(BookingCodeWindow.CueMinutes(settings));
         var courtNumbers = device.CourtNumbers;
         var courts = await db.Courts.AsNoTracking()
             .Where(c => courtNumbers.Contains(c.CourtNumber) && c.IsActive)
@@ -154,7 +159,7 @@ public static class DeviceRosterBuilder
         // [StartsAt − cue, EndsAt] ∩ [now, now + roster] ≠ ∅  ⇔
         // StartsAt ≤ now + roster + cue  ∧  EndsAt ≥ now — two constants the provider can
         // translate, the same rearrangement QrEndpoints uses.
-        var latestStart = now.AddMinutes(settings.RosterWindowMinutes).Add(cue);
+        var latestStart = now.AddMinutes(BookingCodeWindow.RosterReachMinutes(settings)).Add(cue);
         var bookings = await db.Bookings
             .Where(b => courtIds.Contains(b.CourtId)
                         && b.Status == BookingStatus.Booked
