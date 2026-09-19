@@ -92,14 +92,14 @@ describe("countdown", () => {
       fakeClock();
       const opensAt = new Date(Date.now() + 27 * 60_000 + 12_000).toISOString();
 
-      expect(secondsUntil(deadlineAt(opensAt))).toBe(27 * 60 + 12);
-      expect(formatCountdown(secondsUntil(deadlineAt(opensAt)))).toBe("27m 12s");
+      expect(secondsUntil(deadlineAt(opensAt)!)).toBe(27 * 60 + 12);
+      expect(formatCountdown(secondsUntil(deadlineAt(opensAt)!))).toBe("27m 12s");
     });
 
     it("reports zero for an instant that has already passed", () => {
       fakeClock();
       const gone = new Date(Date.now() - 5_000).toISOString();
-      expect(secondsUntil(deadlineAt(gone))).toBe(0);
+      expect(secondsUntil(deadlineAt(gone)!)).toBe(0);
     });
 
     it("returns null for an instant it cannot read, rather than a countdown to 1970", () => {
