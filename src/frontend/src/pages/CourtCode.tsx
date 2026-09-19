@@ -3,6 +3,7 @@ import { QrCode as QrIcon, RefreshCw } from "lucide-react";
 import { endpoints, type MyQrCode, type MyQrKind } from "../lib/api";
 import { describeCourtCodeFetchFailure, describeCourtCodeRefusal } from "../lib/bookingErrors";
 import { encodeQr, qrPath } from "../lib/qr";
+import { type Deadline, deadlineFor, formatCountdown, secondsUntil } from "../lib/countdown";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { cn } from "../lib/utils";
@@ -98,12 +99,6 @@ export function QrSvg({ value, className }: { value: string; className?: string 
 
 function formatStart(utc: string): string {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(utc));
-}
-
-function formatCountdown(seconds: number): string {
-  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  if (seconds >= 60) return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
-  return `${seconds}s`;
 }
 
 /**
@@ -206,28 +201,11 @@ function subtitleFor(qr: MyQrCode | null): string {
 }
 
 // --- when a code dies -----------------------------------------------------------
-
-/**
- * A code's expiry, on two clocks.
- *
- * <p>
- * <code>performance.now()</code> is monotonic — it cannot be dragged backwards by a
- * clock correction — but on some phones it stops while the device sleeps, which is
- * exactly when a member is not looking at this page. <code>Date.now()</code> runs
- * through sleep but can jump. Reading the expiry off both and trusting whichever says
- * less time is left means a dead code is never shown as live, whichever clock lied.
- * </p>
- */
-type Deadline = { wall: number; perf: number };
-
-function deadlineFor(seconds: number): Deadline {
-  return { wall: Date.now() + seconds * 1000, perf: performance.now() + seconds * 1000 };
-}
-
-function secondsUntil(deadline: Deadline): number {
-  const ms = Math.min(deadline.wall - Date.now(), deadline.perf - performance.now());
-  return Math.max(0, Math.ceil(ms / 1000));
-}
+//
+// `Deadline`, `deadlineFor`, `secondsUntil` and `formatCountdown` used to live here.
+// They are in `lib/countdown.ts` now, imported above — not copied. The door surfaces
+// count down to their own instants and a second hand-rolled two-clock reading is the
+// exact failure the doors contract forbids for `relative()` on the admin side.
 
 /**
  * What a member the club has barred sees instead of a code.
