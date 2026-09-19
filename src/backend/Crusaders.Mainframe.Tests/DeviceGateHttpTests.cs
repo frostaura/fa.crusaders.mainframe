@@ -330,6 +330,62 @@ public sealed class DeviceGateHttpTests
             .FirstOrDefaultAsync(c => c.TenantId == club.TenantId && c.Code == entry.Split('|')[0]));
     }
 
+    /// <summary>
+    /// <b>A board nobody has named gets no roster.</b> Online scans work from its first
+    /// heartbeat, so the install stays plug-and-play; the offline fallback starts when an
+    /// admin names the door.
+    ///
+    /// <para>
+    /// Auto-registration is the whole provisioning story: anything holding the club's device
+    /// key can heartbeat with a MAC it invented and a <c>kind</c> of <c>gate</c>, and a row
+    /// appears. Before this, that one call was answered with the club's live access codes for
+    /// every booking in the roster window — forty-eight of them, each of which opens every
+    /// door in the club for the length of its booking. Naming the door is the admin's
+    /// acknowledgement that the board is one of theirs, and it is the cheapest possible gate
+    /// on the only call that hands out credentials.
+    /// </para>
+    ///
+    /// <para>
+    /// The same board, the same booking and the same request either side of the PATCH is what
+    /// makes this discriminate: the roster is empty because the door has no name, not because
+    /// there was nothing to send.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task An_unnamed_gate_is_pushed_no_roster_until_an_admin_names_the_door()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client);
+        await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(20));
+
+        var unnamed = await BodyAsync(await client.SendAsync(Heartbeat(club.Key, mac, DeviceKinds.Gate)));
+
+        // Present and empty, never absent: the firmware replaces its cache wholesale, and an
+        // omitted key would leave whatever it already held live.
+        Assert.Equal(JsonValueKind.Array, unnamed.GetProperty("roster").ValueKind);
+        Assert.Empty(unnamed.GetProperty("roster").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, unnamed.GetProperty("gate_key").ValueKind);
+
+        // …and the door still works online from the first heartbeat, which is what keeps the
+        // install plug-and-play. Only the OFFLINE fallback waits for the admin.
+        var token = await IdentCodeAsync(factory, club.TenantId, club.MemberId);
+        Assert.True((await BodyAsync(await client.SendAsync(Scan(club.Key, mac, token)))).GetProperty("opened").GetBoolean());
+
+        var (gateId, _) = await IdsAsync(factory, mac, mac);
+        var admin = await AdminClientAsync(factory, club);
+        Assert.Equal(HttpStatusCode.OK,
+            (await admin.PatchAsJsonAsync($"/api/v1/admin/devices/{gateId}", new { gate_key = "front-door" })).StatusCode);
+
+        var named = await BodyAsync(await client.SendAsync(Heartbeat(club.Key, mac, DeviceKinds.Gate)));
+        Assert.Equal("front-door", named.GetProperty("gate_key").GetString());
+        var entry = Assert.Single(named.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!));
+        Assert.Matches(DeviceProtocolCorpusTests.RosterEntryPattern, entry);
+    }
+
     /// <summary>A charged booking for the club's member, written straight to the table.</summary>
     private static async Task<Booking> BookAsync(TestWebAppFactory factory, Club club, DateTimeOffset startsAt, int minutes = 45)
     {
@@ -549,8 +605,12 @@ public sealed class DeviceGateHttpTests
         var bravo = await ClubAsync(factory, "bravo", DefaultSettings);
         var client = factory.CreateClient();
 
-        var alphaGate = await GateAsync(factory, alpha, client);
-        var bravoGate = await GateAsync(factory, bravo, client);
+        // BOTH doors are named, and that is now part of the fixture rather than decoration:
+        // an unnamed gate is pushed an empty roster whatever the club has booked, so a pair of
+        // unnamed gates would make this pass for the wrong reason — the emptiness at alpha has
+        // to be the tenant filter and not the naming rule.
+        var alphaGate = await GateAsync(factory, alpha, client, "alpha-front");
+        var bravoGate = await GateAsync(factory, bravo, client, "bravo-front");
 
         await BookAsync(factory, bravo, DateTimeOffset.UtcNow.AddMinutes(20));
 
