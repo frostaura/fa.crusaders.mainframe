@@ -3,12 +3,16 @@
 #include "../esp32_hal/Esp32Hal.h"
 
 #include <Arduino.h>
+#include <WiFi.h>
 #include <WiFiClient.h>
 
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <esp_task_wdt.h>
 #include <string.h>
+
+#include "../gatelogic/ApiBaseUrl.h"
+#include "../gatelogic/GateConfig.h"
 
 namespace esp32_hal {
 namespace {
@@ -17,6 +21,11 @@ namespace {
 constexpr char kNamespace[] = "crusaders";
 
 Preferences gPrefs;
+
+/// Set from the UART event task when the driver reports an error, read and
+/// cleared from the loop task. `volatile` because those are two tasks and the
+/// compiler has no reason to believe either of them.
+volatile bool gRxError = false;
 
 } // namespace
 
@@ -47,6 +56,23 @@ void Esp32PinOut::driveOutput() {
 // --- scanner ----------------------------------------------------------------
 
 void Esp32Scanner::begin(uint32_t baud, uint8_t rxPin, uint8_t txPin) {
+  // BOTH OF THESE MUST HAPPEN BEFORE begin(). The buffer size is remembered and
+  // used when the driver is installed; afterwards setRxBufferSize is a no-op
+  // against an allocation that already happened. The error callback is the same
+  // — begin() is what creates the UART event task that delivers it, and it only
+  // creates one if a callback is already registered.
+  static_cast<void>(Serial2.setRxBufferSize(gatelogic::kScannerRxBufferBytes));
+  Serial2.onReceiveError([](hardwareSerial_error_t error) {
+    // EVERY error class, not just the overrun ones. A break, a framing error
+    // and a parity error all mean the bytes around them are not what was sent,
+    // and the answer is the same for all five: the line in flight is a hole and
+    // is discarded through its next terminator. This runs on the UART event
+    // task, so it sets a flag and does nothing else.
+    if (error != UART_NO_ERROR) {
+      gRxError = true;
+    }
+  });
+
   Serial2.begin(static_cast<unsigned long>(baud), SERIAL_8N1, static_cast<int8_t>(rxPin),
                 static_cast<int8_t>(txPin));
 }
@@ -61,6 +87,12 @@ bool Esp32Scanner::read(uint8_t& out) {
   }
   out = static_cast<uint8_t>(value);
   return true;
+}
+
+bool Esp32Scanner::takeRxError() {
+  const bool had = gRxError;
+  gRxError = false;
+  return had;
 }
 
 // --- store ------------------------------------------------------------------
@@ -124,7 +156,10 @@ uint16_t Esp32HttpPort::post(const char* path, const char* body, char* out, size
     return 0U;
   }
 
-  char url[160];
+  // Sized from the grammar main.cpp static_asserts API_BASE_URL against, so
+  // "the base URL fits" is a compile-time fact rather than a runtime 0 that
+  // reads at the door as an outage.
+  char url[gatelogic::kUrlBufSize];
   const int written = snprintf(url, sizeof(url), "%s%s", baseUrl_, path);
   if (written < 0 || static_cast<size_t>(written) >= sizeof(url)) {
     return 0U;
@@ -135,8 +170,19 @@ uint16_t Esp32HttpPort::post(const char* path, const char* body, char* out, size
   if (!http.begin(client, url)) {
     return 0U;
   }
-  http.setTimeout(timeoutMs_);
-  http.setConnectTimeout(timeoutMs_);
+  // TWO timeouts, and a call can spend BOTH: setConnectTimeout bounds the TCP
+  // handshake, setTimeout bounds waiting for bytes afterwards. Their sum is
+  // gatelogic::kWorstBlockingCallMs, which the watchdog period is asserted
+  // against and the release-overrun bound is stated in terms of.
+  //
+  // What neither of them bounds is a server that dribbles: setTimeout is an
+  // inter-byte timeout inside HTTPClient's header loop, so a peer sending one
+  // byte every three seconds keeps a call alive indefinitely. That case is the
+  // watchdog's, deliberately — there is no way to interrupt HTTPClient from
+  // here — and it is why the watchdog exists at all rather than being belt and
+  // braces.
+  http.setConnectTimeout(gatelogic::kHttpConnectTimeoutMs);
+  http.setTimeout(gatelogic::kHttpResponseTimeoutMs);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", authorization_);
 
@@ -158,14 +204,29 @@ uint16_t Esp32HttpPort::post(const char* path, const char* body, char* out, size
   return status > 0 ? static_cast<uint16_t>(status) : 0U;
 }
 
-// --- watchdog ---------------------------------------------------------------
+// --- link -------------------------------------------------------------------
 
-void watchdogBegin(uint8_t seconds) {
-  esp_task_wdt_init(static_cast<uint32_t>(seconds), true);
-  esp_task_wdt_add(nullptr);
+bool Esp32Link::up() {
+  return WiFi.status() == WL_CONNECTED;
 }
 
-void watchdogKick() {
+// --- watchdog ---------------------------------------------------------------
+
+bool Esp32Watchdog::begin(uint8_t seconds) {
+  // A RECONFIGURATION, not an initialisation: the Arduino core has already
+  // initialised the TWDT at its own CONFIG_ESP_TASK_WDT_TIMEOUT_S before
+  // setup() runs. IDF 4.4 documents that calling it again "will update the
+  // TWDT's timeout period and panic configurations instead" and returns ESP_OK,
+  // so the value GateConfig.h asserts against is the one in force — but it is
+  // CHECKED rather than assumed, because the last thing assumed about this
+  // watchdog was its period and the effective value was the core's five
+  // seconds.
+  const esp_err_t configured = esp_task_wdt_init(static_cast<uint32_t>(seconds), true);
+  const esp_err_t subscribed = esp_task_wdt_add(nullptr);
+  return configured == ESP_OK && subscribed == ESP_OK;
+}
+
+void Esp32Watchdog::kick() {
   esp_task_wdt_reset();
 }
 

@@ -35,6 +35,10 @@ void ScanAssembler::reset() {
   line_[0] = '\0';
 }
 
+void ScanAssembler::markCorrupt() {
+  corrupt_ = true;
+}
+
 ScanEvent ScanAssembler::feed(uint8_t byte) {
   if (!isTerminator(byte)) {
     if (!isAccepted(byte)) {

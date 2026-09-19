@@ -120,6 +120,28 @@ bool nextStringElement(const char* body, size_t len, size_t& at, char* out, size
 /// non-integer element, or on overflow — never a wrapped value.
 bool nextUnsignedElement(const char* body, size_t len, size_t& at, uint32_t& out);
 
+/// True when `body` is one WHOLE JSON object: optional whitespace, a `{`, a
+/// balanced body, its matching `}`, and nothing after it but whitespace.
+///
+/// WHY A READER OF SINGLE FIELDS NEEDS THIS AT ALL
+/// -----------------------------------------------
+/// Every other function here reads one field and is deliberately tolerant of a
+/// body it cannot fully parse — a truncated response still yields the fields
+/// that arrived whole, which is the right answer for `heartbeat_seconds`. It is
+/// the WRONG answer for anything a caller REPLACES a cached collection from: a
+/// roster cut off by a short read is eleven entries where the server sent
+/// sixteen, and committing it discards five bookings the server never cancelled
+/// AND re-stamps the cache fresh, so those five members are refused for the
+/// whole staleness window with nothing anywhere saying why.
+///
+/// So a caller that replaces state asks this FIRST, and treats an incomplete
+/// body as no push at all.
+///
+/// Braces and brackets are counted rather than type-matched, and strings —
+/// escapes included — are skipped whole, so a `{` or a `]` inside a value
+/// counts for nothing. An unterminated string is incomplete by definition.
+bool isCompleteObject(const char* body, size_t len);
+
 } // namespace json
 } // namespace devapi
 

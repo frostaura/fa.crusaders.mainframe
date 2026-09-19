@@ -68,6 +68,18 @@ public:
   /// Throw away a partial line — on a link-down, or at boot.
   void reset();
 
+  /// The line in flight has a HOLE in it: the UART dropped bytes before they
+  /// reached this class.
+  ///
+  /// Not reset(): reset would leave the REST of the holed line to be read as
+  /// the head of the next token, which is the same mistake in a different
+  /// place. This marks the line corrupt, so everything up to and including its
+  /// next terminator is swallowed with it — exactly what a non-printable byte
+  /// does, and for the same reason. A serial overrun is silent and what arrives
+  /// afterwards is in order, printable and short: it trims, it fits the token
+  /// cap, and it is not what anybody scanned.
+  void markCorrupt();
+
 private:
   char line_[roster::kMaxTokenLen + 1U] = {};
   char token_[roster::kMaxTokenLen + 1U] = {};

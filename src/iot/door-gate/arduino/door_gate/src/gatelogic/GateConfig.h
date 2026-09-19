@@ -85,8 +85,14 @@
 #ifndef GATE_MAX_TOKEN_LEN
 #define GATE_MAX_TOKEN_LEN 20
 #endif
+/// Longer than ONE worst-case blocking HTTP call plus its margin — see
+/// kWorstBlockingCallMs below, which static_asserts the relation. Eight seconds
+/// was exactly the worst call and therefore a guaranteed reset loop against a
+/// silently-dropping API host: the board would panic before the call it was
+/// waiting on could return, boot, and do it again, never loading a roster and
+/// admitting nobody.
 #ifndef GATE_WATCHDOG_SECONDS
-#define GATE_WATCHDOG_SECONDS 8
+#define GATE_WATCHDOG_SECONDS 12
 #endif
 #ifndef HEARTBEAT_INTERVAL_MS
 #define HEARTBEAT_INTERVAL_MS 30000UL
@@ -106,13 +112,14 @@ namespace gatelogic {
 /// roster sized to this holds every entry there can be.
 inline constexpr uint8_t kGateRosterEntries = 48U;
 
+/// The event ring's depth, as a value rather than as a macro, so the queue type
+/// the orchestration is written against is the one the board actually builds.
+inline constexpr uint16_t kGateEventSlots = static_cast<uint16_t>(EVENTQ_SLOTS);
+
 /// The contract's whole-body budget for a heartbeat response (4096) with room
 /// to spare. Static, because loop() makes blocking HTTP calls and a 4.6 KB
 /// local under one of them is a crash that reads as a random reset.
 inline constexpr size_t kGateResponseCap = 4608U;
-
-/// Longest `gate_key` the admin console will accept.
-inline constexpr size_t kMaxGateKeyLen = 64U;
 
 /// The lower bound of the server's own `clamp(gate_unlock_seconds, 1, 30)`.
 /// Applied again here because a zero-second release is a door that clicks and
@@ -123,6 +130,67 @@ inline constexpr uint32_t kMinUnlockMs = 1000UL;
 /// Scanners repeat while a phone is held at the window, and each repeat would
 /// otherwise be an API call, an audit row and a re-armed lock.
 inline constexpr uint32_t kScanDebounceMs = 2000UL;
+
+// --- the loop's own timings -------------------------------------------------
+//
+// These were literals in main.cpp, where `build_src_filter = -<*>` meant no
+// host test could see them and no static_assert could relate them to anything.
+// They are here because the watchdog, the HTTP timeouts and the scanner buffer
+// are ONE budget: get the relation wrong and the board resets every time the
+// API is slow, which is the failure that admits nobody at all.
+
+/// The CONNECT half of one blocking HTTP call.
+///
+/// Separate from the response half below because the core applies them
+/// separately — `HTTPClient::setConnectTimeout` bounds the TCP handshake and
+/// `setTimeout` bounds waiting for bytes afterwards — so one call can spend
+/// BOTH before it returns. Budgeting only one of them is how an eight-second
+/// call gets planned for as a four-second one.
+inline constexpr uint16_t kHttpConnectTimeoutMs = 4000U;
+
+/// The RESPONSE half. A genuinely slow answer is retried on the next heartbeat
+/// rather than allowed to hold the loop — and therefore the release deadline
+/// and the watchdog — for the core's five-second default.
+inline constexpr uint16_t kHttpResponseTimeoutMs = 4000U;
+
+/// The longest ONE blocking call can take while the port honours its timeouts.
+///
+/// This number is the spine of three separate guarantees: the watchdog assert
+/// below, the bound on how far a physical release may overrun its deadline
+/// (GateApp.h), and the size of the scanner's receive buffer. It is derived and
+/// never written out, so changing a timeout moves all three together.
+inline constexpr uint32_t kWorstBlockingCallMs =
+    static_cast<uint32_t>(kHttpConnectTimeoutMs) + static_cast<uint32_t>(kHttpResponseTimeoutMs);
+
+/// What the watchdog must have left over the worst call: enough for a whole
+/// pass, the ESP32's own housekeeping and the idle delay, several times over.
+inline constexpr uint32_t kWatchdogMarginMs = 2000UL;
+
+/// Scanner bytes drained per pass. A ceiling rather than a budget: it exists so
+/// a jammed scanner streaming forever cannot starve the loop.
+inline constexpr uint16_t kScannerBytesPerPass = 64U;
+
+/// The longest idle the loop ever takes. Ten milliseconds of doing nothing
+/// costs nothing a door can notice and keeps the ESP32's own housekeeping tasks
+/// scheduled. It is the ONLY delay in this firmware.
+inline constexpr uint32_t kIdleDelayMs = 10UL;
+
+/// The UART receive buffer, set BEFORE `Serial2.begin` — afterwards it is too
+/// late, the driver has already allocated.
+///
+/// The core's default is 256 bytes, which is 267 ms of line-rate data at 9600
+/// baud. A blocking call holds the loop for up to kWorstBlockingCallMs, and a
+/// member holding a phone at the reader produces a repeated line every few
+/// hundred milliseconds throughout, so the default overruns in ordinary service
+/// — silently, dropping bytes out of the middle of a line that then trims,
+/// fits the token cap, and is handed up as somebody else's token.
+///
+/// 1024 bytes holds a full blocking call's worth of REPEATED SCANS. It does not
+/// hold a full blocking call's worth of CONTINUOUS bytes — that would need
+/// about 7.7 kB at this baud — and it is not meant to: a scanner streaming
+/// without pause is a broken scanner, and the guarantee for that case is the
+/// overrun callback, not the buffer size.
+inline constexpr uint16_t kScannerRxBufferBytes = 1024U;
 
 /// Every wiring and timing fact this firmware has, in one value.
 struct GateConfig {
@@ -214,6 +282,38 @@ static_assert(kGateConfig.maxTokenLen == roster::kMaxTokenLen,
 
 static_assert(kGateConfig.watchdogSeconds >= 1U && kGateConfig.watchdogSeconds <= 30U,
               "GATE_WATCHDOG_SECONDS outside [1, 30] is either a reset storm or no watchdog at all");
+
+/// THE RELATION THE ROUND-G1 REVIEW WAS FOUND BY.
+///
+/// The loop makes at most ONE blocking call per pass and kicks the watchdog
+/// immediately before and immediately after it, so the longest the countdown
+/// ever runs unkicked is one worst-case call. With a watchdog no longer than
+/// that call, an API host that silently drops packets resets the board before
+/// the call it is waiting on can return — every time, from the first heartbeat
+/// after boot, so the roster never loads and the door admits nobody. The
+/// original eight-second watchdog against two four-second timeouts was exactly
+/// that case.
+///
+/// Changing either timeout, or the watchdog, without the other is a compile
+/// error rather than a board that reset-loops in a cupboard.
+static_assert(static_cast<uint32_t>(kGateConfig.watchdogSeconds) * 1000UL >=
+                  kWorstBlockingCallMs + kWatchdogMarginMs,
+              "GATE_WATCHDOG_SECONDS must exceed one worst-case blocking HTTP call (connect + "
+              "response) with room for a whole pass on top, or a slow API host is a reset loop");
+
+static_assert(kScannerRxBufferBytes >= 1024U,
+              "the scanner's receive buffer must hold a blocking call's worth of repeated scans — "
+              "the core's 256-byte default is 267 ms at 9600 baud and overruns in normal service");
+
+/// Milliseconds of continuous line-rate data the buffer holds at the configured
+/// baud. Tied to the baud rather than written out, so raising GATE_SCANNER_BAUD
+/// without raising the buffer is a compile error.
+inline constexpr uint32_t kScannerRxBufferMs =
+    (static_cast<uint32_t>(kScannerRxBufferBytes) * 10UL * 1000UL) / kGateConfig.scannerBaud;
+
+static_assert(kScannerRxBufferMs >= 1000UL,
+              "the scanner's receive buffer holds under a second at this baud — raise "
+              "kScannerRxBufferBytes or lower GATE_SCANNER_BAUD");
 
 } // namespace gatelogic
 

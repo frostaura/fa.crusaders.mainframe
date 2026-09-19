@@ -53,11 +53,24 @@ ScanDecision onGateResponse(uint16_t status, const char* body, size_t len, uint3
                             uint32_t hardCapMs) {
   ScanDecision decision;
 
+  // AUTHORITATIVE, AND NOT AN OUTAGE. A 403 on `/gate` is the club having taken
+  // this board out of service in the admin console — the one 4xx that is a
+  // statement about the board rather than about this request. Falling back
+  // would keep the door admitting rostered members for the whole staleness
+  // window after an admin pressed the button meant to stop exactly that.
+  //
+  // Before the body is looked at, and whatever the body says: the server sends
+  // none, and a proxy's error page must not be able to open a door.
+  if (status == 403U) {
+    setReason(decision, kReasonOutOfService);
+    return decision;
+  }
+
   // devapi::react() is deliberately NOT used here. Its `Rejected` class means
   // "a 4xx this box caused — drop it and move on", which is the right answer
   // for an event upload and the wrong one for a door: a 400 or a 404 says this
   // board learned nothing about the member standing in front of it, and the
-  // roster may well know them. Only 200 is an answer.
+  // roster may well know them. Everything left is an outage.
   if (status != 200U || body == nullptr) {
     decision.fallbackToRoster = true;
     return decision;
