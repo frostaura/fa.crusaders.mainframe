@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-watch
-description: "Unpaid debts, worst first: .env holds live JWT, database, SMTP and device secrets unencrypted and unbacked-up; the Portainer secrets are unset so the release chain has never run; charge-at-booking is unsigned-off."
+description: "Unpaid debts, worst first: .env holds live JWT, database, SMTP and device secrets unencrypted and unbacked-up; the redeploy is now manual and nothing checks the stack before it; charge-at-booking is unsigned-off."
 type: watch
 last_verified: 2026-09-11
 ---
@@ -25,16 +25,19 @@ skipping it, in `docs/go-live-checklist.md`.
    the commit risk and nothing else: it is unencrypted on disk and backed up nowhere, so losing this
    Mac loses all of it at once. A stale `PEACH_PAYMENTS_BASE_URL` also survives there, read by
    nothing since PayFast replaced PeachPayments.
-2. **The Portainer secrets are unset, so the release chain has never executed.**
-   `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` were set 2026-09-05; `PORTAINER_URL`,
-   `PORTAINER_TOKEN`, `PORTAINER_ENDPOINT_ID` and `PORTAINER_STACK_ID` are not. The image-build and
-   deploy jobs are gated on `push` to `main`, so **every pull-request run skips them and
-   `workflow_dispatch` cannot trigger a deploy** — a green CI run on this branch says nothing about
-   the release half. The chain stays unproven until the four secrets are set *and* one real push to
-   `main` has completed. Cheapest unblock available on this project by a wide margin. The
-   **main-branch gating is re-verified 2026-09-16** (seven jobs carry it in `ci.yml`); the *secrets
-   inventory* is a `gh secret list` reading from 2026-09-11 that was not re-run — re-measure it
-   before acting on it.
+2. **The redeploy is manual now, and nothing checks the stack before it.** `deploy-portainer` was
+   **removed 2026-09-19 on Dean's instruction** — CI stops at the Docker Hub push, by decision. The
+   publish half is no longer a debt: run `35434498116` on 2026-09-19 pushed all three multi-arch
+   manifests green ([`state.md`](state.md)). What the removal *cost* is the only check anyone had.
+   The job **refused to deploy** a stack that did not name `<user>/crusaders-mainframe-gateway`, or
+   that still bind-mounted `./nginx/nginx.conf`. A redeploy re-pulls the images the stack *names*, so
+   a stack in either state keeps its **old gateway config** — every LAN member back in one
+   rate-limit bucket — while reporting a successful deploy. **Nothing else in the system can see
+   this**: the tests exercise the API given forwarded headers and cannot tell a stale deployed
+   gateway from a fresh one. Whoever redeploys checks both by hand, every time
+   (`docs/go-live-checklist.md` §2). Housekeeping: the four `PORTAINER_*` secrets are read by nothing
+   now and should be deleted from the repository. Image-build jobs remain gated on `push` to `main`,
+   so a green PR run still says nothing about the release half.
 3. **Charge-at-booking has not been signed off by the committee.** The build debits at booking;
    blueprint A.9 says lights-on. Recorded as deviation **D-1** in
    `docs/specs/client-blueprint-deltas.md`. The blueprint is the customer's own word and outranks

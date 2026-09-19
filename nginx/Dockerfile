@@ -2,9 +2,8 @@
 #
 # It used to be stock `nginx:alpine` with ./nginx/nginx.conf bind-mounted from a checkout
 # on the host. One of the closing re-review's fixes lives in that file —
-# `X-Forwarded-Host: $http_host` — and nothing in the chain moved it: the deploy job
-# re-PUTs the existing Portainer stack with pullImage: true, and the only artifacts that
-# travel are images. A club that merged the fix would have got a new backend behind the OLD
+# `X-Forwarded-Host: $http_host` — and nothing in the chain moved it: a redeploy re-pulls
+# the images the stack names, and the only artifacts that travel are images. A club that merged the fix would have got a new backend behind the OLD
 # gateway config, with every LAN member back in one rate-limit bucket, while the dashboard
 # said deployed (round-3 finding 18).
 #
