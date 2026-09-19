@@ -221,7 +221,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
   <div class="mark" aria-hidden="true"></div>
   <div class="name">Crusaders Court Lights</div>
   <nav aria-label="Sections">
-    <a href="#how">How it works</a><a href="#flows">Flows</a><a href="#deploy">Deployment</a><a href="#trouble">On the glass</a>
+    <a href="#how">How it works</a><a href="#flows">Flows</a><a href="#deploy">Deployment</a><a href="#doors">…and the doors</a><a href="#trouble">On the glass</a>
   </nav>
 </div></div>
 
@@ -231,6 +231,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
   <span class="lg" style="--c:#3b82e0;--t:#fff">BACKEND</span>
   <span class="lg" style="--c:#5ed4c8;--t:#052b27">ESP</span>
   <span class="lg" style="--c:#9fc3ff;--t:#0b1a33">MEGA</span>
+  <span class="lg" style="--c:#f2a48b;--t:#3a1206">GATE</span>
   <span class="lg" style="--c:#e0a84a;--t:#2b1a00">PAYFAST</span>
 </div>
 <div class="wrap">
@@ -355,6 +356,51 @@ SCAN TO START</span>.</li>
   </div>
 </section>
 
+<section id="doors">
+  <header><h2>…and the doors</h2><p>The same club, the same key, the same API — one small board per door instead of one per four courts. A member holds up the code their phone already shows them and the lock lets go for three seconds. Nothing here touches a court, a booking or a credit.</p></header>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">The board</div><div class="v">One ESP32, one lock, one lamp.</div><div class="d">A QR scanner on a serial port, one relay on the lock, one LED. No screen and no buttons — the lamp is the whole of what a member sees. It calls out and never listens, exactly like the court box.</div></div>
+    <div class="tile"><div class="k">The image</div><div class="v">One firmware for every door.</div><div class="d">Nothing about a particular door is compiled in. You name the door in the web app; the board never learns its own name, so a spare board is simply a spare board.</div></div>
+    <div class="tile"><div class="k">The rule</div><div class="v">A door is not attendance.</div><div class="d">Walking in may mean collecting a racquet or watching someone else play. An open never checks anyone in, never reverses a no-show and never moves a credit.</div></div>
+  </div>
+
+  <div id="doorlist" style="margin-top:22px"></div>
+
+  <ol class="deploy">
+    <li>
+      <h3>Putting a door in service</h3>
+      <p class="why">The server is already running and the club already has its key — a door needs nothing of its own. Steps 1 to 4 of the list above are done; this is everything else.</p>
+      <ul>
+        <li>In <code>src/iot/door-gate/arduino/door_gate/</code>, copy the <code>secrets.h.example</code> that sits beside the <code>.ino</code> to <code>secrets.h</code> and fill in the <b>same four values</b> the box uses: WiFi name, WiFi password, <code>http://&lt;reserved-address&gt;:8088</code>, the club's Device API key. The build refuses to start without it and refuses an empty value in it. (The PlatformIO route reads its own copy under <code>src/common/</code>; both are gitignored.)</li>
+        <li>In the Arduino IDE install the <b>esp32 core, exactly 2.0.17</b> — the sketch folder's own README carries the boards-manager URL. Only one version of a core installs at a time and 3.x is not a small difference.</li>
+        <li>Open <code>src/iot/door-gate/arduino/door_gate/door_gate.ino</code>, board <b>ESP32 Dev Module</b>, pick the port, <b>Upload</b>. No DIP positions to set and nothing to install from the Library Manager — the folder vendors every library it needs, and it is generated, so never hand-edit it.</li>
+        <li>Within a minute the door is on the <b>Devices</b> page by itself as <code>gate-xxxxxx</code>. <b>Give it a name</b> — "front-door", "side-door". Until you do, it works only while it can reach the server.</li>
+        <li>Under <b>Settings</b>, the three numbers a door runs on: how long the lock releases (3 seconds, anything from 1 to 30), who may open a door (<i>any active member</i>, the default, or <i>only members with a booking</i>), and how early before a booking its holder may come in (30 minutes).</li>
+      </ul>
+    </li>
+    <li>
+      <h3>What the lamp is telling you</h3>
+      <p class="why">There is no screen. This is the entire user interface, and the last row is the one people report as a fault.</p>
+      <div class="tblwrap"><table class="tt">
+        <thead><tr><th>Lamp</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><b>Solid</b></td><td>The lock is released — push the door.</td></tr>
+          <tr><td><b>Three fast blinks</b></td><td>Refused. The door never says <i>why</i>: one refusal looks like every other from the doorway, deliberately.</td></tr>
+          <tr><td><b>Slow blink, once a second</b></td><td>The radio is not associated. The door is deciding from the bookings it already holds.</td></tr>
+          <tr><td><b>Two quick blinks</b></td><td>It has just booted.</td></tr>
+          <tr><td><b>Nothing at all</b></td><td>A refusal <i>while the door is already open</i>. Solid outranks the blinks, so the second person of a pair sees a steady lamp — the door is open in front of them, which is the more useful thing for it to be saying. Not a dead LED.</td></tr>
+        </tbody>
+      </table></div>
+    </li>
+    <li>
+      <h3>Before a door goes on a wall</h3>
+      <p class="why">One paragraph, because it is the part of this page that is not software.</p>
+      <p><b>None of this has ever run on hardware, and what a door does with no power has never been measured.</b> The expectation is that it is released — but a power cut takes the lock's own supply with it, so the <i>lock</i> decides that one, and a dead board with the lock still powered is decided by how the lock is wired through the relay. Which lock is fitted and which relay contact feeds it are written down nowhere, so §12 of <code>docs/go-live-checklist.md</code> measures both with a meter and an audible lock instead of assuming: mains pulled, then board power pulled on its own; ten power cycles confirming the lock does not click on the way up, and the same after a watchdog reset; the backend unplugged at boot to prove the board sits quiet rather than reset-looping; a rostered member let in with the network down and an unrostered one refused; the roster left to go stale past six hours and confirmed to admit nobody; a door taken out of service and confirmed to refuse without falling back. <b>And the one that is not ours at all:</b> every door this board controls must open from the inside by pushing it — a panic bar, a handle — with no power, no relay and no firmware involved. Nothing here is a life-safety device.</p>
+    </li>
+  </ol>
+</section>
+
 <section id="trouble">
   <header><h2>What the glass is telling you</h2><p>Every screen the box can show, and what it means.</p></header>
   <div class="tblwrap"><table class="tt">
@@ -403,13 +449,13 @@ SCAN TO START</span></td><td>The ESP sent the light-on command but the Mega neve
 
 <script>
 (function(){
-var PC={FRONTEND:{c:'#c9a7ff',t:'#1a0f33'},BACKEND:{c:'#3b82e0',t:'#ffffff'},ESP:{c:'#5ed4c8',t:'#052b27'},MEGA:{c:'#9fc3ff',t:'#0b1a33'},PAYFAST:{c:'#e0a84a',t:'#2b1a00'}};
+var PC={FRONTEND:{c:'#c9a7ff',t:'#1a0f33'},BACKEND:{c:'#3b82e0',t:'#ffffff'},ESP:{c:'#5ed4c8',t:'#052b27'},MEGA:{c:'#9fc3ff',t:'#0b1a33'},GATE:{c:'#f2a48b',t:'#3a1206'},PAYFAST:{c:'#e0a84a',t:'#2b1a00'}};
 var LANES={
   phone:{n:'Phone',c:PC.FRONTEND.c}, desk:{n:'Desk',c:PC.FRONTEND.c}, api:{n:'Backend',c:PC.BACKEND.c},
-  box:{n:'Box · ESP',c:PC.ESP.c}, mega:{n:'Mega',c:PC.MEGA.c}, pay:{n:'PayFast',c:PC.PAYFAST.c},
+  box:{n:'Box · ESP',c:PC.ESP.c}, mega:{n:'Mega',c:PC.MEGA.c}, gate:{n:'Door gate',c:PC.GATE.c}, pay:{n:'PayFast',c:PC.PAYFAST.c},
   you:{n:'You',c:'#8aa3c4'}, server:{n:'Server',c:PC.BACKEND.c}, ide:{n:'Arduino IDE',c:'#8aa3c4'}, web:{n:'Web app',c:PC.FRONTEND.c}
 };
-var PROJ={phone:'FRONTEND',desk:'FRONTEND',web:'FRONTEND',api:'BACKEND',server:'BACKEND',box:'ESP',mega:'MEGA',pay:'PAYFAST',you:'',ide:''};
+var PROJ={phone:'FRONTEND',desk:'FRONTEND',web:'FRONTEND',api:'BACKEND',server:'BACKEND',box:'ESP',mega:'MEGA',gate:'GATE',pay:'PAYFAST',you:'',ide:''};
 var L=function(a,b){return '<span class="lcd">'+a+(b?'\n'+b:'')+'</span>';};
 
 var FLOWS=[
@@ -581,7 +627,7 @@ function drawSvg(f,avail){
   var NH=44; f.steps.forEach(function(s){var L=wrap(s.t,maxc).length;NH=Math.max(NH,32+L*13);});
   var ROW=NH+26;
   var lanes=[];f.steps.forEach(function(s){if(lanes.indexOf(s.l)<0)lanes.push(s.l);});
-  var order=['phone','desk','you','web','api','server','pay','box','ide','mega'];
+  var order=['phone','desk','you','web','api','server','pay','box','gate','ide','mega'];
   lanes.sort(function(a,b){return order.indexOf(a)-order.indexOf(b);});
   var extra={};lanes.forEach(function(l){extra[l]=0;});
   f.steps.forEach(function(s){if(s.o&&s.o.length){extra[s.l]=Math.max(extra[s.l],s.o.length);}});
@@ -638,6 +684,51 @@ function render(f, mount){
 var _rt;window.addEventListener('resize',function(){clearTimeout(_rt);_rt=setTimeout(function(){document.querySelectorAll('.fcard').forEach(function(c){if(c._redraw&&!c.hidden)c._redraw();});},120);});
 var mount=document.getElementById('flowlist');FLOWS.forEach(function(f){render(f,mount);});
 render(DEPLOY,document.getElementById('deploylist'));
+
+var DOORS=[
+{id:'door-pair',t:'A new door pairs itself',tags:[],tg:['setup'],
+ s:'The same four values as a court box, flashed from the Arduino IDE. It appears on the Devices page by itself — and then you name it, which is the step that does something.',
+ steps:[
+  {l:'desk',t:'Copy the API key',d:'<b>Devices → Device API key → reveal → copy.</b> The same one the boxes use.<small>One key per club. A door has no credential of its own, and nothing about a door is claimed or provisioned.</small>'},
+  {l:'ide',p:'GATE',t:'Flash the board',d:'Open <code>src/iot/door-gate/arduino/door_gate/</code>, board <b>ESP32 Dev Module</b>, pick the port, Upload. Your <code>secrets.h</code> sits beside the <code>.ino</code>.<small>No DIP switches on this board and nothing from the Library Manager. The esp32 core must be exactly 2.0.17 — the sketch folder\'s README says where to get it.</small>'},
+  {l:'gate',t:'First heartbeat',d:'Joins the WiFi and sends its MAC, firmware version and uptime — plus one word the box never sends: <code>kind: "gate"</code>.',
+   o:[{t:'WiFi / URL / key wrong',d:'Nothing is created server-side, the lamp keeps its slow blink, and the door opens for nobody. Check the four values and reflash.'}]},
+  {l:'api',t:'Auto-register',d:'Key → club. Unknown MAC + <code>kind: "gate"</code> → a device row appears as <code>gate-xxxxxx</code>, a door with no courts, no button map and no name.<small>A board can only say this once: on a MAC the club already knows, the row wins and the hint is ignored. A box cannot turn itself into a door, or the other way about.</small>'},
+  {l:'desk',t:'Name the door',d:'Open the row and give it a name — <b>front-door</b>, <b>side-door</b>. That name is what the audit trail says instead of <code>gate-0a1b2c</code>.',
+   o:[{t:'until you name it',d:'The door works, but only while it can reach the server: an unnamed board is deliberately sent an EMPTY booking list. Anyone holding the club key could invent a board and be handed the club\'s live codes otherwise, so naming it is your acknowledgement that this one is yours.'}]},
+  {l:'gate',t:'Bookings arrive',d:'From the next heartbeat the door holds the club\'s current bookings — all courts, not four — and can decide on its own if it has to.'}
+ ]},
+{id:'door-in',t:'A member arrives at the door',tags:[],tg:['online first'],
+ s:'Phone, scan, door. The backend answers, and its answer is final — the door never argues with it.',
+ steps:[
+  {l:'phone',t:'The same code',d:'The Court Code screen shows the same 12 characters as at the box, as a QR. Nothing extra to set up for doors.'},
+  {l:'gate',t:'Scanner → token',d:'Reads the line, trims it, and refuses anything too long or outside the code alphabet without truncating it.<small>A scanner re-reads while a phone is held at the window, so the same code within two seconds of a decision is simply dropped — no second call, no second audit row.</small>'},
+  {l:'gate',t:'Ask the backend',d:'With the radio up it posts the code and waits. Only the backend knows about a booking made a minute ago or a membership suspended this morning.'},
+  {l:'api',t:'Decide, and record',d:'Under the default policy any member the club has not barred gets in; under the other they need a live booking on any court, and club admins always pass that check. A booking\'s QR opens a door only inside that booking\'s own window.<small>One audit row per decision, naming the member — and never the code itself. That row is the whole record that anything happened: no ledger entry, no booking, nothing else to reconstruct it from.</small>',
+   o:[{t:'too early',d:'A real booking, but its entry window has not opened yet. Told plainly, because the club minted that code for that person and a desk may not be staffed.'},{t:'not recognised',d:'Unknown, expired, another club\'s — or a booking code presented after its slot ended. Deliberately one answer for all of them: a door that told them apart would be a way to test which codes are real.'},{t:'not an active member',d:'Suspended, rejected, or not yet approved.'},{t:'no booking',d:'Only under the bookings-only policy, and only for somebody who is not a club admin.'}]},
+  {l:'gate',t:'Release the lock',d:'For the club\'s release time — three seconds by default, and never more than thirty however the setting is edited. The lamp goes solid.<small>Never for "what is left of the booking": a door held open for twenty-five minutes is not a door.</small>'},
+  {l:'api',t:'Nothing else happens',d:'No attendance stamped, no no-show reversed, no credit moved, no booking touched. Walking through a door says nothing about a court.'}
+ ]},
+{id:'door-off',t:'The door when the network is gone',tags:[],tg:['offline'],
+ s:'It decides from the bookings it already holds — a narrower rule than the court box\'s, and knowingly so.',
+ steps:[
+  {l:'gate',t:'The call fails',d:'A timeout, a 5xx, no route, or the breaker is open after two failures in a row. <b>Only that</b> hands the scan to the local list; a refusal from the backend never does.'},
+  {l:'gate',t:'Match what it holds',d:'Compares the scanned code, exactly, against the bookings from the last heartbeat.',
+   o:[{t:'match, in window',d:'The lock releases and the door remembers what it did, to tell the backend later.'},{t:'match, too early',d:'The booking exists but its window has not opened. Three blinks.'},{t:'no match',d:'Three blinks. A walk-up member\'s 60-second code can never be in the list, by construction — offline, they go to the desk.'},{t:'list older than six hours',d:'Nobody gets in, however good the match looks. A week-old list would admit a member suspended since.'},{t:'never had a heartbeat',d:'Nobody gets in. So does an unnamed door, whose list is empty on purpose.'}]},
+  {l:'gate',t:'Queue it',d:'Only what the backend does not already know: an open it decided itself, a refusal it decided itself, and its own boot.'},
+  {l:'api',t:'Catch up',d:'Each event is receipted on its sequence number, so a retry can never double-apply. The member is identified as of <b>the moment they scanned</b>, not the moment it uploaded — otherwise somebody who walked in during an outage becomes a stranger.<small>Still no attendance, and no booking is ever paired to it.</small>'}
+ ]},
+{id:'door-oos',t:'Taking a door out of service',tags:[],tg:['admin'],
+ s:'One switch in the web app, and the honest limit of what it can reach.',
+ steps:[
+  {l:'desk',t:'Disable the row',d:'The same control that takes a court box out of service.'},
+  {l:'api',t:'Refuse everything',d:'Every device call from that board is refused with the one status that means "the club decided", rather than one that means "we could not answer".'},
+  {l:'gate',t:'Deny, and forget',d:'The door refuses the scan and <b>does not fall back</b> to its own list; the next heartbeat empties that list outright.<small>This is the whole reason the two answers are told apart: any other failure is evidence about the network, and this one is evidence about the club.</small>'},
+  {l:'desk',t:'What it cannot reach',d:'<b>A door that cannot reach the server never hears it.</b> One with its uplink pulled goes on admitting the bookings it already holds until that list goes stale, six hours after it arrived. Out of service is not a lock — if a door has to be shut now, shut it mechanically.'}
+ ]}
+];
+var doormount=document.getElementById('doorlist');
+if(doormount){DOORS.forEach(function(f){render(f,doormount);});}
 
 /* filters */
 var cards=Array.prototype.slice.call(mount.querySelectorAll('.fcard'));

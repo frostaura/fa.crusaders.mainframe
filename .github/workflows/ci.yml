@@ -780,10 +780,18 @@ jobs:
   # nginx/nginx.conf carries the X-Forwarded-Host that gives every member their own
   # rate-limit bucket rather than one bucket for the club.
   # It used to be mounted into stock nginx:alpine from a checkout on the
-  # host, and the deploy chain moves images and nothing else — so a club merging a
-  # gateway fix got a new backend behind the OLD config while the dashboard said
-  # deployed (round-3 finding 18). Built and pushed like the other two now, so the
+  # host, and a redeploy moves images and nothing else — so a club merging a
+  # gateway fix got a new backend behind the OLD config, with nothing anywhere
+  # saying so (round-3 finding 18). Built and pushed like the other two now, so the
   # trap cannot recur on the next nginx.conf edit either.
+  #
+  # THIS WORKFLOW PUBLISHES AND STOPS. There is no redeploy job: the Portainer one
+  # was removed 2026-09-19 by decision, along with the four PORTAINER_* secrets it
+  # was the only reader of. Pulling these images onto the club machine is a MANUAL
+  # step, and the two checks that job used to make before deploying — that the
+  # stack names the gateway image, and that it no longer bind-mounts
+  # nginx/nginx.conf — are now made by hand, every time. Neither mistake is
+  # visible any other way; see docs/go-live-checklist.md §2.
   # ============================================================================
   build-gateway-amd64:
     name: Build Gateway (amd64)

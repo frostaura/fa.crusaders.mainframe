@@ -11,7 +11,7 @@ A FrostAura Technologies project. Strategic context, charter, feature spec, desi
 - **Biometric peripheral:** abstracted via `IBiometricDevice` — see [`docs/specs/biometric-abstraction.md`](./docs/specs/biometric-abstraction.md)
 - **Lights:** WeMos Mega 2560 + ESP8266 court box driving a 4-channel relay board on the club LAN — see [`src/iot/court-box/README.md`](./src/iot/court-box/README.md)
 - **Doors:** one ESP32 per door — QR scanner, one relay on the lock — asking the same API who may come in — see [`src/iot/door-gate/README.md`](./src/iot/door-gate/README.md)
-- **Deploy:** GitHub Actions → Docker Hub (CI stops here) → the club machine pulls the published images → Cloudflared tunnel — see [`docs/specs/deployment.md`](./docs/specs/deployment.md)
+- **Deploy:** GitHub Actions → multi-arch images → Docker Hub, where **CI stops by decision** — there is no redeploy job. Pulling the published `:latest` manifests onto the club machine is a **manual** step, and so are the two stack checks the removed job used to make; members reach it through a Cloudflared tunnel — see [`docs/specs/deployment.md`](./docs/specs/deployment.md) and [`docs/go-live-checklist.md`](./docs/go-live-checklist.md) §2
 
 ## Quick start (local dev)
 ```bash
