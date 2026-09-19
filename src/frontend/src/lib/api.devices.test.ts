@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { endpoints } from "./api";
 import { stubFetch } from "../test/harness";
-import { deviceFixture, DEVICE_API_KEY_FIXTURE } from "../test/harness";
+import { applyDevicePatch, deviceFixture, DEVICE_API_KEY_FIXTURE } from "../test/harness";
 
 /**
  * The device wrappers, pinned to their routes.
@@ -67,28 +67,61 @@ describe("device API wrappers", () => {
   });
 
   /**
-   * `gate_key` binds three-valued exactly as `button_map` does, and for the same reason: an
-   * absent key leaves the door's name alone, `null` clears it, and a string sets it. The
-   * distinction is only provable on the wire text — a key that was never sent and a key sent
-   * as undefined parse to the same object.
+   * `gate_key` is TWO-valued on the wire, and that is the correction.
+   *
+   * <p>
+   * It was written here as three-valued "exactly as `button_map` does", and it is not.
+   * `DeviceRegistryService.UpdateAsync` reads it
+   * <code>if (cmd.GateKey is not null) device.GateKey = cmd.GateKey.Length == 0 ? null : cmd.GateKey</code>,
+   * so `null` and ABSENT are the same instruction — leave the door's name alone — and `""`
+   * is the only value that clears it. The page sent `null` to clear a name and cleared
+   * nothing, silently, while this test and the page test both stayed green: each asserted
+   * the wire text against a stub that answered with a cleared row whatever it was handed.
+   * </p>
+   *
+   * <p>
+   * So the assertion is now on the OUTCOME as a server that applies the API's own rule
+   * produces it ({@link applyDevicePatch}), with the wire text kept beside it — a key never
+   * sent and a key sent as undefined parse to the same object, so absence is only provable
+   * in the serialised text.
+   * </p>
    */
-  it("sends gate_key three-valued, and only when the caller named it", async () => {
-    const stub = stubFetch([{ method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture() }]);
+  it("clears a door name with an empty string, because null means unchanged", async () => {
+    const named = deviceFixture({ kind: "Gate", court_numbers: [], gate_key: "front-door" });
+    const stub = stubFetch([{
+      method: "PATCH",
+      path: "/api/v1/admin/devices/",
+      respond: (request) => applyDevicePatch(named, (request.body ?? {}) as Record<string, unknown>),
+    }]);
 
-    await endpoints.adminDeviceUpdate(ID, { name: "Door gate", gate_key: "front-door" });
+    const set = await endpoints.adminDeviceUpdate(ID, { name: "Door gate", gate_key: "side-door" });
     expect(stub.calls[0].path).toBe(`/api/v1/admin/devices/${ID}`);
-    expect(stub.calls[0].raw).toBe('{"name":"Door gate","gate_key":"front-door"}');
+    expect(stub.calls[0].raw).toBe('{"name":"Door gate","gate_key":"side-door"}');
+    expect(set.gate_key).toBe("side-door");
 
-    // Null, not "": the API reads null as "no name". Sending an empty string would depend on
-    // the server trimming it back to null, which is a second place for the two to disagree.
-    await endpoints.adminDeviceUpdate(ID, { name: "Door gate", gate_key: null });
-    expect(stub.calls[1].raw).toBe('{"name":"Door gate","gate_key":null}');
+    // The clear. `""` on the wire, and the row that comes back has no name — which is the
+    // half a canned response could not have told apart from the no-op below.
+    const cleared = await endpoints.adminDeviceUpdate(ID, { name: "Door gate", gate_key: "" });
+    expect(stub.calls[1].raw).toBe('{"name":"Door gate","gate_key":""}');
+    expect(cleared.gate_key).toBeNull();
 
-    // A PATCH about something else must not carry the key at all — not as null, which would
-    // wipe the door's name, and not as a stale echo racing another admin's edit.
+    // A PATCH about something else must not carry the key at all — and if it did carry it as
+    // null the server would ignore it, which is why null must never be how a clear is spelt.
     await endpoints.adminDeviceUpdate(ID, { enabled: false });
     expect(stub.calls[2].raw).toBe('{"enabled":false}');
     expect(stub.calls[2].raw).not.toContain("gate_key");
+  });
+
+  /**
+   * And the type refuses the value that caused it. `null` is not a clear and never was, so a
+   * caller that spells one that way is a compile error rather than a silent no-op a test has
+   * to catch afterwards.
+   */
+  it("has no way to spell a clear as null", async () => {
+    const stub = stubFetch([{ method: "PATCH", path: "/api/v1/admin/devices/", body: deviceFixture() }]);
+    // @ts-expect-error null means "unchanged" on this field, so it is not an accepted value.
+    await endpoints.adminDeviceUpdate(ID, { gate_key: null });
+    expect(stub.calls[0].raw).toBe('{"gate_key":null}');
   });
 
   /**

@@ -410,17 +410,26 @@ describe("AdminSettings — door gates", () => {
   });
 
   /**
-   * Each policy's hint names the accounts that pass either way. "A user with no membership
-   * row is not barred" is how an operator or a club admin opens a door at all, and nobody
-   * would guess it from a label reading "Any member in good standing".
+   * The hint follows the policy that is selected, and the staff exemption appears on the one
+   * arm where it exempts somebody from something.
+   *
+   * <p>
+   * It used to read "accounts with no membership of their own, such as club admins and
+   * operators, always pass", on both arms. The rule is `User.IsAdmin`; there is no operator
+   * role in this product; and under the open policy every active member already passes, so
+   * printing it there exempted nobody — while being false of a club admin whose own
+   * membership is suspended, who is barred like anybody else.
+   * </p>
    */
-  it("describes the policy that is actually selected, and names who always passes", async () => {
+  it("describes the policy that is actually selected, and exempts admins only where it matters", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
     const picker = await screen.findByLabelText(/Who may open a door/);
     expect(hintOf(picker)).toMatch(/unless their membership is suspended, pending approval or rejected/);
-    expect(hintOf(picker)).toMatch(/club admins and operators, always pass/);
+    // No exemption on the open policy, and the word "operator" nowhere on the screen.
+    expect(hintOf(picker)).not.toMatch(/always pass/);
+    expect(hintOf(picker).toLowerCase()).not.toMatch(/operator/);
 
     fireEvent.change(picker, { target: { value: "booking_window" } });
     // The hint follows the choice rather than describing both at once, and it spells out the
@@ -428,6 +437,29 @@ describe("AdminSettings — door gates", () => {
     expect(hintOf(screen.getByLabelText(/Who may open a door/)))
       .toMatch(/starts within the next 30 minutes/);
     expect(hintOf(screen.getByLabelText(/Who may open a door/))).toMatch(/Anyone else is turned away/);
+    // The exemption, and the limit on it in the same breath.
+    expect(hintOf(screen.getByLabelText(/Who may open a door/)))
+      .toMatch(/Club admins always pass this booking check/);
+    expect(hintOf(screen.getByLabelText(/Who may open a door/)))
+      .toMatch(/still turns anyone away, admin or not/);
+    expect(hintOf(screen.getByLabelText(/Who may open a door/)).toLowerCase()).not.toMatch(/operator/);
+  });
+
+  /**
+   * <b>A booking code is not a standing building key</b>, and the open policy's name implies
+   * that it is. A member's own code opens a door at any hour under `active_member`; the QR
+   * behind a booking opens one only inside that booking's own window, and not once the
+   * booking is cancelled. Nothing else on this screen would tell an admin so.
+   */
+  it("says a booking's QR is narrower than a member's own code", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const hint = hintOf(await screen.findByLabelText(/Who may open a door/));
+    expect(hint).toMatch(/own code scans opens the door at any hour/);
+    expect(hint).toMatch(/A booking's QR is narrower/);
+    expect(hint).toMatch(/until the booking ends/);
+    expect(hint).toMatch(/not at all once the booking is cancelled/);
   });
 
   it("follows the early-entry number into the strict policy's hint", async () => {

@@ -1,5 +1,6 @@
 import { ApiError } from "./api";
 import { RELAYS } from "../components/ButtonMapEditor";
+import { GATE_KEY_MAX_LENGTH } from "./gateCopy";
 import {
   GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
   GATE_UNLOCK_MAX_SECONDS, GATE_UNLOCK_MIN_SECONDS,
@@ -46,15 +47,17 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
   // deleted and re-registered as the other kind while the form was open.
   gate_key_not_a_gate: `A door name only belongs on a door gate, and this row is a court box. Refresh the page — if the board really is a door, delete the row and let it register itself again.`,
   court_fields_on_a_gate: "Courts and button maps belong on a court box, and this row is a door gate. A door drives no courts. Refresh the page and edit the door's name instead.",
+  // The editor's own maxLength stops this at the keyboard, so it reaches an admin through a
+  // pasted value or a row edited from somewhere else. It had no entry at all and fell through
+  // to the underscore swap — "gate key too long", which names no bound and no field.
+  gate_key_too_long: `A door name is at most ${GATE_KEY_MAX_LENGTH} characters. Shorten it and save again.`,
 
   // The three tenant numbers, each named with the bound the API holds, because
   // "out of range" alone leaves an admin guessing which end they went past.
   gate_unlock_seconds_out_of_range: `Unlock time has to be between ${GATE_UNLOCK_MIN_SECONDS} and ${GATE_UNLOCK_MAX_SECONDS} seconds. A door never holds the lock open longer than ${GATE_UNLOCK_MAX_SECONDS} seconds whatever is set here.`,
   gate_early_entry_minutes_out_of_range: `Early entry has to be between ${GATE_EARLY_ENTRY_MIN_MINUTES} and ${GATE_EARLY_ENTRY_MAX_MINUTES} minutes.`,
-  // GUESSED TOKEN. The contract names the other two refusals and the two admin-device ones
-  // but never spells the invalid-policy one, so this follows the `<key>_invalid` shape
-  // `button_map_invalid` already uses. If the API answers something else the fallback below
-  // still shows the server's own `message`, so a mismatch degrades rather than misleads.
+  // Confirmed against the API rather than guessed: this comment used to say the token was
+  // inferred from `button_map_invalid`'s shape because the contract never spelt it out.
   gate_access_policy_invalid: "Who may open a door has to be either “Any member in good standing” or “Only a member with a booking”. Pick one and save again.",
 };
 

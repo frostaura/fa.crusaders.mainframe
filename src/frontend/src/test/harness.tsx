@@ -38,13 +38,36 @@ export type StubRoute = {
   status?: number | number[];
   /** Response headers, keyed lower-case — `content-disposition` for a file download. */
   headers?: Record<string, string>;
-  body: unknown;
+  /** The canned answer. Optional only when {@link StubRoute.respond} supplies one instead. */
+  body?: unknown;
   /**
    * Answers the nth matching call with the nth entry, the last one repeating — for a
    * screen that fetches the same thing twice and must show that it got two different
    * answers. When set, `body` is ignored.
    */
   sequence?: unknown[];
+  /**
+   * Answers from the REQUEST rather than from a canned body, and wins over both `body`
+   * and `sequence`.
+   *
+   * <p>
+   * A canned body pins nothing about what was sent: a stub that answers
+   * <code>{gate_key: null}</code> with a cleared row would report a cleared door however
+   * the page had asked for it, and that is exactly how the frontend shipped a PATCH the
+   * API treats as "leave it alone" with two tests green over it. A route that applies the
+   * API's own rule — see {@link applyDevicePatch} — makes the wrong wire value fail here
+   * for the reason it fails in production.
+   * </p>
+   */
+  respond?: (request: StubRequest) => unknown;
+};
+
+/** What a {@link StubRoute.respond} handler is given: the call it is answering. */
+export type StubRequest = {
+  method: string;
+  path: string;
+  /** The parsed request body, or undefined for a bodyless call. */
+  body: unknown;
 };
 
 export type StubCall = {
@@ -86,6 +109,27 @@ function serialise(answer: unknown): string {
   return typeof answer === "string" ? answer : JSON.stringify(answer);
 }
 
+/**
+ * What this route answers this call with: `respond` first, then the nth `sequence` entry
+ * with the last repeating, then the canned `body`.
+ *
+ * <p>
+ * Out here rather than inline in the stub, because the stub is already at the complexity
+ * gate's bound and three more branches inside it put the whole file over.
+ * </p>
+ */
+function answerFor(route: StubRoute, nth: number, request: StubRequest): unknown {
+  if (route.respond) return route.respond(request);
+  if (route.sequence) return route.sequence[Math.min(nth, route.sequence.length - 1)];
+  return route.body;
+}
+
+/** The status this route answers this call with — a single one, or the nth with the last repeating. */
+function statusFor(route: StubRoute, nth: number): number {
+  if (!Array.isArray(route.status)) return route.status ?? 200;
+  return route.status[Math.min(nth, route.status.length - 1)];
+}
+
 export function stubFetch(routes: StubRoute[]): FetchStub {
   const calls: StubCall[] = [];
   const served = new Map<StubRoute, number>();
@@ -116,10 +160,15 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
       // an endpoint nobody meant it to and still pass.
       return Promise.reject(new Error(`No stub for ${method} ${path}`));
     }
+    if (!route.respond && !("body" in route)) {
+      // Same reason, one level in: a route with neither an answer nor a responder would
+      // serialise to the string "undefined" and read as a parse failure in the page.
+      return Promise.reject(new Error(`Stub for ${method} ${route.path} has neither body nor respond`));
+    }
 
     const nth = served.get(route) ?? 0;
     served.set(route, nth + 1);
-    const answer = route.sequence ? route.sequence[Math.min(nth, route.sequence.length - 1)] : route.body;
+    const answer = answerFor(route, nth, { method, path, body });
 
     // `status` and `ok` are computed out here rather than inline in the literal because
     // lizard reads a bare `<` inside an object literal in a .tsx file as the start of a
@@ -127,9 +176,7 @@ export function stubFetch(routes: StubRoute[]): FetchStub {
     // anonymous function. That is why `make complexity` used to measure this file as a
     // single 189-line function and could not see `stubFetch` at all — and why adding a
     // fixture to the end of the file tripped the length gate on a line nobody touched.
-    const status = Array.isArray(route.status)
-      ? route.status[Math.min(nth, route.status.length - 1)]
-      : route.status ?? 200;
+    const status = statusFor(route, nth);
     const ok = status < 400;
     // `json()` and `blob()` as well as `text()`: the typed client reads text and parses it,
     // the multipart photo upload calls `res.json()` directly, and the wallet CSV must be
@@ -312,6 +359,78 @@ export function gateFixture(overrides: Record<string, unknown> = {}) {
     auto_registered: false,
     created_at: new Date().toISOString(),
     ...overrides,
+  };
+}
+
+/**
+ * One device row, patched the way `DeviceRegistryService.UpdateAsync` patches it.
+ *
+ * <p>
+ * <b>`gate_key` is the field this exists for.</b> The API's rule is
+ * <code>if (cmd.GateKey is not null) device.GateKey = cmd.GateKey.Length == 0 ? null : cmd.GateKey</code>
+ * — so an ABSENT key and a `null` key both mean "leave the door's name alone", and `""` is
+ * the only value that clears it. The frontend sent `null` to clear a name, which is a
+ * silent no-op, and two tests were green over it for one reason: both pinned the wire text
+ * against a server that answered with a cleared row whatever it was sent. A mock that
+ * accepts anything pins nothing.
+ * </p>
+ *
+ * <p>
+ * `name`, `enabled`, `court_numbers` and `button_map` are patched on their own contracts —
+ * `button_map` genuinely IS three-valued (absent leaves it, `null` reverts to the club's),
+ * which is the neighbouring field whose semantics the gate key was wrongly assumed to
+ * share.
+ * </p>
+ */
+export function applyDevicePatch(
+  row: Record<string, unknown>, patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...row };
+  if (typeof patch.name === "string") next.name = patch.name;
+  if (typeof patch.enabled === "boolean") next.enabled = patch.enabled;
+  if (Array.isArray(patch.court_numbers)) next.court_numbers = patch.court_numbers;
+  if ("button_map" in patch) next.button_map = patch.button_map;
+  // The whole point: null is not a clear, it is an absence. Only a string is applied.
+  if (typeof patch.gate_key === "string") {
+    const trimmed = patch.gate_key.trim();
+    next.gate_key = trimmed === "" ? null : trimmed;
+  }
+  return next;
+}
+
+/** A device server's routes plus a window onto the row it is holding. */
+export type DeviceServer = {
+  routes: StubRoute[];
+  /** The row as the server now holds it — what a real GET would serve next. */
+  current: () => Record<string, unknown>;
+};
+
+/**
+ * A stateful stand-in for the devices API: one row, a list that serves it and a PATCH that
+ * applies {@link applyDevicePatch} to it.
+ *
+ * <p>
+ * The reload after a save then shows what a real one would, so a PATCH the API would
+ * ignore leaves the row unchanged on screen instead of being reported as a success. That
+ * is the difference between a test that pins a wire value and a test that pins an
+ * OUTCOME — and the wire value the two gate-key tests pinned was the wrong one.
+ * </p>
+ */
+export function deviceServer(initial: Record<string, unknown>): DeviceServer {
+  let row = { ...initial };
+  return {
+    routes: [
+      { path: "/api/v1/admin/devices/", respond: () => [row] },
+      {
+        method: "PATCH",
+        path: "/api/v1/admin/devices/",
+        respond: (request) => {
+          row = applyDevicePatch(row, (request.body ?? {}) as Record<string, unknown>);
+          return row;
+        },
+      },
+    ],
+    current: () => row,
   };
 }
 
