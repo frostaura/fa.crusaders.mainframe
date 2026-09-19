@@ -666,6 +666,36 @@ export type MyQrCode = {
   court_number?: number | null;
   /** Booking codes only. UTC. */
   starts_at?: string;
+  /**
+   * Does this club have a door gate at all — at least one enabled `Gate` row?
+   *
+   * <p>
+   * <b>All three door fields are OPTIONAL, and that is load-bearing.</b> An API that
+   * predates them sends none, and the page must then say nothing whatever about doors: a
+   * club with no gate being told its code "also opens the club door" is the same class of
+   * falsehood, inverted, as the one this field exists to fix. `doors !== true` — absent,
+   * false, or anything else — is the silent case.
+   * </p>
+   *
+   * <p>
+   * It is sent rather than derived because the alternative is the member page reading
+   * tenant settings to find out whether the club owns a door, which is both a second
+   * request and a second place for the answer to drift from the door's own.
+   * </p>
+   */
+  doors?: boolean;
+  /**
+   * When this booking's code starts opening a door — `StartsAt − H`, where H is the
+   * horizon the DOOR applies, not the one the phone uses to decide which code to show.
+   * Null for a member/ident code, which is bounded by the club's policy rather than by a
+   * booking. UTC.
+   */
+  door_opens_at?: string | null;
+  /**
+   * When it stops: the code's own expiry, which is the booking's end plus the club's
+   * grace window. Null for a member/ident code. UTC.
+   */
+  door_closes_at?: string | null;
 };
 
 export type AdminCourt = {

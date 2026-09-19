@@ -107,6 +107,41 @@ function formatCountdown(seconds: number): string {
 }
 
 /**
+ * What this code does at the club's DOOR, or nothing at all.
+ *
+ * <p>
+ * Silent unless the server said `doors: true`, which means the club has at least one
+ * enabled gate. An older API sends the field not at all, a club with no gate sends it
+ * false, and both must produce no sentence: telling a club with no door that its code
+ * opens one is the same falsehood this function exists to fix, pointing the other way.
+ * </p>
+ *
+ * <p>
+ * <b>The two arms differ because the page knows different amounts.</b> For a booking code
+ * the server sends the window outright — `door_opens_at` is `StartsAt − H` for the
+ * horizon the DOOR applies, `door_closes_at` is the code's expiry — so the sentence can
+ * carry clock times and does, because a member standing at a door wants to know whether
+ * now is inside it. For a member code there is no window to state: under `active_member`
+ * it opens at any hour and under `booking_window` it needs a qualifying booking, and this
+ * page is not sent which policy is set. Printing either would be a guess, so the sentence
+ * names the rule without pretending to know it.
+ * </p>
+ *
+ * <p>
+ * An opening time with no closing time still earns the first half. Inventing a clock time
+ * the server did not send would be worse than a vaguer sentence that is true.
+ * </p>
+ */
+function describeDoor(qr: MyQrCode): string {
+  if (qr.doors !== true) return "";
+  if (qr.kind !== "booking") return " It also opens the club door whenever the club's door rules allow.";
+  if (!qr.door_opens_at) return "";
+  const until = qr.door_closes_at ? formatStart(qr.door_closes_at) : null;
+  const end = until ?? "shortly after your booking ends";
+  return ` It also opens the club door from ${formatStart(qr.door_opens_at)} until ${end}.`;
+}
+
+/**
  * The one-line meaning of a code, in the member's terms.
  *
  * <p>
@@ -115,6 +150,16 @@ function formatCountdown(seconds: number): string {
  * looking: a booking code opens one court at one time, an ident code identifies the
  * member anywhere. Presenting the wrong one is SEE THE DESK.
  * </p>
+ *
+ * <p>
+ * <b>Both arms were false once codes opened doors</b> (round G3, F1). "For your booking
+ * only — it works at that court" and "Identifies you at any court box" each described the
+ * whole of what a code does, and each stopped being the whole of it the day the gate
+ * shipped: the same twelve characters let the holder into the building. The court clauses
+ * stay exactly as they were, because they are still true of COURTS — a booking code
+ * really is refused at every court but its own — and {@link describeDoor} adds the door,
+ * or adds nothing at a club that has none.
+ * </p>
  */
 function describeKind(qr: MyQrCode): { headline: string; detail: string } {
   if (qr.kind === "booking") {
@@ -122,14 +167,42 @@ function describeKind(qr: MyQrCode): { headline: string; detail: string } {
     return {
       headline: qr.court_number != null ? `Booking code · court ${qr.court_number}${when}` : `Booking code${when}`,
       detail: "For your booking only — it works at that court, from a few minutes before your slot until it ends. "
-        + "At any other court it will not be recognised.",
+        + "At any other court it will not be recognised." + describeDoor(qr),
     };
   }
   return {
     headline: "Walk-up code · any court",
     detail: "Identifies you at any court box: start a walk-up on a free court, or pay for someone else's time. "
-      + "It is not tied to a booking.",
+      + "It is not tied to a booking." + describeDoor(qr),
   };
+}
+
+/**
+ * The sentence at the top of the page — the first thing a member reads, and the one that
+ * has to place the code before they have looked at anything else.
+ *
+ * <p>
+ * It said the code is for "the scanner on the court box" and that it "switches the lights
+ * on and marks you as arrived". At a club with a door both halves mislead: the first sends
+ * a member holding their phone at a door to go and look for a court box, and the second is
+ * flatly FALSE of a door. A gate decision never writes a booking, a `CheckedInAt`, a
+ * ledger entry or a settlement row — walking through a door is not attendance, which is
+ * the same truth `gateCopy` states for the admin side. So the attendance claim is
+ * narrowed to the court rather than extended to the door.
+ * </p>
+ *
+ * <p>
+ * A string from a function, not JSX text, for the reason {@link WalkUpSwitch} carries in
+ * full: lizard's .tsx lexer desyncs on an odd number of bare apostrophes in JSX text, and
+ * the file already spends its odd one.
+ * </p>
+ */
+function subtitleFor(qr: MyQrCode | null): string {
+  if (qr?.doors !== true) {
+    return "Show this to the scanner on the court box. It switches the lights on and marks you as arrived.";
+  }
+  return "Show this to the scanner on the court box, or at the club door."
+    + " At a court it switches the lights on and marks you as arrived; at a door it just lets you in.";
 }
 
 // --- when a code dies -----------------------------------------------------------
@@ -386,9 +459,7 @@ export default function CourtCodePage() {
     <div className="max-w-xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Your court code</h1>
-        <p className="text-sm text-text-secondary">
-          Show this to the scanner on the court box. It switches the lights on and marks you as arrived.
-        </p>
+        <p className="text-sm text-text-secondary">{subtitleFor(qr)}</p>
       </div>
 
       <WalkUpSwitch walkUp={walkUp} loading={loading} onChoose={chooseWalkUp} />
