@@ -38,6 +38,14 @@ public static class AdminConfigEndpoints
                 advance_booking_days = GetInt(doc, "advance_booking_days", defaults.AdvanceBookingDays),
                 day_start_minute = GetInt(doc, "day_start_minute", defaults.DayStartMinute),
                 day_end_minute = GetInt(doc, "day_end_minute", defaults.DayEndMinute),
+
+                // The per-weekday map the engine has read since it existed, and this
+                // endpoint never served. A club could not change its opening hours: the
+                // screen offered only the flat pair above, the seeder names all seven days,
+                // so every save of "Day starts 09:00" reported success and changed nothing
+                // any member could see. Rendered from the parsed map, not echoed from the
+                // stored document, so the hours shown are the hours BookingService enforces.
+                operating_hours = defaults.OperatingHours.ToWire(),
                 penalty_pct = GetDecimal(doc, "penalty_pct", defaults.PenaltyPct),
                 grace_window_minutes = GetInt(doc, "grace_window_minutes", defaults.GraceWindowMinutes),
                 penalty_window_minutes = GetInt(doc, "penalty_window_minutes", defaults.PenaltyWindowMinutes),
@@ -58,10 +66,21 @@ public static class AdminConfigEndpoints
                 peak_advance_hours_for_regular = GetInt(doc, "peak_advance_hours_for_regular", defaults.PeakAdvanceHoursForRegular),
                 retention_years = GetInt(doc, "retention_years", defaults.RetentionYears),
                 no_show_lookback_days = GetInt(doc, "no_show_lookback_days", defaults.NoShowLookbackDays),
+
+                // The court-box and identification numbers (WI-2). Same rule as the
+                // economics keys: defaults come from TenantSettingsAccessor, never
+                // from literals here.
+                walk_up_max_minutes = GetInt(doc, "walk_up_max_minutes", defaults.WalkUpMaxMinutes),
+                heartbeat_seconds = GetInt(doc, "heartbeat_seconds", defaults.HeartbeatSeconds),
+                activation_forward_window_minutes = GetInt(doc, "activation_forward_window_minutes", defaults.ActivationForwardWindowMinutes),
+                activation_cue_window_minutes = GetInt(doc, "activation_cue_window_minutes", defaults.ActivationCueWindowMinutes),
+                qr_lifetime_seconds = GetInt(doc, "qr_lifetime_seconds", defaults.QrLifetimeSeconds),
+                roster_window_minutes = GetInt(doc, "roster_window_minutes", defaults.RosterWindowMinutes),
             });
         });
 
-        settings.MapPut("/", async (UpdateSettingsRequest req, MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
+        settings.MapPut("/", async (
+            UpdateSettingsRequest req, MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
         {
             if (req.AdvanceBookingDays < 0 || req.AdvanceBookingDays > 365)
                 return Results.BadRequest(new { error = "advance_booking_days_out_of_range" });
@@ -69,8 +88,47 @@ public static class AdminConfigEndpoints
                 return Results.BadRequest(new { error = "slice_minutes_out_of_range" });
             if (req.DayStartMinute < 0 || req.DayEndMinute > 24 * 60 || req.DayStartMinute >= req.DayEndMinute)
                 return Results.BadRequest(new { error = "operating_hours_invalid" });
+
+            // The per-weekday map, strictly. Same posture as the button map: lenient when a
+            // box or the booking engine reads a stored document later — a broken one must
+            // never close the club — and strict here, because this is the one moment there
+            // is a person to tell. The refusal names the day, since "operating hours
+            // invalid" on a seven-row form says nothing about which row to fix.
+            Dictionary<string, string>? hours = null;
+            if (req.OperatingHours is not null)
+            {
+                if (!OperatingHours.TryParseWire(req.OperatingHours, out hours, out var badDay))
+                {
+                    return Results.BadRequest(new { error = "operating_hours_day_invalid", day = badDay });
+                }
+            }
             if (req.PenaltyPct is < 0 or > 100)
                 return Results.BadRequest(new { error = "penalty_pct_out_of_range" });
+
+            // The two settings that take money off a member were the only two on this PUT
+            // with no bound at all. Both were accepted at any value and both reach the box
+            // in the heartbeat config.
+            //
+            // Grace is capped at the hour the Settings field already declares: no-show
+            // detection must stay reachable inside an operating day, and a grace window of
+            // 4321 minutes (72 hours) meant `no_show_penalty` could never fire on a
+            // 06:00-22:00 club — the sweep's own lookback expires first. Late-cancel is
+            // capped at a day, also the field's own declared bound: beyond that every
+            // cancellation is inside the window, so a member cancelling a fortnight ahead
+            // paid the 30% penalty. Every other setting on this endpoint enforces exactly
+            // the range its input declares; these two now do too.
+            if (req.GraceWindowMinutes is < 0 or > 60)
+                return Results.BadRequest(new { error = "grace_window_minutes_out_of_range" });
+            if (req.PenaltyWindowMinutes is < 0 or > 1440)
+                return Results.BadRequest(new { error = "penalty_window_minutes_out_of_range" });
+
+            // Timezone was readable and not writable: GET served it, UpdateSettingsRequest
+            // had no member for it, so a second club in another zone saw its whole booking
+            // grid in South African wall-clock time with no correction short of an UPDATE
+            // on the JSON column. Validated against the platform's IANA tzdb — the free-tier
+            // dependency CLAUDE.md names — rather than a hand-kept list that would rot.
+            if (req.Timezone is not null && !IsKnownTimezone(req.Timezone))
+                return Results.BadRequest(new { error = "timezone_invalid" });
 
             // Strict here, lenient on read. This is the one moment an admin is standing
             // in front of the screen to be told what is wrong with their map; a box
@@ -85,6 +143,9 @@ public static class AdminConfigEndpoints
             var economicsError = ValidateEconomics(req);
             if (economicsError is not null) return Results.BadRequest(new { error = economicsError });
 
+            var deviceError = ValidateDeviceNumbers(req);
+            if (deviceError is not null) return Results.BadRequest(new { error = deviceError });
+
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
             {
@@ -92,6 +153,50 @@ public static class AdminConfigEndpoints
                 db.TenantSettings.Add(row);
             }
             var doc = ParseObject(row.SettingsJson);
+
+            // The cue window must fit inside the forward window, and either may arrive
+            // alone — so each is compared against the value that will actually be in
+            // effect: the request's, else the stored one, else the canonical default.
+            // Derived from the document already in hand rather than a second read of it.
+            var effectiveCue = req.ActivationCueWindowMinutes
+                ?? GetInt(doc, "activation_cue_window_minutes", TenantSettingsView.DefaultActivationCueWindowMinutes);
+            var effectiveForward = req.ActivationForwardWindowMinutes
+                ?? GetInt(doc, "activation_forward_window_minutes", TenantSettingsView.DefaultActivationForwardWindowMinutes);
+            if (effectiveCue > effectiveForward)
+            {
+                return Results.BadRequest(new { error = "activation_cue_window_exceeds_forward_window" });
+            }
+
+            // A map is checked against every court box that would RUN it before it is
+            // saved: the box's court list and the map are edited on different screens, and
+            // a court button reaching past a box's list is a button that selects nothing.
+            // A box with its own override is unaffected by the club's map and is not
+            // consulted — that is what lets a four-court box and a one-court annex box
+            // coexist (review #17). Refused with the box named so the admin knows which
+            // one to fix, give more courts, or give its own map. Disabled boxes do not
+            // count: a switched-off box runs no map.
+            if (buttons is not null)
+            {
+                var boxes = await db.Devices
+                    .Where(d => d.Kind == DeviceKind.CourtBox && d.Enabled)
+                    .OrderBy(d => d.DeviceCode)
+                    .ToListAsync(ct);
+                foreach (var box in boxes)
+                {
+                    if (ButtonMap.FromJson(box.ButtonMapJson) is not null) continue;
+                    if (buttons.FirstSelectionBeyond(box.CourtNumbers.Count) is { } index)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            error = ButtonMap.SelectsCourtBeyondDeviceCourts,
+                            device_code = box.DeviceCode,
+                            court_index = index,
+                            device_court_count = box.CourtNumbers.Count,
+                        });
+                    }
+                }
+            }
+
             doc["slice_minutes"] = ToElement(req.SliceMinutes);
             doc["slice_price_credits"] = ToElement(req.SlicePriceCredits);
             doc["advance_booking_days"] = ToElement(req.AdvanceBookingDays);
@@ -100,11 +205,24 @@ public static class AdminConfigEndpoints
             doc["penalty_pct"] = ToElement(req.PenaltyPct);
             doc["grace_window_minutes"] = ToElement(req.GraceWindowMinutes);
             doc["penalty_window_minutes"] = ToElement(req.PenaltyWindowMinutes);
+            // Omitted means unchanged, like the economics and device keys below it.
+            if (req.Timezone is not null) doc["timezone"] = ToElement(req.Timezone.Trim());
+            // Same rule for the weekday map, and an EMPTY map is a real instruction rather
+            // than a no-op: it means "every day follows the flat pair", which is the only
+            // way back to the default once a club has named a day.
+            if (hours is not null) doc["operating_hours"] = ToElement(hours);
             // Omitted means unchanged, not "reset to default": a screen that does not
             // yet edit the button map must not wipe one an admin set through another.
             if (buttons is not null) doc["button_map"] = ToElement(buttons.ToWire());
             WriteOptionalEconomics(doc, req);
+            WriteOptionalDeviceNumbers(doc, req);
             row.SettingsJson = JsonSerializer.Serialize(doc);
+            // The column was written once, at construction, and never again — a dead audit
+            // field on the one table that governs money and lights. Nothing reads it today,
+            // which is exactly why it was never noticed: the first person to need "when did
+            // this club last change its penalty policy" would have got the seed date and
+            // believed it.
+            row.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { saved = true });
         });
@@ -212,6 +330,48 @@ public static class AdminConfigEndpoints
         return null;
     }
 
+    /// <summary>
+    /// Bounds on the six court-box and identification keys (WI-2). The walk-up cap
+    /// tops out at 90 because that is the relay bank's hard actuation cap — a tenant
+    /// setting above it would sell minutes the lights cannot deliver. The cue ≤
+    /// forward pair rule is checked in the handler against effective values, because
+    /// either key may arrive alone.
+    /// </summary>
+    private static string? ValidateDeviceNumbers(UpdateSettingsRequest req)
+    {
+        if (req.WalkUpMaxMinutes is < 1 or > RelayHardCap.Minutes) return "walk_up_max_minutes_out_of_range";
+        // The firmware's own bounds, not a wider policy one: bridgelogic::Cadence clamps
+        // the interval into [15, 300] whatever the API sends, so accepting 600 here only
+        // ever meant an admin reading 600 on the page while every box ran at 300 and the
+        // fleet then read as offline for 40% of each interval. See HeartbeatCadence.
+        if (req.HeartbeatSeconds is not null
+            && (req.HeartbeatSeconds < HeartbeatCadence.MinSeconds || req.HeartbeatSeconds > HeartbeatCadence.MaxSeconds))
+        {
+            return "heartbeat_seconds_out_of_range";
+        }
+        if (req.ActivationForwardWindowMinutes is < 1 or > 1440) return "activation_forward_window_minutes_out_of_range";
+        if (req.ActivationCueWindowMinutes is < 0 or > 1440) return "activation_cue_window_minutes_out_of_range";
+        if (req.QrLifetimeSeconds is < 15 or > 3600) return "qr_lifetime_seconds_out_of_range";
+        if (req.RosterWindowMinutes is < 5 or > 1440) return "roster_window_minutes_out_of_range";
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the platform's IANA tzdb knows this zone id.
+    ///
+    /// <para>
+    /// Block body rather than an expression one, and the id is trimmed here so the check and
+    /// the write agree on what was validated. <c>TryFindSystemTimeZoneById</c> is
+    /// case-insensitive and accepts Windows ids on Windows, which is fine: the value is only
+    /// ever read back through <c>TimeZoneInfo</c>.
+    /// </para>
+    /// </summary>
+    private static bool IsKnownTimezone(string id)
+    {
+        var trimmed = id.Trim();
+        return trimmed.Length > 0 && TimeZoneInfo.TryFindSystemTimeZoneById(trimmed, out _);
+    }
+
     private static bool TryParsePeakHours(string range)
     {
         var parts = range.Split('-');
@@ -244,6 +404,17 @@ public static class AdminConfigEndpoints
         if (req.NoShowLookbackDays is not null) doc["no_show_lookback_days"] = ToElement(req.NoShowLookbackDays);
     }
 
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the six device numbers.</summary>
+    private static void WriteOptionalDeviceNumbers(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.WalkUpMaxMinutes is not null) doc["walk_up_max_minutes"] = ToElement(req.WalkUpMaxMinutes);
+        if (req.HeartbeatSeconds is not null) doc["heartbeat_seconds"] = ToElement(req.HeartbeatSeconds);
+        if (req.ActivationForwardWindowMinutes is not null) doc["activation_forward_window_minutes"] = ToElement(req.ActivationForwardWindowMinutes);
+        if (req.ActivationCueWindowMinutes is not null) doc["activation_cue_window_minutes"] = ToElement(req.ActivationCueWindowMinutes);
+        if (req.QrLifetimeSeconds is not null) doc["qr_lifetime_seconds"] = ToElement(req.QrLifetimeSeconds);
+        if (req.RosterWindowMinutes is not null) doc["roster_window_minutes"] = ToElement(req.RosterWindowMinutes);
+    }
+
     private static Dictionary<string, JsonElement> ParseObject(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return new();
@@ -272,6 +443,20 @@ public sealed record UpdateSettingsRequest(
     int PenaltyWindowMinutes,
     IReadOnlyList<string>? ButtonMap = null,
 
+    /// <summary>
+    /// The tenant's IANA zone. Optional on the same omitted-means-unchanged terms as the
+    /// keys below; it drives the whole booking grid (<c>ScheduleDay.timezone</c>) and was
+    /// served by GET while this record had no member for it, so it could not be set.
+    /// </summary>
+    string? Timezone = null,
+
+    /// <summary>
+    /// The per-weekday opening hours, <c>{"mon":"06:00-22:00", …}</c>. Optional on the same
+    /// omitted-means-unchanged terms as everything below; an empty map clears it, so every
+    /// weekday falls back to <see cref="DayStartMinute"/>/<see cref="DayEndMinute"/>.
+    /// </summary>
+    IReadOnlyDictionary<string, string>? OperatingHours = null,
+
     // The nine economics keys. All nullable, all optional: omitted means unchanged, so a
     // screen that edits only booking settings cannot revert an economics change made from
     // another one.
@@ -283,7 +468,16 @@ public sealed record UpdateSettingsRequest(
     string? PeakHours = null,
     int? PeakAdvanceHoursForRegular = null,
     int? RetentionYears = null,
-    int? NoShowLookbackDays = null);
+    int? NoShowLookbackDays = null,
+
+    // The six court-box / identification keys (WI-2). Optional on the same
+    // omitted-means-unchanged terms as the economics keys.
+    int? WalkUpMaxMinutes = null,
+    int? HeartbeatSeconds = null,
+    int? ActivationForwardWindowMinutes = null,
+    int? ActivationCueWindowMinutes = null,
+    int? QrLifetimeSeconds = null,
+    int? RosterWindowMinutes = null);
 
 /// <summary>
 /// A new court. <c>SlicePriceCredits</c> is optional: left out, the court is priced at the

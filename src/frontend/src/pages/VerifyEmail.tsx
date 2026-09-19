@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { endpoints } from "../lib/api";
 import { Card } from "../components/Card";
@@ -6,9 +6,15 @@ import { Card } from "../components/Card";
 export default function VerifyEmailPage() {
   const { token } = useParams<{ token: string }>();
   const [state, setState] = useState<"verifying" | "ok" | "fail">(token ? "verifying" : "fail");
+  // Same single-use token, same rule as /welcome: spend it once. StrictMode invokes this effect
+  // twice, so the second call was answered `400 invalid_or_expired` on a link that had just
+  // been consumed successfully — and whichever settled last is what the member read.
+  const spent = useRef<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
+    if (spent.current === token) return;
+    spent.current = token;
     endpoints.verifyEmail(token).then((r) => setState(r.verified ? "ok" : "fail")).catch(() => setState("fail"));
   }, [token]);
 

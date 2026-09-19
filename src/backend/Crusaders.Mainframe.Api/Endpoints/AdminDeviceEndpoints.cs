@@ -1,16 +1,21 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Services;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
 /// <summary>
-/// Admin management of the physical devices allowed to talk to this tenant.
+/// Admin management of the boxes that have called this club's API, and of the one key
+/// they all present.
 ///
 /// <para>
-/// The derived key is returned <b>once</b>, on registration and on rotation, and is
-/// never readable afterwards — it is not stored, so there is nothing to read back.
-/// That mirrors how <c>WebhookEndpoints</c> hands out an endpoint secret, and it is
-/// the reason rotation is a first-class operation rather than an afterthought.
+/// There is no register route. A board creates its own row on its first heartbeat, so
+/// this surface is list, edit, delete — plus the club key, which is <b>readable</b>
+/// rather than shown-once because an admin has to be able to paste it into a
+/// <c>secrets.h</c> at a workbench weeks after the club was created. Regenerating it
+/// invalidates the old key on the very next request, which is why the page warns that
+/// every box must be reflashed.
 /// </para>
 ///
 /// <para>
@@ -23,108 +28,185 @@ public static class AdminDeviceEndpoints
     {
         var g = app.MapGroup("/api/v1/admin/devices").RequireAuthorization(p => p.RequireRole("admin"));
 
+        // Declared before the "/{id:guid}" routes for readability only — the guid
+        // constraint already stops "api-key" matching them.
+        g.MapGet("/api-key", ApiKeyAsync);
+        g.MapPost("/api-key/regenerate", RegenerateApiKeyAsync);
+
         g.MapGet("/", ListAsync);
-        g.MapPost("/", RegisterAsync);
-        g.MapPost("/{id:guid}/rotate-key", RotateKeyAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);
-        g.MapPost("/{id:guid}/revoke", RevokeAsync);
+        g.MapDelete("/{id:guid}", DeleteAsync);
 
         return app;
     }
 
-    private static async Task<IResult> ListAsync(DeviceRegistryService devices, CancellationToken ct)
-        => Results.Ok((await devices.ListAsync(ct)).Select(DeviceView.Of).ToList());
+    /// <summary>
+    /// The tenant's configured heartbeat interval, which every device view carries so the
+    /// page can derive an offline threshold from it rather than hardcoding one. See
+    /// <see cref="DeviceView"/> and <see cref="HeartbeatCadence"/>.
+    /// </summary>
+    private static async Task<int> HeartbeatSecondsAsync(TenantSettingsAccessor settingsAccessor, CancellationToken ct)
+        => (await settingsAccessor.GetAsync(ct)).HeartbeatSeconds;
 
-    private static async Task<IResult> RegisterAsync(
-        RegisterDeviceRequest req, DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+    private static async Task<IResult> ListAsync(
+        DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor, CancellationToken ct)
     {
-        var invalid = Validate(req);
-        if (invalid is not null) return Results.BadRequest(new { error = invalid });
-
-        if (await devices.DeviceCodeTakenAsync(req.DeviceCode.Trim(), ct))
-        {
-            return Results.Conflict(new { error = "device_code_taken" });
-        }
-
-        var registered = await devices.RegisterAsync(
-            new RegisterDeviceCommand(req.DeviceCode, req.Name, req.Kind, req.Hardware, req.CourtNumber, req.GateKey),
-            ctx.User.Id() ?? Guid.Empty, ct);
-
-        // Shown once. Flash it into the device's secrets.h and do not keep a copy here.
-        return Results.Ok(new
-        {
-            device = DeviceView.Of(registered.Device),
-            device_key = registered.DeviceKey,
-            key_version = registered.Device.KeyVersion,
-            note = "Store this key on the device now. It is derived, not stored, and cannot be shown again.",
-        });
+        var heartbeat = await HeartbeatSecondsAsync(settingsAccessor, ct);
+        return Results.Ok((await devices.ListAsync(ct)).Select(d => DeviceView.Of(d, heartbeat)).ToList());
     }
 
-    private static async Task<IResult> RotateKeyAsync(
-        Guid id, DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+    /// <summary>
+    /// <c>GET /api/v1/admin/devices/api-key</c> — the club's device key, minted on the
+    /// first read so the page is never empty.
+    /// </summary>
+    private static async Task<IResult> ApiKeyAsync(
+        DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+        => Results.Ok(ApiKeyView(await devices.ApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
+
+    /// <summary>
+    /// <c>POST /api/v1/admin/devices/api-key/regenerate</c> — a new key, effective
+    /// immediately. Every box is offline until it is reflashed with it.
+    /// </summary>
+    private static async Task<IResult> RegenerateApiKeyAsync(
+        DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+        => Results.Ok(ApiKeyView(await devices.RegenerateApiKeyAsync(ctx.User.Id() ?? Guid.Empty, ct)));
+
+    // Block body, not an expression body: lizard's C# parser mis-scopes an
+    // expression-bodied member containing braces into a *global* pseudo-function the
+    // length of the file — see memory/gotchas.md.
+    private static object ApiKeyView(Domain.Tenant tenant)
     {
-        var device = await devices.FindAsync(id, ct);
-        if (device is null) return Results.NotFound();
-
-        var rotated = await devices.RotateKeyAsync(device, ctx.User.Id() ?? Guid.Empty, ct);
-
-        return Results.Ok(new
+        return new
         {
-            device = DeviceView.Of(rotated.Device),
-            device_key = rotated.DeviceKey,
-            key_version = rotated.Device.KeyVersion,
-        });
+            api_key = tenant.DeviceApiKey,
+            regenerated_at = tenant.DeviceApiKeyRegeneratedAt,
+        };
     }
 
+    /// <summary>
+    /// The admin PATCH. <c>enabled</c> is the one field here that moves money after the fact, and
+    /// it is <b>idempotent on purpose</b>: <c>DeviceRegistryService.UpdateAsync</c> stamps
+    /// <see cref="Device.OutOfServiceSince"/> only on the TRANSITION, so sending
+    /// <c>{"enabled": false}</c> to a board that is already out of service changes nothing.
+    ///
+    /// <para>
+    /// Without that guard a repeat of a request that says nothing new would move the recorded
+    /// switch-off instant forward to now, which pushes every unsettled deadline between the real
+    /// switch-off and the repeat out of <c>DoorWasShutFor</c>'s "dark at once" branch and back
+    /// into the silence test — reopening the <c>offline_after_seconds</c> hole the column was
+    /// added to close, across the sweep's whole lookback. The console happens to send only the
+    /// fields it changed, but this is a documented surface and callers repeat requests. Pinned by
+    /// <c>Taking_a_board_out_of_service_records_the_instant_and_returning_it_clears_it</c>.
+    /// </para>
+    /// </summary>
     private static async Task<IResult> UpdateAsync(
-        Guid id, UpdateDeviceRequest req, DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
+        Guid id, UpdateDeviceRequest req, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
+        HttpContext ctx, CancellationToken ct)
     {
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
+
+        if (ParseButtonMapPatch(req.ButtonMap, out var buttons) is { } badMap) return badMap;
+
+        // The effective map after this PATCH — the override it sets, else the one the row
+        // keeps, else the club's — must be able to address the effective court list, and a
+        // new list must be well-formed and name real courts. Including the trim: shrinking
+        // a box's court list turns off the court buttons it no longer has rather than
+        // refusing the edit.
+        var resolved = await AssignmentAsync(devices, device, req.CourtNumbers, buttons, ct);
+        if (resolved is { } outcome)
+        {
+            if (outcome.Error is { } invalid) return Results.BadRequest(new { error = invalid });
+            buttons = new Optional<ButtonMap?>(outcome.Override);
+        }
 
         var updated = await devices.UpdateAsync(
             device,
-            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumber, req.OtaChannel, req.PinnedVersion),
+            new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, buttons),
             ctx.User.Id() ?? Guid.Empty, ct);
 
-        return Results.Ok(DeviceView.Of(updated));
+        return Results.Ok(DeviceView.Of(updated, await HeartbeatSecondsAsync(settingsAccessor, ct)));
     }
 
-    private static async Task<IResult> RevokeAsync(
+    /// <summary>
+    /// Removes a box's row. Not destructive and not a revocation: the board still holds the
+    /// club key, so it re-registers on its next heartbeat with default courts. That is the
+    /// intended way to reset a box whose configuration has been got into a mess.
+    /// </summary>
+    private static async Task<IResult> DeleteAsync(
         Guid id, DeviceRegistryService devices, HttpContext ctx, CancellationToken ct)
     {
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
 
-        return Results.Ok(DeviceView.Of(await devices.RevokeAsync(device, ctx.User.Id() ?? Guid.Empty, ct)));
+        await devices.DeleteAsync(device, ctx.User.Id() ?? Guid.Empty, ct);
+
+        // A body rather than 204, because the Devices page types this route's answer and a
+        // 204 would leave it typing `undefined`.
+        return Results.Ok(new { deleted = true });
     }
 
-    private static string? Validate(RegisterDeviceRequest req)
+    /// <summary>
+    /// button_map on a PATCH is three-valued: absent leaves the override alone, null clears
+    /// it (back to the club's map), a list sets it. Bound as a JsonElement because a nullable
+    /// list cannot tell the first two apart. Returns the refusal, or null when the value is
+    /// usable (including absent).
+    /// </summary>
+    private static IResult? ParseButtonMapPatch(JsonElement element, out Optional<ButtonMap?>? buttons)
     {
-        if (string.IsNullOrWhiteSpace(req.DeviceCode)) return "device_code_required";
-        if (req.DeviceCode.Length > 64) return "device_code_too_long";
-        if (string.IsNullOrWhiteSpace(req.Name)) return "name_required";
+        buttons = null;
+        if (element.ValueKind == JsonValueKind.Undefined) return null;
+        if (element.ValueKind == JsonValueKind.Null)
+        {
+            buttons = new Optional<ButtonMap?>(null);
+            return null;
+        }
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return Results.BadRequest(new { error = "button_map_invalid", message = "button_map must be a list of eight entries or null" });
+        }
 
-        // A court box drives a specific court; a gate opens a specific gate. Mixing
-        // them means a heartbeat cannot be routed to anything.
-        if (req.Kind == DeviceKind.CourtBox && req.CourtNumber is null) return "court_number_required_for_court_box";
-        if (req.Kind == DeviceKind.Gate && string.IsNullOrWhiteSpace(req.GateKey)) return "gate_key_required_for_gate";
-
+        var wire = element.EnumerateArray().Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() ?? "" : "?").ToList();
+        if (!ButtonMap.TryParse(wire, out var parsed, out var reason))
+        {
+            return Results.BadRequest(new { error = "button_map_invalid", message = reason });
+        }
+        buttons = new Optional<ButtonMap?>(parsed);
         return null;
+    }
+
+    /// <summary>
+    /// The court-list and effective-map rules for a PATCH, or null when nothing relevant
+    /// changed — in which case the request's own button_map is left exactly as it arrived,
+    /// including absent.
+    /// </summary>
+    private static async Task<CourtAssignment?> AssignmentAsync(
+        DeviceRegistryService devices, Device device, IReadOnlyList<int>? newCourts, Optional<ButtonMap?>? buttons, CancellationToken ct)
+    {
+        if (device.Kind != DeviceKind.CourtBox || (newCourts is null && buttons is null)) return null;
+
+        var courts = newCourts ?? device.CourtNumbers;
+        if (newCourts is not null && DeviceRegistryService.ValidateCourtNumbers(courts) is { } bad)
+        {
+            return new CourtAssignment(bad, null, false);
+        }
+
+        // buttons is already the three-valued shape ResolveCourtAssignmentAsync wants:
+        // absent means the caller said nothing about the map, so shrinking the court list
+        // trims it; null means they explicitly asked for the club's map and is refused when
+        // it does not fit; a list is theirs and is refused when it does not fit.
+        return await devices.ResolveCourtAssignmentAsync(courts, buttons, device.ButtonMapJson, ct);
     }
 }
 
-public sealed record RegisterDeviceRequest(
-    string DeviceCode,
-    string Name,
-    DeviceKind Kind,
-    DeviceHardware Hardware,
-    int? CourtNumber,
-    string? GateKey);
-
+/// <summary>
+/// <c>button_map</c> is pinned snake_case like <c>court_numbers</c> and is three-valued:
+/// absent leaves the override alone, <c>null</c> clears it, a list sets it — hence a bare
+/// <see cref="JsonElement"/> (Undefined when absent, Null when null) rather than a
+/// nullable list, which reads both as null.
+/// </summary>
 public sealed record UpdateDeviceRequest(
     string? Name,
     bool? Enabled,
-    int? CourtNumber,
-    OtaChannel? OtaChannel,
-    string? PinnedVersion);
+    [property: JsonPropertyName("court_numbers")] IReadOnlyList<int>? CourtNumbers,
+    [property: JsonPropertyName("button_map")] JsonElement ButtonMap = default);

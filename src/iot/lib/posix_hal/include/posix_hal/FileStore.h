@@ -4,8 +4,8 @@
 // LittleFsStore, so a scenario that works against the simulator works against
 // the board. Deliberately NOT an in-memory map: a store that forgot everything
 // when the process exited could not reproduce "the box was power-cycled and
-// came back still claimed", which is the behaviour layer 1 of the discovery
-// stack depends on.
+// carried on where it left off", which is the whole point of persisting
+// anything.
 //
 // No integrity check inside the driver, for the same reason as the two device
 // stores: hal/Store.h puts that obligation on the caller, and a simulator that

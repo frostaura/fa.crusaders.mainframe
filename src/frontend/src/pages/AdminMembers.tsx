@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Fingerprint, KeyRound, Plus, Search, Users, Wallet, X } from "lucide-react";
-import { endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow } from "../lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Ban, Fingerprint, KeyRound, MailWarning, Plus, RotateCcw, Search, Users, Wallet, X } from "lucide-react";
+import { endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type MemberClass } from "../lib/api";
+import {
+  OTHER_BOOKING, newIdempotencyKey, recentBookingsFrom, relatedBookingRefusal,
+  validateAdjustment, type RecentBooking,
+} from "../lib/creditAdjustment";
+import { notifyPendingApplicationsChanged } from "../lib/pendingApplications";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { Modal } from "../components/Modal";
+import { ScrollArea } from "../components/ScrollArea";
 import { useToast } from "../components/Toast";
 import { cn, formatCredits } from "../lib/utils";
 
@@ -25,6 +31,27 @@ const STATUSES: { value: StatusFilter; label: string }[] = [
   { value: "Suspended", label: "Suspended" },
 ];
 
+/**
+ * What an admin is told the temporary password they just generated actually does.
+ *
+ * <p>
+ * It used to read "The member should change it after signing in" — the advisory wording from
+ * before the forced-change gate existed, when that sentence was the entire mechanism. The
+ * password now unlocks one screen and nothing else, and an admin reading the weaker sentence
+ * cannot tell from this screen that the member is locked out of everything until they replace
+ * it. This is the API's own wording for the same call.
+ * </p>
+ *
+ * <p>
+ * A named constant rather than a JSX block comment beside the paragraph: lizard's TSX scanner
+ * reads a braced JSX comment as the end of the enclosing function and swallows the rest of the
+ * file into one 347-line pseudo-function, which trips the length gate under a name nobody
+ * wrote. Same family as the brace traps already recorded for its C# parser.
+ * </p>
+ */
+const TEMP_PASSWORD_SCOPE =
+  "It only unlocks the change-password screen — they must choose a new password before they can do anything else.";
+
 export default function AdminMembersPage() {
   const toast = useToast();
   const [members, setMembers] = useState<AdminMember[] | null>(null);
@@ -39,9 +66,19 @@ export default function AdminMembersPage() {
   const [creditFor, setCreditFor] = useState<AdminMember | null>(null);
   const [creditAmount, setCreditAmount] = useState("");
   const [creditReason, setCreditReason] = useState("");
+  const [creditBooking, setCreditBooking] = useState("");
+  // The server's verdict on the named booking, shown at the field rather than as a toast:
+  // it is the one input the admin has to change, and a toast that has faded says nothing.
+  const [creditBookingError, setCreditBookingError] = useState<string | null>(null);
   const [resetFor, setResetFor] = useState<AdminMember | null>(null);
-  const [resetResult, setResetResult] = useState<{ tempPassword: string; emailSentTo: string } | null>(null);
+  const [resetResult, setResetResult] = useState<{ tempPassword: string; emailSentTo: string | null } | null>(null);
+  const [suspendFor, setSuspendFor] = useState<AdminMember | null>(null);
+  const [suspendReason, setSuspendReason] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** The key naming the adjustment currently being attempted; cleared once it lands. */
+  const adjustKey = useRef<string | null>(null);
+  /** Synchronous re-entry guard for Apply — see `adjust`. */
+  const adjustInFlight = useRef(false);
   const [enrollFor, setEnrollFor] = useState<AdminMember | null>(null);
   const [biometrics, setBiometrics] = useState<Record<string, BiometricEnrollmentRow>>({});
 
@@ -51,6 +88,16 @@ export default function AdminMembersPage() {
       // Server filter only when status is specific; the rest filters/sorts client-side.
       const r = await endpoints.adminMembers(status === "all" ? undefined : status);
       setMembers(r);
+      // The one place the pending set is known to have moved, because this is the one place
+      // it is re-read from the server. The chrome's "Members N" badge counts the same
+      // applications this screen's "N pending" summary does, and it re-read itself only on
+      // navigation — which an approval pressed ON /admin/members does not cause, so the two
+      // numbers sat contradicting each other on one screen. Notifying from HERE rather than
+      // from the approve and reject handlers is what makes them agree in every case and not
+      // only the happy one: the badge moves exactly when the list it is counting is
+      // replaced, so a transition that half-failed cannot leave one number ahead of the
+      // other. See lib/pendingApplications.
+      notifyPendingApplicationsChanged();
     } catch { toast.push({ tone: "danger", text: "Couldn't load members." }); }
     finally { setLoading(false); }
   };
@@ -85,40 +132,95 @@ export default function AdminMembersPage() {
     else { setSortKey(k); setSortDir(k === "created_at" ? "desc" : "asc"); }
   };
 
+  /**
+   * Approve, then re-read the club from the server whatever happened.
+   *
+   * <p>
+   * The reload used to sit INSIDE the `try`, so anything that threw between the button and
+   * it left the screen frozen on the pre-approval club — the row still offering Approve, the
+   * summary still saying "N pending", the chrome badge still counting the applicant. That is
+   * survivable when the request genuinely failed and lethal when it did not: with SMTP
+   * refusing connections the API committed the approval and then threw, the admin read
+   * "Approval failed." about a member who was already Active, and pressing Approve again
+   * answered 404. The reload is therefore in `finally`: the screen shows what the server
+   * says, not what the console hoped, and the two numbers on it move together.
+   * </p>
+   */
   const approve = async (m: AdminMember) => {
     setBusyId(m.membership_id);
-    try { await endpoints.adminApprove(m.membership_id); toast.push({ tone: "success", text: `${m.full_name} approved.` }); await load(); }
+    try {
+      const r = await endpoints.adminApprove(m.membership_id);
+      // Two different true things. The transition is the status change; the welcome email is
+      // a consequence of it, and the API now says which of the two happened. "Approved" with
+      // no further comment, when nobody was told, is how a club leaves an active member
+      // waiting for a link that was never sent.
+      toast.push(r.member_notified
+        ? { tone: "success", text: `${m.full_name} approved.` }
+        : { tone: "warning", text: `${m.full_name} is approved, but the welcome email couldn't be sent. Their membership is active — tell them directly.` });
+    }
     catch { toast.push({ tone: "danger", text: "Approval failed." }); }
-    finally { setBusyId(null); }
+    finally { setBusyId(null); await load(); }
   };
 
   const reject = async () => {
     if (!rejectFor || !rejectReason.trim()) return;
+    const name = rejectFor.full_name;
     setBusyId(rejectFor.membership_id);
     try {
-      await endpoints.adminReject(rejectFor.membership_id, rejectReason);
-      toast.push({ tone: "success", text: "Application rejected." });
+      const r = await endpoints.adminReject(rejectFor.membership_id, rejectReason);
+      toast.push(r.member_notified
+        ? { tone: "success", text: "Application rejected." }
+        : { tone: "warning", text: `${name}'s application is rejected, but the email couldn't be sent. Tell them directly — they'll be refused at sign-in until someone does.` });
       setRejectFor(null); setRejectReason("");
-      await load();
     } catch { toast.push({ tone: "danger", text: "Rejection failed." }); }
-    finally { setBusyId(null); }
+    finally { setBusyId(null); await load(); }
+  };
+
+  const closeCredit = () => {
+    setCreditFor(null); setCreditAmount(""); setCreditReason(""); setCreditBooking(""); setCreditBookingError(null);
+    adjustKey.current = null;
+    adjustInFlight.current = false;
   };
 
   const adjust = async () => {
     if (!creditFor) return;
+    // Two guards, because they stop two different things.
+    //
+    // The ref stops the second click: `busyId` is React state, and a second click landing
+    // before the re-render commits reads the old value — which is exactly what a
+    // double-click is. The ref is written synchronously, so the second call returns here.
+    //
+    // The key stops everything the ref cannot see: a retry after a failed response, a
+    // second tab, a request the browser retried under the covers. It names THIS movement
+    // and survives until the movement succeeds, so the server answers a repeat with the
+    // row it already wrote instead of writing a second one. A double-click posted +7
+    // twice and moved a member 444 -> 458; four clicks on a slow connection granted 44
+    // credits where 11 were typed. Money is ledger-only, so a duplicated row IS the wrong
+    // balance and nothing on the ledger says which of the two was the mistake.
+    if (adjustInFlight.current) return;
+    const bookingId = creditBooking.trim();
+    const complaint = validateAdjustment(creditAmount, creditReason, bookingId);
+    if (complaint) { toast.push({ tone: "warning", text: complaint }); return; }
     const amount = parseFloat(creditAmount);
-    if (isNaN(amount) || amount === 0) { toast.push({ tone: "warning", text: "Enter a non-zero amount." }); return; }
-    if (!creditReason.trim()) { toast.push({ tone: "warning", text: "A reason is required." }); return; }
     const targetUserId = creditFor.user_id;
+    adjustInFlight.current = true;
+    adjustKey.current ??= newIdempotencyKey();
     setBusyId(targetUserId);
+    setCreditBookingError(null);
     try {
-      const r = await endpoints.adminAdjust(targetUserId, amount, creditReason);
+      const r = await endpoints.adminAdjust(targetUserId, amount, creditReason, bookingId || undefined, adjustKey.current);
       // Reflect the new balance in this row immediately — no list refetch, no reload.
-      setMembers((prev) => prev?.map((m) => m.user_id === targetUserId ? { ...m, balance_credits: r.balance_after_credits } : m) ?? prev);
-      toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} ${formatCredits(Math.abs(amount))}.` });
-      setCreditFor(null); setCreditAmount(""); setCreditReason("");
-    } catch { toast.push({ tone: "danger", text: "Credit adjustment failed." }); }
-    finally { setBusyId(null); }
+      setMembers((prev) => patchMember(prev, (row) => row.user_id === targetUserId, { balance_credits: r.balance_after_credits }));
+      toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} ${formatCredits(Math.abs(amount))}${bookingId ? ` for booking ${bookingId.slice(0, 8)}` : ""}.` });
+      closeCredit();
+    } catch (err) {
+      // A refused booking id keeps the form open with the reason at the field. Anything
+      // else is not about one input, so it stays a toast.
+      const refusal = relatedBookingRefusal(err);
+      if (refusal) setCreditBookingError(refusal);
+      else toast.push({ tone: "danger", text: "Credit adjustment failed." });
+    }
+    finally { adjustInFlight.current = false; setBusyId(null); }
   };
 
   const resetPassword = async () => {
@@ -127,8 +229,77 @@ export default function AdminMembersPage() {
     try {
       const r = await endpoints.adminResetMemberPassword(resetFor.membership_id);
       setResetResult({ tempPassword: r.temp_password, emailSentTo: r.email_sent_to });
-      toast.push({ tone: "success", text: `Password reset for ${resetFor.full_name}.` });
+      toast.push(r.member_notified
+        ? { tone: "success", text: `Password reset for ${resetFor.full_name}.` }
+        : { tone: "warning", text: `Password reset for ${resetFor.full_name}, but the email couldn't be sent. Read them the password below.` });
     } catch { toast.push({ tone: "danger", text: "Password reset failed." }); }
+    finally { setBusyId(null); }
+  };
+
+  /**
+   * Assign a member's class.
+   *
+   * The endpoint and a typed client for it both existed and nothing called either, so
+   * every member onboarded through the product was permanently Regular — while the class
+   * decides the top-up rate (R100 buys 160 credits as Regular and 240 as league/senior)
+   * and peak-hour exclusivity. The row is corrected locally rather than by refetching the
+   * list, so a sorted, filtered, scrolled table does not jump under the admin's cursor.
+   */
+  const setMemberClass = async (m: AdminMember, next: MemberClass) => {
+    const previous = m.member_class;
+    if (next === previous) return;
+    setBusyId(m.membership_id);
+    setMembers((prev) => patchMember(prev, (r) => r.membership_id === m.membership_id, { member_class: next }));
+    try {
+      await endpoints.adminSetMemberClass(m.membership_id, next);
+      toast.push({ tone: "success", text: `${m.full_name} is now ${classLabel(next).toLowerCase()}.` });
+    } catch {
+      // Put the old value back: a select that keeps a class the server refused is a lie
+      // about a field that doubles what the member's money buys.
+      setMembers((prev) => patchMember(prev, (r) => r.membership_id === m.membership_id, { member_class: previous }));
+      toast.push({ tone: "danger", text: `Couldn't change ${m.full_name}'s class. Their rate is unchanged.` });
+    } finally { setBusyId(null); }
+  };
+
+  const suspend = async () => {
+    if (!suspendFor || !suspendReason.trim()) return;
+    setBusyId(suspendFor.membership_id);
+    try {
+      const r = await endpoints.adminSuspend(suspendFor.membership_id, suspendReason);
+      toast.push(r.member_notified
+        ? { tone: "success", text: `${suspendFor.full_name} suspended.` }
+        : { tone: "warning", text: `${suspendFor.full_name} is suspended, but the email couldn't be sent. They'll find out at the door unless you tell them.` });
+      setSuspendFor(null); setSuspendReason("");
+    } catch { toast.push({ tone: "danger", text: "Couldn't suspend this member." }); }
+    finally { setBusyId(null); await load(); }
+  };
+
+  const reactivate = async (m: AdminMember) => {
+    setBusyId(m.membership_id);
+    try {
+      const r = await endpoints.adminReactivate(m.membership_id);
+      toast.push(r.member_notified
+        ? { tone: "success", text: `${m.full_name} is active again.` }
+        : { tone: "warning", text: `${m.full_name} is active again, but the email couldn't be sent. Tell them directly.` });
+    } catch { toast.push({ tone: "danger", text: "Couldn't reactivate this member." }); }
+    finally { setBusyId(null); await load(); }
+  };
+
+  /**
+   * Send the verification email again.
+   *
+   * An unverified member cannot sign in with a password however active their membership
+   * is, and this is the button that unsticks them. The endpoint answers the same way for
+   * an address it does not hold, so the toast promises delivery to the address rather
+   * than confirming the account — there is nothing here to leak either way, but the copy
+   * should not imply a lookup that did not happen.
+   */
+  const resendVerification = async (m: AdminMember) => {
+    setBusyId(m.membership_id);
+    try {
+      await endpoints.resendVerification(m.email);
+      toast.push({ tone: "success", text: `Verification email sent to ${m.email}.` });
+    } catch { toast.push({ tone: "danger", text: "Couldn't send the verification email. Check the mail settings and try again." }); }
     finally { setBusyId(null); }
   };
 
@@ -182,109 +353,92 @@ export default function AdminMembersPage() {
         </div>
       </Card>
 
-      {/* Table */}
+      {/*
+        ScrollArea, not a bare `overflow-x-auto` div, and a table that stops being a table
+        on a phone.
+
+        The bare div was silent in both directions. At 1440 px the nine-column table
+        measured 1006 px inside a 990 px box and clipped its own ACTIONS header mid-word;
+        at 375 px it was 1006 px inside 341 px, so status, class, balance and every row
+        action sat off the right edge behind a scrollbar macOS does not draw — and
+        scrolling to reach them took the member's NAME off screen, leaving an admin
+        pressing Suspend on a row they could no longer identify.
+
+        Four changes, none of which drops a column:
+        • below `sm` each row renders as a card (`block` rows and cells, with the column
+          name printed from `data-label`), so everything is on screen at 375 px with no
+          sideways scroll at all — measured, 0 px of overflow;
+        • from `sm` up the identity column is sticky, so the name stays put while the rest
+          of the row scrolls under it;
+        • the actions column is sticky too, at the other edge, so the four things an admin
+          came here to press are on screen from the moment the page loads rather than 151 px
+          beyond the card's right edge;
+        • the avatar moved into the name cell and the action icons run in a row rather than
+          a column, which took ~90 px off the table's width and row height from 165 px to
+          one line (60.5–69 px, measured at 768 and 1440).
+
+        What did NOT happen is the table fitting the card. It is 1141 px against a 990 px
+        card at 1440 px and a 734 px one at 768 px, and no arrangement of eight columns that
+        keeps a readable name and email fits either. Sideways scroll is therefore the
+        mechanism, not a failure of one — and ScrollArea is what stops it being a silent one:
+        a gradient, a keyboard tab stop, and a sentence a screen reader can read, none of
+        which the plain div had. It was built in round 1 for exactly this and applied only to
+        the ledger.
+      */}
       <Card className="!p-0 overflow-hidden">
         {filtered.length === 0 ? (
           <EmptyState loading={loading} hasFilters={search.trim().length > 0 || status !== "all"} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-bg-muted/40 text-xs uppercase tracking-wide text-text-muted">
+          <ScrollArea label="Members table">
+            <table className="w-full text-sm sm:table-fixed">
+              <thead className="hidden sm:table-header-group bg-bg-muted text-xs uppercase tracking-wide text-text-muted">
                 <tr>
-                  <th className="text-left px-4 py-3" style={{ width: 60 }}></th>
-                  <SortHeader label="Name" k="full_name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="text-right px-4 py-3">Balance</th>
-                  <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                  <th className="text-right px-4 py-3">Actions</th>
+                  <SortHeader label="Name" k="full_name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="sticky left-0 z-20 bg-bg-muted" />
+                  <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn("hidden xl:table-cell", COLUMN_WIDTH.email)} />
+                  <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn("hidden lg:table-cell", COLUMN_WIDTH.memberNumber)} />
+                  <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={COLUMN_WIDTH.status} />
+                  <th className={cn("hidden md:table-cell text-left px-3 py-3", COLUMN_WIDTH.memberClass)}>Class</th>
+                  <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn("hidden lg:table-cell", COLUMN_WIDTH.joined)} />
+                  <th className={cn("text-right px-3 py-3 whitespace-nowrap sticky right-[200px] z-20 bg-bg-muted border-l border-border", COLUMN_WIDTH.balance)}>Balance</th>
+                  <th className={cn("text-right px-3 py-3 whitespace-nowrap sticky right-0 z-20 bg-bg-muted min-w-[200px] border-l border-border", COLUMN_WIDTH.actions)}>Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {filtered.map((m) => (
-                  <tr key={m.membership_id} className="hover:bg-bg-muted/30">
-                    <td className="px-4 py-3 align-middle">
-                      {m.photo_url ? (
-                        <img
-                          src={m.photo_url}
-                          alt=""
-                          width={36}
-                          height={36}
-                          style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}
-                          className="rounded-full object-cover block shrink-0"
-                        />
-                      ) : (
-                        <div
-                          style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}
-                          className="rounded-full bg-bg-muted text-text-secondary flex items-center justify-center text-sm font-medium shrink-0"
-                        >
-                          {m.full_name[0]?.toUpperCase() ?? "?"}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-text-primary truncate max-w-[180px]" title={m.full_name}>{m.full_name}</p>
-                        {biometrics[m.user_id]?.templates.length ? (
-                          <span
-                            title={`${biometrics[m.user_id].templates.length} fingerprint(s) enrolled`}
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-info-soft text-info-strong"
-                          >
-                            <Fingerprint size={11} /> {biometrics[m.user_id].templates.length}
-                          </span>
-                        ) : null}
-                      </div>
-                      {m.rejection_reason && <p className="text-xs text-danger-strong truncate max-w-[260px]" title={m.rejection_reason}>{m.rejection_reason}</p>}
-                    </td>
-                    <td className="px-4 py-3 text-text-secondary truncate max-w-[200px]" title={m.email}>{m.email}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-text-secondary">{m.membership_number}</td>
-                    <td className="px-4 py-3"><Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge></td>
-                    <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
-                      <span className={cn("font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}>
-                        {formatCredits(m.balance_credits)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-text-secondary whitespace-nowrap text-xs">
-                      {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col items-end gap-1">
-                        {m.status === "PendingApproval" && (
-                          <div className="flex gap-1.5">
-                            <Button onClick={() => approve(m)} disabled={busyId === m.membership_id} className="h-9 px-3 text-xs">Approve</Button>
-                            <Button variant="outline" onClick={() => { setRejectFor(m); setRejectReason(""); }} className="h-9 px-3 text-xs">Reject</Button>
-                          </div>
-                        )}
-                        {m.status === "Active" && (
-                          <>
-                            <IconAction title="Adjust credit" onClick={() => setCreditFor(m)} icon={<Wallet size={16} />} />
-                            <IconAction
-                              title={biometrics[m.user_id]?.templates.length ? "Manage biometrics" : "Enroll fingerprint"}
-                              onClick={() => setEnrollFor(m)}
-                              icon={<Fingerprint size={16} />}
-                            />
-                            <IconAction title="Reset password" onClick={() => setResetFor(m)} icon={<KeyRound size={16} />} />
-                          </>
-                        )}
-                        {m.status !== "Active" && m.status !== "PendingApproval" && (
-                          <IconAction title="Reset password" onClick={() => setResetFor(m)} icon={<KeyRound size={16} />} />
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                  <MemberRow
+                    key={m.membership_id}
+                    member={m}
+                    fingerprints={biometrics[m.user_id]?.templates.length ?? 0}
+                    busy={busyId === m.membership_id}
+                    onClass={(next) => setMemberClass(m, next)}
+                    actions={{
+                      approve: () => approve(m),
+                      reject: () => { setRejectFor(m); setRejectReason(""); },
+                      credit: () => setCreditFor(m),
+                      enroll: () => setEnrollFor(m),
+                      reset: () => setResetFor(m),
+                      suspend: () => { setSuspendFor(m); setSuspendReason(""); },
+                      reactivate: () => reactivate(m),
+                      resend: () => resendVerification(m),
+                    }}
+                  />
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollArea>
         )}
       </Card>
 
       {/* Reject modal */}
       {rejectFor && (
         <Modal onClose={() => setRejectFor(null)} title={`Reject ${rejectFor.full_name}'s application`}>
-          <Label>Reason (visible to applicant)</Label>
-          <Input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="e.g. Membership number not on file." />
+          {/* Bound, not merely adjacent. Both this and the suspend field below carried a
+              <Label> with no `htmlFor` and an <Input> with no `id`, so `el.labels.length`
+              was 0 and a screen reader announced an unlabelled edit box — for the one field
+              on the screen whose text is emailed verbatim to the person it is about. The
+              adjust-credit modal a few lines down had it right all along. */}
+          <Label htmlFor="reject-reason">Reason (visible to applicant)</Label>
+          <Input id="reject-reason" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="e.g. Membership number not on file." />
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="ghost" onClick={() => setRejectFor(null)}>Cancel</Button>
             <Button variant="danger" onClick={reject} disabled={!rejectReason.trim()}>Reject</Button>
@@ -292,16 +446,43 @@ export default function AdminMembersPage() {
         </Modal>
       )}
 
+      {/* Suspend modal */}
+      {suspendFor && (
+        <Modal onClose={() => setSuspendFor(null)} title={`Suspend ${suspendFor.full_name}?`}>
+          <p className="text-sm text-text-secondary">
+            They won’t be able to sign in, book a court, or open a court at the box. Their credit balance
+            and any bookings they already have are left exactly as they are, and reactivating restores
+            everything. The reason is emailed to them.
+          </p>
+          <Label htmlFor="suspend-reason" className="mt-3">Reason (visible to the member)</Label>
+          <Input id="suspend-reason" value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} placeholder="e.g. Membership dues unpaid since March." />
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="ghost" onClick={() => setSuspendFor(null)}>Cancel</Button>
+            <Button variant="danger" onClick={suspend} disabled={!suspendReason.trim() || busyId === suspendFor.membership_id}>
+              {busyId === suspendFor.membership_id ? "Suspending…" : "Suspend"}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
       {/* Credit adjust modal */}
       {creditFor && (
-        <Modal onClose={() => setCreditFor(null)} title={`Adjust credit — ${creditFor.full_name}`}>
-          <Label>Amount (ZAR — positive credits, negative debits)</Label>
-          <Input value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)} placeholder="e.g. 100" inputMode="decimal" />
-          <Label className="mt-3">Reason (audit-logged)</Label>
-          <Input value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Voided 2026-05-04 booking, reissuing credit" />
+        <Modal onClose={closeCredit} title={`Adjust credit — ${creditFor.full_name}`}>
+          <Label htmlFor="credit-amount">Amount (credits — positive adds, negative deducts)</Label>
+          <Input id="credit-amount" value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)} placeholder="e.g. 100" inputMode="decimal" />
+          <Label htmlFor="credit-reason" className="mt-3">Reason (audit-logged)</Label>
+          <Input id="credit-reason" value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Goodwill — court 2 lights faulty on 2026-05-04" />
+          <RelatedBookingField
+            userId={creditFor.user_id}
+            value={creditBooking}
+            error={creditBookingError}
+            onChange={(next) => { setCreditBooking(next); setCreditBookingError(null); }}
+          />
           <div className="flex justify-end gap-2 mt-4">
-            <Button variant="ghost" onClick={() => setCreditFor(null)}>Cancel</Button>
-            <Button onClick={adjust}>Apply</Button>
+            <Button variant="ghost" onClick={closeCredit}>Cancel</Button>
+            <Button onClick={adjust} disabled={busyId === creditFor.user_id}>
+              {busyId === creditFor.user_id ? "Applying…" : "Apply"}
+            </Button>
           </div>
         </Modal>
       )}
@@ -335,7 +516,12 @@ export default function AdminMembersPage() {
       {/* Reset password — show generated password once */}
       {resetFor && resetResult && (
         <Modal onClose={() => { setResetFor(null); setResetResult(null); }} title="Temporary password generated">
-          <p className="text-sm text-text-secondary">Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. The member should change it after signing in.</p>
+          <p className="text-sm text-text-secondary">
+            {resetResult.emailSentTo
+              ? <>Emailed to <strong className="text-text-primary">{resetResult.emailSentTo}</strong>. </>
+              : <><strong className="text-text-primary">Not emailed</strong> — the send failed, so this password only reaches the member if you pass it on. </>}
+            {TEMP_PASSWORD_SCOPE}
+          </p>
           <div className="my-4 px-4 py-3 rounded-lg border border-border bg-bg-muted font-mono text-base tracking-wider text-center select-all">
             {resetResult.tempPassword}
           </div>
@@ -349,28 +535,662 @@ export default function AdminMembersPage() {
   );
 }
 
-function IconAction({ title, icon, onClick }: { title: string; icon: React.ReactNode; onClick: () => void }) {
+/**
+ * One row of the members list, replaced in place.
+ *
+ * <p>
+ * The three callers all correct a single row locally rather than refetching the list, so a
+ * sorted, filtered, scrolled table does not jump under the admin's cursor.
+ * </p>
+ *
+ * <p>
+ * It is a named function with a block body rather than the inline
+ * <code>? {{ ...r, ...patch }} : r</code> each caller used to write, and that is a gate
+ * requirement, not taste: lizard's .tsx parser miscounts a brace-bearing object literal
+ * inside a ternary and swallows every function after it into the enclosing one, so
+ * `make complexity` reported a 278-line `setMemberClass` that does not exist and a
+ * 366-line `relatedBookingRefusal` that is nine. See memory/gotchas.md — this is the
+ * .tsx face of the same trap the C# expression-body entry describes.
+ * </p>
+ */
+function patchMember(
+  rows: AdminMember[] | null,
+  matches: (row: AdminMember) => boolean,
+  patch: Partial<AdminMember>,
+): AdminMember[] | null {
+  if (!rows) return rows;
+  return rows.map((row) => {
+    if (!matches(row)) return row;
+    return { ...row, ...patch };
+  });
+}
+
+/**
+ * One row action, as an icon.
+ *
+ * <p>
+ * <b>`disabled` is not decoration on this control.</b> Two of these fire a request straight
+ * from the click — Reactivate and Resend verification — and until it existed neither read the
+ * `busyId` the handlers were already setting. An ordinary impatient double-click on Reactivate
+ * therefore sent two requests: the first returned 200 and the second 409, and the admin was
+ * shown both toasts at once — "Aisha Patel is active again." in green above "Couldn't
+ * reactivate this member." in red, with nothing on screen saying which was true. Resend was
+ * worse than confusing: it sent two verification emails, and §2 spends any earlier unused link
+ * on a resend, so the first mail the member received contained a dead link.
+ * </p>
+ *
+ * <p>
+ * The guarded <code>Approve</code> button beside these had read <code>busyId</code> since it
+ * was written and fired exactly once on the same double-click, which is what made this an
+ * omission on one control rather than a missing pattern.
+ * </p>
+ */
+function IconAction({ title, icon, onClick, tone = "info", disabled = false }: { title: string; icon: React.ReactNode; onClick: () => void; tone?: "info" | "danger"; disabled?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
+      aria-busy={disabled}
       title={title}
       aria-label={title}
-      className="inline-flex items-center justify-center w-8 h-8 rounded-md text-text-secondary hover:text-info-strong hover:bg-info-soft transition"
+      className={cn(
+        "inline-flex items-center justify-center w-8 h-8 rounded-md text-text-secondary transition shrink-0",
+        tone === "danger" ? "hover:text-danger-strong hover:bg-danger-soft" : "hover:text-info-strong hover:bg-info-soft",
+        "disabled:opacity-40 disabled:cursor-wait disabled:hover:bg-transparent",
+      )}
     >
       {icon}
     </button>
   );
 }
 
-function SortHeader({ label, k, sortKey, sortDir, onSort }: { label: string; k: SortKey; sortKey: SortKey; sortDir: SortDir; onSort: (k: SortKey) => void }) {
+/** Everything a row can do, so the row itself holds no page state. */
+type MemberRowActions = {
+  approve: () => void;
+  reject: () => void;
+  credit: () => void;
+  enroll: () => void;
+  reset: () => void;
+  suspend: () => void;
+  reactivate: () => void;
+  resend: () => void;
+};
+
+/**
+ * A cell that is a table cell on a desktop and a labelled line of a card on a phone.
+ *
+ * <p>
+ * `data-label` is printed by a `::before` pseudo-element below `sm`, which is what lets the
+ * same DOM be a nine-column table at 1440 px and a readable card at 375 px without hiding a
+ * single column and without rendering the row twice. It has to be a pseudo-element rather
+ * than a second `<span>`: a duplicate label in the DOM is a duplicate accessible name, and
+ * every `getByText("Status")` in the suite would then match two nodes.
+ * </p>
+ */
+/**
+ * Which widths each column is drawn at — one place, so a header and its body cells cannot
+ * disagree about it.
+ *
+ * <p>
+ * <b>A pinned column hides whatever the table overflows by.</b> `position: sticky` on the
+ * right pulls a cell LEFT of where it sits in flow by exactly the un-scrolled overflow, and
+ * whatever was in that band is underneath it. Measured in Chromium against a seeded club:
+ * the table is 1079px, its container was 990px at <em>both</em> 1440px and 1920px, and the
+ * 89px band immediately left of the pins is precisely where the 99px `Joined` column sat —
+ * so the header rendered as a bare glyph and every cell as a single `S`, at every desktop
+ * width, with ~800px of page beside it unused. At 768px the overflow is 345px and `Status`
+ * and `Class` go under too.
+ * </p>
+ *
+ * <p>
+ * Three rounds tried to solve that by column ORDER, and order cannot solve it: the hidden
+ * band is wherever the pins land, so every arrangement has a victim. The only overlap-free
+ * states are "no overflow" or "no pinning", and pinning is what puts the row actions on
+ * screen at all. So the overflow goes instead — in two halves. This table decides <b>which</b>
+ * columns exist at each width; {@link COLUMN_WIDTH} and `table-fixed` decide how wide they
+ * are, which is what makes "no overflow" a property of the CSS rather than of the club's
+ * longest name. A column that does not fit is <b>not drawn</b> rather than drawn underneath
+ * something. Below `sm` every field is still on screen, because the row is a card there and
+ * nothing is a column at all.
+ * </p>
+ *
+ * <p>
+ * The breakpoints come from the declared widths in {@link COLUMN_WIDTH} against the
+ * container at each one — 606 at `sm`, 734 at `md`, 990 at `lg`, 1246 at `xl` and above,
+ * measured in Chromium — with `Name` taking whatever is left. Changing a width or a
+ * breakpoint means re-running `e2e/admin-members-layout.spec.ts`, which measures the result
+ * in a real browser at four widths against two clubs with different-length names.
+ * </p>
+ */
+const COLUMN_DISPLAY = {
+  /** Card field below `sm`, table cell above it. */
+  always: "block sm:table-cell",
+  /** Card field below `sm`; from 768 up, once `Class` fits beside the pinned pair. */
+  fromMd: "block sm:hidden md:table-cell",
+  /** Card field below `sm`; from 1024 up — `Member #` and `Joined`. */
+  fromLg: "block sm:hidden lg:table-cell",
+  /** Card field below `sm`; from 1280 up, where the full table finally fits its container. */
+  fromXl: "block sm:hidden xl:table-cell",
+} as const;
+
+/**
+ * The width of every column except <b>Name</b>, which is deliberately the only `auto` one.
+ *
+ * <p>
+ * These are not cosmetic. The table is <code>table-fixed</code> from `sm` up, and that is
+ * what makes this layout a property of the breakpoints rather than of whichever club is
+ * loaded. Under the default <code>auto</code> algorithm a column is as wide as its widest
+ * cell wants to be, so the table's total width — and therefore how much of it overflows its
+ * container, and therefore how much of it the two pinned columns paint over — was a function
+ * of the longest member NAME in the club. The round that "removed the overflow" removed it
+ * for a seeded club whose longest name is 23 characters. Measured in Chromium: at 768px that
+ * fixture already overflowed by 61px with 8 of 20 sample points across the Class header
+ * covered, and a 25-character name ("Christopher van der Merwe") took it to 80px and 10 of
+ * 20. The e2e pin could not see either, because it sampled each header's centre point only
+ * and the centre happened to be clear.
+ * </p>
+ *
+ * <p>
+ * Fixed layout removes the mechanism instead of the symptom: a `w-full` fixed-layout table
+ * is exactly its container's width whatever the content, so <em>overflow cannot arise</em>
+ * and the pins have nothing to hide. Every column here is declared; Name takes the slack, so
+ * the club with the longest names gets a narrower name column and a truncated, hoverable
+ * name rather than a table that grows and slides a header under a pinned cell. Actions in
+ * particular must stay exactly 200px, because <code>Balance</code> is pinned at
+ * <code>right-[200px]</code> and the two numbers are one decision.
+ * </p>
+ *
+ * <p>
+ * <b>What the trade costs, stated rather than discovered.</b> Under the old auto layout no
+ * cell ever ellipsised — every column was as wide as its content — and the price was the
+ * overflow, and therefore the occlusion. A fixed column can clip where an auto one grew, so
+ * the numbers below are the measured content widths at 1280px (Name 238 · Email 208 ·
+ * Member # 107 · Status 95 · Class 163 · Joined 105 · Balance 122 · Actions 209, summing to
+ * 1247 against a 1246px container — the old layout fitted at `xl` by one pixel and by luck)
+ * with the slack moved to Name. Measured against the seeded club, nothing clips at 375, 640,
+ * 700, 767, 1023, 1100, 1279, 1280, 1440, 1600 or 1920. At 768 six names and at 1024 one
+ * name ellipsise — and at exactly those two widths the old layout overflowed by 61px and 9px
+ * with the `Class` and `Joined` headers partly under a pinned cell. A name cut with an
+ * ellipsis and a hover title is a cued loss; a header painted over by a pinned column is a
+ * silent one. That is the whole exchange.
+ * </p>
+ *
+ * <p>
+ * <b>Balance is declared in <code>rem</code> and everything else in <code>px</code>, and that
+ * is deliberate.</b> Text scales with the reader's own font size and a <code>px</code> column
+ * does not, so at a 20px root font — Chrome's "Large", an ordinary accessibility setting —
+ * <code>98765432.19 cr</code> needed 133px of a 113px box and at 24px it needed 160 of 107.
+ * The money column elided silently at exactly the setting somebody turns on because they are
+ * finding it hard to read. In <code>rem</code> the column grows with the text and the balance
+ * stays whole at 16, 20 and 24px, measured. The 18px it takes at the default size, and the
+ * more it takes above that, comes out of Name, which is the auto column and already truncates
+ * with a hover title. The other columns hold badges, dates and buttons whose loss is cued;
+ * only this one holds a number whose prefix is a different plausible amount.
+ * </p>
+ *
+ * <p>
+ * A fixed-width column also cannot grow for its own HEADER, and until round 9 the header
+ * simply overflowed: at a 24px root font the <code>Member #</code> sort button painted over 3
+ * of 20 sample points of the <code>Status</code> header at 1024, 1280 and 1440, and the
+ * <code>Name</code> button over 5 and 9 of 20 at 640 and 768, with <code>regionOverflow</code>
+ * reporting 0 throughout. {@link SortHeader} now clips its own label with an ellipsis and a
+ * hover title instead, which is the same trade every other cell here makes.
+ * </p>
+ *
+ * <p>
+ * Changing any number here means re-running <code>e2e/admin-members-layout.spec.ts</code>,
+ * which measures the result in a real browser at four widths — and which now varies the
+ * fixture's longest name, because a layout that only holds for one club's data is not fixed,
+ * and the reader's root font size, because a layout that only holds at 16px is not either.
+ * </p>
+ */
+const COLUMN_WIDTH = {
+  email: "w-[216px]",
+  memberNumber: "w-[104px]",
+  status: "w-[118px]",
+  memberClass: "w-[148px]",
+  joined: "w-[100px]",
+  balance: "w-[9rem]",
+  actions: "w-[200px]",
+} as const;
+
+function Cell({ label, className, align = "left", display = COLUMN_DISPLAY.always, children }: { label: string; className?: string; align?: "left" | "right"; display?: string; children: React.ReactNode }) {
+  return (
+    <td
+      data-label={label}
+      className={cn(
+        display,
+        "px-0 sm:px-3 py-0.5 sm:py-3 text-left",
+        // The label, on a phone only. `content-none` from `sm` up is what keeps it off the
+        // desktop table, where the column header already says it.
+        "before:content-[attr(data-label)] before:mr-2 before:text-[10px] before:uppercase before:tracking-wide before:text-text-muted sm:before:content-none",
+        "before:inline-block before:w-20 sm:before:w-0",
+        align === "right" && "sm:text-right",
+        className,
+      )}
+    >
+      {children}
+    </td>
+  );
+}
+
+/**
+ * One member, as a table row from `sm` up and as a card below it.
+ *
+ * <p>
+ * Lifted out of the page's JSX rather than left inline, because lizard's .tsx parser folds
+ * a page's whole return into whichever function precedes it and `make complexity` then
+ * measures the lot as one — see the note on {@link patchMember}. It also keeps the row's
+ * markup readable, which matters here: the identity cell is sticky, so its background has
+ * to be opaque, and that is easy to lose in a 120-line return.
+ * </p>
+ */
+function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
+  member: AdminMember;
+  fingerprints: number;
+  busy: boolean;
+  onClass: (next: MemberClass) => void;
+  actions: MemberRowActions;
+}) {
+  return (
+    <tr className="block sm:table-row p-3 sm:p-0 hover:bg-bg-muted/30">
+      {/*
+        Identity: avatar and name in ONE cell, and sticky from `sm` up.
+
+        Two defects at once. The avatar had a 60 px column of its own, which was 92 px of
+        the 1006 px that would not fit the 990 px card; and with the name scrolling away
+        with everything else, an admin who scrolled right to reach the actions was pressing
+        Suspend on a row they could no longer identify. A sticky cell needs an opaque
+        background or the columns underneath show through it as it passes.
+      */}
+      <td className="block sm:table-cell sm:sticky sm:left-0 sm:z-10 bg-bg-surface px-0 sm:px-3 py-1 sm:py-3 sm:align-middle">
+        <div className="flex items-center gap-2">
+          {m.photo_url ? (
+            <img
+              src={m.photo_url}
+              alt=""
+              width={36}
+              height={36}
+              style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}
+              className="rounded-full object-cover block shrink-0"
+            />
+          ) : (
+            <div
+              style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}
+              className="rounded-full bg-bg-muted text-text-secondary flex items-center justify-center text-sm font-medium shrink-0"
+            >
+              {m.full_name[0]?.toUpperCase() ?? "?"}
+            </div>
+          )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-text-primary truncate max-w-[200px] sm:max-w-none" title={m.full_name}>{m.full_name}</p>
+              {fingerprints > 0 ? (
+                <span
+                  title={`${fingerprints} fingerprint(s) enrolled`}
+                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-info-soft text-info-strong shrink-0"
+                >
+                  <Fingerprint size={11} /> {fingerprints}
+                </span>
+              ) : null}
+            </div>
+            {m.rejection_reason && <p className="text-xs text-danger-strong truncate max-w-[220px] sm:max-w-none" title={m.rejection_reason}>{m.rejection_reason}</p>}
+          </div>
+        </div>
+      </td>
+      <Cell label="Email" display={COLUMN_DISPLAY.fromXl} className="text-text-secondary">
+        <span className="block truncate max-w-[220px] sm:max-w-full" title={m.email}>{m.email}</span>
+      </Cell>
+      <Cell label="Member #" display={COLUMN_DISPLAY.fromLg} className="font-mono text-xs text-text-secondary">
+        {/* A club that prefixes its year issues numbers three times this column wide, and the
+            ellipsis was the only cue: measured at 245px of content in an 80px box, with no
+            title to recover it from. Elision here is a fair trade for a fixed column; an
+            unrecoverable one is not. */}
+        <span className="block truncate max-w-[180px] sm:max-w-full" title={m.membership_number}>{m.membership_number}</span>
+      </Cell>
+      {/*
+        Status, and — under it — whether this member ever confirmed their address.
+
+        The "Unverified" marker used to live inside the Email cell, which is drawn only from
+        1280px up. Turning the marker on in the same round that stopped drawing Email below
+        `xl` made it invisible at 640-1279: an admin at 768 or 1024 could not see that a
+        member was unverified at all, on the screen whose whole job is answering "the app
+        will not let me in". It was READABLE at 1024-1279 before that round, so it was a
+        regression, not a pre-existing gap.
+
+        (No apostrophes in this comment on purpose: lizard reads a bare one in JSX text as a
+        string opener and swallows the rest of the file — see memory/gotchas.md.)
+
+        It belongs on Status because Status is drawn at every width, and because that is what
+        it is: a second fact about the standing of the account. Stacked rather than beside, so
+        COLUMN_WIDTH.status (118px, whatever that number becomes) holds both, and so the row
+        grows by one short line only for the members it applies to. The number used to be
+        written out here as 124px, which the code has never carried; a width quoted in a
+        comment beside the constant that contradicts it is worse than no number at all.
+      */}
+      <Cell label="Status">
+        <div className="flex flex-col items-start gap-1">
+          <Badge tone={statusTone(m.status)}>{prettyStatus(m.status)}</Badge>
+          {m.email_verified === false && (
+            <span
+              title="This member never confirmed their email address, so they cannot sign in with a password."
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-warning-soft text-warning-strong"
+            >
+              <MailWarning size={11} /> Unverified
+            </span>
+          )}
+        </div>
+      </Cell>
+      <Cell label="Class" display={COLUMN_DISPLAY.fromMd}>
+        <MemberClassCell member={m} busy={busy} onChange={onClass} />
+      </Cell>
+      <Cell label="Joined" display={COLUMN_DISPLAY.fromLg} className="text-text-secondary whitespace-nowrap text-xs">
+        {new Date(m.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
+      </Cell>
+      <Cell label="Balance" align="right" className="tabular-nums whitespace-nowrap sm:sticky sm:right-[200px] sm:z-10 bg-bg-surface sm:border-l sm:border-border">
+        {/*
+          `truncate` and the title are the belt; the fixed column width is the braces. A column
+          clips exactly as silently as a pinned one covered — `123456.78 cr` reading as
+          `12345`, with no ellipsis and no cue, is the misread this column was pinned for in
+          the first place, and swapping the pin for a width would reproduce it for a bigger
+          number.
+
+          The width is measured, not guessed, and the number here used to be neither. It said
+          "132px holds nine significant digits" beside a column declared at 126px, and the
+          round-8 verifier measured `98765432.19 cr` at scrollWidth 107 against clientWidth 101 at
+          640, 768, 1024, 1280, 1440 and 1920 — an admin read `98765432.1…` at EVERY width,
+          on the fixture the e2e spec calls a club buying credit in bulk. Measured in Chromium
+          on the production build with the bundled Figtree actually loaded:
+          `-99999999.99 cr` is 112.4px wide and `-123456789.50 cr` is 121.2px. 9rem of column
+          is 119px of content at the default root font, once the 24px of padding and the 1px
+          pin border are taken off, so every balance from -99 999 999.99 to 99 999 999.99 is
+          drawn in full and a ten-digit one elides with an ellipsis and a hover title rather
+          than reading as a plausible smaller amount. In `rem` rather than `px` so that holds
+          at a raised browser font size too — see COLUMN_WIDTH. The 18px comes off Name, which
+          is the auto column and already truncates with a title.
+
+          `e2e/admin-members-layout.spec.ts` measures scrollWidth against clientWidth on this
+          cell now, so this paragraph cannot go back to being a number nobody checked.
+        */}
+        <span
+          title={formatCredits(m.balance_credits)}
+          className={cn("block truncate font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}
+        >
+          {formatCredits(m.balance_credits)}
+        </span>
+      </Cell>
+      {/*
+        Actions: one line, and pinned to the right edge from `sm` up.
+
+        Two rounds argued `flex-wrap` against `flex-row` on the div below without either
+        one measuring it, so this was settled in Chromium against the real stack — an admin
+        signed in against a seeded club of seven members, at 375, 768 and 1440 px. What the
+        three candidate layouts actually do (row height / how many of the 27 action controls
+        are on screen before the admin scrolls anything):
+
+          flex-wrap      768: 92.5–136.5 px, 0 of 27 · 1440: 92.5–136.5 px, 0 of 27
+          flex-row       768: 60.5–69 px,    0 of 27 · 1440: 60.5–69 px,    0 of 27
+          flex-row+pin   768: 60.5–69 px,   27 of 27 · 1440: 60.5–69 px,   27 of 27
+
+        So the comment that used to sit here had it backwards: wrapping is what MAKES the
+        tall row, not what prevents it — it lets the table squeeze this column from 197 px to
+        96 px, and the buttons then stack into the 136 px row that is two thirds of the way
+        back to the original 165 px one. `flex-row` with no wrap is what holds one line.
+
+        And `flex-row` alone was not enough either. The table is 1141 px wide and the card is
+        990 px at 1440 px, so before this the entire action set sat outside the scroller's
+        box on arrival: every action was reachable, and none was visible. Pinning the column
+        the way the identity column is already pinned puts all four on screen at both desktop
+        widths with the member's name still opposite them, and the middle columns scroll
+        between the two pinned edges.
+
+        The pin overlays whatever it covers, and round 4 tried to solve that by column order
+        — `Joined` between `Class` and `Balance`, on the theory that a clipped date cannot
+        lie. Measured in Chromium at every pixel of scroll, that was wrong twice over. It did
+        not move Balance away from the pin at all (Balance was still the column immediately
+        before it), and ordering cannot work in principle: the right pin sweeps
+        `[clientWidth - 200, tableWidth]` and the left one sweeps `[0, overflow + 222]`, and
+        at 768 px those two ranges already cover the whole 1144 px table. There is no column
+        position that is safe from both. What the shipped order actually produced, glyph by
+        glyph, was `1500.00 cr` reading as `150` at scrollLeft 96 of 151 at 1440 px — and
+        `123456.78 cr` reading as `12345` at scrollLeft 0, before the admin touches anything.
+        A member with 123 456 credits displayed as 12 345, on the screen where credit is
+        adjusted, with no ellipsis and no cue that anything was cut.
+
+        So the money column is pinned too, beside the actions, rather than left to pass under
+        them. `Balance` sits at `right-[200px]` and `Actions` is held to `min-w-[200px]` —
+        the two numbers are one decision and the tests assert they match, because a pin whose
+        offset no longer equals the width it clears puts the balance straight back under the
+        actions. Contiguity is part of it: Balance must be the column immediately before
+        Actions or a scrolling column shows through the seam between the two pinned cells.
+
+        One consequence to know about before touching `min-w-[200px]`: it also decides whether
+        `flex-wrap` on the div below is still a defect. Round 4 caught wrapping in the browser
+        because the table squeezed this column to 96 px and the buttons stacked; with a 200 px
+        floor the widest action row (Approve + Reject + Resend) measures 173.4 px of content in
+        175.5 px of space, so wrapping now renders identically and no browser assertion can see
+        it. That is a 2.1 px margin — a fifth control or a longer label puts it back — so the
+        `flex-row` / not-`flex-wrap` assertions in AdminMembers.test.tsx and
+        admin-members-layout.test.tsx are what hold that line now, and they are not decoration.
+
+        Measured after the change, at 1 px granularity across five fixture variations (large,
+        negative, fractional, all-pending, long-string) at both 768 and 1440: zero scroll
+        positions at which any balance renders partially, and the row actions stay 27-of-27
+        on screen at rest. The remaining columns scroll between the two pinned edges, which is
+        the same sideways scroll ScrollArea announces with a gradient, a tab stop and a
+        sentence.
+      */}
+      <Cell label="Actions" align="right" className="pt-2 sm:pt-3 sm:sticky sm:right-0 sm:z-10 bg-bg-surface sm:min-w-[200px] sm:border-l sm:border-border">
+        <div className="flex flex-row items-center gap-1 sm:justify-end">
+          {m.status === "PendingApproval" && (
+            <>
+              <Button onClick={actions.approve} disabled={busy} className="h-9 px-3 text-xs">Approve</Button>
+              <Button variant="outline" onClick={actions.reject} disabled={busy} className="h-9 px-3 text-xs">Reject</Button>
+            </>
+          )}
+          {m.status === "Active" && (
+            <>
+              <IconAction title="Adjust credit" onClick={actions.credit} icon={<Wallet size={16} />} disabled={busy} />
+              <IconAction
+                title={fingerprints > 0 ? "Manage biometrics" : "Enroll fingerprint"}
+                onClick={actions.enroll}
+                icon={<Fingerprint size={16} />}
+                disabled={busy}
+              />
+              <IconAction title="Reset password" onClick={actions.reset} icon={<KeyRound size={16} />} disabled={busy} />
+              <IconAction
+                title="Suspend member"
+                onClick={actions.suspend}
+                icon={<Ban size={16} />}
+                tone="danger"
+                disabled={busy}
+              />
+            </>
+          )}
+          {m.status === "Suspended" && (
+            <>
+              <IconAction title="Reactivate member" onClick={actions.reactivate} icon={<RotateCcw size={16} />} disabled={busy} />
+              <IconAction title="Reset password" onClick={actions.reset} icon={<KeyRound size={16} />} disabled={busy} />
+            </>
+          )}
+          {m.status === "Rejected" && (
+            <IconAction title="Reset password" onClick={actions.reset} icon={<KeyRound size={16} />} disabled={busy} />
+          )}
+          {/* Available whatever the status: an applicant who never verified is
+              stuck before approval matters, and an approved one is stuck after. */}
+          {m.email_verified === false && (
+            <IconAction title="Resend verification email" onClick={actions.resend} icon={<MailWarning size={16} />} disabled={busy} />
+          )}
+        </div>
+      </Cell>
+    </tr>
+  );
+}
+
+const MEMBER_CLASSES: MemberClass[] = ["Regular", "LeagueOrSenior"];
+
+function classLabel(c: MemberClass): string {
+  return c === "LeagueOrSenior" ? "League or senior" : "Regular";
+}
+
+/**
+ * The member's class, editable in place.
+ *
+ * <p>
+ * A select rather than a modal because this is a two-value field an admin changes while
+ * reading down a list, and a confirmation step for it would be ceremony. It is read-only
+ * for a rejected application: that membership is not going to buy anything, and offering
+ * a rate control on it invites the question of whether setting one revives the account.
+ * </p>
+ */
+function MemberClassCell({ member, busy, onChange }: { member: AdminMember; busy: boolean; onChange: (next: MemberClass) => void }) {
+  const current = member.member_class ?? "Regular";
+  if (member.status === "Rejected") {
+    return <span className="text-xs text-text-muted">{classLabel(current)}</span>;
+  }
+  return (
+    <select
+      value={current}
+      disabled={busy}
+      aria-label={`Member class for ${member.full_name}`}
+      onChange={(e) => onChange(e.target.value as MemberClass)}
+      className="h-9 px-2 w-full max-w-full rounded-lg border border-border bg-bg-surface text-text-primary text-xs disabled:opacity-60"
+    >
+      {MEMBER_CLASSES.map((c) => <option key={c} value={c}>{classLabel(c)}</option>)}
+    </select>
+  );
+}
+
+/**
+ * The optional booking a credit adjustment is compensation for.
+ *
+ * <p>
+ * Naming the booking is what turns a manual credit from plain money into evidence. It
+ * does <b>not</b> stand in for the automatic reversal and does not cancel it: a no-show
+ * is reversed on its own the moment the box's attendance upload arrives, and both legs
+ * of that reversal are always attempted. What naming the booking does is make the hand
+ * adjustment part of the arithmetic — settlement-model I3 nets it against the reversal
+ * <em>one leg at a time</em>:
+ * </p>
+ *
+ * <pre>
+ * penaltyBack = max(0, penalised − Σ  positive adjustments naming b)
+ * refundBack  = max(0, refunded  − Σ |negative adjustments naming b|)
+ * </pre>
+ *
+ * <p>
+ * So a positive adjustment reduces the penalty the reversal gives back, and a negative
+ * one reduces the refund the reversal takes away. The sign is never read as a signal
+ * that the desk "already fixed it" — the model tried that, and because the honest
+ * outstanding after a sweep is always negative, a positive adjustment could never be
+ * the whole correction: it matched only wrong-direction repairs, skipped the refund
+ * reversal, and made a played court free (review finding 2).
+ * </p>
+ *
+ * <p>
+ * Netting caps at each leg, so an adjustment larger than the leg is worth is a decision
+ * the model does not claw back; the excess stands on the ledger under the admin's name
+ * (settlement-model §7.1). The copy below says all of this, because the copy here used
+ * to say the reverse — first that a credit was the repair for a wrongly-recorded
+ * no-show, then that a credit on top left the member "holding both". Neither is true
+ * under I3, and both push the desk into paying the wrong amount.
+ * </p>
+ *
+ * <p>
+ * The booking must be this member's own. The picker only offers their bookings, and a
+ * typed id is checked here for shape; ownership and existence are the server's, and its
+ * two refusals arrive back here as {@link RELATED_BOOKING_REFUSAL} text shown at this
+ * field rather than as a toast.
+ * </p>
+ */
+function RelatedBookingField(
+  { userId, value, error, onChange }: { userId: string; value: string; error: string | null; onChange: (next: string) => void },
+) {
+  const [recent, setRecent] = useState<RecentBooking[] | null>(null);
+  const [choice, setChoice] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    // Best effort: the field degrades to "type the ID" if the ledger cannot be read.
+    endpoints.adminLedger({ userId, limit: 50 })
+      .then((rows) => { if (!cancelled) setRecent(recentBookingsFrom(rows)); })
+      .catch(() => { if (!cancelled) setRecent([]); });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const pick = (next: string) => {
+    setChoice(next);
+    onChange(next === OTHER_BOOKING ? "" : next);
+  };
+
+  return (
+    <div className="mt-3">
+      <Label htmlFor="credit-booking">For booking (optional)</Label>
+      <select
+        id="credit-booking"
+        value={choice}
+        onChange={(e) => pick(e.target.value)}
+        className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+      >
+        <option value="">Not for a specific booking</option>
+        {recent === null && <option value="loading" disabled>Loading recent bookings…</option>}
+        {(recent ?? []).map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+        <option value={OTHER_BOOKING}>Another booking of this member's — enter its ID</option>
+      </select>
+      {choice === OTHER_BOOKING && (
+        <Input
+          aria-label="Booking ID"
+          className="mt-2 font-mono text-xs"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="00000000-0000-0000-0000-000000000000"
+          autoComplete="off"
+        />
+      )}
+      {choice === OTHER_BOOKING && (
+        <p className="mt-1 text-xs text-text-muted">
+          It must be one of {"this member's"} own bookings. The server refuses another {"member's"}, because naming it
+          would change what that member is owed.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger-strong">
+          {error}
+        </p>
+      )}
+      <p className="mt-1 text-xs text-text-muted">
+        Only for a credit or debit that genuinely compensates this member for that booking. It does not stand in for
+        the automatic reversal: when the court box reports the member did attend, the refund and the penalty are
+        reversed on their own, and what you post here is netted against that reversal one leg at a time — a positive
+        adjustment reduces the penalty the reversal gives back, a negative one reduces the refund it takes away.
+        Netting stops at zero per leg, so anything beyond what a leg is worth stands as posted and is not clawed back.
+      </p>
+    </div>
+  );
+}
+
+function SortHeader({ label, k, sortKey, sortDir, onSort, className }: { label: string; k: SortKey; sortKey: SortKey; sortDir: SortDir; onSort: (k: SortKey) => void; className?: string }) {
   const active = sortKey === k;
   const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
   return (
-    <th className="text-left px-4 py-3">
-      <button type="button" onClick={() => onSort(k)} className={cn("inline-flex items-center gap-1 hover:text-text-primary", active && "text-text-primary")}>
-        <span>{label}</span>
-        <Icon size={12} className={cn(active ? "opacity-100" : "opacity-40")} />
+    <th className={cn("text-left px-3 py-3 whitespace-nowrap overflow-hidden", className)}>
+      {/* A header in a fixed-width column cannot grow for its own label, so the label has to
+          give way inside the column rather than paint over the next one. Without the clip the
+          nowrap sort button simply overflowed the th: measured in Chromium with a 24px root
+          font — an ordinary browser accessibility setting — the Member # button covered 3 of
+          20 sample points of the Status header at 1024, 1280 and 1440, and the Name button
+          covered 5 and 9 of 20 at 640 and 768, with the table itself reporting zero overflow.
+          A neighbouring column painted over is the silent loss this whole table was rebuilt to
+          remove; an ellipsised header with a hover title is a cued one. */}
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        title={label}
+        className={cn("inline-flex max-w-full items-center gap-1 hover:text-text-primary", active && "text-text-primary")}
+      >
+        <span className="truncate">{label}</span>
+        <Icon size={12} className={cn("shrink-0", active ? "opacity-100" : "opacity-40")} />
       </button>
     </th>
   );

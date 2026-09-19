@@ -86,13 +86,12 @@ bool stringField(const char* body, size_t len, const char* key, char* out, size_
   return out[0] != '\0';
 }
 
-bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
-  size_t at = findKey(body, len, key);
-  if (at == kNotFound) {
-    return false;
-  }
-  at = skipToValue(body, len, at);
+namespace {
 
+/// Reads the decimal digits at `at`, advancing past them. False when there are
+/// none or the value would not fit — saturating is the caller's decision, and
+/// none of them want a wrapped value.
+bool readUnsigned(const char* body, size_t len, size_t& at, uint32_t& out) {
   uint32_t value = 0U;
   size_t digits = 0U;
   while (at < len && body[at] >= '0' && body[at] <= '9') {
@@ -109,6 +108,34 @@ bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out)
   }
   out = value;
   return true;
+}
+
+} // namespace
+
+bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
+  size_t at = findKey(body, len, key);
+  if (at == kNotFound) {
+    return false;
+  }
+  at = skipToValue(body, len, at);
+  return readUnsigned(body, len, at, out);
+}
+
+bool boolField(const char* body, size_t len, const char* key, bool& out) {
+  size_t at = findKey(body, len, key);
+  if (at == kNotFound) {
+    return false;
+  }
+  at = skipToValue(body, len, at);
+  if (at + 4U <= len && memcmp(body + at, "true", 4U) == 0) {
+    out = true;
+    return true;
+  }
+  if (at + 5U <= len && memcmp(body + at, "false", 5U) == 0) {
+    out = false;
+    return true;
+  }
+  return false;
 }
 
 size_t findArray(const char* body, size_t len, const char* key) {
@@ -133,6 +160,21 @@ bool nextStringElement(const char* body, size_t len, size_t& at, char* out, size
     return false;
   }
   return copyQuoted(body, len, at, out, outCap);
+}
+
+bool nextUnsignedElement(const char* body, size_t len, size_t& at, uint32_t& out) {
+  // Skip the separator and any whitespace; stop at a digit, the bracket, or
+  // anything else. "Anything else" is a non-integer element — reported as the
+  // end of what this reader understands rather than skipped over, because an
+  // array of court numbers with a string in it is not a court list.
+  while (at < len &&
+         (body[at] == ',' || body[at] == ' ' || body[at] == '\t' || body[at] == '\n' || body[at] == '\r')) {
+    ++at;
+  }
+  if (at >= len || body[at] == ']') {
+    return false;
+  }
+  return readUnsigned(body, len, at, out);
 }
 
 } // namespace json

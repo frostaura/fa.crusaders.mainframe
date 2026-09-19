@@ -16,9 +16,141 @@
 
   html, body, #root { height: 100%; }
   body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+  /*
+   * Every clickable surface feels the same.
+   *
+   * The fingerprint control on the schedule had a hover lift and a real focus ring
+   * and nothing else in the product did, so which things could be pressed was
+   * something a member learned per screen. This is one rule rather than a prop on
+   * each primitive, deliberately: an affordance applied per component is one that
+   * a new component silently does not get.
+   *
+   * The base selector is behavioural — anything with a button/link role, a real
+   * <a href>, or an explicit `data-interactive` — so a div that has been made
+   * clickable is covered too, and a disabled control is excluded rather than
+   * pretending it can be pressed.
+   *
+   * `:focus-visible`, not `:focus`. A visible ring on every mouse click is noise
+   * that authors then remove wholesale, taking the keyboard user's ring with it —
+   * which is exactly how a codebase ends up with no focus indication at all.
+   */
+  button,
+  [role="button"],
+  a[href],
+  summary,
+  label[for],
+  select,
+  [data-interactive] {
+    cursor: pointer;
+    transition-property: transform, box-shadow, background-color, border-color, color, opacity;
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* The lift. Small enough not to reflow anything around it, large enough to read
+     as a response — and suppressed for anyone who has asked for less motion. */
+  button:not(:disabled):not([aria-disabled="true"]):hover,
+  [role="button"]:not([aria-disabled="true"]):hover,
+  a[href]:hover,
+  summary:hover,
+  [data-interactive]:not([aria-disabled="true"]):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px -1px rgb(15 23 42 / 0.06), 0 4px 6px -1px rgb(15 23 42 / 0.08);
+  }
+
+  /* Pressed. The lift going away under the finger is what makes a tap feel landed. */
+  button:not(:disabled):not([aria-disabled="true"]):active,
+  [role="button"]:not([aria-disabled="true"]):active,
+  a[href]:active,
+  [data-interactive]:not([aria-disabled="true"]):active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.04);
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* Keyboard focus, on everything focusable rather than only on the controls whose
+     author remembered. Offset so the ring reads on a filled button as well as an
+     outlined one. */
+  :focus-visible {
+    outline: 2px solid var(--accent-strong, #0369A1);
+    outline-offset: 2px;
+    border-radius: inherit;
+  }
+
+  /*
+   * Reduced motion, with the specificity to actually win.
+   *
+   * This block used to say `button:hover` — (0,1,1) — against a base rule of
+   * `button:not(:disabled):not([aria-disabled="true"]):hover`, which is (0,3,1). A media query
+   * adds no specificity, so the base rule won and the override did nothing: measured on a live
+   * page under `prefers-reduced-motion: reduce`, a hovered grid cell still reported
+   * `transform: matrix(1, 0, 0, 1, 0, -1)`. All the block achieved was dropping the transition to
+   * 1ms, so instead of easing 1px the element SNAPPED 1px — which is worse than the motion it was
+   * meant to remove.
+   *
+   * The selectors below are therefore the base rules' selectors, character for character. Equal
+   * specificity, later in the source, so this one wins. If a selector above changes, this has to
+   * change with it — which is why they sit next to each other rather than in separate files.
+   *
+   * The shadow goes too. It is not motion, but it is the other half of the lift, and half a lift
+   * reads as a rendering fault rather than as a hover state; the cursor, the background change
+   * and the focus ring are what still say "this can be pressed".
+   */
+  @media (prefers-reduced-motion: reduce) {
+    button, [role="button"], a[href], summary, label[for], select, [data-interactive] {
+      transition-duration: 1ms;
+    }
+    button:not(:disabled):not([aria-disabled="true"]):hover,
+    [role="button"]:not([aria-disabled="true"]):hover,
+    a[href]:hover,
+    summary:hover,
+    [data-interactive]:not([aria-disabled="true"]):hover,
+    button:not(:disabled):not([aria-disabled="true"]):active,
+    [role="button"]:not([aria-disabled="true"]):active,
+    a[href]:active,
+    [data-interactive]:not([aria-disabled="true"]):active {
+      transform: none;
+      box-shadow: none;
+    }
+  }
 }
 
 @layer utilities {
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /*
+   * Opt OUT, for the few surfaces where a lift is wrong: a grid cell that must not
+   * shift its neighbours, a carousel dot that must not jump under a thumb, a
+   * full-width row in a table. They keep the cursor and the focus ring — the parts
+   * that say "this can be pressed" — and lose only the motion.
+   *
+   * The `:not()` pair is not a guard, it is the specificity. This rule read
+   * `.no-lift:hover` — (0,2,0) — against the base lift at
+   * `button:not(:disabled):not([aria-disabled="true"]):hover` — (0,3,1) — and
+   * `a[href]:hover` — (0,2,1). It lost to both, so it did nothing at all: measured in
+   * Chromium, a hovered carousel dot reported `transform: matrix(1, 0, 0, 1, 0, -1)`
+   * and the full two-layer lift shadow, on every one of the three controls that use
+   * the class. Being in a later layer does not help — Tailwind's `@layer` is a source
+   * ordering, not a cascade layer, so specificity is decided first.
+   *
+   * Repeating the base rule's two `:not()`s carries it to (0,4,0), which beats every
+   * selector in that set on the class count alone and does not depend on which element
+   * the class lands on. This is the second time this exact arithmetic has been got
+   * wrong in this file — see the reduced-motion block above — so it is measured rather
+   * than reasoned about: e2e/affordance.spec.ts hovers a real dot in a real engine, and
+   * src/components/affordance.test.ts computes the two specificities and compares them.
+   */
+  .no-lift:not(:disabled):not([aria-disabled="true"]):hover,
+  .no-lift:not(:disabled):not([aria-disabled="true"]):active {
+    transform: none;
+    box-shadow: none;
+  }
 }

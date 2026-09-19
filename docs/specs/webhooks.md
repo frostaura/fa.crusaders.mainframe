@@ -4,7 +4,7 @@ User- and admin-configurable HTTP callbacks fired on system events. Lets externa
 
 ## Configuration
 - A tenant admin (or a player, scoped to their own events only) can register an endpoint:
-  - `url` — HTTPS by default; **HTTP allowed for LAN / RFC1918 hosts** (lights controllers etc.). Supports template variables (see "URL templating" below).
+  - `url` — HTTPS by default; **HTTP allowed for LAN / RFC1918 hosts** on the private-network allow-list (a scoreboard, an accounting box, any LAN consumer the club points a webhook at — never the court box, which is pull-only). Supports template variables (see "URL templating" below).
   - `event_filter` — array of event names, or `["*"]` for all
   - `secret` — auto-generated, used to sign payloads (HMAC-SHA256)
   - `enabled` — bool
@@ -13,14 +13,16 @@ User- and admin-configurable HTTP callbacks fired on system events. Lets externa
 - Endpoints can be tested via a "Send test ping" button — sends a `webhook.test` event.
 
 ## URL templating
-The webhook URL supports **single-brace placeholder substitution** — `{variable_name}` — resolved per-event from the event payload at delivery time. This lets one webhook config target many resources without registering N separate endpoints. Example: for the on-court Arduino lights controller, a single config with `url = http://arduino.local/court/{court_number}/turn/on` filtered to `booking.lights_on` covers every court.
+The webhook URL supports **single-brace placeholder substitution** — `{variable_name}` — resolved per-event from the event payload at delivery time. This lets one webhook config target many resources without registering N separate endpoints. Example: a club scoreboard on a DHCP reservation, allow-listed as `10.0.40.7/32`, with a single config `url = http://10.0.40.7/court/{court_number}/lit` filtered to `booking.lights_on` covers every court. **Do not template a URL at the court box** — it has no HTTP listener and switches its own relays (see below).
 
 **Available variables** (always present, regardless of event):
 - `{tenant_id}`, `{tenant_slug}`
-- `{event_id}`, `{event_type}`
+- `{id}`, `{type}` — the envelope's own field names, and what a delivered body carries. `{event_id}` and `{event_type}` are accepted as aliases: this document promised those two names while the envelope only ever had `id` and `type`, so a template written against it was refused at delivery as a missing variable — a config error, deliberately not retried, so the endpoint just stopped (review A2-16). Both spellings work now; the short ones are canonical.
 - `{occurred_at}` (ISO8601), `{occurred_at_unix}`
 
 **Event-specific variables** are flattened from `data` — every key in the event's `data` object is available as `{key}`. For booking events that means `{court_id}`, `{court_number}`, `{court_name}`, `{user_id}`, `{user_name}`, `{booking_id}`, `{starts_at}`, `{ends_at}`, `{slice_count}`, `{amount_charged_zar}`, `{balance_after_zar}`, etc.
+
+`actor` and `subject` are **objects** in the envelope and are not flattened, so `{user_id}` resolves only from `data`, on the events that carry one — not from `actor.user_id` or `subject.user_id`. There is no alias for it: two different user ids in one envelope have no single right answer.
 
 **Resolution rules**:
 - Missing variable at delivery time → delivery fails with a clear error in the delivery log; endpoint owner is emailed; not retried (a missing variable is a config bug, not a transient failure).
@@ -30,9 +32,10 @@ The webhook URL supports **single-brace placeholder substitution** — `{variabl
 
 **Body templating** uses the same syntax inside string fields of the JSON body. Default body remains the standard event payload; templating is opt-in via a "custom body" field in the endpoint config (advanced users only).
 
-## Internal LAN consumers (Arduino lights controller)
-The on-court Arduino lights controller is a **first-class internal webhook consumer** — it receives `booking.lights_on` and `booking.lights_off` events from the same delivery worker that fans out external webhooks. This is intentional: no separate code path for "internal" vs "external" listeners. See `lights-controller.md` for the full architecture, the URL template pattern (`http://arduino.local/court/{court_number}/turn/on` and `.../turn/off`), and the auth posture (shared secret in body; HMAC sig where compute allows).
+## The court box is not a webhook consumer
+The court lights are switched by the court box itself — an ESP8266 bridge and a Mega with its own relay bank and independent auto-off timer — which decides locally from an online activation or its cached heartbeat roster and **pulls** everything it needs from the API (`docs/specs/deployment.md`, `docs/specs/device-serial-protocol.md`). It has no inbound HTTP listener, no `arduino.local` name, and nothing in the delivery worker targets it. `docs/specs/lights-controller.md`, which described a webhook-driven Arduino at `http://arduino.local/court/{court_number}/turn/...`, is superseded and must not be used as a templating example.
 
+`booking.lights_on` and `booking.lights_off` are therefore what they are for every other event: a programmatic **mirror** of something that already happened at the court, for whatever external consumer wants to know.
 
 ## Event catalogue
 | Event | Triggered when |
@@ -41,17 +44,24 @@ The on-court Arduino lights controller is a **first-class internal webhook consu
 | `member.approved` | Admin approves a pending member |
 | `member.rejected` | Admin rejects a pending member |
 | `member.suspended` | Admin suspends a member |
+| `member.reactivated` | Admin lifts a suspension |
 | `booking.created` | A booking is committed |
 | `booking.cancelled` | A booking is cancelled (free) |
 | `booking.late_cancellation` | A booking is cancelled inside the penalty window |
 | `booking.no_show` | No-show penalty applied after grace expires |
-| `booking.lights_on` | Biometric match succeeds and lights are activated |
+| `booking.lights_on` | A court was activated (online activation, roster fallback uploaded later, or a walk-up) |
+| `booking.lights_off` | The lights-off cue fires at the end of a slot |
+| `booking.no_show_reversed` | Late attendance evidence from a box reversed a settled no-show |
+| `booking.displaced` | A booking sold into a released tail was cancelled and refunded by a no-show reversal (`ResoldTailRefunded`) |
+| `booking.cancelled_lights_charged` | A cancelled booking was lit from an offline box's roster and charged pro rata for the lit minutes |
+| `booking.displacement_reversed` | The box's own `release` proved the earlier court went dark before a displaced booking's slot, so it was reinstated and re-charged (settlement model I9) |
 | `booking.completed` | A booking's slice ends naturally |
-| `credit.topped_up` | PeachPayments confirms a top-up |
+| `credit.topped_up` | PayFast confirms a top-up (ITN) |
 | `credit.refunded` | A cancellation/no-show ledger entry is written |
 | `credit.penalty_applied` | A penalty ledger entry is written |
 | `credit.adjusted` | An admin issues a manual adjustment |
-| `peripheral.unhealthy` | A biometric device's `State` becomes `Faulted` |
+| `peripheral.unhealthy` | A court box has not heart-beaten for longer than `offline_after_seconds`. Fires **once per outage**, from `PeripheralHealthWorker`. It means "the box is not reporting" — never "the reader is faulty": `BiometricDeviceState.Faulted` is still set by no driver, so a fingerprint reader failing behind a healthy box remains invisible. See `feature-spec.md` §6a and §9. |
+| `peripheral.recovered` | The same box called in again; carries how long the outage lasted |
 | `webhook.test` | The "send test ping" button is clicked |
 
 ## Payload shape
@@ -96,9 +106,6 @@ All payloads are JSON, structured:
 - **Retry policy.** On any non-2xx response (or timeout >10s): retry with exponential backoff at 1m, 5m, 30m, 2h, 12h, 24h. After 6 failures the endpoint is auto-disabled and the owner is emailed. Driven by `WebhookRetryWorker`, which sweeps due deliveries every 30s in batches of 50. A blocked destination is exempt and is abandoned on the first attempt.
 - **Per-endpoint queue.** Slow / failing endpoints don't block others. Each endpoint has its own delivery worker.
 - **Retention.** Each event keeps its delivery log (status code, response time, retry count) for 30 days, viewable in admin UI.
-
-## Internal LAN consumers (Arduino lights controller)
-The on-court Arduino lights controller is a **first-class internal webhook consumer** — it receives `booking.lights_on` and `booking.lights_off` events from the same delivery worker that fans out external webhooks. This is intentional: no separate code path for "internal" vs "external" listeners. See `lights-controller.md` for the full architecture, the per-court channel mapping, and the auth posture (shared secret in body; HMAC sig where compute allows).
 
 ## Player-scoped vs tenant-wide
 - A **player-registered** endpoint receives only events where the player is the subject (`data.user_id == player.id`) or actor.
@@ -146,13 +153,37 @@ Also:
 ### The LAN carve-out
 
 `Webhooks:PrivateNetworkAllowList` is a list of CIDRs, so
-`"192.168.68.150/32"` admits one court box rather than the entire private internet.
+`"10.0.40.7/32"` admits one LAN consumer rather than the entire private internet.
 `Webhooks:AllowPrivateNetworks` disables the guard wholesale and defaults to **on in
 Development only** — the dev loop runs against MailHog, a local API and a simulator on
 localhost.
 
-`CLAUDE.md` states this carve-out must not be closed. It exists because a court box
-lives at a fixed RFC1918 address on the club LAN and there is nowhere else for it to be.
+`CLAUDE.md` states this carve-out must not be closed. It exists for legitimate LAN
+consumers a club points a webhook at — reached by DHCP reservation, since the network is
+DHCP everywhere. The court box is **not** one of them: it is pull-only, has no inbound
+HTTP listener, and can never be a webhook destination.
+
+**The allow-list is deployment configuration and there is no admin surface for it — by
+decision, not by omission.** `OutboundAddressGuard` is a singleton that parses
+`Webhooks:PrivateNetworkAllowList` once, at construction, from `IConfiguration`; it has
+no tenant in scope, and the address it judges is the one being dialled inside a socket's
+`ConnectCallback`, long after any request context. So the list is **process-wide**: one
+entry admits that address for every tenant the deployment serves. A club admin who could
+add to it would be moving an SSRF boundary for every *other* club on the same host, which
+is the cross-tenant escalation this repo classes as a P0 — an admin-only, validated,
+audited screen would not change that, because the blast radius is the problem, not the
+authorisation.
+
+Making it tenant-scoped instead is a larger change than it looks and is **not** in v1: the
+guard would have to carry the owning tenant from registration through to the connect
+callback of a delivery attempt that runs on a background queue.
+
+What an admin gets instead is a refusal that says so. `destination_not_permitted` names
+the setting and says plainly that no screen can change it and who can, so the request to
+whoever runs the deployment is actionable — see `CREATE_REFUSAL` in
+`src/frontend/src/pages/AdminWebhooks.tsx`, pinned by `AdminWebhooks.test.tsx` ("says the
+LAN carve-out is deployment configuration, not a screen that is missing"). Operator
+instructions, including the DHCP reservation, are in `docs/go-live-checklist.md`.
 
 ### Other
 

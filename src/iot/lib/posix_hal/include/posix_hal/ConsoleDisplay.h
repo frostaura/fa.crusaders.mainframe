@@ -4,8 +4,8 @@
 // fakes::FakeDisplay's header gives: the questions worth answering are "what
 // does the glass say now" and "what fell off the right-hand edge", and a call
 // log answers neither. The rendered lines are also how a person watching the
-// simulator sees the claim code the board is displaying — which is the only
-// channel that code is ever legitimately on.
+// simulator sees what a member standing at the panel would see, which is the
+// only place several of these outcomes are ever visible.
 //
 // The frame is drawn at kDisplayCols wide, so text that a 16-column panel would
 // have truncated is visibly truncated here too.

@@ -1,7 +1,0 @@
-{
-  "name": "otacore",
-  "version": "1.0.0",
-  "description": "Whether to take an over-the-air update, and what to do when one turns out to be bad.",
-  "dependencies": { "devapi": "*", "fwversion": "*", "hal": "*", "timebase": "*" },
-  "build": { "flags": ["-I include"] }
-}

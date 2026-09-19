@@ -49,11 +49,11 @@ uint32_t parseU32(const char* text) {
 
 } // namespace
 
-CourtBox::CourtBox(const CourtPorts& ports)
+CourtBox::CourtBox(const CourtPorts& ports, proto::LegacyDialect legacy)
     : display_(ports.display), scanner_(ports.scanner), bridge_(ports.bridge), clock_(ports.clock),
-      relays_(ports.relay), panel_(ports.buttons), scan_(), auth_(), rx_(proto::Link::Downlink), uptime_(),
-      stateDue_(), lastMask_(0U), overrunPending_(false), txBuf_(), txDropped_(0U), rxErrors_(0U),
-      unauthorised_(0U), oversizeScans_(0U) {
+      relays_(ports.relay), panel_(ports.buttons), scan_(), auth_(), rx_(proto::Link::Downlink, legacy),
+      uptime_(), stateDue_(), scanFeedback_(), lastMask_(0U), overrunPending_(false), txBuf_(),
+      txDropped_(0U), rxErrors_(0U), unauthorised_(0U), oversizeScans_(0U) {
 }
 
 void CourtBox::begin() {
@@ -61,6 +61,7 @@ void CourtBox::begin() {
   auth_.disarm();
   scan_.reset();
   rx_.reset();
+  scanFeedback_.disarm();
   const uint32_t now = clock_.nowMs();
   uptime_.seed(now);
   stateDue_.arm(now, kStateIntervalMs);
@@ -74,10 +75,11 @@ void CourtBox::poll() {
   uptime_.tick(now);
 
   drainBridge(now);
-  drainScanner();
+  drainScanner(now);
   pollButtons(now);
   releaseExpired(now);
   noteAuthLapse(now);
+  expireScanFeedback(now);
   flushOverrun();
   publishState(now);
 }
@@ -97,7 +99,7 @@ void CourtBox::drainBridge(uint32_t nowMs) {
   }
 }
 
-void CourtBox::drainScanner() {
+void CourtBox::drainScanner(uint32_t nowMs) {
   uint8_t byte = 0U;
   for (uint16_t i = 0U; i < kBytesPerPass && scanner_.read(byte); ++i) {
     if (!scan_.feed(byte)) {
@@ -115,6 +117,19 @@ void CourtBox::drainScanner() {
       continue;
     }
     static_cast<void>(sendFrame(frame));
+    // Painted whether or not the frame got out. A full TX ring IS the dead-ESP
+    // case, and that is exactly when the member most needs to see that the
+    // scanner heard them — see kScanFeedbackLine1.
+    paintRow(0U, kScanFeedbackLine1);
+    paintRow(1U, "");
+    scanFeedback_.arm(nowMs, kScanFeedbackMs);
+  }
+}
+
+void CourtBox::expireScanFeedback(uint32_t nowMs) {
+  if (scanFeedback_.expired(nowMs)) {
+    scanFeedback_.disarm();
+    showIdle();
   }
 }
 
@@ -151,7 +166,10 @@ void CourtBox::releaseExpired(uint32_t nowMs) {
     }
   }
   // The relay is already open by this point. Publishing the new state is how
-  // the bridge finds out, and it happens whether or not the events got through.
+  // the bridge finds out when the event above did NOT get through: the bridge
+  // reconciles its held courts against every `!STATE` mask (bridgelogic/
+  // StateReconcile), and this one goes out whether or not the events did — as
+  // does the periodic one ten seconds later, if this one is dropped too.
   publishState(nowMs);
 }
 
@@ -214,6 +232,9 @@ void CourtBox::handleFrame(const proto::Frame& frame, uint32_t nowMs) {
   } else if (verb == proto::Verb::Ext) {
     applyExt(frame, nowMs);
   } else if (verb == proto::Verb::Lcd) {
+    // The bridge answered, so its text stands and the local feedback must not
+    // repaint idle over it ten seconds later.
+    scanFeedback_.disarm();
     paintRow(0U, frame.arg(0));
     paintRow(1U, frame.arg(1));
   } else if (verb == proto::Verb::Auth) {

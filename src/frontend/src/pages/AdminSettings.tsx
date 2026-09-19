@@ -1,5 +1,9 @@
 import { useEffect, useState, cloneElement, isValidElement, useId } from "react";
 import { endpoints, type AdminSettings, type AdminCourt, ApiError } from "../lib/api";
+import {
+  DAY_KEYS, DAY_NAMES, OFFLINE_FLOOR_SECONDS, describeOfflineAfter, formatDayHours,
+  operatingHoursComplaint, parseDayHours, timezoneOptions, type DayHours, type DayKey,
+} from "../lib/tenantSettings";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -56,11 +60,16 @@ export default function AdminSettingsPage() {
 
   if (loading || !settings) return <p className="text-text-secondary">Loading settings…</p>;
 
+  // A weekly table with a bad row must not reach the API: the refusal names the day, but a
+  // toast that has faded says nothing about which of seven rows to fix, and the row itself
+  // is already saying it in red.
+  const hoursComplaint = operatingHoursComplaint(settings.operating_hours ?? {});
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Admin · Settings</h1>
-        <p className="text-sm text-text-secondary">Court schedule, booking limits, and penalty policy for this tenant.</p>
+        <p className="text-sm text-text-secondary">Court schedule, booking limits, penalty policy and court-box behaviour for this tenant.</p>
       </div>
 
       <Card className="space-y-5">
@@ -82,8 +91,26 @@ export default function AdminSettingsPage() {
             <Input type="time" value={minToHHMM(settings.day_end_minute)}
               onChange={(e) => setSettings({ ...settings, day_end_minute: hhmmToMin(e.target.value) })} />
           </Field>
+          {/* The zone every wall-clock time on this page and every slot on the booking
+              grid is read in. It was served by the API and had nowhere to be set: a club
+              outside South Africa saw its whole schedule in Johannesburg time with no
+              correction short of an UPDATE on a JSON column. */}
+          <Field
+            label="Timezone"
+            hint="The zone the club's day is read in. Day start and end, the booking grid and every time a member sees are all in this zone."
+          >
+            <select
+              value={settings.timezone}
+              onChange={(e) => setSettings({ ...settings, timezone: e.target.value })}
+              className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+            >
+              {timezoneOptions(settings.timezone).map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+            </select>
+          </Field>
         </div>
       </Card>
+
+      <OperatingHoursSection settings={settings} onChange={setSettings} />
 
       <Card className="space-y-5">
         <h2 className="text-base font-semibold">No-show & cancellation policy</h2>
@@ -112,12 +139,20 @@ export default function AdminSettingsPage() {
           Credits are the unit of account. A member pays in rand and receives credits at the rate for their class.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* step 0.01, not 0.1.
+              A number input's valid values step from `min`, not from zero, so min=0.01 with
+              step=0.1 made the valid set 0.01, 0.11, … 1.51, 1.61 — and the club's own shipped
+              rates, 1.6 and 2.4, were both stepMismatch. Every round rate an admin would type
+              (1.5, 2.0, 2.5) was invalid, the arrows turned 1.6 into 1.61, and because Save is
+              not a native submit nothing ever said so: the field looked fine while the arrows
+              quietly moved the money conversion rate by a hundredth. Cents are the smallest unit
+              anyone would express a rand rate in, so 0.01 is both the granularity and the base. */}
           <Field label="Credits per R1 — members" hint="R100 at 1.6 gives 160 credits.">
-            <Input type="number" min={0.01} max={1000} step={0.1} value={settings.credits_per_zar_regular}
+            <Input type="number" min={0.01} max={1000} step={0.01} value={settings.credits_per_zar_regular}
               onChange={(e) => setSettings({ ...settings, credits_per_zar_regular: Number(e.target.value) })} />
           </Field>
           <Field label="Credits per R1 — league / over-65" hint="R100 at 2.4 gives 240 credits.">
-            <Input type="number" min={0.01} max={1000} step={0.1} value={settings.credits_per_zar_league}
+            <Input type="number" min={0.01} max={1000} step={0.01} value={settings.credits_per_zar_league}
               onChange={(e) => setSettings({ ...settings, credits_per_zar_league: Number(e.target.value) })} />
           </Field>
           <Field label="Top-up block (R)" hint="Members top up in multiples of this.">
@@ -149,6 +184,8 @@ export default function AdminSettingsPage() {
         </div>
       </Card>
 
+      <DeviceNumbersSection settings={settings} onChange={setSettings} />
+
       <Card className="space-y-5">
         <h2 className="text-base font-semibold">Records</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -162,12 +199,202 @@ export default function AdminSettingsPage() {
           </Field>
         </div>
         <div className="flex justify-end">
-          <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save settings"}</Button>
+          <Button onClick={save} disabled={saving || hoursComplaint !== null}>{saving ? "Saving…" : "Save settings"}</Button>
         </div>
       </Card>
 
       <CourtsSection courts={courts} reload={load} />
     </div>
+  );
+}
+
+/**
+ * The club's opening hours, per weekday.
+ *
+ * <p>
+ * The engine has read <code>operating_hours</code> since it existed and this screen could
+ * not write it. All the screen had was the flat "Day starts / Day ends" pair, which is only
+ * the default for a weekday the map does not name — and the seed names all seven, so the
+ * pair governed nothing. A club that changed it got <code>200 {"saved":true}</code>, a
+ * "Settings saved." toast, and a Saturday that still ran 07:00–20:00 because that is what
+ * the map said. The one setting the product enforces was the one setting it could not edit.
+ * </p>
+ *
+ * <p>
+ * A day is either on the club default or has hours of its own; there is no "closed all day",
+ * because the engine has no way to express one — a range whose close is at or before its
+ * open is refused as the typo it almost always is, on both sides of the wire.
+ * </p>
+ */
+function OperatingHoursSection({ settings, onChange }: { settings: AdminSettings; onChange: (next: AdminSettings) => void }) {
+  const map = settings.operating_hours ?? {};
+  const complaint = operatingHoursComplaint(map);
+
+  const setDay = (day: DayKey, hours: DayHours | null) => {
+    const next = { ...map };
+    if (hours === null) delete next[day];
+    else next[day] = formatDayHours(hours);
+    onChange({ ...settings, operating_hours: next });
+  };
+
+  return (
+    <Card className="space-y-5">
+      <h2 className="text-base font-semibold">Opening hours</h2>
+      <p className="text-sm text-text-secondary">
+        When members can book. A day left on the club default uses <strong className="text-text-primary">Day starts</strong> and{" "}
+        <strong className="text-text-primary">Day ends</strong> above ({minToHHMM(settings.day_start_minute)}–{minToHHMM(settings.day_end_minute)}).
+        These are the hours the booking grid draws and the API enforces — a slot outside them is refused, and a walk-up at the box is cut short at closing.
+      </p>
+      <div className="space-y-2">
+        {DAY_KEYS.map((day) => (
+          <DayHoursRow
+            key={day}
+            day={day}
+            hours={parseDayHours(map[day])}
+            fallback={{ open: minToHHMM(settings.day_start_minute), close: minToHHMM(settings.day_end_minute) }}
+            error={complaint?.day === day ? complaint.message : null}
+            onChange={(next) => setDay(day, next)}
+          />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** One weekday: the club default, or a pair of times of its own. */
+function DayHoursRow({ day, hours, fallback, error, onChange }: {
+  day: DayKey;
+  hours: DayHours | null;
+  fallback: DayHours;
+  error: string | null;
+  onChange: (next: DayHours | null) => void;
+}) {
+  const name = DAY_NAMES[day];
+  const custom = hours !== null;
+  const shown = hours ?? fallback;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-[120px_auto_1fr] gap-2 sm:items-center p-3 rounded-md border border-border">
+      <span className="text-sm font-medium text-text-primary">{name}</span>
+      <label className="flex items-center gap-2 text-xs text-text-secondary">
+        <input
+          type="checkbox"
+          checked={custom}
+          aria-label={`${name} has its own hours`}
+          // Ticking a day starts it at the club default rather than at 00:00, so the
+          // first thing an admin sees is the hours that are actually in force for it.
+          onChange={(e) => onChange(e.target.checked ? shown : null)}
+        />
+        Own hours
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        {custom ? (
+          <>
+            <Input
+              type="time"
+              className="h-9 w-32"
+              aria-label={`${name} opens`}
+              value={shown.open}
+              onChange={(e) => onChange({ ...shown, open: e.target.value })}
+            />
+            <span className="text-xs text-text-muted">to</span>
+            <Input
+              type="time"
+              className="h-9 w-32"
+              aria-label={`${name} closes`}
+              value={shown.close}
+              onChange={(e) => onChange({ ...shown, close: e.target.value })}
+            />
+          </>
+        ) : (
+          <span className="text-xs text-text-muted">Club default — {fallback.open} to {fallback.close}</span>
+        )}
+        {error && <span className="text-xs text-danger-strong">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The six court-box and identification numbers.
+ *
+ * Served by GET /admin/settings since the programme added them, and until now absent
+ * from this page — an admin could change none of them. Bounds are the API's own
+ * (AdminConfigEndpoints.ValidateDeviceNumbers); the cue window is additionally capped
+ * at the forward window here because the API refuses the pair otherwise, and a refusal
+ * after Save is a worse place to learn that than a disabled spinner.
+ */
+function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings; onChange: (next: AdminSettings) => void }) {
+  const set = (patch: Partial<AdminSettings>) => onChange({ ...settings, ...patch });
+  return (
+    <Card className="space-y-5">
+      <h2 className="text-base font-semibold">Court boxes &amp; identification</h2>
+      <p className="text-sm text-text-secondary">
+        How the boxes at the courts behave. Boxes pick a change up on their next heartbeat.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Walk-up maximum (minutes)" hint="1–90. The most court time a walk-up can buy at the box in one go; 90 is the relay's hard cap.">
+          <Input type="number" min={1} max={90} value={settings.walk_up_max_minutes}
+            onChange={(e) => set({ walk_up_max_minutes: Number(e.target.value) })} />
+        </Field>
+        {/* 3600 was offered and 300 was what the box ran: the firmware clamps its own
+            cadence to 15-300, and the Devices page then reported the whole fleet
+            offline for most of every interval (review finding 22). The field states
+            the range the box will honour, and the API holds the same bound. */}
+        {/* The "three missed beats" half of this hint was true only above 60 s. Below it the
+            180-second floor takes over, so an admin lowering the interval to detect an
+            outage faster got none of the improvement and no explanation — at 15 s the box
+            reported offline_after_seconds: 180, not 45. The floor is deliberate (a club on
+            the 15-second minimum must not be called offline after 45 seconds of ordinary
+            jitter), so the hint states it and the derived line below says what THIS value
+            actually buys, rather than making the admin work it out. */}
+        <Field
+          label="Heartbeat interval (seconds)"
+          hint={`15–300. How often a box calls in for its roster and button map. A box clamps anything outside 15–300 to that range, so a larger number here is not what it would run. The Devices page calls a box offline after three missed beats or ${OFFLINE_FLOOR_SECONDS / 60} minutes, whichever is longer — at ${settings.heartbeat_seconds}s that is ${describeOfflineAfter(settings.heartbeat_seconds)}.`}
+        >
+          <Input type="number" min={15} max={300} value={settings.heartbeat_seconds}
+            onChange={(e) => set({ heartbeat_seconds: Number(e.target.value) })} />
+        </Field>
+        {/*
+            These two were described the wrong way round, and the one whose hint promised to
+            control how early the lights come on is not the one that does.
+
+            Measured against a real box and a real booking: with the forward window at 1440
+            and the cue at 10, a scan 19.5 minutes before the start answered `too_early`;
+            raising the CUE to 30 lit the court, and raising it to 900 lit a court 13.8 hours
+            early. The forward window only decides whether the box recognises the booking at
+            all — outside it the answer is `no_booking` — which is what
+            `CourtActivationService.WindowAsync` and `DeviceActivateEndpoint` have always
+            done. An admin who wanted members to open the court half an hour early edited the
+            field that said so, saw "Settings saved.", and changed nothing.
+
+            So the cue is now named as the one that switches the lights, and the forward
+            window is named as recognition. `feature-spec.md` and `lights-controller.md`
+            describe the mechanism; only this screen described it backwards.
+        */}
+        <Field
+          label="Booking lookahead at the box (minutes)"
+          hint="1–1440. How far ahead the box recognises a booking at all. Outside this the box answers “no booking behind this code”; inside it, but before the lights cue below, it answers “too early” and says when to come back. This does NOT decide when the lights come on."
+        >
+          <Input type="number" min={1} max={1440} value={settings.activation_forward_window_minutes}
+            onChange={(e) => set({ activation_forward_window_minutes: Number(e.target.value) })} />
+        </Field>
+        <Field
+          label="Lights on this early (minutes before a booking)"
+          hint={`0–${settings.activation_forward_window_minutes}. This is the one that decides how early a scan actually switches a booking's lights on. Must not exceed the booking lookahead.`}
+        >
+          <Input type="number" min={0} max={settings.activation_forward_window_minutes} value={settings.activation_cue_window_minutes}
+            onChange={(e) => set({ activation_cue_window_minutes: Number(e.target.value) })} />
+        </Field>
+        <Field label="Court code lifetime (seconds)" hint="15–3600. How long a member's walk-up code stays valid; the app fetches a new one as it runs out.">
+          <Input type="number" min={15} max={3600} value={settings.qr_lifetime_seconds}
+            onChange={(e) => set({ qr_lifetime_seconds: Number(e.target.value) })} />
+        </Field>
+        <Field label="Offline roster reach (minutes)" hint="5–1440. How far ahead a box's cached roster lets it admit booked members when the API is unreachable.">
+          <Input type="number" min={5} max={1440} value={settings.roster_window_minutes}
+            onChange={(e) => set({ roster_window_minutes: Number(e.target.value) })} />
+        </Field>
+      </div>
+    </Card>
   );
 }
 
@@ -234,7 +461,7 @@ function CourtsSection({ courts, reload }: { courts: AdminCourt[]; reload: () =>
         <Field label="New court name">
           <Input placeholder="Court 5" value={newName} onChange={(e) => setNewName(e.target.value)} />
         </Field>
-        <Field label="Price per slice (R)">
+        <Field label="Price per slice (credits)" hint="Credits, not rand. Members are charged this per slice; rand only ever buys credits.">
           <Input type="number" min={0} value={newPrice} onChange={(e) => setNewPrice(Number(e.target.value))} />
         </Field>
         <Button onClick={create} disabled={adding}>{adding ? "Adding…" : "Add court"}</Button>
@@ -273,7 +500,7 @@ function CourtRow({ court, reload }: { court: AdminCourt; reload: () => Promise<
   return (
     <div className={`grid grid-cols-1 sm:grid-cols-[1fr_140px_auto_auto] gap-2 sm:items-center p-3 rounded-md border border-border ${court.is_active ? "bg-bg-surface" : "bg-bg-muted/40"}`}>
       <Input value={name} onChange={(e) => setName(e.target.value)} disabled={!court.is_active} />
-      <Input type="number" min={0} value={price} onChange={(e) => setPrice(Number(e.target.value))} disabled={!court.is_active} />
+      <Input type="number" min={0} aria-label={`${court.name} price per slice (credits)`} value={price} onChange={(e) => setPrice(Number(e.target.value))} disabled={!court.is_active} />
       <Button variant="outline" onClick={save} disabled={!dirty || busy || !court.is_active}>Save</Button>
       {court.is_active ? (
         <ConfirmButton

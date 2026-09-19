@@ -1,9 +1,1 @@
-
-# OTA firmware signing PRIVATE key — never committed. The public half is the
-# checked-in header lib/otacore/include/otacore/OtaPublicKey.h; the private half
-# lives with whoever cuts releases. See tools/generate_ota_keys.sh.
-*_private_key.pem
-ota_private_key.pem
-private.key
-firmware.signed.bin
 __pycache__/

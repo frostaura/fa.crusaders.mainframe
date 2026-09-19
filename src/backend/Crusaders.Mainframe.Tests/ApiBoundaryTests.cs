@@ -234,6 +234,63 @@ public sealed class ApiBoundaryTests
     }
 
     /// <summary>
+    /// One OPEN outage per box, enforced by the schema — the guard that makes
+    /// <c>peripheral.unhealthy</c> fire once per outage rather than once per thirty-second
+    /// sweep.
+    ///
+    /// <para>
+    /// It has to be here for the same reason the ExternalReference index above does: the
+    /// health sweep reads "is there an open outage?" and then writes one, and under READ
+    /// COMMITTED a slow tick and its successor can both pass the read. The in-memory provider
+    /// enforces no unique index, so every other test of this worker would pass with the
+    /// constraint deleted.
+    /// </para>
+    ///
+    /// <para>
+    /// And the filter is the half that matters as much: closed outages must accumulate freely,
+    /// because the history is what lets a no-show sweep waive a penalty for a window that has
+    /// since recovered (<c>feature-spec.md</c> §6a, <c>settlement-model.md</c> S5a).
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_box_can_have_only_one_open_outage_and_any_number_of_closed_ones()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        await db.Database.MigrateAsync();
+
+        await using var conn = new NpgsqlConnection(_pg.ConnectionString);
+        await conn.OpenAsync();
+
+        var tenantId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+
+        async Task InsertAsync(DateTimeOffset? endedAt)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO device_outages ("Id","TenantId","DeviceId","StartedAt","DetectedAt","EndedAt")
+                VALUES (@id, @tenant, @device, now(), now(), @ended)
+                """;
+            cmd.Parameters.AddWithValue("id", Guid.NewGuid());
+            cmd.Parameters.AddWithValue("tenant", tenantId);
+            cmd.Parameters.AddWithValue("device", deviceId);
+            cmd.Parameters.AddWithValue("ended", (object?)endedAt ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await InsertAsync(null);
+        await Assert.ThrowsAsync<PostgresException>(() => InsertAsync(null));
+
+        // Closed rows are the history, and are unconstrained.
+        await InsertAsync(DateTimeOffset.UtcNow);
+        await InsertAsync(DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
     /// The double-booking race, closed in the only place it can be.
     ///
     /// <para>

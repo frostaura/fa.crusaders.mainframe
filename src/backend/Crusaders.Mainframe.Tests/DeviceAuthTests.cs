@@ -3,244 +3,93 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
-/// Unit-level tests for the two pure pieces of device auth: key derivation and the
-/// canonical string. These need no database and no host, and they cover the parts the
-/// firmware has to reproduce byte for byte on an 8-bit micro — where a mismatch
-/// produces a 401 with no diagnostic and costs a trip to the club.
+/// The two pure pieces of the device credential: how a key is minted, and how one is
+/// compared. Both are small enough that the risk is in the details — an encoding a C
+/// string literal cannot carry, or a comparison that returns early.
 /// </summary>
-public class DeviceKeyDerivationTests
+public class DeviceApiKeyTests
 {
-    private const string Master = "unit-test-master-key-that-is-definitely-long-enough";
-
-    private static DeviceKeyDeriver Deriver(string master = Master)
-        => new(new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["Devices:MasterKey"] = master })
-            .Build());
-
     [Fact]
-    public void Derivation_is_deterministic()
+    public void A_key_is_url_safe_and_padding_free()
     {
-        var tenant = Guid.NewGuid();
-        var device = Guid.NewGuid();
+        var key = DeviceApiKey.Generate();
 
-        Assert.Equal(Deriver().Derive(tenant, device, 1), Deriver().Derive(tenant, device, 1));
+        Assert.Equal(43, key.Length);                  // 32 bytes, base64 minus padding
+        Assert.DoesNotContain('=', key);
+        Assert.DoesNotContain('+', key);
+        Assert.DoesNotContain('/', key);
     }
 
     [Fact]
-    public void Key_is_thirty_two_bytes()
-    {
-        Assert.Equal(32, Deriver().Derive(Guid.NewGuid(), Guid.NewGuid(), 1).Length);
-    }
+    public void Two_keys_are_never_the_same()
+        => Assert.NotEqual(DeviceApiKey.Generate(), DeviceApiKey.Generate());
 
-    /// <summary>Rotation is a version bump, so the bump must actually change the key.</summary>
     [Fact]
-    public void Version_bump_changes_the_key()
+    public void Matching_accepts_only_the_exact_key()
     {
-        var tenant = Guid.NewGuid();
-        var device = Guid.NewGuid();
-        var d = Deriver();
+        var key = DeviceApiKey.Generate();
 
-        Assert.NotEqual(d.Derive(tenant, device, 1), d.Derive(tenant, device, 2));
+        Assert.True(DeviceApiKey.Matches(key, key));
+        Assert.False(DeviceApiKey.Matches(key, key[..^1]));            // a prefix
+        Assert.False(DeviceApiKey.Matches(key, key + "x"));            // an extension
+        Assert.False(DeviceApiKey.Matches(key, key[..^1] + "!"));      // one byte out
+        Assert.False(DeviceApiKey.Matches(key, key.ToUpperInvariant()));
     }
 
     /// <summary>
-    /// The tenant is HKDF salt. Two tenants that somehow shared a device id — a restored
-    /// backup, a copy-pasted provisioning script — must still get different keys.
+    /// A null or empty stored key is what a club that has never opened the Devices page
+    /// has. It must never be matchable — least of all by an empty bearer header.
     /// </summary>
-    [Fact]
-    public void Two_tenants_with_the_same_device_id_get_different_keys()
-    {
-        var device = Guid.NewGuid();
-        var d = Deriver();
-
-        Assert.NotEqual(d.Derive(Guid.NewGuid(), device, 1), d.Derive(Guid.NewGuid(), device, 1));
-    }
-
-    [Fact]
-    public void Two_devices_in_one_tenant_get_different_keys()
-    {
-        var tenant = Guid.NewGuid();
-        var d = Deriver();
-
-        Assert.NotEqual(d.Derive(tenant, Guid.NewGuid(), 1), d.Derive(tenant, Guid.NewGuid(), 1));
-    }
-
-    [Fact]
-    public void Different_master_key_yields_a_different_device_key()
-    {
-        var tenant = Guid.NewGuid();
-        var device = Guid.NewGuid();
-
-        Assert.NotEqual(
-            Deriver().Derive(tenant, device, 1),
-            Deriver("a-completely-different-master-key-also-long-enough").Derive(tenant, device, 1));
-    }
-
-    [Fact]
-    public void Encoded_key_is_base64url_and_padding_free()
-    {
-        var encoded = Deriver().DeriveEncoded(Guid.NewGuid(), Guid.NewGuid(), 1);
-
-        Assert.DoesNotContain('=', encoded);
-        Assert.DoesNotContain('+', encoded);
-        Assert.DoesNotContain('/', encoded);
-        Assert.Equal(43, encoded.Length);   // 32 bytes base64 minus padding
-    }
-
-    /// <summary>
-    /// A missing master key must be a startup failure, not a silent fallback to a
-    /// constant — which is the shape of bug that ships a fleet-wide known key.
-    /// </summary>
-    [Fact]
-    public void Missing_master_key_throws()
-    {
-        var config = new ConfigurationBuilder().Build();
-        Assert.Throws<InvalidOperationException>(() => new DeviceKeyDeriver(config));
-    }
-
-    [Fact]
-    public void Short_master_key_throws()
-    {
-        Assert.Throws<InvalidOperationException>(() => Deriver("too-short"));
-    }
-
-    /// <summary>The flat env-var form is what docker-compose actually sets.</summary>
-    [Fact]
-    public void Flat_env_var_name_binds()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["DEVICE_MASTER_KEY"] = Master })
-            .Build();
-
-        Assert.Equal(32, new DeviceKeyDeriver(config).Derive(Guid.NewGuid(), Guid.NewGuid(), 1).Length);
-    }
-}
-
-public class DeviceRequestSignerTests
-{
-    private static readonly byte[] Key = Encoding.UTF8.GetBytes("0123456789abcdef0123456789abcdef");
-
-    [Fact]
-    public void Canonical_string_has_five_newline_separated_fields()
-    {
-        var c = DeviceRequestSigner.CanonicalString("post", "/api/v1/device/heartbeat", 1700000000, "abc", []);
-        var parts = c.Split('\n');
-
-        Assert.Equal(5, parts.Length);
-        Assert.Equal("POST", parts[0]);                      // method upper-cased
-        Assert.Equal("/api/v1/device/heartbeat", parts[1]);
-        Assert.Equal("1700000000", parts[2]);
-        Assert.Equal("abc", parts[3]);
-        Assert.Equal(64, parts[4].Length);                   // hex sha256
-    }
-
-    /// <summary>The empty-body hash is a constant the firmware hardcodes. Pin it.</summary>
-    [Fact]
-    public void Empty_body_hashes_to_the_known_sha256_of_nothing()
-    {
-        var c = DeviceRequestSigner.CanonicalString("GET", "/x", 1, "n", []);
-        Assert.EndsWith("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", c);
-    }
+    [Theory]
+    [InlineData(null, "anything")]
+    [InlineData("", "anything")]
+    [InlineData("a-real-key", null)]
+    [InlineData("a-real-key", "")]
+    [InlineData(null, null)]
+    [InlineData("", "")]
+    public void An_absent_key_matches_nothing(string? stored, string? presented)
+        => Assert.False(DeviceApiKey.Matches(stored, presented));
 
     [Theory]
-    [InlineData("GET", "/api/v1/device/heartbeat", 1700000000L, "n1")]
-    [InlineData("POST", "/api/v1/device/heartbeat", 1700000000L, "n1")]   // method differs
-    [InlineData("GET", "/api/v1/device/other", 1700000000L, "n1")]        // path differs
-    [InlineData("GET", "/api/v1/device/heartbeat", 1700000001L, "n1")]    // timestamp differs
-    [InlineData("GET", "/api/v1/device/heartbeat", 1700000000L, "n2")]    // nonce differs
-    public void Every_field_participates_in_the_signature(string method, string path, long ts, string nonce)
-    {
-        var baseline = DeviceRequestSigner.Sign(Key,
-            DeviceRequestSigner.CanonicalString("GET", "/api/v1/device/heartbeat", 1700000000L, "n1", []));
-        var candidate = DeviceRequestSigner.Sign(Key,
-            DeviceRequestSigner.CanonicalString(method, path, ts, nonce, []));
-
-        var isBaseline = method == "GET" && path == "/api/v1/device/heartbeat" && ts == 1700000000L && nonce == "n1";
-        if (isBaseline) Assert.Equal(baseline, candidate);
-        else Assert.NotEqual(baseline, candidate);
-    }
+    [InlineData("Bearer abc", "abc")]
+    [InlineData("bearer abc", "abc")]           // header schemes are case-insensitive
+    [InlineData("Bearer   abc  ", "abc")]
+    [InlineData("abc", null)]                   // not a bearer header at all
+    [InlineData("Basic abc", null)]
+    [InlineData("Bearer ", null)]
+    [InlineData("Bearer", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void The_bearer_key_is_read_off_the_header(string? header, string? expected)
+        => Assert.Equal(expected, DeviceApiKey.FromAuthorizationHeader(header));
 
     /// <summary>
-    /// A query string is part of the signed path, so <c>?admin=1</c> cannot be bolted
-    /// onto a captured signature.
+    /// A bound on what an unauthenticated caller can make the server hold and compare.
     /// </summary>
     [Fact]
-    public void Query_string_is_signed()
-    {
-        var plain = DeviceRequestSigner.CanonicalString("GET", "/a", 1, "n", []);
-        var withQuery = DeviceRequestSigner.CanonicalString("GET", "/a?admin=1", 1, "n", []);
-
-        Assert.NotEqual(DeviceRequestSigner.Sign(Key, plain), DeviceRequestSigner.Sign(Key, withQuery));
-    }
-
-    [Fact]
-    public void Body_is_signed()
-    {
-        var a = DeviceRequestSigner.CanonicalString("POST", "/a", 1, "n", "{\"court\":1}"u8);
-        var b = DeviceRequestSigner.CanonicalString("POST", "/a", 1, "n", "{\"court\":2}"u8);
-
-        Assert.NotEqual(DeviceRequestSigner.Sign(Key, a), DeviceRequestSigner.Sign(Key, b));
-    }
-
-    /// <summary>
-    /// The canonicalisation hole this format exists to close: fields must not be able
-    /// to slide across their delimiters into one another.
-    /// </summary>
-    [Fact]
-    public void Fields_cannot_be_smuggled_across_the_delimiter()
-    {
-        var honest = DeviceRequestSigner.CanonicalString("GET", "/a", 1, "n", []);
-        var smuggled = DeviceRequestSigner.CanonicalString("GET", "/a\n1\nn", 1, "n", []);
-
-        Assert.NotEqual(honest, smuggled);
-    }
-
-    [Fact]
-    public void Signature_is_lowercase_hex_of_the_expected_length()
-    {
-        var sig = DeviceRequestSigner.Sign(Key, "anything");
-
-        Assert.Equal(64, sig.Length);
-        Assert.Equal(sig.ToLowerInvariant(), sig);
-        Assert.All(sig, c => Assert.True(Uri.IsHexDigit(c)));
-    }
-
-    [Fact]
-    public void Verify_accepts_a_correct_signature_and_rejects_everything_else()
-    {
-        const string canonical = "GET\n/a\n1\nn\nx";
-        var sig = DeviceRequestSigner.Sign(Key, canonical);
-
-        Assert.True(DeviceRequestSigner.Verify(Key, canonical, sig));
-        Assert.False(DeviceRequestSigner.Verify(Key, canonical, sig.ToUpperInvariant()));
-        Assert.False(DeviceRequestSigner.Verify(Key, canonical, sig[..^1] + "0"));
-        Assert.False(DeviceRequestSigner.Verify(Key, canonical, sig[..32]));
-        Assert.False(DeviceRequestSigner.Verify(Key, canonical, ""));
-        Assert.False(DeviceRequestSigner.Verify(Key, canonical, null!));
-        Assert.False(DeviceRequestSigner.Verify(Encoding.UTF8.GetBytes("fedcba9876543210fedcba9876543210"), canonical, sig));
-    }
+    public void An_absurdly_long_bearer_value_is_dropped_rather_than_compared()
+        => Assert.Null(DeviceApiKey.FromAuthorizationHeader("Bearer " + new string('a', DeviceApiKey.MaxLength + 1)));
 }
 
 /// <summary>
 /// The device scheme over real HTTP, against the real schema.
 ///
 /// <para>
-/// These are the tests the plan calls for by name. Everything above is pure-function
-/// coverage; only these prove that a signed request survives middleware ordering,
-/// resolves a tenant from the device row rather than from a Host header, and is
-/// rejected in every one of the ways it should be. The in-memory provider cannot
-/// stand in — it does not apply migrations and does not enforce the unique index that
-/// keeps two clubs' <c>court-box-1</c> apart.
+/// Everything above is pure-function coverage; only these prove that a request carrying
+/// the club key survives middleware ordering, resolves a tenant from the key rather than
+/// from a Host header, registers an unknown board, and is rejected in every one of the
+/// ways it should be. The in-memory provider cannot stand in — it does not apply
+/// migrations and does not enforce the unique index that keeps two clubs' boxes apart.
 /// </para>
 /// </summary>
 [Collection(HttpTestCollection.Name)]
@@ -251,391 +100,447 @@ public sealed class DeviceAuthHttpTests
     public DeviceAuthHttpTests(PostgresFixture pg) => _pg = pg;
 
     private const string HeartbeatPath = "/api/v1/device/heartbeat";
+    private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private sealed record Provisioned(Guid DeviceId, byte[] Key, Guid TenantId, string Slug);
+    private sealed record Club(Guid TenantId, string Slug, string Key);
 
     /// <summary>
-    /// Migrates, creates a tenant and a device, and returns the key the box would carry.
+    /// Migrates and creates a club with a device key — and no devices at all, because a
+    /// box registering itself is the path under test.
     ///
     /// <para>
-    /// The slug is suffixed per call because every test in this class shares one
-    /// database — an xUnit class fixture is created once, not once per test. The
-    /// <b>device code is not</b> suffixed: "court-box-1" repeating across tenants is
-    /// the condition being tested, and the unique index is scoped to the tenant.
+    /// The slug is suffixed per call because every test in this class shares one database:
+    /// an xUnit class fixture is created once, not once per test.
     /// </para>
     /// </summary>
-    private static async Task<Provisioned> ProvisionAsync(
-        TestWebAppFactory factory, string slugPrefix, bool enabled = true, DateTimeOffset? revokedAt = null)
+    private static async Task<Club> ClubAsync(TestWebAppFactory factory, string slugPrefix)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await db.Database.MigrateAsync();
 
         var slug = $"{slugPrefix}-{Guid.NewGuid():N}"[..24];
-        var tenant = new Tenant { Slug = slug, DisplayName = $"Club {slug}" };
+        var tenant = new Tenant
+        {
+            Slug = slug,
+            DisplayName = $"Club {slug}",
+            DeviceApiKey = DeviceApiKey.Generate(),
+            DeviceApiKeyRegeneratedAt = DateTimeOffset.UtcNow,
+        };
         db.Tenants.Add(tenant);
         db.TenantSettings.Add(new TenantSettings
         {
             TenantId = tenant.Id,
-            SettingsJson = """{"slice_minutes":15,"grace_window_minutes":5,"timezone":"UTC"}""",
+            SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","heartbeat_seconds":45}""",
         });
-
-        var device = new Device
-        {
-            TenantId = tenant.Id,
-            DeviceCode = "court-box-1",
-            Name = "Court 1 box",
-            Kind = DeviceKind.CourtBox,
-            Hardware = DeviceHardware.Esp8266,
-            CourtNumber = 1,
-            Enabled = enabled,
-            RevokedAt = revokedAt,
-        };
-        db.Devices.Add(device);
+        db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m });
         await db.SaveChangesAsync();
 
-        var keys = scope.ServiceProvider.GetRequiredService<IDeviceKeyDeriver>();
-        return new Provisioned(device.Id, keys.Derive(tenant.Id, device.Id, device.KeyVersion), tenant.Id, slug);
+        return new Club(tenant.Id, slug, tenant.DeviceApiKey!);
     }
 
-    /// <summary>Builds the request a correctly-implemented firmware would send.</summary>
-    private static HttpRequestMessage Signed(
-        Provisioned p,
-        string method = "POST",
-        string path = HeartbeatPath,
-        string body = """{"running_version":"1.0.0","mega_version":"0.9.0"}""",
-        long? unixSeconds = null,
-        string? nonce = null,
-        byte[]? signWithKey = null,
-        string? overrideSignature = null)
+    /// <summary>A random MAC, so tests in this shared database never collide on the unique index.</summary>
+    private static string NewMac() => Guid.NewGuid().ToString("N")[..12];
+
+    /// <summary>The request a correctly-implemented firmware would send.</summary>
+    private static HttpRequestMessage Heartbeat(
+        string? key, string mac, string? runningVersion = null, string? megaVersion = null, string? firmwareVersion = null)
     {
-        var ts = unixSeconds ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var n = nonce ?? Guid.NewGuid().ToString("N");
-        var bytes = Encoding.UTF8.GetBytes(body);
+        var body = new JsonObject { ["mac"] = mac };
+        if (runningVersion is not null) body["running_version"] = runningVersion;
+        if (megaVersion is not null) body["mega_version"] = megaVersion;
+        if (firmwareVersion is not null) body["firmware_version"] = firmwareVersion;
 
-        var canonical = DeviceRequestSigner.CanonicalString(method, path, ts, n, bytes);
-        var signature = overrideSignature ?? DeviceRequestSigner.Sign(signWithKey ?? p.Key, canonical);
-
-        var req = new HttpRequestMessage(new HttpMethod(method), path)
+        var req = new HttpRequestMessage(HttpMethod.Post, HeartbeatPath)
         {
-            Content = new ByteArrayContent(bytes),
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
         };
-        req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        req.Headers.Add(DeviceRequestSigner.DeviceIdHeader, p.DeviceId.ToString());
-        req.Headers.Add(DeviceRequestSigner.TimestampHeader, ts.ToString());
-        req.Headers.Add(DeviceRequestSigner.NonceHeader, n);
-        req.Headers.Add(DeviceRequestSigner.SignatureHeader, signature);
+        if (key is not null) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
         return req;
     }
 
     private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
 
     [SkippableFact]
-    public async Task A_correctly_signed_heartbeat_is_accepted_and_resolves_the_tenant()
+    public async Task An_unknown_board_registers_itself_and_the_response_resolves_the_tenant()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
+        var club = await ClubAsync(factory, "alpha");
+        var mac = NewMac();
         var client = factory.CreateClient();
 
-        var response = await client.SendAsync(Signed(p));
+        var response = await client.SendAsync(Heartbeat(club.Key, mac));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
 
-        // Resolved from the device row, not from the Host header — the client's host is
+        // Resolved from the key, not from the Host header — the client's host is
         // "localhost", which resolves to no tenant at all.
-        Assert.Equal(p.Slug, json.GetProperty("tenant_slug").GetString());
-        Assert.Equal("court-box-1", json.GetProperty("device_code").GetString());
-        Assert.Equal(1, json.GetProperty("court_number").GetInt32());
+        Assert.Equal(club.Slug, json.GetProperty("tenant_slug").GetString());
+        Assert.Equal($"box-{mac[^6..]}", json.GetProperty("device_code").GetString());
         Assert.Equal(15, json.GetProperty("config").GetProperty("slice_minutes").GetInt32());
+
+        // The interval is the tenant's setting, not a hardcoded 60.
+        Assert.Equal(45, json.GetProperty("heartbeat_seconds").GetInt32());
+
+        // The club has exactly one court, so that is what the box was given.
+        Assert.Equal(new[] { 1 }, json.GetProperty("court_numbers").EnumerateArray().Select(e => e.GetInt32()));
+
+        // Nothing that belonged to the retired scheme survives on the wire.
+        Assert.False(json.TryGetProperty("server_unix", out _));
+        Assert.False(json.TryGetProperty("ota", out _));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+        Assert.Equal(club.TenantId, device.TenantId);
+        Assert.True(device.AutoRegistered);
+    }
+
+    /// <summary>A second heartbeat is the same board, not a second row.</summary>
+    [SkippableFact]
+    public async Task A_second_heartbeat_from_the_same_board_does_not_register_it_again()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "alpha");
+        var mac = NewMac();
+        var client = factory.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(1, await db.Devices.IgnoreQueryFilters().CountAsync(d => d.MacAddress == mac));
     }
 
     /// <summary>
-    /// The regression test for the bug this handler was written to avoid. The endpoint
-    /// reads its own device row through the global query filter; if the handler failed
-    /// to set the tenant, that filter would evaluate against Guid.Empty, the row would
-    /// not be found, and this would 404 rather than 200.
+    /// The regression test for the bug the scheme was written to avoid. The endpoint reads
+    /// its own device row through the global query filter; if the handler failed to set the
+    /// tenant, that filter would evaluate against Guid.Empty and the row would be
+    /// re-created on every call instead of updated.
     /// </summary>
     [SkippableFact]
     public async Task Heartbeat_writes_last_seen_and_versions_to_the_right_row()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
+        var club = await ClubAsync(factory, "alpha");
+        var mac = NewMac();
         var client = factory.CreateClient();
 
-        var response = await client.SendAsync(Signed(p, body: """{"running_version":"2.3.4","mega_version":"1.1.0"}"""));
+        var response = await client.SendAsync(
+            Heartbeat(club.Key, mac, runningVersion: "2.3.4", megaVersion: "1.1.0"));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-        var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == p.DeviceId);
+        var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
 
         Assert.NotNull(device.LastSeenAt);
         Assert.Equal("2.3.4", device.RunningVersion);
         Assert.Equal("1.1.0", device.MegaVersion);
-        Assert.Equal(p.TenantId, device.TenantId);
-    }
-
-    [SkippableFact]
-    public async Task Unsigned_request_is_rejected()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        await ProvisionAsync(factory, "alpha");
-        var client = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync(HeartbeatPath, new { running_version = "1.0.0" });
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-    }
-
-    [SkippableFact]
-    public async Task Wrong_key_is_rejected()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
-        var client = factory.CreateClient();
-
-        var wrong = new byte[32];
-        Array.Fill(wrong, (byte)7);
-
-        var response = await client.SendAsync(Signed(p, signWithKey: wrong));
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(club.TenantId, device.TenantId);
     }
 
     /// <summary>
-    /// Tampering after signing. The body is hashed into the canonical string, so a
-    /// captured signature cannot be re-used over different content.
+    /// The wiring behind the no-show waiver, over real HTTP: a heartbeat that ends a silence
+    /// past the club's threshold leaves a closed <c>DeviceOutage</c> behind, because the
+    /// heartbeat is the only actor that sees the instant a silence ended.
+    ///
+    /// <para>
+    /// Without it the row is written only when <c>PeripheralHealthWorker</c> happens to catch
+    /// the box mid-outage on its thirty-second stride, and a club power cut that ends between
+    /// two ticks settles the same booking at two different prices depending on whether the
+    /// sweep ran before or after the box came back. The unit half of this is
+    /// <c>PeripheralHealthTests.The_waiver_is_the_same_whether_the_box_came_back_before_or_after_the_sweep</c>;
+    /// this is the half that proves the endpoint calls it.
+    /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task Body_tampered_after_signing_is_rejected()
+    public async Task A_heartbeat_that_ends_a_long_silence_records_the_outage_it_ended()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
+        var club = await ClubAsync(factory, "alpha");
+        var mac = NewMac();
         var client = factory.CreateClient();
 
-        var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var nonce = Guid.NewGuid().ToString("N");
-        var honest = """{"running_version":"1.0.0"}""";
-        var signature = DeviceRequestSigner.Sign(p.Key,
-            DeviceRequestSigner.CanonicalString("POST", HeartbeatPath, ts, nonce, Encoding.UTF8.GetBytes(honest)));
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
 
-        var req = new HttpRequestMessage(HttpMethod.Post, HeartbeatPath)
-        {
-            Content = new StringContent("""{"running_version":"6.6.6"}""", Encoding.UTF8, "application/json"),
-        };
-        req.Headers.Add(DeviceRequestSigner.DeviceIdHeader, p.DeviceId.ToString());
-        req.Headers.Add(DeviceRequestSigner.TimestampHeader, ts.ToString());
-        req.Headers.Add(DeviceRequestSigner.NonceHeader, nonce);
-        req.Headers.Add(DeviceRequestSigner.SignatureHeader, signature);
+        // The box goes dark for twenty minutes. heartbeat_seconds is 45 here, so
+        // offline_after_seconds is the 180-second floor and twenty minutes is far past it.
+        var wentQuietAt = DateTimeOffset.UtcNow.AddMinutes(-20);
+        await BackdateAsync(factory, mac, wentQuietAt);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(req)).StatusCode);
-    }
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
 
-    /// <summary>
-    /// Replay. The same bytes, sent twice, must fail the second time — otherwise a
-    /// captured lights-on request works forever on an open club LAN.
-    /// </summary>
-    [SkippableFact]
-    public async Task Replayed_nonce_is_rejected()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
-        var client = factory.CreateClient();
-
-        var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var nonce = Guid.NewGuid().ToString("N");
-
-        var first = await client.SendAsync(Signed(p, unixSeconds: ts, nonce: nonce));
-        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-
-        var replay = await client.SendAsync(Signed(p, unixSeconds: ts, nonce: nonce));
-        Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
-    }
-
-    [SkippableTheory]
-    [InlineData(-3600)]   // an hour behind
-    [InlineData(3600)]    // an hour ahead
-    [InlineData(-300)]    // just outside the two-minute window
-    public async Task Stale_or_future_timestamp_is_rejected(int offsetSeconds)
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
-        var client = factory.CreateClient();
-
-        var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + offsetSeconds;
-        var response = await client.SendAsync(Signed(p, unixSeconds: ts));
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-    }
-
-    [SkippableFact]
-    public async Task Disabled_device_is_rejected()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha", enabled: false);
-        var client = factory.CreateClient();
-
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Signed(p))).StatusCode);
-    }
-
-    [SkippableFact]
-    public async Task Revoked_device_is_rejected()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha", revokedAt: DateTimeOffset.UtcNow);
-        var client = factory.CreateClient();
-
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Signed(p))).StatusCode);
-    }
-
-    [SkippableFact]
-    public async Task Unknown_device_id_is_rejected()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
-        var client = factory.CreateClient();
-
-        var ghost = p with { DeviceId = Guid.NewGuid() };
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Signed(ghost))).StatusCode);
-    }
-
-    [SkippableFact]
-    public async Task Malformed_headers_are_rejected_rather_than_crashing()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
-        var client = factory.CreateClient();
-
-        async Task<HttpStatusCode> SendAsync(Action<HttpRequestMessage> mutate)
-        {
-            var req = new HttpRequestMessage(HttpMethod.Post, HeartbeatPath)
-            {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json"),
-            };
-            mutate(req);
-            return (await client.SendAsync(req)).StatusCode;
-        }
-
-        // Device id that is not a guid.
-        Assert.Equal(HttpStatusCode.Unauthorized, await SendAsync(r =>
-        {
-            r.Headers.Add(DeviceRequestSigner.DeviceIdHeader, "not-a-guid");
-            r.Headers.Add(DeviceRequestSigner.TimestampHeader, "1");
-            r.Headers.Add(DeviceRequestSigner.NonceHeader, "n");
-            r.Headers.Add(DeviceRequestSigner.SignatureHeader, "00");
-        }));
-
-        // Timestamp that is not a number.
-        Assert.Equal(HttpStatusCode.Unauthorized, await SendAsync(r =>
-        {
-            r.Headers.Add(DeviceRequestSigner.DeviceIdHeader, p.DeviceId.ToString());
-            r.Headers.Add(DeviceRequestSigner.TimestampHeader, "yesterday");
-            r.Headers.Add(DeviceRequestSigner.NonceHeader, "n");
-            r.Headers.Add(DeviceRequestSigner.SignatureHeader, "00");
-        }));
-
-        // Device id present, everything else missing.
-        Assert.Equal(HttpStatusCode.Unauthorized, await SendAsync(r =>
-            r.Headers.Add(DeviceRequestSigner.DeviceIdHeader, p.DeviceId.ToString())));
-    }
-
-    /// <summary>
-    /// Rotation must actually revoke. A box still holding the old key is offline until
-    /// re-provisioned — deliberately, since a rotation that left the old key working
-    /// would not be a rotation.
-    /// </summary>
-    [SkippableFact]
-    public async Task Key_rotation_invalidates_the_previous_key()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
-        var client = factory.CreateClient();
-
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(p))).StatusCode);
-
-        byte[] newKey;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
-            var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == p.DeviceId);
-            device.KeyVersion++;
-            await db.SaveChangesAsync();
+            var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+            var outage = Assert.Single(await db.DeviceOutages.IgnoreQueryFilters()
+                .Where(o => o.DeviceId == device.Id).ToListAsync());
 
-            newKey = scope.ServiceProvider.GetRequiredService<IDeviceKeyDeriver>()
-                .Derive(device.TenantId, device.Id, device.KeyVersion);
+            Assert.Equal(wentQuietAt, outage.StartedAt, TimeSpan.FromSeconds(1));
+            Assert.NotNull(outage.EndedAt);
+            Assert.Equal(device.LastSeenAt, outage.EndedAt);
         }
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Signed(p))).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Signed(p with { Key = newKey }))).StatusCode);
+        // The control: an ordinary heartbeat inside the threshold records nothing, or every
+        // box in the club would carry an outage row per call.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+            Assert.Single(await db.DeviceOutages.IgnoreQueryFilters()
+                .Where(o => o.DeviceId == device.Id).ToListAsync());
+        }
+    }
+
+    /// <summary>Puts a box's last heartbeat back in time, which is what an outage looks like from the API side.</summary>
+    private static async Task BackdateAsync(TestWebAppFactory factory, string mac, DateTimeOffset lastSeenAt)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+        device.LastSeenAt = lastSeenAt;
+        await db.SaveChangesAsync();
     }
 
     /// <summary>
-    /// The cross-tenant test that matters for hardware: one club's box, correctly
-    /// signed, must land on its own tenant even when a second club exists in the same
-    /// database with an identically-coded device.
+    /// The contract calls the field <c>firmware_version</c> and the firmware writes
+    /// <c>running_version</c>. Both are read, so a rename on either side degrades to a
+    /// column that keeps updating rather than one that silently stops.
     /// </summary>
     [SkippableFact]
-    public async Task Two_tenants_with_identical_device_codes_stay_apart()
+    public async Task Firmware_version_is_accepted_as_a_synonym_of_running_version()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var alpha = await ProvisionAsync(factory, "alpha");
-        var bravo = await ProvisionAsync(factory, "bravo");
+        var club = await ClubAsync(factory, "alpha");
+        var mac = NewMac();
+        var client = factory.CreateClient();
+
+        await client.SendAsync(Heartbeat(club.Key, mac, firmwareVersion: "2.0.0"));
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal("2.0.0", (await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac)).RunningVersion);
+    }
+
+    [SkippableFact]
+    public async Task A_request_with_no_key_is_rejected()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        await ClubAsync(factory, "alpha");
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(HeartbeatPath, new { mac = NewMac() });
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [SkippableFact]
+    public async Task An_unrecognised_key_is_rejected()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        await ClubAsync(factory, "alpha");
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(Heartbeat(DeviceApiKey.Generate(), NewMac()));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    /// <summary>
+    /// Near-misses. A key one character short, one character long or one byte different
+    /// must all be refused — this is what the constant-time comparison is comparing.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_key_that_is_nearly_right_is_rejected()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "alpha");
+        var client = factory.CreateClient();
+
+        foreach (var wrong in new[] { club.Key[..^1], club.Key + "x", club.Key[..^1] + (club.Key[^1] == 'a' ? 'b' : 'a') })
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Heartbeat(wrong, NewMac()))).StatusCode);
+        }
+    }
+
+    /// <summary>
+    /// Regenerating has to bite on the next request. A grace window would mean a key an
+    /// admin believes they have replaced still opens the club's courts.
+    /// </summary>
+    [SkippableFact]
+    public async Task Regenerating_the_key_invalidates_the_previous_one_immediately()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "alpha");
+        var mac = NewMac();
+        var client = factory.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+
+        string replacement;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var tenant = await db.Tenants.SingleAsync(t => t.Id == club.TenantId);
+            replacement = tenant.DeviceApiKey = DeviceApiKey.Generate();
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(replacement, mac))).StatusCode);
+    }
+
+    /// <summary>A club that has never opened the Devices page has no key, and nothing opens it.</summary>
+    [SkippableFact]
+    public async Task A_club_with_no_key_cannot_be_reached_by_an_empty_one()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "alpha");
+        var client = factory.CreateClient();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var tenant = await db.Tenants.SingleAsync(t => t.Id == club.TenantId);
+            tenant.DeviceApiKey = null;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Heartbeat("", NewMac()))).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Heartbeat(club.Key, NewMac()))).StatusCode);
+    }
+
+    /// <summary>
+    /// The MAC is the board's whole identity, so a request without a usable one cannot be
+    /// answered — and must say so rather than 404, which would read as "unknown board".
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("")]
+    [InlineData("not-a-mac")]
+    [InlineData("5ccf7f1a2b3")]
+    public async Task A_heartbeat_without_a_usable_mac_is_a_bad_request(string mac)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "alpha");
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(Heartbeat(club.Key, mac));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    /// <summary>
+    /// A box an admin switched off is refused rather than silently re-registered around
+    /// the disable — which would make the switch a lie.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_disabled_box_is_refused()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "alpha");
+        var mac = NewMac();
+        var client = factory.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var device = await db.Devices.IgnoreQueryFilters().SingleAsync(d => d.MacAddress == mac);
+            device.Enabled = false;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+    }
+
+    /// <summary>
+    /// One club's key must never reach another club's board. With per-device keys this was
+    /// a stolen-box attack; with a club key it is the whole of tenant isolation on this
+    /// surface, so it is worth proving rather than assuming.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_clubs_key_only_ever_registers_boards_into_that_club()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var alpha = await ClubAsync(factory, "alpha");
+        var bravo = await ClubAsync(factory, "bravo");
         var client = factory.CreateClient();
 
         Assert.NotEqual(alpha.TenantId, bravo.TenantId);
         Assert.NotEqual(alpha.Key, bravo.Key);
 
-        var a = JsonDocument.Parse(await (await client.SendAsync(Signed(alpha))).Content.ReadAsStringAsync()).RootElement;
-        var b = JsonDocument.Parse(await (await client.SendAsync(Signed(bravo))).Content.ReadAsStringAsync()).RootElement;
+        var alphaMac = NewMac();
+        var bravoMac = NewMac();
+
+        var a = JsonDocument.Parse(await (await client.SendAsync(Heartbeat(alpha.Key, alphaMac))).Content.ReadAsStringAsync()).RootElement;
+        var b = JsonDocument.Parse(await (await client.SendAsync(Heartbeat(bravo.Key, bravoMac))).Content.ReadAsStringAsync()).RootElement;
 
         Assert.Equal(alpha.Slug, a.GetProperty("tenant_slug").GetString());
         Assert.Equal(bravo.Slug, b.GetProperty("tenant_slug").GetString());
 
-        // Alpha's key over bravo's device id: the exact shape of a stolen-box attack.
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await client.SendAsync(Signed(bravo with { Key = alpha.Key }))).StatusCode);
+        // Bravo's key naming alpha's board: a new row in BRAVO, never alpha's row.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(bravo.Key, alphaMac))).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var rows = await db.Devices.IgnoreQueryFilters().Where(d => d.MacAddress == alphaMac).ToListAsync();
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r.TenantId == alpha.TenantId);
+        Assert.Contains(rows, r => r.TenantId == bravo.TenantId);
     }
 
     /// <summary>
-    /// A device credential must not open the admin surface. This is the whole reason
-    /// the scheme exists rather than baking an admin JWT into a board.
+    /// A device credential must not open the admin surface. This is the whole reason the
+    /// scheme exists rather than baking an admin JWT into a board.
     /// </summary>
     [SkippableFact]
     public async Task Device_credentials_do_not_reach_the_admin_surface()
     {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var p = await ProvisionAsync(factory, "alpha");
+        var club = await ClubAsync(factory, "alpha");
         var client = factory.CreateClient();
 
-        var response = await client.SendAsync(Signed(p, method: "GET", path: "/api/v1/admin/devices/", body: ""));
+        var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/devices/");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", club.Key);
 
+        var response = await client.SendAsync(req);
+
+        // BadRequest is a legitimate outcome here and not a weakening of the assertion: the
+        // admin surface resolves its tenant from the JWT or the Host, and a device key is
+        // neither, so the request dies at tenant resolution rather than at authorisation.
+        // What matters is that it is never 200 with a device list in it.
         Assert.True(
             response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.BadRequest,
             $"A device reached the admin surface with {(int)response.StatusCode}.");

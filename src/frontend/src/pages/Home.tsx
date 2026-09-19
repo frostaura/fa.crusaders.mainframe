@@ -19,6 +19,7 @@ export default function HomePage() {
         {auth.status === "authenticated" ? (
           <div className="flex flex-wrap gap-3">
             <Link to="/schedule" className="text-accent-strong font-medium hover:underline">Open the schedule →</Link>
+            <Link to="/court-code" className="text-text-secondary hover:underline">Show your court code</Link>
             <Link to="/wallet" className="text-text-secondary hover:underline">View wallet</Link>
             {auth.isAdmin && <Link to="/admin/members" className="text-text-secondary hover:underline">Admin · Members</Link>}
           </div>

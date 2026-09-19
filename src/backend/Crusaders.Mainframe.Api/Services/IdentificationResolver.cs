@@ -1,9 +1,3 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
-using Crusaders.Mainframe.Api.Multitenancy;
-using Microsoft.IdentityModel.Tokens;
-
 namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>
@@ -25,91 +19,73 @@ namespace Crusaders.Mainframe.Api.Services;
 /// members, so a random four digits would frequently match <i>somebody</i>. Refusing is the
 /// only correct answer, and it is refused with a reason rather than silently returning null.
 /// </para>
+///
+/// <para>
+/// What a QR carries is an <see cref="Domain.AccessCode"/>, never a JWT. There used to be a
+/// JWT path here, and it could not work: the court box's scanner pipeline carries at most
+/// 24 bytes and a signed token is hundreds (review H2). A sixty-bit random code that names
+/// a row is what the hardware can actually scan, and the row is what makes it real.
+/// </para>
 /// </summary>
 public sealed class IdentificationResolver
 {
-    private readonly IConfiguration _config;
-    private readonly ITenantContext _tenant;
+    private readonly AccessCodeService _codes;
 
-    public IdentificationResolver(IConfiguration config, ITenantContext tenant)
-    { _config = config; _tenant = tenant; }
-
-    /// <summary>Methods that can identify a member without a booking to check against.</summary>
-    public static bool CanIdentifyGlobally(string? method)
-        => string.Equals(method, "qr", StringComparison.OrdinalIgnoreCase);
+    public IdentificationResolver(AccessCodeService codes) => _codes = codes;
 
     /// <summary>
-    /// The user this token identifies, or null. Null covers every failure — expired,
-    /// tampered, wrong purpose, unsupported method — on purpose: telling them apart at a
-    /// court box turns it into an oracle for which tokens are real.
+    /// Methods that can identify a member without a booking to check against. <c>qr</c>
+    /// is a code read by a camera or scanner; <c>code</c> is the same code typed in.
     /// </summary>
-    public Task<Guid?> ResolveAsync(string? method, string? token, CancellationToken ct)
+    public static bool CanIdentifyGlobally(string? method)
+        => string.Equals(method, "qr", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(method, "code", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The user this code identifies, or null. Null covers every failure — expired,
+    /// unknown, another club's, unsupported method, wrong kind of code — on purpose:
+    /// telling them apart at a court box turns it into an oracle for which codes are real.
+    ///
+    /// <para>
+    /// <b>Only a member-ident code identifies here.</b> A booking-activation code names
+    /// its member too, and for a while that was taken as a convenience — a member with a
+    /// booking on court 2 buying a walk-up on court 3 without fetching a second code. It
+    /// was also the hole in the threat model (closing re-review #19): booking codes are
+    /// pushed in clear to every box driving that court and sit in box RAM for hours, on
+    /// the stated understanding that "nothing a box holds is a member's identity". Making
+    /// them a spendable identity meant anyone who read a roster code — a lifted box, a
+    /// LAN sniff, a glance at a phone — could buy court time on that member's credits at
+    /// any box, or charge them for a stranger's court as the payer. So a booking code
+    /// opens its own booking on the activation paths (<c>/activate</c>, <c>/events</c>,
+    /// which resolve codes themselves) and nothing else; the wallet needs the short-lived
+    /// ident code the member's phone shows for exactly this.
+    /// </para>
+    /// </summary>
+    public async Task<Guid?> ResolveAsync(string? method, string? token, CancellationToken ct)
     {
         if (!CanIdentifyGlobally(method) || string.IsNullOrWhiteSpace(token))
         {
-            return Task.FromResult<Guid?>(null);
+            return null;
         }
-        return Task.FromResult(VerifyQrToken(token));
+
+        var resolved = await _codes.ResolveAsync(token, ct);
+        return resolved?.Purpose == Domain.AccessCodePurpose.MemberIdent ? resolved.UserId : null;
     }
 
     /// <summary>
-    /// Verifies a <c>qr_ident</c> token and returns its subject.
-    ///
-    /// <para>
-    /// The lifetime check is the point: these are minted with a 60-second expiry, which is
-    /// also why a QR token can never be cached on a court box for offline use. A box holding
-    /// a stable copy of somebody's identity is a box that opens a court for them forever.
-    /// </para>
+    /// The identification an ACTIVATION path may act on: either kind of code, with the
+    /// booking a booking code names carried along so the caller can hold the activation to
+    /// that booking. This is the courtside camera's question — "may this person start on
+    /// court N?" — and a booking code answers it for its own booking exactly as the box's
+    /// <c>/activate</c> does. It is not a wallet identity; see <see cref="ResolveAsync"/>.
     /// </summary>
-    public Guid? VerifyQrToken(string token)
+    public async Task<ResolvedAccessCode?> ResolveForActivationAsync(string? method, string? token, CancellationToken ct)
     {
-        var secret = _config["Jwt:Secret"];
-        if (string.IsNullOrWhiteSpace(secret)) return null;
-
-        var handler = new JwtSecurityTokenHandler();
-        ClaimsPrincipal principal;
-        try
-        {
-            principal = handler.ValidateToken(token, new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidateAudience = true,
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true,
-                ValidIssuer = _config["Jwt:Issuer"],
-                ValidAudience = _config["Jwt:Audience"],
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)),
-                ClockSkew = TimeSpan.FromSeconds(10),
-            }, out _);
-        }
-        catch
+        if (!CanIdentifyGlobally(method) || string.IsNullOrWhiteSpace(token))
         {
             return null;
         }
 
-        // The purpose claim is what stops a login JWT — same key, same issuer, much longer
-        // life — being held up to a camera.
-        if (principal.FindFirstValue("purpose") != "qr_ident") return null;
-
-        // The token is minted with a tenant on it; until now nothing read it back, so a
-        // member of one club could present their QR at another club's court box and be
-        // resolved to their own user id. What stopped a booking appearing was incidental
-        // rather than deliberate — the balance query is tenant-filtered, so a foreign user
-        // reads as zero credits and the walk-up ends in 402 — but a court priced at zero
-        // would have written the cross-tenant row, and the 400-vs-402 split was already a
-        // usable oracle for "is this a live member token of some other club?".
-        //
-        // Isolation is structural, so it is checked here rather than left resting on an
-        // arithmetic accident downstream.
-        if (!Guid.TryParse(principal.FindFirstValue("tenant_id"), out var tokenTenantId)
-            || tokenTenantId != _tenant.TenantId)
-        {
-            return null;
-        }
-
-        var sub = principal.FindFirstValue(JwtRegisteredClaimNames.Sub)
-                  ?? principal.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        return Guid.TryParse(sub, out var userId) ? userId : null;
+        return await _codes.ResolveAsync(token, ct);
     }
 }

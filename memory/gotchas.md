@@ -1,70 +1,58 @@
 ---
 name: crusaders-mainframe-gotchas
-description: "Money bug FIXED 2026-08-22 (credits rename done, schema deployable); .env holds real SMTP creds; three CI gates were incapable of failing; a PlatformIO coordinate is owner/name and the wrong owner hid two more build bugs behind it; the rollover grep gate keys on identifier names and has a blind spot; dotnet and pio are absent from fresh remote sessions"
+description: "The test suite lies in specific ways: it cannot pass in the last half-hour of a UTC day, some tests cannot fail on this Mac by construction, a test can be green because of one fixture field, and the in-memory provider has no transactions."
 type: gotcha
-last_verified: 2026-08-23
+last_verified: 2026-09-11
 ---
 
-# Gotchas
+# Gotchas — the test suite and its fixtures
 
-- **~~MONEY BUG — the 8.2 credits rename is half-done~~ — FIXED 2026-08-22.** The rename landed in full: `AmountZar → AmountCredits`, `AmountChargedZar → AmountChargedCredits`, `SlicePriceZar → SlicePriceCredits`, and every affected wire key. Fields that genuinely hold rand were deliberately left named for rand — `PendingTopup.AmountZar`, `ZarPaid`, `ConversionRate`, `AdminMemberEndpoints`' `top_ups_zar` (which sums `ZarPaid`), and the `topup_*` / `credits_per_zar_*` settings. **A blind sweep breaks that distinction**: it renamed `top_ups_zar` onto the existing `top_ups_credits` and the frontend typecheck caught the duplicate key. The member spend report legitimately carries both units side by side.
-- **~~Only one migration exists and any deployed DB is stuck~~ — FIXED 2026-08-22.** Verified empirically first: a production boot against a fresh Postgres threw `PendingModelChangesWarning` and died, because the model snapshot was a hand-written 52-line stub and eight columns plus `webauthn_credentials` existed only in a Development-only raw-DDL block in `Seeder.cs`. Passkeys could never have worked in production. Nothing is deployed, so the migration was regenerated from the model rather than patched. `ApiBoundaryTests` now asserts each of those columns against `information_schema`, so re-adding them as raw DDL fails the build.
-- **`.env` holds real SMTP credentials.** It is now correctly gitignored (`.gitignore` lines 54–58) and is not tracked — verified. It is still unencrypted and unbacked-up.
-- **The vendored Gaia toolkit was removed 2026-08-21** — `.claude/skills/`, `.claude/agents/`, `.claude/gaia-instructions.md` and the whole `.github/` mirror (55 tracked files, staged not committed). It was a superseded naming generation (`gaia-*`, since renamed upstream), and **8 of its 9 skills could never fire**: their frontmatter was missing its opening `---`, so the loader read the description as the literal string `name: <skill>`. Procedural guidance now comes from the installed Gaia plugins. Do not re-vendor it — a local copy stops receiving fixes, which is how this one rotted. The stack skills it carried were present and ignored anyway; see the frontend deviation below.
-- **Three CI gates were incapable of failing** (all fixed 2026-08-22, but the pattern is the point). `backend-integration` ended in `|| (echo ...; exit 0)` *and* filtered for `ApiBoundaryTests`, a class that did not exist — so it provisioned a Postgres container it never touched. The coverage gate exited 0 when no report was produced, passing precisely when it broke. Security Scan needs `backend` to pass first, and backend had been red for months, so it had **never once executed** — the moment it became reachable it found 10 advisories. **A gate that never runs is indistinguishable from one that always passes.** Do not add a fourth escape hatch; `make test-iot` fails hard if `pio` is missing for exactly this reason.
-- **`dotnet` and `pio` are not installed in a fresh remote session.** Install the .NET 10 SDK (`dot.net/v1/dotnet-install.sh --channel 10.0`) and `pip install -r src/iot/requirements.txt` before trusting any local test result. A Postgres can be started from `/usr/lib/postgresql/16/bin` without Docker — `initdb -A trust -U crusaders`, then `pg_ctl -o '-p 5432 -k /tmp' start` as the `postgres` user.
-- **`Program.cs` captures the connection string at `AddDbContext` registration time**, which under the minimal hosting model happens *before* `ConfigureAppConfiguration` hooks fire. Config layered on by `WebApplicationFactory` never reaches it; environment variables do. `TestWebAppFactory` sets them for this reason — do not "simplify" it back to `ConfigureAppConfiguration`.
-- **A PlatformIO library coordinate is `owner/name`, and two owners can publish the same name at the same version.** `court_mega` pinned `johnrickman/LiquidCrystal_I2C@1.1.4`, which is a GitHub-only library in the Arduino Library Manager index and has never been in the PlatformIO registry; `marcoschwartz/LiquidCrystal_I2C@1.1.4` is the registry one, same API, identical version number. `pio pkg search <name>` is the check. Fixed 2026-08-23, with the reason in a comment beside the line so nobody "corrects" the owner back.
-- **The Arduino AVR builder appends `-std=gnu++11` to CXXFLAGS AFTER `build_flags` are processed**, so `[common]`'s `-std=gnu++17` lost every time and nothing in `lib/` — which is full of C++17 `inline constexpr` variables — could compile for the Mega. `build_unflags = -std=gnu++11` in `[env:court_mega]` is what lets ours win. This had been latent for as long as the library coordinate kept `pio run` from getting that far, which is the general shape: **one broken gate hides the next one behind it.**
-- **The rollover grep gate keys on identifier NAMES, so it has a blind spot.** It matches `(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)`, which catches `now >= expiresAtMs` but NOT `now >= until_[i].at` — and `at` is `tb::Deadline`'s public field, so the naive comparison is reachable through any deadline whose variable is named something else. Demonstrated 2026-08-23 by writing exactly that mutation: the grep stayed silent and only the tests went red. The tests are the real gate here; the grep is a cheap second net with a hole in it.
-- **`git ls-files` only matches tracked files**, so a lint target built on it silently passes on new work. `make lint-iot` uses `-co --exclude-standard`. This was found by deliberately breaking formatting and watching the gate pass.
-- **`clang-format` output varies by version**, so it is pinned in `src/iot/requirements.txt` alongside platformio, lizard and gcovr. An OS-provided formatter lets CI reject code a developer formatted correctly.
-- **GitHub sets `CI=true` in every job**, including ones with no database. Keying a "must not skip" assertion on it fails the jobs it was meant to leave alone — `ApiBoundaryTests` keys on `REQUIRE_BOUNDARY_TESTS` instead.
-- **The SSRF guard now EXISTS — this entry used to say it did not.** It was true until 2026-08-23: `ValidateUrl` checked the scheme only and both call sites hardcoded `allowLan: true`, so any authenticated *member* could point a webhook at any LAN address and read 512 characters back. The decision now happens in the socket's `ConnectCallback`, against the address actually being dialled, because a host resolved at registration can point elsewhere by delivery time. Redirects are not followed; `169.254.0.0/16` is blocked; the lights-controller carve-out is a CIDR allow-list. **The lesson worth keeping is that this entry was stale in the pessimistic direction and nearly caused the work to be done twice.**
-- **Webhook retry now EXISTS — this entry used to say it did not.** `NextRetryAt` had been written and read by nothing since the pipeline was authored, so a receiver down for thirty seconds lost the event permanently. Fixed 2026-08-23. The reason relay actuation still must not ride the webhook bus is unchanged: it is a mirror of the event stream, not a control channel.
-- **`docs/phases/` does not exist** despite the plan mandating a `phase-<n>.md` execution log per phase. There is no record of *why* any implementation choice was made — only what the specs said should happen.
-- **The claim commitment hashes the nonce's HEX TEXT, not its 8 raw bytes.** `docs/specs/device-discovery.md` writes `cch = SHA256(code || ":" || nonce)` while calling `n` an "8-byte nonce, hex", which reads either way; the shared corpus settles it as the ASCII hex. A side that hashed the decoded bytes would produce a commitment that never matches, and the symptom is an admin whose correct claim code is refused — the same class of invisible byte-level disagreement the corpus exists to catch. Same for the truncation: 16 hex characters means the first 8 digest BYTES.
-- **`BackgroundService.StartAsync` no longer runs `ExecuteAsync` inline on .NET 10.** It schedules it, and `StopAsync` immediately afterwards can return before `_executeTask` is even assigned. Any test that starts a hosted service directly and then asserts on what it did must poll with a deadline; asserting straight after `StartAsync` — or even after `StartAsync` then `StopAsync` — races it and reads the pre-start state. This cost two red tests in `DiscoveryListenerTests` that looked like a listener bug and were not.
-- **lizard's C# parser mis-scopes any expression-bodied member whose body contains braces** — `=> new { ... }`, `=> new() { ... }`, `=> x switch { ... }`, even a property pattern like `=> code is { Length: 8 }`. It treats the `{` as closing the function and dumps the rest of the file into a `*global*` pseudo-function whose reported *length is the whole file*. In a file over 200 lines that trips `-L 200` with a warning that names no real function and points at line 0. The fix is a block body (`{ return ...; }`), not a `whitelizard.txt` entry. Existing offenders (`DeviceView.Of`) survive only because their files are short.
-- Docs use "Arduino" and "ESP32" interchangeably for the same lights controller.
-- **Docker device passthrough is undocumented in `docker-compose.yml`**, pending the biometric SDK choice.
-- iCloud has fabricated `* 2.dll` / `* 2.pdb` duplicates under `src/backend/.../bin` and `obj`. Build output only, gitignored, harmless — do not treat them as source.
-- **Local `dotnet test` fails MSB3021 "Access denied" copying `appsettings*.json` into `bin/`** on this iCloud path (source files carry the protected `com.apple.provenance` xattr; MSBuild's copy is denied on *create* but succeeds on *overwrite*). Recovery: `cp` the two appsettings files into each project's `bin/Debug/net10.0/` by hand once, then rerun — verified 2026-08-21. Plain `cp` and CI (ubuntu) are unaffected.
-- **vitest has no `localStorage` under Node ≥25 + jsdom 28** (jsdom 28 defers to Node's flag-gated built-in, which is undefined without `--localstorage-file`). Fixed 2026-08-21 with an in-memory Storage polyfill in `src/frontend/src/test/setup.ts` — keep it if that file is ever rewritten, or App.test.tsx fails on `localStorage.clear()`.
-- **Frontend `node_modules` on this iCloud path loses rollup's native optional dep** (build fails with a missing `rollup/dist/native.js` require). Recovery: `rm -rf node_modules && npm ci`.
+Why a green suite is not evidence at all is a decision, not a gotcha:
+[`decisions-method.md`](decisions-method.md).
 
-## A concurrency test on the EF in-memory provider proves the opposite of what it claims
-
-The in-memory provider has **no transactions** — it says so itself, via
-`InMemoryEventId.TransactionIgnoredWarning`. It applies each change entry by entry, so a
-`SaveChanges` that fails a concurrency check has *already inserted* the ledger rows before it
-throws. Every "the refusal takes the money down with it" test written against it passes while
-demonstrating exactly the failure it was meant to catch.
-
-Found the hard way: a double-cancel test asserted a balance of 200 and got 232 — one
-`CancellationResult.NotFound` and two committed refunds, simultaneously. Anything resting on
-one `SaveChanges` being one transaction belongs in the Postgres-backed suite. `TestHost` is
-in-memory; `TestWebAppFactory` + `PostgresFixture` is not.
-
-## Green is not evidence
-
-Three agents told to *refute* rather than confirm found sixteen defects in a branch with 495
-passing tests — including an IDOR any logged-in member could use, registration writing rows
-outside every tenant, and a front panel that lit the wrong court. Several were invisible by
-construction rather than by oversight: the button decode lived in `main.cpp`, which `pio test`
-excludes via `build_src_filter` and `tools/strict_compile.sh` skips because it walks `lib/`
-only. When a fix is "move the logic somewhere the tests can see it", that is the fix, not a
-tidy-up on the side.
-
-
-## From the court-hardware programme (2026-08-23)
-
-- **A test that books `UtcNow.AddHours(3)` fails every afternoon.** The fixture's `peak_hours` is 16:00–19:00 with the tenant timezone at UTC, and blueprint A.12 refuses a Regular member a peak slot more than an hour ahead — so two cancellation tests passed all morning and failed after ~13:00 UTC with an `InvalidCastException` naming `PeakHoursLeagueOnly` inside a test about refunds. It reads as a broken cancellation and is not one. `TestHost.BookableSlot()` steps clear of the window, and `BookableSlotFrom(now, hours)` exists so the fix itself is tested at all 24 hours rather than at whichever one the suite runs.
-- **`-Wswitch-enum` is not satisfied by a `default:` label** — it wants every enumerator named. Adding `default:` silences the one warning that catches a newly-added enum member. The pattern that keeps both is to handle every case explicitly and put the fallback `return` **after** the closing brace, which is reachable only from a byte value a downgrade produced.
-- **PlatformIO compiles only the files inside each `test_<name>/` directory.** A shared helper placed in `test/support/` compiles (the include path reaches it) and then fails to link, once, per suite that uses it. The corpus reader is therefore header-only with everything `inline`; each test binary gets its own copy and there is no build configuration to keep in step with a new suite.
-- **`@testing-library/user-event`'s keyboard and typing paths never settle under jsdom 28 + vitest 4 here.** A `user.type()` or `user.keyboard()` hangs to the 5-second test timeout and the failure reads as a component that ignores input. `user.click` is fine. Use `fireEvent.change` / `fireEvent.keyDown` for those two; the events dispatched are the ones a browser sends. Mixing user-event with fake timers deadlocks outright.
-- **A migration file written with a UTF-8 BOM fails `dotnet format` with `error CHARSET`.** `dotnet ef migrations add` writes one and the generated `.Designer.cs` keeps it, but a hand-edited `.cs` must not have one — `make lint-backend` is where this surfaces, several minutes after the edit.
-- **The Postgres superuser on a locally-initialised cluster here is `crusaders`, not `postgres`**, and `pg_ctl` refuses to run as root. `su postgres -c "pg_ctl -D /tmp/pgdata start"`, and `API_BOUNDARY_TEST_CONNECTION_STRING` must be set or 60 tests skip silently.
-- **A fetch stub that matches routes by first-declared prefix is a trap.** `/api/v1/admin/devices/` is a prefix of `/api/v1/admin/devices/discovered`, so a test stubbing both got whichever came first and failed with an empty screen and no hint why. Both the vitest harness and the Playwright fixture sort by longest prefix.
-- **A mutation that does not apply looks exactly like a passing gate.** Shell escaping inside a `python3 -c` one-liner silently made an edit a no-op, so good tests appeared to prove nothing. Use a heredoc, and confirm the mutant is present (`grep MUTANT`) before believing the result.
-- **Playwright refuses a browser revision it did not pin.** A runner that already ships Chromium (`/opt/pw-browsers`) is unusable unless `executablePath` points at it; otherwise every CI run re-downloads a few hundred megabytes to get a build differing by a revision number. `PLAYWRIGHT_CHROMIUM_PATH` in `playwright.config.ts` handles it and is a no-op when unset.
+- **The suite cannot pass in the last ~30 minutes of a UTC day.** Six tests go red together — one
+  in `WalkUpBookingTests` and five in `DeviceEventHttpTests` — all from one cause: a 30-minute
+  purchase truncated at the club's midnight close and the pro-rata price that follows. CI is green
+  only by the hour it happens to run. **Reproduce a red run on the untouched base commit in a
+  second worktree before believing your diff caused it.** Sweeping for these means running under
+  several synthetic clocks — and moving the club timezone in the test host alone manufactures false
+  failures unless every fixture pinning `"timezone":"UTC"` moves with it.
+- **A test booking `UtcNow.AddHours(3)` fails every afternoon.** The fixture's peak window is
+  16:00–19:00 UTC and a Regular member may not take a peak slot that far ahead, so a cancellation
+  test throws `PeakHoursLeagueOnly` and reads as a broken refund path. `BookableSlot()` steps clear
+  of the window; `BookableSlotFrom(now, hours)` exists so a fix is tested at all 24 hours.
+- **Some tests cannot fail on this Mac, by construction.** `DateTimeOffset.UtcNow` here always
+  lands on a 100 ns boundary, so a sub-microsecond remainder that survives differently through
+  Postgres on Linux cannot arise locally — one test was red on five CI runs at four different hours
+  and green here every time. Diagnosing it needs the CI log and a deliberately tick-offset fixture,
+  not another local run. **`-v q` suppresses the assertion message in CI**, leaving only `[FAIL]`
+  and a name; pass `-v n` when a CI-only failure has to be read rather than guessed.
+- **A test can be green because of its FIXTURE, not its code.** Flipping one boolean on a stale
+  device fixture exposed a live money rule — a stale-but-enabled box beside a healthy one waiving
+  no-show penalties indefinitely — that no test discriminated. Mutate the rule *and* vary the
+  fixture.
+- **A concurrency test on the EF in-memory provider proves the opposite of what it claims.** That
+  provider has no transactions (it says so, via `TransactionIgnoredWarning`) and applies changes
+  entry by entry, so a `SaveChanges` that fails a concurrency check has *already inserted* the
+  ledger rows before it throws. A double-cancel test asserting a balance of 200 got 232 — one
+  `NotFound` and two committed refunds at once. Anything resting on one `SaveChanges` being one
+  transaction belongs in the Postgres-backed suite: the in-process `TestHost` is in-memory,
+  `TestWebAppFactory` + `PostgresFixture` is not.
+- **A mutation that does not apply looks exactly like a passing gate.** Shell escaping inside a
+  `python3 -c` one-liner silently made an edit a no-op, so good tests appeared to prove nothing.
+  Use a heredoc and confirm the mutant is present before believing the result.
+- **`Program.cs` captures the connection string at `AddDbContext` registration**, which under the
+  minimal hosting model runs *before* `ConfigureAppConfiguration` hooks fire. Config layered on by
+  `WebApplicationFactory` never reaches it; environment variables do. That is why the test factory
+  sets them — do not "simplify" it back.
+- **`BackgroundService.StartAsync` no longer runs `ExecuteAsync` inline on .NET 10.** It schedules
+  it, and an immediate `StopAsync` can return before the task is even assigned. A test that starts a
+  hosted service and asserts on what it did must poll with a deadline; asserting straight after
+  reads the pre-start state and looks like a service bug.
+- **GitHub sets `CI=true` in every job**, including ones with no database, so keying a "must not
+  skip" assertion on it fails the jobs it meant to leave alone. The boundary tests key on
+  `REQUIRE_BOUNDARY_TESTS`, and without a connection string in that variable's partner they skip
+  **silently** — a green run that tested nothing.
+- **After deleting a feature, run the browser suite, not just the unit suites.** An e2e spec covered
+  the discovery-and-claim flow for weeks after the flow was removed from the product, red in a
+  required job the whole time.

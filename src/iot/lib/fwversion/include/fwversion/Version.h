@@ -6,9 +6,9 @@
 // platformio.ini's [common] block, where both firmwares and the simulator pick
 // them up. A second, hand-written "1.0.0" here would be a copy that nobody
 // updates in the same commit — and this string goes out in `!PONG` and in the
-// discovery beacon's `fw` field, which is what an admin reads when deciding
-// whether a board took an OTA update. A version that lies about that is worse
-// than no version at all.
+// heartbeat's `firmware_version`, which is what the admin Devices screen shows
+// and the only way to tell from a desk which image a board is running. A
+// version that lies about that is worse than no version at all.
 //
 // The defaults exist for tools/strict_compile.sh, which compiles these headers
 // with no PlatformIO flags at all. They are deliberately 0.0.0: a binary

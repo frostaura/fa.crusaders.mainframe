@@ -1,16 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Fingerprint, Loader2, Plus, Trash2 } from "lucide-react";
-import { endpoints, ApiError, type WebAuthnCredentialRow } from "../lib/api";
+import { endpoints, ApiError, errorCode, type WebAuthnCredentialRow } from "../lib/api";
 import { useProfile } from "../lib/profile";
 import { useToast } from "../components/Toast";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { isPasskeySupported, registerPasskey } from "../lib/webauthn";
+import { ChangePasswordForm } from "./ChangePassword";
 import { cn } from "../lib/utils";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
+
+/**
+ * What `PUT /api/v1/me/profile` will actually accept for a name.
+ *
+ * <p>
+ * The rule existed only on the server: Save stayed enabled for three spaces, the API answered
+ * `400 full_name_invalid`, the toast said "Couldn't save name.", and a reload silently put the
+ * old name back. Nothing on the screen ever said what a valid name was. Stated here, enforced
+ * here, and named in the toast if the server still refuses.
+ * </p>
+ */
+const NAME_MIN = 2;
+const NAME_MAX = 120;
 
 export default function ProfilePage() {
   const { profile, loading, refresh, setLocal } = useProfile();
@@ -67,15 +81,26 @@ export default function ProfilePage() {
     if (f) handleFile(f);
   };
 
+  const trimmedName = fullName.trim();
+  const nameTooShort = trimmedName.length < NAME_MIN;
+  const nameUnchanged = trimmedName === (profile?.full_name ?? "").trim();
+
   const saveName = async () => {
-    if (!profile) return;
-    if (fullName.trim() === (profile.full_name ?? "").trim()) return;
+    if (!profile || nameUnchanged || nameTooShort) return;
     setSavingName(true);
     try {
-      const r = await endpoints.meUpdateProfile({ fullName: fullName.trim() });
+      const r = await endpoints.meUpdateProfile({ fullName: trimmedName });
       setLocal({ ...profile, full_name: r.full_name });
       toast.push({ tone: "success", text: "Name updated." });
-    } catch { toast.push({ tone: "danger", text: "Couldn't save name." }); }
+    } catch (err) {
+      const code = errorCode(err);
+      toast.push({
+        tone: "danger",
+        text: code === "full_name_invalid"
+          ? `Your name must be between ${NAME_MIN} and ${NAME_MAX} characters.`
+          : "Couldn't save your name. Check your connection and try again.",
+      });
+    }
     finally { setSavingName(false); }
   };
 
@@ -115,7 +140,13 @@ export default function ProfilePage() {
             )}
             <span className={cn(
               "absolute inset-0 flex flex-col items-center justify-center gap-1 text-white text-xs font-medium",
-              "bg-black/40 transition-opacity",
+              // 40% was not enough scrim. White 12px text over it composited to rgb(153,153,153)
+              // on a mid-tone photo — 2.85:1, against the 4.5:1 floor. The photo underneath is a
+              // member's own upload and can be anything, so the alpha has to hold against the
+              // worst case: white text needs the composite at or below rgb(119,119,119), which
+              // over a pure-white photo means at least 53% black. 60% leaves margin (5.9:1) and
+              // still shows the face through it.
+              "bg-black/60 transition-opacity",
               uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100",
             )}>
               {uploading ? (
@@ -150,19 +181,54 @@ export default function ProfilePage() {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               placeholder="As it appears on the schedule"
-              maxLength={120}
+              maxLength={NAME_MAX}
+              aria-describedby="fullName-rule"
             />
+            <p id="fullName-rule" className="text-xs text-text-muted mt-1">
+              At least {NAME_MIN} characters. Shown to other players on the booking grid.
+            </p>
           </div>
           <div className="flex justify-end">
-            <Button onClick={saveName} disabled={savingName || fullName.trim() === (profile.full_name ?? "").trim()}>
+            <Button onClick={saveName} disabled={savingName || nameUnchanged || nameTooShort}>
               {savingName ? "Saving…" : "Save"}
             </Button>
           </div>
         </div>
       </Card>
 
+      <PasswordCard />
       <PasskeysCard />
     </div>
+  );
+}
+
+/**
+ * Somewhere for a member to change their own password.
+ *
+ * <p>
+ * There was nowhere. This page offered a photo, a name and passkeys, and the word "password"
+ * appeared on it nowhere at all — so a temporary password an admin had emailed in plaintext was
+ * the account's permanent credential, with no self-service reset either.
+ * </p>
+ */
+function PasswordCard() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Card className="space-y-4">
+      <div>
+        <h2 className="text-base font-semibold">Password</h2>
+        <p className="text-sm text-text-secondary">
+          Change the password you sign in with. We'll email you whenever it changes, so you'd know if
+          somebody else did it.
+        </p>
+      </div>
+      {open ? (
+        <ChangePasswordForm onDone={() => setOpen(false)} />
+      ) : (
+        <Button variant="outline" onClick={() => setOpen(true)}>Change password</Button>
+      )}
+    </Card>
   );
 }
 

@@ -1,44 +1,63 @@
 ---
 name: crusaders-mainframe-decisions
-description: "Court-hardware programme agreed 2026-08-22: charge AT BOOKING (supersedes charge-on-lights-on), PayFast not Peach, brains on the ESP8266, walk-ups create bookings, gates parked; blueprint Rev 2 economics otherwise stand"
+description: "Product and economics: blueprint Rev 2 is the customer's word and outranks internal specs; credits are the unit of account; charge AT BOOKING supersedes charge-on-lights-on and still needs committee sign-off; PayFast replaced Peach."
 type: decision
-last_verified: 2026-08-22
+last_verified: 2026-09-11
 ---
 
-# Live decisions
+# Live decisions — product and economics
 
-Blueprint **Rev 2** (received 2026-05-09 from the Crusaders committee, filed at `docs/specs/client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md` in both `.md` and `.xlsx`) is the current economics and supersedes anything older.
+Blueprint **Rev 2**, received 2026-05-09 from the Crusaders committee and filed at
+`docs/specs/client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md` (plus the verbatim `.xlsx`), is
+the current economics and supersedes anything older. **It is the customer's own word and outranks
+internal specs on economics** — a conflict is resolved in the blueprint's favour or escalated, never
+decided in the repo. Line-by-line reconciliation lives in `docs/specs/client-blueprint-deltas.md`.
 
-- **Credits, not rand, are the unit of account.** R100 → **160 credits (Regular)** / **240 credits (League or 65+)**. The club wanted class-based value without class-based pricing on the court.
-- **Two member classes:** `Regular` and `LeagueOrSenior`, assigned by an admin at approval time.
-- **Charge on lights-on, not on booking.** Booking creates a hold only; the lights-on event posts the debit — cancellation before lights-on then needs no refund at all, removing an entire class of ledger complexity and dispute.
-- **15-minute slices** (Crusaders default changed 30 → 15). **2-week booking horizon. 1 hour per member per day**, relaxed same-day if courts are free.
-- **Top-ups in R100 blocks, max R1000 per member**; admin credit unlimited.
-- **Peak-hours league exclusivity 16:00–19:00** — Regular members take a peak slot only inside the last hour before start, and only if still empty. Admins bypass.
-- **At-court payer override** — a different identified player can press "I'll pay"; the booking records `booked_by_user_id` and `paid_by_user_id`, both audit-logged and emailed.
-- **Identification triple-stack:** biometric + PIN + QR (60s signed token, courtside webcam scan). Face recognition deferred. Stated goal: "do away with cards."
-- **Unfunded accounts cannot book** — 402 InsufficientBalance.
+- **Credits are the unit of account, not rand.** R100 buys **160 credits (Regular)** or **240
+  (League or 65+)**. *Why:* the club wanted class-based value without class-based pricing visible on
+  the court. ZAR survives only on `PendingTopup` for reconciliation.
+- **Two member classes**, `Regular` and `LeagueOrSenior`, assigned by an admin at approval.
+- **Charge at booking, not at lights-on.** A booking debits the full slot cost immediately; a
+  no-show keeps a configurable penalty and refunds the rest. *Why:* it collapses hold-then-charge
+  into one movement and makes a lost-slot race unable to leave a member paying for a court they
+  never got. **This deliberately contradicts blueprint A.9**, is recorded as deviation **D-1**, and
+  **is not the repo's decision to close** — the committee must sign it off before go-live
+  ([`watch.md`](watch.md)). The ledger consequences are in
+  [`decisions-settlement.md`](decisions-settlement.md).
+- **15-minute slices** (Crusaders moved 30 → 15) · **2-week booking horizon** · **1 hour per member
+  per day**, relaxed same-day when courts are free · **top-ups in R100 blocks, R1000 cap per
+  member**, admin credit unlimited · **unfunded accounts cannot book** (402).
+- **Peak-hours league exclusivity 16:00–19:00.** A Regular member takes a peak slot only inside the
+  last hour before start and only if still empty; admins bypass.
+- **At-court payer override.** Another identified player presses "I'll pay"; the booking carries
+  `booked_by_user_id` and `paid_by_user_id`, both audit-logged and emailed.
+- **Identification is biometric + PIN + code**, stated goal "do away with cards". Face recognition
+  deferred. The token grammar is in [`decisions-device.md`](decisions-device.md).
+- **Walk-ups create real bookings.** Buying light time at the pad produces a booking in the buyer's
+  name, visible online immediately. *Why:* one money path and one data model rather than two. A
+  walk-up is born activated and can never be a no-show; it is truncated at the next booking and
+  charged pro rata.
+- **PayFast replaced PeachPayments.** The `IPaymentProvider` seam survived; the branding did not.
+  PayFast signs MD5 over a PHP-`urlencode`-compatible string (spaces as `+`, uppercase hex) which
+  .NET's escaping does not reproduce — budget real time for signature parity.
+- **Biometrics are soft on the critical path.** Booking, top-up and cancellation all work without
+  them and v1.0 can fall back to an admin "mark as no-show", so the physical install does not gate
+  the SaaS launch.
+- **Free-tier-first on external data — and only the tzdb half is built.** Confirmed 2026-09-16:
+  `TimeZoneInfo.FindSystemTimeZoneById` is real (`Services/BookingService.cs`, `ScheduleService.cs`,
+  `Endpoints/ReportingEndpoints.cs`), and SMTP + PayFast are the only paid third parties. The rest of
+  `docs/development-plan.md`'s item 5 — libphonenumber, a Gravatar avatar fallback, MX-based email
+  validation — is **unbuilt**: no package, no phone field, no MX lookup, and the single `Dns.` call
+  in the API is the SSRF guard. `en-ZA` is deliberately *not* used for money; PayFast rejects its
+  comma decimal, so signing formats with `InvariantCulture`. The plan is not the build.
 - **2-year retention** of usage history via a nightly anonymisation worker.
-- **POPI compliance is deliberately out of scope.** Founder direction, 2026-05-06: "forget about legislation for now." A decision, not an oversight — but revisit before any club other than Crusaders onboards.
-- **Biometrics are soft on the critical path.** Booking, top-up and cancellation all work without them; v1.0 can fall back to a manual admin "mark as no-show". The physical install is off the SaaS launch critical path.
-- **New repos are private by default** (founder, 2026-07-24) — this was the first under that rule. Created private and pushed 2026-08-21 on the founder's instruction.
-- **Lint gate kept strict; loader idiom carries documented per-site disables** (2026-08-21). The 31 react-hooks v7 errors were fixed for real where the rule caught genuine impurity (render-time `Date.now`, refs read in render, sync state init), and the recurring fetch-on-mount loader idiom got `eslint-disable-next-line` with a stated reason at each site rather than downgrading the rule in config. Rationale: a config downgrade would silence the rule for all future code in a money-handling product; per-site disables keep it enforcing while acknowledging the existing house idiom.
-- **The 6 red backend tests stay red on purpose** (2026-08-21). 5 BookingTests assert pre-Rev-2 economics and HealthEndpointTests trips EF pending-model-changes — both are the credits-rename + missing-migrations money bug. Editing tests or suppressing the EF validation to green the gate would hide the exact defect the gate exists to catch; they go green when the credits work lands.
-- **The Foundation squash program was killed 2026-07-24.** The standing rationale survives: commercial club software and any future philanthropic squash program stay decoupled unless root decides otherwise. Kill record in `Foundation/projects/MEMORY.md`.
-
-## Court-hardware programme (founder, 2026-08-22)
-
-Agreed across a working session with the founder. These supersede earlier entries where they conflict.
-
-- **Charge at booking, not at lights-on.** A booking debits the full slot cost immediately; a no-show keeps a configurable penalty and refunds the remainder. **This directly supersedes the charge-on-lights-on invariant** in `CLAUDE.md`, which forbids exactly this. The invariant is rewritten in the same commit as the code, not before — the codebase must never contradict its own charter. Not yet implemented; the charge still happens at activation.
-- **No refund once the lights have been on.** Partial use is not refunded. Note the current cancel path refunds the unused fraction whenever `ChargedAt` is set, and under charge-at-booking that branch becomes the path *every* cancellation takes — it must be rewritten in the same phase.
-- **One configurable penalty period** governs both ends: cancel before it, full refund; miss it, no-show and the court is released. Maps onto the existing `penalty_window_minutes` and `penalty_pct`.
-- **PayFast replaces PeachPayments.** The `IPaymentProvider` seam survives intact; the branding does not. PayFast signs with MD5 over a PHP-`urlencode`-compatible parameter string — spaces as `+`, uppercase hex — which .NET's escaping does not reproduce. Budget a day for signature parity.
-- **The brains move to the ESP8266.** The ATmega2560 cannot be flashed over WiFi (its ESP sits on Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET), and **the wiring cannot change**. So the Mega becomes a thin I/O layer with an independent auto-off timer, and everything volatile lives on the ESP, which OTAs. Rationale: it makes USB-only flashing of the Mega a non-event rather than a recurring trip to the club.
-- **The LCD stays 16×2** even though the fitted panel is a 20×4 (silkscreened 2004A). Safety over screen real estate; the geometry is a compile-time constant.
-- **Walk-ups create real bookings.** A member buying light time at the terminal produces a booking in their name, visible online immediately — so there is one money path and one data model, not two. A walk-up booking is born activated and can never be a no-show.
-- **A walk-up is truncated at the next booking** and charged pro rata. Note this needs new arithmetic: `sliceCount` is an integer and price is a flat multiple of it, so no fractional path exists.
-- **Buttons are remappable from the admin panel** — any physical button to any action, including which court it drives. Free, because the Mega already reports raw keypresses and lets the brain decide.
-- **Gates are parked.** Hardware undecided, possibly a plain ESP per gate. The device model stays open so they slot in later without redesign.
-- **Delivery is one branch, one PR** (`claude/squash-booking-system-design-dt7ja6`, PR #1). Do not split it.
-- **Fix everything found, related or not**, with adversarial QA rounds rather than a fixed number of passes.
+- **POPI compliance is deliberately out of scope** (founder, 2026-05-06: "forget about legislation
+  for now"). A decision, not an oversight — **revisit before any club other than Crusaders
+  onboards.**
+- **This repo is private**, as the first project under the 2026-07-24 private-by-default rule.
+- **Commercial club software and any philanthropic squash programme stay decoupled** unless root
+  decides otherwise; the Foundation squash programme was killed 2026-07-24.
+- **This repo carries no local `.claude/skills/` and must not reacquire one.** The vendored Gaia
+  toolkit was removed 2026-08-21 and that removal is committed here. *Why:* generic procedure
+  belongs upstream in a plugin, not forked into a product repo — the evidence that settled it is the
+  division's [`vendored-skills-verdict.md`](../../../memory/vendored-skills-verdict.md).

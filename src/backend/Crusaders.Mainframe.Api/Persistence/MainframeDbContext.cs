@@ -27,6 +27,7 @@ public class MainframeDbContext : DbContext
     public DbSet<Court> Courts => Set<Court>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<DeviceEventReceipt> DeviceEventReceipts => Set<DeviceEventReceipt>();
+    public DbSet<DeviceOutage> DeviceOutages => Set<DeviceOutage>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<LedgerEntry> LedgerEntries => Set<LedgerEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -36,6 +37,7 @@ public class MainframeDbContext : DbContext
     public DbSet<BiometricMatchEvent> BiometricMatchEvents => Set<BiometricMatchEvent>();
     public DbSet<PendingTopup> PendingTopups => Set<PendingTopup>();
     public DbSet<WebAuthnCredential> WebAuthnCredentials => Set<WebAuthnCredential>();
+    public DbSet<AccessCode> AccessCodes => Set<AccessCode>();
 
     /// <summary>
     /// Builds the model, including the global query filter on every tenant-scoped entity.
@@ -119,6 +121,7 @@ public class MainframeDbContext : DbContext
         });
 
         ConfigureDevices(modelBuilder);
+        ConfigureAccessCodes(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -246,6 +249,10 @@ public class MainframeDbContext : DbContext
             e.HasIndex(p => p.IdempotencyKey).IsUnique();
             e.HasIndex(p => p.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
             e.Property(p => p.AmountZar).HasColumnType("numeric(10,2)");
+            // Same precision as ledger_entries.ConversionRate — the two hold the same number
+            // and a narrower column here would silently round the rate the ledger then quotes.
+            e.Property(p => p.ConversionRate).HasColumnType("numeric(8,4)");
+            e.Property(p => p.MemberClass).HasConversion<int?>();
             e.Property(p => p.IdempotencyKey).HasMaxLength(64).IsRequired();
             e.Property(p => p.GatewayCheckoutId).HasMaxLength(128);
             e.Property(p => p.ExternalReference).HasMaxLength(255);
@@ -275,22 +282,40 @@ public class MainframeDbContext : DbContext
             e.Property(d => d.DeviceCode).HasMaxLength(64).IsRequired();
             e.Property(d => d.Name).HasMaxLength(128).IsRequired();
             e.Property(d => d.GateKey).HasMaxLength(64);
+            e.Property(d => d.MacAddress).HasMaxLength(12).IsRequired();
             e.Property(d => d.LastIpAddress).HasMaxLength(64);
             e.Property(d => d.RunningVersion).HasMaxLength(32);
             e.Property(d => d.MegaVersion).HasMaxLength(32);
-            e.Property(d => d.PinnedVersion).HasMaxLength(32);
             e.Property(d => d.Kind).HasConversion<int>();
             e.Property(d => d.Hardware).HasConversion<int>();
-            e.Property(d => d.OtaChannel).HasConversion<int>();
             e.HasQueryFilter(d => d.TenantId == _tenant.TenantId);
 
-            // Filtered unique: one row per physical board per tenant, while leaving
-            // hand-registered devices (which have no MAC) unconstrained. Without it the
-            // "already registered" check below is advisory — two concurrent claims for the
-            // same board would both pass it and both insert.
-            e.HasIndex(d => new { d.TenantId, d.MacAddress })
+            // One row per physical board per tenant. Without it the "have I seen this MAC
+            // before?" check in auto-registration is advisory — two heartbeats from a box
+            // that has just been switched on arrive together, both find nothing, and the
+            // club ends up with two rows for one board.
+            e.HasIndex(d => new { d.TenantId, d.MacAddress }).IsUnique();
+        });
+
+        modelBuilder.Entity<DeviceOutage>(e =>
+        {
+            e.ToTable("device_outages");
+            e.HasKey(o => o.Id);
+            e.HasQueryFilter(o => o.TenantId == _tenant.TenantId);
+
+            // At most one OPEN outage per box. The health sweep's "have I already alerted for
+            // this outage?" check is a read followed by a write, and two ticks overlapping —
+            // a slow one and its successor — would otherwise both find nothing and both open a
+            // row, alerting the club twice and leaving two windows for the no-show waiver to
+            // read. The filter is what makes it a uniqueness rule about the PRESENT: closed
+            // outages accumulate freely, which is the history the waiver needs.
+            e.HasIndex(o => new { o.TenantId, o.DeviceId })
                 .IsUnique()
-                .HasFilter("\"MacAddress\" IS NOT NULL");
+                .HasFilter("\"EndedAt\" IS NULL");
+
+            // The no-show waiver's lookup: this tenant's outages overlapping a booking's grace
+            // window. Without it every swept booking table-scans the outage history.
+            e.HasIndex(o => new { o.TenantId, o.StartedAt });
         });
 
         modelBuilder.Entity<DeviceEventReceipt>(e =>
@@ -305,6 +330,43 @@ public class MainframeDbContext : DbContext
             // arriving together — both find nothing and both write. This makes the duplicate
             // impossible rather than unlikely.
             e.HasIndex(r => new { r.TenantId, r.DeviceId, r.Seq }).IsUnique();
+
+            // The lookup a `release` event makes: the last activation this box lit on this
+            // relay. Without it, pairing a release to its session is a table scan on every
+            // court switch-off. See docs/specs/settlement-model.md §4.
+            e.HasIndex(r => new { r.TenantId, r.DeviceId, r.Court, r.OccurredAt });
+        });
+    }
+
+    /// <summary>
+    /// The codes a member's phone shows a court box. Lifted out of <c>OnModelCreating</c>
+    /// for the same length reason as the devices.
+    /// </summary>
+    private void ConfigureAccessCodes(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AccessCode>(e =>
+        {
+            e.ToTable("access_codes");
+            e.HasKey(c => c.Id);
+            e.Property(c => c.Code).HasMaxLength(20).IsRequired();
+            e.Property(c => c.Purpose).HasConversion<int>();
+            e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
+
+            // The code is the lookup key a box presents, and it must name exactly one
+            // member: two rows with one code would make a scan a coin flip on whose
+            // court opens. Per tenant, because the resolver is tenant-filtered and a
+            // collision across clubs is unreachable through it anyway.
+            e.HasIndex(c => new { c.TenantId, c.Code }).IsUnique();
+
+            // One code per booking, enforced — not merely read. Two phones asking for the
+            // same booking's code at once both find nothing and both insert; the index
+            // refuses the second, and AccessCodeService's retry then finds the first.
+            // Filtered so member-ident codes, which have no booking, are unconstrained.
+            // A booking never needs a second code: its code lives until the booking ends
+            // plus the grace window, and nothing mints for a booking that has ended.
+            e.HasIndex(c => new { c.TenantId, c.BookingId })
+                .IsUnique()
+                .HasFilter("\"BookingId\" IS NOT NULL");
         });
     }
 

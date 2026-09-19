@@ -1,6 +1,9 @@
 # Go-live checklist
 
-Everything on this branch is code-complete and green. **Nothing here is code.** Each item
+The 2026-08-24 adversarial E2E review ([`reviews/adversarial-e2e-review.md`](reviews/adversarial-e2e-review.md))
+found the end-to-end path unbuilt; this checklist is valid only at the tip of the fix
+programme's branch/PR, and the code-complete claim returns only when a closing re-review
+passes. **Nothing here is code.** Each item
 needs physical access, a live credential, or a person's decision — and each one, left
 undone, breaks the club in a specific way that is written next to it.
 
@@ -30,18 +33,23 @@ the API. The box has no readback and cannot even detect it.
 
 ---
 
-## 2. Deploy secrets — six unset
+## 2. Deploy secrets — the Portainer four are unset
 
 The release chain builds multi-arch images, pushes to Docker Hub and redeploys through
-Portainer. It has never run, because six repository secrets are unset and
+Portainer. It has never run, because the Portainer secrets are unset and
 `workflow_dispatch` cannot trigger a deploy — only a real push to `main`.
 
-- [ ] `DOCKERHUB_USERNAME`
-- [ ] `DOCKERHUB_TOKEN`
+- [x] `DOCKERHUB_USERNAME` — set 2026-09-05
+- [x] `DOCKERHUB_TOKEN` — set 2026-09-05
 - [ ] `PORTAINER_URL`
-- [ ] `PORTAINER_API_KEY`
+- [ ] `PORTAINER_TOKEN`
 - [ ] `PORTAINER_STACK_ID`
 - [ ] `PORTAINER_ENDPOINT_ID`
+
+There was a seventh, `OTA_PRIVATE_KEY`, read by an `iot-sign` firmware-signing job. The
+firmware no longer takes over-the-air updates; the job and the workflow's reference to the
+key are both gone. If the secret is still set on the repository, **delete it** — a secret
+nothing reads is a credential nobody is watching.
 
 **If skipped:** the deploy job is skipped silently on every push and the club never gets a
 build. **The release chain stays unproven until these are set and one real push to `main`
@@ -85,123 +93,249 @@ indifferent to which end the debit is taken from.
 
 ---
 
-## 5. The first ESP8266 flash
+## 5. Flash both halves and see the box come up
 
-Every flash after the first is over the air. The first one may not be.
+Both halves are flashed over USB, by DIP switch. No adapter, no soldering, no pad access,
+and no network path — the whole procedure is the **Arduino IDE 2**: open the sketch, pick
+the board and the port, press Upload. `src/iot/arduino/README.md` is the page, and it needs
+no terminal, no `make` and nothing from the Library Manager. The `make flash-*` targets do
+the same two uploads from PlatformIO and are the developer alternative.
 
-The project wiring sheet documents DIP positions for Serial3↔ESP and USB↔Mega, but **not
-for USB↔ESP8266 with GPIO0 pulled low**, which is what a first flash needs.
+**Everything the box needs is compiled in — four values, all mandatory.** `secrets.h` is
+gitignored and lives on the flashing machine only; `court_bridge` `#error`s on a missing
+value and `static_assert`s on an empty one, so there is no way to produce an image with a
+blank in it — and therefore no way to hand a box to the wall believing a credential landed
+when it did not. There is nothing to claim, nothing to discover and nothing to provision: a
+flashed box joins, heartbeats, and appears on the admin Devices screen by itself.
 
-- [ ] Check the physical board for such a position.
-- [ ] If there is none: an external USB-TTL adapter on the ESP module's TX/RX pads with
-      GPIO0 grounded, once per board.
-- [ ] Record the answer in `src/iot/README.md`.
+- [ ] Arduino IDE 2 installed, with `https://arduino.esp8266.com/stable/package_esp8266com_index.json`
+      added under *Preferences → Additional boards manager URLs*, and both cores installed
+      from Boards Manager: **Arduino AVR Boards 1.8.6** and **esp8266 3.1.2**. Those are the
+      versions CI compiles the sketches against and the ones `src/iot/platformio.ini` pins.
+- [ ] `cp src/iot/arduino/court_bridge/secrets.h.example src/iot/arduino/court_bridge/secrets.h`
+      on the flashing machine and fill in all four, then do not commit it:
+      `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL` (the backend's **LAN** address and port,
+      no trailing slash — the box and the backend are on the same club network), and
+      `DEVICE_API_KEY` (copy it from the admin Devices page).
+- [ ] Open `src/iot/arduino/court_mega/court_mega.ino`, board **Arduino Mega or Mega 2560**,
+      processor **ATmega2560**, pick the port, **Upload** — with DIP
+      **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
+- [ ] Open `src/iot/arduino/court_bridge/court_bridge.ino`, board **Generic ESP8266 Module**,
+      flash size **4MB (FS:2MB OTA:~1019KB)**, CPU **80 MHz**, upload speed **115200**, pick
+      the port, **Upload** — with DIP **1–4 OFF, 5 ON, 6 ON, 7 ON**, 8 OFF. Then move DIP 7
+      OFF and open the **Serial Monitor at 9600** — **watch the monitor, not the glass**: in
+      that DIP position the ESP's UART is on the USB socket and the Mega is not on the other
+      end of it, so the LCD cannot change.
+- [ ] Restore the run positions (**1, 2, 3, 4 ON**, 5–8 OFF) and confirm the LCD now shows
+      `CONNECTED / SCAN TO START`. That repaint is the proof the ESP and the Mega are
+      talking again, and it is the only positive confirmation the box gives. If it reads
+      `CRUSADERS COURTS / SCAN TO START` instead, the two halves are talking and the box is
+      **not** on the WiFi — check the SSID and password in `secrets.h`.
+- [ ] Confirm the box appears on the admin Devices page within one heartbeat (30 s by
+      default) with four court numbers against it. That is the whole of registration.
 
-**If skipped:** the boards cannot be flashed at all and the schedule is wrong by however
-long it takes to find a USB-TTL adapter.
+**If skipped:** the box has no firmware. Nothing here needs a second visit: everything is
+in the image, so a box that flashed and painted `CONNECTED` is a box that will join the
+network and register itself.
 
 ---
 
-## 6. Firmware signing key
-
-OTA images are signed with RSA-2048/SHA-256 and verified against a public key compiled into
-the firmware. The signing pipeline is built and gated; the club must generate its **own** key
-pair — the one committed to the repository is a working default, and a default private key is
-no secret. Until the club generates its own, anyone with the repository can sign firmware the
-boards will accept.
-
-- [ ] Run `src/iot/tools/generate_ota_keys.sh /secure/path/ota_private_key.pem`. This writes a
-      fresh private key where you point it and regenerates the committed public-key header
-      (`src/iot/lib/otacore/include/otacore/OtaPublicKey.h`).
-- [ ] Commit the regenerated public-key header. The **private** key goes to the release
-      pipeline's secret store and nowhere else — it is gitignored, and must never be committed.
-- [ ] Set `OTA_PRIVATE_KEY` in the release job to that key's path. The build then produces
-      `firmware.signed.bin` automatically (`src/iot/tools/pio_sign_post.py`); an unsigned build
-      is fine for USB but OTA refuses it.
-- [ ] Re-flash **every** board once over USB with the new-key firmware before relying on OTA —
-      a board only trusts images signed by the key it was built with.
-- [ ] Publish `Ota:Stable:Version`, `Ota:Stable:Url` and `Ota:Stable:SizeBytes` in the
-      deployment's configuration.
-
-**If skipped (own key not generated):** OTA works, but against the repository's default key,
-so anyone with the repo can push firmware to the fleet. The private key is what a stolen board
-must *not* yield — that is the whole reason the signature is asymmetric rather than an HMAC
-keyed with the device key.
-
----
-
-## 7. Rotate the club WiFi password
+## 6. Rotate the club WiFi password
 
 The password is in Carl's original sketch, in plain text, in a file that has been on more
 than one machine.
 
 - [ ] Rotate it on the access point.
-- [ ] Put the new one in `src/iot/src/common/secrets.h` on the flashing machine only —
-      gitignored, never committed.
+- [ ] Edit `secrets.h` on the flashing machine and upload `court_bridge` again from the
+      Arduino IDE (item 5; `make flash-bridge` does the same thing). That is
+      the whole delivery mechanism: every credential is compiled into the image, so there is
+      no store to go stale, no precedence rule between two credentials, and nothing to
+      power-cycle to prove. The same is true of the device API key — pressing
+      "Regenerate" on the admin Devices page invalidates the old one immediately, so a
+      regeneration is a reflash and must be planned as one.
+- [ ] Confirm the box rejoins — the LCD returns to `CONNECTED / SCAN TO START` once the run
+      DIPs are restored, and the box shows as heartbeating on the admin Devices screen.
 
 **If skipped:** the club's WiFi credential is known to everyone who has seen that file.
 
 ---
 
-## 8. Power — two ESP nodes on one 5V rail
+## 7. Power — measure both rails under load
 
-Two ESP nodes share an LM2596 rail with relay coils, the LCD backlight and the scanner. An
-ESP8266 draws ~350 mA in transmit bursts and a browning-out rail produces exactly the
-intermittent faults that get blamed on software.
+The supply is a Mean Well PSU feeding two fused LM2596 bucks: a **5V rail** carrying the
+relay coils, the LCD backlight and the scanner, and a **9V rail** into the Mega's VIN,
+whose onboard regulators feed the ESP8266 half of the WeMos board. An ESP8266 draws
+~350 mA in transmit bursts and a browning-out rail produces exactly the intermittent
+faults that get blamed on software.
 
-- [ ] Measure the 5V rail under load: all four relays energised, LCD lit, WiFi transmitting.
-- [ ] If it sags below ~4.7V, split the rail or fit a larger regulator.
+- [ ] Measure the 5V rail under full load: all four relays energised, LCD lit, scanner
+      active.
+- [ ] Measure the Mega's VIN/5V during ESP WiFi transmit bursts — the ESP hangs off the
+      Mega's onboard regulators, not the LM2596 5V rail.
+- [ ] If either sags below ~4.7V at the 5V point, split the load or fit a larger regulator.
+These are **two separate checks and they prove different things.** They used to be one
+bullet, and once the `Wire` bus timeout was added that one bullet could no longer fire: the
+short is absorbed, so a technician either ticked a box that tested nothing or read the
+absence of a reset as a fault and started replacing bootloaders.
 
-**If skipped:** boards reset at random. The OTA boot guard will read three of those as a
-failed firmware and condemn a perfectly good build — the symptom will look like a bad
-release and will not be one.
+- [ ] **(a) The bus timeout and the hold-off.** With a court lit, short SDA to ground for a
+      few seconds. **Expected: no reset.** Each LCD write gives up in ~25 ms
+      (`Wire.setWireTimeout`), the next 20 writes are skipped (`courtlogic::DisplayHoldoff`),
+      `loop()` keeps returning and the watchdog keeps being kicked — so the court stays lit
+      to its own deadline and `!PING` is still answered. The LCD freezes on its last
+      message; on removing the short it must resume rendering **legibly** within a
+      handful of writes (the driver re-syncs the controller before the first write after a
+      hold-off run — that is the check for garbled characters). A reset here is a fault.
+- [ ] **(b) The watchdog itself, and the bootloader behind it.** This needs the bench
+      build, because nothing in a production image can stall a pass:
+      `pio run -e court_mega_bench -t upload`. Sixty seconds after boot the firmware stops
+      returning from `loop()` on purpose. **Expected: a hardware reset within 2 s, and the
+      box back with every relay open** (`ArduinoRelay::begin` drives the released level
+      before `pinMode`). Light a court first, so "relays open" is observable. Do it once
+      with the ESP plugged in and once without.
+      A board that stays dark or loops on reset has a bootloader that does not survive a
+      WDT reset (older Mega2560 stk500v2 bootloaders); that is a bootloader replacement, not
+      a firmware fix, and it is out of software's reach.
+- [ ] **Reflash `-e court_mega` before the box goes to site.** `court_mega_bench` is a bench
+      environment and nothing else; a club box running it dies sixty seconds after every
+      power-up.
+
+**If skipped:** the rail faults go undetected and boards reset at random. The ESP hangs off
+the Mega's onboard regulators, so a sagging rail resets **it** too — and an ESP that
+reboots mid-evening loses the per-court booking ends `!EXT` needs, so a two-hour court
+adopted from the next `!STATE` darkens at the ninety-minute cap, mid-game. Separately, the
+Mega's one hard-safety property — that a stall ends in a reset with every contact open —
+goes to site unverified on every unit, because (b) is the only thing in the tree that
+exercises it.
 
 ---
 
-## 9. Event-queue durability, accepted knowingly
+## 8. Event-queue durability, accepted knowingly
 
 Queued events live in RAM. They survive the WiFi going away, a router reboot and a two-day
-outage; they do not survive a power cut. `hal::IStore` holds 32-byte values and an event is
-larger, so persisting them needs a block-oriented port.
+outage — the API now believes a scan up to 30 days old (`DeviceEventEndpoints.MaxEventAge`)
+and keeps booking codes resolvable that long, so a long outage's attendance still lands and
+reverses the sweep; they do not survive a power cut. `hal::IStore` is a key/value port for
+short identifiers (128-byte values) with no ring semantics — an `Event` is 48 bytes and
+would fit in one record, so this is unbuilt work rather than a hard limit, and the half-right
+version of it (a torn ring that replays a stale activation) charges a member twice.
 
 - [ ] Somebody accepts this, or schedules the work.
 
 **If accepted:** a court lit during an offline window that ended in a power cut is never
-reported, so the sweep treats it as a no-show and refunds it less a penalty the member did
-not earn. It is visible in the ledger and an admin can reverse it — which is why this is a
-recorded limitation and not a blocker. Item 8 makes it rarer.
+reported, so the sweep concludes nobody played.
+
+**What that costs changed direction when §6a shipped, and the change is the reason to read this
+item again.** It used to cost the *member*: the sweep refunded the booking less a 30% penalty
+they had not earned. That was wrong, but it was wrong on the member's own ledger, and a member
+who is charged for a game they played complains. Under `settlement-model.md` S5a the same
+booking is refunded **in full** — `Owed(b) = 0` — and stamped `peripheral_outage`, so the cost
+falls on the *club*, silently: a court whose lights ran is free, the ledger shows a refund that
+looks correct, and nobody has a reason to raise it. It is the one I2 exception in the system and
+`settlement-model.md` I2 names it.
+
+Two things follow, and both are already true rather than planned:
+
+- The unhealthy-box alert no longer opens by telling an admin to check the box's power. A
+  power-cycle is precisely the action that discards the queued activations, so the alert that
+  reports the outage used to instruct the step that converts it into free courts.
+- The recovery mail no longer promises that everything recorded during the outage uploads. It
+  says what is true: it uploads if the box stayed powered.
+
+Making the loss positively detectable is the work this item is really asking for, it is not
+scheduled, and **the route this item used to name for it does not work.** It said the box
+persists its sequence number across reboots and the API stores a `DeviceEventReceipt` per
+`(device, seq)`, so a gap after a reconnect is derivable. Both halves are true and the inference
+is not. `EventQueue` reserves sequence numbers in blocks of `kSeqCheckpointStride` = 64 and
+`begin()` resumes at `mark + 1` — the header says outright that "the previous boot may have issued
+any number inside that block, and there is no way to know which" — so every unclean reboot skips
+up to 63 numbers whether or not anything was lost, and a power cut *is* an unclean reboot.
+Compiled against the real header, a box that pushed three events and then lost power reports its
+next event as seq 65: a 61-number gap with zero events lost. A gap cannot distinguish "the queue
+lost N activations" from "the checkpoint skipped N numbers", so detection needs something new from
+the box — a boot record naming what it discarded, or a durable ring — not a query over the
+receipts. Item 7 makes the whole failure rarer.
 
 ---
 
-## 10. Decide how a box identifies a member with no network
+## 9. Offline identification — the decided design, verified once
 
-`lib/roster` is built and tested, and nothing fills it — because the identifier it would
-hold has not been chosen, and that is a security trade rather than an implementation gap.
+The design is decided: each booking mints a **short access code**, scoped to that booking
+and expiring with it. The box works **online-first** — a scan hits the activation endpoint
+when the network is up — and falls back to the **heartbeat roster** of those codes when it
+is not. A permanent identity is never cached on the box, by construction.
 
-The QR token is a **60-second signed JWT**: it cannot be pre-cached, by construction. A box
-holding a stable copy of somebody's identity is a box that opens a court for them forever.
-So the offline path needs a *stable* identifier — a PIN-derived token, or a printed
-membership code — and either one is something a stolen box could work against: a token it
-can compare against a typed four-digit PIN is a token it can brute-force over the 10,000
-space for the members in its cache.
+The accepted trade: a stolen box caches only booking-scoped, expiring codes — nothing in
+its memory opens a court beyond the bookings it was already holding, and nothing it holds
+is a member's identity.
 
-- [ ] Somebody decides: accept that a court box needs the network to admit a member, or pick
-      a stable identifier and accept the offline brute-force exposure that comes with it.
+- [ ] One activation confirmed through the online path.
+- [ ] One activation confirmed from the roster fallback with the WAN deliberately down.
+- [ ] The roster confirmed to age out (`ROSTER_MAX_AGE_MS`) and refuse rather than guess.
+- [ ] `heartbeat_seconds` confirmed honoured by the box: change it in tenant settings and
+      watch the heartbeat cadence follow on the next accepted heartbeat. The API accepts
+      10–3600; the box clamps what it is sent into **15–300 s** (`bridgelogic::Cadence`)
+      and keeps its previous interval when the field is absent.
 
-**If skipped:** the box works — the online path is what runs today, and it is the one the
-club will use — but the WiFi going down takes the courts down with it, which is exactly the
-regression the local-decision design was built to avoid. The cache is ready for whichever
-answer comes back.
+**If skipped:** the fallback path goes live unproven, and the first WiFi outage is the
+first test of the exact regression the local-decision design was built to avoid.
 
 ---
 
-## 11. Real hardware, once
+## 10. Real hardware, once
 
 Everything below the API is proven on the host with no board attached, which is what makes
 CI meaningful. It is not the same as having been run.
 
-- [ ] One board flashed, claimed through the Devices screen, and seen to heartbeat.
+- [ ] One board flashed, seen to register itself on the Devices screen, and seen to heartbeat.
 - [ ] One member scanned at a real court, lights confirmed on, ledger checked.
 - [ ] The Mega's auto-off timer confirmed with the ESP **unplugged** — that is the whole
       point of it being independent.
 - [ ] One no-show left to expire and the refund-less-penalty checked in the ledger.
+
+The 2026-08-24 review's §4 adds seven checks that no software answer can close — eyes and
+a multimeter on the actual box:
+
+- [ ] Power topology confirmed: which LM2596 output feeds the ESP8266 side, and that rail
+      measured during WiFi transmit bursts (item 7).
+- [ ] The physical 8-way DIP verified against the wiring sheet for all four modes — Mega
+      upload, ESP upload, ESP USB monitor, run.
+- [ ] All firmware screens confirmed legible on the physical 20×4 glass (driven as 16×2 —
+      no wrapped or orphaned half-lines).
+- [ ] A real minted **12-character access code** QR fed to the physical scanner and its TX
+      output captured: the terminator, and that the whole code arrives intact. (This bullet
+      used to describe a ~200-character JWT payload and ask where it truncates; the system
+      has not minted those since the resolver was narrowed to booking- and member-scoped
+      codes, so the length question it was written for no longer exists.)
+- [ ] Scanner confirmed factory-set to 9600 baud on both fixed links. **Every UART in the
+      box is 9600 8N1** — the Mega↔ESP link, the scanner, and the ESP's USB monitor (DIP 5
+      and 6 ON, which is what `make monitor-bridge` opens). The only 115200 in
+      `platformio.ini` is the Mega's `upload_speed` for avrdude during a USB flash; no UART
+      runs at it in service, and the Mega has no monitor at all (it never opens Serial0). A
+      monitor opened at the wrong rate shows framing garbage that looks like a broken box
+      and is not one.
+- [ ] Item 7's check **(b)** done with the ESP plugged in as well as unplugged: the
+      `court_mega_bench` build stalled with a court lit, box back within 2 s with relays
+      open — and the production `-e court_mega` image reflashed afterwards.
+- [ ] Relay board JD-VCC jumper confirmed (which 5V feeds coil vs logic), and active-LOW
+      behaviour re-confirmed end to end on all four channels.
+- [ ] Physical A/B/C/D and 15/30/45/60 buttons confirmed on pins 22/24/26/28 and
+      30/32/34/36 in that order — a swapped pair sells the wrong duration or court.
+
+---
+
+## 11. LAN webhook consumers — the private-network allow-list
+
+Production rejects RFC1918 webhook destinations unless the endpoint is on
+`Webhooks:PrivateNetworkAllowList` (a CIDR list), with `Webhooks:AllowPrivateNetworks` as
+the master switch. The court box is **not** a webhook destination — it is pull-only, with
+no inbound HTTP listener — so nothing about the box needs this. The allow-list exists for
+any *other* legitimate LAN consumer the club points a webhook at.
+
+- [ ] For each legitimate LAN consumer: give it a DHCP reservation (the network is DHCP
+      everywhere — no static addresses), and add its address as a CIDR entry, e.g.
+      `Webhooks:PrivateNetworkAllowList:0 = 10.0.40.7/32`.
+- [ ] Leave `Webhooks:AllowPrivateNetworks` false unless a consumer genuinely needs it.
+
+**If skipped:** any webhook pointed at a LAN address is refused by the SSRF guard — which
+is the correct default, and only wrong if the club actually has such a consumer.

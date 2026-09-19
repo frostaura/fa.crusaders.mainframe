@@ -1,22 +1,38 @@
 ---
 name: crusaders-mainframe-questions
-description: "SAFETY: do the relays switch a contactor or the lighting load directly? Also: PIN length, gate policy vocabulary, revoked-card window, biometric vendor SDK, SaaS pricing, go-live date"
+description: "All founder-owned and none of them technical: PIN length (a 4-digit collision charges the wrong member), biometric vendor SDK, gate policy, revoked-card window, pricing beyond Crusaders, and whether the club goes live this quarter."
 type: question
-last_verified: 2026-08-22
+last_verified: 2026-09-11
 ---
 
 # Open questions
 
-- **SAFETY — do the court relays switch a contactor coil, or the lighting load directly?** The fitted module is rated 10A/250VAC, which is plausible for one modern LED bank and inadequate for older metal-halide. If it is direct, that needs a qualified electrician before anything ships. **No software decision changes this, and it gates go-live.** Owner: Dean.
-- **PIN policy.** The club's existing codes are 4 digits with no uniqueness constraint, and matching is first-verify-wins with no deterministic ordering. Once a PIN authorises a debit, a collision charges the wrong member. Six digits with a blocklist, or keep four and accept it? Owner: Dean.
-- **Gate policy vocabulary.** "Per-gate and admin-configurable" settles the shape but not the predicates — active membership, time of day, member class, a booking within N minutes? Needed before gates are built. Owner: Dean.
-- **How long may a revoked card still open a gate**, given devices cache and may be offline? A policy call, not a technical one. Owner: Dean.
-- **Is the fitted LCD really the 20×4**, or was that a bench substitute? Firmware drives 16×2 either way, so this only decides whether screen real estate is being wasted. Owner: Carl.
-- **The first ESP8266 flash may need a USB-TTL adapter.** The documented DIP positions cover Serial3↔ESP and USB↔Mega but not USB↔ESP8266 with GPIO0 low. Every flash after the first is OTA. Verify on the physical board before trusting a schedule. Owner: Carl.
+The relay safety question is the one that gates everything and lives in
+[`safety-relays.md`](safety-relays.md). Everything below is **founder-owned (Dean)** unless noted,
+and none of it is blocked on engineering.
 
-- **Which biometric vendor SDK?** The abstraction is complete; the driver decision is the blocker and no evaluation doc exists. Owner: Dean.
-- ~~**Arduino fail-safe on network loss.**~~ Resolved by design 2026-08-22: the Mega holds an independent per-relay auto-off timer, so existing sessions run to completion and nothing strands a lit court — fail-safe A, with the existing buttons serving as the physical override C. No new wiring.
-- **SaaS pricing for tenant #2 onwards.** Free for Crusaders; everything else TBD. Owner: Dean.
-- **Crusaders' existing member-data migration.** TBD with the committee.
-- **Crusaders go-live:** does the club go live this quarter, or is the project formally parked with a date? This is the division's leading cash-engine candidate, so the answer is portfolio-relevant. Owner: Dean.
-- Deferred by decision, listed so they are not rediscovered as questions: recurring bookings (out of scope v1) · multi-sport (`court_type` column exists, UI is squash-only) · partner/2-player booking (v1.1) · walk-ins and guest passes (admin books under `guests@<tenant>.local`) · PWA push (deferred; email carries the load) · native wrapper (PWA only) · mandatory backup fingers (1 primary + 1 recommended, not enforced) · per-tenant custom domain (schema supports it, UI v1.1) · Docker Hub namespace (assumed `frostaura/crusaders-mainframe-{backend,frontend}`).
+- **PIN policy.** The club's existing codes are four digits with no uniqueness constraint, and
+  matching is first-verify-wins with no deterministic ordering. **Once a PIN authorises a debit, a
+  collision charges the wrong member.** Six digits with a blocklist, or keep four and accept it?
+- **Which biometric vendor SDK?** The abstraction is complete and a null device plus a simulator
+  ship with it, so this blocks only the physical install — but no evaluation exists at all.
+- **Gate policy vocabulary.** "Per-gate and admin-configurable" settles the shape, not the
+  predicates: active membership, time of day, member class, a booking within N minutes? Needed
+  before gates are built, and gates are parked until it is answered.
+- **How long may a revoked card still open a gate**, given devices cache and may be offline? A
+  policy call, not a technical one.
+- **SaaS pricing from tenant #2 onward.** Crusaders is free; nothing else is decided.
+- **Crusaders' existing member-data migration** — to be settled with the committee.
+- **Does the club go live this quarter, or is the project formally parked with a date?** This is
+  the division's leading cash-engine candidate, so the answer is portfolio-relevant, not local.
+- **Why does a private repo ship an MIT `LICENSE`?** Confirmed 2026-09-16: `LICENSE` is MIT and
+  `README.md` says so, while this repo is private by the 2026-07-24 default
+  ([`decisions.md`](decisions.md)). Not a contradiction under an opt-in OSS posture, but licensing
+  is **parent-controlled**, the same shape as the licence question open on `fa.lifeos`, and nobody
+  has decided it here. Confirm MIT or replace it before any customer or second tenant sees the repo.
+
+**Deferred by decision — listed so they are not rediscovered as questions:** recurring bookings
+(out of scope for v1) · multi-sport (the column exists, the UI is squash-only) · partner/two-player
+booking (v1.1) · walk-ins and guest passes (an admin books under a per-tenant guest address) · PWA
+push (email carries the load) · a native wrapper (PWA only) · mandatory backup fingers (recommended,
+not enforced) · per-tenant custom domain (schema supports it, UI is v1.1).

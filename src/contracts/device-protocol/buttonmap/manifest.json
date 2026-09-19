@@ -1,0 +1,8 @@
+{
+  "description": "The button-map token grammar and the relay hard cap it is pinned to.",
+  "authority": "src/backend/Crusaders.Mainframe.Api/Services/ButtonMap.cs validates what an admin saves; src/iot/lib/court/ButtonMap.cpp parses what the heartbeat hands the box. Neither is the reference — the corpus is.",
+  "case_count": {
+    "actions": 27,
+    "maps": 6
+  }
+}

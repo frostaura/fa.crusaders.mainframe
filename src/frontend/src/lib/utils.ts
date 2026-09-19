@@ -33,3 +33,70 @@ export function formatCredits(value: number, options?: { long?: boolean }) {
 export function formatZar(value: number) {
   return `R${value.toFixed(2)}`;
 }
+
+/**
+ * A signed credit figure, with the sign shown explicitly.
+ *
+ * The ledger table built this inline as `+`/`−` plus `toFixed(2)` plus a literal " cr",
+ * so the one table where the sign carries the meaning was the one place not going through
+ * `formatCredits`. Uses U+2212 MINUS, not a hyphen, so a debit lines up under a credit in
+ * the tabular-nums column.
+ */
+export function formatSignedCredits(value: number) {
+  // Zero has no direction, so it gets no sign. This used to render "+0.00 cr", and the
+  // reports card — hardcoding its own minus around `formatCredits` rather than coming
+  // through here — rendered "−0.00 cr" for a member who had spent nothing and been
+  // penalised nothing. On the one screen whose whole job is to reconcile, a signed zero
+  // reads as a movement that did not happen. Note `-0 === 0`, so a negated zero lands here.
+  if (value === 0) return formatCredits(0);
+  return `${value > 0 ? "+" : "−"}${formatCredits(Math.abs(value))}`;
+}
+
+/**
+ * A conversion rate as a bare number — trailing zeros trimmed.
+ *
+ * `credits_per_zar_*` accepts four decimals, so this cannot be `toFixed(2)`: a club on
+ * 1.6667 would be quoted 1.67 on the screen and settled at 1.6667 in the ledger.
+ *
+ * It is the NUMBER only. Say the rate to a member through {@link formatRatePerRand},
+ * which owns the unit noun beside it — see the singular trap recorded there.
+ */
+export function formatRate(value: number) {
+  return String(Number(value.toFixed(4)));
+}
+
+/**
+ * A conversion rate as a member reads it: "1.6 credits / R1", and "1 credit / R1".
+ *
+ * Trimming the trailing zeros is right for 1.6667 and wrong for exactly 1, which came out
+ * as the bare "1" and left the top-up screens reading "At 1 credits / R1" for any club on
+ * a 1:1 rate — seen live on the re-quote screen. The noun has to agree with the number, so
+ * the noun lives here with the number rather than as loose text at each call site, which is
+ * how the two got out of step. Only 1 is singular: 0, 0.5 and 1.6 all take "credits", which
+ * is English rather than an arbitrary rule, and 1.0000 is the same rate as 1.
+ */
+export function formatRatePerRand(value: number) {
+  const rate = formatRate(value);
+  return `${rate} ${rate === "1" ? "credit" : "credits"} / R1`;
+}
+
+/**
+ * A timestamp, in the reader's own locale.
+ *
+ * One helper so the wallet, the admin ledger and the reports cannot each pick their own
+ * format. Server-composed strings — a ledger comment naming a booking's slot — are
+ * rendered in the CLUB's timezone by the API and are not re-formatted here; this is for
+ * the `at` field of a movement, which is an instant and belongs in the reader's clock.
+ */
+export function formatInstant(iso: string) {
+  return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
+/** Minutes as a person says them: "45 min", "1 h 15 min", "2 h". */
+export function formatMinutes(total: number) {
+  if (total <= 0) return "0 min";
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}

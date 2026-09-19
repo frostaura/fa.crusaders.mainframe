@@ -44,18 +44,26 @@ src/backend/    .NET 10 solution (Api + Tests)
 src/frontend/   React + Vite + Tailwind, hand-rolled component primitives
 src/iot/        Court-control firmware (ATmega2560 + ESP8266), PlatformIO
 src/contracts/  Wire-protocol corpus shared by the firmware and backend tests
-test/           Service virtualization: the PayFast imposter and its docs
+test/           e2e-device/ (the hardware-free end-to-end proof) and
+                virtualization/ (the PayFast imposter and its docs)
 docs/           Charter + specs (canonical reference)
 .github/        CI workflow
-nginx/          Reverse-proxy template for the compose gateway
+nginx/          The gateway: nginx.conf plus the Dockerfile that bakes it in
 Makefile        The entry point for every task — there is no scripts/ directory
 ```
 
 ## Before this goes live
 
-Everything in the repository is code-complete and green. What remains needs physical access,
-a live credential, or a person's decision — including one **safety** question about whether
-the relays switch a contactor or the lighting load directly, which gates everything else.
+Every phase is built and the suites are green — which is not the same as done, and this
+repository has the receipts: three adversarial passes have each found real defects in code
+that was already passing. The one kept on disk as evidence is
+**[`docs/reviews/adversarial-e2e-review.md`](./docs/reviews/adversarial-e2e-review.md)** —
+its finding ids are what the device end-to-end suite and this checklist decode against. What
+each later round established lives in the memory store, not in a report.
+
+What remains beyond that needs physical access, a live credential, or a person's decision —
+including one **safety** question about whether the relays switch a contactor or the
+lighting load directly, which gates everything else.
 
 **[`docs/go-live-checklist.md`](./docs/go-live-checklist.md)** is the list, ordered by what
 stops go-live first, with the consequence of skipping each item written next to it.

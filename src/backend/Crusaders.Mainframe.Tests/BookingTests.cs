@@ -1,4 +1,5 @@
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -123,8 +124,15 @@ public class BookingTests
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
-        // Starts in 5 minutes — inside the 15-minute penalty window.
-        var startsAt = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        // Starts in 5 minutes — inside the 15-minute penalty window — and therefore ENDS in
+        // twenty. That is a slot that cannot be moved without leaving the window the test is
+        // about, so the club is moved instead: the fixture closes at local midnight, and
+        // from 23:41 local onwards this booking is refused OutOfHours and the test dies with
+        // an InvalidCastException naming OutOfHours inside a test about cancellation
+        // penalties. `now` comes FROM the move so the two cannot drift apart.
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var startsAt = (await TestHost.NowClearOfClosingAsync(db, host.Tenant.Id, 20)).AddMinutes(5);
         var booked = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, 1, default);
 
         var cancelled = (CancellationResult.Ok)await booking.CancelAsync(booked.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
@@ -179,17 +187,49 @@ public class BookingTests
     [Fact]
     public void A_bookable_slot_is_never_inside_peak_hours_whatever_time_it_is()
     {
-        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
-
-        for (var hour = 0; hour < 24; hour++)
+        foreach (var (from, ahead) in EveryStartingPoint())
         {
-            foreach (var ahead in new[] { 1.0, 2.0, 3.0, 5.0 })
-            {
-                var slot = TestHost.BookableSlotFrom(midnight.AddHours(hour), ahead);
+            var slot = TestHost.BookableSlotFrom(from, ahead);
+            var where = $"(from {from:HH:mm}, +{ahead}h)";
 
-                Assert.False(slot.Hour is >= 16 and < 19,
-                    $"slot at {slot:HH:mm} lands in peak (from {hour:00}:00, +{ahead}h)");
-                Assert.True(slot > midnight.AddHours(hour), "a bookable slot must be in the future");
+            Assert.False(slot.Hour is >= 16 and < 19, $"slot at {slot:HH:mm} lands in peak {where}");
+            Assert.True(slot > from, "a bookable slot must be in the future");
+
+            // ...and clear of CLOSING time, which is the same promise from the other end
+            // of the day and was not being kept. The hours rule is evaluated on the
+            // slot's END, `day_end_minute` is 1440 here, and callers book up to four
+            // slices on one slot — so an hour of headroom is what a bookable slot has to
+            // leave. A slot at 23:50 ends at 00:05 and is refused OutOfHours, which made
+            // MoneySurfaceTests red for about a quarter of an hour every night and green
+            // for the rest of the day.
+            var endsAtMinute = (slot.Hour * 60) + slot.Minute + 60;
+            Assert.True(endsAtMinute <= 24 * 60, $"an hour booked from {slot:HH:mm} runs past midnight {where}");
+        }
+    }
+
+    /// <summary>
+    /// Every clock this helper could be handed, crossed with every lead time its callers
+    /// use.
+    ///
+    /// <para>
+    /// MINUTES as well as hours, and that is not thoroughness for its own sake: sweeping
+    /// only on the hour is what let the closing-time hole above survive its first fix.
+    /// Every slot an on-the-hour sweep produces lands at :00, an hour booked from 23:00
+    /// ends at exactly midnight, and the new assertion passed — while a slot at 23:50,
+    /// which is what the real clock hands <c>MoneySurfaceTests</c>, did not.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<(DateTimeOffset From, double Ahead)> EveryStartingPoint()
+    {
+        var midnight = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        foreach (var minute in new[] { 0, 1, 30, 45, 50, 59 })
+        {
+            for (var hour = 0; hour < 24; hour++)
+            {
+                foreach (var ahead in new[] { 1.0, 2.0, 3.0, 5.0 })
+                {
+                    yield return (midnight.AddHours(hour).AddMinutes(minute), ahead);
+                }
             }
         }
     }
@@ -215,8 +255,17 @@ public class BookingTests
         var db = scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Persistence.MainframeDbContext>();
 
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+
+        // Thirty minutes ahead of a raw UtcNow is thirty minutes past closing for the last
+        // quarter-hour of the club's day: day_end_minute is 1440, the operating-hours rule is
+        // evaluated on the slot's END, and a 15-minute slice starting after 23:45 ends at 1441.
+        // Real UTC 23:16 to 23:29, every night, this money test died with an
+        // InvalidCastException naming OutOfHours — which reads as a broken refund and is not.
+        // Taking `now` from the move makes the two one statement: delete it and this no longer
+        // compiles. 30 ahead + 15 of court is 45 minutes of the club's day.
+        var now = await TestHost.NowClearOfClosingAsync(db, host.Tenant.Id, minutesNeeded: 45);
         var booked = (BookingResult.Ok)await booking.CreateAsync(
-            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, DateTimeOffset.UtcNow.AddMinutes(30), 1, default);
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, now.AddMinutes(30), 1, default);
         Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 
         // They turned up and played. The clock is irrelevant; this stamp is not.
@@ -230,5 +279,61 @@ public class BookingTests
         Assert.Equal(0m, cancelled.RefundedCredits);
         Assert.Equal(0m, cancelled.PenaltyCredits);
         Assert.Equal(200m - SlicePriceCredits, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+    }
+
+    /// <summary>
+    /// A court a club prices at zero posts no ledger row for the booking at all (I10).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Nothing exercised this branch, and it was writing a 0.00 <c>BookingCharge</c> — a row
+    /// that moves no money and reads on the member's statement as a movement that did not
+    /// happen, which is the harm I10 is written against, in the one place with no
+    /// idempotency reference to justify it. Free courts are not hypothetical: a club running
+    /// an open morning or a junior session sets <c>SlicePriceCredits</c> to zero and every
+    /// booking made in it left a phantom line.
+    /// </para>
+    /// <para>
+    /// The booking itself is unaffected — it is made, it holds the slot, and it is
+    /// cancellable. Only the row is gone. The flush that inserts it still happens inside the
+    /// same try that catches the overlap violation, so the slot race is decided exactly as
+    /// it is on a priced court; the second half of this test is that assertion.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_court_priced_at_zero_books_the_slot_and_posts_no_ledger_row()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var court = await db.Courts.FirstAsync(c => c.Id == host.Courts[0].Id);
+        court.SlicePriceCredits = 0m;
+        await db.SaveChangesAsync();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 200m, host.PlayerUser.Id), default);
+        var before = await db.LedgerEntries.CountAsync();
+
+        var startsAt = TestHost.BookableSlot(2);
+        var ok = Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, startsAt, sliceCount: 1, default));
+
+        Assert.Equal(BookingStatus.Booked, ok.Booking.Status);
+        Assert.Equal(0m, ok.Booking.AmountChargedCredits);
+        Assert.Equal(200m, ok.BalanceAfterCredits);
+
+        // The row, named rather than counted by balance: a 0.00 entry moves no balance, so
+        // asserting the balance alone would pass with the phantom line still there.
+        Assert.Equal(before, await db.LedgerEntries.CountAsync());
+        Assert.Empty(await db.LedgerEntries.Where(l => l.RelatedBookingId == ok.Booking.Id).ToListAsync());
+
+        // And the slot is genuinely held. The booking row flushes inside the try that
+        // catches the overlap violation, so a second booking on the same slice is refused
+        // here exactly as it is on a priced court — which is what would break if the
+        // insert were left to drift down to the SaveChanges after the audit row.
+        Assert.IsType<BookingResult.SlotTaken>(await booking.CreateAsync(
+            host.Courts[0].Id, host.LeaguePlayerUser.Id, host.LeaguePlayerUser.Id, startsAt, 1, default));
     }
 }

@@ -63,10 +63,29 @@ public sealed class ButtonMap
     /// <summary>Physical buttons on a court box. Fixed by the wiring.</summary>
     public const int ButtonCount = 8;
 
-    /// <summary>The longest court time a single button may grant, as a guard rail.
-    /// Not a policy — a club that wants three hours can set 180 — but a typo that
-    /// reads 6000 would leave a court's lights on for four days.</summary>
-    public const int MaxGrantMinutes = 240;
+    /// <summary>
+    /// The longest court time a single button may grant: the relay bank's hard cap.
+    ///
+    /// <para>
+    /// This used to be 240 with a note that a club wanting three hours could set 180.
+    /// It could not — the relay timer cuts the lights at <see cref="RelayHardCap.Minutes"/>
+    /// regardless, so a 180-minute button sold ninety minutes of darkness (review M1).
+    /// The bound is the hardware's, shared through <see cref="RelayHardCap"/> with the
+    /// walk-up and activation paths and pinned in the corpus the firmware reads.
+    /// </para>
+    /// </summary>
+    public const int MaxGrantMinutes = RelayHardCap.Minutes;
+
+    /// <summary>Relays on a court box: A–D. A box drives at most this many courts.</summary>
+    public const int MaxCourtsPerBox = 4;
+
+    /// <summary>
+    /// The error an admin is shown when the button map and a box's court list disagree,
+    /// from whichever screen they were editing. One constant, because the same
+    /// contradiction is refused from two places and a UI matching on the string must
+    /// not have to know which one raised it.
+    /// </summary>
+    public const string SelectsCourtBeyondDeviceCourts = "button_map_selects_court_beyond_device_courts";
 
     public IReadOnlyList<ButtonAction> Actions { get; }
 
@@ -212,4 +231,85 @@ public sealed class ButtonMap
     }
 
     public IReadOnlyList<string> ToWire() => Actions.Select(a => a.ToWire()).ToList();
+
+    /// <summary>The wire array as a JSON document, for <c>Device.ButtonMapJson</c>.</summary>
+    public string ToJson() => JsonSerializer.Serialize(ToWire());
+
+    /// <summary>
+    /// A per-device override from its stored JSON, or null when there is none or it no
+    /// longer parses — lenient on read for the same reason <see cref="FromSettings"/> is:
+    /// a box must keep working on the club's map rather than stop on a bad row.
+    /// </summary>
+    public static ButtonMap? FromJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var wire = JsonSerializer.Deserialize<List<string>>(json);
+            return wire is not null && TryParse(wire, out var map, out _) ? map : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The map a box actually runs: its own override when it has one, else the club's.</summary>
+    public static ButtonMap EffectiveFor(string? deviceOverrideJson, ButtonMap tenantMap)
+        => FromJson(deviceOverrideJson) ?? tenantMap;
+
+    /// <summary>
+    /// The first court index a <see cref="ButtonAction.SelectCourt"/> button names that a
+    /// box driving <paramref name="courtCount"/> courts has no relay for — or null when
+    /// every court button lands on a wired court.
+    ///
+    /// <para>
+    /// The map and a device's court list are edited on different admin screens, and a
+    /// <c>court:C</c> button on a box whose list has two entries is a button that selects
+    /// nothing. Refused at write time from <i>both</i> screens — saving the map is
+    /// checked against every box, and assigning a box its courts is checked against the
+    /// current map — because that is the moment a human is present to be told. The
+    /// heartbeat, which used to log a warning for this, now sends a pair it can trust.
+    /// </para>
+    /// </summary>
+    public int? FirstSelectionBeyond(int courtCount)
+    {
+        foreach (var action in Actions)
+        {
+            if (action is ButtonAction.SelectCourt c && c.CourtIndex >= courtCount) return c.CourtIndex;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// This map with every court button the box has no relay for turned off, or
+    /// <c>this</c> when there is nothing to trim.
+    ///
+    /// <para>
+    /// A club's map names courts A–D because most boxes drive four. Registering a two-court
+    /// box under it used to be a flat 400 with no way forward from the screen the admin was
+    /// on: they had to go and edit the club's map — changing every OTHER box's behaviour —
+    /// or hand-register the box with a map they had to compose themselves. A two-court box
+    /// with buttons C and D turned off is what they would have written, so it is what is
+    /// derived (closing re-review #13 residual). Buttons that are not court selections are
+    /// untouched: 15/30/45/60 mean the same thing on a box of any size.
+    /// </para>
+    ///
+    /// <para>
+    /// Only ever applied to a map the admin did NOT just type. An override that arrives in
+    /// the request and overreaches is still refused — quietly rewriting what someone
+    /// deliberately wrote is a worse failure than telling them it does not fit.
+    /// </para>
+    /// </summary>
+    public ButtonMap TrimmedTo(int courtCount)
+    {
+        if (FirstSelectionBeyond(courtCount) is null) return this;
+
+        return new ButtonMap(Actions
+            .Select(a => a is ButtonAction.SelectCourt c && c.CourtIndex >= courtCount ? new ButtonAction.None() : a)
+            .ToList());
+    }
+
+    /// <summary>Value equality on the wire form — two maps are the same map when they say the same thing.</summary>
+    public bool SameAs(ButtonMap? other) => other is not null && ToWire().SequenceEqual(other.ToWire());
 }

@@ -19,11 +19,19 @@ months. A shared corpus is the cheapest thing that would have caught it.
 | Directory | Speaks | Read by |
 |---|---|---|
 | `serial/` | the line protocol between the ATmega2560 and the ESP8266 over Serial3 @ 9600 | C++ only — both ends of that link are firmware |
-| `http/` | the canonical signing string and HMAC of a device API request | **C++ and C#** — the firmware signs, the server verifies |
+| `http/` | the request and response BODIES of the device API, and the bearer header every request carries | **C++ and C#** — the firmware renders, the server parses |
+| `buttonmap/` | the button-map token grammar and the relay hard cap it is pinned to (`relay_hard_cap_minutes`) | **C++ and C#** — the server validates what an admin saves, the firmware parses what the heartbeat hands it |
 
-`http/` is the one that matters most. A canonical string the firmware builds
-one byte differently from the server produces a 401 with no diagnostic, on a
+`http/` is the one that matters most. A body the firmware renders one field
+differently from the way the server reads it is a 400 with no diagnostic, on a
 board in an electrical cupboard, and costs a trip to the club to discover.
+
+It used to hold the canonical signing string and the HMAC of every request as
+well. Firmware 2.0.0 replaced request signing with one static per-tenant key in
+an `Authorization: Bearer` header — one club, one box — so what is left to agree
+on is the body shape and that header. The `discovery/` family went with it: there
+is no UDP beacon, no OFFER and no claim commitment any more, because the API base
+URL is compiled into the image.
 
 ## Anti-drift: executed counts, not checksums
 

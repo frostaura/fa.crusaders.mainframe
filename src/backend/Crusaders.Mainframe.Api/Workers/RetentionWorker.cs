@@ -20,6 +20,19 @@ namespace Crusaders.Mainframe.Api.Workers;
 public sealed class RetentionWorker : BackgroundService
 {
     private static readonly Guid AnonymisedUserSentinel = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
+    /// <summary>How long an expired member-ident code is kept before it is purged.</summary>
+    public const int AccessCodeGraveHours = 24;
+
+    /// <summary>
+    /// How long an expired booking-activation code is kept. Longer than an ident code by
+    /// the whole event horizon (<see cref="Endpoints.DeviceEventEndpoints.MaxEventAge"/>):
+    /// a box back from a long outage uploads scans whose roster codes expired at the
+    /// slot's end, and the code is the only thing that turns that scan into attendance
+    /// and undoes the no-show sweep. Purged a day after that horizon, the way ident codes
+    /// are purged a day after theirs.
+    /// </summary>
+    public static readonly int BookingCodeGraveHours = (int)Endpoints.DeviceEventEndpoints.MaxEventAge.TotalHours + AccessCodeGraveHours;
     private readonly IServiceProvider _services;
     private readonly ILogger<RetentionWorker> _logger;
 
@@ -87,6 +100,26 @@ public sealed class RetentionWorker : BackgroundService
             {
                 a.SubjectUserId = AnonymisedUserSentinel;
                 totalAnonymised++;
+            }
+
+            // Access codes — the handles a member's phone shows a court box. An ident code
+            // is dead a day after it expires: long enough for a dispute about "my code did
+            // not work" to be looked into, and no longer, because a table of every code
+            // ever shown is a table of every member's movements. A booking code lives
+            // longer — it is the evidence a box back from a long outage uploads, and a
+            // purged code is a no-show that can never be reversed. Deleted outright, not
+            // anonymised — there is no aggregate anybody wants from them.
+            var identCutoff = DateTimeOffset.UtcNow.AddHours(-AccessCodeGraveHours);
+            var bookingCutoff = DateTimeOffset.UtcNow.AddHours(-BookingCodeGraveHours);
+            var staleCodes = await db.AccessCodes
+                .Where(c => (c.Purpose == AccessCodePurpose.MemberIdent && c.ExpiresAt < identCutoff)
+                            || (c.Purpose == AccessCodePurpose.BookingActivation && c.ExpiresAt < bookingCutoff))
+                .ToListAsync(ct);
+            if (staleCodes.Count > 0)
+            {
+                db.AccessCodes.RemoveRange(staleCodes);
+                await db.SaveChangesAsync(ct);
+                _logger.LogInformation("Retention purged {Count} expired access codes for tenant {Slug}", staleCodes.Count, tenant.Slug);
             }
 
             if (totalAnonymised > 0)

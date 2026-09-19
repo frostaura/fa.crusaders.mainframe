@@ -2,11 +2,15 @@
 //
 // WHY THIS EXISTS
 // ---------------
-// Two very different devices have to persist the same handful of facts: the
-// device identity, its bridge credential, the WiFi details and the court
-// mapping. On the ATmega2560 that is 4 KB of EEPROM written a byte at a time;
+// Two very different devices have to persist a small number of facts across a
+// power cut. On the ATmega2560 that is 4 KB of EEPROM written a byte at a time;
 // on the ESP8266 it is LittleFS on flash. Everything above this port is
 // indifferent to which, and the host tests use neither.
+//
+// The bridge is down to ONE record — the event queue's sequence high-water mark
+// (lib/eventq). The device credential, the WiFi details and the API base URL
+// used to be here too and are now compiled into the image, so a change to any
+// of them is a reflash rather than a runtime write.
 //
 // WHY A TORN WRITE IS PART OF THE CONTRACT
 // ----------------------------------------
@@ -37,8 +41,15 @@
 
 namespace hal {
 
-/// Longest value the port accepts. Sized for a device id plus a bridge token.
-constexpr uint8_t kStoreMaxValueLen = 32U;
+/// Longest value the port accepts.
+///
+/// 128, not 32. The port was sized for "a device id plus a bridge token", and
+/// the 32-byte cap then quietly truncated an API base URL that no longer lives
+/// here at all. What is left is far smaller — a ten-character sequence mark —
+/// but the cap stays where it is: an eventq::Event is 48 bytes, and persisting
+/// the ring is the one extension this port is still a candidate for. Still a
+/// uint8_t length, still identifiers and tokens, never blobs.
+constexpr uint8_t kStoreMaxValueLen = 128U;
 
 /// Longest key, excluding the terminator. Keys are short ASCII literals.
 constexpr uint8_t kStoreMaxKeyLen = 15U;

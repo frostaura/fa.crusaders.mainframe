@@ -34,7 +34,11 @@ namespace Crusaders.Mainframe.Api.Migrations
     /// <para>
     /// Cancelled rows are exempt — they are kept for the audit trail and their slot is free to
     /// rebook. Every other status still holds the slot, <c>NoShow</c> included, which is what
-    /// stops a no-show being overwritten before the sweep has settled it.
+    /// stops a no-show being overwritten before the sweep has settled it. After settlement a
+    /// <c>NoShow</c> row holds only its elapsed portion: <c>NoShowWorker.SweepOneAsync</c>
+    /// truncates <c>EndsAt</c> to the sweep's clock in the same save as the status change
+    /// (decision 2026-08-24, review H5), and that truncation — not an exemption here — is
+    /// what frees the tail of the slot for resale.
     /// </para>
     /// </summary>
     public partial class AddBookingOverlapExclusion : Migration

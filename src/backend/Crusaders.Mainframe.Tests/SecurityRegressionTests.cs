@@ -54,7 +54,7 @@ public sealed class SecurityRegressionTests
             TenantId = tenant.Id,
             // A penalty window wide enough that a cancellation now lands inside it, which is
             // what makes the IDOR cost the victim money rather than merely lose them a court.
-            SettingsJson = """{"slice_minutes":15,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":600,"timezone":"UTC"}""",
+            SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":600,"timezone":"UTC"}""",
         });
 
         var admin = new User { TenantId = tenant.Id, Email = $"a-{slug}@test.local", PasswordHash = "x", EmailVerified = true, IsAdmin = true };
@@ -204,8 +204,11 @@ public sealed class SecurityRegressionTests
         var club = await SeedAsync(factory);
 
         using var admin = ClientFor(factory, club, club.AdminId, role: "admin");
+        // The reason rides along because §7 requires one whenever a penalty is waived
+        // (`AdminWaiveReasonHttpTests`); this test is about the IDOR, not the waiver.
         var response = await admin.PostAsJsonAsync(
-            $"/api/v1/admin/bookings/{club.BookingId}/cancel", new { waivePenalty = true });
+            $"/api/v1/admin/bookings/{club.BookingId}/cancel",
+            new { waivePenalty = true, waiveReason = "Regression fixture" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -346,18 +349,20 @@ public sealed class SecurityRegressionTests
     }
 
     /// <summary>
-    /// A QR token minted by one club does not identify anybody at another club's court.
+    /// A QR code minted by one club does not identify anybody at another club's court.
     ///
     /// <para>
-    /// The token has always carried <c>tenant_id</c>; nothing read it back. What kept a
-    /// cross-tenant booking row from being written was incidental — the balance sum is
+    /// When the QR was a JWT it carried <c>tenant_id</c> and nothing read it back. What kept
+    /// a cross-tenant booking row from being written was incidental — the balance sum is
     /// tenant-filtered, so a foreign member reads as zero credits and the walk-up ends in
     /// 402. That is an arithmetic accident, not isolation, and the 400-vs-402 split it left
     /// behind was a working oracle for "is this a live member token of some other club?".
+    /// The code is now a row, and the row is tenant-filtered like every other read, so the
+    /// isolation is the query filter rather than a comparison somebody has to remember.
     /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task A_qr_token_from_another_tenant_identifies_nobody()
+    public async Task A_qr_code_from_another_tenant_identifies_nobody()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -365,8 +370,8 @@ public sealed class SecurityRegressionTests
         var home = await SeedAsync(factory);
         var away = await SeedAsync(factory);
 
-        // A genuine, unexpired qr_ident token — for the away club's member.
-        var foreignQr = Token(away.TenantId, away.Slug, away.VictimId, role: null, purpose: "qr_ident");
+        // A genuine, unexpired code — for the away club's member.
+        var foreignQr = await TestAccessCodes.MintIdentAsync(factory.Services, away.TenantId, away.Slug, away.VictimId);
 
         using var kiosk = ClientFor(factory, home, home.AdminId, role: "admin");
         var response = await kiosk.PostAsJsonAsync("/api/v1/court/1/qr/match", new { token = foreignQr });
@@ -439,5 +444,76 @@ public sealed class SecurityRegressionTests
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("payer_not_recognised", await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// A booking-activation code is not a wallet (closing re-review #19): pushed in clear to
+    /// every box driving the court and held in box RAM for hours, it must open only its own
+    /// booking. Presented as the volunteer's token it is refused, and the victim is charged
+    /// for nobody's court.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_booking_code_is_refused_as_the_payer_override()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        var before = await BalanceAsync(factory, club.TenantId, club.VictimId);
+        var victimsBookingCode = await TestAccessCodes.InsertBookingCodeAsync(factory.Services, club.TenantId, club.VictimId, club.BookingId);
+
+        using var kiosk = ClientFor(factory, club, club.AdminId, role: "admin");
+        var response = await kiosk.PostAsJsonAsync(
+            $"/api/v1/court/1/biometric/match",
+            new { payerMethod = "qr", payerToken = victimsBookingCode });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("payer_not_recognised", await response.Content.ReadAsStringAsync());
+        Assert.Equal(before, await BalanceAsync(factory, club.TenantId, club.VictimId));
+    }
+
+    /// <summary>
+    /// <c>AdjustRequest.RelatedBookingId</c> was copied onto the ledger row unchecked — any
+    /// GUID, any member (round-3 finding 17). The id is not decoration: it is what nets a
+    /// desk adjustment against that booking's automatic reversal, so a mis-picked id changed
+    /// <b>somebody else's</b> settlement, and nothing on their ledger explained it. The UI
+    /// offers a free-text "another booking — enter its ID" field, so the mis-pick is the
+    /// expected accident, not an attack.
+    ///
+    /// <para>Settlement model I4: it must exist in this tenant and its payer must be the
+    /// member being adjusted.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task An_adjustment_cannot_name_another_members_booking()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory);
+        using var admin = ClientFor(factory, club, club.AdminId, role: "admin");
+
+        // The victim's booking id, pasted into an adjustment on the other member's wallet.
+        var crossed = await admin.PostAsJsonAsync(
+            $"/api/v1/admin/credit/{club.AttackerId}/adjust",
+            new { amountCredits = 10m, reason = "goodwill", relatedBookingId = club.BookingId });
+        Assert.Equal(HttpStatusCode.BadRequest, crossed.StatusCode);
+        Assert.Contains("booking_not_members", await crossed.Content.ReadAsStringAsync());
+
+        // A booking id that is not one at all.
+        var invented = await admin.PostAsJsonAsync(
+            $"/api/v1/admin/credit/{club.AttackerId}/adjust",
+            new { amountCredits = 10m, reason = "goodwill", relatedBookingId = Guid.NewGuid() });
+        Assert.Equal(HttpStatusCode.BadRequest, invented.StatusCode);
+        Assert.Contains("booking_not_found", await invented.Content.ReadAsStringAsync());
+
+        // Nothing was posted on either attempt.
+        Assert.Equal(0m, await BalanceAsync(factory, club.TenantId, club.AttackerId));
+
+        // The member's own booking is accepted, so the refusal is about ownership and not
+        // about the field.
+        var owned = await admin.PostAsJsonAsync(
+            $"/api/v1/admin/credit/{club.VictimId}/adjust",
+            new { amountCredits = 10m, reason = "goodwill", relatedBookingId = club.BookingId });
+        Assert.Equal(HttpStatusCode.OK, owned.StatusCode);
     }
 }

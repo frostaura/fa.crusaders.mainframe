@@ -62,36 +62,44 @@ public sealed class BiometricService
     /// debited against this user's account instead of the booked player. Used when a different
     /// identified player presses "I'll pay" at the touchpad.
     /// </param>
-    public async Task<BiometricMatchResult> MatchAtCourtAsync(int courtNumber, Guid? payerOverrideUserId, CancellationToken ct)
+    /// <returns>
+    /// The device's identification outcome, plus what activating on it did. The activation is
+    /// null only when nobody was identified; it used to be swallowed here entirely, so an
+    /// insufficient-balance refusal reached the kiosk as a plain successful match — the
+    /// member was told nothing while the lights stayed off.
+    /// </returns>
+    public async Task<(BiometricMatchResult Match, ActivationResult? Activation)> MatchAtCourtAsync(
+        int courtNumber, Guid? payerOverrideUserId, CancellationToken ct)
     {
         var court = await _db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == courtNumber, ct);
         if (court is null)
-            return new BiometricMatchResult(false, null, null, 0, 0, 0);
+            return (new BiometricMatchResult(false, null, null, 0, 0, 0), null);
 
         var now = DateTimeOffset.UtcNow;
 
-        // The window comes from CourtActivationService so biometric, PIN and QR agree with
-        // each other and with NoShowWorker. It used to read Biometric:GraceMinutes — a key
-        // absent from appsettings.json, so permanently its 5-minute default.
-        var (windowStart, windowEnd) = await _activation.WindowAsync(now, ct);
+        // The candidate list comes from CourtActivationService so biometric, PIN and QR read
+        // the SAME ordered selector — window from tenant settings, rows ordered by StartsAt.
+        // This path used to build a third, unordered bookings-join-templates query of its
+        // own, which re-opened the two-back-to-back-bookings bug the shared selector fixed:
+        // whichever row the store returned first was checked in, and a member scanning at
+        // 16:58 holding 17:00 and 17:15 could activate the 17:15 slice while the 17:00 one
+        // swept as a no-show under their feet.
+        var candidates = await _activation.CandidatesAsync(court.Id, now, ct);
+        var candidateUserIds = candidates.Select(b => b.UserId).Distinct().ToList();
 
-        // Candidate set: users with a Booked booking on this court touching the current grace+forward window.
-        var candidates = await (
-            from b in _db.Bookings
-            where b.CourtId == court.Id
-                && b.Status == BookingStatus.Booked
-                && b.StartsAt < windowEnd && b.EndsAt > windowStart
-            join t in _db.EnrolledTemplates on b.UserId equals t.UserId
-            where t.SupersededAt == null
-            select new { b, t }
-        ).ToListAsync(ct);
+        var templates = await _db.EnrolledTemplates
+            .Where(t => candidateUserIds.Contains(t.UserId) && t.SupersededAt == null)
+            .Select(t => new { t.TemplateId, t.UserId })
+            .ToListAsync(ct);
 
-        var refs = candidates.Select(x => new EnrolledTemplateRef(x.t.TemplateId, x.t.UserId)).Distinct().ToList();
+        var refs = templates.Select(t => new EnrolledTemplateRef(t.TemplateId, t.UserId)).Distinct().ToList();
         var capture = await _device.CaptureAsync(new CaptureOptions(), ct);
         var match = await _device.IdentifyAsync(capture, refs, new IdentifyOptions(), ct);
 
+        // The FIRST candidate is the earliest booking in the window — the one the player is
+        // standing on — because CandidatesAsync orders by StartsAt.
         var booking = match.Matched
-            ? candidates.FirstOrDefault(x => x.t.UserId == match.MatchedUserId)?.b
+            ? candidates.FirstOrDefault(b => b.UserId == match.MatchedUserId)
             : null;
 
         _db.BiometricMatchEvents.Add(new BiometricMatchEvent
@@ -109,18 +117,26 @@ public sealed class BiometricService
 
         await _db.SaveChangesAsync(ct);
 
+        ActivationResult? activation = null;
         if (booking is not null)
         {
             // Charge, check in and cue the lights through the shared path. Insufficient
             // balance refuses here rather than logging and lighting the court anyway.
-            await _activation.ActivateAsync(
+            activation = await _activation.ActivateAsync(
                 court, booking,
                 identifiedUserId: match.MatchedUserId ?? booking.UserId ?? Guid.Empty,
                 payerOverrideUserId: payerOverrideUserId,
                 method: "biometric",
                 ct);
         }
+        else if (match.Matched)
+        {
+            // Identified, but holding no activatable booking on this court. Unreachable
+            // while refs derive from the candidate list, but stated rather than left null
+            // so a matched player always carries an activation outcome to the kiosk.
+            activation = new ActivationResult.NoBooking();
+        }
 
-        return match;
+        return (match, activation);
     }
 }

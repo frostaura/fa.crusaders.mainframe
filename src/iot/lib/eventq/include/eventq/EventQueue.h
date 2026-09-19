@@ -18,17 +18,41 @@
 // down, a router reboot, a two-day outage — because the box stays powered
 // throughout. It does not survive the breaker going off.
 //
-// That boundary is a consequence of the store port: hal::IStore holds values of
-// at most 32 bytes and an Event is larger, so there is no way to write one
-// through it. Persisting them needs a block-oriented port, which is a change to
-// make deliberately rather than to smuggle in here.
+// That boundary USED to be a consequence of the store port, and this comment
+// used to say so: hal::IStore capped a value at 32 bytes, an Event is 48, so
+// there was no way to write one through it. **That is no longer true.** The cap
+// is kStoreMaxValueLen = 128 and an Event fits with room to spare, so nothing
+// about the port stops it any more (review 3's dropped lead: a residual false
+// statement in a firmware comment, and this is the one that mattered — it gave
+// an accepted limitation a technical reason it no longer has).
+//
+// What is true now is smaller and less comfortable: persisting the ring has not
+// been built. It would need a record per slot plus a durable head and tail, and
+// the wrong version of that is worse than none — a torn ring that replays a
+// stale activation is a court charged twice. The trade is recorded and accepted
+// on the go-live checklist rather than dressed up as an impossibility.
 //
 // What it costs when it happens: a court that was lit during an offline window
 // that ended in a power cut is never reported, so the API still sees the
-// booking as un-attended and the no-show sweep refunds it less the penalty. The
-// member is charged a penalty for a game they played. That is wrong, it is
-// visible in the ledger, and an admin can reverse it — which is why this is a
-// recorded limitation rather than a blocker. It is in the go-live checklist.
+// booking as un-attended and the no-show sweep settles it as one.
+//
+// WHO PAYS FOR THAT CHANGED, AND THIS PARAGRAPH USED TO BE STALE. It used to
+// cost the member — refunded less a 30% penalty for a game they played. Wrong,
+// but wrong on their own ledger, and a member charged for a game they played
+// complains. Since feature-spec.md §6a / settlement-model.md S5a, a booking
+// whose box was unreachable at its grace deadline is refunded IN FULL with no
+// penalty, so the same lost activation now makes the court free and the loss is
+// the club's, silently: the ledger row looks correct and nobody raises it. That
+// is the one I2 exception in the system and settlement-model.md I2 names it.
+//
+// It is still a recorded limitation rather than a blocker, and it is on the
+// go-live checklist — but it is no longer self-correcting through a member
+// complaint, so do not reason about it as if an admin will hear about it.
+//
+// A consequence for anyone touching this file: the API-side alert deliberately
+// does NOT open by telling an admin to check the box's power. Power-cycling a
+// box that is lighting courts from its cached roster is exactly what discards
+// this ring.
 //
 // An earlier draft of this file carried a per-slot checksum and a header
 // claiming torn writes read back as absent. Nothing wrote to flash, so the
@@ -48,12 +72,22 @@
 //
 // WHY THE SEQUENCE NUMBER PERSISTS AND THE QUEUE'S CONTENTS NEED NOT
 // ------------------------------------------------------------------
-// `seq` is the idempotency key, so reusing one after a reboot would let the API
-// discard a genuine event as a duplicate of an unrelated older one. It is
-// therefore checkpointed to the store in blocks — see kSeqCheckpointStride —
-// rather than on every push, which would wear the flash out. A reboot resumes
-// from the checkpoint, which is at or AHEAD of the true last value: skipping
-// sequence numbers is free, reusing one is a lost event.
+// `seq` is the idempotency key, and the API enforces it with a PERMANENT unique
+// index on (tenant, device, seq): a number seen before is silently receipted as
+// a duplicate, forever, not merely for a while. So a box that restarted its
+// numbering at 1 after a power cut would have every event up to its old
+// high-water discarded as a duplicate — and under charge-at-booking that is the
+// no-show sweep refunding-and-penalising members who actually played.
+//
+// It is therefore checkpointed to the store in blocks — see
+// kSeqCheckpointStride — rather than on every push, which would wear the flash
+// out. A reboot resumes from the checkpoint, which is at or AHEAD of the true
+// last value: skipping sequence numbers is free, reusing one is a lost event.
+//
+// THIS IS THE ONLY THING THE BRIDGE PERSISTS. The device credential, the WiFi
+// details and the API base URL are compiled into the image as of firmware
+// 2.0.0; this one record is what keeps hal::IStore and the ESP's LittleFS
+// partition alive, and it earns it.
 //
 // WHY THERE IS NO ALLOCATOR AND NO std::deque
 // -------------------------------------------
@@ -84,6 +118,16 @@ namespace eventq {
 /// 64 events, at the cost of skipping up to 63 numbers on an unclean reboot —
 /// which costs nothing, because the API only cares that a number is never
 /// REUSED.
+///
+/// A CONSEQUENCE THAT KEEPS BEING GOT WRONG ON THE API SIDE. Because of this,
+/// a gap in the sequence numbers the API has receipts for is NOT evidence that
+/// events were lost. A clean run of three events followed by a power cut leaves
+/// the next event at seq 65 with nothing dropped, and no query over
+/// DeviceEventReceipt can tell that apart from a queue that discarded 61. Three
+/// documents claimed the opposite and have been corrected (settlement-model.md
+/// I2, go-live-checklist.md section 8, system-blueprint.html risk 9). Detecting
+/// a lost queue needs something this file does not emit — a boot record naming
+/// what was discarded, or a durable ring.
 inline constexpr uint32_t kSeqCheckpointStride = 64U;
 
 /// The store key holding the high-water sequence mark.

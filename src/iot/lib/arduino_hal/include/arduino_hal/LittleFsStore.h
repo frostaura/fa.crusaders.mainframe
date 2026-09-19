@@ -1,16 +1,19 @@
 // Crusaders Mainframe — hal::IStore on the ESP8266's LittleFS partition.
 //
-// This is the half of the box that has something to persist: the device key
-// issued at claim time, the remembered API URL that makes discovery a first-run
-// problem rather than a per-boot one, and the WiFi credentials. All of it is
-// short — the port's uint8_t lengths are sized for identifiers and tokens, not
-// blobs — so one small file per key is the whole design.
+// This is the half of the box that has something to persist. As of firmware
+// 2.0.0 that is one record: the event queue's sequence high-water mark, which
+// the API's permanent (tenant, device, seq) dedupe index makes load-bearing.
+// The device key, the API base URL and the WiFi credentials all used to be here
+// and are now compiled into the image. What is left is short — the port's
+// uint8_t lengths are sized for identifiers and tokens, not blobs — so one
+// small file per key is still the whole design.
 //
 // WHY ONE FILE PER KEY AND NOT ONE PACKED RECORD FILE
 // ---------------------------------------------------
 // A packed file has to be rewritten in full to change one value, which turns
 // every credential update into a window in which ALL of them are lost if the
-// power goes. Separate files put that window around one key at a time. LittleFS
+// power goes. Separate files put that window around one key at a time, which
+// matters again the moment a second record is added. LittleFS
 // is log-structured and copy-on-write, so the cost of the extra inodes is small
 // and the wear is spread rather than concentrated on one file's blocks.
 //
@@ -39,7 +42,7 @@
 namespace arduino_hal {
 
 /// Directory holding one file per key. A directory rather than the root so a
-/// future OTA staging file or log cannot collide with a key name.
+/// future staging file or log cannot collide with a key name.
 inline constexpr char kStoreDir[] = "/kv";
 
 class LittleFsStore final : public hal::IStore {
@@ -47,8 +50,9 @@ public:
   LittleFsStore();
 
   /// Mount the partition, formatting it once if it has never been mounted.
-  /// Returns false when neither works, which is a board that cannot be claimed
-  /// — worth reporting rather than discovering at the first put().
+  /// Returns false when neither works, which is a board that cannot remember
+  /// its event sequence across a power cut — worth reporting rather than
+  /// discovering at the first put().
   bool begin();
 
   bool mounted() const { return mounted_; }

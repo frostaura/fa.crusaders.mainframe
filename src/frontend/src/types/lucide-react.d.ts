@@ -84,6 +84,9 @@ declare module "lucide-react" {
   export const Radio: LucideIcon;
   export const Wifi: LucideIcon;
   export const WifiOff: LucideIcon;
+  export const Ban: LucideIcon;
+  export const MailWarning: LucideIcon;
+  export const RotateCcw: LucideIcon;
   // Fall-through for anything else — any other icon name resolves to LucideIcon.
   const _fallback: { [icon: string]: LucideIcon };
 }

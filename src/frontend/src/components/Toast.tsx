@@ -52,10 +52,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 }
 
 function ToastViewport({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
+  // `z-[200]`, above `Modal`'s `z-[100]` overlay and not below it. A toast raised while a
+  // dialog was open painted UNDER the dialog's 30% black scrim, so the only explanation a
+  // member got for a refusal read as greyed-out background chrome — and any dialog taller
+  // than the toast's own strip hid it outright. Booking refusals no longer travel this way
+  // at all (they render inside the dialog), but a toast raised over any other dialog has
+  // the same problem and this is the layer that fixes it.
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed left-1/2 top-[100px] z-50 -translate-x-1/2 flex flex-col items-center gap-2 w-[min(92vw,420px)]"
+      className="pointer-events-none fixed left-1/2 top-[100px] z-[200] -translate-x-1/2 flex flex-col items-center gap-2 w-[min(92vw,420px)]"
     >
       {toasts.map((t) => (
         <ToastView key={t.id} toast={t} onDismiss={onDismiss} />
@@ -90,12 +96,24 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
     danger: "bg-danger-soft text-danger-strong border-danger-strong/20",
   };
 
+  const dismiss = () => { setVisible(false); window.setTimeout(() => onDismiss(toast.id), 250); };
+
+  // A toast is dismissed by tapping it, and it used to be a plain div that said so with
+  // nothing but `cursor-pointer`: no focus ring, no keyboard route to it at all, and none
+  // of the hover treatment the rest of the product now shares. `data-interactive` is what
+  // the base layer in index.css keys on for a surface that is not a <button> — and once a
+  // thing can be pressed, it has to be pressable without a mouse. `role="status"` stays:
+  // the toast still has to ANNOUNCE itself, which is a different job from being pressable.
   return (
     <div
       role="status"
-      onClick={() => { setVisible(false); window.setTimeout(() => onDismiss(toast.id), 250); }}
+      data-interactive
+      tabIndex={0}
+      aria-label={`${toast.text} — dismiss`}
+      onClick={dismiss}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dismiss(); } }}
       className={cn(
-        "pointer-events-auto cursor-pointer select-none",
+        "pointer-events-auto select-none",
         "rounded-lg border px-4 py-2.5 text-sm font-medium shadow-md w-full",
         "transition-all duration-300 ease-out",
         tones[toast.tone],

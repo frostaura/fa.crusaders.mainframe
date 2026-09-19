@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.IdentityModel.Tokens.Jwt;
+using System.Net;
 using System.Text;
 using Crusaders.Mainframe.Api.Biometric;
 using Crusaders.Mainframe.Api.Email;
@@ -10,13 +13,19 @@ using Crusaders.Mainframe.Api.Services;
 using Crusaders.Mainframe.Api.Webhooks;
 using Fido2NetLib;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.RateLimiting;
+using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Crusaders.Mainframe.Api.Security.Outbound;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Kestrel announces "Server: Kestrel" on every response by default, and the gateway announces
+// its own version on top of that. Neither buys anything and both name a version to look up.
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
 // ---- Postgres / EF Core ----
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
@@ -37,18 +46,16 @@ builder.Services.AddCors(options =>
 
 // ---- JWT ----
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is required.");
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "crusaders.mainframe";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "crusaders.mainframe.app";
+// The same two constants the issuer uses. They were duplicated as literals here and absent
+// there, so an API with no Jwt:Issuer configured minted tokens this middleware then refused.
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? JwtIssuer.DefaultIssuer;
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? JwtIssuer.DefaultAudience;
 // Device authentication is a second scheme rather than a variant of the JWT one:
 // a board in a cupboard has no user, no refresh cycle and no browser, and giving it
-// an admin JWT was the alternative.
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.DeviceAuth.IDeviceKeyDeriver,
-                              Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyDeriver>();
-
+// an admin JWT was the alternative. It reads the club's one API key from the
+// Authorization header — see DeviceAuthenticationHandler.
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddScheme<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceAuthOptions,
-               Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceAuthenticationHandler>(
-        Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceAuthenticationHandler.SchemeName, _ => { })
+    .AddScheme<DeviceAuthOptions, DeviceAuthenticationHandler>(DeviceAuthenticationHandler.SchemeName, _ => { })
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -63,15 +70,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ClockSkew = TimeSpan.FromSeconds(30),
         };
         // EventSource (SSE) clients cannot set custom request headers, so the wallet stream
-        // accepts the JWT via ?access_token=... query string in addition to Authorization.
+        // accepts a short-lived, stream-scoped ticket via ?ticket=... in addition to Authorization.
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = ctx =>
             {
                 if (string.IsNullOrEmpty(ctx.Token)
-                    && ctx.HttpContext.Request.Path.StartsWithSegments("/api/v1/wallet/stream"))
+                    && ctx.HttpContext.Request.Path.StartsWithSegments(TokenPurposes.WalletStreamPath))
                 {
-                    var qToken = ctx.Request.Query["access_token"].ToString();
+                    // A stream TICKET, never the session token. The query string is logged verbatim
+                    // by every proxy in front of this — nginx's `location /api/` records `$request`
+                    // — and is re-sent on every reconnect, so what travels here has to be worth
+                    // roughly nothing: one minute, one read-only stream. See TokenPurposes.
+                    var qToken = ctx.Request.Query["ticket"].ToString();
                     if (!string.IsNullOrEmpty(qToken)) ctx.Token = qToken;
                 }
                 return Task.CompletedTask;
@@ -93,9 +104,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnTokenValidated = ctx =>
             {
                 var purpose = ctx.Principal?.FindFirst("purpose")?.Value;
-                if (!string.Equals(purpose, "access", StringComparison.Ordinal))
+                if (!TokenPurposes.IsValidFor(purpose, ctx.HttpContext.Request.Path))
                 {
                     ctx.Fail($"Token purpose '{purpose ?? "(none)"}' is not valid for API access.");
+                    return Task.CompletedTask;
+                }
+
+                // Sign-out has to mean the credential stops working, not that one browser stopped
+                // presenting it. A revoked jti is refused here rather than per-endpoint, so a new
+                // endpoint inherits the check instead of having to remember it.
+                var jti = ctx.Principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value
+                       ?? ctx.Principal?.FindFirst("jti")?.Value;
+                var revoked = ctx.HttpContext.RequestServices.GetRequiredService<AccessTokenRevocationList>();
+                if (jti is not null && revoked.IsRevoked(jti))
+                {
+                    ctx.Fail("This session has been signed out.");
                 }
                 return Task.CompletedTask;
             },
@@ -103,33 +126,106 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddAuthorization();
 
+// ---- Reverse proxy ----
+//
+// Every deployment fronts the API with the nginx gateway (docker-compose.yml: the backend
+// is `expose`d, never published; docker-compose.onprem.yml: host-networked, still fronted
+// by the gateway on :8088). Kestrel therefore sees the gateway's bridge address as the
+// remote peer of every browser request and the gateway's port-less `Host` header. Until
+// the forwarded headers were honoured, two things followed from that: the rate limiter
+// put the whole club in one bucket (closing re-review #7), and every URL composed from
+// the request — the OTA image, provisioning's api_base_url — pointed at port 80, where
+// nothing listens (#8, #18). The middleware below rewrites RemoteIpAddress, Scheme and
+// Host from X-Forwarded-For / -Proto / -Host, and ONLY when the request arrived from a
+// proxy this deployment trusts — anything else could otherwise forge its own client
+// address and escape the limiter, or forge a Host and be handed a URL that points a
+// court box at an attacker.
+//
+// Gateway:TrustedProxies is a list of addresses or CIDR networks, read by GatewayTrust —
+// see that type for why the default is a single delimited STRING rather than a JSON array
+// (indexed configuration merges by index, so an array default cannot be narrowed) and for
+// why ForwardLimit is 2 rather than 1 (the cloudflared hop). The default names the compose
+// bridge the gateway container actually stands on; it used to name 172.16.0.0/12, which on
+// a club LAN in that range made every laptop a trusted proxy.
+var trustedProxies = GatewayTrust.Parse(builder.Configuration);
+var forwardLimit = builder.Configuration.GetValue("Gateway:ForwardLimit", GatewayTrust.DefaultForwardLimit);
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+    options.ForwardLimit = forwardLimit;
+    options.KnownProxies.Clear();
+    options.KnownIPNetworks.Clear();
+    foreach (var entry in trustedProxies)
+    {
+        // A malformed entry is skipped rather than thrown on, and the startup audit below
+        // names it. A typo in one proxy address must not stop a club's API from booting.
+        if (GatewayTrust.TryParseEntry(entry) is not { } parsed) continue;
+        if (parsed.IsNetwork)
+        {
+            options.KnownIPNetworks.Add(new System.Net.IPNetwork(parsed.Address, parsed.PrefixLength));
+        }
+        else
+        {
+            options.KnownProxies.Add(parsed.Address);
+        }
+    }
+});
+
 // ---- Rate limiting ----
 //
-// The application had none. Three surfaces need it for different reasons, so they get
-// three policies rather than one global number:
-//   auth   — password and PIN guessing, which is an unbounded oracle without a limit
-//   device — a court box calls on a schedule; anything faster is a fault or a flood
-//   api    — a backstop so one client cannot saturate an on-prem box at the club
+// The application had none. Four surfaces need it for different reasons, so they get
+// four policies rather than one global number:
+//   auth     — password and PIN guessing, which is an unbounded oracle without a limit
+//   device   — a court box calls on a schedule; anything faster is a fault or a flood
+//   api      — a backstop so one client cannot saturate an on-prem box at the club
 //
-// Partitioned by remote address, falling back to a single shared partition when the
-// address is unknown, so a proxy that strips it cannot be used to escape the limit.
+// Partitioned by the client address as the forwarded-headers middleware above resolved
+// it, falling back to a single shared partition when the address is unknown, so a proxy
+// that strips it cannot be used to escape the limit. The DEVICE policy partitions by the
+// club instead: every box at a club shares one NATted address on the LAN, so an
+// address partition is a single bucket for the whole club however many boxes it has,
+// while the club is exactly the unit the key names. The auth policy partitions by the
+// authenticated user when there is one: the Court Code page refreshes its ident code on
+// a timer for every member who has it open, and "ten a minute" has to mean per member,
+// not per club. That is why authentication runs BEFORE the limiter — a request with no
+// token costs the JWT handler nothing, and one with a bad token costs one HMAC, so an
+// unauthenticated flood is still refused cheaply and never reaches the database.
+//
+// The ceilings stay deployment configuration (RateLimits:*), not tenant settings: the
+// limiter runs before tenant resolution, and letting a club raise its own ceiling would
+// move a denial-of-service control inside the blast radius it exists to contain.
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    static string PartitionKey(HttpContext ctx)
+    static string ClientKey(HttpContext ctx)
         => ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
+    static string AuthKey(HttpContext ctx)
+    {
+        // By member when there is one, else by client address.
+        var userId = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.Id() : null;
+        return userId is { } id ? $"user:{id:N}" : $"ip:{ClientKey(ctx)}";
+    }
+
     options.AddPolicy(RateLimitPolicies.Auth, ctx =>
-        RateLimitPartition.GetFixedWindowLimiter(PartitionKey(ctx), _ => new FixedWindowRateLimiterOptions
+        RateLimitPartition.GetFixedWindowLimiter(AuthKey(ctx), _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = builder.Configuration.GetValue("RateLimits:AuthPerMinute", 10),
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
         }));
 
+    static string DeviceKey(HttpContext ctx)
+    {
+        // By club when the device scheme recognised the key, else by client address —
+        // which is what an unauthenticated flood at this surface gets.
+        var tenantId = ctx.User.DeviceTenantId();
+        return tenantId is { } id ? $"tenant:{id:N}" : $"ip:{ClientKey(ctx)}";
+    }
+
     options.AddPolicy(RateLimitPolicies.Device, ctx =>
-        RateLimitPartition.GetFixedWindowLimiter(PartitionKey(ctx), _ => new FixedWindowRateLimiterOptions
+        RateLimitPartition.GetFixedWindowLimiter(DeviceKey(ctx), _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = builder.Configuration.GetValue("RateLimits:DevicePerMinute", 120),
             Window = TimeSpan.FromMinutes(1),
@@ -137,7 +233,7 @@ builder.Services.AddRateLimiter(options =>
         }));
 
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
-        RateLimitPartition.GetFixedWindowLimiter(PartitionKey(ctx), _ => new FixedWindowRateLimiterOptions
+        RateLimitPartition.GetFixedWindowLimiter(ClientKey(ctx), _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = builder.Configuration.GetValue("RateLimits:GlobalPerMinute", 600),
             Window = TimeSpan.FromMinutes(1),
@@ -161,17 +257,18 @@ builder.Services.AddScoped<IJwtIssuer, JwtIssuer>();
 // off the request thread without scope-disposal hazards.
 builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<TenantSettingsAccessor>();
-builder.Services.AddSingleton<OtaCatalogue>();
+builder.Services.AddScoped<AccessCodeService>();
 builder.Services.AddScoped<IdentificationResolver>();
 builder.Services.AddScoped<DeviceRegistryService>();
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.ProvisioningGrants>();
-builder.Services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceVerifier>();
+builder.Services.AddScoped<DeviceKeyResolver>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddScoped<IPaymentProvider, Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
 builder.Services.AddSingleton<BalanceBroadcaster>();
+builder.Services.AddSingleton<AccessTokenRevocationList>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<BookingService>();
+builder.Services.AddScoped<AdminBlockService>();
 builder.Services.AddScoped<CourtActivationService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<MemberApprovalService>();
@@ -197,31 +294,23 @@ builder.Services.AddHostedService<WebhookRetryWorker>();
 builder.Services.AddHostedService<LightsCueWorker>();
 builder.Services.AddHostedService<NoShowWorker>();
 
+// §6a / §9 — notices a court box that has stopped heart-beating, alerts the club's admins and
+// emits peripheral.unhealthy / peripheral.recovered. The outage rows it writes are also what
+// lets the no-show sweep waive a penalty nobody could have avoided.
+builder.Services.AddHostedService<PeripheralHealthWorker>();
+
 // Phase 8.8 — retention worker (nightly anonymisation of records older than retention_years)
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.RetentionWorker>();
-
-// Device discovery — a UDP listener on the club LAN plus the bounded store behind it.
-//
-// The store is a singleton independent of the listener on purpose: the admin endpoints
-// have to answer "did the listener bind?" even — especially — when it did not, and a
-// store that only existed once a socket was open could not report its own absence.
-builder.Services.AddSingleton(sp =>
-    Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions.FromConfiguration(
-        sp.GetRequiredService<IConfiguration>()));
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryStore>(sp =>
-    new Crusaders.Mainframe.Api.Security.Discovery.DiscoveryStore(
-        sp.GetRequiredService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryOptions>()));
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Security.Discovery.IDiscoveryDeviceResolver,
-                              Crusaders.Mainframe.Api.Security.Discovery.DiscoveryDeviceResolver>();
-builder.Services.AddHostedService<Crusaders.Mainframe.Api.Security.Discovery.DiscoveryListener>();
-builder.Services.AddScoped<DeviceDiscoveryService>();
 
 // Phase 5 — biometric abstraction
 builder.Services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
 
-// Hardware abstractions ship before drivers, and CI must pass without touching a relay.
-builder.Services.AddSingleton<Crusaders.Mainframe.Api.Lights.IRelayClient,
-                              Crusaders.Mainframe.Api.Lights.NullRelayClient>();
+// IRelayClient is deliberately NOT registered. The court box is pull-only — it decides
+// scans against its cached roster and drives its own relays — so nothing in the container
+// resolves a relay client, and a registration with no injection site is a claim that the
+// API actuates lights when it does not (original review A2-16). The interface and its null
+// driver stay: they hold the shape any future API-driven actuation must take, which is why
+// LightsCueTests pins that every overload carries a duration.
 builder.Services.AddScoped<BiometricService>();
 
 // WebAuthn / passkeys
@@ -249,6 +338,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddProblemDetails();
 builder.Services.AddRouting();
 
+builder.Services.AddHttpContextAccessor();
+
 var app = builder.Build();
 
 // ---- Schema + seed ----
@@ -262,11 +353,58 @@ if (builder.Configuration.GetValue<bool>("Database:AutoMigrateOnStartup"))
     await db.Database.MigrateAsync();
 }
 
+// Bring back the sign-outs that are still inside their token's lifetime.
+//
+// The revocation list is in-process, so without this a restart — a redeploy, a crash — would
+// resurrect every credential a member had signed out, for the remainder of its fifteen minutes.
+// Cheap: the table only ever holds sign-outs from the last quarter of an hour.
+try
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+    var revocations = app.Services.GetRequiredService<AccessTokenRevocationList>();
+    var now = DateTimeOffset.UtcNow;
+    var live = await db.AuthTokens.IgnoreQueryFilters()
+        .Where(t => t.Kind == Crusaders.Mainframe.Api.Domain.TokenKind.RevokedAccess && t.ExpiresAt > now)
+        .Select(t => new { t.TokenHash, t.ExpiresAt })
+        .ToListAsync();
+    foreach (var row in live) revocations.SeedHashed(row.TokenHash, row.ExpiresAt);
+}
+catch (Exception ex)
+{
+    // A database that is not there yet is a startup-ordering problem, not a reason to refuse to
+    // boot; the list simply starts empty and re-fills from the next sign-out.
+    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Revocations")
+        .LogWarning(ex, "Could not rehydrate the access-token revocation list");
+}
+
 if (app.Environment.IsDevelopment())
 {
     var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Seed");
     try { await Seeder.SeedAsync(app.Services, logger); }
     catch (Exception ex) { logger.LogError(ex, "Seed failed (non-fatal in dev)"); }
+}
+
+// First of all, ahead even of the forwarded-headers rewrite: a static file, a 404 and an
+// unhandled 500 have to carry the framing refusal too. See SecurityHeaders for what was
+// reachable without it.
+app.UseSecurityHeaders();
+
+app.UseForwardedHeaders();
+
+// Trusting a proxy network is only safe while nothing else can reach Kestrel directly, and
+// the on-prem overlay puts the backend on host networking where that stops being true by
+// default. Said out loud at boot rather than left to an audit: an over-broad range, an entry
+// that is not an address at all, and — the combination behind review finding 15 — a trusted
+// network that contains this host's own address while the server is bound to every interface.
+// Skipped in Development, where the bind is a laptop and the overlap is noise.
+foreach (var warning in GatewayTrust.Warnings(
+             trustedProxies,
+             [builder.Configuration["Urls"] ?? "", builder.Configuration["ASPNETCORE_URLS"] ?? ""],
+             GatewayTrust.HostAddresses(),
+             auditBinding: !app.Environment.IsDevelopment()))
+{
+    app.Logger.LogWarning("Gateway trust: {Warning}", warning);
 }
 
 app.UseCors();
@@ -284,23 +422,41 @@ app.UseCors();
     });
 }
 
-app.UseRateLimiter();
+// Authentication before the limiter, so the auth policy can partition by member — see
+// the rate-limiting section above for why that is cheap. The forwarded-headers rewrite
+// comes first of all: every later decision about "who is calling" reads what it wrote.
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthorization();
+
+// After authorization, so it is the last word: a session holding an admin-issued temporary
+// password reaches nothing but the call that replaces it. See PasswordChangeGate for why the
+// enforcement cannot live in the browser.
+app.UseMiddleware<PasswordChangeGate>();
 
 // ---- Anonymous endpoints ----
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok", service = "crusaders.mainframe", time = DateTimeOffset.UtcNow }))
    .AllowAnonymous();
 
-app.MapGet("/api/v1/whoami", (HttpContext ctx, ITenantContext tenant) => Results.Ok(new
+// The session-bootstrap probe. `must_change_password` is here and not only on the login response
+// because the browser reloads: without it a member who refreshes mid-forced-change renders the app
+// and then meets PasswordChangeGate's 403 on every screen instead of the one screen they need.
+app.MapGet("/api/v1/whoami", async (HttpContext ctx, ITenantContext tenant, MainframeDbContext db) =>
 {
-    tenant_slug = tenant.TenantSlug,
-    tenant_id = tenant.TenantId,
-    user_id = ctx.User.Id(),
-    is_authenticated = ctx.User.Identity?.IsAuthenticated ?? false,
-    is_admin = ctx.User.IsInRole("admin"),
-})).AllowAnonymous();
+    var userId = ctx.User.Id();
+    var mustChangePassword = userId is { } id
+        && await db.Users.IgnoreQueryFilters().Where(u => u.Id == id).Select(u => u.MustChangePassword).FirstOrDefaultAsync(ctx.RequestAborted);
+    return Results.Ok(new
+    {
+        tenant_slug = tenant.TenantSlug,
+        tenant_id = tenant.TenantId,
+        user_id = userId,
+        is_authenticated = ctx.User.Identity?.IsAuthenticated ?? false,
+        is_admin = ctx.User.IsInRole("admin"),
+        must_change_password = mustChangePassword,
+    });
+}).AllowAnonymous();
 
 // ---- Mounted endpoint groups ----
 app.MapAuthEndpoints();
@@ -310,7 +466,6 @@ app.MapScheduleEndpoints();
 app.MapBookingEndpoints();
 app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();
-app.MapAdminDeviceDiscoveryEndpoints();
 app.MapAdminLedgerEndpoints();
 app.MapMeProfileEndpoints();
 app.MapWebhookEndpoints();

@@ -29,6 +29,10 @@ public static class AdminMemberEndpoints
                 photo_url = m.PhotoUrl,
                 status = m.Status.ToString(),
                 member_class = m.MemberClass.ToString(),
+                // An unverified member cannot sign in and nothing on this screen said so,
+                // so "they say the app won't let them in" had no answer here. The console
+                // now shows it and offers a resend.
+                email_verified = m.User!.EmailVerified,
                 created_at = m.CreatedAt,
                 rejection_reason = m.RejectionReason,
                 // Correlated subquery — EF translates to a single per-row SUM. Cheap at member-list scale.
@@ -68,16 +72,40 @@ public static class AdminMemberEndpoints
         g.MapPost("/{memberId:guid}/approve", async (Guid memberId, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
         {
             var actor = ctx.User.Id() ?? Guid.Empty;
-            var ok = await svc.ApproveAsync(memberId, actor, ct);
-            return ok ? Results.Ok(new { approved = true }) : Results.NotFound();
+            var r = await svc.ApproveAsync(memberId, actor, ct);
+            // `member_notified` is the honest half of this answer. The approval commits before
+            // the welcome email is attempted, so a dead SMTP host used to throw out of the
+            // service and hand the console a 500 for a member who was already Active — and the
+            // console then said "Approval failed." about somebody it had just approved. The
+            // transition is the status change; the mail is a consequence of it, and the console
+            // is told which of the two happened rather than being made to guess.
+            return r.Ok ? Results.Ok(new { approved = true, member_notified = r.MemberNotified }) : Results.NotFound();
         });
 
         g.MapPost("/{memberId:guid}/reject", async (Guid memberId, RejectRequest req, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
             var actor = ctx.User.Id() ?? Guid.Empty;
-            var ok = await svc.RejectAsync(memberId, actor, req.Reason, ct);
-            return ok ? Results.Ok(new { rejected = true }) : Results.NotFound();
+            var r = await svc.RejectAsync(memberId, actor, req.Reason, ct);
+            return r.Ok ? Results.Ok(new { rejected = true, member_notified = r.MemberNotified }) : Results.NotFound();
+        });
+
+        // Suspend / reactivate (spec §8). The enum value and the console's "Suspended"
+        // filter both existed; the operation did not, so a club could not lock out a
+        // member whose dues had lapsed and the filter was permanently empty.
+        g.MapPost("/{memberId:guid}/suspend", async (
+            Guid memberId, SuspendRequest req, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
+            var r = await svc.SuspendAsync(memberId, ctx.User.Id() ?? Guid.Empty, req.Reason.Trim(), ct);
+            return TransitionResult(r.Result, new { suspended = true, member_notified = r.MemberNotified }, "member_already_suspended", "member_not_active");
+        });
+
+        g.MapPost("/{memberId:guid}/reactivate", async (
+            Guid memberId, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
+        {
+            var r = await svc.ReactivateAsync(memberId, ctx.User.Id() ?? Guid.Empty, ct);
+            return TransitionResult(r.Result, new { reactivated = true, member_notified = r.MemberNotified }, "member_already_active", "member_not_suspended");
         });
 
         // Admin-initiated password reset. Generates a strong temporary password, sets it as
@@ -96,6 +124,9 @@ public static class AdminMemberEndpoints
 
             var tempPassword = GenerateTempPassword();
             user.PasswordHash = hasher.Hash(tempPassword);
+            // Arms the forced change. Without it the "temporary" password was simply the account's
+            // password, forever — see PasswordChangeGate and User.MustChangePassword.
+            user.MustChangePassword = true;
 
             db.AuditLogs.Add(new AuditLog
             {
@@ -107,14 +138,19 @@ public static class AdminMemberEndpoints
             });
             await db.SaveChangesAsync(ct);
 
+            // `email_sent_to` used to be printed whether or not the send threw, so the one
+            // screen an admin reaches for when "email delivery is uncertain" asserted that
+            // delivery had happened. Same shape as approve/reject, one layer down.
+            var notified = true;
             try { await email.SendAsync(EmailTemplates.AdminPasswordReset(user.Email, membership.FullName, tempPassword), ct); }
-            catch (Exception ex) { logger.LogWarning(ex, "Admin reset email failed for {UserId}", user.Id); }
+            catch (Exception ex) { notified = false; logger.LogWarning(ex, "Admin reset email failed for {UserId}", user.Id); }
 
             return Results.Ok(new
             {
                 temp_password = tempPassword,
-                email_sent_to = user.Email,
-                advice = "Share this with the member out-of-band if email delivery is uncertain. They should change it on first login.",
+                email_sent_to = notified ? user.Email : null,
+                member_notified = notified,
+                advice = "Share this with the member out-of-band if email delivery is uncertain. It only unlocks the change-password screen — they must choose a new password before they can do anything else.",
             });
         });
 
@@ -185,6 +221,23 @@ public static class AdminMemberEndpoints
         return app;
     }
 
+    /// <summary>
+    /// One mapping from a lifecycle outcome to an HTTP answer, so suspend and reactivate
+    /// cannot drift apart. A 409 rather than a 400 for the two conflict cases: the request
+    /// was well-formed and the row was simply not in the state it names, which is a
+    /// different repair (reload the list) from a malformed one.
+    /// </summary>
+    private static IResult TransitionResult(MembershipTransition outcome, object ok, string alreadyError, string wrongStatusError)
+    {
+        return outcome switch
+        {
+            MembershipTransition.Ok => Results.Ok(ok),
+            MembershipTransition.NotFound => Results.NotFound(),
+            MembershipTransition.AlreadyInState => Results.Json(new { error = alreadyError }, statusCode: 409),
+            _ => Results.Json(new { error = wrongStatusError }, statusCode: 409),
+        };
+    }
+
     private static string GenerateTempPassword()
     {
         // 12 chars, mixed case + digits, no easily-confused glyphs.
@@ -197,4 +250,5 @@ public static class AdminMemberEndpoints
 }
 
 public sealed record RejectRequest(string Reason);
+public sealed record SuspendRequest(string Reason);
 public sealed record AssignClassRequest(string MemberClass);

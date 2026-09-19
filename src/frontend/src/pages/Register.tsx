@@ -1,8 +1,27 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { endpoints, ApiError, uploadPhoto } from "../lib/api";
+import { endpoints, ApiError, errorCode, uploadPhoto } from "../lib/api";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
+
+/**
+ * The API's refusal codes, as sentences.
+ *
+ * <p>
+ * This screen used to map by status alone: every 400 became "password must be at least 8
+ * characters", so a member who left their name blank was told to fix a password that was
+ * already fine. And a membership number that was already taken produced an unhandled 500 and
+ * "Registration failed. Try again." — advice that could never work, on the most ordinary human
+ * mistake there is: typing a digit of someone else's club number.
+ * </p>
+ */
+const MESSAGES: Record<string, string> = {
+  missing_fields: "Please fill in every field — name, email, membership number and password.",
+  password_too_short: "Your password must be at least 8 characters.",
+  email_in_use: "An account with that email already exists. Sign in instead, or reset your password.",
+  membership_number_in_use:
+    "That membership number is already registered. Check the number on your card — if it's right, contact the club committee.",
+};
 
 export default function RegisterPage() {
   const nav = useNavigate();
@@ -28,9 +47,11 @@ export default function RegisterPage() {
       await endpoints.register({ email, password, fullName, membershipNumber, photoUrl: upload.url });
       setSubmitted(true);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) setError("An account with that email already exists.");
-      else if (err instanceof ApiError && err.status === 400) setError("Please check your details — password must be at least 8 characters.");
-      else setError("Registration failed. Try again.");
+      const code = errorCode(err);
+      if (code && MESSAGES[code]) setError(MESSAGES[code]);
+      else if (err instanceof ApiError && err.status === 409) setError("Those details are already registered. Sign in instead, or reset your password.");
+      else if (err instanceof ApiError && err.status === 429) setError("Too many attempts. Wait a minute, then try again.");
+      else setError("Couldn't submit your application. Check your connection and try again — if it keeps failing, contact the club committee.");
     } finally {
       setLoading(false);
     }

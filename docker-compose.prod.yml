@@ -1,0 +1,111 @@
+# Production stack — the file content behind the Portainer stack for the club.
+#
+# Mirrors docker-compose.yml but pulls the published multi-arch images instead of building,
+# and carries its configuration INLINE: there is no .env behind a Portainer stack, and every
+# value a running club needs is in this one file. Edit the lines marked CHANGE-ME once, when the
+# stack is created; nothing else needs touching. CI's deploy-portainer job re-pulls and
+# redeploys this stack after every push to main.
+#
+# Topology, as agreed 2026-09-05: everything here runs on the one on-premises machine the court
+# box reaches over the club LAN. The gateway is the only published port. Cloudflared (outside
+# this stack) maps the public hostname to http://localhost:8088, which is what lets members book
+# from anywhere; the box's secrets.h names http://<this machine's LAN address>:8088. The stack
+# keeps compose's own bridge rather than host networking because the gateway image reaches the
+# API and the SPA by service name (backend:5000, frontend:80), and because the API only believes
+# X-Forwarded-* headers from that bridge's pinned subnet — see the note on `networks` below.
+#
+# Names are the ones the API READS. .NET configuration maps Section__Key to Section:Key; a flat
+# name like JWT_SECRET reaches nothing and the API boots on the appsettings.json placeholder,
+# which is exactly what the previous compose file did. Keep them as they are.
+
+# The compose bridge is PINNED rather than left to docker's default pool, and the API's
+# Gateway:TrustedProxies default names exactly this /24. Change this subnet and you must change
+# Gateway.TrustedProxies in appsettings.json, GatewayTrust.ComposeBridgeNetwork and
+# docker-compose.yml together.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.83.0/24
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: crusaders
+      POSTGRES_PASSWORD: CHANGE-ME-strong-database-password
+      POSTGRES_DB: crusaders_mainframe
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U crusaders -d crusaders_mainframe" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: frostaura/crusaders-mainframe-backend:latest
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5000
+      # Same password as POSTGRES_PASSWORD above.
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=crusaders_mainframe;Username=crusaders;Password=CHANGE-ME-strong-database-password
+      Database__AutoMigrateOnStartup: "true"
+      # Signs every member and admin session. At least 32 characters; changing it logs everyone out.
+      Jwt__Secret: CHANGE-ME-random-string-of-at-least-32-characters
+      # The address members use. Verification, welcome and password-reset links are built from it,
+      # and PayFast is told to return here. Cloudflared points this hostname at the gateway.
+      App__PublicBaseUrl: https://CHANGE-ME.frostaura.net
+      Cors__AllowedOrigins__0: https://CHANGE-ME.frostaura.net
+      # Passkeys are bound to the hostname members sign in on.
+      WEBAUTHN_RP_ID: CHANGE-ME.frostaura.net
+      WEBAUTHN_ORIGIN: https://CHANGE-ME.frostaura.net
+      WEBAUTHN_RP_NAME: Crusaders Squash
+      # Outbound mail: verification, welcome, password reset, receipts, no-show notices.
+      Smtp__Host: smtpout.secureserver.net
+      Smtp__Port: "587"
+      Smtp__User: mainframe@frostaura.net
+      Smtp__Password: CHANGE-ME-mailbox-password
+      Smtp__From: mainframe@frostaura.net
+      Smtp__FromName: Crusaders Squash
+      Media__StoragePath: /app/media
+      Biometric__TemplateStorePath: /app/biometric/templates
+    volumes:
+      - media_data:/app/media
+      - biometric_data:/app/biometric
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail --silent http://127.0.0.1:5000/healthz >/dev/null || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: frostaura/crusaders-mainframe-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  gateway:
+    # A built image, not stock nginx:alpine with the config bind-mounted: the deploy chain moves
+    # images and nothing else. deploy-portainer refuses a stack that does not name this image.
+    image: frostaura/crusaders-mainframe-gateway:latest
+    restart: unless-stopped
+    ports:
+      # The one published port. Cloudflared dials it; so does the court box, on the LAN address.
+      - "8088:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  media_data:
+  biometric_data:

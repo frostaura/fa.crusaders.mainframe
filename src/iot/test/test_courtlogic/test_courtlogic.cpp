@@ -17,6 +17,7 @@
 #include "courtlogic/AuthWindow.h"
 #include "courtlogic/ButtonPanel.h"
 #include "courtlogic/CourtBox.h"
+#include "courtlogic/DisplayHoldoff.h"
 #include "courtlogic/RelayGuard.h"
 #include "courtlogic/ScanAssembler.h"
 #include "fakes/FakeButtons.h"
@@ -105,6 +106,128 @@ struct Box {
     bridge.drainTx();
   }
 };
+
+// --- Hardening wave (closing re-review 2026-09-04) --------------------------
+
+void feedRaw(fakes::FakeTransport& tx, const char* text) {
+  for (size_t i = 0U; text[i] != '\0'; ++i) {
+    TEST_ASSERT_TRUE(tx.feedByte(static_cast<uint8_t>(text[i])));
+  }
+}
+
+void test_box_refuses_the_legacy_dialect_so_a_bare_a_lights_nothing(void) {
+  // THE #11 PIN. The production Mega is built with LegacyDialect::Refuse (the
+  // CourtBox default): a lone `A` between two terminators — which the legacy
+  // table read as `!ON,A,5400` — is BADFRAME, and no relay moves. The line it
+  // arrives on carries the ESP's boot banner at every ESP reset.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    Box b(kBases[i]);
+    feedRaw(b.bridge, "A\n");
+    b.step(kBases[i] + 1U);
+    TEST_ASSERT_EQUAL_UINT8(0U, b.box.relays().mask());
+    TEST_ASSERT_FALSE(b.relay.isOn(kCourtA));
+    TEST_ASSERT_EQUAL_UINT8(1U, countLinesStarting(b.bridge, "!EVT,BADFRAME"));
+    TEST_ASSERT_EQUAL_UINT16(1U, b.box.rxErrors());
+    // The legacy two-line prompt armed the buttons as a side effect; refused
+    // too, so garbage cannot open the window either.
+    feedRaw(b.bridge, "HELLO|WORLD\n");
+    b.step(kBases[i] + 2U);
+    TEST_ASSERT_FALSE(b.box.auth().allows(kBases[i] + 3U));
+    TEST_ASSERT_EQUAL_UINT8(2U, countLinesStarting(b.bridge, "!EVT,BADFRAME"));
+    // A v2 frame on the same decoder still works: the dialect, not the
+    // link, is what was refused.
+    feedFrame(b.bridge, proto::Frame::on(proto::Court::A, 60U));
+    b.step(kBases[i] + 3U);
+    TEST_ASSERT_TRUE(b.relay.isOn(kCourtA));
+  }
+}
+
+void test_box_accepts_the_legacy_dialect_only_when_told_to(void) {
+  // The bench and the simulator opt in, and the corpus keeps the dialect
+  // honest there. This is what a real box would have done with the same byte.
+  fakes::FakeRelay relay;
+  fakes::FakeDisplay display;
+  fakes::FakeScanner scanner;
+  fakes::FakeButtons buttons;
+  fakes::FakeTransport bridge;
+  fakes::FakeClock clock(kBaseMid);
+  courtlogic::CourtBox box(courtlogic::CourtPorts{relay, display, scanner, buttons, bridge, clock},
+                           proto::LegacyDialect::Accept);
+  box.begin();
+  feedRaw(bridge, "A\n");
+  clock.setNow(kBaseMid + 1U);
+  box.poll();
+  TEST_ASSERT_TRUE(relay.isOn(kCourtA));
+  TEST_ASSERT_EQUAL_UINT16(0U, box.rxErrors());
+}
+
+void test_display_holdoff_abandons_then_skips_then_tries_again(void) {
+  // THE #3 PIN, the host-testable half. After a bus timeout the driver skips
+  // the next kHoldoffWrites writes and then tries the panel again, so a dead
+  // display costs one bounded stall per holdoff and a recovered one starts
+  // rendering without a power cycle. The AVR-specific half — the timeout
+  // itself and the watchdog — is in arduino_hal and is a bench check.
+  courtlogic::DisplayHoldoff holdoff;
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_FALSE(holdoff.holding());
+  holdoff.noteTimeout();
+  TEST_ASSERT_TRUE(holdoff.holding());
+  TEST_ASSERT_EQUAL_UINT16(1U, holdoff.timeouts());
+  for (uint8_t i = 0U; i < courtlogic::kHoldoffWrites; ++i) {
+    TEST_ASSERT_FALSE(holdoff.allow());
+  }
+  TEST_ASSERT_TRUE(holdoff.allow()); // the retry
+  TEST_ASSERT_FALSE(holdoff.holding());
+  TEST_ASSERT_TRUE(holdoff.allow()); // and it keeps rendering while the bus is fine
+  holdoff.noteTimeout();
+  holdoff.noteTimeout(); // a second timeout inside a holdoff restarts it, never stacks
+  TEST_ASSERT_EQUAL_UINT16(3U, holdoff.timeouts());
+  for (uint8_t i = 0U; i < courtlogic::kHoldoffWrites; ++i) {
+    TEST_ASSERT_FALSE(holdoff.allow());
+  }
+  TEST_ASSERT_TRUE(holdoff.allow());
+}
+
+void test_display_holdoff_asks_for_exactly_one_resync_per_abandoned_write(void) {
+  // REVIEW 3, FINDING 12. The bus timeout bounds the STALL; it does not recover
+  // the DISPLAY. An abandoned write can take an En edge with it, and the
+  // HD44780 then pairs every later nibble wrongly — from that write on, every
+  // screen is garbage on a bus that is now perfectly healthy, for the rest of
+  // the evening. Only the 4-bit reset sequence clears it, and it was reachable
+  // only through the library's init(), called once in setup().
+  courtlogic::DisplayHoldoff holdoff;
+  // Nothing has gone wrong: no re-sync is owed and none is invented.
+  TEST_ASSERT_FALSE(holdoff.resyncPending());
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+
+  holdoff.noteTimeout();
+  TEST_ASSERT_TRUE(holdoff.resyncPending());
+  // It survives the whole holdoff run — the driver cannot act on it until a
+  // write is allowed through again.
+  for (uint8_t i = 0U; i < courtlogic::kHoldoffWrites; ++i) {
+    TEST_ASSERT_FALSE(holdoff.allow());
+    TEST_ASSERT_TRUE(holdoff.resyncPending());
+  }
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_TRUE(holdoff.takeResync());
+  // Exactly once, however many writes follow: the controller is back in phase.
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+  TEST_ASSERT_FALSE(holdoff.resyncPending());
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+
+  // Two timeouts inside one holdoff still owe one re-sync, not two.
+  holdoff.noteTimeout();
+  holdoff.noteTimeout();
+  for (uint8_t i = 0U; i < courtlogic::kHoldoffWrites; ++i) {
+    TEST_ASSERT_FALSE(holdoff.allow());
+  }
+  TEST_ASSERT_TRUE(holdoff.allow());
+  TEST_ASSERT_TRUE(holdoff.takeResync());
+  TEST_ASSERT_FALSE(holdoff.takeResync());
+}
 
 } // namespace
 
@@ -774,8 +897,84 @@ void test_box_a_duration_past_a_uint16_clamps_rather_than_wrapping(void) {
   TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!STATE,1,5400,0,0,0"));
 }
 
+// --- scan feedback (review A2-14) -------------------------------------------
+//
+// The sketch this replaces painted "VERIFYING..." on every scan before any
+// answer existed. v2 moved every scan-path LCD write onto the ESP, so with the
+// bridge dead a scan produced no visible change at all and members re-scanned
+// until they reported the scanner as broken. The Mega now acknowledges locally
+// and lets the bridge's answer overwrite it.
+
+void test_box_a_scan_is_acknowledged_on_the_glass_before_any_answer(void) {
+  Box b(kBaseMid);
+
+  TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
+  b.step(kBaseMid + 1U);
+
+  TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING("                ", b.display.row(1U));
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!SCAN,MEM-0042"));
+}
+
+void test_box_a_dead_bridge_still_gets_the_scan_acknowledged(void) {
+  Box b(kBaseMid);
+
+  // The ESP is gone: the frame cannot be sent. That is exactly when the member
+  // most needs to see that the scanner heard them.
+  b.bridge.setConnected(false);
+  TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
+  b.step(kBaseMid + 1U);
+
+  TEST_ASSERT_TRUE(b.box.droppedTxFrames() > 0U);
+  TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+}
+
+void test_box_the_bridges_answer_replaces_the_acknowledgement_and_stays(void) {
+  Box b(kBaseMid);
+
+  TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
+  b.step(kBaseMid + 1U);
+
+  feedFrame(b.bridge, proto::Frame::lcd("COURT A", "45 MIN"));
+  b.step(kBaseMid + 800U);
+  TEST_ASSERT_EQUAL_STRING("COURT A         ", b.display.row(0U));
+
+  // Ten seconds on, the answer must NOT be painted over with the idle screen:
+  // the bridge answered, so the feedback timer was disarmed.
+  b.step(kBaseMid + 1U + courtlogic::kScanFeedbackMs);
+  b.step(kBaseMid + 1U + courtlogic::kScanFeedbackMs + 5000U);
+  TEST_ASSERT_EQUAL_STRING("COURT A         ", b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING("45 MIN          ", b.display.row(1U));
+}
+
+void test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds(void) {
+  for (size_t i = 0; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    Box b(base);
+
+    TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
+    b.step(base);
+    TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+
+    // Still waiting one millisecond before the deadline — across the wrap for
+    // the two wrap bases, where a naive comparison would repaint immediately
+    // or never.
+    b.step(base + courtlogic::kScanFeedbackMs - 1U);
+    TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+
+    b.step(base + courtlogic::kScanFeedbackMs);
+    TEST_ASSERT_EQUAL_STRING(courtlogic::kIdleLine1, b.display.row(0U));
+    TEST_ASSERT_EQUAL_STRING("SCAN TO START   ", b.display.row(1U));
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
+
+  RUN_TEST(test_box_a_scan_is_acknowledged_on_the_glass_before_any_answer);
+  RUN_TEST(test_box_a_dead_bridge_still_gets_the_scan_acknowledged);
+  RUN_TEST(test_box_the_bridges_answer_replaces_the_acknowledgement_and_stays);
+  RUN_TEST(test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds);
 
   RUN_TEST(test_relay_guard_drives_the_active_low_level);
   RUN_TEST(test_relay_guard_releases_at_the_deadline_at_every_base);
@@ -824,6 +1023,10 @@ int main(int, char**) {
   RUN_TEST(test_box_repaints_a_row_padded_to_the_full_width);
   RUN_TEST(test_box_reports_an_overrun_on_the_pass_after_it_recovers);
   RUN_TEST(test_box_samples_the_clock_once_per_pass);
+  RUN_TEST(test_box_refuses_the_legacy_dialect_so_a_bare_a_lights_nothing);
+  RUN_TEST(test_box_accepts_the_legacy_dialect_only_when_told_to);
+  RUN_TEST(test_display_holdoff_abandons_then_skips_then_tries_again);
+  RUN_TEST(test_display_holdoff_asks_for_exactly_one_resync_per_abandoned_write);
 
   return UNITY_END();
 }

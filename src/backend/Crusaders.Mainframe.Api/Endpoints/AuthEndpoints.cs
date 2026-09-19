@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Security;
@@ -28,8 +29,20 @@ public static class AuthEndpoints
             {
                 RegistrationResult.Created c => Results.Ok(new { user_id = c.UserId, status = "pending_email_verification" }),
                 RegistrationResult.AlreadyExists => Results.Conflict(new { error = "email_in_use" }),
+                RegistrationResult.MembershipNumberInUse => Results.Conflict(new { error = "membership_number_in_use" }),
                 _ => Results.Problem("Unexpected"),
             };
+        }).AllowAnonymous();
+
+        // Re-send the address-confirmation email. Anonymous by necessity — the member cannot sign
+        // in until it is done — and deliberately incurious: it answers 200 whether or not the
+        // address exists, so it is not an account-enumeration oracle. Rate-limited with the rest
+        // of the group.
+        g.MapPost("/resend-verification", async (ResendVerificationRequest req, AuthService auth, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Email)) return Results.BadRequest(new { error = "missing_fields" });
+            await auth.ResendVerificationAsync(req.Email, ct);
+            return Results.Ok(new { ok = true });
         }).AllowAnonymous();
 
         g.MapPost("/verify-email/{token}", async (string token, AuthService auth, CancellationToken ct) =>
@@ -43,9 +56,12 @@ public static class AuthEndpoints
             var result = await auth.LoginAsync(req.Email, req.Password, ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin }),
+                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
                 LoginResult.InvalidCredentials => Results.Unauthorized(),
-                LoginResult.EmailNotVerified => Results.StatusCode(403),
+                // Was a bare 403 with an empty body, indistinguishable from not_approved — so the
+                // screen said "Your account isn't approved yet" to members who were approved and
+                // had simply never clicked the verify link, and offered them nothing to do about it.
+                LoginResult.EmailNotVerified => Results.Json(new { error = "email_not_verified" }, statusCode: 403),
                 LoginResult.NotApproved na => Results.Json(new { error = "not_approved", status = na.Status.ToString() }, statusCode: 403),
                 _ => Results.Problem("Unexpected"),
             };
@@ -70,13 +86,19 @@ public static class AuthEndpoints
             var result = await auth.ConsumeMagicLinkAsync(token, ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin }),
+                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
                 _ => Results.BadRequest(new { error = "invalid_or_expired" }),
             };
         }).AllowAnonymous();
 
         // Refresh the access token for an already-authenticated user. Caller must present a still-valid
         // JWT; we re-mint with a fresh expiry so an active session never silently expires under the user.
+        //
+        // A membership that is no longer Active comes back as `NotApproved` and falls into the 401
+        // below, deliberately: 403 would be the more descriptive status, but the browser client
+        // ends a session on 401 and merely reports a 403, so a suspended member's open tab would
+        // keep running on the token it already holds until that token expired on its own. The
+        // sentence they get is the sign-in screen's, where the reason is named properly.
         g.MapPost("/refresh", async (HttpContext ctx, AuthService auth, CancellationToken ct) =>
         {
             var sub = ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
@@ -85,10 +107,22 @@ public static class AuthEndpoints
             var result = await auth.RefreshAsync(userId, ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin }),
+                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
                 _ => Results.Unauthorized(),
             };
         }).RequireAuthorization();
+
+        // Sign out, on the server as well as in the browser.
+        //
+        // Clearing localStorage is not a sign-out: a JWT is a bearer credential and stays valid
+        // wherever else it reached — a second tab, a proxy log, anything that captured it —
+        // until it expires on its own. This puts the presented token on the revocation list, so
+        // the very next request carrying it is refused.
+        //
+        // Answers 204 whether or not there was anything to revoke. A member signing out has
+        // nothing to do differently on a failure, and an endpoint that reported which tokens it
+        // recognised would be an oracle for exactly the wrong audience.
+        g.MapPost("/logout", SignOutAsync).RequireAuthorization();
 
         // Dev-only shortcut: force-resets the seeded admin's password and returns a session token.
         // Keeps the "Sign in as seeded admin" UI button reliable even after password drift during tests.
@@ -98,18 +132,44 @@ public static class AuthEndpoints
             var result = await auth.DevAdminLoginAsync(ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin }),
+                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
                 _ => Results.Problem("Seeded admin not found"),
             };
         }).AllowAnonymous();
 
         return app;
     }
+
+    /// <summary>
+    /// Revokes the access token the caller presented.
+    /// </summary>
+    /// <remarks>
+    /// A named method rather than an inline lambda because <c>MapAuthEndpoints</c> is scored by
+    /// lizard as one function, and three more branches inside it pushed the whole registration
+    /// over the complexity gate. The handler is the thing with the branches; it can own them.
+    /// </remarks>
+    private static async Task<IResult> SignOutAsync(HttpContext ctx, AuthService auth, CancellationToken ct)
+    {
+        var userId = ctx.User.Id();
+        var jti = ctx.User.FindFirstValue(JwtRegisteredClaimNames.Jti) ?? ctx.User.FindFirstValue("jti");
+        if (userId is null || jti is null) return Results.NoContent();
+
+        // A token with an unreadable `exp` is held for an hour rather than trusted: the ceiling
+        // only bounds how long the revocation is remembered, and remembering one too long costs
+        // a row, while remembering one too briefly un-revokes a live credential.
+        var expiresAt = long.TryParse(ctx.User.FindFirstValue(JwtRegisteredClaimNames.Exp), out var unix)
+            ? DateTimeOffset.FromUnixTimeSeconds(unix)
+            : DateTimeOffset.UtcNow.AddHours(1);
+
+        await auth.RevokeAccessTokenAsync(userId.Value, jti, expiresAt, ct);
+        return Results.NoContent();
+    }
 }
 
 public sealed record RegisterRequest(string Email, string Password, string FullName, string MembershipNumber, string? PhotoUrl);
 public sealed record LoginRequest(string Email, string Password);
 public sealed record ForgotPasswordRequest(string Email);
+public sealed record ResendVerificationRequest(string Email);
 public sealed record ResetPasswordRequest(string Token, string NewPassword);
 
 public static class CurrentUser

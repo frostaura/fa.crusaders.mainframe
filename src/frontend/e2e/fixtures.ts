@@ -17,10 +17,12 @@ import { test as base, type Page } from "@playwright/test";
  * </p>
  *
  * <p>
- * <b>What it does not prove:</b> anything about the server. The API's own behaviour
- * is held by 473 backend tests including a Postgres-backed boundary suite; running a
- * database, a migration and a seeded tenant per browser test would buy a slower copy
- * of what those already cover.
+ * <b>What it does not prove:</b> anything about the server. The API's own behaviour is
+ * held by the xUnit suite and its Postgres-backed boundary tier, and the box-facing chain
+ * end to end by <code>test/e2e-device/scenario.py</code> against a real API and a real
+ * database; running a migration and a seeded tenant per browser test would buy a slower
+ * copy of what those already cover. (No count here on purpose — the one that used to be
+ * stated was stale by four hundred tests.)
  * </p>
  *
  * <p>
@@ -54,7 +56,7 @@ export async function serveApi(page: Page, routes: ApiRoute[]) {
     const method = route.request().method().toUpperCase();
 
     // Longest prefix wins, so "/api/v1/admin/devices/" cannot swallow
-    // "/api/v1/admin/devices/discovered" depending on declaration order.
+    // "/api/v1/admin/devices/api-key" depending on declaration order.
     const match = routes
       .filter((r) => (r.method ?? "GET").toUpperCase() === method && url.pathname.startsWith(r.path))
       .sort((a, b) => b.path.length - a.path.length)[0];

@@ -68,15 +68,13 @@ Anything that becomes load-bearing later goes through this same test before adop
 | PayFast provider + ITN handling | `Payments/PayFast/` | fixture corpus from an independent implementation |
 | Webhook delivery with HMAC, backoff and auto-disable | `Webhooks/` | backend suite |
 | SSRF guard on outbound webhooks | `Security/OutboundAddressGuard` | `OutboundGuardTests` |
-| Device auth, discovery, claim-by-code, provisioning | `Security/DeviceAuth/`, `Security/Discovery/` | shared corpus, both sides |
-| OTA release catalogue and per-device pinning | `Services/OtaCatalogue.cs` | `OtaCatalogueTests` |
+| Device auth: one static club API key, boxes that register themselves | `Security/DeviceAuth/`, `Services/DeviceRegistryService.cs` | shared corpus, both sides |
 | Reporting endpoints + CSV | `Endpoints/ReportingEndpoints.cs` | backend suite |
 | Admin: members, ledger, webhooks, settings, **devices** | `src/frontend/src/pages/` | vitest route tests + Playwright |
 | All 18 tenant settings editable from the admin panel | `Endpoints/AdminConfigEndpoints.cs` | `AdminSettingsHttpTests` |
 | Mega firmware: relays, buttons, scanner, LCD, **independent auto-off** | `src/iot/lib/courtlogic` | Unity suite at four clock bases including the wrap |
-| ESP8266: roster cache, event queue, session, signed API client | `src/iot/lib/{roster,eventq,court,devapi}` | Unity suite + ASAN/UBSAN |
+| ESP8266: roster cache, event queue, session, bearer-key API client | `src/iot/lib/{roster,eventq,court,devapi}` | Unity suite + ASAN/UBSAN |
 | Remappable buttons, walk-up pad | `src/iot/lib/court`, `Services/ButtonMap.cs` | shared corpus read by both sides |
-| Signed OTA + boot guard | `src/iot/lib/otacore` | Unity suite; **no rollback — see D-2** |
 
 ### Built, not yet exercised against reality
 
@@ -84,7 +82,6 @@ Anything that becomes load-bearing later goes through this same test before adop
 | --- | --- |
 | PayFast | A live transaction. The algorithm is pinned by a corpus; the first real R100 is a milestone. |
 | The release chain | Six unset Actions secrets, and `workflow_dispatch` cannot trigger a deploy. |
-| OTA | The signing key pair does not exist yet. |
 | The court box | Has never been flashed. Everything is proven on the host with no board attached. |
 
 ### Deliberately not built
@@ -97,15 +94,16 @@ Anything that becomes load-bearing later goes through this same test before adop
 | Face recognition | Deferred until a vendor SDK exists. PIN and QR cover the triple stack. |
 | XLSX / PDF reports | CSV covers the pilot. |
 
-### The two open deviations
+### The open deviations
 
 Both are in [`./specs/client-blueprint-deltas.md`](./specs/client-blueprint-deltas.md).
 
 - **D-1 — the debit happens at booking, not at lights-on.** Contradicts the customer's own
   written brief. **Needs committee sign-off before go-live.**
-- **D-2 — firmware is signed with RSA-2048, not Ed25519, and there is no rollback.** An
-  implementation constraint rather than a product decision; the security property the plan
-  asked for is unchanged.
+- **D-2 — firmware signing (RSA-2048 rather than Ed25519, no rollback).** *Historical.*
+  Over-the-air updates are gone with device contract v2: one club, one box, and a founder
+  with a USB cable. There is no image to sign, so the deviation has nothing left to be a
+  deviation from.
 
 ### What actually blocks go-live
 
@@ -271,11 +269,11 @@ The outbound event stream + the Arduino lights integration. Specs: [`webhooks.md
   - SSRF guard: production rejects RFC1918 destinations *unless* the endpoint is registered against an internal-LAN allow-list (the lights-controller use case)
 - Endpoints: `GET/POST/PUT/DELETE /api/v1/webhooks` (player-scoped), `GET/POST/PUT/DELETE /api/v1/admin/webhooks` (tenant-wide), `POST /api/v1/webhooks/{id}/test` (sends `webhook.test`), `GET /api/v1/webhooks/{id}/deliveries`
 - Lights flow: `BookingService` emits `booking.lights_on` with `duration_seconds` derived from the booking → standard webhook delivery hits the Arduino URL
-- `peripheral.unhealthy` event from the Arduino health-poll worker
+- `peripheral.unhealthy` / `peripheral.recovered` from `PeripheralHealthWorker` *(built — but not by polling the board: the health-poll design here is historical. The box pushes a heartbeat and the worker sweeps `Device.LastSeenAt` against `offline_after_seconds`. See `docs/specs/feature-spec.md` §6a and §9.)*
 
 **Frontend deliverables:**
 - `/settings/webhooks` (player) — list, create with URL-template hints, view delivery log, "Send test" button
-- `/admin/webhooks` (tenant admin) — same plus tenant-wide endpoints; pre-filled "Lights on" and "Lights off" templates pointing at `arduino.local/court/{court_number}/turn/{action}`
+- `/admin/webhooks` (tenant admin) — same plus tenant-wide endpoints; pre-filled "Lights on" and "Lights off" templates pointing at `arduino.local/court/{court_number}/turn/{action}` *(historical: the court box is pull-only and is never a webhook destination — see `docs/specs/webhooks.md`; these templates were never shipped)*
 - Delivery log row: status, attempt count, latency, peek-at-payload modal
 
 **Arduino firmware (`src/firmware/lights-controller/`):**

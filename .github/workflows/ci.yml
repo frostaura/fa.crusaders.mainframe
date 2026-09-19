@@ -191,7 +191,11 @@ jobs:
           API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=crusaders_mainframe_test;Username=crusaders;Password=crusaders_test_pw
           # Asserts the boundary tests actually run here rather than skipping quietly.
           REQUIRE_BOUNDARY_TESTS: "true"
-        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --filter "(FullyQualifiedName~ApiBoundaryTests|FullyQualifiedName~TenantIsolationTests)"
+        # No --filter: xUnit collections are not filterable by name, and a
+        # class-name list rots the day a new Postgres-backed class is added —
+        # which is exactly how the postgres-http tier silently ran in CI never.
+        # The in-memory tests re-run here; the `backend` job stays the fast gate.
+        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
 
   # ============================================================================
   # IoT firmware — host-compiled unit tests, no hardware required.
@@ -227,8 +231,10 @@ jobs:
       - name: Formatting (clang-format)
         run: |
           # Must be the pinned pip build, not the OS one — versions format differently.
+          # src/iot/arduino/ is generated output plus two vendored libraries; the
+          # originals under lib/ and src/ are already in this list.
           clang-format --version
-          clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h')
+          clang-format --dry-run -Werror $(git ls-files -co --exclude-standard 'src/iot/**/*.cpp' 'src/iot/**/*.h' ':(exclude)src/iot/arduino/**')
 
       - name: Strict compile — full pedantic set as errors
         run: src/iot/tools/strict_compile.sh
@@ -260,10 +266,10 @@ jobs:
             exit 1
           fi
 
-      - name: OTA signer roundtrip
-        # The release-signing step is what a board's signature check trusts, so it
-        # is a gate. Proves a signed image verifies and a tampered one is rejected.
-        run: python3 src/iot/tools/sign_firmware.py --selftest
+      - name: Generated corpus headers are current
+        # One copy of the gate: the Makefile target owns the generator and file
+        # lists; CI only overrides PY since the pinned toolchain is on PATH here.
+        run: make corpus-check PY=python3
 
       - name: Unit tests (host)
         run: pio test -d src/iot -e native
@@ -326,8 +332,60 @@ jobs:
       - name: Install pinned toolchain
         run: pip install -r src/iot/requirements.txt
 
+      # court_bridge now #errors without secrets.h, and secrets.h is gitignored
+      # because it holds a real WiFi password and the club's device API key. CI has
+      # neither and needs neither: the four values only have to EXIST for the
+      # preprocessor, and a build made from them is a compile check, never an
+      # artifact anybody flashes. Written here rather than committed as an example
+      # copy so that a developer who forgets their own still gets the #error.
+      - name: Write a throwaway secrets.h
+        run: |
+          set -euo pipefail
+          cat > src/iot/src/common/secrets.h <<'SECRETS'
+          #pragma once
+          #define WIFI_SSID "ci-build-only"
+          #define WIFI_PASSWORD "ci-build-only"
+          #define API_BASE_URL "http://127.0.0.1:8088"
+          #define DEVICE_API_KEY "ci-build-only-not-a-real-key"
+          SECRETS
+
       - name: Build court_mega, court_bridge and the simulator
         run: pio run -d src/iot -e court_mega -e court_bridge -e simulator
+
+      # The Arduino IDE is the DEPLOYMENT route and src/iot/arduino/ is generated,
+      # so a source or platformio.ini change that was not re-exported would leave a
+      # technician flashing last week's firmware from a folder that looks current.
+      - name: Arduino sketches are current
+        run: make arduino-check PIO=pio PY=python3
+
+      - name: Cache the Arduino cores
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino-cores-${{ runner.os }}-${{ hashFiles('src/iot/arduino/arduino-cli.yaml') }}
+
+      - name: Compile both sketches with the Arduino toolchain
+        run: |
+          set -euo pipefail
+          ESP_URL=https://arduino.esp8266.com/stable/package_esp8266com_index.json
+          # The installer REFUSES to create its own BINDIR — "folder not found. Please create
+          # it before continuing." — and exits 1 without installing anything.
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$RUNNER_TEMP/bin" sh
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          # Pinned to match the PlatformIO platforms above: framework-arduino-avr
+          # 5.2.0 is core 1.8.6, framework-arduinoespressif8266 3.30102.0 is 3.1.2.
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr@1.8.6
+          arduino-cli core update-index --additional-urls "$ESP_URL"
+          arduino-cli core install esp8266:esp8266@3.1.2 --additional-urls "$ESP_URL"
+          # The sketch reads its OWN secrets.h, beside the .ino. Same throwaway
+          # values written above; gitignored either way.
+          cp src/iot/src/common/secrets.h src/iot/arduino/court_bridge/secrets.h
+          arduino-cli compile --fqbn arduino:avr:mega:cpu=atmega2560 src/iot/arduino/court_mega
+          arduino-cli compile --fqbn esp8266:esp8266:generic:eesz=4M2M,xtal=80,baud=115200 src/iot/arduino/court_bridge
+          rm -f src/iot/arduino/court_bridge/secrets.h
 
       # The simulator is what the .NET integration tests talk to, so "it links"
       # is not enough — it has to come up and bind its socket. --port 0 asks the
@@ -339,6 +397,99 @@ jobs:
                   --port 0 --store "$RUNNER_TEMP/simstore" </dev/null || true)
           echo "$out"
           echo "$out" | grep -q '^\[sim\] listening on 127\.0\.0\.1:[0-9]\+$'
+
+  # ============================================================================
+  # End-to-end device proof — the real API, a real Postgres, the firmware's native
+  # simulator and the PayFast imposter, driven by test/e2e-device/scenario.py.
+  #
+  # This is the only job that proves the box-facing chain end to end (the club key,
+  # auto-registration on first heartbeat, activate/events/walk-up, the no-show
+  # sweep) against the code as it will ship. It existed as a Makefile target and
+  # nothing in CI ran it. Runs headless: Postgres is the service container below
+  # (E2E_PG_HOST/PORT point the script at it, so it never reaches for docker), the
+  # simulator is built by pio from the pinned toolchain, mountebank comes from npx.
+  # The image builds are gated on it.
+  # ============================================================================
+  e2e-device:
+    name: End-to-end (device chain)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [backend, iot-build]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crusaders
+          POSTGRES_PASSWORD: crusaders_test_pw
+          POSTGRES_DB: crusaders_mainframe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crusaders"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: src/iot/requirements.txt
+
+      # The same entry iot-build populated: the simulator build reuses the native
+      # toolchain instead of downloading it again.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-boards-${{ runner.os }}-${{ hashFiles('src/iot/platformio.ini') }}
+          restore-keys: pio-boards-${{ runner.os }}-
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('src/backend/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Install pinned toolchain
+        run: pip install -r src/iot/requirements.txt
+
+      - name: Restore backend
+        run: dotnet restore src/backend/Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj
+
+      # PIO/PY on PATH here rather than in the per-checkout venv the Makefile defaults
+      # to, exactly as the `iot` job overrides them for corpus-check.
+      - name: Run the device end-to-end proof
+        env:
+          E2E_PG_HOST: localhost
+          E2E_PG_PORT: "5432"
+          E2E_PG_USER: crusaders
+          E2E_PG_PASSWORD: crusaders_test_pw
+        run: make test-e2e-device PIO=pio PY=python3
+
+      - name: Upload scenario scratch on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-device-scratch
+          path: .tmp/e2e-device/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # ============================================================================
   # Security — npm audit + dotnet vulnerable package scan
@@ -414,7 +565,7 @@ jobs:
     name: Build Backend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -442,7 +593,7 @@ jobs:
     name: Build Backend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -491,7 +642,7 @@ jobs:
     name: Build Frontend (amd64)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -521,7 +672,7 @@ jobs:
     name: Build Frontend (arm64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
-    needs: [backend, frontend, e2e, backend-integration, iot, iot-build, security]
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
@@ -569,13 +720,101 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-frontend:latest-arm64
 
   # ============================================================================
+  # Gateway — the nginx reverse proxy, as an image rather than a bind mount.
+  #
+  # nginx/nginx.conf carries the X-Forwarded-Host that gives every member their own
+  # rate-limit bucket rather than one bucket for the club.
+  # It used to be mounted into stock nginx:alpine from a checkout on the
+  # host, and the deploy chain moves images and nothing else — so a club merging a
+  # gateway fix got a new backend behind the OLD config while the dashboard said
+  # deployed (round-3 finding 18). Built and pushed like the other two now, so the
+  # trap cannot recur on the next nginx.conf edit either.
+  # ============================================================================
+  build-gateway-amd64:
+    name: Build Gateway (amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push gateway (amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./nginx
+          file: ./nginx/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-amd64
+
+  build-gateway-arm64:
+    name: Build Gateway (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    needs: [backend, frontend, e2e, e2e-device, backend-integration, iot, iot-build, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push gateway (arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./nginx
+          file: ./nginx/Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-arm64
+
+  merge-gateway-manifests:
+    name: Create Gateway Multi-arch Manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-gateway-amd64, build-gateway-arm64]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create -t ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest \
+            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-amd64 \
+            ${{ secrets.DOCKERHUB_USERNAME }}/crusaders-mainframe-gateway:latest-arm64
+
+  # ============================================================================
   # Portainer deploy — re-pull images and redeploy the live stack
   # ============================================================================
   deploy-portainer:
     name: Re-pull image and redeploy on Portainer
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [merge-backend-manifests, merge-frontend-manifests]
+    needs: [merge-backend-manifests, merge-frontend-manifests, merge-gateway-manifests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Wait for Docker Hub propagation
@@ -589,12 +828,15 @@ jobs:
           PORTAINER_TOKEN: ${{ secrets.PORTAINER_TOKEN }}
           PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID }}
           PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
+          # Needed to name the gateway image in the stack check below.
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euo pipefail
           : "${PORTAINER_URL:?secret PORTAINER_URL is required}"
           : "${PORTAINER_TOKEN:?secret PORTAINER_TOKEN is required}"
           : "${PORTAINER_ENDPOINT_ID:?secret PORTAINER_ENDPOINT_ID is required}"
           : "${PORTAINER_STACK_ID:?secret PORTAINER_STACK_ID is required}"
+          : "${DOCKERHUB_USERNAME:?secret DOCKERHUB_USERNAME is required}"
 
           api="${PORTAINER_URL%/}/api"
 
@@ -603,6 +845,29 @@ jobs:
             -H "X-API-Key: ${PORTAINER_TOKEN}" \
             "${api}/stacks/${PORTAINER_STACK_ID}/file" \
             | jq -r '.StackFileContent')
+
+          # The deploy is a re-PUT of the stack Portainer already holds with
+          # pullImage: true. That re-pulls the images the stack NAMES — so a stack still
+          # naming stock nginx:alpine with ./nginx/nginx.conf bind-mounted silently keeps
+          # the old gateway config while reporting a successful deploy, which is exactly
+          # how the forwarded host would have been stranded
+          # (round-3 finding 18). Checked here, against the live stack, because nothing
+          # else in the chain can see it: the tests exercise the API given forwarded
+          # headers and cannot tell a stale deployed gateway from a fresh one.
+          gateway_image="${DOCKERHUB_USERNAME}/crusaders-mainframe-gateway"
+          stack_ok=1
+          if ! printf '%s' "${stack_file_content}" | grep -q "${gateway_image}"; then
+            echo "::error title=Portainer stack does not name the gateway image::the live stack has no '${gateway_image}' service. The gateway is built and pushed by this workflow; a stack that does not name it will keep whatever gateway it has, config included."
+            stack_ok=0
+          fi
+          if printf '%s' "${stack_file_content}" | grep -q 'nginx/nginx\.conf'; then
+            echo "::error title=Portainer stack bind-mounts nginx.conf::the live stack still mounts ./nginx/nginx.conf from a host checkout. That file is baked into the gateway image now; a bind mount silently overrides it with whatever is on the host and pins the club to a config the release cannot update."
+            stack_ok=0
+          fi
+          if [ "${stack_ok}" -ne 1 ]; then
+            echo "Refusing to deploy. Point the Portainer stack's gateway service at ${gateway_image}:latest and remove the nginx.conf volume; see docs/specs/deployment.md."
+            exit 1
+          fi
 
           echo "Fetching current stack metadata..."
           env_array=$(curl -fsSL \

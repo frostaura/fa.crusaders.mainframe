@@ -38,6 +38,23 @@ enum class Link : uint8_t {
   Uplink,   ///< Mega -> bridge. Decoded by the bridge.
 };
 
+/// Whether a decoder honours Carl's unchecksummed legacy dialect at all.
+///
+/// The production Mega REFUSES it. The legacy downlink is the one path by which
+/// a relay closes without a checksummed command — a lone `A` between two
+/// terminators is `!ON,A,5400` — and the wire it listens on receives the
+/// ESP8266's 74880-baud boot banner at every ESP reset, beside four relay
+/// coils. The serial spec names exactly that corruption as the defect v2
+/// exists to fix. The dialect stays in the codec, tested against the corpus,
+/// for the simulator and the bench (a v2 Mega paired with the original bridge);
+/// the composition root of a real box does not opt in.
+enum class LegacyDialect : uint8_t {
+  /// Lines without the `!` sentinel are parsed as Carl's dialect.
+  Accept,
+  /// Lines without the `!` sentinel are reported as BADFRAME, whatever they say.
+  Refuse,
+};
+
 /// Encode a frame as `!VERB,arg1,arg2*CC\n`.
 ///
 /// Returns the number of bytes written, or 0 if the frame would not fit in
@@ -73,7 +90,9 @@ public:
     bool isFrame() const { return error == DecodeError::None; }
   };
 
-  explicit Decoder(Link link);
+  /// `legacy` defaults to Accept so every existing caller and corpus test keeps
+  /// its meaning; the production Mega passes Refuse explicitly (see CourtBox).
+  explicit Decoder(Link link, LegacyDialect legacy = LegacyDialect::Accept);
 
   /// Feed one byte. Returns true when at least one Result became available.
   ///
@@ -116,6 +135,7 @@ private:
   bool pushError(DecodeError e);
 
   Link link_;
+  LegacyDialect legacy_;
   char line_[kMaxFrameLen];
   uint16_t len_;
   bool overrun_;

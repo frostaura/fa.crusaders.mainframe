@@ -1,5 +1,5 @@
 // Unity tests for the ESP8266 half: the event queue, the roster cache and the
-// signed-request client.
+// API client.
 //
 // WHY THESE THREE ARE ONE SUITE
 // -----------------------------
@@ -73,18 +73,6 @@ void loadRoster(Cache& cache, uint32_t nowMs, const roster::Entry* entries, uint
   }
   cache.commitReplace();
 }
-
-/// Deterministic bytes, so a signature can be compared against a fixture. A
-/// client that reached for a platform RNG could only be tested against itself.
-class ScriptedEntropy final : public devapi::IEntropySource {
-public:
-  explicit ScriptedEntropy(uint8_t seed = 0U) : next_(seed) {}
-
-  uint8_t nextByte() override { return next_++; }
-
-private:
-  uint8_t next_;
-};
 
 // ---------------------------------------------------------------------------
 // Event queue
@@ -212,6 +200,46 @@ void test_queue_a_reboot_resumes_past_the_reserved_block() {
   TEST_ASSERT_TRUE(e.seq >= eventq::kSeqCheckpointStride);
 }
 
+/// The inference three API-side documents drew from "the sequence survives a reboot"
+/// plus "the API stores a receipt per (device, seq)", which does not follow: they
+/// concluded a gap after a reconnect would show that queued events were lost.
+///
+/// Here NOTHING is lost — every event was uploaded and released before the power
+/// cut — and the API still sees a 61-number hole, because the checkpoint reserved a
+/// block of 64 and begin() resumes past the whole of it. A gap therefore cannot
+/// distinguish "the queue lost N activations" from "the checkpoint skipped N
+/// numbers", and settlement-model.md I2, go-live-checklist.md section 8 and
+/// system-blueprint.html risk 9 have been corrected to say so. If this test ever
+/// goes red because the firmware issues numbers densely across a reboot, those three
+/// documents become wrong in the other direction and must be revisited.
+void test_queue_a_sequence_gap_after_a_reboot_is_not_evidence_of_loss() {
+  fakes::FakeStore store;
+
+  uint32_t lastBefore = 0U;
+  {
+    eventq::EventQueue<64U> q(&store);
+    q.begin();
+    for (int i = 0; i < 3; ++i) {
+      eventq::Event e = activation("member", 0U);
+      static_cast<void>(q.push(e));
+      lastBefore = e.seq;
+    }
+    // Uploaded and acknowledged, so the ring is empty and the breaker costs
+    // nothing whatsoever.
+    static_cast<void>(q.releaseThrough(lastBefore));
+    TEST_ASSERT_TRUE(q.empty());
+  }
+
+  eventq::EventQueue<64U> after(&store);
+  after.begin();
+  eventq::Event next = activation("member", 0U);
+  static_cast<void>(after.push(next));
+
+  TEST_ASSERT_EQUAL_UINT32(3U, lastBefore);
+  TEST_ASSERT_EQUAL_UINT32(eventq::kSeqCheckpointStride + 1U, next.seq);
+  TEST_ASSERT_TRUE(next.seq > lastBefore + 1U);
+}
+
 void test_queue_checkpoints_are_strided_not_per_event() {
   fakes::FakeStore store;
   Queue q(&store);
@@ -319,10 +347,11 @@ void test_queue_events_do_not_survive_a_power_cut_and_the_sequence_does() {
   }
 
   // The breaker goes. This is the documented limit, asserted rather than left
-  // to be discovered: the events were in RAM and are gone, because hal::IStore
-  // holds 32-byte values and an Event does not fit through it. What DOES
-  // survive is the sequence high-water mark, which is what the API's
-  // deduplication rests on.
+  // to be discovered: the events were in RAM and are gone. NOT because they
+  // could not be written — kStoreMaxValueLen is 128 and an Event is 48, so the
+  // port would take one; persisting the ring simply has not been built, and the
+  // header says so. What DOES survive is the sequence high-water mark, which is
+  // what the API's deduplication rests on.
   eventq::EventQueue<64U> after(&store);
   after.begin();
 
@@ -501,235 +530,81 @@ void test_roster_token_copy_refuses_rather_than_truncates() {
 }
 
 // ---------------------------------------------------------------------------
-// Device client
+// Device client — the bearer header and the response policy
 // ---------------------------------------------------------------------------
+//
+// This block used to be four hundred lines: canonical strings, HMACs, a nonce
+// per request, a clock held as an offset over millis(), a zero-timestamp probe
+// whose 401 seeded that clock, a skew tolerance pinned against the server's,
+// and two strike counters deciding when a 401 meant a dead credential. All of
+// it existed to let a board with no RTC sign a request. With signing gone,
+// what is left to be wrong about is the header and the status mapping.
 
-const uint8_t kKeyBytes[] = {0x00U, 0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U};
-
-devapi::Credentials credentials() {
-  devapi::Credentials c;
-  c.deviceId = "11111111-2222-3333-4444-555555555555";
-  c.key = dc::ByteSpan{kKeyBytes, sizeof(kKeyBytes)};
-  return c;
+void test_client_renders_the_bearer_header_the_server_expects() {
+  char header[devapi::kAuthorizationBufSize] = {};
+  const size_t n = devapi::renderAuthorization(header, sizeof(header), "k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU");
+  TEST_ASSERT_EQUAL_size_t(strlen("Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU"), n);
+  TEST_ASSERT_EQUAL_STRING("Bearer k7Qz3mR9vT1bXf5NpYw2LcJd8HsA4EgU", header);
 }
 
-devapi::Call heartbeatCall(const char* body) {
-  devapi::Call call;
-  call.method = "POST";
-  call.pathAndQuery = "/api/v1/device/heartbeat";
-  call.body = body;
-  call.bodyLen = strlen(body);
-  return call;
+void test_client_a_key_that_would_not_fit_is_refused_not_truncated() {
+  // Half a key is a 401 that reads exactly like the wrong key, and the box
+  // cannot tell the two apart — so it never sends one.
+  char tiny[16] = {};
+  TEST_ASSERT_EQUAL_size_t(0U, devapi::renderAuthorization(tiny, sizeof(tiny), "0123456789abcdef"));
+  TEST_ASSERT_EQUAL_STRING("", tiny);
+
+  char header[devapi::kAuthorizationBufSize] = {};
+  char oversize[devapi::kMaxApiKeyLen + 2U];
+  memset(oversize, 'k', sizeof(oversize) - 1U);
+  oversize[sizeof(oversize) - 1U] = '\0';
+  TEST_ASSERT_EQUAL_size_t(0U, devapi::renderAuthorization(header, sizeof(header), oversize));
+  TEST_ASSERT_EQUAL_STRING("", header);
+
+  // An exactly-maximum key still fits, so the bound is not off by one.
+  char exact[devapi::kMaxApiKeyLen + 1U];
+  memset(exact, 'k', devapi::kMaxApiKeyLen);
+  exact[devapi::kMaxApiKeyLen] = '\0';
+  TEST_ASSERT_EQUAL_size_t(sizeof(devapi::kBearerPrefix) - 1U + devapi::kMaxApiKeyLen,
+                           devapi::renderAuthorization(header, sizeof(header), exact));
 }
 
-void test_client_refuses_to_sign_before_it_knows_the_time() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-
-  devapi::RequestBuffers buffers;
-  devapi::SignedRequest request;
-  // A box with no clock signs a timestamp of zero, gets a 401, and reads it as
-  // a revoked key — then re-provisions over what was only an unsynchronised
-  // clock. Failing locally is how that loop is not entered.
-  TEST_ASSERT_FALSE(client.sign(heartbeatCall("{}"), 1000U, buffers, request));
-}
-
-void test_client_signs_the_current_time_not_the_boot_time() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::RequestBuffers early;
-  devapi::SignedRequest earlyRequest;
-  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), 0U, early, earlyRequest));
-
-  devapi::RequestBuffers later;
-  devapi::SignedRequest laterRequest;
-  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), 3600000U, later, laterRequest));
-
-  // An hour of uptime is an hour on the timestamp. Signing the offset alone
-  // works for the first few minutes of a board's life and then produces a
-  // permanent 401 that reads exactly like a revoked key.
-  TEST_ASSERT_EQUAL_STRING("1750000000", earlyRequest.timestamp);
-  TEST_ASSERT_EQUAL_STRING("1750003600", laterRequest.timestamp);
-}
-
-void test_client_every_request_gets_a_fresh_nonce() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::RequestBuffers first;
-  devapi::SignedRequest firstRequest;
-  devapi::RequestBuffers second;
-  devapi::SignedRequest secondRequest;
-  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), 1000U, first, firstRequest));
-  TEST_ASSERT_TRUE(client.sign(heartbeatCall("{}"), 1000U, second, secondRequest));
-
-  // Same second, same body, same path — and still a different signature,
-  // because the server remembers recent nonces and refuses a replay.
-  TEST_ASSERT_TRUE(strcmp(firstRequest.nonce, secondRequest.nonce) != 0);
-  TEST_ASSERT_TRUE(strcmp(firstRequest.signature, secondRequest.signature) != 0);
-}
-
-void test_client_a_different_body_is_a_different_signature() {
-  ScriptedEntropy a(7U);
-  ScriptedEntropy b(7U); // identical nonce stream, so only the body differs
-  devapi::DeviceClient first(credentials(), a);
-  devapi::DeviceClient second(credentials(), b);
-  first.adoptServerTime(1750000000ULL, 0U);
-  second.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::RequestBuffers bufA;
-  devapi::SignedRequest reqA;
-  devapi::RequestBuffers bufB;
-  devapi::SignedRequest reqB;
-  TEST_ASSERT_TRUE(first.sign(heartbeatCall("{\"uptime_seconds\":1}"), 1000U, bufA, reqA));
-  TEST_ASSERT_TRUE(second.sign(heartbeatCall("{\"uptime_seconds\":2}"), 1000U, bufB, reqB));
-
-  TEST_ASSERT_EQUAL_STRING(reqA.nonce, reqB.nonce);
-  TEST_ASSERT_TRUE(strcmp(reqA.signature, reqB.signature) != 0);
-}
-
-void test_client_a_different_path_is_a_different_signature() {
-  ScriptedEntropy a(7U);
-  ScriptedEntropy b(7U);
-  devapi::DeviceClient first(credentials(), a);
-  devapi::DeviceClient second(credentials(), b);
-  first.adoptServerTime(1750000000ULL, 0U);
-  second.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::Call events;
-  events.method = "POST";
-  events.pathAndQuery = "/api/v1/device/events";
-  events.body = "{}";
-  events.bodyLen = 2U;
-
-  devapi::RequestBuffers bufA;
-  devapi::SignedRequest reqA;
-  devapi::RequestBuffers bufB;
-  devapi::SignedRequest reqB;
-  TEST_ASSERT_TRUE(first.sign(heartbeatCall("{}"), 1000U, bufA, reqA));
-  TEST_ASSERT_TRUE(second.sign(events, 1000U, bufB, reqB));
-
-  // A signature for one endpoint must not be replayable against another.
-  TEST_ASSERT_TRUE(strcmp(reqA.signature, reqB.signature) != 0);
-}
-
-void test_client_refuses_to_sign_without_a_credential() {
-  ScriptedEntropy entropy;
-  devapi::Credentials none;
-  devapi::DeviceClient client(none, entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::RequestBuffers buffers;
-  devapi::SignedRequest request;
-  TEST_ASSERT_FALSE(client.sign(heartbeatCall("{}"), 1000U, buffers, request));
-}
-
-void test_client_learns_the_clock_from_any_response_including_a_failure() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  TEST_ASSERT_FALSE(client.clockKnown());
-
-  devapi::Response rejected;
-  rejected.status = 401U;
-  rejected.serverUnix = 1750000000ULL;
-  static_cast<void>(client.react(rejected, 5000U));
-
-  // The 401 that rejected it is the response that fixes it.
-  TEST_ASSERT_TRUE(client.clockKnown());
-  TEST_ASSERT_EQUAL_UINT64(1750000005ULL, client.unixNow(10000U));
-}
-
-void test_client_a_401_with_a_big_skew_is_a_clock_problem_not_a_key_problem() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-
-  devapi::Response rejected;
-  rejected.status = 401U;
-  rejected.serverUnix = 1750000000ULL;
-
-  // First contact: the box had no clock at all, so a 401 says nothing about
-  // the key. Re-provisioning here would abandon a working credential.
-  TEST_ASSERT_TRUE(client.react(rejected, 0U) == devapi::Reaction::ClockCorrected);
-}
-
-void test_client_a_401_with_a_good_clock_means_the_key_is_gone() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::Response rejected;
-  rejected.status = 401U;
-  rejected.serverUnix = 1750000010ULL;
-
-  // Ten seconds of drift is not why this was refused. The credential is.
-  TEST_ASSERT_TRUE(client.react(rejected, 10000U) == devapi::Reaction::Reprovision);
+void test_client_an_absent_key_renders_nothing_rather_than_a_bare_bearer() {
+  // `Authorization: Bearer ` with nothing after it is a request the server
+  // answers 401 — indistinguishable, from the box, from a revoked key.
+  char header[devapi::kAuthorizationBufSize] = {};
+  TEST_ASSERT_EQUAL_size_t(0U, devapi::renderAuthorization(header, sizeof(header), ""));
+  TEST_ASSERT_EQUAL_STRING("", header);
+  TEST_ASSERT_EQUAL_size_t(0U, devapi::renderAuthorization(header, sizeof(header), nullptr));
 }
 
 void test_client_transient_failures_keep_the_event_and_permanent_ones_do_not() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
+  // The mapping the event drain acts on. Getting Rejected wrong in either
+  // direction is a queue that either loses attendance or never empties.
+  TEST_ASSERT_TRUE(devapi::react(200U) == devapi::Reaction::Accepted);
+  TEST_ASSERT_TRUE(devapi::react(204U) == devapi::Reaction::Accepted);
 
-  devapi::Response r;
+  TEST_ASSERT_TRUE(devapi::react(0U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(408U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(429U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(500U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(503U) == devapi::Reaction::Retry);
 
-  r.status = 200U;
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Accepted);
-
-  r.status = 0U; // never completed — no route, DNS, TLS
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Retry);
-
-  r.status = 503U;
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Retry);
-
-  r.status = 429U; // rate limited: back off, do not discard
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Retry);
-
-  // A 400 the box caused. Retrying an identical request forever pins every
-  // later event behind one the server will never accept.
-  r.status = 400U;
-  TEST_ASSERT_TRUE(client.react(r, 1000U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(400U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(404U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(409U) == devapi::Reaction::Rejected);
+  TEST_ASSERT_TRUE(devapi::react(422U) == devapi::Reaction::Rejected);
 }
 
-void test_client_a_response_without_a_clock_does_not_reset_a_good_one() {
-  ScriptedEntropy entropy;
-  devapi::DeviceClient client(credentials(), entropy);
-  client.adoptServerTime(1750000000ULL, 0U);
-
-  devapi::Response r;
-  r.status = 503U;
-  r.serverUnix = 0U; // absent, not "the epoch"
-  static_cast<void>(client.react(r, 1000U));
-
-  TEST_ASSERT_TRUE(client.clockKnown());
-  TEST_ASSERT_EQUAL_UINT64(1750000001ULL, client.unixNow(1000U));
-}
-
-void test_find_server_unix_reads_the_field_and_refuses_nonsense() {
-  const char ok[] = "{\"server_time\":\"x\",\"server_unix\":1750000000,\"tenant_slug\":\"c\"}";
-  TEST_ASSERT_EQUAL_UINT64(1750000000ULL, devapi::findServerUnix(ok, sizeof(ok) - 1U));
-
-  const char spaced[] = "{ \"server_unix\" : 42 }";
-  TEST_ASSERT_EQUAL_UINT64(42ULL, devapi::findServerUnix(spaced, sizeof(spaced) - 1U));
-
-  const char absent[] = "{\"tenant_slug\":\"crusaders\"}";
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(absent, sizeof(absent) - 1U));
-
-  // A string where an integer belongs, and a body cut off mid-number: both
-  // reported as absent rather than half-read into a plausible clock.
-  const char quoted[] = "{\"server_unix\":\"1750000000\"}";
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(quoted, sizeof(quoted) - 1U));
-
-  const char truncated[] = "{\"server_unix\":";
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(truncated, sizeof(truncated) - 1U));
-
-  const char absurd[] = "{\"server_unix\":999999999999999999999999}";
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(absurd, sizeof(absurd) - 1U));
-
-  TEST_ASSERT_EQUAL_UINT64(0ULL, devapi::findServerUnix(nullptr, 0U));
+void test_client_a_401_is_kept_because_it_is_about_the_key_not_the_event() {
+  // The one mapping worth arguing about. A 401 now means one thing: the
+  // compiled-in key is not this tenant's. That is true of every request the box
+  // will ever make, so dropping on it would empty the queue of a whole
+  // evening's attendance while somebody found a laptop — and under
+  // charge-at-booking a lost activation is a member refunded-and-penalised for
+  // a game they played. The cure is a reflash; the queue waits.
+  TEST_ASSERT_TRUE(devapi::react(401U) == devapi::Reaction::Retry);
+  TEST_ASSERT_TRUE(devapi::react(403U) == devapi::Reaction::Retry);
 }
 
 // ---------------------------------------------------------------------------
@@ -750,7 +625,9 @@ void test_session_a_booked_member_gets_the_lights_and_an_activation_event() {
 
   TEST_ASSERT_TRUE(out.action == court::Action::TurnOn);
   TEST_ASSERT_EQUAL_UINT8(2U, out.court);
-  TEST_ASSERT_EQUAL_UINT32(2700000UL, out.durationMs);
+  // One second after the slot opened, so one second less than the slot: the
+  // grant is what REMAINS, not what was booked. Rounded up on the display.
+  TEST_ASSERT_EQUAL_UINT32(2699000UL, out.durationMs);
   TEST_ASSERT_EQUAL_STRING("COURT C", out.line1);
   TEST_ASSERT_EQUAL_STRING("45 MIN", out.line2);
 
@@ -926,6 +803,66 @@ void test_session_a_full_queue_still_opens_the_court() {
 // ---------------------------------------------------------------------------
 
 corpus::File g_buttonCases;
+corpus::File g_buttonManifest;
+
+// --- executed-case ledger ---------------------------------------------------
+//
+// The same shape as the devcrypto suite's: each corpus test records how many
+// cases it ran under the section it read, and the last test cross-checks the
+// ledger against cases.json and manifest.json in both directions. Until this
+// existed the button-map test asserted `executed >= 20` against a corpus that
+// declared 27, and a `maps` section nothing on this side read — exactly the
+// silent skip the corpus README's executed-count rule exists to forbid.
+
+constexpr size_t kMaxButtonSections = 4;
+
+struct ButtonLedger {
+  char names[kMaxButtonSections][corpus::kMaxNameLen];
+  size_t executed[kMaxButtonSections];
+  size_t count = 0;
+
+  void record(const char* name, size_t ran) {
+    TEST_ASSERT_TRUE_MESSAGE(count < kMaxButtonSections, "ledger full");
+    strncpy(names[count], name, corpus::kMaxNameLen - 1);
+    names[count][corpus::kMaxNameLen - 1] = '\0';
+    executed[count] = ran;
+    ++count;
+  }
+
+  bool find(const char* name, size_t* ran) const {
+    for (size_t i = 0; i < count; ++i) {
+      if (strcmp(names[i], name) == 0) {
+        *ran = executed[i];
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
+ButtonLedger g_buttonLedger;
+
+void loadButtonCorpus() {
+  TEST_ASSERT_TRUE_MESSAGE(g_buttonCases.load("buttonmap", "cases.json"),
+                           "button-map corpus not found — a skipped corpus proves nothing");
+  TEST_ASSERT_TRUE_MESSAGE(g_buttonManifest.load("buttonmap", "manifest.json"),
+                           "src/contracts/device-protocol/buttonmap/manifest.json not found above cwd");
+}
+
+const char* buttonSection(const char* name) {
+  const char* value = corpus::member(g_buttonCases.root(), name);
+  TEST_ASSERT_NOT_NULL_MESSAGE(value, name);
+  TEST_ASSERT_TRUE_MESSAGE(corpus::isArray(value), name);
+  return value;
+}
+
+size_t buttonDeclaredCount(const char* name) {
+  const char* counts = corpus::member(g_buttonManifest.root(), "case_count");
+  TEST_ASSERT_NOT_NULL_MESSAGE(counts, "manifest has no case_count");
+  const char* value = corpus::member(counts, name);
+  TEST_ASSERT_NOT_NULL_MESSAGE(value, name);
+  return static_cast<size_t>(corpus::unsignedValue(value));
+}
 
 /// Every token in the corpus, parsed by the firmware, checked against what the
 /// corpus says the API accepts.
@@ -936,15 +873,11 @@ corpus::File g_buttonCases;
 /// ignores leaves a button that quietly still does what it did before an admin
 /// changed it. Both sides read this file, so drift turns a test red.
 void test_buttonmap_agrees_with_the_shared_corpus() {
-  TEST_ASSERT_TRUE_MESSAGE(g_buttonCases.load("buttonmap", "cases.json"),
-                           "button-map corpus not found — a skipped corpus proves nothing");
+  loadButtonCorpus();
 
-  const char* actions = corpus::member(g_buttonCases.root(), "actions");
-  TEST_ASSERT_NOT_NULL(actions);
-
-  corpus::ArrayIter it(actions);
+  corpus::ArrayIter it(buttonSection("actions"));
   const char* element = nullptr;
-  int executed = 0;
+  size_t executed = 0;
 
   while (it.next(&element)) {
     char wire[128] = {};
@@ -989,9 +922,101 @@ void test_buttonmap_agrees_with_the_shared_corpus() {
   }
 
   // A corpus that loaded but yielded nothing passes every assertion above. The
-  // count is what makes an empty or reshaped file a failure rather than a
-  // silent success.
-  TEST_ASSERT_TRUE_MESSAGE(executed >= 20, "corpus yielded too few action cases");
+  // declared count is what makes an empty, reshaped or quietly extended file a
+  // failure rather than a silent success.
+  TEST_ASSERT_EQUAL_size_t(buttonDeclaredCount("actions"), executed);
+  g_buttonLedger.record("actions", executed);
+}
+
+/// Every whole map in the corpus, applied entry by entry exactly as the
+/// heartbeat handler applies one, and read back as the panel it produces.
+///
+/// The server decides whether a map is VALID — it refuses one that cannot start
+/// or finish a walk-up, or that leaves buttons undefined — and the firmware
+/// never sees a refused one. What the firmware must agree on is narrower and
+/// is asserted here: every token in every map parses (the grammar is shared,
+/// whatever the map's structural verdict), a valid map fills all eight buttons
+/// so none falls back to the old wiring, and the panel a valid map produces can
+/// select a court and grant minutes. A map the server calls invalid must fail
+/// at least one of those on this side too, or the two sides disagree about
+/// what a usable panel is.
+void test_buttonmap_applies_every_corpus_map() {
+  loadButtonCorpus();
+  TEST_ASSERT_EQUAL_UINT8(court::kButtonCount, static_cast<uint8_t>(corpus::unsignedValue(
+                                                   corpus::member(g_buttonCases.root(), "button_count"))));
+
+  corpus::ArrayIter it(buttonSection("maps"));
+  const char* element = nullptr;
+  size_t executed = 0;
+
+  while (it.next(&element)) {
+    char name[64] = {};
+    TEST_ASSERT_TRUE(corpus::stringValue(corpus::member(element, "name"), name, sizeof(name), nullptr));
+    const char* validValue = corpus::skipWs(corpus::member(element, "valid"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(validValue, name);
+    const bool expectedValid = validValue[0] == 't';
+
+    court::ButtonMap map;
+    map.reset();
+    corpus::ArrayIter tokens(corpus::member(element, "wire"));
+    const char* tokenValue = nullptr;
+    uint8_t entries = 0U;
+    while (tokens.next(&tokenValue)) {
+      char wire[32] = {};
+      TEST_ASSERT_TRUE_MESSAGE(corpus::stringValue(tokenValue, wire, sizeof(wire), nullptr), name);
+      TEST_ASSERT_TRUE_MESSAGE(entries < court::kButtonCount, name);
+      TEST_ASSERT_TRUE_MESSAGE(map.setFromWire(entries, wire), wire);
+      ++entries;
+    }
+
+    bool canSelectCourt = false;
+    bool canGrantMinutes = false;
+    for (uint8_t i = 0U; i < entries; ++i) {
+      canSelectCourt = canSelectCourt || map[i].kind == court::ButtonKind::SelectCourt;
+      canGrantMinutes = canGrantMinutes || map[i].kind == court::ButtonKind::GrantMinutes;
+    }
+    const bool usable = entries == court::kButtonCount && canSelectCourt && canGrantMinutes;
+    TEST_ASSERT_EQUAL_MESSAGE(expectedValid, usable, name);
+    ++executed;
+  }
+
+  TEST_ASSERT_EQUAL_size_t(buttonDeclaredCount("maps"), executed);
+  g_buttonLedger.record("maps", executed);
+}
+
+/// Every case section in buttonmap/cases.json is declared in its manifest and
+/// was executed by a test above, and every declared section exists. Sections
+/// whose name starts with `_` are prose, not cases.
+void test_every_buttonmap_section_is_declared_and_executed() {
+  loadButtonCorpus();
+  char name[corpus::kMaxNameLen];
+  const char* value = nullptr;
+  size_t sectionsSeen = 0;
+
+  corpus::ObjectIter cases(g_buttonCases.root());
+  while (cases.next(name, sizeof(name), &value)) {
+    if (name[0] == '_' || !corpus::isArray(value)) {
+      continue;
+    }
+    size_t ran = 0;
+    TEST_ASSERT_TRUE_MESSAGE(g_buttonLedger.find(name, &ran),
+                             "corpus section was not executed by any test in this suite");
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(buttonDeclaredCount(name), ran, name);
+    ++sectionsSeen;
+  }
+
+  const char* counts = corpus::member(g_buttonManifest.root(), "case_count");
+  TEST_ASSERT_NOT_NULL(counts);
+  corpus::ObjectIter declared(counts);
+  size_t sectionsDeclared = 0;
+  while (declared.next(name, sizeof(name), &value)) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(corpus::member(g_buttonCases.root(), name),
+                                 "manifest declares a section cases.json does not contain");
+    ++sectionsDeclared;
+  }
+
+  TEST_ASSERT_EQUAL_size_t(sectionsSeen, sectionsDeclared);
+  TEST_ASSERT_EQUAL_size_t(sectionsSeen, g_buttonLedger.count);
 }
 
 void test_buttonmap_defaults_to_the_original_wiring() {
@@ -1360,6 +1385,7 @@ int main(int, char**) {
   RUN_TEST(test_queue_overflow_discards_the_oldest_and_says_so);
   RUN_TEST(test_queue_release_through_stops_at_an_unacknowledged_event);
   RUN_TEST(test_queue_a_reboot_resumes_past_the_reserved_block);
+  RUN_TEST(test_queue_a_sequence_gap_after_a_reboot_is_not_evidence_of_loss);
   RUN_TEST(test_queue_checkpoints_are_strided_not_per_event);
   RUN_TEST(test_queue_a_torn_sequence_mark_is_absent_not_mongrel);
   RUN_TEST(test_queue_a_store_that_refuses_every_write_still_queues);
@@ -1381,6 +1407,8 @@ int main(int, char**) {
   RUN_TEST(test_roster_token_copy_refuses_rather_than_truncates);
 
   RUN_TEST(test_buttonmap_agrees_with_the_shared_corpus);
+  RUN_TEST(test_buttonmap_applies_every_corpus_map);
+  RUN_TEST(test_every_buttonmap_section_is_declared_and_executed);
   RUN_TEST(test_buttonmap_defaults_to_the_original_wiring);
   RUN_TEST(test_buttonmap_an_unknown_token_leaves_the_previous_entry_alone);
   RUN_TEST(test_buttonmap_reset_clears_a_short_map_rather_than_leaving_stale_entries);
@@ -1419,18 +1447,11 @@ int main(int, char**) {
   RUN_TEST(test_json_an_absent_or_non_array_value_is_reported_as_absent);
   RUN_TEST(test_json_a_key_that_is_a_prefix_of_another_does_not_match_it);
 
-  RUN_TEST(test_client_refuses_to_sign_before_it_knows_the_time);
-  RUN_TEST(test_client_signs_the_current_time_not_the_boot_time);
-  RUN_TEST(test_client_every_request_gets_a_fresh_nonce);
-  RUN_TEST(test_client_a_different_body_is_a_different_signature);
-  RUN_TEST(test_client_a_different_path_is_a_different_signature);
-  RUN_TEST(test_client_refuses_to_sign_without_a_credential);
-  RUN_TEST(test_client_learns_the_clock_from_any_response_including_a_failure);
-  RUN_TEST(test_client_a_401_with_a_big_skew_is_a_clock_problem_not_a_key_problem);
-  RUN_TEST(test_client_a_401_with_a_good_clock_means_the_key_is_gone);
+  RUN_TEST(test_client_renders_the_bearer_header_the_server_expects);
+  RUN_TEST(test_client_a_key_that_would_not_fit_is_refused_not_truncated);
+  RUN_TEST(test_client_an_absent_key_renders_nothing_rather_than_a_bare_bearer);
   RUN_TEST(test_client_transient_failures_keep_the_event_and_permanent_ones_do_not);
-  RUN_TEST(test_client_a_response_without_a_clock_does_not_reset_a_good_one);
-  RUN_TEST(test_find_server_unix_reads_the_field_and_refuses_nonsense);
+  RUN_TEST(test_client_a_401_is_kept_because_it_is_about_the_key_not_the_event);
 
   return UNITY_END();
 }

@@ -26,9 +26,10 @@
 // ----------------------------------------
 //   * The ESP8266 half. This is a MEGA simulator: it speaks the downlink side
 //     of the serial protocol and expects a bridge — or a test — on the socket.
-//     Simulating the bridge as well would mean simulating WiFi, UDP discovery
-//     and an HTTP client, and the parts of that worth testing are already
-//     covered by lib/discovery's corpus tests.
+//     Simulating the bridge as well would mean simulating WiFi and an HTTP
+//     client, and the parts of that worth testing — every request body and
+//     every response reading — are already covered by lib/bridgelogic's corpus
+//     tests.
 //   * Torn writes. posix_hal::FileStore cannot produce one; a local filesystem
 //     write of 32 bytes either happens or does not. fakes::FakeStore is where
 //     that case is exercised.
@@ -193,7 +194,10 @@ int main(int argc, char** argv) {
   static_cast<void>(signal(SIGINT, onSignal));
   static_cast<void>(signal(SIGTERM, onSignal));
 
-  courtlogic::CourtBox box(courtlogic::CourtPorts{relay, display, scanner, buttons, bridge, clock});
+  // LegacyDialect::Accept, explicitly: the simulator is the bench, and the one
+  // place a legacy-dialect bridge is still met. The production Mega refuses it.
+  courtlogic::CourtBox box(courtlogic::CourtPorts{relay, display, scanner, buttons, bridge, clock},
+                           proto::LegacyDialect::Accept);
   box.begin();
 
   while (gStopRequested == 0) {

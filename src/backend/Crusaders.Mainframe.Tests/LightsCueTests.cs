@@ -203,6 +203,97 @@ public class LightsCueTests
     }
 
     /// <summary>The sweep is idempotent — a second tick must not re-cue.</summary>
+    /// <summary>
+    /// A reversed no-show was cued off at the sweep (NoShow, truncated end); the reversal
+    /// put it back to Booked and checked in. With the cue-off marker already set it was
+    /// never promoted — parked as Booked for ever, never Completed, never anonymised by
+    /// retention. Attended and over is Completed.
+    /// </summary>
+    [Fact]
+    public async Task A_reversed_no_show_that_is_over_is_promoted_to_completed()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var seed = host.NewScope();
+        var booking = await SeedBookingAsync(host, seed, DateTimeOffset.UtcNow.AddMinutes(-30), BookingStatus.NoShow);
+
+        var worker = WorkerFor(host);
+        await worker.TickAsync(default);   // cues the no-show off
+
+        using (var scope = host.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.Bookings.FirstAsync(b => b.Id == booking.Id);
+            Assert.NotNull(row.LightsOffCuedAt);
+            // What ReverseNoShowAsync leaves behind for a slot already over: Booked, checked
+            // in, the cue-off marker still set.
+            row.Status = BookingStatus.Booked;
+            row.CheckedInAt = DateTimeOffset.UtcNow.AddMinutes(-25);
+            await db.SaveChangesAsync();
+        }
+
+        await worker.TickAsync(default);
+
+        using var check = host.NewScope();
+        var after = await check.ServiceProvider.GetRequiredService<MainframeDbContext>().Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
+        Assert.Equal(BookingStatus.Completed, after.Status);
+    }
+
+    /// <summary>
+    /// Settlement model I12. The sweep cued the lights off at the truncated end; the
+    /// reversal used to clear <c>LightsOffCuedAt</c> so the sweep would fire again at the
+    /// restored end — a <b>second</b> <c>booking.lights_off</c> for one booking, carrying a
+    /// different <c>ends_at</c>, to a webhook consumer with no way to tell which was real.
+    /// The marker stays; the attended-and-over pass is what promotes the row.
+    /// </summary>
+    [Fact]
+    public async Task A_reversal_does_not_cue_the_lights_off_a_second_time()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+        var bus = host.Services.GetRequiredService<IEventBus>();
+
+        // Sold 18:00–19:00, swept five minutes in: NoShow with the end truncated.
+        var startsAt = DateTimeOffset.UtcNow.AddMinutes(-30);
+        var booking = new Booking
+        {
+            TenantId = host.Tenant.Id,
+            CourtId = host.Courts[0].Id,
+            UserId = host.PlayerUser.Id,
+            BookedByUserId = host.PlayerUser.Id,
+            PaidByUserId = host.PlayerUser.Id,
+            StartsAt = startsAt,
+            EndsAt = DateTimeOffset.UtcNow.AddMinutes(-25),
+            SliceMinutes = 15,
+            SliceCount = 4,
+            AmountChargedCredits = 32m,
+            Status = BookingStatus.NoShow,
+            ChargedAt = startsAt,
+        };
+        db.Bookings.Add(booking);
+        await db.SaveChangesAsync();
+
+        var worker = WorkerFor(host);
+        await worker.TickAsync(default);
+        await db.Entry(booking).ReloadAsync();
+        var cuedAt = booking.LightsOffCuedAt;
+        Assert.NotNull(cuedAt);
+
+        Assert.IsType<NoShowReversalResult.Ok>(
+            await bookings.ReverseNoShowAsync(booking, startsAt.AddMinutes(1), Guid.Empty, default));
+
+        await db.Entry(booking).ReloadAsync();
+        Assert.True(booking.EndsAt > DateTimeOffset.UtcNow, "the reversal restores the end past now");
+        Assert.Equal(cuedAt, booking.LightsOffCuedAt);
+
+        await worker.TickAsync(default);
+
+        var emitted = new List<DomainEvent>();
+        while (bus.Reader.TryRead(out var evt)) emitted.Add(evt);
+        Assert.Single(emitted, e => e.Type == "booking.lights_off" && Equals(e.Data["booking_id"], booking.Id));
+    }
+
     [Fact]
     public async Task Cueing_off_happens_once()
     {

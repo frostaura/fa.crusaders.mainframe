@@ -16,12 +16,16 @@ public sealed class AuthService
     private readonly IEmailService _email;
     private readonly IConfiguration _config;
     private readonly ILogger<AuthService> _logger;
+    private readonly MemberApprovalService _memberships;
+    private readonly AccessTokenRevocationList _revocations;
 
     public AuthService(MainframeDbContext db, ITenantContext tenant, IPasswordHasher hasher,
-        IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger)
+        IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger,
+        MemberApprovalService memberships, AccessTokenRevocationList revocations)
     {
         _db = db; _tenant = tenant; _hasher = hasher; _jwt = jwt;
         _email = email; _config = config; _logger = logger;
+        _memberships = memberships; _revocations = revocations;
     }
 
     /// <summary>
@@ -54,11 +58,66 @@ public sealed class AuthService
         }
     }
 
+    /// <summary>
+    /// Removes a photo that was uploaded for a registration that then failed.
+    ///
+    /// <para>
+    /// The browser uploads the selfie before it posts the registration, so every refused
+    /// registration used to leave a file on the media volume forever, tied to nobody. The
+    /// upload endpoint is anonymous, so that was a write-anything-you-like loop with no
+    /// reaper at the end of it.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The referenced-by-nobody check is load-bearing, not tidiness.</b> The URL arrives in
+    /// an anonymous request body, so without it an attacker could post a registration carrying
+    /// a <i>real member's</i> photo URL and a deliberately-duplicate email, and have us delete
+    /// that member's photo on the failure path. Same reason the name is refused if it can walk
+    /// out of the tenant's own photo directory.
+    /// </para>
+    /// </summary>
+    private async Task RemoveOrphanedPhotoAsync(string? photoUrl, CancellationToken ct)
+    {
+        var prefix = $"/uploads/{_tenant.TenantSlug}/photos/";
+        if (string.IsNullOrWhiteSpace(photoUrl) || !photoUrl.StartsWith(prefix, StringComparison.Ordinal)) return;
+
+        var name = photoUrl[prefix.Length..];
+        if (name.Length == 0 || name.Contains('/') || name.Contains('\\') || name.Contains("..")) return;
+        if (await _db.Memberships.IgnoreQueryFilters().AnyAsync(m => m.PhotoUrl == photoUrl, ct)) return;
+
+        try
+        {
+            var dir = Path.GetFullPath(Path.Combine(_config["Media:StoragePath"] ?? "./media", _tenant.TenantSlug, "photos"));
+            var full = Path.GetFullPath(Path.Combine(dir, name));
+            if (!full.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return;
+            if (File.Exists(full)) File.Delete(full);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not remove orphaned registration photo {Url}", photoUrl);
+        }
+    }
+
     public async Task<RegistrationResult> RegisterAsync(string email, string password, string fullName, string membershipNumber, string? photoUrl, CancellationToken ct)
     {
         email = email.Trim().ToLowerInvariant();
+        membershipNumber = membershipNumber.Trim();
         if (await _db.Users.AnyAsync(u => u.Email == email, ct))
+        {
+            await RemoveOrphanedPhotoAsync(photoUrl, ct);
             return new RegistrationResult.AlreadyExists();
+        }
+
+        // Checked here rather than left to the unique index. It was left to the index, and the
+        // index did its job: 23505 out of SaveChangesAsync, an unhandled 500 carrying the whole
+        // EF exception, and a screen telling the applicant to "Try again" — advice that could
+        // never work. Membership numbers are club-issued and mistyping a digit onto somebody
+        // else's is an ordinary human error, not an edge case.
+        if (await _db.Memberships.AnyAsync(m => m.MembershipNumber == membershipNumber, ct))
+        {
+            await RemoveOrphanedPhotoAsync(photoUrl, ct);
+            return new RegistrationResult.MembershipNumberInUse();
+        }
 
         var user = new User
         {
@@ -97,13 +156,124 @@ public sealed class AuthService
             Action = "member.registered",
         });
 
-        await _db.SaveChangesAsync(ct);
+        // The pre-checks above close the ordinary case; this closes the race between two
+        // applicants claiming the same number in the same second. Same answer either way, so
+        // the caller never has to know which one it was.
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            _db.ChangeTracker.Clear();
+            await RemoveOrphanedPhotoAsync(photoUrl, ct);
+            return await _db.Users.AnyAsync(u => u.Email == email, ct)
+                ? new RegistrationResult.AlreadyExists()
+                : new RegistrationResult.MembershipNumberInUse();
+        }
 
         var verifyUrl = $"{PublicBaseUrl()}/verify-email/{token}";
         await SendOrLogAsync(EmailTemplates.VerifyEmail(email, verifyUrl), $"verification for {email}", ct);
         await SendOrLogAsync(EmailTemplates.MembershipPending(email), $"pending-approval notice for {email}", ct);
+        // ONE call, and it is this one. Two fixers closed spec §2.3 independently — a private
+        // helper here and MemberApprovalService.AnnounceRegistrationAsync — and the merge left
+        // both live, so every application put two near-identical emails in front of the club's
+        // desk. The service is the survivor because it also emits `member.registered`, which a
+        // private helper in the auth path had no business doing.
+        await _memberships.AnnounceRegistrationAsync(user.Id, ct);
 
         return new RegistrationResult.Created(user.Id);
+    }
+
+    /// <summary>
+    /// True for a unique-index violation, whichever provider raised it.
+    ///
+    /// <para>
+    /// Npgsql reports SQLSTATE 23505; the in-memory provider used by most of the suite enforces
+    /// no index at all and never gets here. Matched on the SQLSTATE rather than on the exception
+    /// type so this file does not have to reference the driver.
+    /// </para>
+    /// </summary>
+    private static bool IsUniqueViolation(DbUpdateException ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            var sqlState = e.GetType().GetProperty("SqlState")?.GetValue(e) as string;
+            if (sqlState == "23505") return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Re-sends the address-confirmation email, if there is anything to re-send.
+    ///
+    /// <para>
+    /// Always reports success. An honest answer here would say whether an address is registered
+    /// and whether it is verified — a free account-enumeration oracle on an anonymous,
+    /// rate-limited endpoint. The caller learns nothing; the person who owns the mailbox gets
+    /// the link.
+    /// </para>
+    ///
+    /// <para>
+    /// Any earlier unused verification token is spent first, so a member who asks twice cannot
+    /// end up with two live links to the same account.
+    /// </para>
+    /// </summary>
+    public async Task ResendVerificationAsync(string email, CancellationToken ct)
+    {
+        email = email.Trim().ToLowerInvariant();
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == email, ct);
+        if (user is null || user.EmailVerified) return;
+
+        var stale = await _db.AuthTokens
+            .Where(t => t.UserId == user.Id && t.Kind == TokenKind.EmailVerification && t.UsedAt == null)
+            .ToListAsync(ct);
+        foreach (var t in stale) t.UsedAt = DateTimeOffset.UtcNow;
+
+        var token = TokenHashing.Generate();
+        _db.AuthTokens.Add(new AuthToken
+        {
+            TenantId = user.TenantId,
+            UserId = user.Id,
+            Kind = TokenKind.EmailVerification,
+            TokenHash = TokenHashing.Hash(token),
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(24),
+        });
+        await _db.SaveChangesAsync(ct);
+
+        await SendOrLogAsync(EmailTemplates.VerifyEmail(user.Email, $"{PublicBaseUrl()}/verify-email/{token}"),
+            $"re-sent verification for {user.Email}", ct);
+    }
+
+    /// <summary>
+    /// Changes the signed-in user's own password, and in doing so retires any temporary one.
+    ///
+    /// <para>
+    /// This is the only way <see cref="User.MustChangePassword"/> is ever cleared, which is what
+    /// makes an admin-issued temporary password actually temporary: it stops working at the
+    /// moment it is replaced, and until then it unlocks nothing but this call.
+    /// </para>
+    /// </summary>
+    public async Task<PasswordChangeResult> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null || user.PasswordHash is null) return PasswordChangeResult.NoPasswordSet;
+        if (!_hasher.Verify(currentPassword, user.PasswordHash)) return PasswordChangeResult.CurrentPasswordWrong;
+        if (_hasher.Verify(newPassword, user.PasswordHash)) return PasswordChangeResult.Unchanged;
+
+        user.PasswordHash = _hasher.Hash(newPassword);
+        user.MustChangePassword = false;
+        _db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = user.TenantId,
+            ActorUserId = user.Id,
+            SubjectUserId = user.Id,
+            Action = "user.password_changed",
+        });
+        await _db.SaveChangesAsync(ct);
+
+        await SendOrLogAsync(EmailTemplates.PasswordChanged(user.Email), $"password-changed notice for {user.Email}", ct);
+        return PasswordChangeResult.Ok;
     }
 
     public async Task<bool> VerifyEmailAsync(string token, CancellationToken ct)
@@ -129,7 +299,6 @@ public sealed class AuthService
         var user = await query.FirstOrDefaultAsync(ct);
         if (user is null || user.PasswordHash is null) return new LoginResult.InvalidCredentials();
         if (!_hasher.Verify(password, user.PasswordHash)) return new LoginResult.InvalidCredentials();
-        if (!user.EmailVerified) return new LoginResult.EmailNotVerified();
 
         if (!_tenant.IsResolved)
         {
@@ -138,6 +307,20 @@ public sealed class AuthService
         }
 
         var membership = await _db.Memberships.IgnoreQueryFilters().FirstOrDefaultAsync(m => m.UserId == user.Id, ct);
+        var decided = membership is not null && !user.IsAdmin
+            && membership.Status is MembershipStatus.Rejected or MembershipStatus.Suspended;
+        // A decision the club has already taken outranks an unconfirmed address.
+        //
+        // Verification used to be checked first for everybody, so a rejected applicant who had
+        // never clicked the verify link was told to go and confirm their email — and the screen
+        // offered the resend to go with it. That is a repair for a problem they do not have,
+        // ending at a screen saying an admin will review their application; the review had
+        // already happened and it was a refusal. Confirming an address cannot change a rejection
+        // or lift a suspension, so those two are reported as what they are, whatever the address
+        // is doing. A PENDING applicant is the opposite case — verifying is exactly what they
+        // still owe — so that order is unchanged.
+        if (decided) return new LoginResult.NotApproved(membership!.Status);
+        if (!user.EmailVerified) return new LoginResult.EmailNotVerified();
         if (membership is not null && membership.Status != MembershipStatus.Active && !user.IsAdmin)
             return new LoginResult.NotApproved(membership.Status);
 
@@ -149,7 +332,7 @@ public sealed class AuthService
         if (user.IsPlatformAdmin) roles.Add("platform_admin");
 
         var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles);
-        return new LoginResult.Ok(token, user.Id, user.IsAdmin);
+        return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword);
     }
 
     public async Task<bool> RequestPasswordResetAsync(string email, CancellationToken ct)
@@ -184,8 +367,19 @@ public sealed class AuthService
 
         var user = await _db.Users.FirstAsync(u => u.Id == record.UserId, ct);
         user.PasswordHash = _hasher.Hash(newPassword);
+        // The member has just chosen this one themselves, so whatever an admin issued before it
+        // is retired and the forced-change gate has nothing left to enforce.
+        user.MustChangePassword = false;
         record.UsedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
+
+        // Spec §11 and §3: every successful password change emails the member, "the one signal a
+        // member has that somebody else changed it". Only the admin-issued and self-service
+        // paths were sending it; the reset path — the one a stolen or forwarded reset link
+        // travels — changed the password and told nobody. The reset mail itself is not that
+        // signal: it is sent before anything happens, and it is the mail an attacker with
+        // mailbox access has already read.
+        await SendOrLogAsync(EmailTemplates.PasswordChanged(user.Email), $"password-changed notice for {user.Email}", ct);
         return true;
     }
 
@@ -200,14 +394,33 @@ public sealed class AuthService
         var user = await _db.Users.FirstAsync(u => u.Id == record.UserId, ct);
         record.UsedAt = DateTimeOffset.UtcNow;
         user.LastLoginAt = DateTimeOffset.UtcNow;
+        // Consuming a link that was emailed to the address IS proof of control of the address.
+        //
+        // Email verification used to be enforced on the password ingress and silently skipped
+        // here, so an approved member who never clicked the verify link was refused at sign-in
+        // (and told, wrongly, that they were not approved) while the welcome link let them
+        // straight in. One of the two had to give; refusing the ingress that carries the proof
+        // would have been the wrong one.
+        user.EmailVerified = true;
         await _db.SaveChangesAsync(ct);
 
         var roles = new List<string>();
         if (user.IsAdmin) roles.Add("admin");
         var jwt = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles);
-        return new LoginResult.Ok(jwt, user.Id, user.IsAdmin);
+        return new LoginResult.Ok(jwt, user.Id, user.IsAdmin, user.MustChangePassword);
     }
 
+    /// <summary>
+    /// Re-mints an access token for a session that already holds a valid one.
+    /// </summary>
+    /// <remarks>
+    /// It applies the same membership test as <see cref="LoginAsync"/>, and that is the whole
+    /// point of it doing more than re-signing a claim set. The app refreshes on a timer for as
+    /// long as a tab is open, so without the test a member suspended at the desk kept renewing
+    /// a full session indefinitely — reading their wallet, their ledger and the schedule —
+    /// while the sign-in screen correctly refused them. Suspension has to end the session that
+    /// is already open, not only the next one.
+    /// </remarks>
     public async Task<LoginResult> RefreshAsync(Guid userId, CancellationToken ct)
     {
         var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
@@ -217,11 +430,14 @@ public sealed class AuthService
             var tenant = await _db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == user.TenantId, ct);
             _tenant.Set(tenant.Id, tenant.Slug);
         }
+        var membership = await _db.Memberships.IgnoreQueryFilters().FirstOrDefaultAsync(m => m.UserId == user.Id, ct);
+        if (membership is not null && membership.Status != MembershipStatus.Active && !user.IsAdmin)
+            return new LoginResult.NotApproved(membership.Status);
         var roles = new List<string>();
         if (user.IsAdmin) roles.Add("admin");
         if (user.IsPlatformAdmin) roles.Add("platform_admin");
         var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles);
-        return new LoginResult.Ok(token, user.Id, user.IsAdmin);
+        return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword);
     }
 
     /// <summary>
@@ -236,8 +452,47 @@ public sealed class AuthService
         if (user is null) return new LoginResult.InvalidCredentials();
         user.PasswordHash = _hasher.Hash(Seeder.DefaultAdminPassword);
         user.EmailVerified = true;
+        // The dev shortcut hands out a known password on purpose; it must not then trap the
+        // session behind the forced-change gate a previous admin-side reset may have armed.
+        user.MustChangePassword = false;
         await _db.SaveChangesAsync(ct);
         return await RefreshAsync(user.Id, ct);
+    }
+
+    /// <summary>
+    /// Signs one access token out, for real.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deleting the client's copy is not a sign-out — a JWT is a bearer credential and stays
+    /// valid wherever else it reached. The token is put on the in-process revocation list so
+    /// the next request carrying it is refused, and written to <c>auth_tokens</c> so a restart
+    /// inside its remaining lifetime does not bring it back.
+    /// </para>
+    /// <para>
+    /// Idempotent by design: signing out twice, or signing out a token already recorded, is a
+    /// no-op rather than an error. There is nothing a member gains by being told which.
+    /// </para>
+    /// </remarks>
+    public async Task RevokeAccessTokenAsync(Guid userId, string jti, DateTimeOffset expiresAt, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(jti)) return;
+        _revocations.Revoke(jti, expiresAt);
+
+        var hash = TokenHashing.Hash(jti);
+        var already = await _db.AuthTokens.IgnoreQueryFilters()
+            .AnyAsync(t => t.TokenHash == hash && t.Kind == TokenKind.RevokedAccess, ct);
+        if (already) return;
+
+        _db.AuthTokens.Add(new AuthToken
+        {
+            TenantId = _tenant.IsResolved ? _tenant.TenantId : Guid.Empty,
+            UserId = userId,
+            Kind = TokenKind.RevokedAccess,
+            TokenHash = hash,
+            ExpiresAt = expiresAt,
+        });
+        await _db.SaveChangesAsync(ct);
     }
 
     private string PublicBaseUrl() => _config["App:PublicBaseUrl"] ?? "http://localhost:8088";
@@ -247,11 +502,27 @@ public abstract record RegistrationResult
 {
     public sealed record Created(Guid UserId) : RegistrationResult;
     public sealed record AlreadyExists : RegistrationResult;
+
+    /// <summary>The (tenant, membership number) pair is taken. Its own case, not a 500.</summary>
+    public sealed record MembershipNumberInUse : RegistrationResult;
+}
+
+/// <summary>Outcome of a member changing their own password.</summary>
+public enum PasswordChangeResult
+{
+    Ok,
+    CurrentPasswordWrong,
+
+    /// <summary>The new password is the current one. Refused, so a forced change is a real change.</summary>
+    Unchanged,
+
+    /// <summary>The account has no password at all — passkey-only, or never set one.</summary>
+    NoPasswordSet,
 }
 
 public abstract record LoginResult
 {
-    public sealed record Ok(string AccessToken, Guid UserId, bool IsAdmin) : LoginResult;
+    public sealed record Ok(string AccessToken, Guid UserId, bool IsAdmin, bool MustChangePassword = false) : LoginResult;
     public sealed record InvalidCredentials : LoginResult;
     public sealed record EmailNotVerified : LoginResult;
     public sealed record NotApproved(MembershipStatus Status) : LoginResult;

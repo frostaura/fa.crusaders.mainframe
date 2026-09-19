@@ -20,6 +20,17 @@ public abstract record ActivationResult
 
     /// <summary>The booking is cancelled, expired or otherwise past charging.</summary>
     public sealed record NotChargeable : ActivationResult;
+
+    /// <summary>
+    /// Identified and holding the booking, but its start is further off than the cue
+    /// window allows. <b>Nothing was charged, stamped or cued.</b> The forward window
+    /// finds the booking — it has to be wide enough to disambiguate back-to-back slices —
+    /// and the cue window is the narrower one that says when a scan may actually light the
+    /// court. Before this the two were the same two hours, so a member scanning on their
+    /// way in was stamped present, cued the lights, and locked out their refund, up to two
+    /// hours before their slot.
+    /// </summary>
+    public sealed record TooEarly(Booking Booking, int StartsInSeconds) : ActivationResult;
 }
 
 /// <summary>
@@ -42,8 +53,18 @@ public abstract record ActivationResult
 /// session settled to free play with nothing to follow up. Charging happens <b>first</b>
 /// now, and nothing is stamped and no event is emitted unless it succeeded.
 /// </para>
+///
+/// <para>
+/// <b>Not sealed, and <see cref="ActivateAsync(ActivationRequest, CancellationToken)"/> is
+/// virtual, for one reason: the refusal branch is otherwise untestable.</b> Every refusal
+/// this returns to a walk-up is a race — the booking is decided between the debit and the
+/// activation — and no test can schedule that inside one call. The walk-up path now UNDOES
+/// the purchase on a refusal (money back, slot released, no confirmation), which is money
+/// code, and money code that nothing drives is money code nobody has read. A test double
+/// that returns a refusal is the seam; nothing else here is meant to be overridden.
+/// </para>
 /// </summary>
-public sealed class CourtActivationService
+public class CourtActivationService
 {
     private readonly MainframeDbContext _db;
     private readonly BookingService _bookings;
@@ -68,28 +89,8 @@ public sealed class CourtActivationService
         _logger = logger;
     }
 
-    /// <summary>How far ahead of a slot someone may identify and have it count.</summary>
-    ///
-    /// <remarks>
-    /// Two hours is wide enough to hold <b>two</b> of a member's bookings at once, and
-    /// back-to-back slices are the ordinary shape under a per-day cap measured in minutes.
-    /// Both selectors below therefore order by <c>StartsAt</c> and take the earliest, which
-    /// is the one the player is standing on: a live booking always starts before a future
-    /// one.
-    ///
-    /// <para>
-    /// Neither used to order at all, and the row the database happened to return first won.
-    /// Pick the 17:15 slice when a member scans at 16:58 holding 17:00 and 17:15, and the
-    /// lights come on seventeen minutes early on the wrong row — while the 17:00 booking is
-    /// never checked in, is swept as a no-show at 17:05, and costs the member a penalty for
-    /// a court they are playing on. A rescan cannot repair it either: the status is no
-    /// longer <c>Booked</c>, so the row is not a candidate any more.
-    /// </para>
-    /// </remarks>
-    private static readonly TimeSpan ForwardWindow = TimeSpan.FromHours(2);
-
     /// <summary>
-    /// The window in which an identification counts, from tenant settings.
+    /// The window in which an identification <i>finds</i> a booking, from tenant settings.
     ///
     /// <para>
     /// There were three of these and they disagreed: biometric read
@@ -100,14 +101,53 @@ public sealed class CourtActivationService
     /// as a no-show by the worker, which is not a grace period so much as a disagreement.
     /// One setting now governs all of them, per the every-configurable-number invariant.
     /// </para>
+    ///
+    /// <para>
+    /// The forward edge is <c>activation_forward_window_minutes</c> — it was a hardcoded two
+    /// hours, and it is deliberately wide: wide enough to hold <b>two</b> of a member's
+    /// bookings at once, because back-to-back slices are the ordinary shape under a per-day
+    /// cap measured in minutes. Both selectors below therefore order by <c>StartsAt</c> and
+    /// take the earliest, which is the one the player is standing on: a live booking always
+    /// starts before a future one. Neither used to order at all, and the row the database
+    /// happened to return first won — the 17:15 slice at 16:58 holding 17:00 and 17:15, the
+    /// lights on seventeen minutes early on the wrong row, and the 17:00 booking swept as a
+    /// no-show at 17:05 with a penalty for a court the member was playing on.
+    /// </para>
+    ///
+    /// <para>
+    /// Finding a booking is not the same as lighting it. That is the cue window, checked in
+    /// <see cref="ActivateAsync"/>.
+    /// </para>
     /// </summary>
     public async Task<(DateTimeOffset Start, DateTimeOffset End)> WindowAsync(DateTimeOffset now, CancellationToken ct)
     {
         var settings = await _settings.GetAsync(ct);
-        return (now.AddMinutes(-settings.GraceWindowMinutes), now.Add(ForwardWindow));
+        return (
+            now.AddMinutes(-settings.GraceWindowMinutes),
+            now.AddMinutes(settings.ActivationForwardWindowMinutes));
     }
 
-    /// <summary>The bookings on this court that an identification could activate right now.</summary>
+    /// <summary>
+    /// The bookings on this court that an identification could activate right now.
+    ///
+    /// <para>
+    /// A member the club has not approved — <b>suspended</b>, rejected, or still waiting —
+    /// has no booking among them. A suspension takes access away without touching money or
+    /// bookings — the row, the ledger and every future slot stand, and reactivating restores
+    /// all of it — so it is enforced on the candidate set rather than as a new
+    /// <see cref="ActivationResult"/> case. That is what keeps it to one clause with no
+    /// caller changes: PIN, biometric, QR and the activation endpoints all answer their
+    /// existing "no booking", and no new refusal has to be routed through four screens.
+    /// The member was told why by email; a court box is not the place to explain it, and one
+    /// that named the reason would be explaining it to whoever is standing there.
+    /// </para>
+    ///
+    /// <para>
+    /// The test is <c>!= Active</c>, not <c>== Suspended</c>. <see cref="MembershipAccess"/>
+    /// is where that rule and its blast radius are written down; this is its query-side
+    /// twin, inline because a captured expression does not translate inside a subquery.
+    /// </para>
+    /// </summary>
     public async Task<List<Booking>> CandidatesAsync(Guid courtId, DateTimeOffset now, CancellationToken ct)
     {
         var (start, end) = await WindowAsync(now, ct);
@@ -115,12 +155,16 @@ public sealed class CourtActivationService
         return await _db.Bookings
             .Where(b => b.CourtId == courtId
                         && b.Status == BookingStatus.Booked
-                        && b.StartsAt < end && b.EndsAt > start)
+                        && b.StartsAt < end && b.EndsAt > start
+                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status != MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .ToListAsync(ct);
     }
 
-    /// <summary>This user's activatable booking on this court, if any.</summary>
+    /// <summary>
+    /// This user's activatable booking on this court, if any. Barred memberships are
+    /// excluded on the same clause as <see cref="CandidatesAsync"/> — see there.
+    /// </summary>
     public async Task<Booking?> FindForUserAsync(Guid courtId, Guid userId, DateTimeOffset now, CancellationToken ct)
     {
         var (start, end) = await WindowAsync(now, ct);
@@ -129,20 +173,22 @@ public sealed class CourtActivationService
             .Where(b => b.CourtId == courtId
                         && b.UserId == userId
                         && b.Status == BookingStatus.Booked
-                        && b.StartsAt < end && b.EndsAt > start)
+                        && b.StartsAt < end && b.EndsAt > start
+                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status != MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .FirstOrDefaultAsync(ct);
     }
 
     /// <summary>
-    /// Charges, checks in and cues the lights — in that order.
+    /// Charges, checks in and cues the lights — in that order. The identification happened
+    /// now; see the overload for one that happened earlier.
     ///
     /// <para>
     /// <paramref name="method"/> is recorded on the audit trail so a dispute can be
     /// answered with how the player identified, not merely that they did.
     /// </para>
     /// </summary>
-    public async Task<ActivationResult> ActivateAsync(
+    public Task<ActivationResult> ActivateAsync(
         Court court,
         Booking booking,
         Guid identifiedUserId,
@@ -150,8 +196,51 @@ public sealed class CourtActivationService
         string method,
         CancellationToken ct)
     {
+        return ActivateAsync(
+            new ActivationRequest(court, booking, identifiedUserId, payerOverrideUserId, method, OccurredAt: null), ct);
+    }
+
+    /// <summary>
+    /// The same decision for an identification that happened at
+    /// <see cref="ActivationRequest.OccurredAt"/> rather than now.
+    ///
+    /// <para>
+    /// A court box decides scans offline and uploads them when the link returns, so the
+    /// moment a member identified and the moment the server hears of it can be hours
+    /// apart. Judging the scan by the upload clock is wrong in both directions: a scan
+    /// made ahead of the cue window was admitted once the window had opened by the time it
+    /// arrived, and a scan made inside the window was stamped with an arrival time that
+    /// belonged to the WiFi, not the member. The cue gate and <c>CheckedInAt</c> now use
+    /// the scan's own time; the lights-on event still measures its remaining duration from
+    /// the server clock, because the relay timer the box runs is the box's own.
+    /// </para>
+    /// </summary>
+    public virtual async Task<ActivationResult> ActivateAsync(ActivationRequest request, CancellationToken ct)
+    {
+        var (court, booking, identifiedUserId, payerOverrideUserId, method, when) = request;
         var now = DateTimeOffset.UtcNow;
+        var occurredAt = when ?? now;
         var alreadyActive = booking.CheckedInAt is not null;
+
+        // Too early to light, before anything is charged or stamped.
+        //
+        // The forward window that FOUND this booking is two hours wide so that back-to-back
+        // slices can be told apart; the cue window is the narrower one that says when a
+        // scan may actually light the court. The two used to be the same two hours, so a
+        // member scanning on their way in at 15:10 for a 17:00 slot was stamped present,
+        // cued the lights, and — because CheckedInAt was set — lost their refund if they
+        // then cancelled. A live session is never too early: a repeat scan of one falls
+        // through to the idempotent branch below whatever the clock says.
+        //
+        // Compared against the scan's own time, not the upload's: a box that admitted a
+        // member ahead of the cue window and uploaded the event once the window had
+        // opened was reporting a scan that broke the rule, not one that kept it.
+        var settings = await _settings.GetAsync(ct);
+        var cueOpensAt = booking.StartsAt.AddMinutes(-settings.ActivationCueWindowMinutes);
+        if (!alreadyActive && occurredAt < cueOpensAt)
+        {
+            return new ActivationResult.TooEarly(booking, (int)Math.Ceiling((booking.StartsAt - occurredAt).TotalSeconds));
+        }
 
         // Charge first. Everything below this line is a consequence of it having worked.
         var charge = await _bookings.ChargeOnActivationAsync(
@@ -195,8 +284,10 @@ public sealed class CourtActivationService
             return new ActivationResult.Activated(booking, payerUserId, amount, AlreadyActive: true);
         }
 
-        booking.CheckedInAt = now;
-        booking.LightsOnCuedAt ??= now;
+        // Attendance is when the member identified, which for an uploaded event is the
+        // scan and not the upload.
+        booking.CheckedInAt = occurredAt;
+        booking.LightsOnCuedAt ??= occurredAt;
 
         _db.AuditLogs.Add(new AuditLog
         {
@@ -211,6 +302,7 @@ public sealed class CourtActivationService
                 method,
                 payer_user_id = payerUserId,
                 amount_credits = amount,
+                occurred_at = occurredAt,
             }),
         });
 
@@ -267,3 +359,17 @@ public sealed class CourtActivationService
             });
     }
 }
+
+/// <summary>
+/// Who identified, where, how — and when. <see cref="OccurredAt"/> is null for a scan the
+/// server is answering live, and the moment of the scan for one a box decided offline and
+/// uploaded later; the cue gate and <c>CheckedInAt</c> are judged against it. Bundled so
+/// the six positional arguments the courtside touchpoints pass stay as they are.
+/// </summary>
+public sealed record ActivationRequest(
+    Court Court,
+    Booking Booking,
+    Guid IdentifiedUserId,
+    Guid? PayerOverrideUserId,
+    string Method,
+    DateTimeOffset? OccurredAt);

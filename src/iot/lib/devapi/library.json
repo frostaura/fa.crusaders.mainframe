@@ -1,7 +1,7 @@
 {
   "name": "devapi",
-  "version": "1.0.0",
-  "description": "The device-facing API client: signed request construction and response parsing.",
-  "dependencies": { "devcrypto": "*", "eventq": "*", "roster": "*", "timebase": "*" },
+  "version": "2.0.0",
+  "description": "The device-facing API client: the bearer header, the response-status policy, and a heapless JSON scanner.",
+  "dependencies": { "eventq": "*", "roster": "*", "timebase": "*" },
   "build": { "flags": ["-I include"] }
 }

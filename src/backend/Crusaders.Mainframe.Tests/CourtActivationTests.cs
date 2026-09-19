@@ -58,13 +58,54 @@ public class CourtActivationTests
                 new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, topUpCredits, host.PlayerUser.Id), default);
         }
 
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        // Every booking in this class starts NOW — that is what "a player standing in front
+        // of it" means — so, like a walk-up, the slot cannot be stepped forward the way
+        // TestHost.BookableSlot steps one. The club is moved instead. Without this, fourteen
+        // tests here are refused OutOfHours for the last hour of the club's local day: the
+        // fixture closes at local midnight (day_end_minute 1440) and a slice starting at
+        // 23:46 ends at 00:01. Same defect as the five walk-up tests, in a class the round
+        // that fixed those did not reach. Sixty minutes of headroom covers the longest thing
+        // bought here with room to spare. See TestHost.DayZoneFor.
+        await TestHost.ClearOfClosingAsync(db, host.Tenant.Id, 60);
+
         return new Fixture(
             host, scope,
             scope.ServiceProvider.GetRequiredService<CourtActivationService>(),
             ledger,
             scope.ServiceProvider.GetRequiredService<BookingService>(),
-            scope.ServiceProvider.GetRequiredService<MainframeDbContext>(),
+            db,
             host.EmailService);
+    }
+
+    /// <summary>
+    /// The fixture is clear of its own closing time — the guard that makes the line above
+    /// impossible to delete quietly.
+    ///
+    /// <para>
+    /// Every other test in this class would only notice its absence during the last hour of
+    /// the club's local day, which is exactly the property that let the defect sit here
+    /// through three rounds. This one notices at any hour, because it compares against the
+    /// seeded literal <c>"UTC"</c>, which <c>DayZoneFor</c> never returns.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task The_fixture_is_moved_clear_of_its_own_closing_time()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var row = await f.Db.TenantSettings.IgnoreQueryFilters().SingleAsync(x => x.TenantId == f.Host.Tenant.Id);
+        var zone = System.Text.Json.JsonDocument.Parse(row.SettingsJson).RootElement
+            .GetProperty("timezone").GetString();
+
+        Assert.NotEqual("UTC", zone);
+        var local = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zone!));
+        Assert.True(
+            (local.Hour * 60) + local.Minute + 60 <= 24 * 60,
+            $"a booking made now still runs past local midnight (local {local:HH:mm} in {zone})");
     }
 
     /// <summary>A booking starting now, i.e. one a player is standing in front of.</summary>
@@ -287,6 +328,39 @@ public class CourtActivationTests
         Assert.Single(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
     }
 
+    // ---- Offline scans are judged when they happened ----------------------
+
+    /// <summary>
+    /// A court box decides scans offline and uploads them later, so the scan and the
+    /// server hearing of it can be far apart. The cue gate and the attendance stamp use the
+    /// scan's own time: a scan made ahead of the cue window is too early however open the
+    /// window is by the time it arrives, and a scan made inside it is stamped when the
+    /// member actually identified, not when the WiFi came back.
+    /// </summary>
+    [Fact]
+    public async Task An_uploaded_scan_is_judged_and_stamped_at_the_time_it_happened()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        // Starts in a minute: the ten-minute cue opened nine minutes ago.
+        var booking = await BookNowAsync(f);
+
+        var early = await f.Activation.ActivateAsync(
+            new ActivationRequest(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "qr", DateTimeOffset.UtcNow.AddMinutes(-30)), default);
+        Assert.IsType<ActivationResult.TooEarly>(early);
+        Assert.Null(booking.CheckedInAt);
+
+        var scannedAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var live = await f.Activation.ActivateAsync(
+            new ActivationRequest(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "qr", scannedAt), default);
+        Assert.False(Assert.IsType<ActivationResult.Activated>(live).AlreadyActive);
+        Assert.Equal(scannedAt, booking.CheckedInAt);
+        Assert.Equal(scannedAt, booking.LightsOnCuedAt);
+        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+    }
+
     // ---- Defect 3: one grace window ---------------------------------------
 
     /// <summary>
@@ -308,7 +382,8 @@ public class CourtActivationTests
         var (start, end) = await f.Activation.WindowAsync(now, default);
 
         Assert.Equal(now.AddMinutes(-settings.GraceWindowMinutes), start, TimeSpan.FromSeconds(1));
-        Assert.True(end > now);
+        // The forward edge was a hardcoded two hours; it is the tenant's setting now.
+        Assert.Equal(now.AddMinutes(settings.ActivationForwardWindowMinutes), end, TimeSpan.FromSeconds(1));
     }
 
     /// <summary>
@@ -339,6 +414,80 @@ public class CourtActivationTests
 
         Assert.Null(await f.Activation.FindForUserAsync(
             f.Host.Courts[0].Id, f.Host.PlayerUser.Id, DateTimeOffset.UtcNow, default));
+    }
+
+    // ---- The cue window ---------------------------------------------------
+
+    /// <summary>
+    /// A scan inside the forward window but outside the cue window finds the booking and
+    /// does nothing to it. The forward window has to be two hours wide to tell back-to-back
+    /// slices apart; the cue window is the narrower one that says when a scan may light the
+    /// court. They used to be the same two hours, so a member scanning on their way in was
+    /// stamped present, cued the lights, and — because attendance means <c>CheckedInAt</c> —
+    /// lost their refund if they then cancelled. Here the cancellation still refunds in full.
+    /// </summary>
+    [Fact]
+    public async Task Scan_outside_cue_window_stamps_nothing()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var settings = await f.Scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        var startsIn = settings.ActivationCueWindowMinutes + 30;
+        Assert.True(startsIn < settings.ActivationForwardWindowMinutes, "the case must sit inside the forward window");
+        Assert.True(startsIn > settings.PenaltyWindowMinutes, "the cancellation must sit outside the penalty window");
+
+        // Booked by the admin on the player's behalf, so no booking rule stands in the way
+        // of a slot that starts at whatever hour the suite happens to run.
+        var created = await f.Bookings.CreateAsync(
+            f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.AdminUser.Id,
+            DateTimeOffset.UtcNow.AddMinutes(startsIn), 1, default);
+        var booking = Assert.IsType<BookingResult.Ok>(created).Booking;
+        Assert.Equal(92m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+
+        // The booking IS in the forward window — the selectors find it.
+        Assert.NotNull(await f.Activation.FindForUserAsync(CourtOf(f).Id, f.Host.PlayerUser.Id, DateTimeOffset.UtcNow, default));
+
+        var result = await f.Activation.ActivateAsync(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "qr", default);
+
+        var early = Assert.IsType<ActivationResult.TooEarly>(result);
+        Assert.Equal(booking.Id, early.Booking.Id);
+        Assert.InRange(early.StartsInSeconds, startsIn * 60 - 5, startsIn * 60);
+
+        var fresh = await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id);
+        Assert.Null(fresh.CheckedInAt);
+        Assert.Null(fresh.LightsOnCuedAt);
+        Assert.Empty(await f.Db.AuditLogs.Where(a => a.Action == "court.activated").ToListAsync());
+
+        // Not stamped, so the member can still change their mind and be made whole.
+        var cancelled = await f.Bookings.CancelAsync(booking.Id, f.Host.PlayerUser.Id, actorIsAdmin: false, waivePenalty: false, default);
+        var ok = Assert.IsType<CancellationResult.Ok>(cancelled);
+        Assert.Equal(8m, ok.RefundedCredits);
+        Assert.Equal(0m, ok.PenaltyCredits);
+        Assert.Equal(100m, await f.Ledger.GetBalanceAsync(f.Host.PlayerUser.Id, default));
+    }
+
+    /// <summary>The cue window's edge is inclusive: a scan exactly at cue-minutes-before lights the court.</summary>
+    [Fact]
+    public async Task A_scan_inside_the_cue_window_activates()
+    {
+        var f = await CreateAsync();
+        await using var _ = f.Host;
+        using var __ = f.Scope;
+
+        var settings = await f.Scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        var startsIn = Math.Max(settings.ActivationCueWindowMinutes - 1, 0);
+
+        var created = await f.Bookings.CreateAsync(
+            f.Host.Courts[0].Id, f.Host.PlayerUser.Id, f.Host.AdminUser.Id,
+            DateTimeOffset.UtcNow.AddMinutes(startsIn).AddSeconds(30), 1, default);
+        var booking = Assert.IsType<BookingResult.Ok>(created).Booking;
+
+        var result = await f.Activation.ActivateAsync(CourtOf(f), booking, f.Host.PlayerUser.Id, null, "qr", default);
+
+        Assert.IsType<ActivationResult.Activated>(result);
+        Assert.NotNull((await f.Db.Bookings.AsNoTracking().FirstAsync(b => b.Id == booking.Id)).CheckedInAt);
     }
 
     // ---- Payer override ---------------------------------------------------
@@ -507,8 +656,10 @@ public class CourtActivationTests
         Assert.NotNull(found);
         Assert.Equal(earlier, found!.StartsAt);
 
-        // And the candidate list the biometric and PIN paths read is ordered the same way,
-        // since they select from it themselves.
+        // And the candidate list the PIN path selects from is ordered the same way. The
+        // biometric path now routes through CandidatesAsync too — MatchAtCourtAsync takes
+        // the first candidate whose user matched, rather than building an unordered query
+        // of its own — and BiometricServiceTests pins that end to end.
         var candidates = await f.Activation.CandidatesAsync(court.Id, now, default);
         Assert.Equal(earlier, candidates[0].StartsAt);
     }

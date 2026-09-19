@@ -14,11 +14,14 @@
 > bus is a single serial dispatcher with a 10s per-endpoint timeout and no
 > working retry. Actuation is a direct client on the request path instead.
 >
-> The parts that held up — the local auto-off timer, `/health`, `/status` — are
-> carried into `src/iot`. Kept for the design rationale and the fail-safe
-> discussion.
+> The parts that held up — the local auto-off timer, `/health`, `/status`, and
+> the observation that a controller credential is compiled in and rotated by
+> reflashing — are carried into `src/iot`. What replaced the `secret`-in-body
+> and the optional HMAC is one static per-tenant key in an
+> `Authorization: Bearer` header, on requests the box makes *outbound*; nothing
+> calls the box. Kept for the design rationale and the fail-safe discussion.
 
-The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
+[Superseded design] The court lights are switched by an **Arduino** on the club LAN. The Arduino runs a small HTTP server exposing endpoints that drive a **6-channel relay board** (one channel per court, up to 6 courts per Arduino). The mainframe drives the lights by **calling those endpoints via the existing outbound webhook system** — the Arduino is, architecturally, just another webhook consumer.
 
 ## Why this shape
 - **No new abstraction.** The mainframe already has a webhook delivery worker with signing, retries, and per-endpoint queues. The Arduino is registered as a webhook endpoint per tenant; lights events fire to it like any other consumer.

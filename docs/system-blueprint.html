@@ -1,0 +1,1607 @@
+<title>Crusaders Mainframe Blueprint</title>
+<!-- Self-contained by rule: no external stylesheets, scripts or fonts. Archivo / IBM Plex Mono are used when installed locally; the system stacks below are the designed fallback. -->
+<style>
+:root{
+  --paper:#F4F7F9; --card:#FFFFFF; --card2:#EDF1F4; --ink:#17222D; --muted:#5C6E7E;
+  --line:#D3DDE5; --line2:#BCC9D4;
+  --amber:#B8770E; --amber-fill:#E9A23B; --amber-soft:#F7E7C8;
+  --blue:#2E6FAE; --blue-fill:#4A87C2; --blue-soft:#DCE8F4;
+  --red:#BE4128; --red-soft:#F6DFD8;
+  --green:#2C8A5F; --green-soft:#DCEEE4;
+  --violet:#6B5AA8; --violet-soft:#E6E1F3;
+  --code-bg:#1B2733; --code-ink:#D8E2EC;
+  --shadow:0 1px 2px rgba(23,34,45,.06), 0 8px 24px rgba(23,34,45,.07);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0F151C; --card:#17202A; --card2:#121A22; --ink:#E6ECF2; --muted:#93A3B2;
+    --line:#2B3844; --line2:#3A4A59;
+    --amber:#F0A83C; --amber-fill:#C98A22; --amber-soft:#3A2E17;
+    --blue:#6FA9E2; --blue-fill:#3E6E9E; --blue-soft:#1B2C3E;
+    --red:#E2755F; --red-soft:#3D211B;
+    --green:#57BB8E; --green-soft:#1B3226;
+    --violet:#A395D6; --violet-soft:#2A2440;
+    --code-bg:#0B1117; --code-ink:#C6D2DE;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0F151C; --card:#17202A; --card2:#121A22; --ink:#E6ECF2; --muted:#93A3B2;
+  --line:#2B3844; --line2:#3A4A59;
+  --amber:#F0A83C; --amber-fill:#C98A22; --amber-soft:#3A2E17;
+  --blue:#6FA9E2; --blue-fill:#3E6E9E; --blue-soft:#1B2C3E;
+  --red:#E2755F; --red-soft:#3D211B;
+  --green:#57BB8E; --green-soft:#1B3226;
+  --violet:#A395D6; --violet-soft:#2A2440;
+  --code-bg:#0B1117; --code-ink:#C6D2DE;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:'Archivo',system-ui,-apple-system,sans-serif;
+  font-size:15.5px; line-height:1.55;
+}
+.mono{font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace}
+a{color:var(--blue)}
+h1,h2,h3,h4{text-wrap:balance; margin:0}
+p{max-width:72ch}
+
+/* ---------- shell: rail + content ---------- */
+.shell{display:grid; grid-template-columns:216px minmax(0,1fr); max-width:1340px; margin:0 auto}
+nav.rail{
+  position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto;
+  padding:26px 10px 26px 22px; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; gap:2px;
+}
+.rail .brand{font-weight:900; letter-spacing:-.02em; font-size:15px; margin-bottom:14px; line-height:1.2}
+.rail .brand .mono{display:block; font-size:10px; font-weight:500; color:var(--muted); letter-spacing:.08em; margin-top:4px}
+.rail a{
+  display:block; padding:6px 10px; border-radius:6px; text-decoration:none; color:var(--muted);
+  font-size:12.5px; font-weight:600; letter-spacing:.01em; border-left:2px solid transparent;
+}
+.rail a:hover{color:var(--ink); background:var(--card2)}
+.rail a.active{color:var(--ink); background:var(--card2); border-left-color:var(--amber-fill)}
+.rail .grp{font-family:'IBM Plex Mono',monospace; font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin:14px 0 4px 10px; opacity:.8}
+main{min-width:0; padding:0 40px 90px}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr}
+  nav.rail{position:static; height:auto; flex-direction:row; flex-wrap:wrap; border-right:0; border-bottom:1px solid var(--line); padding:14px 16px}
+  .rail .grp{display:none}
+  .rail .brand{width:100%}
+  main{padding:0 16px 70px}
+}
+
+/* ---------- sections ---------- */
+section{padding-top:64px}
+.eyebrow{font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--amber); margin-bottom:8px}
+.eyebrow.sw{color:var(--blue)} .eyebrow.safe{color:var(--red)} .eyebrow.fe{color:var(--green)} .eyebrow.data{color:var(--violet)}
+h2{font-size:30px; font-weight:800; letter-spacing:-.025em; line-height:1.1; margin-bottom:10px}
+h3{font-size:17px; font-weight:800; letter-spacing:-.01em; margin:26px 0 8px}
+.lede{color:var(--muted); font-size:16px; max-width:66ch; margin:0 0 22px}
+.card{background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow)}
+.pad{padding:18px 20px}
+.scroll{overflow-x:auto}
+figure{margin:18px 0}
+figcaption{font-size:12.5px; color:var(--muted); margin-top:8px; max-width:78ch}
+svg text{font-family:'Archivo',sans-serif}
+svg .m{font-family:'IBM Plex Mono',monospace}
+
+/* ---------- hero ---------- */
+header.hero{padding:56px 0 8px}
+.hero h1{font-size:clamp(34px,5vw,54px); font-weight:900; letter-spacing:-.035em; line-height:1.02}
+.hero .sub{color:var(--muted); font-size:17px; max-width:64ch; margin:14px 0 4px}
+.hero .stamp{display:inline-flex; gap:8px; align-items:center; font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.1em; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:5px 12px; margin-bottom:18px}
+.hero .stamp b{color:var(--amber); font-weight:600}
+.tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin:26px 0 6px}
+.tile{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px}
+.tile .v{font-family:'IBM Plex Mono',monospace; font-size:21px; font-weight:600; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+.tile .k{font-size:11px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; margin-top:2px}
+.tile.hw .v{color:var(--amber)} .tile.sw .v{color:var(--blue)} .tile.ok .v{color:var(--green)}
+
+/* ---------- legend ---------- */
+.legend{display:flex; flex-wrap:wrap; gap:14px; align-items:center; font-size:12px; color:var(--muted); margin:8px 0 0}
+.legend i{display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px}
+
+/* ---------- tables ---------- */
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+th{font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); text-align:left; font-weight:600; padding:8px 12px; border-bottom:1.5px solid var(--line2)}
+td{padding:7px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.mono, .num{font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-variant-numeric:tabular-nums}
+.pin{display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; background:var(--amber-soft); color:var(--amber); border-radius:4px; padding:1px 7px; margin:1px 2px 1px 0}
+.pill{display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; border-radius:999px; padding:2px 9px}
+.pill.hw{background:var(--amber-soft); color:var(--amber)}
+.pill.sw{background:var(--blue-soft); color:var(--blue)}
+.pill.ok{background:var(--green-soft); color:var(--green)}
+.pill.risk{background:var(--red-soft); color:var(--red)}
+.pill.data{background:var(--violet-soft); color:var(--violet)}
+
+/* ---------- callouts ---------- */
+.callout{border-left:3px solid var(--amber-fill); background:var(--card); border-radius:0 10px 10px 0; padding:14px 18px; margin:16px 0; border-top:1px solid var(--line); border-right:1px solid var(--line); border-bottom:1px solid var(--line)}
+.callout.danger{border-left-color:var(--red)}
+.callout.good{border-left-color:var(--green)}
+.callout .t{font-weight:800; font-size:13.5px; letter-spacing:.01em; margin-bottom:4px}
+.callout.danger .t{color:var(--red)}
+.callout p{margin:4px 0; font-size:13.5px}
+
+/* ---------- code ---------- */
+pre.code{background:var(--code-bg); color:var(--code-ink); border-radius:10px; padding:14px 18px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; line-height:1.6; overflow-x:auto; margin:12px 0}
+code{font-family:'IBM Plex Mono',monospace; font-size:.92em; background:var(--card2); border:1px solid var(--line); border-radius:4px; padding:0 5px}
+pre.code code{background:none;border:0;padding:0}
+
+/* ---------- widgets ---------- */
+.widget{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; box-shadow:var(--shadow)}
+.widget .wt{font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-bottom:10px}
+.seg{display:inline-flex; flex-wrap:wrap; gap:6px}
+.seg button{
+  font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; cursor:pointer;
+  background:var(--card2); color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:6px 12px;
+}
+.seg button:hover{color:var(--ink); border-color:var(--line2)}
+.seg button.on{background:var(--amber-soft); color:var(--amber); border-color:var(--amber-fill)}
+.seg button:focus-visible, .rail a:focus-visible, input:focus-visible{outline:2px solid var(--blue); outline-offset:2px}
+.frame-out{font-family:'IBM Plex Mono',monospace; font-size:17px; background:var(--code-bg); color:var(--code-ink); border-radius:8px; padding:12px 16px; margin-top:12px; overflow-x:auto; white-space:nowrap}
+.frame-out .fs{color:#F0A83C}.frame-out .fv{color:#7FD1A7}.frame-out .fa{color:#8FBCE8}.frame-out .fc{color:#E58D77}
+.frow{display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; margin-top:6px}
+.frow label{display:block; font-size:11px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; margin-bottom:5px}
+.frow input[type=range]{width:180px; accent-color:var(--amber-fill)}
+.fnote{font-size:12px; color:var(--muted); margin-top:10px; max-width:70ch}
+
+/* DIP widget */
+.dipbank{display:flex; gap:7px; margin:14px 0 4px}
+.dip{width:26px; border-radius:5px; background:var(--card2); border:1px solid var(--line2); padding:3px; text-align:center}
+.dip .slot{height:38px; border-radius:3px; background:var(--code-bg); position:relative}
+.dip .knob{position:absolute; left:3px; right:3px; height:15px; border-radius:2px; background:#5A6B7C; transition:top .18s}
+.dip.on .knob{top:3px; background:var(--amber-fill)}
+.dip:not(.on) .knob{top:20px}
+.dip .lbl{font-family:'IBM Plex Mono',monospace; font-size:9.5px; color:var(--muted); margin-top:3px}
+.dipnote{font-size:13px; margin-top:8px}
+
+.grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; align-items:start}
+.grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; align-items:start}
+.kv{font-size:13px}
+.kv b{font-weight:700}
+ul.tight{margin:6px 0; padding-left:20px; font-size:13.5px}
+ul.tight li{margin:5px 0}
+.footer{margin-top:70px; padding-top:18px; border-top:1px solid var(--line); font-size:12px; color:var(--muted); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px}
+</style>
+
+<div class="shell">
+<nav class="rail" aria-label="Sections">
+  <div class="brand">Crusaders Mainframe<span class="mono">SYSTEM BLUEPRINT · REV 2026-09-06</span></div>
+  <div class="grp">System</div>
+  <a href="#overview">Topology</a>
+  <div class="grp">Hardware</div>
+  <a href="#courtbox">The court box</a>
+  <a href="#pins">GPIO &amp; wiring</a>
+  <a href="#dip">DIP switches</a>
+  <a href="#firmware">Firmware split</a>
+  <div class="grp">Protocols</div>
+  <a href="#serial">Serial protocol</a>
+  <a href="#identity">Identity &amp; flashing</a>
+  <a href="#deviceapi">Device API</a>
+  <div class="grp">Server side</div>
+  <a href="#webhooks">Webhooks &amp; guards</a>
+  <a href="#backend">Backend</a>
+  <a href="#database">Database</a>
+  <a href="#settlement">Settlement model</a>
+  <a href="#payments">Payments</a>
+  <div class="grp">Edges</div>
+  <a href="#frontend">Frontend</a>
+  <a href="#deploy">Deployment</a>
+  <a href="#risks">Watch list</a>
+  <a href="#fixes">Where it stands</a>
+</nav>
+<main>
+
+<header class="hero" id="top">
+  <div style="height:42px"></div>
+  <div class="stamp"><b>●</b> ON-PREM SAAS · CLUB LAN · 4 COURTS</div>
+  <h1>Crusaders Mainframe Blueprint</h1>
+  <p class="sub">The full system on one page — a multi-tenant booking SaaS whose last hop is a relay coil: React PWA → .NET 10 API → PostgreSQL ledger → outbound webhooks → an ESP8266 bridge that asks the API first and falls back to its cached roster → an ATmega2560 that physically switches the court lights. Revised 2026-09-05 to the state of the <a href="#fixes">E2E fix programme</a> branch, after the simplification that removed request signing, discovery and OTA, and again on 2026-09-06 for the round-3 fixes: the webhook catalogue, the roster’s contents, and one route to detecting a lost event queue that this page used to assert and that the firmware refutes. Test <em>counts</em> were removed rather than corrected — see <a href="#gates">why</a>.</p>
+  <div class="tiles">
+    <div class="tile hw"><div class="v">4</div><div class="k">Courts per box, relays A–D</div></div>
+    <div class="tile hw"><div class="v">9600</div><div class="k">Baud, both serial links</div></div>
+    <div class="tile hw"><div class="v">90 min</div><div class="k">Relay hard cap — one shared constant</div></div>
+    <div class="tile sw"><div class="v">12</div><div class="k">Chars in an access code</div></div>
+    <div class="tile sw"><div class="v">4</div><div class="k">Device routes, one club key</div></div>
+    <div class="tile ok"><div class="v">0</div><div class="k">Skipped tests CI accepts — <span class="mono">REQUIRE_BOUNDARY_TESTS</span></div></div>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--amber-fill)"></i>Hardware / court box</span>
+    <span><i style="background:var(--blue-fill)"></i>Backend / software</span>
+    <span><i style="background:var(--green)"></i>Member-facing</span>
+    <span><i style="background:var(--violet)"></i>Data</span>
+    <span><i style="background:var(--red)"></i>Safety / risk</span>
+  </div>
+</header>
+
+<!-- ================= TOPOLOGY ================= -->
+<section id="overview">
+  <div class="eyebrow">System · End to end</div>
+  <h2>Topology — from tap to relay coil</h2>
+  <p class="lede">Everything runs on one on-prem machine at the club behind a Cloudflare tunnel; the court box is the only other computer. The API never dials the box — every call is box → API, carrying the club’s single device API key as <span class="mono">Authorization: Bearer</span> and the box’s MAC in the body. A scan asks <span class="mono">POST /api/v1/device/activate</span> first and is decided from the heartbeat-pushed roster only when the API could not be asked; the mains-side safety timer lives one hop further down, on the Mega itself.</p>
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 1240 620" role="img" aria-label="System topology: member PWA through Cloudflare tunnel to the on-prem Docker stack (gateway, frontend, backend API, PostgreSQL), and across the club LAN to the court box, where an ESP8266 bridge talks over Serial3 to an ATmega2560 driving four relays, LCD, buttons and QR scanner" style="min-width:1000px;max-width:100%;height:auto">
+    <defs>
+      <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+      <marker id="arwA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--amber-fill)"/></marker>
+      <marker id="arwR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--red)"/></marker>
+    </defs>
+    <g fill="none" stroke="currentColor" stroke-opacity=".28" stroke-dasharray="5 5">
+      <rect x="14" y="30" width="360" height="560" rx="10"/>
+      <rect x="404" y="30" width="450" height="560" rx="10"/>
+      <rect x="884" y="30" width="342" height="560" rx="10"/>
+    </g>
+    <g class="m" font-size="10.5" fill="currentColor" opacity=".55" letter-spacing="2">
+      <text x="30" y="52">INTERNET</text>
+      <text x="420" y="52">CLUB LAN — ON-PREM MACHINE (DOCKER / PORTAINER)</text>
+      <text x="900" y="52">ELECTRICAL CUPBOARD — COURT BOX</text>
+    </g>
+
+    <!-- member -->
+    <g>
+      <rect x="34" y="82" width="170" height="62" rx="8" fill="var(--card2)" stroke="var(--green)" stroke-width="1.6"/>
+      <text x="119" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">Member PWA</text>
+      <text x="119" y="126" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".65">React 19 · Vite · installable</text>
+      <rect x="34" y="452" width="170" height="58" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+      <text x="119" y="476" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">PayFast</text>
+      <text x="119" y="494" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".65">hosted checkout + ITN</text>
+      <rect x="238" y="82" width="130" height="62" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+      <text x="303" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">Cloudflare</text>
+      <text x="303" y="126" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".65">DNS + tunnel edge</text>
+    </g>
+
+    <!-- docker stack -->
+    <g>
+      <rect x="424" y="82" width="150" height="48" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+      <text x="499" y="102" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">cloudflared</text>
+      <text x="499" y="118" text-anchor="middle" font-size="10" fill="currentColor" opacity=".65">systemd, tunnel ingress</text>
+
+      <rect x="424" y="168" width="150" height="52" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="499" y="189" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">nginx gateway</text>
+      <text x="499" y="206" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".65">:8088 → / and /api</text>
+
+      <rect x="424" y="262" width="150" height="46" rx="8" fill="var(--card2)" stroke="var(--green)" stroke-width="1.6"/>
+      <text x="499" y="281" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">frontend</text>
+      <text x="499" y="297" text-anchor="middle" font-size="10" fill="currentColor" opacity=".65">nginx + static React build</text>
+
+      <rect x="636" y="150" width="196" height="150" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="734" y="172" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">backend · .NET 10</text>
+      <text x="734" y="188" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".65">Minimal APIs · :5000</text>
+      <g font-size="10.5" fill="currentColor">
+        <rect x="650" y="200" width="168" height="24" rx="4" fill="none" stroke="var(--blue)" stroke-opacity=".55"/>
+        <text x="734" y="216" text-anchor="middle">webhook delivery workers</text>
+        <rect x="650" y="230" width="168" height="24" rx="4" fill="none" stroke="var(--blue)" stroke-opacity=".55"/>
+        <text x="734" y="246" text-anchor="middle">device API · roster · settlement</text>
+        <rect x="650" y="260" width="168" height="24" rx="4" fill="none" stroke="var(--blue)" stroke-opacity=".55"/>
+        <text x="734" y="276" text-anchor="middle">no-show sweep · retry sweep</text>
+      </g>
+
+      <rect x="636" y="340" width="196" height="52" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="734" y="361" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">PostgreSQL 16</text>
+      <text x="734" y="378" text-anchor="middle" font-size="10" fill="currentColor" opacity=".65">ledger-only money · tenant_id everywhere</text>
+
+      <rect x="424" y="356" width="150" height="60" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+      <text x="499" y="378" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">SMTP</text>
+      <text x="499" y="393" text-anchor="middle" font-size="9.5" fill="currentColor" opacity=".65">every player-affecting event</text>
+      <text x="499" y="406" text-anchor="middle" font-size="9.5" fill="currentColor" opacity=".65">webhooks mirror, never replace</text>
+
+      <rect x="424" y="470" width="150" height="46" rx="8" fill="none" stroke="currentColor" stroke-opacity=".3" stroke-width="1.3" stroke-dasharray="4 3"/>
+      <text x="499" y="489" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">no discovery listener</text>
+      <text x="499" y="505" text-anchor="middle" font-size="9.5" class="m" fill="currentColor" opacity=".6">removed 2026-09-05</text>
+    </g>
+
+    <!-- court box -->
+    <g>
+      <rect x="902" y="82" width="140" height="60" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="2"/>
+      <text x="972" y="106" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">ESP8266</text>
+      <text x="972" y="123" text-anchor="middle" font-size="10" fill="currentColor" opacity=".7">all the brains · USB-flashed</text>
+
+      <rect x="902" y="228" width="140" height="64" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="2"/>
+      <text x="972" y="252" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">ATmega2560</text>
+      <text x="972" y="269" text-anchor="middle" font-size="10" fill="currentColor" opacity=".7">thin I/O · auto-off timer</text>
+
+      <rect x="902" y="356" width="140" height="46" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.6"/>
+      <text x="972" y="375" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Relay board ×4</text>
+      <text x="972" y="391" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">pins 2·3·4·5 — active LOW</text>
+
+      <rect x="1088" y="356" width="120" height="46" rx="8" fill="var(--card2)" stroke="var(--red)" stroke-width="1.8"/>
+      <text x="1148" y="375" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Court lights</text>
+      <text x="1148" y="391" text-anchor="middle" font-size="10" fill="currentColor" opacity=".7">A · B · C · D</text>
+
+      <g font-size="11" fill="currentColor">
+        <rect x="1088" y="150" width="120" height="38" rx="7" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.3"/>
+        <text x="1148" y="168" text-anchor="middle" font-weight="700">LCD 2004A</text>
+        <text x="1148" y="181" text-anchor="middle" font-size="9.5" class="m" opacity=".7">I²C 0x27</text>
+        <rect x="1088" y="210" width="120" height="38" rx="7" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.3"/>
+        <text x="1148" y="228" text-anchor="middle" font-weight="700">Buttons ×8</text>
+        <text x="1148" y="241" text-anchor="middle" font-size="9.5" class="m" opacity=".7">pins 22–36</text>
+        <rect x="1088" y="270" width="120" height="38" rx="7" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.3"/>
+        <text x="1148" y="288" text-anchor="middle" font-weight="700">QR scanner</text>
+        <text x="1148" y="301" text-anchor="middle" font-size="9.5" class="m" opacity=".7">Serial2 @9600</text>
+      </g>
+
+      <rect x="902" y="470" width="306" height="52" rx="8" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-width="1.3"/>
+      <text x="1055" y="491" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">Mean Well PSU → 2× fused LM2596</text>
+      <text x="1055" y="507" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">5 V rail · 9 V rail</text>
+    </g>
+
+    <!-- arrows -->
+    <g stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#arw)">
+      <path d="M204 113 H236"/>
+      <path d="M368 113 Q400 113 422 106"/>
+      <path d="M499 132 V166"/>
+      <path d="M499 222 V260"/>
+      <path d="M576 194 Q610 194 634 200"/>
+      <path d="M734 302 V338"/>
+      <path d="M119 146 V450"/>
+    </g>
+    <g class="m" font-size="10" fill="currentColor" opacity=".75">
+      <text x="207" y="105">HTTPS</text>
+      <text x="376" y="98">tunnel</text>
+      <text x="506" y="150">http</text>
+      <text x="508" y="244">/ static</text>
+      <text x="584" y="188">/api</text>
+      <text x="742" y="326">EF Core</text>
+      <text x="127" y="300">tops up (ZAR)</text>
+    </g>
+    <!-- payfast ITN -->
+    <path d="M204 481 Q420 540 634 296" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#arw)" stroke-dasharray="6 4"/>
+    <text x="330" y="538" class="m" font-size="10" fill="currentColor" opacity=".75">ITN (server→server, MD5-signed, retried)</text>
+
+    <!-- backend <-> ESP -->
+    <g stroke="var(--amber-fill)" stroke-width="1.8" fill="none">
+      <path d="M834 212 Q880 200 900 152 Q908 132 902 118" marker-end="url(#arwA)"/>
+      <path d="M902 96 Q860 60 834 160" marker-end="url(#arwA)" stroke-dasharray="6 4"/>
+    </g>
+    <text x="845" y="120" class="m" font-size="10" fill="var(--amber)" text-anchor="end">heartbeat ← court_numbers · roster · config</text>
+    <text x="845" y="70" class="m" font-size="10" fill="var(--amber)" text-anchor="end">activate · walk-up · events (box → API, Bearer key)</text>
+
+    <!-- serial + relays -->
+    <g stroke="var(--amber-fill)" stroke-width="1.8" fill="none">
+      <path d="M972 144 V226" marker-end="url(#arwA)"/>
+      <path d="M958 226 V150" marker-end="url(#arwA)"/>
+      <path d="M972 294 V354" marker-end="url(#arwA)"/>
+    </g>
+    <text x="982" y="190" class="m" font-size="10" fill="var(--amber)">Serial3 · 9600 8N1</text>
+    <text x="982" y="330" class="m" font-size="10" fill="var(--amber)">drive LOW = on</text>
+    <g stroke="var(--amber-fill)" stroke-width="1.4" fill="none" marker-end="url(#arwA)">
+      <path d="M1088 169 Q1060 169 1044 240"/>
+      <path d="M1088 229 Q1066 236 1044 252"/>
+      <path d="M1088 289 Q1066 282 1044 268"/>
+    </g>
+    <path d="M1042 379 H1086" stroke="var(--red)" stroke-width="2" fill="none" marker-end="url(#arwR)"/>
+    <text x="1064" y="371" class="m" font-size="9.5" fill="var(--red)" text-anchor="middle">230 VAC</text>
+    <text x="1064" y="418" font-size="9.5" fill="var(--red)" text-anchor="middle">via contactor? — open</text>
+  </svg>
+  <figcaption>One machine runs the whole SaaS; the court box is the only peripheral computer. Amber paths are club-LAN hardware traffic, and every HTTP call on them is <em>outbound from the box</em>: activation and walk-up questions, the drained event queue, and the heartbeat that brings back the box's court list, its roster and its button map. There is no inbound path to the box and no broadcast on the LAN — the box learns nothing it was not compiled with or handed in a heartbeat reply. The red hop is mains voltage — its contactor question is the top item on the <a href="#risks">watch list</a>.</figcaption>
+  </figure>
+  </div>
+
+  <div class="grid3" style="margin-top:18px">
+    <div class="callout good" style="margin:0">
+      <div class="t">Online first; the court still works when the network does not</div>
+      <p>A scan asks the API — only it knows about a booking made thirty seconds ago or a balance too low to admit — and its answer is final. When the API <em>cannot be asked</em> (no link, no court list yet, the circuit breaker open, a 5xx, a malformed 200) the box decides from the roster the last heartbeat pushed, and the API hears about it later via the sequence-numbered event queue.</p>
+    </div>
+    <div class="callout" style="margin:0">
+      <div class="t">Charge at booking — decided 2026-08-22</div>
+      <p>Booking posts the <span class="mono">BookingCharge</span> debit in the same unit of work as the slot. Supersedes the blueprint's charge-on-lights-on; committee sign-off pending.</p>
+    </div>
+    <div class="callout danger" style="margin:0">
+      <div class="t">Two fail-safes point opposite ways — on purpose</div>
+      <p>The relay timer <b>fails open</b> (lights off even if everything above dies). The roster cache <b>fails closed</b> (a stale roster refuses entry). Both are correct.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= COURT BOX ================= -->
+<section id="courtbox">
+  <div class="eyebrow">Hardware · Overview</div>
+  <h2>The court box</h2>
+  <p class="lede">A WeMos Mega 2560 with its onboard ESP8266, driving four court-light relays, a 20×4 2004A LCD driven as 16×2, an eight-button panel and a QR scanner. The wiring is fixed and cannot change — every pin, serial port, baud rate and DIP position below reflects hardware already built and working. Firmware adapts to the hardware, never the reverse.</p>
+
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin-top:0">Why the brains live on the ESP8266</h3>
+      <p style="font-size:13.5px">The ATmega2560 cannot be flashed over WiFi: its ESP8266 sits on <b>Serial3</b>, not the Serial0 bootloader port, and no GPIO reaches the Mega's RESET pin — adding one would be a wiring change. So the split is deliberate:</p>
+      <table style="margin-top:10px">
+        <thead><tr><th></th><th>ATmega2560</th><th>ESP8266</th></tr></thead>
+        <tbody>
+          <tr><td><b>Role</b></td><td>thin I/O, near-static</td><td>all the brains</td></tr>
+          <tr><td><b>Owns</b></td><td>buttons, scanner framing, relay drive, LCD — including the <span class="mono">CHECKING...</span> it paints itself on every scan, so a dead ESP is visible on the glass — and the <b>independent auto-off timer</b></td><td>protocol, device auth, heartbeat, the <b>scan decision</b> (<span class="mono">lib/bridgelogic</span>: online-first, roster fallback), <span class="mono">!AUTH</span> arming, <span class="mono">!STATE</span> reconciliation, roster cache, event queue</td></tr>
+          <tr><td><b>Updated by</b></td><td>USB, rarely</td><td><b>USB too</b> — the Arduino IDE, whenever a value in <span class="mono">secrets.h</span> changes. OTA was removed at firmware 2.0.0: a fleet-update mechanism for one box is a way for the box to break itself and nothing else</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:13px; margin-top:10px; color:var(--muted)">In the system this replaces, the off command was scheduled inside an Excel macro on a Windows PC — close the workbook mid-session and a court burned until somebody noticed. The Mega's timer is independent precisely so that if the ESP hangs, WiFi drops and the backend dies, <b>the lights still go off</b>.</p>
+    </div>
+    <div>
+      <div class="callout danger" style="margin-top:0">
+        <div class="t">⚠ Relays — open safety question, gates go-live</div>
+        <p>The relay module is rated <b>10 A @ 250 VAC</b>. Plausible for one modern LED court bank; inadequate for older metal-halide. Standard practice is relay → <b>contactor coil</b>, contactor carries the lighting load. <b>Not yet confirmed on the installed hardware.</b> If relays switch lighting directly, a qualified electrician is required before anything ships. No software decision changes this.</p>
+      </div>
+      <div class="callout">
+        <div class="t">The display is 20×4 driven as 16×2</div>
+        <p>The physical panel is a 2004A, but firmware drives it as 16×2 by decision — works on either panel. Geometry is a compile-time constant (<code>LCD_COLS</code>/<code>LCD_ROWS</code>): widening later is a one-line change plus a corpus update.</p>
+      </div>
+      <div class="callout good">
+        <div class="t">Hard limits burned into the Mega</div>
+        <p><span class="mono">RELAY_HARD_CAP_MS</span> = 90 min — no frame can express indefinite-on, and the same 5400 s is now <em>one</em> constant on both sides: <span class="mono">proto::kRelayHardCapSeconds</span> (static-asserted in the ESP build too) and the backend's <span class="mono">RelayHardCap</span>, pinned by the buttonmap corpus, so the button map, a walk-up and an activation can no longer sell minutes the relay will not deliver. <span class="mono">AUTH_TTL_MS</span> = 30 s — button authorisation expires. Both hold regardless of what the ESP, network or backend believe.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PINS ================= -->
+<section id="pins">
+  <div class="eyebrow">Hardware · GPIO map</div>
+  <h2>GPIO &amp; wiring</h2>
+  <p class="lede">Every peripheral hangs off fixed Mega pins. Relays are <b>active LOW</b> — driving the pin low energises the coil — and all buttons use <code>INPUT_PULLUP</code>, so a press reads low.</p>
+
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 1120 560" role="img" aria-label="Pin map of the WeMos Mega 2560 court box: relays on pins 2 to 5, status LED on 13, LCD on I2C pins 20 and 21, court buttons on 22 to 28, duration buttons on 30 to 36, QR scanner on Serial2 pins 16 and 17, and the onboard ESP8266 on Serial3 pins 14 and 15" style="min-width:940px;max-width:100%;height:auto">
+    <defs>
+      <marker id="parw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--amber-fill)"/></marker>
+    </defs>
+
+    <!-- board -->
+    <rect x="416" y="46" width="290" height="480" rx="12" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="2"/>
+    <text x="561" y="76" text-anchor="middle" font-size="14.5" font-weight="800" fill="currentColor">WeMos Mega 2560</text>
+    <text x="561" y="93" text-anchor="middle" font-size="10.5" class="m" fill="currentColor" opacity=".6">one board, two computers</text>
+
+    <!-- ESP subboard -->
+    <rect x="446" y="110" width="230" height="64" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="1.6"/>
+    <text x="561" y="136" text-anchor="middle" font-size="12.5" font-weight="800" fill="currentColor">ESP8266 (onboard)</text>
+    <text x="561" y="153" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">WiFi · bearer key · roster · events</text>
+
+    <!-- internal serial3 -->
+    <g stroke="var(--amber-fill)" stroke-width="1.6" fill="none">
+      <path d="M547 174 V212"/><path d="M575 212 V174" marker-end="url(#parw)"/>
+      <path d="M547 174 V212" marker-end="url(#parw)"/>
+    </g>
+    <rect x="446" y="212" width="230" height="46" rx="8" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-width="1.3"/>
+    <text x="561" y="231" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">Serial3 — TX 14 / RX 15</text>
+    <text x="561" y="247" text-anchor="middle" font-size="9.5" class="m" fill="currentColor" opacity=".65">9600 8N1 · routed by DIP 1+2 · wiring fixed</text>
+
+    <!-- left pins -->
+    <g class="m" font-size="11" font-weight="600">
+      <g fill="var(--amber-soft)" stroke="var(--amber-fill)">
+        <rect x="398" y="292" width="38" height="20" rx="4"/><rect x="398" y="318" width="38" height="20" rx="4"/>
+        <rect x="398" y="344" width="38" height="20" rx="4"/><rect x="398" y="370" width="38" height="20" rx="4"/>
+        <rect x="398" y="422" width="38" height="20" rx="4"/>
+        <rect x="398" y="464" width="38" height="20" rx="4"/><rect x="398" y="490" width="38" height="20" rx="4"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="417" y="306">D2</text><text x="417" y="332">D3</text><text x="417" y="358">D4</text><text x="417" y="384">D5</text>
+        <text x="417" y="436">D13</text>
+        <text x="417" y="478">20</text><text x="417" y="504">21</text>
+      </g>
+    </g>
+
+    <!-- right pins -->
+    <g class="m" font-size="11" font-weight="600">
+      <g fill="var(--amber-soft)" stroke="var(--amber-fill)">
+        <rect x="686" y="286" width="38" height="20" rx="4"/><rect x="686" y="312" width="38" height="20" rx="4"/>
+        <rect x="686" y="338" width="38" height="20" rx="4"/><rect x="686" y="364" width="38" height="20" rx="4"/>
+        <rect x="686" y="402" width="38" height="20" rx="4"/><rect x="686" y="428" width="38" height="20" rx="4"/>
+        <rect x="686" y="454" width="38" height="20" rx="4"/><rect x="686" y="480" width="38" height="20" rx="4"/>
+        <rect x="686" y="122" width="38" height="20" rx="4"/><rect x="686" y="148" width="38" height="20" rx="4"/>
+      </g>
+      <g fill="currentColor" text-anchor="middle">
+        <text x="705" y="300">22</text><text x="705" y="326">24</text><text x="705" y="352">26</text><text x="705" y="378">28</text>
+        <text x="705" y="416">30</text><text x="705" y="442">32</text><text x="705" y="468">34</text><text x="705" y="494">36</text>
+        <text x="705" y="136">17</text><text x="705" y="162">16</text>
+      </g>
+    </g>
+
+    <!-- left peripherals -->
+    <rect x="40" y="270" width="290" height="130" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="185" y="294" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">Relay board — courts A–D</text>
+    <g font-size="10.5" class="m" fill="currentColor" opacity=".8" text-anchor="middle">
+      <text x="112" y="318">A ← D2</text><text x="258" y="318">B ← D3</text>
+      <text x="112" y="340">C ← D4</text><text x="258" y="340">D ← D5</text>
+    </g>
+    <text x="185" y="368" text-anchor="middle" font-size="10.5" fill="var(--red)" font-weight="700">ACTIVE LOW · 10 A @ 250 VAC · contactor TBC</text>
+    <text x="185" y="386" text-anchor="middle" font-size="9.5" class="m" fill="currentColor" opacity=".6">coil driven via on-board transistors</text>
+
+    <rect x="40" y="412" width="290" height="40" rx="10" fill="var(--card)" stroke="currentColor" stroke-opacity=".4" stroke-width="1.3"/>
+    <text x="185" y="437" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Status LED <tspan class="m" font-size="10" opacity=".65">← D13</tspan></text>
+
+    <rect x="40" y="462" width="290" height="60" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="185" y="486" text-anchor="middle" font-size="12.5" font-weight="800" fill="currentColor">LCD 2004A — driven 16×2</text>
+    <text x="185" y="506" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">I²C addr 0x27 · SDA 20 · SCL 21</text>
+
+    <!-- right peripherals -->
+    <rect x="790" y="266" width="290" height="118" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="935" y="290" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">Court buttons (green) ×4</text>
+    <g font-size="10.5" class="m" fill="currentColor" opacity=".8" text-anchor="middle">
+      <text x="862" y="314">A ← 22</text><text x="1008" y="314">B ← 24</text>
+      <text x="862" y="336">C ← 26</text><text x="1008" y="336">D ← 28</text>
+    </g>
+    <text x="935" y="366" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".65">INPUT_PULLUP · debounced in courtlogic</text>
+
+    <rect x="790" y="396" width="290" height="104" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="935" y="420" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">Duration buttons (black) ×4</text>
+    <g font-size="10.5" class="m" fill="currentColor" opacity=".8" text-anchor="middle">
+      <text x="862" y="444">15 m ← 30</text><text x="1008" y="444">30 m ← 32</text>
+      <text x="862" y="466">45 m ← 34</text><text x="1008" y="466">60 m ← 36</text>
+    </g>
+    <text x="935" y="488" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".65">INPUT_PULLUP</text>
+
+    <rect x="790" y="96" width="290" height="86" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+    <text x="935" y="122" text-anchor="middle" font-size="13" font-weight="800" fill="currentColor">QR scanner</text>
+    <text x="935" y="142" text-anchor="middle" font-size="10.5" class="m" fill="currentColor" opacity=".75">Serial2 · RX 17 / TX 16 · 9600</text>
+    <text x="935" y="162" text-anchor="middle" font-size="10" fill="currentColor" opacity=".65">emits one line per scan → framed by the Mega</text>
+
+    <!-- leaders -->
+    <g stroke="var(--amber-fill)" stroke-width="1.5" fill="none" marker-end="url(#parw)">
+      <path d="M396 302 Q370 302 332 320"/>
+      <path d="M396 380 Q370 380 332 360"/>
+      <path d="M396 432 H334"/>
+      <path d="M396 474 Q372 474 332 486"/>
+      <path d="M726 296 Q756 296 788 310"/>
+      <path d="M726 470 Q756 470 788 452"/>
+      <path d="M726 132 Q756 132 788 132"/>
+    </g>
+  </svg>
+  <figcaption>The fixed pin map. The ESP8266 rides the same PCB but is a separate computer — everything it knows about the physical world arrives as checksummed frames over Serial3. The QR scanner talks only to the Mega; the Mega frames each scan line and forwards it upstream as <span class="mono">!SCAN</span>.</figcaption>
+  </figure>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Wiring table (fixed)</h3>
+      <table>
+        <thead><tr><th>Function</th><th>Connection</th></tr></thead>
+        <tbody>
+          <tr><td>Court relays A–D</td><td><span class="pin">2</span><span class="pin">3</span><span class="pin">4</span><span class="pin">5</span> — <b>active LOW</b></td></tr>
+          <tr><td>Court buttons A–D (green)</td><td><span class="pin">22</span><span class="pin">24</span><span class="pin">26</span><span class="pin">28</span> <code>INPUT_PULLUP</code></td></tr>
+          <tr><td>Duration buttons 15/30/45/60 m (black)</td><td><span class="pin">30</span><span class="pin">32</span><span class="pin">34</span><span class="pin">36</span> <code>INPUT_PULLUP</code></td></tr>
+          <tr><td>Status LED</td><td><span class="pin">13</span></td></tr>
+          <tr><td>LCD</td><td>I²C <span class="pin">0x27</span> · SDA <span class="pin">20</span> / SCL <span class="pin">21</span></td></tr>
+          <tr><td>QR scanner</td><td><b>Serial2</b> — RX <span class="pin">17</span> / TX <span class="pin">16</span> @ 9600</td></tr>
+          <tr><td>ESP8266 bridge</td><td><b>Serial3</b> — TX <span class="pin">14</span> / RX <span class="pin">15</span> @ 9600 8N1</td></tr>
+          <tr><td>Power</td><td>Mean Well PSU → 2× fused LM2596 → 5 V and 9 V rails</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Power tree</h3>
+      <figure style="margin:6px 0 0">
+      <svg viewBox="0 0 460 240" role="img" aria-label="Power tree: mains to Mean Well PSU, then two fused LM2596 buck converters producing a 5 volt rail and a 9 volt rail; the relay contacts switch mains to the court lights separately" style="max-width:100%;height:auto">
+        <defs><marker id="pwr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+        <rect x="14" y="20" width="120" height="44" rx="8" fill="var(--card2)" stroke="var(--red)" stroke-width="1.6"/>
+        <text x="74" y="39" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">Mains 230 VAC</text>
+        <text x="74" y="54" text-anchor="middle" font-size="9" class="m" fill="currentColor" opacity=".6">lighting circuit</text>
+        <rect x="180" y="20" width="120" height="44" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+        <text x="240" y="39" text-anchor="middle" font-size="11.5" font-weight="700" fill="currentColor">Mean Well PSU</text>
+        <text x="240" y="54" text-anchor="middle" font-size="9" class="m" fill="currentColor" opacity=".6">DC bus</text>
+        <rect x="180" y="96" width="120" height="40" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+        <text x="240" y="113" text-anchor="middle" font-size="10.5" font-weight="700" fill="currentColor">fuse + LM2596 №1</text>
+        <text x="240" y="128" text-anchor="middle" font-size="9" class="m" fill="currentColor" opacity=".6">buck</text>
+        <rect x="180" y="152" width="120" height="40" rx="8" fill="var(--card2)" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/>
+        <text x="240" y="169" text-anchor="middle" font-size="10.5" font-weight="700" fill="currentColor">fuse + LM2596 №2</text>
+        <text x="240" y="184" text-anchor="middle" font-size="9" class="m" fill="currentColor" opacity=".6">buck</text>
+        <rect x="344" y="96" width="100" height="40" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="1.6"/>
+        <text x="394" y="120" text-anchor="middle" font-size="12" font-weight="800" class="m" fill="currentColor">5 V rail</text>
+        <rect x="344" y="152" width="100" height="40" rx="8" fill="var(--amber-soft)" stroke="var(--amber-fill)" stroke-width="1.6"/>
+        <text x="394" y="176" text-anchor="middle" font-size="12" font-weight="800" class="m" fill="currentColor">9 V rail</text>
+        <g stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#pwr)">
+          <path d="M134 42 H178"/>
+          <path d="M240 64 V94"/>
+          <path d="M220 64 Q206 80 214 150"/>
+          <path d="M300 116 H342"/>
+          <path d="M300 172 H342"/>
+        </g>
+        <path d="M74 64 Q74 210 178 214" stroke="var(--red)" stroke-width="1.8" fill="none" stroke-dasharray="6 4" marker-end="url(#pwr)"/>
+        <text x="60" y="150" font-size="9.5" fill="var(--red)" class="m">switched by</text>
+        <text x="60" y="163" font-size="9.5" fill="var(--red)" class="m">relay contacts</text>
+        <text x="196" y="222" font-size="10" fill="var(--red)" font-weight="700">→ court lights (electrician-only zone)</text>
+      </svg>
+      <figcaption>Low-voltage logic and mains never share a path: the PSU feeds two independently fused buck rails, while relay <em>contacts</em> switch the lighting circuit. Mains wiring is a qualified-electrician job by rule.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DIP ================= -->
+<section id="dip">
+  <div class="eyebrow">Hardware · Config</div>
+  <h2>DIP switches</h2>
+  <p class="lede">One 8-way DIP block routes the serial lines. Pick a mode to see the required positions — taken from the project wiring sheet.</p>
+  <div class="widget">
+    <div class="wt">DIP MODE SELECTOR</div>
+    <div class="seg" role="group" aria-label="DIP mode">
+      <button data-dip="1,2,3,4" data-note="<b>Run (normal operation)</b> — Mega ↔ ESP8266 on Serial3 <em>and</em> Mega reachable over USB. This is how the box sits in the cupboard." class="on">Run</button>
+      <button data-dip="1,2" data-note="<b>Mega ↔ ESP8266 internal serial only</b> — the two computers talk on Serial3; USB path open.">Internal serial</button>
+      <button data-dip="3,4" data-note="<b>Upload to Mega over USB</b> — 1+2 OFF isolates the ESP so the uploader owns the line. Arduino IDE: open <span class='mono'>arduino/court_mega</span>, board <em>Mega 2560</em>, Upload.">USB → Mega</button>
+      <button data-dip="5,6,7" data-note="<b>Upload to ESP8266 over USB</b> — DIP 7 is the flash-mode line. <em>Every</em> flash is this one: there is no over-the-air path and no adapter, soldering or pad access is ever needed.">ESP upload</button>
+      <button data-dip="5,6" data-note="<b>ESP8266 run / monitor over USB</b> — watch the bridge's console <b>at 9600</b>. That UART <em>is</em> the Mega link and its baud is fixed by the wiring; 115200 shows framing garbage that reads as a dead board.">ESP monitor</button>
+    </div>
+    <div class="dipbank" id="dipbank" aria-hidden="true"></div>
+    <div class="dipnote" id="dipnote"></div>
+  </div>
+  <div class="callout good">
+    <div class="t">USB-only flashing is a two-minute job, which is why nothing else was needed</div>
+    <p>The wiring sheet carries a dedicated <b>USB ↔ ESP8266 upload</b> position — <b>5, 6, 7 ON</b>, others OFF — differing from ESP run/monitor only in <b>DIP 7</b>, the flash-mode line. No external serial adapter, no soldering, no pad access. That is the fact the whole update story now rests on: because reflashing the ESP is a switch change like every other mode, the over-the-air path, the image signing and the runtime credential store all cost more than they bought and were removed at firmware <span class="mono">2.0.0</span>. Restore <b>1, 2, 3, 4 ON</b> before the box goes back on the wall, and power-cycle it.</p>
+  </div>
+</section>
+
+<!-- ================= FIRMWARE ================= -->
+<section id="firmware">
+  <div class="eyebrow">Hardware · Firmware</div>
+  <h2>Firmware — one logic layer, three targets</h2>
+  <p class="lede">Everything under <code>lib/</code> except the two HALs is free of Arduino headers, so the same code compiles for AVR, Xtensa <em>and</em> the host test runner — a <b>native Unity suite</b>, run plain and again under ASAN + UBSAN, proves the logic with no board attached, and CI enforces purity with a grep gate. <code>main.cpp</code> is a composition root only; behaviour is not allowed to live where no test can drive it. The 2026-08-24 review found the ESP sketch hiding exactly such behaviour (a roster nothing filled, a scan path that never asked the API, an <span class="mono">!AUTH</span> nobody sent); it now lives in <code>lib/bridgelogic</code>, host-tested and corpus-bound. Firmware is <span class="mono">2.0.0</span> — a deliberate contract break in which request signing, the discovery beacon, claim codes, provisioning, the device clock, OTA, image signing and the runtime WiFi credential store were all removed. <b>PlatformIO is the tested build; the Arduino IDE is the deployment route</b>, and because the AVR core hard-codes <span class="mono">-std=gnu++11</span> with no way for a sketch to override it, anything <span class="mono">court_mega</span> links must be valid C++11 as well as C++17.</p>
+
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin-top:0">Module map — <span class="mono" style="font-size:13px">src/iot/lib/</span></h3>
+      <table>
+        <thead><tr><th>Module</th><th>Owns</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">timebase/</td><td>rollover-safe <code>millis()</code> primitives — read first</td></tr>
+          <tr><td class="mono">courtlogic/</td><td>the Mega's behaviour: auto-off timer, debounce, scan framing, auth window, frame dispatch</td></tr>
+          <tr><td class="mono">protocol/</td><td>Mega ↔ ESP serial codec</td></tr>
+          <tr><td class="mono">devcrypto/</td><td>lowercase hex encode/decode — all that is left of it once request signing went</td></tr>
+          <tr><td class="mono">roster/</td><td>who may open which court — cached, age-limited</td></tr>
+          <tr><td class="mono">eventq/</td><td>what the box DID, queued until the API can hear</td></tr>
+          <tr><td class="mono">court/</td><td>what a scan means; button map; walk-up pad</td></tr>
+          <tr><td class="mono" style="color:var(--amber)">bridgelogic/</td><td><b>the ESP's decisions</b> — <span class="mono">RosterSync</span> (heartbeat → cache), <span class="mono">ScanFlow</span> (online-then-roster), <span class="mono">WalkUp</span> (court + nonce body), <span class="mono">StateReconcile</span> (<span class="mono">!STATE</span> → held state), <span class="mono">Relight</span> (<span class="mono">!EXT</span> before each cap expiry), <span class="mono">OnRetry</span>, <span class="mono">ApiBreaker</span>, <span class="mono">AuthPolicy</span>, <span class="mono">Cadence</span>; everything <span class="mono">court_bridge/main.cpp</span> does NOT do</td></tr>
+          <tr><td class="mono">devapi/</td><td>the bearer header, the response-status policy, and a heapless JSON scanner</td></tr>
+          <tr><td class="mono">fwversion/</td><td>the <span class="mono">FW_VERSION_*</span> string, alone so either half can carry it</td></tr>
+          <tr><td class="mono">hal/ + hal_fakes/</td><td>port interfaces, nulls, recording test doubles</td></tr>
+          <tr><td class="mono">arduino_hal/ · posix_hal/</td><td>the only places Arduino / POSIX headers live</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:10px">Targets: <span class="mono">court_mega</span> (AVR) · <span class="mono">court_bridge</span> (ESP8266) · <span class="mono">simulator</span> (native, speaks the real downlink protocol on a loopback socket, bound to loopback unless <span class="mono">--bind-all</span>). <span class="mono">src/iot/arduino/</span> holds the two <b>generated</b> IDE sketches — <span class="mono">make arduino-export</span> writes them, <span class="mono">make arduino-check</span> fails on a diff, and CI runs it so a technician cannot open a folder that looks current and flash last week's firmware.</p>
+    </div>
+
+    <div>
+      <div class="card pad" style="margin-bottom:16px">
+        <h3 style="margin-top:0">The decision model — who decides what, and in which direction it fails</h3>
+        <table>
+          <thead><tr><th>Subsystem</th><th>Rule</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Scan</td><td><span class="pill sw">online first</span></td><td><span class="mono">ScanFlow</span>: a box with WiFi and a court list POSTs <span class="mono">/activate</span>; a <em>refusal</em> is final and the roster gets no second opinion. Only an unanswerable call — no route, a 5xx, a malformed 200, or <span class="mono">ApiBreaker</span> open after two consecutive transport failures (15 s backoff doubling to 120 s; any completed answer, 401 and 429 included, closes it) — hands the scan to the roster. The first heartbeat goes out the moment the link comes up: until <span class="mono">court_numbers</span> has arrived the box is <em>not</em> online</td></tr>
+            <tr><td>Roster cache</td><td><span class="pill risk">fails closed</span></td><td>filled by <span class="mono">RosterSync</span> from every heartbeat (wholesale replace; an absent key leaves the cache alone; a malformed entry is refused, never truncated). Past <span class="mono">ROSTER_MAX_AGE_MS</span> (6 h) the box admits nobody — a cancelled booking lingering in cache lights a court nobody is charged for. Lights the court the <em>matched entry</em> names, for its <em>remaining</em> time</td></tr>
+            <tr><td>Relay timer</td><td><span class="pill ok">fails open</span></td><td>lights off even if ESP, WiFi and backend are all gone — the most expensive failure is a court burning all night</td></tr>
+            <tr><td>Held state</td><td><span class="pill sw">reconciled</span></td><td><span class="mono">StateReconcile</span> reads <span class="mono">!STATE</span> (every change, every 10 s): a mask bit cleared while the bridge believes the court held <em>is</em> the release, so a dropped <span class="mono">!EVT,AUTOOFF</span> can no longer strand a court as held; 2 s grace against a frame in flight. A failed <span class="mono">!ON</span> no longer marks a court held — the box paints TRY AGAIN instead</td></tr>
+            <tr><td>Walk-ups</td><td><span class="pill sw">need network</span></td><td>the box knows neither tariff nor next booking; refusing to sell new time is a member at the desk, refusing paid time is a member in the dark. Body carries the court number and a per-purchase nonce, reused across retries of the same purchase</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card pad" style="margin-bottom:16px">
+        <h3 style="margin-top:0">The box carries no clock at all — and that is the fix, not a gap</h3>
+        <p style="font-size:13.5px">Review C1 found a box that had to sign every request with a wall clock it had no way to seed. The whole apparatus that grew around that — <span class="mono">server_unix</span> in a provision response and in every heartbeat, a 401 body carrying the server clock so a clockless board could recover, an asymmetric skew window, a two-strike loop breaker, a clock adopted from a verified discovery OFFER — <b>is gone</b>, because with one static key there is nothing to sign and nothing to date. The box keeps only <span class="mono">tb::Uptime64</span>, a 64-bit accumulator over <code>millis()</code>. The heartbeat's <span class="mono">uptime_ms</span> and both <span class="mono">uptime_ms</span> fields on an events batch are rendered from it, and <b>the server dates an event from the difference between the two</b>. A <span class="mono">uint32_t</span> anywhere on that path is the 49.7-day wrap re-entering through the API, and it once was: an activation queued before the wrap and uploaded after it arrived stamped 49.7 days ahead of its own batch.</p>
+      </div>
+      <div class="card pad" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Event queue</h3>
+        <p style="font-size:13.5px">A RAM ring of what the box did — <span class="mono">Activation · Release · UnknownScan · Fault · Boot</span> — drained to the API when reachable, at most 32 per batch. Survives WiFi loss, router reboots, a two-day outage; <b>not a power cut</b>. That last one is now stated honestly: the store's value cap went 32 → 128 bytes and a 48-byte <span class="mono">Event</span> would fit, so persisting the ring has <em>not been built</em> rather than being impossible — it needs a record per slot plus a durable head and tail, and a torn ring that replays a stale activation charges a member twice. The <b>sequence number does persist</b>, in blocks of 64, and is the only thing left in flash: API-side deduplication is a permanent unique index on <span class="mono">(tenant, device, seq)</span>, so a box that restarted numbering at 1 would have every event receipted as a duplicate. Only the <em>roster</em> path queues: an activation the API itself granted is one it already recorded. A queued activation is evidence, not a charge — it is what stops the no-show sweep reversing a debit already posted at booking (review C6).</p>
+      </div>
+      <div class="card pad">
+        <h3 style="margin-top:0">The rollover rule</h3>
+        <p style="font-size:13.5px"><code>millis()</code> wraps every ~49.7 days and a box in a cupboard is normally up that long. <b>Never compare times directly</b> — use <code>tb::reached(now, deadline)</code> / <code>tb::Deadline</code>. The predecessor firmware got it wrong in both directions on adjacent lines (0-as-sentinel, and <code>now &gt;= expiresAt</code> — false for 49.7 days after the wrap, so the relay was never released). <code>make lint-iot</code> greps for raw deadline comparisons outside <code>lib/timebase</code>.</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>Flashing — both halves, over USB, and nothing else</h3>
+  <div class="grid3">
+    <div class="card pad kv">
+      <span class="pill hw">Four values</span>
+      <p style="font-size:13.5px;margin:8px 0 0">A box knows exactly what is compiled into it. <span class="mono">secrets.h</span> (gitignored, all four mandatory — the bridge <span class="mono">#error</span>s without them and <span class="mono">static_assert</span>s on an empty one) holds <span class="mono">WIFI_SSID</span>, <span class="mono">WIFI_PASSWORD</span>, <span class="mono">API_BASE_URL</span> — the gateway's <b>LAN</b> address and port, <b><span class="mono">http</span>, never <span class="mono">https</span></b>, because the box has a plain <span class="mono">WiFiClient</span> and no heap for a TLS context — and <span class="mono">DEVICE_API_KEY</span>, read off the admin Devices page. Rotating the WiFi password, the key or the base URL is the same procedure for all three: edit the file, upload <span class="mono">court_bridge</span>, restore the run DIPs.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill ok">The Arduino IDE is the route</span>
+      <p style="font-size:13.5px;margin:8px 0 0">Open <span class="mono">arduino/court_mega</span>, then <span class="mono">arduino/court_bridge</span>, press Upload for each; nothing to install from the Library Manager, because each sketch folder vendors every library it needs. Boards are pinned to what CI compiles against — <b>Arduino AVR 1.8.6</b> and <b>esp8266 3.1.2</b>, matching the PlatformIO platforms. <span class="mono">make flash-mega</span> / <span class="mono">make flash-bridge</span> do the same two uploads from PlatformIO and are the <em>developer</em> alternative.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill risk">What went, and why</span>
+      <p style="font-size:13.5px;margin:8px 0 0">OTA, the RSA-2048 image trailer, <span class="mono">BootGuard</span>, the <span class="mono">iot-sign</span> job, the <span class="mono">OTA_PRIVATE_KEY</span> secret, the <span class="mono">/firmware/</span> route, the <span class="mono">Ota:*</span> override and the flash credential store are <b>all removed</b>. The signing key never existed — the private half was unlocatable, so every board flashed with the committed public key would have rejected every image nobody could sign. One club, one box and a USB cable needed none of it, and each link in that chain could strand a board in a cupboard.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SERIAL ================= -->
+<section id="serial">
+  <div class="eyebrow">Protocols · Wire format №1</div>
+  <h2>Serial protocol v2 — Mega ↔ ESP8266</h2>
+  <p class="lede">9600 8N1 over Serial3, line-terminated, NMEA-style XOR checksum. v2 exists because the legacy protocol had two defects that can't survive being driven by a server: <b>ON had no duration</b> (the off command lived in a VBA macro on a Windows PC) and <b>no integrity</b> (a corrupted <span class="mono">a</span> arriving as <span class="mono">A</span> turns lights on and leaves them on). v2 is additive — the codec still speaks every legacy verb in both directions — but <b>the production Mega does not</b>: <span class="mono">court_mega</span> constructs its decoder with <span class="mono">LegacyDialect::Refuse</span>, so any downlink line not beginning with <span class="mono">!</span> is answered <span class="mono">!EVT,BADFRAME,RX</span> and moves no relay. The bare <span class="mono">A</span> was the one message that closed a relay with no checksum, on a UART that receives the ESP's 74880-baud boot banner at every ESP reset. The simulator opts into <span class="mono">Accept</span>, because it is the bench.</p>
+
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 900 170" role="img" aria-label="Anatomy of a v2 serial frame: exclamation sentinel, verb, comma-separated arguments, star, two hex checksum digits, newline" style="min-width:700px;max-width:100%;height:auto">
+    <g class="m" font-size="30" font-weight="600">
+      <text x="40" y="70" fill="var(--amber)">!</text>
+      <text x="70" y="70" fill="var(--green)">ON</text>
+      <text x="125" y="70" fill="currentColor" opacity=".5">,</text>
+      <text x="145" y="70" fill="var(--blue)">A</text>
+      <text x="172" y="70" fill="currentColor" opacity=".5">,</text>
+      <text x="192" y="70" fill="var(--blue)">1800</text>
+      <text x="285" y="70" fill="var(--amber)">*</text>
+      <text x="310" y="70" fill="var(--red)">4C</text>
+      <text x="365" y="70" fill="currentColor" opacity=".5">\n</text>
+    </g>
+    <g stroke="currentColor" stroke-opacity=".4" fill="none">
+      <path d="M46 84 V100"/><path d="M95 84 V100"/><path d="M225 84 V100"/><path d="M292 84 V100"/><path d="M330 84 V100"/><path d="M380 84 V100"/>
+    </g>
+    <g font-size="11" fill="currentColor" opacity=".85" text-anchor="middle">
+      <text x="46" y="118">sentinel — no legacy</text><text x="46" y="132">message starts with it</text>
+      <text x="95" y="118">VERB, 2–5 chars</text>
+      <text x="205" y="118">args · court A–D ·</text><text x="205" y="132">seconds clamped 1–5400</text>
+      <text x="311" y="118">XOR of bytes between</text><text x="311" y="132">! and *, exclusive —</text><text x="311" y="146">uppercase hex only</text>
+      <text x="395" y="118">\r, \n or \r\n</text>
+    </g>
+    <g font-size="11.5" fill="currentColor">
+      <text x="560" y="40" font-weight="800">Escaping (LCD text only)</text>
+      <text x="560" y="60" class="m" font-size="11">, → %2C&#160;&#160;&#160;% → %25</text>
+      <text x="560" y="92" font-weight="800">On checksum failure</text>
+      <text x="560" y="112">dropped silently and counted — never guessed at:</text>
+      <text x="560" y="128">a half-understood relay command is worse</text>
+      <text x="560" y="144">than a missing one</text>
+    </g>
+  </svg>
+  <figcaption>Frame anatomy. Checksum is uppercase-only on receipt — <span class="mono">*4a</span> is a bad frame, because <span class="mono">a</span> differs from <span class="mono">A</span> by a single bit: the exact corruption the checksum exists to catch.</figcaption>
+  </figure>
+  </div>
+
+  <div class="widget" style="margin-top:16px">
+    <div class="wt">LIVE FRAME BUILDER — real XOR checksum, computed as you click</div>
+    <div class="frow">
+      <div><label>Verb</label>
+        <span class="seg" id="fb-verb">
+          <button class="on" data-v="ON">ON</button><button data-v="OFF">OFF</button><button data-v="EXT">EXT</button><button data-v="AUTH">AUTH</button><button data-v="LCD">LCD</button><button data-v="RST">RST</button><button data-v="PING">PING</button>
+        </span>
+      </div>
+      <div id="fb-courtwrap"><label>Court</label>
+        <span class="seg" id="fb-court">
+          <button class="on" data-c="A">A</button><button data-c="B">B</button><button data-c="C">C</button><button data-c="D">D</button>
+        </span>
+      </div>
+      <div id="fb-secwrap"><label for="fb-sec">Seconds <span class="mono" id="fb-secv">1800</span></label>
+        <input type="range" id="fb-sec" min="60" max="6000" step="60" value="1800" aria-label="Duration seconds">
+      </div>
+    </div>
+    <div class="frame-out" id="fb-out" aria-live="polite"></div>
+    <div class="fnote" id="fb-note"></div>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Downlink — bridge → Mega</h3>
+      <table>
+        <thead><tr><th>Frame</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">!ON,&lt;court&gt;,&lt;seconds&gt;</td><td>Close relay for <b>at most</b> that long. Duration is <b>mandatory</b></td></tr>
+          <tr><td class="mono">!OFF,&lt;court&gt;</td><td>Open the relay now</td></tr>
+          <tr><td class="mono">!EXT,&lt;court&gt;,&lt;seconds&gt;</td><td>Extend deadline to now + s. Refused <span class="mono">!ERR,BADARG</span> if the relay is open — which the bridge reads as "that court is already dark". <span class="mono">bridgelogic::Relight</span> sends one <b>60 s before each cap expiry</b>, which is how a two-hour booking outlives a ninety-minute relay cap and still fails open when the ESP dies</td></tr>
+          <tr><td class="mono">!LCD,&lt;line1&gt;,&lt;line2&gt;</td><td>Display; truncated to 16 columns</td></tr>
+          <tr><td class="mono">!AUTH,&lt;seconds&gt;</td><td>Accept button input this long; <span class="mono">0</span> disarms</td></tr>
+          <tr><td class="mono">!RST</td><td>Relays open, buttons disarmed, default screen</td></tr>
+          <tr><td class="mono">!PING</td><td>Answered with <span class="mono">!PONG</span></td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Seconds are <b>clamped, never rejected</b> (saturating, not wrapping): a clamped light is a wrong-length game; a rejected one is a dark court. <span class="mono">AUTH</span> clamps 0–5400; <span class="mono">ON</span>/<span class="mono">EXT</span> clamp 1–5400 — zero is an OFF wearing an ON's clothes.</p>
+    </div>
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Uplink — Mega → bridge</h3>
+      <table>
+        <thead><tr><th>Frame</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">!BTN,&lt;key&gt;</td><td>Debounced press, key ∈ A–D, 1–4</td></tr>
+          <tr><td class="mono">!SCAN,&lt;code&gt;</td><td>Complete line from the QR scanner</td></tr>
+          <tr><td class="mono">!STATE,&lt;mask&gt;,&lt;remA..D&gt;</td><td>Relay bitmask + seconds remaining — on change and every 10 s. <b>Read, not just logged</b>: the bridge reconciles its held state from the mask (review A2-6)</td></tr>
+          <tr><td class="mono">!PONG,&lt;ver&gt;,&lt;uptime&gt;</td><td>Answer to PING</td></tr>
+          <tr><td class="mono">!EVT,&lt;name&gt;,&lt;detail&gt;</td><td>AUTOOFF · OFF (every commanded release, so early release is billed as time used) · AUTHEXPIRED · BADFRAME · OVERRUN. <b>BADFRAME is the commonest</b>, not the rarest: the production Mega classifies a line by its first byte, so a glitch byte ahead of an <span class="mono">!ON</span> is a BADFRAME, not a BADCRC</td></tr>
+          <tr><td class="mono">!ERR,&lt;code&gt;</td><td>BADCRC · BADVERB · BADARG · NOCOURT</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Bounds: <span class="mono">kMaxArgLen 24</span>, <span class="mono">kMaxFrameLen 192</span>. Over-long LCD text is truncated (the panel cuts it anyway); an over-long SCAN is <b>refused</b> — a truncated member code doesn't fail, it identifies a <em>different member</em>. That 24-byte argument is the pipeline that ruled a JWT out (review H2): the identifier is now a 12-character <a href="#deviceapi">access code</a>, and <span class="mono">roster::kMaxTokenLen 20 ≤ kMaxArgLen</span> is static-asserted where the two meet.</p>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="callout good" style="margin:0">
+      <div class="t">The two safety rules live on the Mega</div>
+      <p>1 — <b>Every ON carries a deadline.</b> v2 cannot express indefinite-on; <span class="mono">RELAY_HARD_CAP_MS</span> (90 min) caps even a frame that asks for more. A Mega whose bridge is unplugged still opens its relays. 2 — <b>Authorisation expires.</b> <span class="mono">!AUTH</span> arms buttons for a bounded window (30 s = <span class="mono">AUTH_TTL_MS</span>); the legacy <span class="mono">authenticated</span> flag had no expiry, so a button pressed hours after someone else's scan fired a relay on their credit. Review H1 found the bridge <em>never sent</em> <span class="mono">!AUTH</span>, so every button press was discarded. <b>Who the window is for is <span class="mono">bridgelogic::AuthPolicy</span>'s rule, and it matters as much as the expiry:</b> it arms <em>only for a scan somebody recognised</em> — the API answered with a verdict about a known member, or the roster matched an entry — so an unknown barcode arms nothing. And a grant does not close the window, it <b>binds</b> it: the court that just lit is remembered, the window stays armed for the same TTL, and an OFF press is honoured for <em>that court only</em> (<span class="mono">NOT YOUR COURT / SCAN TO START</span> otherwise). Before this, any barcode bought thirty seconds of buttons — and with an admin-mapped OFF button, a stranger could dark a league match — while the paying member's own grant closed theirs.</p>
+    </div>
+    <div class="card pad scroll" style="margin:0">
+      <h3 style="margin-top:0">Legacy compatibility (both directions)</h3>
+      <table>
+        <thead><tr><th>Legacy</th><th>v2 equivalent</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">A…D ↓</td><td class="mono">!ON,&lt;court&gt;,&lt;HARD_CAP&gt; — a legacy on gets the cap, because the alternative is forever</td></tr>
+          <tr><td class="mono">a…d ↓</td><td class="mono">!OFF,&lt;court&gt;</td></tr>
+          <tr><td class="mono">RESET · ENTER CODE</td><td class="mono">!RST</td></tr>
+          <tr><td class="mono">INVALID CODE / LOW BALANCE / DENIED</td><td class="mono">!LCD with fixed second lines (TRY AGAIN / TOP UP / —)</td></tr>
+          <tr><td class="mono">&lt;l1&gt;|&lt;l2&gt;</td><td class="mono">!LCD,&lt;l1&gt;,&lt;l2&gt; + !AUTH,30</td></tr>
+          <tr><td class="mono">A…D, 1…4 ↑</td><td class="mono">!BTN,&lt;key&gt;</td></tr>
+          <tr><td class="mono">CHECK:&lt;code&gt; ↑</td><td class="mono">!SCAN,&lt;code&gt;</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">The legacy up/down collision (<span class="mono">A</span> = button up, relay down) is preserved, not fixed — each end only reads one direction, and fixing it would break the compatibility the table exists for. Who opts in is <b>per link</b>: the production Mega refuses the downlink dialect outright; the simulator and bench accept it; the bridge's <em>uplink</em> decoder still accepts it, which costs nothing because no uplink message can close a relay.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= IDENTITY ================= -->
+<section id="identity">
+  <div class="eyebrow">Protocols · Who the box is</div>
+  <h2>Identity &amp; flashing — one club key, and a box that introduces itself</h2>
+  <p class="lede">Device authentication is the whole of one sentence: <b>one static per-club API key, presented as <span class="mono">Authorization: Bearer</span>, with the box's MAC in the request body.</b> No signature, no canonical string, no nonce, no timestamp, no clock window, no per-device key, no provisioning call, no discovery. A key the API does not recognise is a bare 401 with an empty body; a MAC it does not recognise <em>registers itself</em>.</p>
+
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin-top:0">Getting a box onto a court</h3>
+      <table>
+        <thead><tr><th>#</th><th>Step</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td>Read the club's device API key off the admin <b>Devices</b> page. It is <em>readable</em>, not shown-once, because an admin has to paste it into a <span class="mono">secrets.h</span> at a workbench weeks after the club was created.</td></tr>
+          <tr><td class="num">2</td><td>Paste it into <span class="mono">arduino/court_bridge/secrets.h</span> beside the other three values.</td></tr>
+          <tr><td class="num">3</td><td>Open <span class="mono">arduino/court_mega</span> and then <span class="mono">arduino/court_bridge</span> in the Arduino IDE and press Upload for each (<a href="#dip">DIP positions</a>).</td></tr>
+          <tr><td class="num">4</td><td>Restore the run DIPs, power-cycle, screw the box to the wall.</td></tr>
+          <tr><td class="num">5</td><td><b>It appears on the Devices page by itself</b> on its first heartbeat.</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:13px;color:var(--muted);margin-top:10px">Regenerating the key on the Devices page invalidates the old one on the very next request — nothing is cached, because a cache with any lifetime at all is a window in which a rotated-away key still works. So a regeneration <em>is</em> a reflash of every box, and the page says so.</p>
+    </div>
+    <div>
+      <div class="card pad" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Auto-registration is the whole of provisioning</h3>
+        <p style="font-size:13.5px"><span class="mono">DeviceRegistryService.AutoRegisterAsync</span> creates the row from nothing but the MAC. <span class="mono">device_code</span> is <span class="mono">box-&lt;last six hex of the MAC&gt;</span> — what an admin reads off the board's label — falling back to the full MAC if that code is taken, because <span class="mono">device_code</span> is uniquely indexed and a collision would otherwise throw at the one moment nobody is watching, a box registering itself at 6am. The guesses are the ones an admin would otherwise type: the club's courts in ascending order, up to the four the relay bank drives; the club's button map, trimmed if it selects a court this box has not got. The row is flagged <span class="mono">AutoRegistered</span>, the Devices page badges it <b>“New — check court numbers”</b> until an admin edits it, and an audit row is written with actor <span class="mono">Guid.Empty</span> — nobody did this.</p>
+      </div>
+      <div class="callout" style="margin:0">
+        <div class="t">Why a key at all, when both ends are on the club LAN</div>
+        <p>Because the backend's public surface is a Cloudflare tunnel — that is how members book and how the admin runs the club remotely — so <span class="mono">/api/v1/device/*</span> is <b>internet-reachable</b>, and the key is what stands in front of it. Nothing in the firmware assumes the box is ever off the LAN, and nothing assumes the API is LAN-only. The comparison is constant-time and the lookup is a linear pass over the clubs that hold a key with <b>no early exit on a hit</b>, so the response time cannot say which club matched.</p>
+      </div>
+      <div class="callout danger" style="margin:16px 0 0">
+        <div class="t">What this replaced — all of it removed</div>
+        <p>A UDP discovery listener on <b>48653</b> needing host networking to hear a broadcast · ANNOUNCE / OFFER · a claim code read off the box's LCD · a commitment hash · a provisioning grant · a one-shot per-device key derived from a master KEK · key rotation, re-claim and revoke · an HMAC over a canonical request string · a nonce cache · a two-minute clock window · a 401 body carrying <span class="mono">server_unix</span> · the 16 signed-request corpus vectors. Every link in that chain could strand a board in a cupboard, and all of it existed to protect a per-board credential that one club with one box does not need.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout good">
+    <div class="t">The two identity screens, and there are no others</div>
+    <p><span class="mono">CONNECTED / SCAN TO START</span> — the box is on the club WiFi. <span class="mono">CRUSADERS COURTS / SCAN TO START</span> — it is not, and that is deliberately the same wording the Mega paints when idle, because the court still works offline from the roster and the glass should not shout an error at a member who can simply scan. Both are painted at the end of <span class="mono">setup()</span> and again on the first <span class="mono">!PONG</span> of the boot. <b>There is no claim-code screen, because there is nothing to claim</b>, and no WiFi-provisioning screen either: <span class="mono">!WIFI</span> was a verb of the serial protocol until firmware 1.2.0 and is not one now.</p>
+  </div>
+</section>
+
+<!-- ================= DEVICE API ================= -->
+<section id="deviceapi">
+  <div class="eyebrow">Protocols · Wire format №2</div>
+  <h2>Device API — four calls behind one club key</h2>
+  <p class="lede">Everything under <code>/api/v1/device</code> authenticates with the <b>Device</b> scheme — the club's one API key as <span class="mono">Authorization: Bearer</span>, never a JWT — and every call is <em>box → API</em>. The scheme authenticates a <b>club</b>, not a board: which board is calling is the <span class="mono">mac</span> in the body. There is no fifth, anonymous call: provisioning is gone, and an unknown MAC on a heartbeat registers itself. Request and response shapes are pinned in the shared corpus (<code>src/contracts/device-protocol/http/cases.json</code>) that both the C++ and the .NET suites assert, so neither side can drift without the other going red — and the anti-drift rule is an <em>executed-case count</em>, not a checksum, because a side that skips what it cannot parse passes a checksum and fails in the field.</p>
+
+  <div class="card pad scroll">
+    <table>
+      <thead><tr><th>Call</th><th>Box sends</th><th>API answers</th><th>What it settles</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">POST /heartbeat<br><span style="opacity:.6">every heartbeat_seconds (60)</span></td>
+          <td class="mono">{mac, firmware_version, uptime_ms, mega_version?}</td>
+          <td class="mono">{server_time, tenant_slug, device_code, <b>court_numbers</b>[≤4], heartbeat_seconds, config{slice_minutes, grace_window_minutes, button_map[8]}, <b>roster</b>[≤16]}</td>
+          <td>The only call that will <b>create a device row</b>. <span class="mono">court_numbers</span> is the relay mapping (index 0 = relay A). <span class="mono">roster</span> is <b>always present</b> — the box replaces its cache wholesale and a cancelled booking is expressed by absence, so an omitted key would leave a stale roster live. Each entry is <span class="mono">TOKEN|relay|opens_in|closes_in</span> (signed seconds from the response instant; <span class="mono">opens_in</span> = start − cue window, negative = already open) for <span class="mono">Booked</span> bookings on this box's courts inside the tenant's roster window — <b>checked in or not</b>, deliberately: the relay cap is ninety minutes and a slot may be longer, so dropping a live session left the second half of a paid two-hour booking with nothing to re-light it from during an outage. A booking leaves the roster when it ends, not when its member arrives. Earliest sixteen by <span class="mono">StartsAt</span>; a suspended member's booking is left out, so suspension holds while the box is offline too; whole body ≤ 2048 B, the box's response buffer. <span class="mono">button_map</span> is the <em>effective</em> one — the box's own override, else the club's — sent every time rather than on change, because a box that rebooted and missed the change would open the wrong court.</td>
+        </tr>
+        <tr>
+          <td class="mono">POST /activate<br><span style="opacity:.6">the pre-booked member (C3)</span></td>
+          <td class="mono">{mac, method, token, court?}</td>
+          <td class="mono">{activated, reason, court_number?, booking_id?, granted_seconds, starts_in_seconds?}</td>
+          <td>A booking code names its booking outright; a member-ident code is searched across the box's courts for the <em>earliest</em> activatable booking. <span class="mono">granted_seconds</span> = remainder of the slot clamped to <span class="mono">RelayHardCap</span> (5400) — a rescan of a live session answers what is left, which is how a slot longer than 90 min is re-lit. <b>Every refusal is a 200</b> with <span class="mono">activated:false</span> and a reason the LCD can show: <span class="mono">too_early</span> (with <span class="mono">starts_in_seconds</span>), <span class="mono">ended</span>, <span class="mono">not_recognised</span>, <span class="mono">wrong_court</span>, <span class="mono">no_booking</span>, <span class="mono">insufficient_balance</span>, <span class="mono">not_chargeable</span>. <span class="mono">ended</span> is never <span class="mono">activated:true</span> with zero seconds, which the box turned into a one-second relay pulse and a spent scan.</td>
+        </tr>
+        <tr>
+          <td class="mono">POST /walkup<br><span style="opacity:.6">the one call that moves money now</span></td>
+          <td class="mono">{mac, minutes, method, token, <b>court</b>, <b>nonce</b>}</td>
+          <td class="mono">200 {booking_id, granted_minutes, amount_credits, balance_after_credits, replayed}<br>402 insufficient_balance · 409 court_in_use | no_time_available | purchase_ended · 400 minutes_out_of_range | court_not_on_device | nonce_required | not_recognised</td>
+          <td>Six fields (C5/H3). <span class="mono">court</span> is the court <em>number</em> the pressed relay maps to and must be one of the box's; <span class="mono">minutes</span> ≤ min(tenant walk-up cap, 90). <span class="mono">nonce</span> (16 hex) is <b>idempotency, not authentication</b> — which is exactly why it survived the removal of request signing: the ledger reference <span class="mono">walkup:{device}:{nonce}</span> is looked up first and a repeat returns the original grant with <span class="mono">replayed:true</span>, granting the <em>remainder</em> of the purchase from now rather than its original length, so a box that lost the first 200 can still <span class="mono">!ON</span> and nobody is charged twice. A purchase whose window has ended is <span class="mono">409 purchase_ended</span>, not a grant. Creates a real booking, born activated.</td>
+        </tr>
+        <tr>
+          <td class="mono">POST /events<br><span style="opacity:.6">the drained queue</span></td>
+          <td class="mono">{mac, uptime_ms, events[≤32]{seq, uptime_ms, kind, court (relay idx 0–3), method, subject, duration_ms}}</td>
+          <td class="mono">{accepted_through, recorded}</td>
+          <td>Idempotent on <span class="mono">(tenant, device, seq)</span> under a permanent unique index; the box releases its ring up to <span class="mono">accepted_through</span> and no further, so a partial success loses nothing. <b>An <span class="mono">activation</span> event is attendance</b> (C6): its token resolves to the booking, the relay is checked against the booking's court, and it runs through the one <span class="mono">CourtActivationService</span> path <em>before</em> its receipt is written — per-event unit of work, so a mid-batch failure loses no attendance. A <span class="mono">release</span> event names no member and no booking: it carries a relay and <span class="mono">duration_ms</span>, and it is the system's <b>only measurement</b> of what the lights actually did (see the <a href="#settlement">settlement model</a>). <b>Nothing here 4xxs the box</b>: every outcome is acked and written as a <span class="mono">device.activation_{outcome}</span> audit row, so the desk can answer “it let me in — why am I a no-show?” from the record.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout" style="margin-top:16px">
+    <div class="t">Dating an event without a clock</div>
+    <p>The box carries no wall clock, so an offline scan is dated by <b>uptime arithmetic</b>: the batch's <span class="mono">uptime_ms</span> minus the event's, subtracted from the moment the upload lands. Both are rendered from the 64-bit accumulator, so the 49.7-day <code>millis()</code> wrap cannot re-enter through the API. Offline scans are then judged <em>at scan time</em>, not upload time — the cue gate, <span class="mono">CheckedInAt</span> and the roster code's liveness all use that instant. Only a <em>future</em> time (the queue outlived a reboot) or one past a <b>30-day</b> sanity bound is clamped to the upload and audited <span class="mono">device.event_time_clamped</span>. The earlier six-hour clamp, sized to the roster's trust window, re-created the very failure it was meant to prevent for any outage longer than six hours.</p>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="card pad">
+      <h3 style="margin-top:0">Identification — the 12-character access code</h3>
+      <p style="font-size:13.5px">The 60-second JWT QR is <b>retired from identification entirely</b>: the Mega's frame codec caps an argument at 24 bytes and poisons anything longer, so the multi-hundred-byte HS256 token was dropped as TooLong at the panel every time (review H2). What the phone now puts in front of the scanner is an <span class="mono">AccessCode</span>: <b>12 upper-case Crockford base32 characters</b> (no I, L, O, U — readable off a screen, typeable at a desk), 60 bits of CSPRNG entropy, a random handle to a tenant-scoped row that is the proof. Two purposes: a <b>booking-activation</b> code, minted <em>in the booking's own unit of work</em> and live until slot end + grace — it names its booking, so the box finds the roster entry with no search; and a short-lived <b>member-ident</b> code for walk-ups and the payer override. A code minted at one club resolves to nothing at another, structurally, through the tenant query filter. Bookings that predate codes are minted lazily by the roster builder and the QR screen from one rule.</p>
+      <p style="font-size:13.5px"><b>A booking-activation code never identifies a buyer or a payer.</b> <span class="mono">IdentificationResolver</span> returns a user only for a <span class="mono">MemberIdent</span> code; a booking code is usable only through <span class="mono">/activate</span>, for its own booking. A roster code travels in clear on the LAN and sits in box RAM for hours, and it was briefly accepted as a global identity for walk-up purchases and the “I'll pay” override — so anyone who read one could buy court time on that member's credits at any box. This is what keeps the stolen-box threat model true: <em>nothing the box holds is a member's identity.</em></p>
+      <p style="font-size:13px;color:var(--muted)">Member surface: <span class="mono">POST /api/v1/me/qr/generate</span> returns <span class="mono">{code, kind: booking|ident, expires_in_seconds, …}</span>, and the PWA's <span class="mono">/court-code</span> screen renders the <em>bare</em> code as a QR through an in-house encoder (verified against python-qrcode, 40/40 identical matrices) — nothing but the 12 characters ever reaches the 24-byte pipeline.</p>
+    </div>
+    <div>
+      <div class="card pad">
+        <h3 style="margin-top:0">Late evidence reverses a settled no-show (C6 residual, landed 2026-09-04)</h3>
+        <p style="font-size:13.5px">Decision recorded in <span class="mono">memory/decisions.md</span>; mechanism in <span class="mono">DeviceEventEndpoints.SettleAsync</span>. A box offline longer than the grace window lights the court from its roster and queues the scan; by the time WiFi returns the sweep has settled the booking as a no-show, refunded it less the penalty and released the court. The upload used to resolve to <span class="mono">not_chargeable</span> — the member who played kept the refund and paid the penalty. Now <span class="mono">BookingService.ReverseNoShowAsync</span> posts <b>two new rows, never an edit</b> — a debit reversing the refund, a credit reversing the penalty, each the same type as the row it reverses with the opposite sign, referenced <span class="mono">noshow-reversal:{booking}:{refund|penalty}</span> — and the row goes back to <span class="mono">Booked</span>, checked in at the scan. <span class="mono">EndsAt</span> is <b>restored</b> to the original end (or the earliest surviving overlap's start) and any booking sold into the released tail that nobody checked in on is displaced — cancelled with its charge or penalty returned, reason <span class="mono">ResoldTailRefunded</span>, audited and emailed; the reversal posts whatever the balance (a correction, not a purchase). Outcome <span class="mono">reversed_no_show</span>, event <span class="mono">booking.no_show_reversed</span>. Offline scans are judged <b>at scan time</b>: the code's liveness and the cue gate use <span class="mono">OccurredAt</span>, derived from uptime arithmetic and clamped to the upload (with a <span class="mono">device.event_time_clamped</span> audit row) only when it lies in the future or beyond a 30-day sanity bound — a two-day outage's evidence still resolves at scan time, and booking codes outlive that horizon.</p>
+      </div>
+      <div class="callout" style="margin:16px 0 0">
+        <div class="t">Tenant settings the box runs on</div>
+        <p>The six court-box numbers that were hardcoded around the codebase are <span class="mono">tenant_settings</span> keys with one canonical default each, bounds-checked on the admin surface: <span class="mono">walk_up_max_minutes</span> (90, the relay cap), <span class="mono">heartbeat_seconds</span> (60), <span class="mono">activation_forward_window_minutes</span> (120), <span class="mono">activation_cue_window_minutes</span> (10), <span class="mono">qr_lifetime_seconds</span> (60, ident codes), <span class="mono">roster_window_minutes</span> (120).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= WEBHOOKS ================= -->
+<section id="webhooks">
+  <div class="eyebrow sw">Server side · Eventing</div>
+  <h2>Webhooks, web servers &amp; the SSRF guard</h2>
+  <p class="lede">Every system event fans out to user- and admin-registered HTTP endpoints, HMAC-signed and retried per-endpoint. Webhooks are a programmatic <em>mirror</em> of the event stream — every player-affecting event also sends an email, never a substitute. Lights <b>actuation</b> is deliberately <em>not</em> on this bus: the webhook dispatcher is a store-and-forward worker with a 10 s timeout, wrong for a request-path relay flip — and the court box has no inbound HTTP listener at all, so it can never be a webhook destination. Actuation is the box's own decision, made through the <a href="#deviceapi">device API</a>; <span class="mono">booking.lights_on</span> / <span class="mono">lights_off</span> here are a <em>mirror</em> of what already happened.</p>
+
+  <div class="grid2">
+    <div>
+      <div class="card pad scroll">
+        <h3 style="margin-top:0">Delivery semantics</h3>
+        <table>
+          <tbody>
+            <tr><td><b>Ordering</b></td><td>at-least-once; receivers idempotent on <span class="mono">event id</span></td></tr>
+            <tr><td><b>Signature</b></td><td class="mono">X-Crusaders-Signature: sha256=&lt;hex&gt; (HMAC-SHA256 of raw body)</td></tr>
+            <tr><td><b>Timestamp</b></td><td class="mono">X-Crusaders-Timestamp — reject &gt;5 min old (replay)</td></tr>
+            <tr><td><b>Timeout</b></td><td>10 s per attempt; per-endpoint queue so a slow endpoint blocks nobody</td></tr>
+            <tr><td><b>Retry sweep</b></td><td><span class="mono">WebhookRetryWorker</span> every 30 s, batches of 50</td></tr>
+            <tr><td><b>Give-up</b></td><td>after 6 failures: endpoint auto-disabled + owner emailed</td></tr>
+            <tr><td><b>Log retention</b></td><td>status, latency, retry count — 30 days, admin-visible</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure class="card pad" style="margin:16px 0 0">
+        <svg viewBox="0 0 520 190" role="img" aria-label="Retry backoff chart: attempts at 1 minute, 5 minutes, 30 minutes, 2 hours, 12 hours and 24 hours, drawn on a square-root time scale">
+          <g font-size="10.5" class="m" fill="currentColor">
+            <text x="10" y="20" font-weight="600" letter-spacing="1.5" opacity=".6">EXPONENTIAL BACKOFF — 6 ATTEMPTS OVER ~38.6 H</text>
+          </g>
+          <g>
+            <rect x="10" y="40"  width="22"  height="16" rx="3" fill="var(--blue-fill)"/><text x="40"  y="52" font-size="10.5" class="m" fill="currentColor">1 m</text>
+            <rect x="10" y="62"  width="49"  height="16" rx="3" fill="var(--blue-fill)"/><text x="67"  y="74" font-size="10.5" class="m" fill="currentColor">5 m</text>
+            <rect x="10" y="84"  width="120" height="16" rx="3" fill="var(--blue-fill)"/><text x="138" y="96" font-size="10.5" class="m" fill="currentColor">30 m</text>
+            <rect x="10" y="106" width="240" height="16" rx="3" fill="var(--blue-fill)"/><text x="258" y="118" font-size="10.5" class="m" fill="currentColor">2 h</text>
+            <rect x="10" y="128" width="416" height="16" rx="3" fill="var(--blue-fill)"/><text x="434" y="140" font-size="10.5" class="m" fill="currentColor">12 h</text>
+            <rect x="10" y="150" width="470" height="16" rx="3" fill="var(--amber-fill)"/><text x="488" y="162" font-size="10.5" class="m" fill="currentColor">24 h</text>
+          </g>
+          <text x="10" y="184" font-size="9.5" fill="currentColor" opacity=".6">√time scale · final bar amber: after it, auto-disable + email</text>
+        </svg>
+        <figcaption>Backoff ladder per endpoint. A <b>blocked destination</b> (SSRF guard) and a <b>missing template variable</b> are config errors, not transient failures — abandoned on first attempt, never retried.</figcaption>
+      </figure>
+    </div>
+
+    <div>
+      <div class="card pad">
+        <h3 style="margin-top:0">URL templating</h3>
+        <pre class="code">http://box.local/court/<span style="color:#F0A83C">{court_number}</span>/turn/on</pre>
+        <p style="font-size:13px">Single-brace placeholders resolved per-event from the payload — one config covers every court; adding court 5 is a database row, not a webhook change. Variables always available: <span class="mono">tenant_id · tenant_slug · event_id · event_type · occurred_at(_unix)</span> plus every flattened <span class="mono">data</span> key. Validated at save-time against the endpoint's event filter. <b>A variable in the host is refused</b> — payload fields carry member-supplied values, and a host assembled from those is a destination nobody chose.</p>
+      </div>
+      <div class="card pad" style="margin-top:16px">
+        <h3 style="margin-top:0">SSRF guard — decided at the socket</h3>
+        <p style="font-size:13px">Implemented in <span class="mono">OutboundAddressGuard</span> inside the socket's <b>ConnectCallback</b>, against the address about to be dialled — registration-time checks can't survive DNS rebinding. Refused unless allow-listed: loopback, RFC1918, link-local <span class="mono">169.254/16</span> (the cloud-metadata range an RFC1918-only guard misses), CGNAT <span class="mono">100.64/10</span>, multicast/reserved, IPv6 equivalents, and IPv4-mapped IPv6 unwrapped before classification. <b>Every</b> resolved address must pass; redirects are never followed.</p>
+        <div class="callout" style="margin:12px 0 0">
+          <div class="t">The LAN carve-out — do not close it</div>
+          <p><span class="mono">Webhooks:PrivateNetworkAllowList</span> is CIDR-scoped — <span class="mono">10.0.40.7/32</span> admits one LAN consumer, not the private internet. <span class="mono">AllowPrivateNetworks</span> (guard off wholesale) defaults on in Development only. <b>It is configuration-file only, and empty by default.</b> There is no admin screen for it and no API that reads or writes it, so moving a club’s LAN consumer onto the list today means editing <span class="mono">appsettings.json</span> and restarting the API. The carve-out exists and works; operating it does not yet.</p>
+        </div>
+      </div>
+      <div class="card pad" style="margin-top:16px">
+        <h3 style="margin-top:0">Scoping</h3>
+        <p style="font-size:13px"><b>Player endpoints</b> (≤5): only events where the player is subject or actor. <b>Tenant-admin</b> (≤20): all tenant events. <b>Platform-admin</b>: cross-tenant, for the observability stack.</p>
+      </div>
+    </div>
+  </div>
+
+  <h3>Event catalogue — 22 emitted</h3>
+  <div class="card pad scroll">
+    <table>
+      <thead><tr><th>Member</th><th>Booking</th><th>Credit</th><th>Peripheral</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">member.registered<br>member.approved<br>member.rejected<br>member.suspended<br>member.reactivated</td>
+          <td class="mono">booking.created<br>booking.cancelled<br>booking.late_cancellation<br>booking.lights_on<br>booking.lights_off<br>booking.completed<br>booking.no_show<br>booking.no_show_reversed<br>booking.displaced<br>booking.displacement_reversed<br>booking.cancelled_lights_charged</td>
+          <td class="mono">credit.topped_up<br>credit.refunded<br>credit.penalty_applied<br>credit.adjusted</td>
+          <td class="mono">peripheral.unhealthy<br>peripheral.recovered</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Envelope: <span class="mono">{id, type, tenant_id, tenant_slug, occurred_at, occurred_at_unix, actor{user_id, is_admin}, subject{user_id}, data{…}}</span> — <span class="mono">DomainEvent.ToEnvelopeJson</span>, which is what is both templated and signed. <b>Re-derived from the <span class="mono">EmitAsync</span> call sites, 2026-09-06:</b> twenty-two types are emitted, and the admin Webhooks screen's picker (<span class="mono">AdminWebhooks.tsx</span>) offers <b>exactly those twenty-two</b> with their per-event variables — the two sets are identical, so there is no event an admin can select and wait on forever, and none they cannot discover. <b>The catalogue and the emitters are pinned equal by a test</b> (<span class="mono">RepositoryPostureTests</span>), because this is the pair that has drifted in both directions: a picker offering an event nothing fires, and an event fired that the picker never listed. The one name in <span class="mono">docs/specs/webhooks.md</span> with no emitter behind it is <span class="mono">webhook.test</span>. Two earlier revisions of this page were wrong here in opposite directions — one claimed eighteen types including several that had no emitter, its correction claimed eleven and asserted that <span class="mono">member.*</span>, <span class="mono">credit.refunded</span> and <span class="mono">peripheral.unhealthy</span> were emitted by no code path, and by then all three were.</p>
+  </div>
+</section>
+
+<!-- ================= BACKEND ================= -->
+<section id="backend">
+  <div class="eyebrow sw">Server side · API</div>
+  <h2>Backend — .NET 10, one flat project</h2>
+  <p class="lede"><span class="mono">Crusaders.Mainframe.Api</span>: Minimal APIs + EF Core on PostgreSQL 16, folder-layered inside a single assembly. Auth is JWT HS256 plus WebAuthn passkeys (Fido2) for people, and the <b>Device bearer scheme</b> for boxes. The xUnit suite runs in <b>two tiers</b> — an in-process <span class="mono">TestHost</span> tier and a Postgres-backed HTTP tier against a real database — and CI runs it <em>unfiltered</em>, the old class-name filter having silently excluded that whole collection from CI forever. <b>Nothing may skip:</b> without a connection string the Postgres tier skips and the run still exits 0, so <span class="mono">REQUIRE_BOUNDARY_TESTS</span> turns that silence into a failure. Cross-tenant injection tests are non-negotiable for every tenant-scoped table. <b>Authentication runs before the rate limiter</b>, and the auth partition is <span class="mono">user:{id}</span> when a token is present: behind the always-present gateway the whole club otherwise shared one 10/min bucket keyed on the proxy's address, and ten Court Code screens open in a minute took down login club-wide.</p>
+
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin-top:0">Folder layers</h3>
+      <pre class="code">Crusaders.Mainframe.Api/
+├── Endpoints/      # route groups · device: heartbeat, activate,
+│                   #   walkup, events · DeviceRosterBuilder
+├── Domain/         # entities + invariants · Device.CourtNumbers · AccessCode
+├── Services/       # booking, ledger, activation, AccessCodeService,
+│                   #   DeviceRegistryService, RelayHardCap, ButtonMap
+├── Persistence/    # EF Core, migrations (mandatory)
+├── Security/       # JWT · WebAuthn · DeviceAuth/ (bearer key)
+│                   #   · GatewayTrust · OutboundAddressGuard
+├── Webhooks/       # delivery + retry · no-show sweep · lights cue
+├── Biometric/      # IBiometricDevice · Null · simulator
+├── Multitenancy/   # tenant resolution, tenant_settings
+└── Payments/       # PayFast provider, ITN pipeline</pre>
+      <p style="font-size:13px;color:var(--muted)">Hardware abstractions ship before drivers: <span class="mono">IBiometricDevice</span> + <span class="mono">NullBiometricDevice</span> + a mock simulator are first-class, and CI passes without touching real hardware. Known, tracked deviations from the FrostAura mandate: no shadcn/Radix, no Redux Toolkit, folder layering rather than iDesign separation.</p>
+    </div>
+    <div class="card pad">
+      <h3 style="margin-top:0">Invariants — violating any is a defect</h3>
+      <ul class="tight">
+        <li><b>Money is ledger-only.</b> Balance = sum of immutable entries, never a stored field. Every movement carries actor, subject, reason, external reference; disputes replay the ledger.</li>
+        <li><b>Credits are the unit of account.</b> ZAR exists only on <span class="mono">PendingTopup</span> for reconciliation. A field mixing units is a money-correctness bug.</li>
+        <li><b>Charge at booking; refund on cancel; nothing back once checked in.</b> Booking row + <span class="mono">BookingCharge</span> debit flush in one unit of work — a lost slot race can't leave a member paying for a court they didn't get. Penalty and refund post as separate rows, never netted.</li>
+        <li><b>Attendance means <span class="mono">CheckedInAt</span></b> — never the clock, never <span class="mono">ChargedAt</span>. A no-show is the <em>absence</em> of an identification match in the grace window. A box's queued activation <em>is</em> an identification match, judged at scan time.</li>
+        <li><b>The cue window gates the stamp.</b> The 2-hour forward window only disambiguates back-to-back slices; <span class="mono">CheckedInAt</span> and the lights cue happen only from <span class="mono">activation_cue_window_minutes</span> (10) before start — a curious scan at 17:00 for an 18:45 slot answers <span class="mono">too_early</span> and forfeits nothing (review A2-11).</li>
+        <li><b>Every debit takes the payer advisory lock.</b> <span class="mono">PayerLock.BeginAsync</span> serialises the read-then-post on the booking path and on <em>both</em> <span class="mono">ChargeOnActivation</span> branches — the payer reassignment and the never-charged row — so two courtside "I'll pay" taps cannot both see 200 credits and both post (review A2-10).</li>
+        <li><b>A settled no-show frees the slot.</b> The sweep truncates <span class="mono">EndsAt</span> to its own clock in the same save as the refund and penalty, so the tail is resellable through the real GiST exclusion constraint, which exempts only Cancelled (review H5). No un-no-show admin endpoint; ledger adjustment is the recovery path — and a box's own late evidence is the one automatic exception (<a href="#deviceapi">C6 residual</a>).</li>
+        <li><b>One ordered candidate list, three touchpoints.</b> QR, PIN and biometric all read <span class="mono">CandidatesAsync</span> ordered by <span class="mono">StartsAt</span> — the biometric path had its own unordered query and the documented two-bookings wrong-row bug was still live there (review H4) — and the biometric kiosk now sees the <span class="mono">ActivationResult</span> (insufficient balance et al.) instead of a plain "matched" (A2-9).</li>
+        <li><b>One box, up to four courts, and the list order is the wiring.</b> <span class="mono">Device.CourtNumbers</span> is an ordered <span class="mono">int[]</span> whose position is the relay index; the button map is validated against its length at admin save time on every surface (<span class="mono">ButtonMap.FirstSelectionBeyond</span>), never logged per heartbeat.</li>
+        <li><b>Owed is a function of the booking's terminal state alone</b>, never of the order events arrived in — and never more than the price quoted at booking. The rules, their reasons and where each is enforced are in <a href="#settlement">the settlement model</a>, which is normative: where the code and that document disagree, one of them is a defect.</li>
+        <li><b>Tenant isolation is structural.</b> <span class="mono">tenant_id</span> on every entity; leakage is a P0 incident.</li>
+        <li><b>Admins act on behalf of users</b> — every action representable as <span class="mono">{actor, subject}</span> in the audit trail.</li>
+        <li><b>Every configurable number is <span class="mono">tenant_settings.&lt;key&gt;</span>.</b></li>
+        <li><b>Every player-affecting event emails.</b> Webhooks mirror, never replace.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DATABASE ================= -->
+<section id="database">
+  <div class="eyebrow data">Server side · Data</div>
+  <h2>Database — PostgreSQL 16, ledger at the centre</h2>
+  <p class="lede">Multi-tenant by column, not by schema: every row carries <code>tenant_id</code> and every endpoint resolves tenant first. The ledger is append-only; schema changes require an EF migration — <code>EnsureCreated</code> is not a strategy for a money-handling system.</p>
+
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 1120 480" role="img" aria-label="Core entity relationships: tenants own users, courts, devices, settings and webhook endpoints; users hold memberships with a member class; bookings join users and courts and reference both a booked-by and an optional paid-by user; ledger entries record credit movements including booking charges and top-ups; pending topups carry the ZAR amount and conversion rate" style="min-width:940px;max-width:100%;height:auto">
+    <defs><marker id="earw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--violet)"/></marker></defs>
+    <g font-size="10.5" class="m">
+      <!-- tenants -->
+      <rect x="20" y="40" width="180" height="86" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="110" y="60" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">tenants</text>
+      <text x="32" y="80" fill="currentColor" opacity=".75">id · slug · branding</text>
+      <text x="32" y="96" fill="currentColor" opacity=".75">payfast creds (wrapped)</text>
+      <text x="32" y="112" fill="currentColor" opacity=".75">tenant_settings.&lt;key&gt;*</text>
+      <!-- users -->
+      <rect x="260" y="40" width="190" height="86" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="355" y="60" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">users</text>
+      <text x="272" y="80" fill="currentColor" opacity=".75">jwt + webauthn passkeys</text>
+      <text x="272" y="96" fill="currentColor" opacity=".75">photo (mandatory)</text>
+      <text x="272" y="112" fill="currentColor" opacity=".75">tenant_id</text>
+      <!-- memberships -->
+      <rect x="510" y="40" width="200" height="86" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="610" y="60" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">memberships</text>
+      <text x="522" y="80" fill="currentColor" opacity=".75">member_class:</text>
+      <text x="522" y="96" fill="currentColor" opacity=".75">Regular | LeagueOrSenior</text>
+      <text x="522" y="112" fill="currentColor" opacity=".75">class changes audit-logged</text>
+      <!-- courts -->
+      <rect x="20" y="180" width="180" height="70" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="110" y="200" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">courts</text>
+      <text x="32" y="220" fill="currentColor" opacity=".75">court_number 1–4</text>
+      <text x="32" y="236" fill="currentColor" opacity=".75">slice price (credits)</text>
+      <!-- bookings -->
+      <rect x="260" y="170" width="230" height="120" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="2.2"/>
+      <text x="375" y="190" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">bookings</text>
+      <text x="272" y="210" fill="currentColor" opacity=".75">starts_at · ends_at · slices ×15 min</text>
+      <text x="272" y="226" fill="currentColor" opacity=".75">booked_by_user_id</text>
+      <text x="272" y="242" fill="currentColor" opacity=".75">paid_by_user_id (at-court “I'll pay”)</text>
+      <text x="272" y="258" fill="currentColor" opacity=".75">charged_at (set at booking) · ends_at truncated on no-show</text>
+      <text x="272" y="274" fill="currentColor" opacity=".75">checked_in_at ← attendance truth (cue-gated)</text>
+      <!-- ledger -->
+      <rect x="550" y="170" width="250" height="120" rx="8" fill="var(--violet-soft)" stroke="var(--violet)" stroke-width="2.2"/>
+      <text x="675" y="190" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">ledger_entries — append-only</text>
+      <text x="562" y="210" fill="currentColor" opacity=".8">amount_credits · reason</text>
+      <text x="562" y="226" fill="currentColor" opacity=".8">actor · subject · booking_ref</text>
+      <text x="562" y="242" fill="currentColor" opacity=".8">external_reference</text>
+      <text x="562" y="258" fill="currentColor" opacity=".8">└ filtered UNIQUE — the only DB-level</text>
+      <text x="562" y="274" fill="currentColor" opacity=".8">   guarantee against double-credit ITNs</text>
+      <!-- pending topups -->
+      <rect x="860" y="170" width="230" height="100" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="975" y="190" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">pending_topups</text>
+      <text x="872" y="210" fill="currentColor" opacity=".75">zar_paid · conversion_rate</text>
+      <text x="872" y="226" fill="currentColor" opacity=".75">R100 blocks · cap R1000 (non-admin)</text>
+      <text x="872" y="242" fill="currentColor" opacity=".75">reconciliation only —</text>
+      <text x="872" y="258" fill="currentColor" opacity=".75">ZAR never reaches the ledger</text>
+      <!-- devices -->
+      <rect x="20" y="330" width="220" height="100" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+      <text x="130" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">devices (court boxes)</text>
+      <text x="32" y="370" fill="currentColor" opacity=".75">court_numbers[≤4] = relays A–D</text>
+      <text x="32" y="386" fill="currentColor" opacity=".75">mac · fw · mega_fw · failed_version</text>
+      <text x="32" y="402" fill="currentColor" opacity=".75">key HKDF-derived, never stored ·</text>
+      <text x="32" y="418" fill="currentColor" opacity=".75">last_ip observability only</text>
+      <!-- access codes -->
+      <rect x="860" y="330" width="230" height="100" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+      <text x="975" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">access_codes</text>
+      <text x="872" y="370" fill="currentColor" opacity=".75">code · 12 × Crockford b32 · unique</text>
+      <text x="872" y="386" fill="currentColor" opacity=".75">purpose: booking | member_ident</text>
+      <text x="872" y="402" fill="currentColor" opacity=".75">user_id · booking_id? · expires_at</text>
+      <text x="872" y="418" fill="currentColor" opacity=".75">→ bookings · what the scanner reads</text>
+      <!-- webhooks -->
+      <rect x="300" y="330" width="220" height="100" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.8"/>
+      <text x="410" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">webhook_endpoints</text>
+      <text x="312" y="370" fill="currentColor" opacity=".75">url template · event_filter</text>
+      <text x="312" y="386" fill="currentColor" opacity=".75">secret · enabled · scope</text>
+      <text x="312" y="402" fill="currentColor" opacity=".75">+ webhook_deliveries log</text>
+      <text x="312" y="418" fill="currentColor" opacity=".75">(status · latency · retries, 30 d)</text>
+      <!-- audit -->
+      <rect x="580" y="330" width="220" height="100" rx="8" fill="var(--card2)" stroke="var(--violet)" stroke-width="1.8"/>
+      <text x="690" y="350" text-anchor="middle" font-weight="700" font-size="12" fill="currentColor">audit trail</text>
+      <text x="592" y="370" fill="currentColor" opacity=".75">{actor, subject} on every</text>
+      <text x="592" y="386" fill="currentColor" opacity=".75">admin action · class changes</text>
+      <text x="592" y="402" fill="currentColor" opacity=".75">2-year retention with</text>
+      <text x="592" y="418" fill="currentColor" opacity=".75">anonymisation (blueprint)</text>
+    </g>
+    <g stroke="var(--violet)" stroke-width="1.4" fill="none" marker-end="url(#earw)">
+      <path d="M200 83 H258"/>
+      <path d="M450 83 H508"/>
+      <path d="M110 178 V128"/>
+      <path d="M200 215 H258"/>
+      <path d="M355 168 V128"/>
+      <path d="M490 230 H548"/>
+      <path d="M858 220 H802"/>
+      <path d="M675 168 Q660 140 610 128"/>
+      <path d="M130 328 Q120 290 110 252"/>
+      <path d="M410 328 V292"/>
+    </g>
+    <g font-size="9.5" class="m" fill="var(--violet)">
+      <text x="212" y="76">1‥n</text>
+      <text x="462" y="76">1‥1</text>
+      <text x="205" y="208">1‥n</text>
+      <text x="500" y="222">posts</text>
+      <text x="822" y="212">confirms</text>
+    </g>
+  </svg>
+  <figcaption>Core entities. The one violet-filled table is the point of the schema: <span class="mono">ledger_entries</span> is append-only, credit-denominated, and its filtered unique index on <span class="mono">external_reference</span> is what makes a retried PayFast ITN safe rather than a double credit — and, under <span class="mono">walkup:{device}:{nonce}</span>, what makes a retried walk-up a replay rather than a second charge. <span class="mono">access_codes</span> (amber) is the new bridge between a booking and the box: minted in the booking's own unit of work, it is the only thing a scanner ever reads.</figcaption>
+  </figure>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <figure class="card pad" style="margin:0">
+      <svg viewBox="0 0 480 170" role="img" aria-label="Credit conversion chart: 100 rand becomes 160 credits for Regular members and 240 credits for League or Senior members">
+        <text x="10" y="20" font-size="10.5" class="m" fill="currentColor" font-weight="600" letter-spacing="1.5" opacity=".6">R100 TOP-UP → CREDITS, BY MEMBER CLASS</text>
+        <rect x="10" y="44" width="280" height="26" rx="4" fill="var(--blue-fill)"/>
+        <text x="300" y="62" font-size="12" class="m" fill="currentColor">160 · Regular (×1.6)</text>
+        <rect x="10" y="82" width="420" height="26" rx="4" fill="var(--amber-fill)"/>
+        <text x="20" y="100" font-size="12" class="m" font-weight="600" fill="#1A1305">240 · League / Senior (×2.4)</text>
+        <text x="10" y="140" font-size="10.5" fill="currentColor" opacity=".7">Rates are tenant_settings; classes also gate peak hours 16:00–19:00</text>
+        <text x="10" y="156" font-size="10.5" fill="currentColor" opacity=".7">(League/Senior exclusive until 1 h before slot start)</text>
+      </svg>
+      <figcaption>Member class drives both the conversion rate and peak-hour access — the two effects that make it an architectural column, not a tag.</figcaption>
+    </figure>
+    <div class="card pad">
+      <h3 style="margin-top:0">Booking economics (as decided)</h3>
+      <ul class="tight">
+        <li>Default slice <b>15 minutes</b>; 1-hour-per-day cap per member, relaxed same-day if courts are otherwise empty.</li>
+        <li><b>Charge at booking</b> (2026-08-22 decision) — cancel refunds in full, less the late-cancel penalty inside the window; no refund after check-in.</li>
+        <li>Walk-ups create <b>real bookings</b>, truncated at the next booking and charged pro rata — which is why they need the network. Capped at min(<span class="mono">walk_up_max_minutes</span>, the 90-minute relay constant); idempotent on the box's purchase nonce.</li>
+        <li>A no-show settles as refund-less-penalty <em>and</em> releases the court (<span class="mono">EndsAt</span> truncated at the sweep); a box's late attendance evidence reverses the settlement with two opposite-signed rows. Every one of these outcomes is stated normatively, with its reason, in <a href="#settlement">the settlement model</a>.</li>
+        <li><b>The club's opening hours are a booking rule, not decoration.</b> <span class="mono">tenant_settings.operating_hours</span> carries a per-weekday <span class="mono">"HH:mm-HH:mm"</span> map; the grid draws each day from its own row and a booking outside that day's hours is refused. It is read leniently — a weekday the parser cannot make sense of is simply absent, and that day falls back to the flat default, because a hand-edited settings document must never close a club — and written strictly from the admin screen, where a bad row is named and refused while somebody is standing there to fix it.</li>
+        <li><b>The desk can put a member into the red, and only ever on purpose.</b> A member short of the price gets the ordinary <span class="mono">402 insufficient_balance</span>, carrying their balance and the price. An admin booking <em>on that member's behalf</em> may then re-send the request asking for the overdraft by name, and the booking goes through at the same price with the same <span class="mono">BookingCharge</span> — the wallet goes negative, the amount owed does not change, and the audit row records who authorised it. It is never implied by being an admin: the flag is honoured only when the actor and the subject are different people, so nobody can overdraw their own wallet with it and no member's own request can carry it.</li>
+        <li>Top-ups in R100 blocks, capped at R1000 for non-admins.</li>
+        <li>Reports: monthly presets + per-member spend drill-down; 2-year retention with anonymisation.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SETTLEMENT ================= -->
+<section id="settlement">
+  <div class="eyebrow data">Server side · The money statement</div>
+  <h2>Settlement model — what a member owes, after any sequence of events</h2>
+  <p class="lede">The money path had no single statement of itself, and five round-3 findings were five symptoms of that absence: each local fix was reasonable and they contradicted each other, so a played court could come out free, a 100-credit court could bill 143, a member who could have played was refunded and locked out, two members were charged for one court, and one member's desk credit suppressed another's settlement. <code>docs/specs/settlement-model.md</code> is now <b>normative</b> — where it and the code disagree, one of them is a defect, and you say which.</p>
+
+  <div class="callout good">
+    <div class="t">The statement</div>
+    <p>For every booking <span class="mono">b</span> with payer <span class="mono">u</span>, <b><span class="mono">Owed(b)</span> is a function of <span class="mono">b</span>'s terminal state alone.</b> Every event in the booking's life either changes that state or corrects the ledger towards the <span class="mono">Owed</span> of the state it is already in. No event adds a charge that is not one of the rows below. <span class="mono">Owed</span> is <em>not materialised anywhere</em> — there is no stored balance and there must not be one; it is a property of the rules, checked by pinning tests, not a column.</p>
+  </div>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="card pad scroll">
+      <h3 style="margin-top:0">Terminal states</h3>
+      <table>
+        <thead><tr><th>#</th><th>Terminal state</th><th>Owed</th></tr></thead>
+        <tbody>
+          <tr><td class="num">S1</td><td><span class="mono">Booked</span> / <span class="mono">Completed</span> — attended, or not yet decided</td><td class="mono">P</td></tr>
+          <tr><td class="num">S2</td><td>Cancelled before check-in, <b>outside</b> the penalty window</td><td class="mono">0</td></tr>
+          <tr><td class="num">S3</td><td>Cancelled before check-in, <b>inside</b> the penalty window</td><td class="mono">penalty</td></tr>
+          <tr><td class="num">S4</td><td>Cancelled <em>after</em> check-in</td><td class="mono">P</td></tr>
+          <tr><td class="num">S5</td><td><span class="mono">NoShow</span> — swept, no attendance evidence</td><td class="mono">penalty</td></tr>
+          <tr><td class="num">S6</td><td><span class="mono">NoShow</span> reversed by late attendance evidence</td><td class="mono">P</td></tr>
+          <tr><td class="num">S7</td><td>S2/S3 <b>and</b> the court was later lit on this booking's own code</td><td class="mono">min(P, prior + proRata(lit))</td></tr>
+          <tr><td class="num">S8</td><td><b>Displaced</b> (<span class="mono">ResoldTailRefunded</span>)</td><td class="mono">0</td></tr>
+          <tr><td class="num">S9</td><td><span class="mono">AdminBlock</span>, or no user</td><td>not settled</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px"><span class="mono">P</span> = <span class="mono">AmountChargedCredits</span>, quoted and <b>locked at booking</b>, never recomputed from settings that may since have moved. S7 is the only state that composes: a retained late-cancellation penalty is <em>part of</em> what the member has already been billed, so lit time is netted against it and capped at <span class="mono">P</span>.</p>
+    </div>
+    <div>
+      <div class="card pad scroll" style="margin-bottom:16px">
+        <h3 style="margin-top:0">The two invariants everything else serves</h3>
+        <table>
+          <tbody>
+            <tr><td><b>I1 · Ceiling</b></td><td><span class="mono">0 ≤ Owed(b) ≤ P</span> in any sequence of events. The price was quoted and accepted at booking; everything after is a correction of who owes what, not a second sale. The finding this closes billed granted minutes <em>plus</em> a retained late-cancel penalty and reached 143 for a 100-credit court.</td></tr>
+            <tr><td><b>I2 · No free court</b></td><td>If a court was lit on a booking's identity, <span class="mono">Owed &gt; 0</span> unless an admin explicitly waives it. The club's electricity ran and the slot was consumed. <b>I2 outranks precision</b> — a release that never arrives leaves the grant as the answer, because deferring the charge would make a lost release a free court.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card pad">
+        <h3 style="margin-top:0">Grant is not measurement</h3>
+        <p style="font-size:13.5px">An <span class="mono">activation</span> event carries a <b>grant</b> — what the relay was <em>told</em> to run for, an upper bound. The <span class="mono">release</span> that follows carries <span class="mono">heldMs</span>: what it <em>actually</em> ran, and the system's only measurement. So the lit window is bounded three ways, because each fails differently:</p>
+        <pre class="code">litEnd   = min(scan + grant, OriginalEndsAt,
+               scan + heldMs   when the release has landed)
+litStart = max(scan, StartsAt)
+litMin   = clamp(ceil(litEnd − litStart), 0, min(M, 90))</pre>
+        <p style="font-size:13px;color:var(--muted)">A release names no booking, so it is paired by device, relay and time — the latest activation receipt for the same <span class="mono">(device, relay)</span>, accepted only when the implied end sits within <b>2 minutes</b> of the release's own time (both come off the same uptime accumulator). One that cannot be paired is audited <span class="mono">device.release_unpaired</span> and <b>dropped</b>: a release that corrects nothing is right, one that corrects the <em>wrong</em> session is not.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid3" style="margin-top:16px">
+    <div class="callout" style="margin:0">
+      <div class="t">A hand adjustment is netted per leg, never read as a signal</div>
+      <p>An <span class="mono">AdminAdjustment</span> naming a booking is money that <em>has already moved</em>. Both legs of a reversal are always attempted, each netted against adjustments moving money in <b>its own direction</b>. The sign of a desk correction says nothing about which leg it repaired — reading it as “the desk already fixed this” made a played court free in one direction and charged the member twice in the other. An adjustment may only name the <em>payer's own</em> booking.</p>
+    </div>
+    <div class="callout" style="margin:0">
+      <div class="t">Displacement is eager, and reversed when the release disproves it</div>
+      <p>The two error directions are not symmetric. Displacing on a window the court did not use costs a wrongly-refunded member and a dark slot; <em>not</em> displacing on a window it did use puts two members on one lit court, both charged. So a booking overlapping the provisional lit window that nobody checked in on is displaced, refunded in full, its code expired, its member emailed — and <b>reinstated</b> if the release proves the court went dark before its start and it has not yet begun.</p>
+    </div>
+    <div class="callout danger" style="margin:0">
+      <div class="t">Two rows, never a netted one, and never an edit</div>
+      <p>A correction posts a new row of the <b>same type with the opposite sign</b>, reading what it reverses <em>off the ledger</em> rather than recomputing it from settings. A single net row cannot answer “how much penalty did I pay?”, which is the question a disputed settlement asks. <b>Accepted consequence:</b> a period bucket can go negative when a sweep and its reversal fall on different days. <span class="mono">refunds_credits</span> and <span class="mono">penalties_credits</span> are <em>net</em> figures; only <span class="mono">penalty_count</span> counts gross. And a posting of zero credits is never written — it moves nothing and burns its idempotency reference.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PAYMENTS ================= -->
+<section id="payments">
+  <div class="eyebrow sw">Server side · Money in</div>
+  <h2>Payments — PayFast hosted checkout + ITN</h2>
+  <p class="lede">The member never types a card number into anything this project serves — PCI scope stays a redirect. <b>The redirect is not the notification</b>: the server-to-server ITN is what moves money; the return URL only decides which screen the member sees.</p>
+  <div class="grid2">
+    <div class="card pad">
+      <h3 style="margin-top:0">Receiving an ITN — in order, always</h3>
+      <table>
+        <thead><tr><th>#</th><th>Step</th><th>Skipping it costs</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td>Verify MD5 signature (fields in posted order, tenant passphrase)</td><td>forged notifications</td></tr>
+          <tr><td class="num">2</td><td>Check source host (advisory, configurable)</td><td>only defence for a passphrase-less merchant</td></tr>
+          <tr><td class="num">3</td><td>Check amount vs <span class="mono">PendingTopup</span></td><td>authentic message, wrong amount</td></tr>
+          <tr><td class="num">4</td><td><span class="mono">payment_status == COMPLETE</span> only</td><td>crediting a member for a FAILED payment</td></tr>
+          <tr><td class="num">5</td><td>Post credits idempotently (unique <span class="mono">ExternalReference</span>)</td><td>PayFast retries ITNs by design → double credit</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card pad">
+      <h3 style="margin-top:0">The signature is PHP-shaped</h3>
+      <p style="font-size:13px">MD5 over the parameter string <b>in posted order</b> (why <span class="mono">CallbackPayload.Fields</span> is an ordered list, not a dictionary), URL-encoded the way PHP's <code>urlencode</code> does it — which .NET does not:</p>
+      <table style="margin-top:8px">
+        <thead><tr><th></th><th>PHP urlencode</th><th>.NET EscapeDataString</th></tr></thead>
+        <tbody>
+          <tr><td>space</td><td class="mono">+</td><td class="mono">%20</td></tr>
+          <tr><td class="mono">~</td><td class="mono">%7E</td><td class="mono">~</td></tr>
+          <tr><td>hex case</td><td class="mono">UPPER</td><td class="mono">UPPER</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:13px;margin-top:8px">Passphrase appended as <span class="mono">&amp;passphrase=…</span> when present, omitted entirely when not — empty string ≠ absent. The fixture corpus in <span class="mono">src/contracts/payfast/</span> (15 encode + 7 request + 4 ITN cases, generated by an independent implementation) is the authority, not prose. Passphrase is optional at PayFast, <b>required here</b>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FRONTEND ================= -->
+<section id="frontend">
+  <div class="eyebrow fe">Edges · Member-facing</div>
+  <h2>Frontend — mobile-first PWA</h2>
+  <div class="grid3">
+    <div class="card pad kv">
+      <span class="pill ok">Stack</span>
+      <p style="font-size:13.5px;margin:8px 0 0">React 19 + TypeScript + Vite 7 + Tailwind, installable PWA — manifest, maskable icons and the iOS tags Safari reads instead of the manifest. <b>The offline shell covers the app, never the member.</b> The service worker caches the hashed build assets, the icons and the shell, so the installed app opens with no signal instead of showing the browser’s offline page; nothing under <span class="mono">/api/</span> is intercepted, cached or served from a cache. That is a deliberate retreat from feature-spec §12’s original “view balance from cache”, made on 2026-09-05: the browser’s Cache API keys on the request URL and ignores the <span class="mono">Authorization</span> header, and its storage belongs to the browser profile rather than to a login, so on a club-desk tablet the second member to open the wallet was served the first member’s balance and ledger — reproduced live in a real browser, and the fix watched to hold in the same session. The retreat is <b>ratified on its merits</b>: not caching member data has no failure mode, while a per-session cache has one that answers confidently with the wrong member’s body, and what it would buy is a stale balance a member could not act on offline anyway. The price is accepted and is real — no offline balance on a phone with no signal. Figtree type, Monday.com-style soft palette. State is React context (<span class="mono">lib/auth · lib/profile · lib/balance</span>) — a tracked deviation from the Redux Toolkit mandate, as is the fully hand-rolled primitive set (<span class="mono">Button, Card, Modal, Toast, DataTable, Carousel, ConfirmButton, LedgerTable, Charts</span>) in place of shadcn/Radix.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill ok">Wallet UI</span>
+      <p style="font-size:13.5px;margin:8px 0 0"><b>Credits are primary everywhere</b>; ZAR appears only on top-up screens. The booking grid shows <b>photo + name only</b> — no email, phone or membership number visible to other players, which is why photo upload is mandatory at registration.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill ok">Court code screen</span>
+      <p style="font-size:13.5px;margin:8px 0 0">The member-facing QR surface did not exist before this branch (<span class="mono">meQrGenerate</span> had no call site). <span class="mono">/court-code</span> now renders the bare 12-character access code as a QR via an in-house encoder — verified against python-qrcode, 40/40 identical matrices — with booking-or-ident copy and an expiry countdown. Admin <b>Devices</b> is now list, edit and delete plus the club key — there is no register form and no claim flow, because a box creates its own row on its first heartbeat and is badged <span class="mono">New — check court numbers</span> until an admin confirms them. The key is readable rather than shown-once, with the warning that regenerating it means reflashing every box.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill ok">Verified by</span>
+      <p style="font-size:13.5px;margin:8px 0 0"><b>vitest unit tests, plus Playwright e2e in real Chromium</b>, tsc clean, the lizard complexity gate (CCN ≤ 15) and a bundle-size gate in CI. Auth: JWT sessions with WebAuthn passkeys for step-up; sign-out revokes the credential server-side rather than only deleting this browser’s copy, and <b>every</b> route by which a session ends — the button, an expiry, a revocation, an admin reset, any 401 — also empties the offline caches, because on a shared device the button is the rarest of the five. That last sentence is now <b>measured on all three call sites</b> rather than counted in the source: until 2026-09-05 the button and the 401 handler were pinned only by an occurrence count, which a rearrangement defeated while staying green.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DEPLOY ================= -->
+<section id="deploy">
+  <div class="eyebrow sw">Edges · Ship it</div>
+  <h2>Deployment — one machine at the club, one published port</h2>
+  <p class="lede">Standard FrostAura pattern: push → CI gates → multi-arch images → Docker Hub → Portainer API redeploy. The deploy target is the same on-premises machine the court box reaches over the club LAN, and the box speaks plain HTTP only — which is why the gateway is published on a LAN port and why nothing hands a box an <span class="mono">https</span> URL.</p>
+
+  <div class="card pad scroll">
+  <figure style="margin:0">
+  <svg viewBox="0 0 1120 150" role="img" aria-label="CI and deploy chain: git push to main, GitHub Actions gates for backend, frontend, firmware and security, multi-architecture image build pushed to Docker Hub, then a Portainer API call re-pulls and recreates containers on the club machine" style="min-width:940px;max-width:100%;height:auto">
+    <defs><marker id="darw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--blue)"/></marker></defs>
+    <g font-size="11.5" fill="currentColor">
+      <rect x="14" y="34" width="130" height="54" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="79" y="57" text-anchor="middle" font-weight="700">git push</text>
+      <text x="79" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">main</text>
+      <rect x="186" y="22" width="240" height="82" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="306" y="44" text-anchor="middle" font-weight="700">GitHub Actions — ci.yml</text>
+      <text x="306" y="62" text-anchor="middle" font-size="10" opacity=".75">backend · backend-integration vs Postgres</text>
+      <text x="306" y="77" text-anchor="middle" font-size="10" opacity=".75">frontend · e2e · e2e-device · security</text>
+      <text x="306" y="92" text-anchor="middle" font-size="10" opacity=".75">iot (purity·rollover·corpus) · iot-build</text>
+      <rect x="468" y="34" width="170" height="54" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="553" y="57" text-anchor="middle" font-weight="700">multi-arch build</text>
+      <text x="553" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">amd64 + arm64 · three images</text>
+      <rect x="680" y="34" width="140" height="54" rx="8" fill="var(--card2)" stroke="var(--blue)" stroke-width="1.6"/>
+      <text x="750" y="57" text-anchor="middle" font-weight="700">Docker Hub</text>
+      <text x="750" y="74" text-anchor="middle" class="m" font-size="10" opacity=".65">frostaura/…:latest</text>
+      <rect x="862" y="22" width="244" height="82" rx="8" fill="var(--card2)" stroke="var(--amber-fill)" stroke-width="1.8"/>
+      <text x="984" y="44" text-anchor="middle" font-weight="700">Portainer @ club machine</text>
+      <text x="984" y="62" text-anchor="middle" class="m" font-size="10" opacity=".75">PUT /api/stacks/{id}?pullImage=true</text>
+      <text x="984" y="78" text-anchor="middle" font-size="10" opacity=".75">re-pull · recreate · live</text>
+      <text x="984" y="93" text-anchor="middle" font-size="10" opacity=".75">refuses a stack naming the wrong gateway</text>
+    </g>
+    <g stroke="var(--blue)" stroke-width="1.6" fill="none" marker-end="url(#darw)">
+      <path d="M144 61 H184"/><path d="M426 61 H466"/><path d="M638 61 H678"/><path d="M820 61 H860"/>
+    </g>
+    <text x="560" y="130" text-anchor="middle" font-size="10.5" fill="var(--red)" font-weight="700">⚠ the six Actions secrets are still unset — the release chain is unproven end-to-end, and workflow_dispatch cannot prove it</text>
+  </svg>
+  <figcaption>Push-to-live chain. Every gate must be green before an image is built, and a green run on a branch or a PR builds nothing — only a push to <span class="mono">main</span> does. The six secrets are <span class="mono">DOCKERHUB_USERNAME · DOCKERHUB_TOKEN · PORTAINER_URL · PORTAINER_TOKEN · PORTAINER_ENDPOINT_ID · PORTAINER_STACK_ID</span>. <b>Six, not seven:</b> the seventh was <span class="mono">OTA_PRIVATE_KEY</span>, and a repository that still has it set should delete it, because a secret nothing reads is a credential nobody is watching.</figcaption>
+  </figure>
+  </div>
+
+  <div class="grid3" style="margin-top:18px">
+    <div class="card pad kv">
+      <span class="pill sw">Three images, not two</span>
+      <p style="font-size:13.5px;margin:8px 0 0">The gateway used to be stock <span class="mono">nginx:alpine</span> with <span class="mono">nginx/nginx.conf</span> bind-mounted from a checkout on the host — and the deploy chain moves <em>images</em> and nothing else, so that config was a file the release could not deliver. A club merging a gateway fix got a new backend behind the <b>old</b> config, with every LAN member back in one rate-limit bucket, and a dashboard reporting a successful deploy. <span class="mono">nginx/Dockerfile</span> bakes it in. <span class="mono">deploy-portainer</span> now <b>refuses</b> a stack that does not name the gateway image, or that still bind-mounts the file — neither mistake is visible any other way.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill hw">iot-build proves the flashing route</span>
+      <p style="font-size:13.5px;margin:8px 0 0">Beyond compiling <span class="mono">court_mega</span>, <span class="mono">court_bridge</span> and the simulator under PlatformIO and checking the simulator starts and binds, the job now runs <span class="mono">make arduino-check</span> — regenerate <span class="mono">src/iot/arduino/</span> and fail on a diff — and then <b>compiles both generated sketches with arduino-cli</b> on the pinned cores (<span class="mono">arduino:avr@1.8.6</span>, <span class="mono">esp8266:esp8266@3.1.2</span>). Without it, a source change nobody re-exported leaves a technician flashing last week's firmware from a folder that looks current. It writes a <b>throwaway <span class="mono">secrets.h</span></b> first: the real one is gitignored because it holds a WiFi password and the club key, and the four values only have to <em>exist</em> for the preprocessor.</p>
+    </div>
+    <div class="card pad kv">
+      <span class="pill ok">e2e-device, no hardware</span>
+      <p style="font-size:13.5px;margin:8px 0 0">The real API from source against a fresh Postgres, the firmware's native simulator as the Mega half over TCP, a PayFast mountebank imposter, and <span class="mono">test/e2e-device/scenario.py</span> playing the ESP8266 bridge, the member's phone, the admin and PayFast. Every review finding it pins is printed as <span class="mono">finding-id → assertion</span>, and any failed assertion fails the job. Locally: <span class="mono">make test-e2e-device</span>.</p>
+    </div>
+  </div>
+
+  <h3>The Portainer stack is a file — <span class="mono" style="font-size:15px">docker-compose.prod.yml</span></h3>
+  <div class="grid2">
+    <div class="card pad">
+      <p style="font-size:13.5px;margin-top:0">It is the stack <b>verbatim</b>: it pulls the three published images and carries every value <b>inline</b>, because a Portainer stack has no <span class="mono">.env</span> behind it and the founder's rule is that the file itself holds the minimum a running club needs. Four lines are marked <span class="mono">CHANGE-ME</span> and are edited once when the stack is created — database password, JWT secret, public hostname, mailbox password. Nothing else is configuration.</p>
+      <p style="font-size:13.5px"><b>It publishes exactly one port, <span class="mono">8088</span>.</b> Cloudflared (outside the stack) dials it for members; the court box dials the same port on the machine's LAN address, which is what its <span class="mono">secrets.h</span> names. The stack keeps compose's own bridge rather than host networking, because the gateway reaches the API and the SPA by service name and because the API only believes <span class="mono">X-Forwarded-*</span> from that bridge's pinned subnet.</p>
+      <div class="callout danger" style="margin:14px 0 0">
+        <div class="t">Names must be the ones the API reads</div>
+        <p>.NET maps <span class="mono">Section__Key</span> to <span class="mono">Section:Key</span> and nothing else. Until 2026-09-05 both compose files forwarded flat names — <span class="mono">JWT_SECRET</span>, <span class="mono">APP_FRONTEND_URL</span>, <span class="mono">CORS_ALLOWED_ORIGINS</span>, <span class="mono">MEDIA_STORAGE_PATH</span> — that <em>no line of the API reads</em>, while insisting on values for them: the API booted on the <span class="mono">appsettings.json</span> placeholders, dev JWT secret included. The three exceptions that genuinely take flat names, because their readers say so, are <span class="mono">SMTP_*</span> and the three <span class="mono">WEBAUTHN_*</span> keys. When adding a variable, find the <span class="mono">Configuration[…]</span> read first.</p>
+      </div>
+    </div>
+    <div>
+      <div class="card pad scroll" style="margin-bottom:16px">
+        <h3 style="margin-top:0">Trusted proxies and the hop count</h3>
+        <table>
+          <tbody>
+            <tr><td><b>Trust list</b></td><td><span class="mono">127.0.0.1</span>, <span class="mono">::1</span>, and the <b>pinned</b> compose bridge <span class="mono">172.29.83.0/24</span>. It used to be <span class="mono">172.16.0.0/12</span> — a million addresses, and on a club LAN inside that range every laptop was a trusted proxy able to forge its own client address.</td></tr>
+            <tr><td><b>A string, not an array</b></td><td>Load-bearing: .NET merges arrays <em>by index</em>, so with an array default, setting entry 0 left the rest trusted underneath — a deployment could add a proxy but never remove one. A scalar is replaced whole.</td></tr>
+            <tr><td><b>ForwardLimit 2</b></td><td>One hop for the gateway, one for cloudflared. At the default of 1 the API stopped at cloudflared's bridge address and <b>the entire remote membership shared one ten-a-minute auth bucket</b>. Safe to raise because trust is re-checked at each hop.</td></tr>
+            <tr><td><b>X-Forwarded-Host</b></td><td>nginx forwards <span class="mono">$http_host</span> — host <em>and port</em> — because <span class="mono">$host</span> strips the port and the API composes absolute URLs (verification links, PayFast returns) from what it believes the request arrived on.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout" style="margin:0">
+        <div class="t">The onprem overlay is now a choice, not a requirement</div>
+        <p><span class="mono">docker-compose.onprem.yml</span> existed because a UDP discovery listener needed the LAN's broadcast domain, which a docker bridge does not carry. <b>There is no discovery any more</b>, so what it still buys is hardening rather than connectivity: Postgres and MailHog bound to loopback instead of published, and Kestrel bound to loopback plus one address rather than every interface. The boxes are unaffected either way — <span class="mono">:8088</span> is the address in their <span class="mono">secrets.h</span> and the only one this topology gives them.</p>
+      </div>
+    </div>
+  </div>
+  <p style="font-size:13px;color:var(--muted);margin-top:16px">Backups: nightly encrypted <span class="mono">pg_dump</span> offsite; the <span class="mono">MASTER_SECRETS_ENCRYPTION_KEY</span> that wraps tenant secrets lives in a password manager <em>off</em> the host, so losing the machine does not lose the keys. PayFast merchant credentials are <b>per-tenant database settings</b>, never environment. Biometric USB devices reach the container via <span class="mono">--device</span> passthrough, still commented out until a driver is chosen.</p>
+</section>
+
+<!-- ================= RISKS ================= -->
+<section id="risks">
+  <div class="eyebrow safe">Status · Ordered by risk</div>
+  <h2>Watch list &amp; open questions</h2>
+  <p class="lede">The 2026-08-24 adversarial E2E review found the headline flow — book online, scan at the box, lights on — did not exist end to end: 30 confirmed defects, seven critical, every one in firmware, backend, CI or documentation and <b>none in the wiring</b>. Those closed; two further adversarial rounds and a simplification followed. What remains needs physical access, a live credential, or a person's decision — each expanded, with the cost of skipping it, in <span class="mono">docs/go-live-checklist.md</span>.</p>
+  <div class="card pad scroll">
+    <table>
+      <thead><tr><th>#</th><th>Item</th><th>Class</th><th>Why it matters</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td><b>Relay → contactor, or relay → load?</b></td><td><span class="pill risk">Safety</span></td><td>Gates go-live and is the only item that could hurt somebody. If the 10 A / 250 VAC relays switch the lighting load directly, a qualified electrician is required. A welded contact is a court whose lights <b>cannot be switched off by anything</b> — the box has no readback and cannot even detect it. No software decision touches this.</td></tr>
+        <tr><td class="num">2</td><td>Six GitHub Actions secrets unset</td><td><span class="pill sw">Release</span></td><td>Docker Hub + Portainer. The deploy job is skipped silently on every push, and the chain stays unproven until they are set and one real push to <span class="mono">main</span> has completed — <span class="mono">workflow_dispatch</span> cannot trigger a deploy, so a green run on a branch says nothing about it. Founder-only.</td></tr>
+        <tr><td class="num">3</td><td>Committee sign-off: charge-at-booking (D-1)</td><td><span class="pill sw">Decision</span></td><td>The build debits at booking; client blueprint A.9 says lights-on. Recorded as deviation D-1 in <span class="mono">client-blueprint-deltas.md</span>. The blueprint is the customer's own word and outranks internal specs on economics — not the repo's decision to close.</td></tr>
+        <tr><td class="num">4</td><td>First flash and one real-hardware run</td><td><span class="pill hw">Hardware</span></td><td>Everything below the API is proven on the host; nothing has run on the board. Flash <span class="mono">court_mega</span> then <span class="mono">court_bridge</span> from the Arduino IDE, restore the run DIPs, and watch the box <b>register itself</b> on the Devices page within one heartbeat. Then: one member scanned with lights confirmed on and the ledger checked, the Mega's auto-off confirmed with the ESP <em>unplugged</em>, one no-show left to expire — plus the review's <b>seven physical checks</b>: power topology under WiFi bursts, the physical DIP for all four modes, screens legible on the 20×4 glass, a real code fed to the scanner and its TX captured, scanner UART at 9600, the relay board's JD-VCC jumper and active-LOW on all four channels, and button-to-pin order.</td></tr>
+        <tr><td class="num">5</td><td>Offline identification verified once, both paths</td><td><span class="pill hw">Hardware</span></td><td>One activation through <span class="mono">/activate</span>; one from the roster with the WAN deliberately down; the roster seen to age out at <span class="mono">ROSTER_MAX_AGE_MS</span> and refuse rather than guess; <span class="mono">heartbeat_seconds</span> seen to be adopted from a tenant-settings change.</td></tr>
+        <tr><td class="num">6</td><td>Live PayFast credentials and the first real transaction</td><td><span class="pill sw">Credential</span></td><td>Merchant ID, key and passphrase as tenant settings (never committed); ITN URL registered; one real R100 top-up and one deliberate ITN replay confirmed refused. Founder-only.</td></tr>
+        <tr><td class="num">7</td><td>Power: brownout under WiFi transmit bursts</td><td><span class="pill hw">Hardware</span></td><td>Measure the 5 V rail (relays + LCD + scanner) and the Mega's VIN/9 V path, which feeds the ESP, separately. Below ~4.7 V at the 5 V point, split the load or fit a larger regulator. Removing <span class="mono">BootGuard</span> removed the worst consequence — spurious resets condemning a good build — but not the fault.</td></tr>
+        <tr><td class="num">8</td><td>The Mega's watchdog and the club's bootloader</td><td><span class="pill hw">Bench</span></td><td>The 2 s watchdog and the <span class="mono">Wire</span> bus timeout are what stop a wedged I²C bus under the LCD freezing <span class="mono">loop()</span> and with it the independent auto-off. A reset re-runs <span class="mono">setup()</span> and opens every relay first, and <span class="mono">MCUSR</span> is cleared in <span class="mono">.init3</span> so the firmware cannot contribute to a WDT boot loop — but whether the club's stk500v2 <b>bootloader</b> survives a WDT reset is a bench check, and older ones loop.</td></tr>
+        <tr><td class="num">9</td><td>Queued events do not survive a power cut</td><td><span class="pill sw">Accepted</span></td><td>RAM ring; a court lit during an outage that ended at the breaker is never reported and sweeps as a no-show. Now honestly a <em>not built</em> rather than a <em>cannot</em>: the store's cap is 128 bytes and a 48-byte event would fit, but a half-right torn ring charges a member twice. <b>The consequence changed direction with §6a and the entry has been corrected.</b> It used to cost the member a penalty they did not earn — wrong, but visible on their own ledger and disputable. Under S5a the same booking is refunded <em>in full</em> and stamped <span class="mono">peripheral_outage</span>, so the club silently pays for a court that was played and nobody has a reason to complain. The loss is now the club's and it is not member-detectable; it shows up only as <span class="mono">peripheral_outage</span> refunds in the ledger and on <span class="mono">booking.no_show</span>. The mitigation that shipped with the correction is the alert copy: it no longer opens with "check its power", because a power-cycle is the one action that destroys the queued activations. Making the loss <em>positively</em> detectable is unbuilt, <b>and the route this entry used to name does not work</b>. It said a sequence gap after a reconnect would give it away, because the box persists its sequence mark and the API stores a <span class="mono">DeviceEventReceipt</span> per <span class="mono">(device, seq)</span>. Both halves are true and the inference is not: <span class="mono">EventQueue</span> reserves sequence numbers <em>64 at a time</em> to spare the flash, and <span class="mono">begin()</span> resumes at <span class="mono">mark + 1</span> — past the whole reserved block, because "the previous boot may have issued any number inside that block, and there is no way to know which". So <b>every</b> reboot manufactures a gap of up to 63, whether or not a single event was lost, and a gap cannot tell "the queue lost N activations" from "the checkpoint skipped N numbers". Detecting this honestly needs something the box does not send today — a count of what it discarded, or a persisted ring. Accepted knowingly; item 7 makes it rarer.</td></tr>
+        <tr><td class="num">10</td><td><s>Four emitted webhook events are undiscoverable</s> — <b>closed 2026-09-06</b></td><td><span class="pill ok">Closed</span></td><td>The four that fired without appearing in the admin picker — <span class="mono">booking.displaced</span>, <span class="mono">booking.displacement_reversed</span>, <span class="mono">booking.cancelled_lights_charged</span>, <span class="mono">booking.no_show_reversed</span> — are all listed now, along with the member lifecycle and both peripheral events. The picker and the emitters are the same twenty-two names, and a test asserts set equality rather than a count, so neither side can move without the other going red. Delivery itself was already visible — each endpoint row carries a failure badge and opens its own deliveries table.</td></tr>
+        <tr><td class="num">11</td><td>Unwaivered frontend deviation</td><td><span class="pill sw">Governance</span></td><td>Hand-rolled primitives + context state vs the shadcn/Redux mandate — adopt or record a rationale. The primitives have tests, which is a mitigation and not a waiver.</td></tr>
+        <tr><td class="num">12</td><td>LAN webhook allow-list · no backend architecture doc</td><td><span class="pill sw">Ops</span></td><td>The court box is pull-only and never a webhook destination; any <em>other</em> LAN consumer needs a DHCP reservation and a CIDR entry in <span class="mono">Webhooks:PrivateNetworkAllowList</span>. And <span class="mono">src/iot/README.md</span> covers the hardware split thoroughly; nothing yet covers the API.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout good">
+    <div class="t">Launch bar (working set)</div>
+    <p>100% of bookings in-system within 60 days · ≥95% lights-on match rate · ≥70% of members holding positive credit · second club onboarded in &lt;2 h · ≥99.5% uptime during club hours.</p>
+  </div>
+</section>
+
+<!-- ================= WHERE IT STANDS ================= -->
+<section id="fixes">
+  <div class="eyebrow safe">Status · 2026-09-06</div>
+  <h2>Where it stands — branch <span class="mono" style="font-size:20px">claude/e2e-fix-programme</span></h2>
+  <p class="lede">Three adversarial rounds, then a deliberate simplification. The original review — two rounds, 55 agents, 38 raw findings → <b>30 confirmed</b> (7 critical · 7 high · 12 medium · 4 low), one refuted, seven physical-verification items — closed. A closing re-review and then a <b>round-3 re-review at <span class="mono">da6bc8c</span></b> followed. The constraint honoured throughout: <b>the wiring is fixed and was never touched</b> — the pin map matched Carl's schematic and the old sketches exactly, and every fix has been firmware, backend, CI or documentation.</p>
+
+  <div class="grid2">
+    <div>
+      <div class="card pad scroll">
+        <h3 style="margin-top:0">What has landed since the round-3 baseline — 33 commits</h3>
+        <table>
+          <thead><tr><th>Wave</th><th>What changed, and why</th></tr></thead>
+          <tbody>
+            <tr><td><b>The settlement model</b><br><span class="mono" style="font-size:11px">3326d08 · dfc3d8f</span></td><td>Round 3's central call was that the money path needed <em>one coherent statement</em> rather than another layer of special cases: five of its findings were five symptoms of the same absence. <span class="mono">docs/specs/settlement-model.md</span> is that statement, and it is <a href="#settlement">normative</a>; the money path was then made to enforce it.</td></tr>
+            <tr><td><b>The gateway is an image</b><br><span class="mono" style="font-size:11px">ee17e3f · 3b6aaf5</span></td><td>The config that carried two of the closing fixes was a host bind-mount the release chain never delivered. It is baked in now, <span class="mono">deploy-portainer</span> refuses a stack that does not name it, and the production compose file carries its values inline under the names the API actually reads.</td></tr>
+            <tr><td><b>The tunnel hop, the Court Code page, the desk</b><br><span class="mono" style="font-size:11px">cdb9f42 · aee5414 · e4e934d · fbc9b81</span></td><td><span class="mono">ForwardLimit</span> 2 so the remote membership no longer shares one auth bucket; a member can ask for the code they actually need after booking codes stopped being an identity; the desk is no longer steered into paying a wrong no-show twice.</td></tr>
+            <tr><td><b>The Mega's own safety</b><br><span class="mono" style="font-size:11px">70500a3 · bb05f0a</span></td><td>The watchdog armed over <span class="mono">setup()</span> at 8 s and re-armed to 2 s, the LCD re-synchronised after a bus timeout rather than left painting garbage, the bench check made fireable, a lost <span class="mono">!EXT</span> retried, and event uptime widened to 64-bit.</td></tr>
+            <tr><td><b>The simplification</b><br><span class="mono" style="font-size:11px">1b3a0ee → c4d47a2</span></td><td>Firmware <span class="mono">2.0.0</span>. Request signing, the discovery beacon, claim codes, provisioning, the device clock, OTA, image signing, the <span class="mono">/firmware/</span> route, the <span class="mono">iot-sign</span> job and the runtime credential store are all <b>gone</b>, replaced by one club key and a box that registers itself. Flashing became one page; CI now proves the generated Arduino sketches are current and compiles both with arduino-cli.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout" style="margin-top:16px">
+        <div class="t">Verified by a headed browser round, 2026-09-05</div>
+        <p>Every device-facing claim on this page was checked against the <em>running</em> API in a headed browser session on 2026-09-05, not read off the specs — which is how the previous revision's signed-request, discovery and OTA sections were found to describe a system that no longer exists. What that round established is recorded in the project memory store; the one review kept on disk is <a href="reviews/adversarial-e2e-review.md"><span class="mono">docs/reviews/adversarial-e2e-review.md</span></a>, whose finding ids the device end-to-end suite decodes against.</p>
+      </div>
+    </div>
+    <div>
+      <div class="card pad">
+        <h3 id="gates" style="margin-top:0">Gates — what each suite covers</h3>
+        <ul class="tight">
+          <li><b>Backend</b> — <span class="mono">dotnet test</span>, <b>zero skips</b>, both tiers together against a real PostgreSQL: the in-process <span class="mono">TestHost</span> tier and the Postgres-backed HTTP tier. Cross-tenant injection cases for every tenant-scoped table, the settlement invariants, the device contract against the shared fixture corpus, and posture tests that read the shipped ignore rules, nginx config and this page. Without a database the Postgres tier <em>skips silently and the run still exits 0</em>, which is why the connection string is set rather than assumed and why <span class="mono">REQUIRE_BOUNDARY_TESTS</span> turns that silence into a failure in CI.</li>
+          <li><b>Firmware</b> — Unity, host-native, across the suites named for what they cover (<span class="mono">timebase · bridge · courtlogic · devcrypto · hal_fakes · bridgelogic · protocol</span>) — the rollover arithmetic, the serial framing against the shared corpus, the roster decision and the relay cap, with no board attached. CI runs the same suite again under ASAN + UBSAN.</li>
+          <li><b>Frontend</b> — vitest over every page and primitive, plus Playwright in real Chromium for the things jsdom cannot see: the wallet ledger measured at 375×812, the admin members table at 375 / 768 / 1440, the real <span class="mono">sw.js</span> evaluated rather than mocked, and the top-up status screen driven end to end.</li>
+        </ul>
+        <p style="font-size:13px;color:var(--muted);margin-top:10px"><b>This page no longer quotes test counts, and that is the fix.</b> Four revisions carried them, each correcting its predecessor’s numbers and shipping its own already stale. The clearest case is the last: <span class="mono">5f39f4c</span> wrote a backend count into this page in the same diff that added <span class="mono">RepositoryPostureTests.cs</span> — <b>the figure was wrong before the commit finished</b>, in the change whose own stated rule was that a number which has not been re-run should be deleted rather than carried forward. The counts move every round because every round adds tests; the page is revised far less often; so a number here is stale by construction rather than by neglect, and stamping it with a commit would only make an unread footnote out of a figure nobody can act on. What a suite <em>covers</em> changes slowly and is what a reader actually needs, so that is what the three bullets above say. And a count was never evidence in the first place — three audits found sixteen defects in a suite that was entirely green. <span class="mono">src/frontend/src/blueprint-counts.test.ts</span> reads this file and fails the build if a count comes back onto it &mdash; narrowly, on a digit beside a test-suite word, so the baud rate, the relay cap and the GPIO numbers are untouched.</p>
+      </div>
+      <div class="callout danger" style="margin:16px 0 0">
+        <div class="t">Round 3's ledger, and what this page does not claim</div>
+        <p>Round 3 (<span class="mono">2026-09-05</span>, at <span class="mono">da6bc8c</span>) produced <b>0 critical · 6 high · 17 medium · 2 low</b>, and its sharpest observation was that <b>19 of the 25 surviving findings were introduced by the previous wave itself</b>, most as direct side effects of a named fix. Thirty-three commits have landed since, and they visibly address that ledger — but <b>this page has not re-audited it finding by finding</b>, and does not claim the ledger is closed. What it does claim is what was re-verified: the device contract, the deploy chain, the settlement rules, and what the three test suites above cover. Everything else remains on the <a href="#risks">watch list</a>.</p>
+      </div>
+    </div>
+  </div>
+  <div class="footer">
+    <span>Crusaders Mainframe · FrostAura Technologies · sources: <span class="mono">docs/specs/{feature-spec,deployment,settlement-model,device-serial-protocol}.md</span>, <span class="mono">src/contracts/device-protocol/</span>, <span class="mono">src/iot/README.md</span> + <span class="mono">arduino/README.md</span>, the <span class="mono">Device*</span> endpoints and <span class="mono">Security/DeviceAuth/</span>, <span class="mono">docker-compose{,.prod}.yml</span>, <span class="mono">ci.yml</span>, <span class="mono">docs/reviews/</span>, project memory</span>
+    <span class="mono">REV 2026-09-06</span>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+(function(){
+  // ---------- scroll-spy ----------
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.rail a'));
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+  var secs = Array.prototype.slice.call(document.querySelectorAll('section[id], header[id]'));
+  try{
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting && map[e.target.id]){
+          links.forEach(function(a){ a.classList.remove('active'); });
+          map[e.target.id].classList.add('active');
+        }
+      });
+    }, {rootMargin:'-20% 0px -70% 0px'});
+    secs.forEach(function(s){ obs.observe(s); });
+  }catch(err){}
+
+  // ---------- DIP widget ----------
+  var bank = document.getElementById('dipbank');
+  var note = document.getElementById('dipnote');
+  if(bank){
+    for(var i=1;i<=8;i++){
+      var d = document.createElement('div');
+      d.className='dip'; d.id='dip'+i;
+      d.innerHTML='<div class="slot"><div class="knob"></div></div><div class="lbl">'+i+'</div>';
+      bank.appendChild(d);
+    }
+    var dipButtons = Array.prototype.slice.call(document.querySelectorAll('#dip .seg button'));
+    function setDip(btn){
+      dipButtons.forEach(function(b){ b.classList.toggle('on', b===btn); });
+      var on = btn.getAttribute('data-dip').split(',');
+      for(var i=1;i<=8;i++){
+        document.getElementById('dip'+i).classList.toggle('on', on.indexOf(String(i))>=0);
+      }
+      note.innerHTML = btn.getAttribute('data-note') + ' <span style="color:var(--muted)">— switches ' + on.join(', ') + ' ON, rest OFF.</span>';
+    }
+    dipButtons.forEach(function(b){ b.addEventListener('click', function(){ setDip(b); }); });
+    setDip(dipButtons[0]);
+  }
+
+  // ---------- frame builder ----------
+  var verbBtns = Array.prototype.slice.call(document.querySelectorAll('#fb-verb button'));
+  var courtBtns = Array.prototype.slice.call(document.querySelectorAll('#fb-court button'));
+  var sec = document.getElementById('fb-sec');
+  var secv = document.getElementById('fb-secv');
+  var out = document.getElementById('fb-out');
+  var fnote = document.getElementById('fb-note');
+  var courtWrap = document.getElementById('fb-courtwrap');
+  var secWrap = document.getElementById('fb-secwrap');
+  if(out){
+    var state = {verb:'ON', court:'A', sec:1800};
+    var needs = {
+      ON:{court:true, sec:true}, OFF:{court:true, sec:false}, EXT:{court:true, sec:true},
+      AUTH:{court:false, sec:true}, LCD:{court:false, sec:false}, RST:{court:false, sec:false}, PING:{court:false, sec:false}
+    };
+    var notes = {
+      ON:'The Mega closes the relay and arms its <b>own</b> deadline — auto-off happens even if the ESP, the WiFi and the backend are all gone. Duration is mandatory: v2 has nowhere to put an indefinite-on.',
+      OFF:'Opens the relay now. Also fired early on cancellation.',
+      EXT:'Extends the deadline to now + seconds — how back-to-back bookings flow through without flicker. Refused if the relay is open.',
+      AUTH:'Arms the button panel for a bounded window (30 s = AUTH_TTL_MS). The bridge sends it on every remembered scan and sends 0 the moment any path lights the court. Zero disarms — the one verb where 0 is legal.',
+      LCD:'Two display lines, truncated to 16 columns. Commas ride as %2C, percent as %25 — the only frames that ever need escaping.',
+      RST:'Relays open, buttons disarmed, default screen.',
+      PING:'Answered with <span class="mono">!PONG,&lt;version&gt;,&lt;uptime&gt;</span>.'
+    };
+    function xor(s){
+      var c=0; for(var i=0;i<s.length;i++){ c ^= s.charCodeAt(i); }
+      var h=c.toString(16).toUpperCase(); return h.length<2 ? '0'+h : h;
+    }
+    function clamp(v, verb){
+      var lo = verb==='AUTH' ? 0 : 1;
+      var hi = 5400;
+      return Math.max(lo, Math.min(hi, v));
+    }
+    function render(){
+      var n = needs[state.verb];
+      courtWrap.style.display = n.court ? '' : 'none';
+      secWrap.style.display = n.sec ? '' : 'none';
+      var raw = Number(sec.value);
+      var eff = clamp(raw, state.verb);
+      secv.textContent = raw;
+      var args=[];
+      if(state.verb==='LCD'){ args=['LOW BALANCE','TOP UP']; }
+      else{
+        if(n.court) args.push(state.court);
+        if(n.sec) args.push(String(eff));
+      }
+      var body = state.verb + (args.length ? ','+args.join(',') : '');
+      var cc = xor(body);
+      out.innerHTML = '<span class="fs">!</span><span class="fv">'+state.verb+'</span>'
+        + args.map(function(a){return '<span style="opacity:.5">,</span><span class="fa">'+a+'</span>';}).join('')
+        + '<span class="fs">*</span><span class="fc">'+cc+'</span><span style="opacity:.5">\\n</span>';
+      var extra = '';
+      if(n.sec && raw !== eff){
+        extra = ' <b style="color:var(--amber)">Clamped '+raw+' → '+eff+' (saturating, never wrapping — and never rejected: a clamped light is a wrong-length game, a rejected one is a dark court).</b>';
+      }
+      fnote.innerHTML = 'Checksum <span class="mono">'+cc+'</span> = XOR of every byte in “<span class="mono">'+body+'</span>”. ' + notes[state.verb] + extra;
+    }
+    verbBtns.forEach(function(b){ b.addEventListener('click', function(){
+      verbBtns.forEach(function(x){ x.classList.remove('on'); }); b.classList.add('on');
+      state.verb = b.getAttribute('data-v'); render();
+    });});
+    courtBtns.forEach(function(b){ b.addEventListener('click', function(){
+      courtBtns.forEach(function(x){ x.classList.remove('on'); }); b.classList.add('on');
+      state.court = b.getAttribute('data-c'); render();
+    });});
+    sec.addEventListener('input', render);
+    render();
+  }
+})();
+</script>

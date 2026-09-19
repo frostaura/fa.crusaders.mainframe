@@ -33,8 +33,8 @@
 //     scenario, not an installation.
 //   * Persistence. arduino_hal::EepromStore is built and compiled by this
 //     environment but nothing here instantiates it: the Mega has nothing of its
-//     own to remember. The device key, the API URL and the WiFi credentials all
-//     belong to the ESP, which is the half that can be re-provisioned. An
+//     own to remember. The one thing the box persists — the event queue's
+//     sequence high-water mark — is the ESP's, because the event queue is. An
 //     unused store would cost SRAM on a part that has 8 KB of it.
 //   * Anything that knows what a member is. Bookings, credits and the roster
 //     are the ESP's, because they will change and this half cannot be updated.
@@ -48,7 +48,9 @@
 #include "arduino_hal/Pins.h"
 #include "arduino_hal/SerialScanner.h"
 #include "arduino_hal/SerialTransport.h"
+#include "arduino_hal/Watchdog.h"
 #include "courtlogic/CourtBox.h"
+#include "timebase/TimeBase.h"
 
 namespace {
 
@@ -63,28 +65,81 @@ arduino_hal::ArduinoButtons gButtons;
 arduino_hal::SerialTransport gBridge(Serial3);
 arduino_hal::ArduinoClock gClock;
 
-courtlogic::CourtBox gBox(courtlogic::CourtPorts{gRelay, gDisplay, gScanner, gButtons, gBridge, gClock});
+// LegacyDialect::Refuse — the production box takes only checksummed `!` frames.
+// The legacy `A` is the one message that closes a relay with no checksum, and
+// this UART receives the ESP's 74880-baud boot banner at every ESP reset. The
+// codec still speaks the dialect for the simulator and the bench; a real box
+// does not opt in. See proto::LegacyDialect.
+courtlogic::CourtBox gBox(courtlogic::CourtPorts{gRelay, gDisplay, gScanner, gButtons, gBridge, gClock},
+                          proto::LegacyDialect::Refuse);
+
+#ifdef WDT_BENCH_STALL
+/// When the bench build stalls. See arduino_hal::watchdogBenchStall.
+tb::Deadline gBenchStall;
+constexpr uint32_t kBenchStallAfterMs = 60000UL;
+#endif
 
 } // namespace
 
 void setup() {
-  // Relays first, before anything else can take time. begin() drives every pin
+  // The watchdog FIRST, at eight seconds.
+  //
+  // It used to be armed only at the end, on the reasoning that init spends time
+  // in delay() and a period long enough to survive setup() would be too long to
+  // protect loop(). Both halves of that are true; the conclusion was not. It
+  // left the one path in this firmware that can hang FOREVER — the LCD's
+  // synchronous Wire traffic on a bus a PCF8574 is holding low across a
+  // Mega-only reset — with nothing behind it at all (review 3, finding 10). Two
+  // periods costs one extra instruction and closes it.
+  arduino_hal::watchdogBeginBoot();
+
+  // Relays next, before anything else can take time. begin() drives every pin
   // to the released level BEFORE configuring it as an output, because an AVR
   // output latches its power-on LOW — which on an active-LOW board is four
   // courts' lights coming on at every reset.
   gRelay.begin();
 
   gButtons.begin();
+  arduino_hal::watchdogKick();
+  // The longest step by far: the bus release, the timeout and the panel's own
+  // power-on sequence. Kicked either side of it rather than inside it, so a
+  // driver can never hide the stall the watchdog is for.
   gDisplay.begin();
+  arduino_hal::watchdogKick();
   gScanner.begin();
   gBridge.begin();
 
   gBox.begin();
+
+  // Re-armed at two seconds, once nothing above can spend a second in an init
+  // delay(). From here on a pass of loop() that does not return within two
+  // seconds is a hardware reset — which lands back at gRelay.begin() above,
+  // with every contact open. That is the property this half of the box exists
+  // for.
+  arduino_hal::watchdogBegin();
+
+#ifdef WDT_BENCH_STALL
+  gBenchStall.arm(gClock.nowMs(), kBenchStallAfterMs);
+#endif
 }
 
 void loop() {
   // One pass, no delay(). A blocking delay anywhere in this loop stops the
   // relay auto-off timer for its duration, which is the one thing this half of
-  // the box exists to keep running.
+  // the box exists to keep running. The watchdog is kicked HERE and nowhere
+  // else in service: a driver that kicked it from inside its own spin would
+  // hide exactly the stall the watchdog is for.
+  arduino_hal::watchdogKick();
+
+#ifdef WDT_BENCH_STALL
+  // Bench builds only (`env:court_mega_bench`). Sixty seconds after boot the
+  // pass never returns, so the go-live watchdog check has something the Wire
+  // timeout cannot absorb. Unreachable in every shipped image: the flag is
+  // defined in one environment, which uploads nothing to a club box.
+  if (gBenchStall.expired(gClock.nowMs())) {
+    arduino_hal::watchdogBenchStall();
+  }
+#endif
+
   gBox.poll();
 }

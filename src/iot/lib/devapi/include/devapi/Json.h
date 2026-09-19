@@ -46,18 +46,23 @@ size_t findKey(const char* body, size_t len, const char* key);
 /// Copies the string value of `key` into `out`. False when the key is absent, the
 /// value is not a string, or it would not fit.
 ///
-/// <b>Refuses rather than truncates.</b> Half a device key signs every request
-/// wrongly, and the 401 it earns reads exactly like a revoked credential — which
-/// would send a perfectly good board off to be re-claimed.
+/// <b>Refuses rather than truncates.</b> Half a value is a different value, and
+/// every caller here treats absence as "learned nothing" while a truncation
+/// would be acted on as fact.
 bool stringField(const char* body, size_t len, const char* key, char* out, size_t outCap);
 
 /// Reads the unsigned integer value of `key`. False when the key is absent, the value is
 /// not a bare integer, or it would overflow.
 ///
 /// <b>Saturating, never wrapping.</b> A body claiming 10^30 is nonsense; wrapping it
-/// produces a plausible small number, and a plausible small number for an image size
-/// passes the fit check and then runs out of flash halfway through a write.
+/// produces a plausible small number, and a plausible small number for a granted
+/// duration or an accepted sequence is acted on rather than questioned.
 bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out);
+
+/// Reads the boolean value of `key`. False when the key is absent or the value
+/// is not literally `true` or `false` — a quoted "true" is reported as absent,
+/// for the same reason a quoted integer is.
+bool boolField(const char* body, size_t len, const char* key, bool& out);
 
 /// Position of the first element of the array under `key`, or kNotFound when the
 /// key is absent or its value is not an array.
@@ -66,6 +71,11 @@ size_t findArray(const char* body, size_t len, const char* key);
 /// Reads the next string element starting at `at`, advancing `at` past it.
 /// False at the closing bracket, at the end of the buffer, or on a non-string.
 bool nextStringElement(const char* body, size_t len, size_t& at, char* out, size_t outCap);
+
+/// Reads the next unsigned-integer element starting at `at`, advancing `at`
+/// past it. False at the closing bracket, at the end of the buffer, on a
+/// non-integer element, or on overflow — never a wrapped value.
+bool nextUnsignedElement(const char* body, size_t len, size_t& at, uint32_t& out);
 
 } // namespace json
 } // namespace devapi
