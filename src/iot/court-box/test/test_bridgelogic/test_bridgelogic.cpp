@@ -306,6 +306,43 @@ void test_scan_flow_a_grant_on_a_court_this_box_does_not_drive_is_refused_not_re
   TEST_ASSERT_TRUE(r2.outcome.action == court::Action::Refuse);
 }
 
+/// A `reason` whose text happens to be the name of a key read LATER in the same
+/// response. `reason` is server-chosen and sits before `court_number` and
+/// `granted_seconds` in every activate response, so a scanner that matched a
+/// quoted string anywhere read the reason's VALUE as the key and then found no
+/// number after it — a member with a valid booking sent to the desk, or the
+/// roster asked to light a court the API had already activated. Held by
+/// devapi::json::findKey now; this is the court box's own pin on it.
+void test_scan_flow_a_reason_that_names_a_later_key_does_not_hide_it() {
+  const bridgelogic::ScanFlow flow;
+
+  const char courtDecoy[] = "{\"activated\":true,\"reason\":\"court_number\",\"court_number\":9,"
+                            "\"granted_seconds\":2700}";
+  const bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, courtDecoy, len(courtDecoy), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(2U, r.outcome.court); // court 9 is relay C
+  TEST_ASSERT_EQUAL_UINT32(2700000UL, r.outcome.durationMs);
+
+  const char grantDecoy[] = "{\"activated\":true,\"reason\":\"granted_seconds\",\"court_number\":9,"
+                            "\"granted_seconds\":1800}";
+  const bridgelogic::ActivationResult r2 =
+      flow.onActivateResponse(200U, grantDecoy, len(grantDecoy), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(r2.fallbackToRoster);
+  TEST_ASSERT_TRUE(r2.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT32(1800000UL, r2.outcome.durationMs);
+
+  // And on the refusal path, where `reason` names the number the refusal
+  // itself needs: "TOO EARLY" without its minutes reads as a broken box.
+  const char earlyDecoy[] = "{\"activated\":false,\"reason\":\"too_early\","
+                            "\"starts_in_seconds\":540}";
+  const bridgelogic::ActivationResult r3 =
+      flow.onActivateResponse(200U, earlyDecoy, len(earlyDecoy), kCourts, kCourtCount);
+  TEST_ASSERT_EQUAL_STRING("TOO EARLY", r3.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING("WAIT 9 MIN", r3.outcome.line2);
+}
+
 void test_scan_flow_a_refusal_is_a_decision_the_roster_does_not_second_guess() {
   // The no-second-guess test. A refused member who then got the lights from a
   // stale cache is exactly the cancelled-booking-still-lights-a-court failure
@@ -1965,6 +2002,7 @@ int main(int, char**) {
   RUN_TEST(test_scan_flow_display_clamps_a_grant_past_the_relay_cap);
   RUN_TEST(test_scan_flow_a_grant_with_no_seconds_in_it_is_no_decision);
   RUN_TEST(test_scan_flow_a_grant_on_a_court_this_box_does_not_drive_is_refused_not_retried);
+  RUN_TEST(test_scan_flow_a_reason_that_names_a_later_key_does_not_hide_it);
   RUN_TEST(test_scan_flow_a_refusal_is_a_decision_the_roster_does_not_second_guess);
   RUN_TEST(test_scan_flow_no_answer_is_the_rosters_scan);
   RUN_TEST(test_scan_flow_renders_the_activate_body);

@@ -403,6 +403,54 @@ void test_heartbeat_interval_is_adopted_and_bounded() {
   TEST_ASSERT_FALSE(devlink::parseHeartbeatInterval(quoted, len(quoted), ms));
 }
 
+/// THE CLUB'S OWN SLUG IS A DECOY. `tenant_slug` and `device_code` are strings
+/// the server chooses and are sent BEFORE everything these three functions
+/// read, so a club slugged after one of the keys used to make that key
+/// unreadable — silently, because every one of these reports absence and every
+/// caller treats absence as "leave what you had". A box on its compiled-in
+/// cadence forever, a roster that ages out and then admits nobody, a relay bank
+/// mapped to the wrong courts. Held by devapi::json::findKey; pinned here
+/// because this is where it would actually bite.
+void test_a_tenant_slug_that_names_a_key_hides_nothing() {
+  const char cadence[] = "{\"server_time\":\"2023-11-14T22:13:20+00:00\","
+                         "\"tenant_slug\":\"heartbeat_seconds\",\"device_code\":\"court-box-1\","
+                         "\"heartbeat_seconds\":60,\"roster\":[]}";
+  uint32_t ms = 30000UL;
+  TEST_ASSERT_TRUE(devlink::parseHeartbeatInterval(cadence, len(cadence), ms));
+  TEST_ASSERT_EQUAL_UINT32(60000UL, ms);
+
+  const char courtsBody[] = "{\"tenant_slug\":\"court_numbers\",\"device_code\":\"court-box-1\","
+                            "\"court_numbers\":[7,8],\"roster\":[]}";
+  int16_t courts[devlink::kMaxCourts] = {-1, -1, -1, -1};
+  uint8_t count = 99U;
+  TEST_ASSERT_TRUE(devlink::parseCourtNumbers(courtsBody, len(courtsBody), courts, count));
+  TEST_ASSERT_EQUAL_UINT8(2U, count);
+  TEST_ASSERT_EQUAL_INT16(7, courts[0]);
+  TEST_ASSERT_EQUAL_INT16(8, courts[1]);
+
+  const char rosterBody[] = "{\"tenant_slug\":\"roster\",\"device_code\":\"court-box-1\","
+                            "\"court_numbers\":[7,8],\"roster\":[\"7Q3F9KM2XZ8B|0|-120|2580\"]}";
+  Cache cache(kSixHoursMs);
+  const devlink::SyncResult result = devlink::applyRoster(rosterBody, len(rosterBody), cache, kBaseMid);
+  TEST_ASSERT_TRUE(result.replaced);
+  TEST_ASSERT_EQUAL_UINT8(1U, result.accepted);
+  TEST_ASSERT_EQUAL_UINT8(0U, result.rejected);
+}
+
+/// The same, one level worse: the club's slug names the key AND a button-map
+/// element does too. `button_map` is eight strings an admin types by hand, and
+/// they sit between `tenant_slug` and `roster` on every court-box heartbeat.
+void test_a_button_map_element_that_names_a_key_hides_nothing() {
+  const char body[] = "{\"tenant_slug\":\"crusaders\",\"heartbeat_seconds\":60,"
+                      "\"config\":{\"button_map\":[\"roster\",\"court:B\"]},"
+                      "\"roster\":[\"7Q3F9KM2XZ8B|0|-120|2580\"]}";
+  Cache cache(kSixHoursMs);
+  const devlink::SyncResult result = devlink::applyRoster(body, len(body), cache, kBaseMid);
+  TEST_ASSERT_TRUE(result.replaced);
+  TEST_ASSERT_EQUAL_UINT8(1U, result.accepted);
+  TEST_ASSERT_EQUAL_UINT8(0U, result.rejected);
+}
+
 // -------------------------------------------------------------------------
 // EventUpload and Cadence — the bodies, across the millis() wrap
 // -------------------------------------------------------------------------
@@ -527,6 +575,8 @@ int main(int, char**) {
   RUN_TEST(test_breaker_any_answer_closes_it_and_resets_the_window);
 
   RUN_TEST(test_heartbeat_interval_is_adopted_and_bounded);
+  RUN_TEST(test_a_tenant_slug_that_names_a_key_hides_nothing);
+  RUN_TEST(test_a_button_map_element_that_names_a_key_hides_nothing);
 
   RUN_TEST(test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap);
   RUN_TEST(test_heartbeat_body_names_the_box_and_survives_the_millis_wrap);
