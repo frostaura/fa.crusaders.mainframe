@@ -46,6 +46,8 @@ const char* kindName(Kind kind) {
     return "fault";
   case Kind::Boot:
     return "boot";
+  case Kind::GateOpen:
+    return "gate_open";
   }
 
   // Not reachable through the enum, but reachable through a byte read back from

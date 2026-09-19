@@ -65,6 +65,15 @@ enum class Kind : uint8_t {
   /// The box started up. Carries nothing but its own existence, which is what
   /// makes an unexplained gap in the sequence explainable.
   Boot = 5U,
+  /// A door gate released its lock from its OWN roster, because the API could
+  /// not be asked. Queued for offline opens only: an open the API itself
+  /// decided is already in the API's audit trail, and queueing it too would
+  /// file every online open twice.
+  ///
+  /// `court` is kNoCourt — a door is not on a court — and `durationMs` is how
+  /// long the lock was released for. It never touches attendance: walking
+  /// through a door is not playing a booking.
+  GateOpen = 6U,
 };
 
 /// How a member identified themselves, mirroring the API's `method` field.

@@ -19,14 +19,29 @@
 // scaffolding, not firmware — but it still allocates nothing, because the
 // buffers are static and bounded.
 
-// WHY THIS IS HEADER-ONLY AND LIVES IN test/support/
-// --------------------------------------------------
-// Two suites read the corpus now — the crypto one and the bridge one — and
-// PlatformIO builds each test_<name> directory into its own binary without
-// compiling anything outside it. A shared .cpp here would compile and then fail
-// to link, which is exactly what happened when it was tried. Everything is
-// therefore `inline` in the header, each test binary gets its own copy, and
-// there is no build configuration to keep in step with a new suite.
+// WHY THIS IS HEADER-ONLY
+// -----------------------
+// Several suites read the corpus, and PlatformIO builds each test_<name>
+// directory into its own binary without compiling anything outside it. A shared
+// .cpp here would compile and then fail to link, which is exactly what happened
+// when it was tried. Everything is therefore `inline` in the header, each test
+// binary gets its own copy, and there is no build configuration to keep in step
+// with a new suite.
+//
+// WHY IT LIVES IN shared/test/support/ AND NOT IN A DEVICE PROJECT
+// ---------------------------------------------------------------
+// It was in court-box/test/support/, where it was invisible to every other
+// firmware project: PlatformIO puts a project's OWN test_dir on the include
+// path and nothing else, so the door gate's suite could not have read the
+// corpus at all without a second copy of this file. Two copies of a corpus
+// reader is two ways to read the corpus, which is the drift the corpus exists
+// to catch, one level up.
+//
+// It is reached from every project by the SAME line, because each project's
+// `[strict_host]` block carries `-I$PROJECT_DIR/../shared/test` and those blocks
+// are kept byte-identical on purpose. That expression is this directory from
+// any of them, including from `shared` itself, where it is redundant and kept
+// anyway so the blocks stay identical.
 
 #ifndef CRUSADERS_TEST_CORPUS_JSON_H
 #define CRUSADERS_TEST_CORPUS_JSON_H
