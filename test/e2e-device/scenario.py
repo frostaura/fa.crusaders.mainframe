@@ -49,7 +49,7 @@ API_PROJECT = ROOT / "src" / "backend" / "Crusaders.Mainframe.Api"
 API_CSPROJ = API_PROJECT / "Crusaders.Mainframe.Api.csproj"
 API_DLL = API_PROJECT / "bin" / "Debug" / "net10.0" / "Crusaders.Mainframe.Api.dll"
 IMPOSTER = ROOT / "test" / "virtualization" / "payfast" / "imposter.json"
-SIMULATOR = ROOT / "src" / "iot" / ".pio" / "build" / "simulator" / "program"
+SIMULATOR = ROOT / "src" / "iot" / "court-box" / ".pio" / "build" / "simulator" / "program"
 
 # What the Development seeder writes for the pilot tenant. The tenant's PayFast
 # credentials have no admin API yet (they live inside tenant_settings.payfast, and
@@ -778,7 +778,7 @@ class Simulator:
         if not Path(self.cfg.pio).exists() and not shutil.which(self.cfg.pio):
             raise StepFailed(f"{SIMULATOR} is missing and no pio to build it (set PIO=)")
         print("  building the native simulator (pio run -e simulator) ...")
-        r = subprocess.run([self.cfg.pio, "run", "-d", str(ROOT / "src" / "iot"), "-e", "simulator"], capture_output=True, text=True)
+        r = subprocess.run([self.cfg.pio, "run", "-d", str(ROOT / "src" / "iot" / "court-box"), "-e", "simulator"], capture_output=True, text=True)
         if r.returncode != 0 or not SIMULATOR.exists():
             raise StepFailed("simulator build failed:\n" + (r.stdout + r.stderr)[-3000:])
 

@@ -97,7 +97,7 @@ indifferent to which end the debit is taken from.
 
 Both halves are flashed over USB, by DIP switch. No adapter, no soldering, no pad access,
 and no network path — the whole procedure is the **Arduino IDE 2**: open the sketch, pick
-the board and the port, press Upload. `src/iot/arduino/README.md` is the page, and it needs
+the board and the port, press Upload. `src/iot/court-box/arduino/README.md` is the page, and it needs
 no terminal, no `make` and nothing from the Library Manager. The `make flash-*` targets do
 the same two uploads from PlatformIO and are the developer alternative.
 
@@ -111,16 +111,16 @@ flashed box joins, heartbeats, and appears on the admin Devices screen by itself
 - [ ] Arduino IDE 2 installed, with `https://arduino.esp8266.com/stable/package_esp8266com_index.json`
       added under *Preferences → Additional boards manager URLs*, and both cores installed
       from Boards Manager: **Arduino AVR Boards 1.8.6** and **esp8266 3.1.2**. Those are the
-      versions CI compiles the sketches against and the ones `src/iot/platformio.ini` pins.
-- [ ] `cp src/iot/arduino/court_bridge/secrets.h.example src/iot/arduino/court_bridge/secrets.h`
+      versions CI compiles the sketches against and the ones `src/iot/court-box/platformio.ini` pins.
+- [ ] `cp src/iot/court-box/arduino/court_bridge/secrets.h.example src/iot/court-box/arduino/court_bridge/secrets.h`
       on the flashing machine and fill in all four, then do not commit it:
       `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL` (the backend's **LAN** address and port,
       no trailing slash — the box and the backend are on the same club network), and
       `DEVICE_API_KEY` (copy it from the admin Devices page).
-- [ ] Open `src/iot/arduino/court_mega/court_mega.ino`, board **Arduino Mega or Mega 2560**,
+- [ ] Open `src/iot/court-box/arduino/court_mega/court_mega.ino`, board **Arduino Mega or Mega 2560**,
       processor **ATmega2560**, pick the port, **Upload** — with DIP
       **1 OFF, 2 OFF, 3 ON, 4 ON**, 5–8 OFF.
-- [ ] Open `src/iot/arduino/court_bridge/court_bridge.ino`, board **Generic ESP8266 Module**,
+- [ ] Open `src/iot/court-box/arduino/court_bridge/court_bridge.ino`, board **Generic ESP8266 Module**,
       flash size **4MB (FS:2MB OTA:~1019KB)**, CPU **80 MHz**, upload speed **115200**, pick
       the port, **Upload** — with DIP **1–4 OFF, 5 ON, 6 ON, 7 ON**, 8 OFF. Then move DIP 7
       OFF and open the **Serial Monitor at 9600** — **watch the monitor, not the glass**: in

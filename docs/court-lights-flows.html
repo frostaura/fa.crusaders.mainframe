@@ -300,7 +300,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
       <p class="why">The only four things the box ever needs to know.</p>
       <ul>
         <li>In the web app, open <b>Devices</b> → <b>Device API key</b> → reveal → copy.</li>
-        <li>In the repository, copy <code>src/iot/arduino/court_bridge/secrets.h.example</code> to <code>secrets.h</code> in the same folder and fill in:</li>
+        <li>In the repository, copy <code>src/iot/court-box/arduino/court_bridge/secrets.h.example</code> to <code>secrets.h</code> in the same folder and fill in:</li>
       </ul>
 <pre><code>#define WIFI_SSID       "ClubWiFi"
 #define WIFI_PASSWORD   "…"
@@ -323,7 +323,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
       <div class="diprow"><div class="dip"><span class="on">1</span><span class="on">2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><span class="dipcap"><b>Wait:</b> that's the run position. For a Mega upload set</span></div>
       <div class="diprow"><div class="dip"><span>1</span><span>2</span><span class="on">3</span><span class="on">4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><span class="dipcap"><b>Mega upload:</b> 3 and 4 ON, everything else OFF</span></div>
       <ol>
-        <li>Open <code>src/iot/arduino/court_mega/court_mega.ino</code>.</li>
+        <li>Open <code>src/iot/court-box/arduino/court_mega/court_mega.ino</code>.</li>
         <li>Board: <b>Arduino Mega or Mega 2560</b>, processor <b>ATmega2560</b>. Port: the USB serial port that appeared.</li>
         <li><b>Upload</b>. Done when the IDE says so; the LCD shows the idle text.</li>
       </ol>
@@ -333,7 +333,7 @@ table.tt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:
       <p class="why">The bridge is the brain: WiFi, the roster, every decision. This is the one you reflash when the WiFi password, the server address or the key changes.</p>
       <div class="diprow"><div class="dip"><span>1</span><span>2</span><span>3</span><span>4</span><span class="on">5</span><span class="on">6</span><span class="on">7</span><span>8</span></div><span class="dipcap"><b>ESP upload:</b> 5, 6 and 7 ON, everything else OFF</span></div>
       <ol>
-        <li>Open <code>src/iot/arduino/court_bridge/court_bridge.ino</code> (your <code>secrets.h</code> sits beside it; the build refuses to start without it).</li>
+        <li>Open <code>src/iot/court-box/arduino/court_bridge/court_bridge.ino</code> (your <code>secrets.h</code> sits beside it; the build refuses to start without it).</li>
         <li>Board: <b>Generic ESP8266 Module</b>. Flash size <b>4MB (FS:2MB OTA:~1019KB)</b>. Upload speed <b>115200</b>. Port: the same USB port.</li>
         <li><b>Upload</b>. The LCD stays blank during this; that is expected.</li>
       </ol>

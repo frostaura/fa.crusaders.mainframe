@@ -67,7 +67,7 @@ recomputing it from settings — a waived penalty is `penalised = 0`, `penaltyBa
 **S5a is the one deliberate exception to I2, and this used to say the opposite.** The claim here
 was that a court that was lit holds an activation on the box and that activation arriving is
 what turns S5a into S6, so I2 could not be weakened. That is true only while the box stays
-powered. The queue is RAM (`src/iot/lib/eventq/include/eventq/EventQueue.h`), so a box that
+powered. The queue is RAM (`src/iot/shared/lib/eventq/include/eventq/EventQueue.h`), so a box that
 lights courts from its cached roster through an outage and then loses power never uploads those
 activations, S6 never happens, and `Owed(b)` stays `0` for a court that was played. Read I2 with
 its exception below.
@@ -418,7 +418,7 @@ suppressed *both* money legs of the reversal.
 
 **The one exception, accepted deliberately: S5a plus a lost event queue.** The box lights
 courts from its cached roster while its uplink is down and queues the activations, but that
-queue is in RAM — `src/iot/lib/eventq/include/eventq/EventQueue.h` says so, and the go-live
+queue is in RAM — `src/iot/shared/lib/eventq/include/eventq/EventQueue.h` says so, and the go-live
 checklist accepts it. A court lit during an outage that ended in a power cut is therefore never
 reported, the sweep concludes nobody played, S5a refunds in full, and `Owed(b) = 0` for a court
 that ran. Nothing in the system can distinguish that case from the one S5a exists for, because

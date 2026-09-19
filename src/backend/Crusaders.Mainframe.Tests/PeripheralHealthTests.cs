@@ -205,7 +205,7 @@ public class PeripheralHealthTests
     ///
     /// <para>
     /// A box that has lost only its uplink keeps lighting courts from its cached roster and holds
-    /// the scans in a RAM ring (<c>src/iot/lib/eventq/include/eventq/EventQueue.h</c>). Cutting
+    /// the scans in a RAM ring (<c>src/iot/shared/lib/eventq/include/eventq/EventQueue.h</c>). Cutting
     /// the power discards them, and every court it lit during the outage then settles under S5a
     /// as a full refund the club carries — the one accepted I2 exception. The alert that reports
     /// the outage used to say "Check its power and its WiFi", i.e. it led with the single action

@@ -66,7 +66,7 @@ Then, **only on a push to `main`**: `build-backend-{amd64,arm64}`, `build-fronte
 
 ## The court box's own configuration
 
-There is nothing to sign, package or serve. A box carries four values, compiled in from `src/iot/src/common/secrets.h` (copied from `secrets.h.example`, gitignored, all four mandatory — the build `#error`s without them):
+There is nothing to sign, package or serve. A box carries four values, compiled in from `src/iot/court-box/src/common/secrets.h` (copied from `secrets.h.example`, gitignored, all four mandatory — the build `#error`s without them):
 
 | Value | What it is |
 | --- | --- |
@@ -75,7 +75,7 @@ There is nothing to sign, package or serve. A box carries four values, compiled 
 | `API_BASE_URL` | the gateway on the club LAN, e.g. `http://192.168.1.10:8088` — **`http`, never `https`**: the box has a plain `WiFiClient` and no heap for a TLS context |
 | `DEVICE_API_KEY` | the club's device API key, copied from the Devices page |
 
-Getting a box onto a court is: read the key off the Devices page, paste it into `secrets.h` beside the bridge sketch, open `src/iot/arduino/court_mega` and then `src/iot/arduino/court_bridge` in the Arduino IDE and press Upload for each (board settings and DIP positions in [`src/iot/README.md`](../../src/iot/README.md); `make flash-*` is the developer alternative), screw the box to the wall. **It appears on the Devices page by itself** on its first heartbeat, named `box-<last six hex of its MAC>`, driving the club's courts in ascending order up to the four the relay bank has, and badged as unchecked until an admin confirms the court numbers. There is no discovery listener, no claim code, no per-device key and no provisioning step.
+Getting a box onto a court is: read the key off the Devices page, paste it into `secrets.h` beside the bridge sketch, open `src/iot/court-box/arduino/court_mega` and then `src/iot/court-box/arduino/court_bridge` in the Arduino IDE and press Upload for each (board settings and DIP positions in [`src/iot/court-box/README.md`](../../src/iot/court-box/README.md); `make flash-*` is the developer alternative), screw the box to the wall. **It appears on the Devices page by itself** on its first heartbeat, named `box-<last six hex of its MAC>`, driving the club's courts in ascending order up to the four the relay bank has, and badged as unchecked until an admin confirms the court numbers. There is no discovery listener, no claim code, no per-device key and no provisioning step.
 
 Regenerating the key on the Devices page invalidates the old one on the very next request, so every box has to be reflashed. That is the trade this contract makes, and it is why the page says so.
 

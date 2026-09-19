@@ -183,7 +183,7 @@ public sealed class NoShowWorker : BackgroundService
         // WHAT THIS COSTS, STATED PLAINLY. It can make a played court free, and that is a real
         // I2 exception rather than something the design rules out. The box lights courts from
         // its cached roster while its uplink is down and queues the activations, but that queue
-        // is in RAM (src/iot/lib/eventq/include/eventq/EventQueue.h) — a power cut discards it.
+        // is in RAM (src/iot/shared/lib/eventq/include/eventq/EventQueue.h) — a power cut discards it.
         // A court lit during an outage that ended in a power cut is therefore never reported,
         // this sweep concludes nobody played, and the full refund stands with Owed(b) = 0 and
         // nobody to complain. The alternative — keeping a penalty against members who could not

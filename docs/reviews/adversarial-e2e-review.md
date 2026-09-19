@@ -1,6 +1,15 @@
 # Crusaders Mainframe — Adversarial End-to-End Review
 **Date:** 2026-08-24 · **Method:** two-round multi-agent adversarial review (55 agents: 6 finders → dedup → independent refuters per finding → synthesis) · **Constraint honored throughout: the physical wiring is fixed and no finding proposes changing it.**
 
+> **Every path and line number below is as of 2026-08-24 and is deliberately not
+> updated.** This is a dated record, not a map of the tree: it already cites
+> files that have since been deleted (`src/iot/tools/pio_sign_post.py`), and the
+> firmware moved to `src/iot/court-box/` with its device-agnostic libraries in
+> `src/iot/shared/lib/` on 2026-09-19. Rewriting the citations would make the
+> record claim it had inspected code it never saw. What this document is *for*
+> is its finding ids, which `test/e2e-device/` and the go-live checklist decode
+> against; follow a path here by name, not by location.
+
 **Inputs:** the canonical wiring schematic (`Light Project Wiring.xlsx`, both sheets), the old proven-working sketches (`Dean.zip`, `Squash_Court_System_FINAL_WORKING_2026-07-14`), five photos of the actual build, and the full `crusaders.mainframe` repo (firmware, contracts corpus, backend, docs).
 
 **Outcome: 38 raw findings → 30 CONFIRMED (7 critical · 7 high · 12 medium · 4 low) · 1 refuted · 7 physical-verification items.** The firmware pin map (`Pins.h`) matches the schematic and the old code exactly — relays {2,3,4,5} active-LOW, buttons {22–36} pullup, scanner Serial2, bridge Serial3, 9600 baud, LCD 0x27. The wiring layer is sound; every confirmed defect is firmware, backend, CI or documentation, and every fix direction preserves the wiring.

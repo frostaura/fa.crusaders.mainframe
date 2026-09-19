@@ -17,7 +17,7 @@ exchanges plus the API log tail.
 |---|---|---|
 | API | **real**, from source | `dotnet build` then the DLL, `ASPNETCORE_ENVIRONMENT=Development` so the Seeder creates the pilot tenant, admin, four courts and five sample members |
 | Postgres | **real** | whatever answers on `E2E_PG_HOST:E2E_PG_PORT` (default `localhost:5439`, the throwaway `crusaders-fixprog-pg` container; `docker start`/`docker run` if nothing is listening — in CI the `e2e-device` job points these at its Postgres service container, so no docker is needed there). A fresh `e2e_device_<stamp>` database per run — EF's `Migrate` creates it — so re-runs never see each other |
-| Mega half of the court box | **real firmware** | `src/iot/.pio/build/simulator/program`: the same `courtlogic::CourtBox`, `lib/protocol` codec and relay auto-off timer the ATmega runs, behind `posix_hal` and a TCP socket. Built by the target with `pio run -e simulator` |
+| Mega half of the court box | **real firmware** | `src/iot/court-box/.pio/build/simulator/program`: the same `courtlogic::CourtBox`, `court-box/lib/protocol` codec and relay auto-off timer the ATmega runs, behind `posix_hal` and a TCP socket. Built by the target with `pio run -e simulator` |
 | PayFast | **imposter** | mountebank with `test/virtualization/payfast/imposter.json` — the same file `make virt-up` and `docker-compose.test.yml` use. Reused if one is already up on `:4545` |
 | ESP8266 bridge | **played** by the script | the club's device API key as a bearer header and the box's MAC in every body (both self-tested against `src/contracts/device-protocol/http/cases.json` before anything else), heartbeat, `/activate`, `/events`, `/walkup`, and the serial `!VERB,arg*CC` codec towards the simulated Mega |
 | Member's phone | **played** | admin password reset → member login → `POST /me/qr/generate` |
@@ -26,7 +26,7 @@ exchanges plus the API log tail.
 
 ### Why the simulator is only the Mega, and why that is enough
 
-`src/iot/src/simulator/main.cpp` says it outright: *"This is a MEGA simulator: it speaks the
+`src/iot/court-box/src/simulator/main.cpp` says it outright: *"This is a MEGA simulator: it speaks the
 downlink side of the serial protocol and expects a bridge — or a test — on the socket."* It
 runs `courtlogic::CourtBox` (relays, LCD, buttons, scanner, auth window, auto-off timer) over
 `posix_hal` and listens on loopback TCP for one peer. It does **not** run `bridgelogic` or
@@ -70,7 +70,7 @@ and the 30-second sweep, which the script waits for rather than short-circuits �
 ## What it deliberately does not prove
 
 - **The ESP8266's own logic.** `bridgelogic` (roster sync, scan flow, walk-up nonce, `!STATE`
-  reconciliation) is host-tested in `src/iot/test/`. This script re-implements the bridge's
+  reconciliation) is host-tested in `src/iot/court-box/test/` and `src/iot/shared/test/`. This script re-implements the bridge's
   *wire* behaviour to drive the API; it does not execute the firmware's decisions.
 - **That the integration works against PayFast.** The imposter proves the API's handling of a
   callback; the signature algorithm is pinned by `src/contracts/payfast`. The first live

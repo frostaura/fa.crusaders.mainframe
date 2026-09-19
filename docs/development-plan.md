@@ -72,9 +72,9 @@ Anything that becomes load-bearing later goes through this same test before adop
 | Reporting endpoints + CSV | `Endpoints/ReportingEndpoints.cs` | backend suite |
 | Admin: members, ledger, webhooks, settings, **devices** | `src/frontend/src/pages/` | vitest route tests + Playwright |
 | All 18 tenant settings editable from the admin panel | `Endpoints/AdminConfigEndpoints.cs` | `AdminSettingsHttpTests` |
-| Mega firmware: relays, buttons, scanner, LCD, **independent auto-off** | `src/iot/lib/courtlogic` | Unity suite at four clock bases including the wrap |
-| ESP8266: roster cache, event queue, session, bearer-key API client | `src/iot/lib/{roster,eventq,court,devapi}` | Unity suite + ASAN/UBSAN |
-| Remappable buttons, walk-up pad | `src/iot/lib/court`, `Services/ButtonMap.cs` | shared corpus read by both sides |
+| Mega firmware: relays, buttons, scanner, LCD, **independent auto-off** | `src/iot/court-box/lib/courtlogic` | Unity suite at four clock bases including the wrap |
+| ESP8266: roster cache, event queue, session, bearer-key API client | `src/iot/shared/lib/{roster,eventq,devapi,devlink}`, `src/iot/court-box/lib/court` | Unity suite + ASAN/UBSAN |
+| Remappable buttons, walk-up pad | `src/iot/court-box/lib/court`, `Services/ButtonMap.cs` | shared corpus read by both sides |
 
 ### Built, not yet exercised against reality
 

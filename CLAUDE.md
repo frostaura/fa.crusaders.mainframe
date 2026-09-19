@@ -11,14 +11,19 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
 - **`src/backend/Crusaders.Mainframe.Api`** — .NET 10 Minimal APIs, EF Core, PostgreSQL 16. Folder-layered (`Endpoints/ Domain/ Services/ Persistence/ Security/ Webhooks/ Biometric/ Multitenancy/ Payments/ Email/ Lights/ Workers/ Migrations/`) inside a **single flat project**. Auth is JWT HS256 + WebAuthn passkeys (Fido2). The email invariant below is implemented in `Email/`, not in `Services/` — look there first.
 - **`src/backend/Crusaders.Mainframe.Tests`** — xUnit, in-process `TestHost`. Cross-tenant injection tests are part of the suite and are non-negotiable.
 - **`src/frontend`** — React 19 + TypeScript + Vite 7 + Tailwind, mobile-first PWA. **Figtree** font, Monday.com-style soft palette. State is React context (`lib/auth.tsx`, `lib/profile.tsx`, `lib/balance.tsx`).
-- **`src/iot`** — PlatformIO project for the court-control hardware: a WeMos Mega 2560 + onboard ESP8266.
+- **`src/iot`** — the firmware tree: one PlatformIO project per device plus a `shared/` project that builds for no board and carries the device-agnostic libraries (`timebase hal hal_fakes devcrypto fwversion devapi eventq roster devlink`) every firmware compiles. A firmware project reaches them with `lib_extra_dirs = ../shared/lib` — no package, no pin, one source compiled per target. Today the only device project is **`src/iot/court-box`**, the court light box: a WeMos Mega 2560 + onboard ESP8266.
   The **Mega is a thin I/O layer** (buttons, scanner, relays, LCD, plus an *independent* auto-off timer) and
   **all volatile logic lives on the ESP8266**, because the ATmega cannot be flashed over WiFi — its ESP sits
-  on Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET. Everything under `lib/` except
-  `arduino_hal/` and `posix_hal/` is free of Arduino headers so it compiles for the host test runner.
-  **PlatformIO is the tested build; the Arduino IDE is the deployment route.** `src/iot/arduino/` holds
-  two generated sketch folders and is never hand-edited — `make arduino-export` writes it from `lib/`,
-  `src/` and the `-D` flags in `platformio.ini`, and `make arduino-check` regenerates and fails on a diff.
+  on Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET. Everything under either `lib/`
+  except `arduino_hal/` and `posix_hal/` is free of Arduino headers so it compiles for the host test runner.
+  **A module belongs in `shared/lib` only if a second, unrelated device would want it unchanged** — anything
+  that knows a relay, a DIP switch, a court or the Mega↔ESP dialect stays in the device's own project, and
+  where the two sides must agree on a constant the `static_assert` lives on the device side
+  (`court-box/lib/bridgelogic/RosterTokenFits.h`).
+  **PlatformIO is the tested build; the Arduino IDE is the deployment route.** `src/iot/court-box/arduino/`
+  holds two generated sketch folders and is never hand-edited — `make arduino-export` writes it from both
+  `lib/` directories, `src/` and the `-D` flags in `platformio.ini`, and `make arduino-check` regenerates
+  and fails on a diff.
   A consequence binds the sources: the Arduino AVR core hard-codes `-std=gnu++11` and the IDE cannot
   override it, so **anything `court_mega` links must be valid C++11 as well as C++17.**
 - **`src/contracts/device-protocol`** — the wire-protocol fixture corpus, consumed by *both* the C++ and the
@@ -65,7 +70,7 @@ make lint           # dotnet format + eslint/tsc
 make build          # lint, then build both
 make test           # unit
 make test-integration
-make arduino-export # regenerate src/iot/arduino/ from the PlatformIO sources
+make arduino-export # regenerate src/iot/court-box/arduino/ from the PlatformIO sources
 make arduino-check  # regenerate and fail if the committed sketches are stale
 make up / make down / make down-reset / make clean
 ```

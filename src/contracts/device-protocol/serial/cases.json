@@ -1,5 +1,5 @@
 {
-  "description": "ATmega2560 <-> ESP8266 line protocol: encode cases (Frame -> exact bytes) and decode cases (bytes -> Frames or errors). Read by src/iot/test/test_protocol. Checksums here were produced by an independent Python XOR, not by the codec under test.",
+  "description": "ATmega2560 <-> ESP8266 line protocol: encode cases (Frame -> exact bytes) and decode cases (bytes -> Frames or errors). Read by src/iot/court-box/test/test_protocol. Checksums here were produced by an independent Python XOR, not by the codec under test.",
   "authority": "docs/specs/device-serial-protocol.md",
   "encode": [
     {
