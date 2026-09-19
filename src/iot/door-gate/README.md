@@ -11,9 +11,10 @@ takes a DHCP lease. The sketch this replaces ran an unauthenticated HTTP server
 whose `/open` endpoint unlocked the door for anyone on the club WiFi.
 
 **One firmware for every door.** Nothing per-gate is compiled in. A door is named
-in the admin console (`gate_key`) and the board learns its name from the
-heartbeat, so two doors run byte-identical images and a spare board is a spare
-board rather than a board for one particular door.
+in the admin console (`gate_key`), the API keys that name to the board's MAC, and
+**the board never needs to know it** — nothing in this firmware reads `gate_key`
+and there is no field to keep one in. Two doors run byte-identical images and a
+spare board is a spare board rather than a board for one particular door.
 
 Everything in `lib/` except `esp32_hal/` is free of Arduino headers, so the same
 sources compile for the ESP32 and for the host test runner — which is what lets
@@ -47,10 +48,26 @@ so the headers still compile with no build system at all.
 | `GATE_UNLOCK_DEFAULT_MS` | 3000 | release time until the first heartbeat |
 | `GATE_UNLOCK_HARD_CAP_MS` | 30000 | the lock can never stay released longer |
 | `GATE_MAX_TOKEN_LEN` | 20 | `= roster::kMaxTokenLen`, asserted |
-| `GATE_WATCHDOG_SECONDS` | 8 | task watchdog period |
+| `GATE_WATCHDOG_SECONDS` | 12 | task watchdog period; **asserted** to exceed one worst-case HTTP call |
 | `HEARTBEAT_INTERVAL_MS` | 30000 | starting cadence; the tenant's is adopted |
 | `ROSTER_MAX_AGE_MS` | 21600000 | 6 h, same as the court box |
 | `EVENTQ_SLOTS` | 64 | offline events held before the oldest is lost |
+
+Three more are not build flags because nothing about a door should make them
+negotiable per board, and they are one budget rather than three numbers
+(`lib/gatelogic/include/gatelogic/GateConfig.h`):
+
+| Constant | Value | What it is |
+|---|---|---|
+| `kHttpConnectTimeoutMs` / `kHttpResponseTimeoutMs` | 4000 / 4000 | the two halves of one blocking call. The core applies them **separately** and a single call can spend **both**. |
+| `kWorstBlockingCallMs` | 8000 | their sum, and the spine of three guarantees: the watchdog period, the release-overrun bound, and the scanner buffer. Derived, never written out. |
+| `kScannerRxBufferBytes` | 1024 | the UART receive buffer, set **before** `Serial2.begin`. The core's 256-byte default is 267 ms at 9600 baud and overruns while the loop is inside a blocking call. |
+
+`GATE_WATCHDOG_SECONDS` is `static_assert`ed to exceed `kWorstBlockingCallMs`
+plus a 2 s margin. It was 8 — exactly one worst-case call — which against an API
+host that silently drops packets is a guaranteed reset loop: the board panics
+before the call it is waiting on can return, boots, heartbeats, and does it
+again, never loading a roster and admitting nobody.
 
 A value outside its range is a **compile error**, not a surprise on a wall:
 `GateConfig.h` `static_assert`s the pins are output-capable (GPIO 34–39 on an
@@ -88,13 +105,28 @@ relay coil is de-energised whatever the pin was doing. What the door then does i
 decided by `GATE_UNLOCK_ENERGISES_RELAY` alone — **`0` means a de-energised coil
 releases the door.**
 
+The last column is **a statement about the relay module and the lock, not about
+this firmware**, and nothing here can test it. It is on the go-live bench list
+(§12) with a meter, and it is the reason that item exists.
+
 A *rebooting* board is different from a dead one, and this firmware makes it the
-same: `LockDriver::begin()` writes the LOCKED level into the pin's output
-register **before** `pinMode(OUTPUT)` makes the pin drive anything, so the relay's
-first instruction of every boot — including the ones a watchdog reset causes at
-three in the morning — is the one that keeps the door shut. The sketch this
+same **from `setup()` onward**: `GateApp::beginOutputs()` is the first statement
+of `setup()` and writes the LOCKED level into the pin's output register **before**
+`pinMode(OUTPUT)` makes the pin drive anything, so the relay's first instruction
+this firmware issues is the one that keeps the door shut. The sketch this
 replaces does `pinMode` first and `digitalWrite` second, which on a board wired
 `ACTIVE_HIGH=0, UNLOCK_ENERGISES=0` is a door that clicks open on every reset.
+
+**What it cannot cover is the window before `setup()` runs.** From the reset
+release until the first instruction of `setup()` — the ROM bootloader and the
+second-stage loader, roughly 0.3–0.7 s — GPIO 26 is an input with no drive, and
+what the relay module does with a floating input is decided by that module's own
+input bias, not by anything in this repository. On Carl's board, wired
+`UNLOCK_ENERGISES=1`, a floating input that the module reads as inactive leaves
+the door locked; on a board wired `UNLOCK_ENERGISES=0` the same float is a door
+that is open for that window. **This is a bench check, not a claim** — it is in
+the go-live checklist beside the dead-board row, and it is measured with a meter
+and an audible lock, not reasoned about.
 
 ### Which wiring gives "the door is released when there is no power"
 
@@ -136,13 +168,24 @@ the answer. Only the API knows about a booking made thirty seconds ago, a
 membership suspended this morning, or a 60-second member-identification code that
 was never in any roster.
 
-**A 200 is the only answer.** `opened:true` releases the lock for
-`unlock_seconds`, clamped to [1 s, hard cap]. `opened:false` **refuses, and is
-never second-guessed against the roster** — falling back after a refusal would
-let exactly the people the club has just barred in through a booking nobody
-cancelled. Everything else — a transport failure, 401, 403, 404, 429, any 5xx, or
-a 200 whose body cannot be read — says the board learned *nothing*, and the
-roster gets its turn.
+**Two statuses are answers.** `200` carries the decision: `opened:true` releases
+the lock for `unlock_seconds`, clamped to [1 s, hard cap]; `opened:false`
+**refuses, and is never second-guessed against the roster** — falling back after
+a refusal would let exactly the people the club has just barred in through a
+booking nobody cancelled.
+
+`403` is the second, and it is a refusal too: it means the club took this board
+**out of service** in the admin console. A board that fell back to its roster
+after a 403 would keep admitting every rostered member for the next six hours,
+which is precisely what the admin pressed the button to stop. The board answers
+`out_of_service`, and a 403 on the **heartbeat** commits an **empty** roster for
+the same reason. *The residual, stated plainly:* a board that cannot **reach**
+the server never hears the 403, and keeps admitting rostered bookings until its
+roster goes stale at `ROSTER_MAX_AGE_MS`. No firmware can close that window.
+
+Everything else — a transport failure, 401, 404, 408, 429, any 5xx, or a 200
+whose body cannot be read — says the board learned *nothing*, and the roster gets
+its turn.
 
 **Offline, the roster decides**, and the degraded mode is narrower than the court
 box's: only a member with a rostered booking gets in. A walk-up member's
@@ -161,8 +204,36 @@ window; the same token within 2 s of a *decision* for it is dropped without an
 API call, an audit row or a re-armed lock. A different token is never suppressed.
 
 **A scan while the door is already open extends the window, never shortens it** —
-and no sequence of scans can hold the door open past the hard cap measured from
-the moment it first opened.
+and no sequence of scans can set a deadline later than the hard cap measured from
+the moment the door first opened.
+
+**What the deadline does not bound is when the loop next looks at it.** The lock
+is taken back by the loop, and the loop can be inside a blocking HTTP call when
+the deadline passes. The deadline is re-checked with a fresh clock immediately
+after every call, and a pass makes at most one, so the true bound is:
+
+> physical release ≤ granted window + `kWorstBlockingCallMs` + `kIdleDelayMs`
+> — **8 010 ms** over the deadline with this image's numbers, and a worst case of
+> **38.01 s** against the 30-second hard cap.
+
+That sentence replaces "the lock can never stay released longer than the hard
+cap", which was false: the loop used to check the deadline once per pass
+*before* the blocking calls, so the overrun was a whole pass's worth of them.
+
+**The release window is timed from after the call that granted it**, on every
+branch. It was timed from before, which made a 2.9-second round trip on a
+three-second grant a 100-millisecond relay pulse: the door did not open, and the
+server logged an entry.
+
+**At most one blocking call per pass**, with the watchdog kicked immediately
+before and after each one. Three scans in the buffer are three passes' work; the
+two that wait are not lost, they are still in the UART buffer ten milliseconds
+later.
+
+**A scanner overrun costs its line and nothing else.** A serial FIFO overrun
+drops bytes silently and what arrives afterwards is in order, printable and
+short — it trims, it fits the token cap, and it is not what anybody scanned. The
+UART's error callback discards the line in flight through its next terminator.
 
 ---
 
@@ -180,6 +251,13 @@ dropped a second ago, because "you may go in" is the only thing that matters to
 the person in the doorway. A refusal or a boot blink beats the link blink for as
 long as it lasts, then the link blink comes back. Nothing blocks: the lamp is
 asked what level it should be showing once per pass and answers from the clock.
+
+**A refusal while the door is already released shows nothing**, and that is
+intended: solid outranks the three blinks, so the second member of a pair —
+refused while the first one's window is still open — sees a steady lamp. The door
+is open in front of them, which is the true and more useful thing for the lamp to
+be saying. It is on the go-live bench list (§12) so the person testing knows to
+expect it rather than reporting it as a dead LED.
 
 ---
 
@@ -225,13 +303,32 @@ are in [`test/`](test/) and run by `make test-iot`.
 | The heartbeat carries `kind:"gate"` last | `test_heartbeat_body_carries_kind_last_and_refuses_rather_than_truncating` |
 | `gate.unlock_seconds` is adopted and clamped | `test_heartbeat_adopts_the_gate_objects_unlock_seconds_and_clamps_it` |
 | It is read from the `gate` object, not from anywhere else | `test_heartbeat_ignores_an_unlock_seconds_outside_the_gate_object` |
-| Every wire body and every response shape | `test/test_gate_corpus/` — all 14 vectors of `src/contracts/device-protocol/gate/` |
+| A 403 is authoritative and denies with `out_of_service` | `test_flow_a_403_denies_with_its_own_reason_and_no_roster_fallback` |
+| Every status, and which two are answers | `test_flow_the_status_table_says_which_statuses_are_answers` |
+| A 403 on the heartbeat commits an empty roster | `test_app_a_403_on_the_heartbeat_commits_an_empty_roster` |
+| Every other status leaves the roster alone | `test_app_every_status_but_200_and_403_leaves_the_roster_alone` |
+| The release window is timed from **after** the call | `test_app_a_release_is_timed_from_after_the_call_that_granted_it` |
+| The debounce window is stamped from the decision | `test_app_the_debounce_window_starts_when_the_decision_was_made` |
+| At most one blocking call per pass | `test_app_a_pass_makes_at_most_one_blocking_call` |
+| The watchdog is kicked around every blocking call | `test_app_the_watchdog_is_kicked_around_every_blocking_call` + the `static_assert` in `GateConfig.h` |
+| A dead API host never trips the watchdog or starves the lock | `test_app_a_dead_api_host_never_starves_the_watchdog_or_the_lock` |
+| The 8 010 ms release-overrun bound above | `test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call` |
+| A UART overrun costs its line and only its line | `test_app_an_rx_error_discards_the_line_it_holed_and_only_that_line` |
+| Boot and a link event throw away a partial line | `test_app_boot_and_a_link_event_throw_away_a_partial_line` |
+| The heartbeat interval is armed after the call | `test_app_the_heartbeat_interval_is_armed_after_the_call` |
+| A cut-short heartbeat body never replaces the roster | `test_app_a_truncated_heartbeat_body_never_replaces_the_roster`, `test_apply_roster_a_truncated_body_never_replaces_the_roster` |
+| A queued open carries what the lock was **given** | `test_app_a_queued_open_carries_what_the_lock_was_given` |
+| An unreadable line queues on the same judgement a scan makes | `test_app_an_unreadable_line_queues_on_the_same_judgement_a_scan_makes` |
+| `API_BASE_URL` is `http://` + an IPv4 literal + optional port | `test_url_accepts_only_cleartext_http_to_an_ipv4_literal` + `static_assert`s in `main.cpp` |
+| Every wire body and every response shape | `test/test_gate_corpus/` — all 15 vectors of `src/contracts/device-protocol/gate/` |
 
-Two sentences above are **not** pinned by a test and cannot be, and are marked as
-such here rather than left to look checked: what a **dead** board does to the
-door (that is the relay coil and the lock, not software), and the fire-egress
-paragraph (that is an installation property). The go-live checklist carries both
-as bench checks.
+Four sentences above are **not** pinned by a test and cannot be, and are marked
+as such here rather than left to look checked: what a **dead** board does to the
+door and the truth table's last column (that is the relay coil and the lock, not
+software); the **pre-`setup()`** window in which GPIO 26 floats (that is the
+relay module's input bias); and the fire-egress paragraph (that is an
+installation property). The go-live checklist carries all of them as bench
+checks, §12.
 
 ---
 
@@ -282,12 +379,22 @@ is on `Serial2`.
 door-gate/
   platformio.ini          the wiring flags, the board pin and the host test envs
   lib/gatelogic/          every decision, pure, host-tested
+    GateApp               the loop itself — one pass, over ports a fake answers
+    GatePorts             watchdog, link and scanner-error ports
+    ApiBaseUrl/StaticText compile-time checks on API_BASE_URL, C++11-clean
   lib/esp32_hal/          the only place allowed to include Arduino headers
-  src/gate/main.cpp       the only composition root
+  src/gate/main.cpp       wiring only: construction, begin(), pass()
   src/common/             secrets.h.example (secrets.h is gitignored)
-  test/test_gatelogic/    the unit suite
-  test/test_gate_corpus/  all 14 contract vectors, executed and counted
+  test/test_gatelogic/    the unit suite, including the whole loop
+  test/test_gate_corpus/  all 15 contract vectors, executed and counted
 ```
+
+**`main.cpp` decides nothing.** `build_src_filter = -<*>` means the host suite
+cannot see it, so anything decided there is decided where nothing can check it —
+and a round-G1 review found four serious defects living in it at once. The loop
+is `gatelogic::GateApp` now, driven by a fake HTTP port that **advances the fake
+clock**, which is the single thing that makes a stale instant expressible in a
+test at all.
 
 The device-agnostic libraries — `timebase`, `hal`, `hal_fakes`, `devcrypto`,
 `fwversion`, `devapi`, `eventq`, `roster`, `devlink` — are **not** here. They are

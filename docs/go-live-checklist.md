@@ -347,8 +347,9 @@ is the correct default, and only wrong if the club actually has such a consumer.
 The door-gate firmware (`src/iot/door-gate`) is new and **has never run on hardware**.
 Everything it decides is proven on the host — the two polarity flags in all four
 combinations, the release window and its hard cap, the online-first flow and its roster
-fallback, all fourteen contract vectors — and none of that is the same as a board on a wall
-with a lock on the other end of it. Every item below needs the board, the lock and a person.
+fallback, the whole loop including its watchdog and blocking-call budget, all fifteen
+contract vectors — and none of that is the same as a board on a wall with a lock on the
+other end of it. Every item below needs the board, the lock and a person.
 
 **The owner's stated requirement is that the door is released when there is no power.**
 That is a property of the LOCK and its supply, not of software: it needs a **fail-safe**
@@ -374,6 +375,30 @@ the other way, inverts the firmware's whole idea of the door.
       precisely for this, and it is the one safety property no host test can confirm against
       real hardware.
 - [ ] The same check after a **watchdog** reset, not just a power cycle.
+- [ ] **The pre-`setup()` window, measured rather than assumed.** From the reset release
+      until `setup()`'s first instruction — the ROM bootloader and the second-stage loader,
+      roughly 0.3–0.7 s — GPIO 26 is an **input with no drive**, and what the relay module
+      does with a floating input is decided by **that module's own input bias**. Nothing in
+      the firmware reaches this window and no test can. With a meter on the relay input and
+      an audible lock, power-cycle and watch what the door does during that half second, on
+      the module the club actually bought.
+- [ ] **The truth table's last column, on the real module.** `README.md`'s "dead or
+      rebooting board" column is a statement about the relay coil and the lock, not about
+      software, and it has never been measured on this hardware. Pull the board's power with
+      a meter on the relay contacts and confirm each of the two wirings in use does what the
+      table says.
+- [ ] **Watchdog TRIP check — the API host unplugged at boot.** Unplug the machine the
+      backend runs on (or block its address at the router), then power-cycle the gate and
+      **watch the serial monitor at 115200 for two minutes**. Expect: one boot line, then a
+      quiet board with a slow-blinking LED. A board that reprints its boot line every ten or
+      twenty seconds is **reset-looping**, which means it is admitting nobody and will keep
+      doing so until the network comes back. That is exactly what an 8-second watchdog
+      against an 8-second worst-case HTTP call used to do; the period is 12 s now and the
+      relation is `static_assert`ed, and this is the check that says the assert is about the
+      real timeout.
+- [ ] While the API host is still unreachable, **scan a rostered member** and confirm they
+      still get in from the roster. The board must decide the door while it is failing to
+      reach the server, not instead of it.
 
 **If skipped:** a door that is unlocked whenever the software believes it is locked, or one
 that pulses open on every reset. There is no readback on this board — nothing in the
@@ -415,6 +440,17 @@ certified as one, and no combination of the build flags turns it into one.
 - [ ] **Scan a real member's code and watch the LED**: solid while the lock is released,
       three fast blinks on a refusal, slow 1 Hz while the radio is down. That lamp is the
       board's entire user interface and the only feedback a member gets.
+- [ ] **Expect no lamp change for a refusal while the door is already open**, and do not
+      report it as a fault. Solid outranks the refusal blinks by design, so the second
+      member of a pair — refused while the first one's window is still running — sees a
+      steady lamp. The door is open in front of them, which is the more useful thing for the
+      lamp to be saying.
+- [ ] **Take the door out of service in the admin console and scan again.** The board must
+      refuse (`out_of_service`) and must **not** fall back to its roster. Then put it back in
+      service and confirm the next scan works. **Known and accepted:** a board that cannot
+      reach the server at the moment you press the button never hears about it, and keeps
+      admitting rostered bookings until its roster goes stale (6 h). Nothing in the firmware
+      can close that window — if a door has to be shut immediately, shut it mechanically.
 - [ ] **Offline test, done deliberately**: pull the AP, wait for the slow blink, and confirm
       a member **with a rostered booking** still gets in and a member **without one** does
       not. That is the stated degraded mode and it is narrower than the court box's — a
