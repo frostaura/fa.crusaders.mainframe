@@ -416,6 +416,64 @@ void test_is_complete_object_refuses_anything_the_transport_may_have_cut() {
   TEST_ASSERT_FALSE(devapi::json::isCompleteObject(nullptr, 0U));
 }
 
+/// A CLOSER THAT DOES NOT MATCH ITS OPENER IS NOT A CLOSE.
+///
+/// The depth counter was a COUNT: `{` and `[` both raised it, `}` and `]` both
+/// lowered it, so `{"a":1]` reached depth zero and the whole document was
+/// declared complete. Nothing downstream of that reads a bracket as a brace, so
+/// the wrong thing this admits is not a misparse — it is the CUT BODY this
+/// function exists to refuse, arriving with a stray `]` at the end of the
+/// buffer and being committed as a whole roster.
+///
+/// The openers are remembered now, one bit per level. Shared with the court
+/// box: both firmwares ask this before replacing a roster with what arrived.
+void test_is_complete_object_refuses_a_closer_that_does_not_match_its_opener() {
+  const char* mismatched[] = {
+      "{\"a\":1]",
+      "{\"a\":[1}",
+      "{\"a\":[1}]",
+      "{\"roster\":[\"TOKALICE|1|0|3600\"}",
+      "{\"config\":{\"button_map\":[]]}",
+      "[1}",
+  };
+  for (const char* body : mismatched) {
+    TEST_ASSERT_FALSE_MESSAGE(devapi::json::isCompleteObject(body, len(body)), body);
+  }
+
+  // And the matched forms of the same shapes still pass, so the fix is a
+  // narrowing rather than a refusal of nesting.
+  const char* matched[] = {
+      "{\"a\":1}",
+      "{\"a\":[1]}",
+      "{\"roster\":[\"TOKALICE|1|0|3600\"]}",
+      "{\"config\":{\"button_map\":[]}}",
+  };
+  for (const char* body : matched) {
+    TEST_ASSERT_TRUE_MESSAGE(devapi::json::isCompleteObject(body, len(body)), body);
+  }
+}
+
+/// Nesting deeper than the opener stack holds is refused rather than guessed
+/// at. Nothing in either contract nests past three, and a body that does is one
+/// this reader does not understand — which is the same answer it gives a cut
+/// one, for the same reason.
+void test_is_complete_object_refuses_nesting_it_cannot_track() {
+  char deep[160] = {};
+  size_t n = 0U;
+  for (; n < 40U; ++n) {
+    deep[n] = '{';
+  }
+  for (size_t i = 0U; i < 40U; ++i) {
+    deep[n] = '}';
+    ++n;
+  }
+  TEST_ASSERT_FALSE_MESSAGE(devapi::json::isCompleteObject(deep, n), "40 levels is past what is tracked");
+
+  // The depth an actual heartbeat reaches, several times over, still passes.
+  const char* nested = "{\"a\":{\"b\":{\"c\":[{\"d\":[1,2]}]}}}";
+  TEST_ASSERT_TRUE(devapi::json::isCompleteObject(nested, len(nested)));
+}
+
 /// The length governs, not a NUL. A caller holding a 4608-byte buffer with a
 /// 4096-byte response in it passes the response's length, and a body that
 /// happens to sit in a longer buffer must not be read past what arrived.
@@ -465,6 +523,8 @@ int main(int, char**) {
 
   RUN_TEST(test_is_complete_object_accepts_a_whole_document);
   RUN_TEST(test_is_complete_object_refuses_anything_the_transport_may_have_cut);
+  RUN_TEST(test_is_complete_object_refuses_a_closer_that_does_not_match_its_opener);
+  RUN_TEST(test_is_complete_object_refuses_nesting_it_cannot_track);
   RUN_TEST(test_is_complete_object_reads_only_the_length_it_is_given);
 
   return UNITY_END();

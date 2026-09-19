@@ -135,10 +135,26 @@ bool nextUnsignedElement(const char* body, size_t len, size_t& at, uint32_t& out
 /// So a caller that replaces state asks this FIRST, and treats an incomplete
 /// body as no push at all.
 ///
-/// Braces and brackets are counted rather than type-matched, and strings —
-/// escapes included — are skipped whole, so a `{` or a `]` inside a value
-/// counts for nothing. An unterminated string is incomplete by definition.
+/// EACH CLOSER MUST MATCH ITS OPENER. They used only to be COUNTED — `{` and
+/// `[` both raised a depth, `}` and `]` both lowered it — so `{"a":1]` reached
+/// zero and was declared a whole document. That is not a misparse waiting to
+/// happen downstream, because nothing downstream reads a bracket as a brace: it
+/// is precisely the CUT BODY this function exists to refuse, arriving with a
+/// stray closer at the end of a buffer and being committed as a whole roster.
+/// The opener kinds are remembered now, one bit per level.
+///
+/// Strings — escapes included — are skipped whole, so a `{` or a `]` inside a
+/// value counts for nothing. An unterminated string is incomplete by
+/// definition.
+///
+/// Nesting deeper than `kMaxNesting` is REFUSED rather than guessed at, on the
+/// same grounds as a cut body: it is a document this reader does not
+/// understand, and the caller is about to replace something with it. Nothing in
+/// either device contract nests past three.
 bool isCompleteObject(const char* body, size_t len);
+
+/// Container levels `isCompleteObject` can track. One bit each in a uint32_t.
+inline constexpr uint32_t kMaxNesting = 32U;
 
 } // namespace json
 } // namespace devapi

@@ -259,6 +259,10 @@ bool isCompleteObject(const char* body, size_t len) {
     return false;
   }
 
+  // THE OPENERS, not just how many of them. One bit per level: 1 is an object,
+  // 0 is an array. Counting alone let `{"a":1]` close the document, which is
+  // the cut-body case this whole function exists to refuse.
+  uint32_t openers = 0U;
   uint32_t depth = 0U;
   size_t past = 0U;
   bool closed = false;
@@ -275,12 +279,26 @@ bool isCompleteObject(const char* body, size_t len) {
       continue;
     }
     if (body[at] == '{' || body[at] == '[') {
+      if (depth >= kMaxNesting) {
+        // Deeper than the stack holds. Refused rather than guessed at: the
+        // caller is about to replace something with this.
+        return false;
+      }
+      if (body[at] == '{') {
+        openers |= (1UL << depth);
+      } else {
+        openers &= ~(1UL << depth);
+      }
       ++depth;
     } else if (body[at] == '}' || body[at] == ']') {
       if (depth == 0U) {
         return false; // a closer with nothing open
       }
       --depth;
+      const bool wasObject = (openers & (1UL << depth)) != 0U;
+      if (wasObject != (body[at] == '}')) {
+        return false; // a closer that does not match its opener
+      }
       if (depth == 0U) {
         past = at + 1U;
         closed = true;
