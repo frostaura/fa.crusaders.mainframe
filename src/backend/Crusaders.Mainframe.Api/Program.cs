@@ -45,7 +45,10 @@ builder.Services.AddCors(options =>
 });
 
 // ---- JWT ----
-var jwtSecret = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret is required.");
+// Not a null check. The committed placeholder meant this was never null, so a production
+// deployment that forgot Jwt__Secret booted clean and signed tokens with a value that is in
+// the repository. See JwtSecretPolicy.
+var jwtSecret = JwtSecretPolicy.Resolve(builder.Configuration, builder.Environment);
 // The same two constants the issuer uses. They were duplicated as literals here and absent
 // there, so an API with no Jwt:Issuer configured minted tokens this middleware then refused.
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? JwtIssuer.DefaultIssuer;

@@ -85,7 +85,18 @@ services:
       # price, and a court created at 0 is free to book — so this is a money setting, not a
       # cosmetic one. Change court prices afterwards from Admin → Settings.
       Bootstrap__SlicePriceCredits: "8"
-      # Signs every member and admin session. At least 32 characters; changing it logs everyone out.
+      # Signs every member and admin session. At least 32 bytes; changing it logs everyone out.
+      #
+      # Generate it, do not invent it:  openssl rand -base64 48
+      #
+      # The API now REFUSES TO START on any value that looks published — anything beginning
+      # CHANGE-ME, REPLACE_WITH or DEV_ONLY — and the line below is one of them, so a stack
+      # deployed without editing it fails loudly at boot. That refusal is the point. Until
+      # recently appsettings.json carried a placeholder of its own and Program.cs only checked
+      # for null, so a stack missing this key came up perfectly healthy and signed every token
+      # with a string published in this repository and baked into the image: enough for anyone
+      # holding it to mint a valid administrator token for any tenant. See
+      # src/backend/Crusaders.Mainframe.Api/Security/JwtSecretPolicy.cs.
       Jwt__Secret: CHANGE-ME-random-string-of-at-least-32-characters
       # The address members use. Verification, welcome and password-reset links are built from it,
       # and PayFast is told to return here. Cloudflared points this hostname at the gateway.
