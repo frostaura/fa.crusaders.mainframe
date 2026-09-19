@@ -110,7 +110,7 @@ public enum CourtDarkness
 
     /// <summary>
     /// No board in service drove the court, and the hardware that did had already stopped
-    /// answering by that instant. It is switched off now, so the API refuses it on all four
+    /// answering by that instant. It is switched off now, so the API refuses it on all five
     /// <c>/api/v1/device/*</c> routes, <c>/events</c> included — nothing it holds will ever
     /// arrive and the settlement is final.
     /// </summary>
@@ -178,7 +178,7 @@ public sealed class DeviceOutageIndex
     /// <para>
     /// <b>They are read for one thing: whether the club had hardware on the court that the API
     /// had stopped accepting.</b> A box the API refuses cannot light anything —
-    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 for <c>!device.IsActive</c> on all four
+    /// <c>DeviceIdentity.ResolveAsync</c> answers 403 for <c>!device.IsActive</c> on all five
     /// <c>/api/v1/device/*</c> routes — so when the LAST box on a court is switched off, that
     /// court has no check-in of its own left and every no-show on it was charged the full 30% for
     /// a door the club had closed. (The shared courtside terminal's own
@@ -460,7 +460,7 @@ public sealed class DeviceOutageIndex
     /// moment that hardware stopped answering.</b> This is the money half of finding M-F3 and it
     /// has now been got wrong in both directions. The out-of-service switch is what an admin uses
     /// on a box that is broken or has been unplugged for good, and the API then refuses that box
-    /// 403 on all four of its own routes — heartbeat, activate, walkup and events alike. Take the
+    /// 403 on all five of its own routes — heartbeat, activate, walkup, events and gate alike. Take the
     /// LAST box off a court and that court has no check-in of its own left; the first rule read
     /// that court as "no enabled box, therefore no evidence, therefore not dark" and settled its
     /// no-shows at the full 30%, billing the member a penalty for a door the club had closed.
@@ -582,7 +582,7 @@ public sealed class DeviceOutageIndex
     ///
     /// <para>
     /// <b>After the switch was thrown, the door is shut, full stop.</b> The club has declared it:
-    /// from that instant the API answers <c>403</c> for this board on all four
+    /// from that instant the API answers <c>403</c> for this board on all five
     /// <c>/api/v1/device/*</c> routes, so it admits nobody, is told nothing and reports nothing,
     /// and there is nothing left to wait <c>offline_after_seconds</c> for. Waiting anyway is not
     /// neutral — it charged the member the full 30% for a door the club had shut up to three

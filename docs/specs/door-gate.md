@@ -149,10 +149,8 @@ for every booking in the roster window. Up to forty-eight of them, each of which
 door in the club for the length of its booking. Self-registering a "gate" was a way to ask the
 server for the club-wide code set on demand, and nothing about it looked like an attack.
 
-Naming the door is the admin's acknowledgement that the board is one of theirs. It is the
-cheapest gate available on **the only call that hands a caller other members' live codes in
-bulk** — `/me/qr/generate` hands a member their own, one at a time, authenticated as them,
-which is a different thing — and it costs a real install nothing, because:
+Naming the door is the admin's acknowledgement that the board is one of theirs, and it costs a
+real install nothing, because:
 
 - **online scans work from the first heartbeat**, so the board is useful the moment it is
   powered; and
@@ -161,6 +159,20 @@ which is a different thing — and it costs a real install nothing, because:
 What it costs is the offline fallback, for as long as the board is unnamed. A club that plugs
 a gate in and never names it has a door that stops working the moment the network does — which
 is the honest trade and is said in the console copy, not left to be discovered.
+
+**This narrows the surface; it does not close it, and an earlier draft of this section claimed
+otherwise.** A heartbeat from the same invented MAC with **no `kind` at all** auto-registers a
+**court box** on the club's first four courts — with no naming step whatever — and is answered
+with up to sixteen live booking codes for those courts. After §5, every one of those codes
+opens every door in the club inside its own booking's window. So "the only call that hands a
+caller other members' live codes in bulk" was false the moment the gate shipped; the gate's
+naming step covers the 48-code call and leaves the 16-code one exactly where it was.
+
+Whether an auto-registered, never-acknowledged **court box** should also be pushed no roster is
+a live product question and is **not** decided here: taking a box's roster away until an admin
+names it changes the court-box install story and the offline lighting path, which is money and
+is the founder's call. It is recorded in `memory/questions.md` and restated in §10a rather than
+quietly fixed in the gate's changelog.
 
 ### Source
 
@@ -295,12 +307,19 @@ passed only because it deleted the row first. There is **no operator role in thi
 where earlier versions of this document said "operator", the answer is "club admin" or
 nothing.
 
-**The carve-out is on step 6 alone, and it has two limits, both pinned.** An admin is held to
-step 4 exactly as everybody is — a club that has suspended an admin's membership has said
-something about that person, and a door is not where it gets quietly undone — and to step 5
-exactly as everybody is, so an admin presenting a booking code before that booking opens gets
-`too_early` like anyone. "Club admins always pass" is a sentence about the booking check, not
-about doors.
+**The carve-out is on step 6 alone, and it has THREE limits.** An admin is held to step 4
+exactly as everybody is — a club that has suspended an admin's membership has said something
+about that person, and a door is not where it gets quietly undone — and to step 5 exactly as
+everybody is, so an admin presenting a booking code before that booking opens gets `too_early`
+like anyone. Those two are pinned.
+
+The third is the one nobody thinks of and no test can pin, because it is an ABSENCE: **the
+carve-out is an online rule and does not exist offline.** A cached roster holds *bookings*,
+and an admin working a shift has none — so at a door that cannot reach the server, a club admin
+is refused exactly like any other member without a booking. "Club admins always pass" is a
+sentence about the online booking check, not about doors, and it is worth saying out loud
+because the club's own staff are the people most likely to be standing at a cut-off door
+wondering why their key stopped working.
 
 ### A booking code is not a standing building key
 
@@ -599,6 +618,21 @@ The asymmetry is the whole point. Every other failure is evidence about the *lin
 evidence about the *club's decision*, and a board that fell back to a roster it fetched before
 that decision would keep admitting people the club has just stopped admitting.
 
+**So the converse is a contract too, and it is now pinned: on this surface a `403` can mean
+nothing else.** The backend used to pin only the forward direction — that a disabled board
+really is refused — while the firmware depends on the reverse. A new endpoint filter, an
+authorization policy with a second requirement, a middleware that starts applying to this
+group: any of those would make a healthy board purge its roster and deny a member at the door,
+with no test going red and nothing in the log telling it apart from an admin throwing the
+switch. The group is therefore enumerated three ways — its routes and their metadata, the
+source of everything that can serve or wrap it, and the behaviour of every refusal shape a
+board can provoke.
+
+The one documented exception is a **400**, not a 403, and is deliberate: an unrecognised `kind`
+on the heartbeat is refused before the MAC is resolved (§3), so a disabled board sending one is
+told its firmware is wrong rather than that it is out of service. A 400 is not a status D4 acts
+on.
+
 **The residual, stated because it is real and because nobody should discover it during an
 incident:** this only reaches a board that can still reach us. A gate that has been **cut off**
 — uplink pulled, switch dead, line down — never hears the `403`, and goes on admitting
@@ -777,6 +811,10 @@ A stale roster admits nobody: the firmware's own six-hour `ROSTER_MAX_AGE_MS` is
 board that has been offline for a week letting in a member whose suspension it never heard
 about.
 
+**A club admin has no degraded mode either**, and for the same structural reason: the
+`booking_window` carve-out is an online rule, a roster holds bookings, and staff on shift hold
+none. At a cut-off door a club admin is refused like anyone else without a booking.
+
 **An unnamed board has no degraded mode at all** (§4): it is pushed an empty roster, so the
 moment it loses the server it opens for nobody. That is a narrower failure than the one it
 replaces — a board anybody could self-register being handed the club's whole live code set —
@@ -798,6 +836,16 @@ failure mode than this one. Anyone who can see that LAN can read:
 
 - the tenant device API key, from any request header; and
 - up to forty-eight live access codes, from any heartbeat response to a named gate.
+
+**And the key alone buys codes without waiting for one to cross the wire.** A heartbeat with an
+invented MAC and no `kind` auto-registers a **court box** on the club's first four courts, with
+no naming step, and is answered with up to sixteen live booking codes for those courts — each
+of which, after §5, opens every door in the club inside its own booking's window. §4's naming
+step gates the gate's 48-code response and nothing else. This is not new with the door: it is
+the court box's provisioning story, unchanged, and the door is what turned those codes into
+building entry. It is an OPEN QUESTION for the owner rather than a decision taken here
+(`memory/questions.md`), because taking a box's roster away until an admin names it changes the
+install story and the offline lighting path.
 
 ### What a captured roster code buys
 
@@ -830,6 +878,18 @@ already says why it is not attendance for a different reason.
 - Not that the network is trusted; only that it is the same network the court box already
   runs on, and that the blast radius of what crosses it is now one booking's window rather
   than a standing key.
+- Not that a club's booking codes are unreachable without a named gate: the court box's own
+  auto-registration hands out sixteen at a time with no naming step at all (above).
+- Not that the roster is the whole of the club's bookings. It is capped at 48 after ordering,
+  so a club with more than that inside its window has a **49th booking that no door admits
+  offline** — a member whose court is real, whose code is live, and who is refused during an
+  outage because forty-eight other members were due earlier. The cap is a firmware buffer and
+  not a policy, and the residual is stated rather than engineered around.
+- Not that a suspension, a cancellation or a no-show reaches a board that has already been
+  pushed. A roster is a snapshot: a booking swept to `NoShow` after the push is still in the
+  cache and still opens the door offline until the next heartbeat replaces it — which, after
+  §5's relief, is also what the ONLINE decision would now do inside the slot the member paid
+  for, so the two agree for most of that window and diverge only past it.
 
 ---
 
@@ -884,11 +944,14 @@ Three things, and they are worth stating here because they are the reason the fl
    call.** The loop cannot read the clock while it is inside an HTTP request, so a deadline
    that falls during one is serviced when the call returns. The bound is therefore
    *deadline + one call's worth*, and that call's worth is the **connect timeout plus the
-   response timeout** — two separate budgets, which is the trap. With this contract's
-   four-second scan timeout that is four seconds; the exact split, and the compile-time
-   assertion tying it to the watchdog period, live with the flags in the firmware project's
-   own README. The earlier sentence here — that the relay can *never* stay released longer
-   than the cap — was the deadline's property stated as the relay's.
+   response timeout** — two separate budgets, which is the trap. They are four seconds each,
+   so one call is **8 seconds**, or **8 010 ms** counting the loop's ≤10 ms idle; the
+   worst case across a whole pass is **38.01 s**. Those are the firmware project's own
+   numbers and its README is where the split and the compile-time assertion tying them to the
+   watchdog period live — quoted here so the two documents cannot disagree, and not
+   re-derived. The earlier sentence here — that the relay can *never* stay released longer
+   than the cap — was the deadline's property stated as the relay's, and the earlier
+   arithmetic quoted one four-second budget where there are two.
 
 3. **The two polarity flags are independent, and both are tested in all four combinations.**
 
@@ -961,6 +1024,7 @@ new sentence above with no row is the defect this table exists to expose.
 | Club admins always pass the booking check, and nobody else does | `DeviceGateTests.A_club_admin_passes_the_booking_check_and_nobody_else_does`, `DeviceGateHttpTests.A_club_admin_with_a_membership_and_no_booking_still_opens_the_door`, `DeviceGateTests.A_non_admin_with_no_membership_and_no_booking_is_still_refused` |
 | An admin is still held to the membership check | `DeviceGateTests.A_suspended_club_admin_is_refused_by_name_under_either_policy` |
 | An admin is still held to a booking code's own window | `DeviceGateTests.A_club_admins_booking_code_is_bounded_by_its_own_window_too` |
+| An admin has no offline carve-out — a roster holds bookings, and staff on shift hold none | *not pinned, and cannot be: it is the ABSENCE of a rule from the cached path. Stated in §5 and §10.* |
 | A booking code opens the booking it names | `DeviceGateTests.A_booking_code_opens_the_door_for_the_booking_it_names` |
 | A booking code opens only inside its own booking's window, under either policy | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` |
 | `too_early` before the window, `not_recognised` after it | same test, and `DeviceGateHttpTests.A_booking_code_presented_too_early_is_refused_as_a_200_and_audited` |
@@ -985,6 +1049,8 @@ new sentence above with no row is the defect this table exists to expose.
 | A gate's `activation` upload settles nothing | `DeviceGateHttpTests.An_activation_uploaded_by_a_gate_is_recorded_and_settles_nothing` |
 | An unnamed board is pushed no roster; naming it starts the fallback | `DeviceGateHttpTests.An_unnamed_gate_is_pushed_no_roster_until_an_admin_names_the_door` |
 | A board out of service is 403 on the heartbeat as well as the scan | `DeviceGateHttpTests.A_gate_taken_out_of_service_is_refused_on_the_heartbeat_too`, `…The_board_identity_failures_keep_their_own_shapes` |
+| …and on this surface a 403 can mean NOTHING ELSE | `DeviceForbiddenMeansOutOfServiceTests` (five tests: the group's routes and policy, the scheme's role claim, the source of everything that serves or wraps it, no refusal a working board can provoke, and the forward direction on all five routes) |
+| A barred member is off BOTH rosters on real Postgres, not only in memory | `DeviceGateHttpTests.A_barred_members_booking_is_filtered_out_on_real_postgres` |
 | A silent door gets a door's alert and none of the court box's sentences | `PeripheralHealthTests.A_silent_gate_gets_a_door_alert_and_none_of_the_court_boxs_sentences`, `…A_gate_that_comes_back_gets_a_door_all_clear_and_none_of_the_court_boxs` |
 | A silent box beside a silent door still gets the court box's alert | `PeripheralHealthTests.A_silent_box_beside_a_silent_gate_still_gets_the_court_boxs_alert` |
 | A door darkens no court and waives no penalty — by rule, not because its court list happens to be empty | `PeripheralHealthTests.A_silent_gate_darkens_no_court_and_waives_no_penalty`, `…A_silent_gate_carrying_a_court_number_still_darkens_no_court`, `…A_healthy_gate_carrying_a_court_number_does_not_block_the_waiver` |
@@ -1004,9 +1070,10 @@ new sentence above with no row is the defect this table exists to expose.
 
 **What is deliberately not pinned here, and why each one cannot be.**
 
-- The two sentences in §11 that no code decides: that the lock must be fail-safe, and that
-  egress must be mechanical. They belong on `docs/go-live-checklist.md`, where a person signs
-  them off.
+- The two sentences in §11 that no code decides: **which lock the club fits** — this document
+  does not say one "must" be fail-safe, because that is the founder's and the electrician's
+  call and §11 only says which wiring gives "released with no power" — and that egress must be
+  mechanical. They belong on `docs/go-live-checklist.md`, where a person signs them off.
 - The pre-`setup()` reset window in §11.1, for the same reason: it is decided by the relay
   module's input bias and is measured on a bench, not asserted in a test.
 - Every sentence about what the *firmware* does: §11's release-deadline overrun bound, the

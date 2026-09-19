@@ -50,10 +50,16 @@ public static class GateHeartbeatView
             tenant_slug = tenantSlug,
             device_code = device.DeviceCode,
 
-            // Stated outright rather than inferred from which keys are present. A board that
-            // registered as a gate and came back a court box — because somebody deleted the
-            // row and it re-registered without the hint — is a fault the firmware can see and
-            // refuse to act on, and only if the server says which it is.
+            // Stated outright rather than inferred from which keys are present, so a board
+            // that registered as a gate and came back a court box — somebody deleted the row
+            // and it re-registered without the hint — has the FACT available rather than
+            // having to guess it from which keys arrived.
+            //
+            // What the firmware does with that is the firmware's own contract, and this
+            // comment used to claim more than the server can: "a fault the firmware can see
+            // and refuse to act on". The server's obligation ends at making the fact
+            // available. See docs/specs/door-gate.md §3, which says the same thing and is
+            // where the split between the two halves is argued.
             kind = DeviceKinds.Gate,
             gate_key = device.GateKey,
             heartbeat_seconds = heartbeatSeconds,

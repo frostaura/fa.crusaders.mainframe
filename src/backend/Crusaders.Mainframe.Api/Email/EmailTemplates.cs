@@ -814,7 +814,7 @@ public static class EmailTemplates
     /// It exists because of one sentence the outage notice makes and this one cannot: "the box
     /// uploads its record when it reconnects and the booking settles as attended". That is the
     /// S6 reversal, and it is real while the board is in service. A board an admin has taken out
-    /// of service is refused 403 on all four <c>/api/v1/device/*</c> routes, <c>/events</c> among
+    /// of service is refused 403 on all five <c>/api/v1/device/*</c> routes, <c>/events</c> among
     /// them, so nothing it is holding will ever be accepted and the settlement cannot be reversed by
     /// the box. Repeating the promise here would tell a member who did get onto the court to
     /// wait for a correction that is not coming, and send them to the desk a week later instead

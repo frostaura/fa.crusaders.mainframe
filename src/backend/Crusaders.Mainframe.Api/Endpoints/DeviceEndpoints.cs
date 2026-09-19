@@ -113,10 +113,21 @@ public static class DeviceEndpoints
             // one call used to be answered with the club's live access codes for every
             // booking in the roster window, each of which opens every door in the club for
             // the length of its booking. Naming the door is the admin's acknowledgement that
-            // the board is one of theirs, and it is the cheapest possible gate on the only
-            // call that hands a caller OTHER MEMBERS' live codes in bulk. (/me/qr/generate
-            // hands a member their own, one at a time, authenticated as them — a different
-            // thing, and not this risk.)
+            // the board is one of theirs, and it is the cheapest possible gate available.
+            //
+            // IT IS NOT, HOWEVER, THE ONLY CALL THAT HANDS OUT OTHER MEMBERS' CODES IN BULK,
+            // and this comment said it was. A `kind`-less heartbeat from the same invented MAC
+            // auto-registers a COURT BOX on the club's first four courts, with no naming step
+            // at all, and is answered with up to sixteen live booking codes for those courts —
+            // and after the gate shipped, every one of those codes opens every door in the club
+            // inside its own booking's window. The gate's naming step therefore narrows this
+            // surface rather than closing it. Whether an auto-registered, never-acknowledged
+            // COURT BOX should also get no roster is a live product question, recorded in
+            // memory/questions.md and stated in the spec's threat model (§10a) rather than
+            // quietly fixed here: taking a box's roster away until an admin names it changes
+            // the court-box install story and the offline lighting path, which is a decision
+            // the founder owns. (/me/qr/generate hands a member their own code, one at a time,
+            // authenticated as them — a different thing, and not this risk.)
             //
             // Online scans are unaffected, so an install stays plug-and-play: what waits for
             // the admin is the OFFLINE fallback. The list is still always present and still

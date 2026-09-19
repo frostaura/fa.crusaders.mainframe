@@ -331,6 +331,77 @@ public sealed class DeviceGateHttpTests
     }
 
     /// <summary>
+    /// <b>The barred-member filter, on real Postgres, on BOTH roster builders.</b>
+    ///
+    /// <para>
+    /// Both builders carry the same inline membership subquery —
+    /// <c>!db.Memberships.Any(m =&gt; m.UserId == b.UserId &amp;&amp; m.Status != Active)</c> — written out
+    /// longhand rather than as the captured <c>MembershipAccess</c> expression, because a
+    /// captured expression does not translate inside a subquery. That is a provider-shaped
+    /// workaround, and every test that exercised it ran against the EF <b>in-memory</b>
+    /// provider, which evaluates the whole predicate in C# and would have been perfectly happy
+    /// with the captured form too. So the one thing the longhand exists for — that Npgsql can
+    /// translate it — was pinned nowhere.
+    /// </para>
+    ///
+    /// <para>
+    /// A filter that throws, or that silently degrades to a client evaluation, is a suspension
+    /// that holds only while the gate can reach the API — and the window in which a club most
+    /// wants it to hold is the one where nobody is watching. Driven through the real heartbeat
+    /// route, with the member Active first, so an empty roster cannot be an empty fixture.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_barred_members_booking_is_filtered_out_on_real_postgres(bool gate)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", DefaultSettings);
+        var client = factory.CreateClient();
+
+        var mac = gate
+            ? await GateAsync(factory, club, client, "front-door")
+            : await CourtBoxAsync(club, client);
+
+        await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(20));
+
+        // The control: while the membership is Active the code is pushed, so the assertion
+        // below is the filter and not an empty club.
+        var kind = gate ? DeviceKinds.Gate : null;
+        var whileActive = await RosterAsync(client, club, mac, kind);
+        Assert.Single(whileActive);
+
+        await SuspendAsync(factory, club);
+
+        Assert.Empty(await RosterAsync(client, club, mac, kind));
+
+        // …and the code itself still exists. The roster dropped it; nothing revoked it, which
+        // is what keeps a court box deciding offline from a roster fetched beforehand honest.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.NotNull(await db.AccessCodes.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.TenantId == club.TenantId && c.Code == whileActive[0].Split('|')[0]));
+    }
+
+    private static async Task<List<string>> RosterAsync(
+        HttpClient client, Club club, string mac, string? kind)
+    {
+        var json = await BodyAsync(await client.SendAsync(Heartbeat(club.Key, mac, kind)));
+        return json.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!).ToList();
+    }
+
+    /// <summary>Registers a court box the ordinary way — by heartbeating — and hands back its MAC.</summary>
+    private static async Task<string> CourtBoxAsync(Club club, HttpClient client)
+    {
+        var mac = NewMac();
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Heartbeat(club.Key, mac))).StatusCode);
+        return mac;
+    }
+
+    /// <summary>
     /// <b>A board nobody has named gets no roster.</b> Online scans work from its first
     /// heartbeat, so the install stays plug-and-play; the offline fallback starts when an
     /// admin names the door.
