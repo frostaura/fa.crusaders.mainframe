@@ -483,7 +483,7 @@ function GateSection({ settings, onChange }: { settings: AdminSettings; onChange
           <select
             value={settings.gate_access_policy}
             onChange={(e) => set({ gate_access_policy: e.target.value as GateAccessPolicy })}
-            className="w-full h-11 px-3 rounded-lg border border-border bg-bg-surface text-text-primary"
+            className={fieldClassName}
           >
             {GATE_ACCESS_POLICIES.map((policy) => (
               <option key={policy} value={policy}>{GATE_POLICY_LABELS[policy]}</option>
