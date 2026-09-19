@@ -922,6 +922,95 @@ public sealed class DeviceGateHttpTests
     private static HttpClient MemberClient(TestWebAppFactory factory, Club club) =>
         ClientFor(factory, club, club.MemberId, role: null);
 
+    /// <summary>
+    /// The four-hour ceiling over the wire, at a club whose own phone horizon is two days.
+    ///
+    /// <para>
+    /// <c>roster_window_minutes</c> and <c>activation_cue_window_minutes</c> are both at the
+    /// maximum the settings PUT allows, which is a settings document an admin can produce
+    /// through the console without touching the database. Before the clamp that summed to
+    /// 2880 minutes and every booking code in the building was a forty-eight-hour door key,
+    /// while <c>GateAccess.MaxEarlyEntryMinutes</c>, this spec and the console all said four
+    /// hours.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_door_reaches_four_hours_however_wide_the_clubs_own_horizon_is()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", TwoDayHorizonSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client, "front-door");
+
+        var beyond = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(250), minutes: 15);
+        await AssertRefusedAsync(
+            client, Scan(club.Key, mac, await BookingCodeAsync(factory, club, beyond)), GateAccess.TooEarly);
+
+        // …and inside the ceiling the same club's door opens, so the refusal above is the
+        // ceiling and not a door that has stopped working.
+        var inside = await BookAsync(factory, club, DateTimeOffset.UtcNow.AddMinutes(230), minutes: 15);
+        Assert.True((await BodyAsync(await client.SendAsync(
+            Scan(club.Key, mac, await BookingCodeAsync(factory, club, inside))))).GetProperty("opened").GetBoolean());
+    }
+
+    /// <summary>The widest horizon the settings PUT will accept: a day of roster and a day of cue.</summary>
+    private const string TwoDayHorizonSettings =
+        """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","roster_window_minutes":1440,"activation_cue_window_minutes":1440,"activation_forward_window_minutes":1440,"gate_early_entry_minutes":30,"gate_access_policy":"active_member"}""";
+
+    /// <summary>
+    /// <b>The member walking back in for their next court, on the code from their last one.</b>
+    ///
+    /// <para>
+    /// Over real Postgres rather than only against the in-memory provider, and that is not
+    /// ceremony: the entitlement query bounds a booking by the slot it was SOLD —
+    /// <c>StartsAt + SliceMinutes × SliceCount</c>, because the no-show sweep truncates
+    /// <c>EndsAt</c> — and an expression the in-memory provider evaluates in C# is an
+    /// expression Npgsql still has to translate to SQL. A query that throws at a door is
+    /// indistinguishable from a door that does not work.
+    /// </para>
+    ///
+    /// <para>
+    /// The club runs a generous grace window, which is what keeps the earlier booking's code
+    /// alive past its own slot: the row lives until <c>EndsAt</c> plus grace. That is the
+    /// real shape of the complaint — a phone still showing the 17:00 QR at 18:50.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_spent_booking_code_opens_the_door_for_a_member_whose_next_court_is_due()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gate", SharedHorizonSettings);
+        var client = factory.CreateClient();
+        var mac = await GateAsync(factory, club, client, "front-door");
+
+        // A slot that ended ten minutes ago, and the next one starting in twenty. One court,
+        // so they must not overlap — the exclusion constraint is real here. The earlier
+        // booking's code outlives its slot by the grace window, which is what puts a live
+        // code for a finished court in the member's hand at all.
+        var now = DateTimeOffset.UtcNow;
+        var spentBooking = await BookAsync(factory, club, now.AddMinutes(-70), minutes: 60);
+        var spent = await BookingCodeAsync(factory, club, spentBooking);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.AccessCodes.IgnoreQueryFilters().SingleAsync(c => c.Code == spent);
+            Assert.True(row.IsLiveAt(now), "the fixture must present a LIVE code, or this tests plain expiry");
+        }
+
+        // Without the next booking the code is exactly as dead as it was.
+        await AssertRefusedAsync(client, Scan(club.Key, mac, spent), GateAccess.NotRecognised);
+
+        await BookAsync(factory, club, now.AddMinutes(20), minutes: 45);
+
+        Assert.True((await BodyAsync(await client.SendAsync(Scan(club.Key, mac, spent))))
+            .GetProperty("opened").GetBoolean());
+    }
+
     // ---- What a gate may not do on the court-box routes -----------------------
 
     /// <summary>

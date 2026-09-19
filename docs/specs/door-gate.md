@@ -275,8 +275,10 @@ The order is not arbitrary; each step exists to keep the one after it from being
    being admins — step 5.
 5. **The booking code's own window,** for a `BookingActivation` code and only for one. A
    booking code opens a door only while `now ∈ [StartsAt − H, EndsAt]` of **the booking it
-   names**, and only while that booking is still `Booked`. Outside it: `too_early` before,
-   `not_recognised` after. See *A booking code is not a standing building key* below.
+   names**, and only while that booking is still `Booked` — *or* while the member holding it
+   is due on some other court (*A member is not a credential*, below). Outside both:
+   `too_early` before, `not_recognised` after. See *A booking code is not a standing
+   building key* below.
 6. **The policy.** `active_member` opens. `booking_window` opens for a **club admin**
    unconditionally, and otherwise only for a member with a `Booked` booking, on any court,
    inside `[StartsAt − gate_early_entry_minutes, EndsAt]`; failing that, `no_booking`.
@@ -311,7 +313,7 @@ So under **every** policy it is bounded by its own booking's window, `[StartsAt 
 | Policy | `H` |
 |---|---|
 | `booking_window` | `gate_early_entry_minutes` |
-| `active_member` | `max(gate_early_entry_minutes, roster_window_minutes + activation_cue_window_minutes)` |
+| `active_member` | `max(gate_early_entry_minutes, min(roster_window_minutes + activation_cue_window_minutes, 240))` |
 
 The second term is **the horizon in which the member's own phone would show them that code at
 all** (`POST /me/qr/generate?kind=auto`), and the two come from one function so the screen and
@@ -323,6 +325,64 @@ The `max` matters in the other direction too: `H` is never less than
 accepted a narrower window online would refuse, while it could reach the server, a member it
 would have let in during an outage.
 
+**`H` never exceeds four hours, and all three inputs are clamped on read.** `240` is
+`GateAccess.MaxEarlyEntryMinutes` — the number this document has always quoted for
+`gate_early_entry_minutes` — and it bounded that setting alone. The other term is two
+settings the PUT bounds at 1440 each and cross-checks only against each other, so a club
+could set both to their maxima through the console and give every booking code in the
+building a **forty-eight-hour** door window, with this document, the console and the constant
+all still saying four hours. All three numbers are now clamped where they are read
+(`BookingCodeWindow`) and not only where they are written, because the PUT is not the only
+way a value reaches that column — a hand-edited settings document is, exactly as it is for
+`gate_unlock_seconds`.
+
+**The phone is deliberately not narrowed to match.** Where a club's horizon exceeds the
+ceiling the member's screen still shows the code and the door answers `too_early` — which is
+honest, is actionable by the person standing outside, and is pinned. Hiding a booking's own
+code from the member who owns it would be the worse half of the trade.
+
+### A member is not a credential
+
+A booking code bounded by its own booking is the right rule about the **code**. It was the
+wrong rule about the **person**, and twice over:
+
+- A member whose phone was still showing the QR for the court they played at 17:00, walking
+  back in at 18:50 for the court they have booked at 19:00, was told `not_recognised`: your
+  code is fake. It was not fake, it was theirs, it was live, and they were due on a court in
+  ten minutes.
+- A member **six minutes late** was told the same thing. The no-show sweep settles at
+  `grace_window_minutes` past the start, sets `Status = NoShow` and truncates `EndsAt` to its
+  own clock — so the booking QR answered `not_recognised` and the ident QR answered
+  `no_booking`, **outside the building**, while the product's own way to reverse a wrong
+  no-show is that member scanning at the court box **inside** it. A door that enforces a
+  penalty by making it impossible to undo is the worst possible place for that rule to live,
+  and a door settles no money in any case (§1).
+
+So a booking code outside its own window still opens a door **iff the same member holds
+another qualifying booking whose door window contains now**. Without one the refusal is
+exactly what it was. Qualifying means:
+
+| Status | Counts for a door | Because |
+|---|---|---|
+| `Booked` | yes | unchanged |
+| `NoShow` | yes, to the end the slot was **sold** to | a bet against attendance the member is in the middle of losing |
+| `Cancelled` · `Completed` · `AdminBlock` | no | decisions about the booking, and final |
+
+The end a `NoShow` is measured against is `StartsAt + SliceMinutes × SliceCount` — the slot as
+sold. The sweep moves `EndsAt` and nothing else, so the sold length is still on the row; the
+booking's own access code corroborates it independently, because its `ExpiresAt` was minted
+from the original end plus the grace window and the sweep does not rewrite that either. The
+relief is therefore exactly as long as the court the member paid for, and not a minute more.
+
+**The rule lives in one query**, asked twice with two horizons: step 5 asks it with the door's
+own `H`, and step 6 asks it with `gate_early_entry_minutes`. It matches on the member and on
+nothing else. It used to also match the code's own booking id, justified by a booking an
+admin made on a member's behalf carrying a different user from the code's — a state no mint
+path produces, and one that would have let the cached roster's barred filter (which keys on
+the booking's user) and the online check (which keys on the code's) disagree about whom a
+suspension binds. `AccessCodeService` now refuses to stage a code for a booking with no user
+at all, so the two are the same person by construction.
+
 **The two refusals are deliberately asymmetric.**
 
 - **Before the window — `too_early`.** Named rather than folded into `not_recognised`, which
@@ -331,12 +391,12 @@ would have let in during an outage.
   itself minted for them that they are early, about a booking that is already theirs, which
   the door will honour later the same day. "Not recognised" would send a member with a valid
   booking to a desk that may not be staffed.
-- **After `EndsAt`, or for a booking that is no longer `Booked` — `not_recognised`**, and
+- **After `EndsAt`, or for a booking that is no longer live — `not_recognised`**, and
   deliberately indistinguishable from a code that never existed. The row outlives the slot by
   the grace window, so a door that told "spent" from "unknown" apart would be exactly the
   oracle the rest of this section avoids.
 
-The `Booked` test is on the **booking**, not on the code, because nothing revokes a code when
+The status test is on the **booking**, not on the code, because nothing revokes a code when
 its booking is cancelled — revoking on cancel would strand a court box deciding offline from a
 roster it fetched beforehand, which is the one thing that roster is for.
 
@@ -481,15 +541,21 @@ purpose: it is how far ahead of a slot the roster carries it, and it is the wind
 on one rule.
 
 The third is a **floor**: under `active_member` a booking code's own window is
-`max(gate_early_entry_minutes, roster_window_minutes + activation_cue_window_minutes)` (§5), so
-raising this setting can widen the door but can never narrow it below what the cached roster
-already admits. Two settings this club did not set for the doors —
+`max(gate_early_entry_minutes, min(roster_window_minutes + activation_cue_window_minutes, 240))`
+(§5), so raising this setting can widen the door but can never narrow it below what the cached
+roster already admits. Two settings this club did not set for the doors —
 `roster_window_minutes` and `activation_cue_window_minutes` — therefore reach the door under
 the default policy, and they do so because they are what decides when the member's phone shows
-the code at all.
+the code at all. **Both of those, and this one, are bounded again on the way out**, and the
+sum is capped at 240: see §5's ceiling for what it cost not to.
 
-`gate_unlock_seconds` is bounded on the PUT **and clamped again on the way out**, because the
-PUT is not the only way a number reaches that column — a hand-edited settings document is.
+**Every number a door reads is bounded on the PUT *and* clamped again on the way out**, because
+the PUT is not the only way a number reaches that column — a hand-edited settings document is.
+That was true of `gate_unlock_seconds` from the day it shipped and of nothing else on this
+list. The four bounds (`roster_window_minutes` 5–1440, `activation_cue_window_minutes` 0–1440,
+`activation_forward_window_minutes` 1–1440, `gate_early_entry_minutes` 0–240) are named once
+in the code, so the number an admin is refused at and the number the reader enforces cannot
+drift apart.
 
 ### `gate_access_policy` is the one setting in this tree that fails CLOSED
 
@@ -767,9 +833,12 @@ new sentence above with no row is the defect this table exists to expose.
 | A booking code opens the booking it names | `DeviceGateTests.A_booking_code_opens_the_door_for_the_booking_it_names` |
 | A booking code opens only inside its own booking's window, under either policy | `DeviceGateTests.A_booking_code_opens_a_door_only_inside_its_own_bookings_window` |
 | `too_early` before the window, `not_recognised` after it | same test, and `DeviceGateHttpTests.A_booking_code_presented_too_early_is_refused_as_a_200_and_audited` |
-| A booking code for a booking that is no longer `Booked` opens nothing | `DeviceGateTests.A_booking_code_for_a_booking_that_is_no_longer_booked_opens_nothing` |
+| A cancelled or completed booking's code opens nothing | `DeviceGateTests.A_booking_code_for_a_booking_that_is_no_longer_booked_opens_nothing`, `…A_booking_the_member_did_not_lose_by_being_late_still_opens_nothing` |
+| A swept no-show still gets in, to the end the slot was SOLD and no further | `DeviceGateTests.A_member_the_sweep_has_just_written_off_can_still_get_into_the_building` (drives the real `NoShowWorker`) |
+| A code outside its own window opens for a member due on another court | `DeviceGateTests.A_spent_booking_code_still_opens_the_door_for_a_member_due_on_another_court`, `…An_early_booking_code_opens_the_door_for_a_member_whose_court_is_running`, `DeviceGateHttpTests.A_spent_booking_code_opens_the_door_for_a_member_whose_next_court_is_due` |
 | An ident code has no booking window of its own | `DeviceGateTests.An_ident_code_has_no_booking_window_of_its_own` |
 | The door's horizon under `active_member` is the phone's, and cannot drift from it | `DeviceGateTests.The_doors_horizon_under_the_default_policy_is_the_one_the_phone_shows`, `DeviceGateHttpTests.The_door_accepts_a_booking_code_exactly_while_the_phone_would_show_it` |
+| No settings combination, legal or hand-edited, reaches further than four hours | `DeviceGateTests.No_settings_combination_lets_a_door_reach_further_than_four_hours`, `…A_club_with_an_enormous_phone_horizon_still_has_a_four_hour_door`, `DeviceGateHttpTests.The_door_reaches_four_hours_however_wide_the_clubs_own_horizon_is` |
 | The release is the club's setting, clamped to 1–30 | `DeviceGateTests.The_release_is_the_clubs_setting_clamped`, `DeviceGateHttpTests.The_release_on_the_wire_is_the_clubs_setting` |
 | Every reason has a vector and every vector a reason | `DeviceGateProtocolCorpusTests.The_refusal_reasons_and_their_vectors_are_the_same_set` |
 | One audit row per decision, subject named, token absent | `DeviceGateHttpTests.An_active_member_opens_the_door_and_the_open_is_audited` |

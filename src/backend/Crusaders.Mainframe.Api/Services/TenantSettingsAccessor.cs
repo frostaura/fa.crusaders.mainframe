@@ -138,6 +138,29 @@ public sealed record TenantSettingsView(
     public const int DefaultQrLifetimeSeconds = 60;
     public const int DefaultRosterWindowMinutes = 120;
 
+    // ---- The bounds, named once ----
+    //
+    // These four were literals inside AdminConfigEndpoints.ValidateDeviceNumbers and nowhere
+    // else, which made them bounds on the PUT rather than bounds on the SETTING. Nothing
+    // clamps on the way out — TryInt above reads whatever the column holds — so a
+    // hand-edited settings document handed the engine any number at all, and the two that
+    // reach a DOOR (see BookingCodeWindow) could stretch a booking code's entry window to
+    // forty-eight hours while the spec, the console and GateAccess.MaxEarlyEntryMinutes all
+    // said four. Named here so the number an admin is refused at and the number the reader
+    // clamps to cannot drift apart.
+
+    /// <summary>Narrowest roster horizon a club may run. Below this a box is fetching a list that is empty before it is used.</summary>
+    public const int MinRosterWindowMinutes = 5;
+
+    /// <summary>Widest roster horizon a club may run — a day.</summary>
+    public const int MaxRosterWindowMinutes = 1440;
+
+    /// <summary>Widest lights-on cue window a club may run — a day.</summary>
+    public const int MaxActivationCueWindowMinutes = 1440;
+
+    /// <summary>Widest back-to-back disambiguation window a club may run — a day.</summary>
+    public const int MaxActivationForwardWindowMinutes = 1440;
+
     // ---- The door-gate numbers ----
     //
     // Three seconds is long enough to push a door and short enough that it has shut again

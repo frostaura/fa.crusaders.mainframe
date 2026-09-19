@@ -338,7 +338,16 @@ public sealed class NoShowWorker : BackgroundService
             }), ct);
     }
 
-    internal async Task TickAsync(CancellationToken ct)
+    internal Task TickAsync(CancellationToken ct) => TickAsync(DateTimeOffset.UtcNow, ct);
+
+    /// <summary>
+    /// The same sweep at a stated instant, so a test can drive the REAL worker rather than a
+    /// reconstruction of it and still say when. Every window this sweep decides — the grace
+    /// deadline, the lookback floor, the truncated end — is measured off this one value, so
+    /// threading it changes nothing about what the worker does and everything about whether
+    /// the test can put the clock where the bug is.
+    /// </summary>
+    internal async Task TickAsync(DateTimeOffset now, CancellationToken ct)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -346,8 +355,6 @@ public sealed class NoShowWorker : BackgroundService
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var settings = scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>();
         var email = scope.ServiceProvider.GetRequiredService<IEmailService>();
-
-        var now = DateTimeOffset.UtcNow;
 
         // Pull all tenants and walk them — keeps the worker tenant-aware.
         var tenants = await db.Tenants.IgnoreQueryFilters().ToListAsync(ct);

@@ -363,10 +363,24 @@ public static class AdminConfigEndpoints
         {
             return "heartbeat_seconds_out_of_range";
         }
-        if (req.ActivationForwardWindowMinutes is < 1 or > 1440) return "activation_forward_window_minutes_out_of_range";
-        if (req.ActivationCueWindowMinutes is < 0 or > 1440) return "activation_cue_window_minutes_out_of_range";
+        // The four bounds are TenantSettingsView's own constants rather than literals here.
+        // Two of them reach a door (BookingCodeWindow clamps on read against the same
+        // numbers), and a bound an admin is refused at that differs from the bound the reader
+        // enforces is the gap a hand-edited settings column walks through.
+        if (req.ActivationForwardWindowMinutes is < 1 or > TenantSettingsView.MaxActivationForwardWindowMinutes)
+        {
+            return "activation_forward_window_minutes_out_of_range";
+        }
+        if (req.ActivationCueWindowMinutes is < 0 or > TenantSettingsView.MaxActivationCueWindowMinutes)
+        {
+            return "activation_cue_window_minutes_out_of_range";
+        }
         if (req.QrLifetimeSeconds is < 15 or > 3600) return "qr_lifetime_seconds_out_of_range";
-        if (req.RosterWindowMinutes is < 5 or > 1440) return "roster_window_minutes_out_of_range";
+        if (req.RosterWindowMinutes is < TenantSettingsView.MinRosterWindowMinutes
+            or > TenantSettingsView.MaxRosterWindowMinutes)
+        {
+            return "roster_window_minutes_out_of_range";
+        }
         return null;
     }
 
