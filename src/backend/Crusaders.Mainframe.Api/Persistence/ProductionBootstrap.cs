@@ -102,39 +102,76 @@ public static class ProductionBootstrap
             return;
         }
 
-        var slug = (config["Bootstrap:TenantSlug"] ?? "").Trim().ToLowerInvariant();
-        var displayName = (config["Bootstrap:TenantDisplayName"] ?? "").Trim();
-        var adminEmail = (config["Bootstrap:AdminEmail"] ?? "").Trim().ToLowerInvariant();
-        var adminPassword = config["Bootstrap:AdminPassword"] ?? "";
-        var courtCount = config.GetValue("Bootstrap:Courts", 4);
-        // Must be > 0. Court.SlicePriceCredits defaults to 0m and each court carries its OWN
-        // price — AdminConfigEndpoints reads court.SlicePriceCredits, not the tenant setting,
-        // when it charges a booking. Courts created without this are free to book, silently and
-        // for as long as nobody checks the ledger. The default matches the accessor's
-        // slice_price_credits fallback so a bootstrapped club and a configured one agree.
-        var slicePriceCredits = config.GetValue("Bootstrap:SlicePriceCredits", 8m);
-
-        Validate(slug, displayName, adminEmail, adminPassword, courtCount, slicePriceCredits);
+        var plan = BootstrapPlan.From(config);
+        Validate(plan);
 
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
 
+        // What was actually created, in the order it happened. Empty means the club was already
+        // set up, which is the normal case on every boot after the first.
         var created = new List<string>();
 
-        // IgnoreQueryFilters throughout the tenant lookup: we are operating above tenancy, and
-        // the filter would otherwise scope the search to the empty tenant we have not set yet.
-        var tenant = await db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Slug == slug);
+        var tenant = await EnsureTenantAsync(db, plan, created);
+        tenantContext.Set(tenant.Id, tenant.Slug);
+        await EnsureAdminAsync(db, hasher, tenant, plan, logger, created);
+        await EnsureCourtsAsync(db, tenant, plan, created);
+
+        Report(plan, created, logger);
+    }
+
+    /// <summary>
+    /// The <c>Bootstrap:*</c> configuration, read once and passed around as one thing.
+    ///
+    /// <para>
+    /// A record rather than six arguments threaded through four methods. The six were also
+    /// exactly at the complexity gate's parameter limit, so any helper that needed them plus a
+    /// <c>DbContext</c> could not be extracted at all — which is part of why this was one
+    /// 144-line method doing four independent jobs.
+    /// </para>
+    /// </summary>
+    private sealed record BootstrapPlan(
+        string Slug,
+        string DisplayName,
+        string AdminEmail,
+        string AdminPassword,
+        int CourtCount,
+        decimal SlicePriceCredits)
+    {
+        public static BootstrapPlan From(IConfiguration config) => new(
+            (config["Bootstrap:TenantSlug"] ?? "").Trim().ToLowerInvariant(),
+            (config["Bootstrap:TenantDisplayName"] ?? "").Trim(),
+            (config["Bootstrap:AdminEmail"] ?? "").Trim().ToLowerInvariant(),
+            config["Bootstrap:AdminPassword"] ?? "",
+            config.GetValue("Bootstrap:Courts", 4),
+            // Must be > 0. Court.SlicePriceCredits defaults to 0m and each court carries its OWN
+            // price — AdminConfigEndpoints reads court.SlicePriceCredits, not the tenant setting,
+            // when it charges a booking. Courts created without this are free to book, silently
+            // and for as long as nobody checks the ledger. The default matches the accessor's
+            // slice_price_credits fallback so a bootstrapped club and a configured one agree.
+            config.GetValue("Bootstrap:SlicePriceCredits", 8m));
+    }
+
+    /// <summary>The club's tenant row and its settings row, creating either if it is missing.</summary>
+    private static async Task<Tenant> EnsureTenantAsync(MainframeDbContext db, BootstrapPlan plan, List<string> created)
+    {
+        // IgnoreQueryFilters throughout: we are operating above tenancy, and the filter would
+        // otherwise scope the search to the empty tenant we have not set yet.
+        var tenant = await db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Slug == plan.Slug);
+
         if (tenant is null)
         {
-            tenant = new Tenant { Slug = slug, DisplayName = displayName, Status = "active" };
+            tenant = new Tenant { Slug = plan.Slug, DisplayName = plan.DisplayName, Status = "active" };
             db.Tenants.Add(tenant);
             db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = InitialSettingsJson });
             await db.SaveChangesAsync();
-            created.Add($"tenant '{slug}'");
+            created.Add($"tenant '{plan.Slug}'");
+            return tenant;
         }
-        else if (await db.TenantSettings.IgnoreQueryFilters().AllAsync(s => s.TenantId != tenant.Id))
+
+        if (await db.TenantSettings.IgnoreQueryFilters().AllAsync(s => s.TenantId != tenant.Id))
         {
             // A tenant with no settings row reads as "{}" and therefore works, but every write
             // through the admin settings screen assumes the row exists. Cheap to repair here.
@@ -143,100 +180,114 @@ public static class ProductionBootstrap
             created.Add("tenant settings row");
         }
 
-        tenantContext.Set(tenant.Id, tenant.Slug);
+        return tenant;
+    }
 
+    /// <summary>
+    /// The club's first admin — and nothing at all if it already has one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The lookup is by email, and that is what crashed the container. Changing
+    /// <c>Bootstrap__AdminEmail</c> — correcting a typo, moving to a shared committee mailbox —
+    /// found nothing and fell through to creating a SECOND admin, whose membership row carried
+    /// the same hardcoded <c>ADMIN-0001</c>. That collides with the unique index on
+    /// (TenantId, MembershipNumber), the exception escapes startup, and the stack then fails to
+    /// boot on every restart. An operator fixing a typo bricked their club, and the only way
+    /// back was to edit the database or guess the old address.
+    /// </para>
+    /// <para>
+    /// Standing up the first admin is this type's whole job; a second one is the admin console's.
+    /// An existing admin is left exactly as it is, password included — the development seeder
+    /// re-stamps its hardcoded password onto a drifted admin on every boot, and doing that here
+    /// would silently revert a rotation the club had just performed and keep the compose file's
+    /// password live forever.
+    /// </para>
+    /// </remarks>
+    private static async Task EnsureAdminAsync(
+        MainframeDbContext db, IPasswordHasher hasher, Tenant tenant, BootstrapPlan plan, ILogger logger, List<string> created)
+    {
         var admin = await db.Users.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(u => u.TenantId == tenant.Id && u.Email == adminEmail);
+            .FirstOrDefaultAsync(u => u.TenantId == tenant.Id && u.Email == plan.AdminEmail);
+        if (admin is not null) return;
 
         // Does the club already have an admin under some OTHER address?
-        //
-        // This is the case that crashed the container. The lookup above is by email, so
-        // changing Bootstrap__AdminEmail — correcting a typo, moving to a shared committee
-        // mailbox — found nothing and fell through to creating a second admin, whose
-        // membership row carried the same hardcoded ADMIN-0001. That collides with the unique
-        // index on (TenantId, MembershipNumber), the exception escapes startup, and the stack
-        // then fails to boot on EVERY restart. An operator fixing a typo bricked their club,
-        // and the only way back was to edit the database or guess the old address.
-        //
-        // Standing up the club's first admin is this type's whole job. A second one is the
-        // admin console's, so say so and carry on rather than half-creating one.
-        var existingAdmin = admin is null
-            ? await db.Users.IgnoreQueryFilters()
-                .Where(u => u.TenantId == tenant.Id && u.IsAdmin)
-                .Select(u => u.Email)
-                .FirstOrDefaultAsync()
-            : null;
+        var existingAdmin = await db.Users.IgnoreQueryFilters()
+            .Where(u => u.TenantId == tenant.Id && u.IsAdmin)
+            .Select(u => u.Email)
+            .FirstOrDefaultAsync();
 
-        if (admin is null && existingAdmin is not null)
+        if (existingAdmin is not null)
         {
             logger.LogWarning(
                 "Bootstrap: Bootstrap__AdminEmail is '{Wanted}' but this club already has an admin, '{Existing}'. " +
                 "Leaving it alone — add or change admins from Admin → Members, not from the compose file.",
-                adminEmail, existingAdmin);
+                plan.AdminEmail, existingAdmin);
+            return;
         }
-        else if (admin is null)
+
+        admin = new User
         {
-            admin = new User
+            TenantId = tenant.Id,
+            Email = plan.AdminEmail,
+            PasswordHash = hasher.Hash(plan.AdminPassword),
+            EmailVerified = true,
+            IsAdmin = true,
+            Status = "active",
+            // The compose file holding this password is readable by anyone who can see the
+            // Portainer stack, and it travels in plain text to whoever set it up. It is a
+            // delivery mechanism, not a credential.
+            MustChangePassword = true,
+        };
+        db.Users.Add(admin);
+        db.Memberships.Add(new Membership
+        {
+            TenantId = tenant.Id,
+            UserId = admin.Id,
+            FullName = plan.DisplayName + " Admin",
+            // Defence in depth behind the check above. The number only has to be unique within
+            // the tenant and is not meaningful to anybody, so take the first free one rather
+            // than asserting that ADMIN-0001 must be available.
+            MembershipNumber = await FreeAdminNumberAsync(db, tenant.Id),
+            Status = MembershipStatus.Active,
+        });
+        await db.SaveChangesAsync();
+        created.Add($"admin '{plan.AdminEmail}' (must change password at first sign-in)");
+    }
+
+    /// <summary>The club's courts, if it has none. Never adds to a club that already has some.</summary>
+    private static async Task EnsureCourtsAsync(MainframeDbContext db, Tenant tenant, BootstrapPlan plan, List<string> created)
+    {
+        if (await db.Courts.IgnoreQueryFilters().AnyAsync(c => c.TenantId == tenant.Id)) return;
+
+        for (var i = 1; i <= plan.CourtCount; i++)
+        {
+            db.Courts.Add(new Court
             {
                 TenantId = tenant.Id,
-                Email = adminEmail,
-                PasswordHash = hasher.Hash(adminPassword),
-                EmailVerified = true,
-                IsAdmin = true,
-                Status = "active",
-                // The compose file holding this password is readable by anyone who can see the
-                // Portainer stack, and it travels in plain text to whoever set it up. It is a
-                // delivery mechanism, not a credential.
-                MustChangePassword = true,
-            };
-            db.Users.Add(admin);
-            db.Memberships.Add(new Membership
-            {
-                TenantId = tenant.Id,
-                UserId = admin.Id,
-                FullName = displayName + " Admin",
-                // Defence in depth behind the check above. The number only has to be unique
-                // within the tenant and is not meaningful to anybody, so take the first free
-                // one rather than asserting that ADMIN-0001 must be available.
-                MembershipNumber = await FreeAdminNumberAsync(db, tenant.Id),
-                Status = MembershipStatus.Active,
+                CourtNumber = i,
+                Name = $"Court {i}",
+                CourtType = CourtType.Squash,
+                SlicePriceCredits = plan.SlicePriceCredits,
             });
-            await db.SaveChangesAsync();
-            created.Add($"admin '{adminEmail}' (must change password at first sign-in)");
         }
-        // No else. An existing admin is left exactly as it is — password included. The
-        // development seeder re-stamps its hardcoded password onto a drifted admin on every
-        // boot; doing that here would silently revert a rotation the club had just performed,
-        // and would keep the compose file's password live forever.
+        await db.SaveChangesAsync();
+        created.Add($"{plan.CourtCount} squash court(s) at {plan.SlicePriceCredits} credits/slice");
+    }
 
-        if (!await db.Courts.IgnoreQueryFilters().AnyAsync(c => c.TenantId == tenant.Id))
-        {
-            for (var i = 1; i <= courtCount; i++)
-            {
-                db.Courts.Add(new Court
-                {
-                    TenantId = tenant.Id,
-                    CourtNumber = i,
-                    Name = $"Court {i}",
-                    CourtType = CourtType.Squash,
-                    SlicePriceCredits = slicePriceCredits,
-                });
-            }
-            await db.SaveChangesAsync();
-            created.Add($"{courtCount} squash court(s) at {slicePriceCredits} credits/slice");
-        }
-
+    /// <summary>What happened, at a level an operator reading container logs will actually see.</summary>
+    private static void Report(BootstrapPlan plan, List<string> created, ILogger logger)
+    {
         if (created.Count == 0)
         {
-            logger.LogInformation("Bootstrap: nothing to do — tenant '{Slug}' is already set up.", slug);
+            logger.LogInformation("Bootstrap: nothing to do — tenant '{Slug}' is already set up.", plan.Slug);
+            return;
         }
-        else
-        {
-            logger.LogWarning(
-                "Bootstrap created: {Created}. Sign in as {Email} and change the password immediately, " +
-                "then set Bootstrap__Enabled=false.",
-                string.Join(", ", created), adminEmail);
-        }
+
+        logger.LogWarning(
+            "Bootstrap created: {Created}. Sign in as {Email} and change the password immediately, " +
+            "then set Bootstrap__Enabled=false.",
+            string.Join(", ", created), plan.AdminEmail);
     }
 
     /// <summary>
@@ -263,8 +314,9 @@ public static class ProductionBootstrap
     /// <summary>
     /// Every way the configuration can be wrong, reported together rather than one boot at a time.
     /// </summary>
-    private static void Validate(string slug, string displayName, string adminEmail, string adminPassword, int courtCount, decimal slicePriceCredits)
+    private static void Validate(BootstrapPlan plan)
     {
+        var (slug, displayName, adminEmail, adminPassword, courtCount, slicePriceCredits) = plan;
         var problems = new List<string>();
 
         if (string.IsNullOrWhiteSpace(slug))

@@ -48,6 +48,19 @@
 # is green either way only because both lines are here. `RepositoryPostureTests`
 # asserts both are present, so a tidy-up that drops one goes red in the suite
 # rather than months later on somebody else's unrelated commit.
+#
+# PhotoPicker is a MEASUREMENT ARTIFACT of the same kind as the Minimal API entries above,
+# not complexity. lizard reports it at 9 PARAM, and by every other measure it is one of the
+# simplest components in the product: CCN 5, 33 NLOC, 46 lines. React passes exactly one
+# argument — the props object — and lizard counts each destructured member of it as a separate
+# parameter, so the number says "this component has eight props", which is an ordinary API for
+# a form control (value, onChange, two status callbacks, label, hint, required, disabled).
+# The repo already carries six TSX components here for this reason.
+#
+# It is listed rather than "fixed" because every way to satisfy the count makes the code worse:
+# bundling label and hint into a `copy` object, or taking `props` and destructuring on the next
+# line, both move the same eight names one line down and buy nothing. If a reviewer disagrees,
+# the change to make is a smaller component, not a smaller signature.
 AdminConfigEndpoints::MapAdminConfigEndpoints
 AdminMemberEndpoints::MapAdminMemberEndpoints
 AdminMembersPage
@@ -62,6 +75,7 @@ DataTable
 Layout
 MeProfileEndpoints::MapMeProfileEndpoints
 PinEndpoints::MapPinEndpoints
+PhotoPicker
 ProfilePage
 QrEndpoints::MapQrEndpoints
 ReportingEndpoints::MapReportingEndpoints
