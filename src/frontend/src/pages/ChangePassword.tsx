@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ApiError, endpoints, errorCode } from "../lib/api";
+import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useToast } from "../components/Toast";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
+import { describeFailure } from "../lib/errors";
 
 /**
  * The API's refusal codes, as sentences. A member never sees a code, and never sees the same
@@ -47,10 +48,7 @@ export function ChangePasswordForm({ onDone, forced }: { onDone?: () => void; fo
       toast.push({ tone: "success", text: "Password changed." });
       onDone?.();
     } catch (err) {
-      const code = errorCode(err);
-      if (code && MESSAGES[code]) setError(MESSAGES[code]);
-      else if (err instanceof ApiError && err.status === 429) setError("Too many attempts. Wait a minute, then try again.");
-      else setError("Couldn't change your password. Check your connection and try again.");
+      setError(describeFailure(err, { codes: MESSAGES, action: "change your password" }));
     } finally {
       setSaving(false);
     }

@@ -1,5 +1,6 @@
 import { ApiError } from "./api";
 import { formatCredits } from "./utils";
+import { describeFailure } from "./errors";
 
 /**
  * Booking refusals, turned into sentences a member can act on.
@@ -272,7 +273,10 @@ export function describeCourtCodeFetchFailure(e: unknown, screen: "code" | "barr
       ? "That's a lot of checking at once. Give it a moment, then check again."
       : "Too many refreshes. Give it a moment and try again.";
   }
-  return "Couldn't get a code. Check your connection and try again.";
+  // Only a NetworkError is genuinely a connection problem; describeFailure enforces that.
+  // This returned the connection sentence for every non-429 failure, so a member whose club
+  // had no tenant row, or whose session had lapsed, was sent to check their WiFi.
+  return describeFailure(e, { action: "get a code" });
 }
 
 /**

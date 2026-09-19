@@ -71,10 +71,7 @@ export default function RegisterPage() {
         setError(PHOTO_MESSAGES[err.problem]);
         setBlocked(false);
       } else {
-        setError(describeFailure(err, {
-          codes: MESSAGES,
-          fallback: "We couldn't submit your application, and the club's system didn't say why. Try again — if it keeps failing, contact the club committee.",
-        }));
+        setError(describeFailure(err, { codes: MESSAGES, action: "submit your application" }));
         // A missing tenant or a 5xx is not something resubmitting can cure. Hiding the submit
         // button is the honest response: the previous screen invited the member to keep
         // pressing it against a fault only the club's operator could clear.

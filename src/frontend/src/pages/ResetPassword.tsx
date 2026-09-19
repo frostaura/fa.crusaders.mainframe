@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, endpoints, errorCode } from "../lib/api";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
+import { describeFailure } from "../lib/errors";
 
 /**
  * Self-service password reset, step two — the destination of the link in the email.
@@ -43,7 +44,7 @@ export default function ResetPasswordPage() {
       } else if (err instanceof ApiError && err.status === 429) {
         setError("Too many attempts. Wait a minute, then try again.");
       } else {
-        setError("Couldn't reset your password. Check your connection and try again.");
+        setError(describeFailure(err, { action: "reset your password" }));
       }
     } finally {
       setLoading(false);

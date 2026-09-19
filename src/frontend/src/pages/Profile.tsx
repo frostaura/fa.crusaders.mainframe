@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Fingerprint, Loader2, Plus, Trash2 } from "lucide-react";
-import { endpoints, ApiError, errorCode, type WebAuthnCredentialRow } from "../lib/api";
+import { endpoints, ApiError, type WebAuthnCredentialRow } from "../lib/api";
 import { useProfile } from "../lib/profile";
 import { useToast } from "../components/Toast";
 import { Card } from "../components/Card";
@@ -9,6 +9,7 @@ import { ConfirmButton } from "../components/ConfirmButton";
 import { isPasskeySupported, registerPasskey } from "../lib/webauthn";
 import { ChangePasswordForm } from "./ChangePassword";
 import { cn } from "../lib/utils";
+import { describeFailure } from "../lib/errors";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
@@ -93,12 +94,12 @@ export default function ProfilePage() {
       setLocal({ ...profile, full_name: r.full_name });
       toast.push({ tone: "success", text: "Name updated." });
     } catch (err) {
-      const code = errorCode(err);
       toast.push({
         tone: "danger",
-        text: code === "full_name_invalid"
-          ? `Your name must be between ${NAME_MIN} and ${NAME_MAX} characters.`
-          : "Couldn't save your name. Check your connection and try again.",
+        text: describeFailure(err, {
+          codes: { full_name_invalid: `Your name must be between ${NAME_MIN} and ${NAME_MAX} characters.` },
+          action: "save your name",
+        }),
       });
     }
     finally { setSavingName(false); }

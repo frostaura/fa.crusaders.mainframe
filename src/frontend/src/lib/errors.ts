@@ -41,17 +41,40 @@ const CROSS_CUTTING: Record<string, string> = {
   invalid_token: "Your session has expired. Sign in again.",
 };
 
+/**
+ * Puts what the member was trying to do in front of why it failed.
+ *
+ * <p>
+ * A cause without an action is vague ("something went wrong on the club's system" — with
+ * what?), and an action without a cause is the original defect ("couldn't get a code, check
+ * your connection" — when the connection was fine). Both halves, in that order, is the only
+ * version that is specific AND true.
+ * </p>
+ */
+function lead(action: string | undefined, cause: string): string {
+  return action ? `Couldn't ${action} — ${cause}` : cause.charAt(0).toUpperCase() + cause.slice(1);
+}
+
 /** Sentences for HTTP statuses that mean the same thing wherever they appear. */
-function describeStatus(status: number): string | null {
+function describeStatus(status: number, action?: string): string | null {
+  // Deliberately has no action clause: it is about the member's rate of attempts, not about
+  // the particular thing attempted, and it is the one refusal they can definitely resolve.
   if (status === 429) return "Too many attempts. Wait a minute, then try again.";
   if (status === 502 || status === 503 || status === 504)
-    return "The club's system is down or restarting. Give it a minute and try again — if it keeps happening, tell the club committee.";
+    return lead(action, "the club's system is down or restarting. Give it a minute and try again — if it keeps happening, tell the club committee.");
   if (status >= 500)
-    return "Something went wrong on the club's system. It isn't anything you did. Try again shortly, and tell the club committee if it keeps happening.";
+    return lead(action, "something went wrong on the club's system. It isn't anything you did. Try again shortly, and tell the club committee if it keeps happening.");
   return null;
 }
 
 export type DescribeOptions = {
+  /**
+   * What the member was trying to do, as a bare verb phrase that reads after "Couldn't" —
+   * "get a code", "load the schedule", "save your name". Strongly preferred over relying on
+   * {@link DescribeOptions.fallback} alone, because it applies to the network and server
+   * sentences too, which is where the vagueness actually bites.
+   */
+  action?: string;
   /**
    * Sentences for the error codes this particular screen's endpoint can return. Checked before
    * the cross-cutting map, so a screen may override a shared sentence with a better-targeted one.
@@ -74,24 +97,24 @@ export type DescribeOptions = {
 export function describeFailure(err: unknown, opts: DescribeOptions = {}): string {
   if (err instanceof NetworkError) {
     return err.kind === "timeout"
-      ? "The club's system took too long to answer. Check your connection and try again."
-      : "We couldn't reach the club's system. Check your connection and try again.";
+      ? lead(opts.action, "the club's system took too long to answer. Check your connection and try again.")
+      : lead(opts.action, "the club's system couldn't be reached. Check your connection and try again.");
   }
 
   if (!(err instanceof ApiError)) {
     // Something threw that isn't ours at all — a bug in our own code, most likely. Do not
     // present that as either a network fault or a decision the club made.
-    return opts.fallback ?? "Something went wrong. Try again, and tell the club committee if it keeps happening.";
+    return opts.fallback ?? lead(opts.action, "something went wrong. Try again, and tell the club committee if it keeps happening.");
   }
 
   const code = errorCode(err);
   if (code && opts.codes?.[code]) return opts.codes[code];
   if (code && CROSS_CUTTING[code]) return CROSS_CUTTING[code];
 
-  const byStatus = describeStatus(err.status);
+  const byStatus = describeStatus(err.status, opts.action);
   if (byStatus) return byStatus;
 
-  return opts.fallback ?? "That didn't work. Try again, and tell the club committee if it keeps happening.";
+  return opts.fallback ?? lead(opts.action, "that didn't work. Try again, and tell the club committee if it keeps happening.");
 }
 
 /**

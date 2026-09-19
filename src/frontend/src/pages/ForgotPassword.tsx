@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, endpoints } from "../lib/api";
+import { endpoints } from "../lib/api";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
+import { describeFailure } from "../lib/errors";
 
 /**
  * Self-service password reset, step one.
@@ -34,11 +35,7 @@ export default function ForgotPasswordPage() {
       await endpoints.forgotPassword(email.trim());
       setSent(true);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 429) {
-        setError("Too many attempts. Wait a minute, then try again.");
-      } else {
-        setError("Couldn't send the reset email. Check your connection and try again.");
-      }
+      setError(describeFailure(err, { action: "send the reset email" }));
     } finally {
       setLoading(false);
     }

@@ -13,6 +13,7 @@ import { CancelBookingModal } from "../components/CancelBookingModal";
 import { ScheduleBoard } from "../components/ScheduleCells";
 import { useSlotEnders, type CancelTarget } from "../lib/scheduleEnd";
 import { buildTimeSlices, groupSlotsByCourt } from "../lib/scheduleGrid";
+import { describeFailure } from "../lib/errors";
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -48,7 +49,10 @@ export default function SchedulePage() {
       setDay(await endpoints.schedule(date));
       setLoadedAt(Date.now());
     }
-    catch { setError("Couldn't load the schedule. Check your connection and press Refresh."); }
+    // Was a bare `catch` mapping EVERY failure to "Check your connection and press Refresh."
+    // — so a missing tenant row, a 500 and an expired session all told the member their
+    // network was down, and Refresh was the one thing that could not help.
+    catch (err) { setError(describeFailure(err, { action: "load the schedule" })); }
     finally { setLoading(false); }
   }, [date]);
 
