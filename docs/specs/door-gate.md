@@ -905,7 +905,7 @@ new sentence above with no row is the defect this table exists to expose.
 | A board out of service is 403 on the heartbeat as well as the scan | `DeviceGateHttpTests.A_gate_taken_out_of_service_is_refused_on_the_heartbeat_too`, `…The_board_identity_failures_keep_their_own_shapes` |
 | A silent door gets a door's alert and none of the court box's sentences | `PeripheralHealthTests.A_silent_gate_gets_a_door_alert_and_none_of_the_court_boxs_sentences`, `…A_gate_that_comes_back_gets_a_door_all_clear_and_none_of_the_court_boxs` |
 | A silent box beside a silent door still gets the court box's alert | `PeripheralHealthTests.A_silent_box_beside_a_silent_gate_still_gets_the_court_boxs_alert` |
-| A silent door darkens no court and waives no penalty | `PeripheralHealthTests.A_silent_gate_darkens_no_court_and_waives_no_penalty` |
+| A door darkens no court and waives no penalty — by rule, not because its court list happens to be empty | `PeripheralHealthTests.A_silent_gate_darkens_no_court_and_waives_no_penalty`, `…A_silent_gate_carrying_a_court_number_still_darkens_no_court`, `…A_healthy_gate_carrying_a_court_number_does_not_block_the_waiver` |
 | A presented token's length is checked before anything is allocated | `AccessCodeTests.An_absurdly_long_token_is_refused_before_anything_is_allocated` |
 | The three settings round-trip; omitted means unchanged | `AdminSettingsHttpTests.The_gate_settings_are_readable_and_writable_and_omitted_means_unchanged` |
 | Both key spellings bind | `AdminSettingsHttpTests.A_gate_setting_binds_under_either_spelling` |

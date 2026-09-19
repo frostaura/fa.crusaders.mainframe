@@ -464,6 +464,105 @@ public class PeripheralHealthTests
         Assert.Equal(false, evt.Data["peripheral_outage"]);
     }
 
+    /// <summary>
+    /// <b>…and it still darkens no court once somebody has put a court number on it.</b>
+    ///
+    /// <para>
+    /// The test above passes for the wrong reason, and flipping one fixture field is what
+    /// shows it: <c>DeviceOutageIndex</c> read every device row with no filter on kind at all,
+    /// and a gate was left out of the court index only because auto-registration gives it an
+    /// empty <c>CourtNumbers</c>. That is not a rule, it is a coincidence of the default —
+    /// exactly the class of defect <c>memory/gotchas.md</c> records ("a test can be green
+    /// because of its FIXTURE"), and exactly the sentence <c>GateAccess.NotACourtBox</c> was
+    /// written for: a rule enforced by the emptiness of an unrelated list is not enforced.
+    /// </para>
+    ///
+    /// <para>
+    /// The court number is written <b>directly to the row</b>, because the product refuses to
+    /// put one there: <c>PATCH /admin/devices/{id}</c> answers <c>court_fields_on_a_gate</c>.
+    /// That is the point. Nothing stops a restore, a fixture or a later migration producing
+    /// this row, and the money consequence is immediate in both directions — a silent door
+    /// waiving penalties on a court it does not drive, and a healthy door vetoing the §6a
+    /// waiver on a court whose box is genuinely dark.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_silent_gate_carrying_a_court_number_still_darkens_no_court()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddSeconds(-20));
+        var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1));
+
+        // The one field. Written straight to the row: the API refuses to do this.
+        gate.CourtNumbers = [host.Courts[0].CourtNumber];
+        await db.SaveChangesAsync();
+
+        await CreateWorker(host).TickAsync(default);
+        Drain(host);
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        Assert.Equal(97.60m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
+        Assert.Equal(2.40m, evt.Data["penalty_credits"]);
+        Assert.Equal(false, evt.Data["peripheral_outage"]);
+    }
+
+    /// <summary>
+    /// The mirror, and the one that costs the MEMBER rather than the club: a HEALTHY door with
+    /// a court number on it must not vote a genuinely dark court back into the light.
+    ///
+    /// <para>
+    /// This is the direction the empty-list coincidence never protected against at all, and it
+    /// is the one §6a exists to prevent — the club billing a member 30% for its own outage.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_healthy_gate_carrying_a_court_number_does_not_block_the_waiver()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        var booking = await AddDueBookingAsync(host, db);
+        await ledger.PostAsync(new LedgerPosting(
+            host.PlayerUser.Id, LedgerEntryType.BookingCharge, -8m, host.PlayerUser.Id, RelatedBookingId: booking.Id), default);
+
+        // The instants matter and are stated. The booking started an hour ago, so its grace
+        // deadline — the instant the waiver is judged at — is 55 minutes ago. The box had been
+        // silent for over two hours by then; the door had been heard from a minute before it,
+        // so at that instant the door was REACHABLE and would have voted the court Lit.
+        //
+        // The door's last heartbeat is deliberately not "twenty seconds ago": a board is only
+        // evidence about an instant it existed at (DeviceOutageIndex.KnownToExistFrom), and a
+        // board first heard from after the deadline is skipped rather than counted — which
+        // would make this test pass without discriminating anything.
+        await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddHours(-3));
+        var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-56));
+        gate.CourtNumbers = [host.Courts[0].CourtNumber];
+        await db.SaveChangesAsync();
+
+        await CreateWorker(host).TickAsync(default);
+        Drain(host);
+        await CreateNoShowWorker(host).TickAsync(default);
+
+        // Refunded in full, no penalty: §6a. A door is not a court's evidence either way.
+        Assert.Equal(100m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+        var evt = Assert.Single(Drain(host), e => e.Type == "booking.no_show");
+        Assert.Equal(0m, evt.Data["penalty_credits"]);
+        Assert.Equal(true, evt.Data["peripheral_outage"]);
+    }
+
     // ----- money: §6a's "auto-credited (no penalty)" -----------------------------------
 
     private static async Task<Booking> AddDueBookingAsync(

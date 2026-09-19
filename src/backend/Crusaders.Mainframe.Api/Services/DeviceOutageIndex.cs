@@ -220,10 +220,21 @@ public sealed class DeviceOutageIndex
     public static async Task<DeviceOutageIndex> BuildAsync(
         MainframeDbContext db, DateTimeOffset since, int offlineAfterSeconds, CancellationToken ct)
     {
+        // COURT BOXES, stated. This read had no filter on kind at all, and a gate was left out
+        // only because auto-registration gives it an empty CourtNumbers list — so it fell out
+        // of CourtIndex by accident rather than by rule. `PATCH /admin/devices/{id}` refuses
+        // court numbers on a gate row today, but nothing stops a fixture, a restore or a
+        // future migration putting one there, and the moment one appears a silent DOOR starts
+        // waiving no-show penalties on a court it does not drive and a healthy door starts
+        // vetoing the §6a waiver on a court whose box is genuinely dark. Neither is a door's
+        // business: a gate lights nothing, stamps no attendance, and §1 says walking through a
+        // door is not playing a court. A rule enforced by the emptiness of an unrelated list
+        // is not enforced — the same sentence GateAccess.NotACourtBox is written for.
+        //
         // Read once and split, because the two halves answer different questions: the enabled
         // boxes carry the silence, and the switched-off ones only say whether the club has any
         // hardware on the court at all, and from when (see CourtIndex and DarknessAt).
-        var allDevices = await db.Devices.AsNoTracking().ToListAsync(ct);
+        var allDevices = await db.Devices.AsNoTracking().Where(d => d.Kind == DeviceKind.CourtBox).ToListAsync(ct);
 
         // A box that has never called in is not silent, it is unborn — LastSeenAt is null only
         // between auto-registration and the first save, and in seeded fixtures. Same rule the
