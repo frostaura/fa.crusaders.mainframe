@@ -170,13 +170,26 @@ def iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
 
-_FRACTION = re.compile(r"(\.\d{1,6})\d*")
+_FRACTION = re.compile(r"\.(\d+)")
 
 
 def parse_dt(text: str) -> datetime:
-    # .NET writes seven fractional digits; fromisoformat on older Pythons wants six.
-    text = _FRACTION.sub(r"\1", text.replace("Z", "+00:00"))
-    return datetime.fromisoformat(text)
+    """A .NET timestamp, as a datetime, on every Python this repo runs on.
+
+    `fromisoformat` before 3.11 accepts a fractional second of EXACTLY three or six
+    digits and nothing else. .NET writes up to seven and its serialiser trims
+    trailing zeros, so the same endpoint answers `.2717739` on one call and `.69739`
+    on the next — and the second one raised `ValueError: Invalid isoformat string`
+    on the founder's system Python (3.9). The previous rule here only TRUNCATED a
+    long fraction, which is the seven-digit case; it could not lengthen a short one,
+    so roughly one timestamp in ten crashed whichever step happened to read it. CI
+    runs 3.12, where the parser is permissive, so nothing went red there.
+
+    Normalised to exactly six digits instead: pad or trim, whichever it needs.
+    """
+    text = text.replace("Z", "+00:00")
+    return datetime.fromisoformat(
+        _FRACTION.sub(lambda m: "." + (m.group(1) + "000000")[:6], text, count=1))
 
 
 def free_port() -> int:

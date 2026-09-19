@@ -464,20 +464,36 @@ jobs:
 
   # ============================================================================
   # End-to-end device proof — the real API, a real Postgres, the firmware's native
-  # simulator and the PayFast imposter, driven by test/e2e-device/scenario.py.
+  # simulator and the PayFast imposter. Two scenarios, one job.
   #
-  # This is the only job that proves the box-facing chain end to end (the club key,
-  # auto-registration on first heartbeat, activate/events/walk-up, the no-show
-  # sweep) against the code as it will ship. It existed as a Makefile target and
-  # nothing in CI ran it. Runs headless: Postgres is the service container below
-  # (E2E_PG_HOST/PORT point the script at it, so it never reaches for docker), the
-  # simulator is built by pio from the pinned toolchain, mountebank comes from npx.
-  # The image builds are gated on it.
+  # `scenario.py` is the COURT BOX and is the only job that proves the box-facing
+  # chain end to end (the club key, auto-registration on first heartbeat,
+  # activate/events/walk-up, the no-show sweep) against the code as it will ship.
+  #
+  # `door_evening.py` is the DOOR, and it is the only thing anywhere in this
+  # repository that reads a response the way a board does: a raw socket over
+  # HTTP/1.0 with `Connection: close`, a second pass over HTTP/1.1 de-chunked by
+  # hand on a kept-open connection, and both of those again through a real nginx
+  # carrying `nginx/nginx.conf`'s own `/api/` directives. That is why nginx and the
+  # Postgres client are installed below and why E2E_REQUIRE_GATEWAY is set: round G3
+  # found the API answering every device route `Transfer-Encoding: chunked` on a
+  # keep-alive connection, which timed out the firmware's reader on EVERY call — no
+  # roster and a door that refused everyone — with nothing red in any suite, because
+  # every client in every suite de-chunks for you. A framing regression fails here
+  # now instead of at a door.
+  #
+  # Runs headless: Postgres is the service container below (E2E_PG_HOST/PORT point
+  # the scripts at it, so nothing reaches for docker), the simulator is built by pio
+  # from the pinned toolchain, mountebank comes from npx. The image builds are gated
+  # on it.
   # ============================================================================
   e2e-device:
     name: End-to-end (device chain)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Two scenarios now, and the door's own steps wait on the real NoShowWorker and
+    # LightsCueWorker rather than short-circuiting them — the BackgroundService
+    # timers are part of what is being proved.
+    timeout-minutes: 40
     needs: [backend, iot-build]
     services:
       postgres:
@@ -533,19 +549,40 @@ jobs:
       - name: Install pinned toolchain
         run: pip install -r src/iot/requirements.txt
 
+      # Two things door_evening.py cannot do without, installed by name rather than
+      # inherited from whatever the runner image happens to ship this month:
+      #
+      #   psql        — it places a booking at an hour the admin API will not create,
+      #                 which is how a two-hour door window is driven at both of its
+      #                 edges inside a four-minute run;
+      #   nginx       — the boards do NOT talk to the application, they talk to the
+      #                 gateway, and `proxy_http_version 1.1` + `proxy_buffering off`
+      #                 is what re-chunks a response to a 1.1 client. No suite in this
+      #                 repository has ever put a request through it.
+      #
+      # E2E_REQUIRE_GATEWAY below turns a missing nginx into a FAILED assertion rather
+      # than a printed note, because a gate that never runs is indistinguishable from
+      # one that always passes — this repository has shipped three of those.
+      - name: Install the gateway and the Postgres client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends nginx-light postgresql-client
+
       - name: Restore backend
         run: dotnet restore src/backend/Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj
 
       # PIO/PY on PATH here rather than in the per-checkout venv the Makefile defaults
       # to, exactly as the `iot` job overrides them for corpus-check.
-      - name: Run the device end-to-end proof
+      - name: Run the device end-to-end proof (court box, then door)
         env:
           E2E_PG_HOST: localhost
           E2E_PG_PORT: "5432"
           E2E_PG_USER: crusaders
           E2E_PG_PASSWORD: crusaders_test_pw
+          E2E_REQUIRE_GATEWAY: "1"
         run: make test-e2e-device PIO=pio PY=python3
 
+      # Both scenarios write under .tmp/e2e-device/ (the door adds a `-door` suffix to
+      # its run directory), and both empty it on a pass, so anything here is evidence
+      # from a failure: the API log, the gateway's own error log, and the exchanges.
       - name: Upload scenario scratch on failure
         if: failure()
         uses: actions/upload-artifact@v4

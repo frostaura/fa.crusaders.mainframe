@@ -1,15 +1,24 @@
-# End-to-end proof of the court-light system, without hardware
+# End-to-end proof of the device chain, without hardware
 
 ```bash
 make test-e2e-device
 ```
 
-One command, one Python file (`scenario.py`, stdlib only), one verdict. It stands up the
-real stack, plays every part the missing hardware would, asserts each review finding the
-fix programme closed, prints a `finding-id -> assertion` table and exits non-zero on any
-failure. A passing run leaves nothing behind — the per-run database is dropped and
+One command, **two** Python files (stdlib only), one verdict each. Both stand up the real
+stack, play every part the missing hardware would, assert each review finding the fix
+programme closed, print a `finding-id -> assertion` table and exit non-zero on any failure.
+A passing run leaves nothing behind — the per-run database is dropped and
 `.tmp/e2e-device/` is emptied; a failing run keeps both and prints the failing HTTP
 exchanges plus the API log tail.
+
+| File | Proves |
+|---|---|
+| `scenario.py` | the **court box**: the club key, auto-registration, the roster, `/activate`, `/events`, `/walkup`, the money leg, the Mega simulator over serial, the no-show sweep |
+| `door_evening.py` | the **door**: one board's whole evening — and it reads every device response *the way the board does*, over a raw socket. See [Why the door reads its own sockets](#why-the-door-reads-its-own-sockets) |
+| `wire.py` | not a scenario: the board-grade HTTP reader `door_evening.py` uses |
+
+The court box runs first because it is the shorter of the two and a shorter failure is the
+cheaper signal. The rest of this file is `scenario.py`'s unless a heading says otherwise.
 
 ## What is real and what is played
 
@@ -132,10 +141,106 @@ Not defects in the fix programme, but worth knowing before reading the output:
   no `appsettings.json` at all. That is why the harness gives it a scratch content root. See
   `memory/gotchas.md`.
 
+---
+
+# `door_evening.py` — one door's whole evening
+
+```bash
+test/e2e-device/door_evening.py          # or as the second half of make test-e2e-device
+```
+
+Same bootstrap — the real API built from source, the Development seeder, a per-run
+database — and then a door: plugged in, named, handed a roster, scanned at under both
+access policies and at both edges of a booking's own door window, refused for every reason
+it has a word for, taken out of service and put back, uploading what it decided while the
+link was down, and finally read back through the trail an admin sees.
+
+It needs **`psql`** on `PATH` and says so by name if it is missing. Where a booking has to
+be at an hour the admin API will not create it at, it is moved with a direct `UPDATE` —
+the booking and its minted access code together, which is exactly equivalent to the booking
+always having been at that hour. Every such write is announced with a `[db]` prefix. What
+the clock is doing is fixture; every *decision* is still the door's, taken over HTTP.
+
+## Why the door reads its own sockets
+
+`scenario.py` talks to the API through `urllib`. The backend suite talks to it through
+`HttpClient`. Every firmware HTTP fixture is a string a fake hands over. All three frame,
+de-chunk and close on your behalf — **so the one thing none of them could see was the
+framing**, and round G3 found what that hid:
+
+> The real API answers `Transfer-Encoding: chunked` on a keep-alive connection for **every**
+> device route. The firmware's reader asked only `getSize()`, got `-1`, and waited for a
+> close that never came — so every call spent its whole budget and returned a transport
+> failure. The roster never loaded and the door refused everyone. Nothing went red, because
+> there was nothing that could.
+
+So `wire.py` is a deliberately stupid HTTP client over a raw socket that makes the same
+three decisions `src/iot/door-gate/lib/gatelogic` makes — framing is an **input** and never
+a guess (`Content-Length` wins, else chunked, else until-close); three phases with three
+budgets, the body's **sampled after the headers return**; and anything but a whole body is
+**status 0**, not the status the peer sent. Its de-chunker is a byte-at-a-time state machine
+mirroring `ResponseBody.cpp` state for state, because a chunk, a size line and the final
+`0\r\n\r\n` all arrive split across reads on a real board.
+
+The evening runs over **HTTP/1.0 with `Connection: close`**, which is what the shipped
+firmware asks for (`Esp32Hal` calls `useHTTP10(true)` + `setReuse(false)`). Step `DW` then
+runs the belt-and-braces half: **HTTP/1.1 on a kept-open socket, de-chunked by hand** — the
+socket is deliberately *not* reopened per call, because a connection that closes gives you
+the end of the body for free and proves nothing. Both again through a real **nginx** when
+one is on `PATH`, carrying `nginx/nginx.conf`'s own `/api/` directives read out of that file
+rather than restated: the boards do not talk to the application, they talk to the gateway,
+and `proxy_http_version 1.1` + `proxy_buffering off` is what re-chunks to a 1.1 client.
+
+`E2E_REQUIRE_GATEWAY=1` turns "no nginx on PATH" from a printed note into a failed
+assertion. **CI sets it**, because a gate that never runs is indistinguishable from one that
+always passes and this repository has shipped three of those.
+
+## The steps and what each pins
+
+`D<n>` ids are this scenario's own; `B<n>` and `E1` are round G3's decision-record ids and
+`POL` / `EDGE` name the two window drives.
+
+| Step | Finding | Assertion, in one line |
+|---|---|---|
+| D1 | **D1** | no key and a wrong key are both 401 with an empty body; a `kind: "gate"` heartbeat from an unknown MAC registers itself as `gate-<six hex>` with `gate_key` present-and-null, no `court_numbers` / `config` / `button_map`, no `server_unix`, no `ota`, and `gate.unlock_seconds` clamped; an **unnamed** gate is pushed `roster: []`; the Devices page shows it `Gate`, `auto_registered`, unnamed; a malformed MAC is `400 mac_required` |
+| D2 | **D2 / B7** | `court_numbers` on a gate is `400 court_fields_on_a_gate`; 65 characters is `gate_key_too_long`; **a camelCase `gateKey` now BINDS** (it used to answer 200 and silently change nothing); snake_case wins where both arrive, trimmed; `""` clears and `null` leaves alone |
+| D3 | **B6** | a booking beyond the phone's horizon falls through to an ident code — under `active_member` `H` *is* the screen's own horizon, so the screen and the door open at one instant; an ident code is told `doors` and `null` for both window fields |
+| D4 | **D4 / E1** | `server_time` moves; naming the door started the fallback; the booking's own code is on the roster on relay 0 with a **signed** `opens_in` to `StartsAt − early_entry` and a `closes_in` to `EndsAt`; the sixty-second ident code is not cacheable and is absent; the body is under the 4096-byte ceiling |
+| D5 | **D5 / EDGE** | `too_early` for a booking outside its own window; an ident QR opens under `active_member`; unknown, wrong-length and empty tokens are all `not_recognised`; `method=pin` is `method_not_supported` **before** the code table; `method=code` identifies too. `unlock_seconds` is asserted on **every** scan — a refusal carrying a release is a door that opens for a firmware reading the seconds first |
+| D6 | **EDGE / POL / B6** | both sides of the instant the member's own screen states, under **both** policies: refused 45 s before `door_opens_at`, opened 45 s after it, with nothing changed but the clock; `door_opens_at` is `StartsAt − H` and `door_closes_at` is the **code's** expiry, later than `EndsAt` by the grace window; switching to `booking_window` narrows `H` and shuts the door on a code that opened it a second earlier; an ident QR opens for a member whose booking is open, is `no_booking` for one with nothing booked, and **a club admin passes with nothing booked** |
+| D7 | **D7** | a door open stamps no `CheckedInAt`; the court box still activates that booking afterwards and **the box is what stamps attendance**; the door wrote no ledger row |
+| D8 | **B1** | the real `LightsCueWorker` promotes the attended booking to `Completed`, and a `Completed` booking's code **still opens the door** — but has left the offline roster, which closes at `EndsAt` |
+| D9 | **D9** | the real `NoShowWorker` sweeps an unscanned booking, whose code still opens the door — while the **offline** roster has dropped them, the one place offline is stricter |
+| D10 | **D10** | the upper edge is the code's own liveness: open while running, open 45 s before expiry with the slot already over, `not_recognised` after it — indistinguishable from a code that never existed |
+| D11 | **D11** | a code outside its own window opens for a member whose *other* court is running, and — the fixture probe — is `too_early` again the moment that other booking is cancelled; a cancelled booking's own live code opens nothing; a suspended member is `member_not_active` on both code kinds and is off the offline roster on real Postgres; lifting the suspension restores both |
+| D12 | **D12** | a `gate_open` is receipted, names the member the code resolved to **at the scan**, and fingerprints the token instead of logging it; replaying the seq is acknowledged, `recorded: 0`, and leaves no second audit row; two scans of one code fingerprint the same; an `unknown_scan` names nobody and is fingerprinted too; nothing settles |
+| D13 | **D13 / B7 / B2** | missing, empty and 200-character kinds are receipted as `malformed` and the queue drains past them; `no_push` and `events_lost` are accepted at 0, negative, `2^31` and `int64` max, change nothing and never take the door out of service; `" gate_open "`, `"GATE_OPEN"` and `"  GaTe_OpEn  "` are **normalised once** into `device.gate_open` with a fingerprinted subject; an unheard-of kind is recorded as normalised and fingerprinted |
+| D14 | **D14** | another club's live code is `not_recognised` here |
+| D15 | **D15** | all five `/device/*` routes are `403` out of service and the heartbeat hands back **no roster** — which is what a board commits an empty one on; the one documented exception is `400 kind_unknown`, checked before the MAC; re-enabling restores service and the roster |
+| D16 | **D16 / B2** | a gate cannot activate a court or sell a walk-up, refused **by name**; a court box at `/device/gate` is `200 not_a_gate`; a `gate_open` from a court box is receipted as `not_a_gate` and **names nobody**; respelling the kind does not step around it |
+| DA | **B5** | `GET /admin/devices/{id}/activity` returns the board's rows newest-first, carrying both halves of its day plus the registration and the admin's edits; `offline` is keyed on `seq`; an open names the member, a refusal carries its reason, an offline open carries a validated 8-hex fingerprint; **no `DetailsJson`, no device id, no gate key and no twelve-character token** reaches the console; `limit` defaults to 50 and is clamped to 1–200; another club's board is 404 |
+| DW | **E1** | HTTP/1.0 is not chunked; HTTP/1.1 **is**, with no `Content-Length` and the socket held open, and hand de-chunking recovers a whole document inside the body's own budget with no framing byte reaching the parser; a second call on the same kept-open socket reads correctly; the body is under 4096; and all of it again through real nginx, which must close-delimit to a 1.0 client and re-chunk to a 1.1 one |
+| D17 | **D17** | every decision left one row, refusals included; no `gate.*` row carries a live token; the rows name the door by its `gate_key`; and **every refusal reason with a corpus vector was provoked at the live door in this run** — derived from `src/contracts/device-protocol/gate/cases.json`, so a reason nothing here reaches is a screen the firmware has for a refusal this harness has never seen |
+
+## What `door_evening.py` deliberately does not prove
+
+- **The firmware's own decisions.** `gatelogic` (the pass, the roster cache, the release
+  deadline, what a board *does* with a 403 versus a timeout) is host-tested in
+  `src/iot/door-gate/test/`. `wire.py` re-implements the reader's *framing rules* to read
+  the server the way a board would; it does not execute the firmware.
+- **That a 403 makes a board commit an empty roster.** This asserts the server half — a
+  shut door is refused on all five routes and its heartbeat hands back nothing to keep.
+  The board's half is the firmware project's.
+- **Anything physical.** Which lock the club fits, what the relay does before `setup()`
+  runs, and that egress is mechanical are `docs/go-live-checklist.md`'s, where a person
+  signs them off. See `docs/specs/door-gate.md` §11.
+
 ## Knobs
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `E2E_REQUIRE_GATEWAY=1` | unset | `door_evening.py` only: a missing `nginx` is a FAILED assertion rather than a note. CI sets it |
+| `--no-gateway` | | `door_evening.py` only: skip the nginx pass even where one is installed |
 | `E2E_PG_HOST` / `E2E_PG_PORT` | `localhost` / `5439` | the Postgres to create the per-run database on |
 | `E2E_PG_USER` / `E2E_PG_PASSWORD` | `crusaders` / `crusaders_test_pw` | must be allowed to `CREATE DATABASE` |
 | `E2E_PG_CONTAINER` / `E2E_PG_IMAGE` | `crusaders-fixprog-pg` / `postgres:16-alpine` | started with docker only when nothing answers on the port |
@@ -144,11 +249,13 @@ Not defects in the fix programme, but worth knowing before reading the output:
 | `E2E_KEEP_DB=1` | | keep the database after a passing run |
 | `E2E_SKIP_BUILD=1` | | reuse the existing `bin/Debug` DLL |
 | `DOTNET`, `PIO`, `PY` | `dotnet`, `src/iot/.venv/bin/pio`, `src/iot/.venv/bin/python` | toolchain overrides, as elsewhere in the Makefile |
-| `--no-simulator`, `--no-money` | | script flags to skip the Mega or PayFast legs |
+| `--no-simulator`, `--no-money` | | `scenario.py` only: skip the Mega or PayFast legs |
 
 The API is started on an ephemeral port, so two runs on one host cannot collide, and rate
 limits are raised far above a club's traffic so the scenario's burst of auth calls is not
-mistaken for password guessing.
+mistaken for password guessing. `door_evening.py` takes its own ephemeral port and its own
+database, and puts its scratch in a `…-door` sibling of `scenario.py`'s run directory, so
+the two never share anything but the source they are built from.
 
 ## Why not `make virt-up`
 
@@ -160,11 +267,16 @@ is a second copy of the virtualization setup — only a different process manage
 
 ## CI wiring
 
-Wired. `.github/workflows/ci.yml` carries an `e2e-device` job (`needs: [backend, iot-build]`)
-with its own `postgres:16-alpine` service on 5432, the pinned pio toolchain and `npx`, and
-all six image builds gate on it. `E2E_PG_HOST`/`E2E_PG_PORT` point the script at the service
-container, so nothing reaches for docker, and `.tmp/e2e-device/` is uploaded as an artifact
-on failure.
+Wired, and it runs **both** scenarios. `.github/workflows/ci.yml` carries an `e2e-device`
+job (`needs: [backend, iot-build]`) with its own `postgres:16-alpine` service on 5432, the
+pinned pio toolchain, `npx`, and — for the door — `nginx-light` and `postgresql-client`
+installed by name rather than inherited from whatever the runner image ships this month.
+All six image builds gate on it. `E2E_PG_HOST`/`E2E_PG_PORT` point the scripts at the
+service container, so nothing reaches for docker; `E2E_REQUIRE_GATEWAY=1` makes a missing
+nginx a failure rather than a note; and `.tmp/e2e-device/` is uploaded as an artifact on
+failure. The job's timeout is 40 minutes: two scenarios, both of which wait on the real
+`NoShowWorker` and `LightsCueWorker` rather than short-circuiting them, because the
+`BackgroundService` timers are part of what is being proved.
 
 This section used to say "Not added to ci.yml yet" and describe the job as a commented-out
 sketch. It was added in the same wave that wrote that sentence and the sentence was never
