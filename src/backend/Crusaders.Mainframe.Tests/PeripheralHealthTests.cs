@@ -676,7 +676,7 @@ public class PeripheralHealthTests
             minted.Add(board);
         }
         await db.SaveChangesAsync();
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateWorker(host).TickAsync(default);
 
@@ -701,7 +701,7 @@ public class PeripheralHealthTests
             outage.EndedAt = silent;
         }
         await db.SaveChangesAsync();
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateWorker(host).TickAsync(DateTimeOffset.UtcNow.AddHours(3), default);
 
@@ -724,7 +724,7 @@ public class PeripheralHealthTests
         // AddGateAsync leaves AutoRegistered false — an admin has been here — and gateKey null.
         var gate = await AddGateAsync(host, db, DateTimeOffset.UtcNow.AddHours(-1), gateKey: null);
         Assert.False(gate.AutoRegistered);
-        host.EmailService.Sent.Clear();
+        host.EmailService.Clear();
 
         await CreateWorker(host).TickAsync(default);
 

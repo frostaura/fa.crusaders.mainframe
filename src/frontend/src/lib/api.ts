@@ -521,8 +521,9 @@ export type AdminSettings = {
  *
  * <p>
  * Neither policy says anything about which CODE was presented, and a booking's activation
- * code is narrower than both: it opens a door only inside its own booking's window and only
- * while that booking is still Booked. A member's own ident code is what the policy names.
+ * code is narrower than both: it opens a door only inside its own booking's window, and never
+ * for a booking the club cancelled or blocked. One swept as a no-show or marked completed still
+ * counts. A member's own ident code is what the policy names.
  * </p>
  *
  * <p>
