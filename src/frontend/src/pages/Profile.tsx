@@ -321,7 +321,7 @@ function PasskeysCard() {
                 idleLabel={<span className="inline-flex items-center"><Trash2 size={14} className="mr-1" /> Remove</span>}
                 confirmLabel="Tap to confirm"
                 onConfirm={() => remove(r.id)}
-                idleClassName="bg-danger-soft text-danger-strong hover:bg-danger-soft/70"
+                tone="danger"
                 className="h-9 px-3 text-xs"
               />
             </li>

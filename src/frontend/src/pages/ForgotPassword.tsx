@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { endpoints } from "../lib/api";
 import { AuthShell } from "../components/AuthShell";
+import { Alert } from "../components/Alert";
 import { Button, Input, Label } from "../components/Button";
 import { describeFailure } from "../lib/errors";
 
@@ -72,9 +73,9 @@ export default function ForgotPasswordPage() {
             <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
           </div>
           {error && (
-            <p role="alert" className="rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong">
+            <Alert>
               {error}
-            </p>
+            </Alert>
           )}
           <Button type="submit" variant="primary" loading={loading} className="w-full">
             {loading ? "Sending…" : "Send reset link"}

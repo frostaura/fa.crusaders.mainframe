@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { endpoints, uploadPhoto } from "../lib/api";
 import { describeFailure, isDeploymentFault } from "../lib/errors";
 import { AuthShell } from "../components/AuthShell";
+import { Alert } from "../components/Alert";
 import { Button, Input, Label } from "../components/Button";
 import { PhotoPicker } from "../components/PhotoPicker";
 
@@ -131,9 +132,9 @@ export default function RegisterPage() {
           </div>
           <PhotoPicker value={photo} onChange={setPhoto} onError={setError} onBusyChange={setPreparingPhoto} required />
           {error && (
-            <p role="alert" className="rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong">
+            <Alert>
               {error}
-            </p>
+            </Alert>
           )}
           {!blocked && (
             <Button

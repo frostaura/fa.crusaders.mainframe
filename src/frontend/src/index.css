@@ -25,7 +25,14 @@
      * colour change. Until that exists these are the club's colours, stated honestly as
      * constants rather than described as something they are not.
      */
-    /* RGB channels, not hex — see the accent block in tailwind.config.ts for why. */
+    /*
+     * RGB channels, not hex — see `themeable` in src/lib/tokens.ts for why the hex form
+     * silently deletes every opacity modifier on these tokens.
+     *
+     * CSS cannot import the token module, so these two lines are the one place a token value
+     * is written twice. `tokens.test.ts` reads this file and asserts both against
+     * `rootCssVariables`, so the copy cannot drift without failing a test.
+     */
     --accent-soft-rgb: 228 237 247;   /* #E4EDF7 */
     --accent-strong-rgb: 0 73 141;    /* #00498D */
   }
@@ -94,8 +101,22 @@
   /* Keyboard focus, on everything focusable rather than only on the controls whose
      author remembered. Offset so the ring reads on a filled button as well as an
      outlined one. */
+  /*
+   * `--accent-strong-rgb`, not `--accent-strong`.
+   *
+   * This read `var(--accent-strong, #0369A1)`, and `--accent-strong` has never been defined —
+   * not here, not in the Tailwind theme, not anywhere in the repo. So the fallback was not a
+   * fallback, it was the value: every focus ring in the product, on every control, rendered
+   * #0369A1, the sky-blue this palette was moved off. It is the one accent surface a per-tenant
+   * override could never have reached either, because it was not reading the variable the
+   * override sets.
+   *
+   * Nothing about the declaration looks wrong, which is the whole problem with a var() typo —
+   * the browser resolves it happily to the fallback and no tool warns. e2e/affordance.spec.ts
+   * now reads the computed outline colour off a focused control in a real engine.
+   */
   :focus-visible {
-    outline: 2px solid var(--accent-strong, #0369A1);
+    outline: 2px solid rgb(var(--accent-strong-rgb, 0 73 141));
     outline-offset: 2px;
     border-radius: inherit;
   }

@@ -1277,7 +1277,7 @@ function BiometricModal({
                 idleLabel="Unenroll all"
                 confirmLabel="Tap to confirm"
                 onConfirm={removeAll}
-                idleClassName="bg-danger-soft text-danger-strong hover:bg-danger-soft/70"
+                tone="danger"
                 className="h-11 px-4"
               />
             )}

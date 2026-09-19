@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth";
 import { ApiError, endpoints, errorCode } from "../lib/api";
 import { isPasskeySupported } from "../lib/webauthn";
 import { AuthShell } from "../components/AuthShell";
+import { Alert } from "../components/Alert";
 import { Button, Input, Label } from "../components/Button";
 
 // Seeded by Seeder.cs in Development. Hidden behind import.meta.env.DEV so it disappears in prod builds.
@@ -168,9 +169,9 @@ export default function LoginPage() {
             like body copy is one a member skims past and then presses the button again.
           */}
           {error && (
-            <p role="alert" className="rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong">
+            <Alert>
               {error}
-            </p>
+            </Alert>
           )}
           {offerResend && (
             resendState === "sent" ? (

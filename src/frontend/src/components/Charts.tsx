@@ -5,17 +5,37 @@ import {
 import { createElement, useEffect, useRef, useState } from "react";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 import { formatCredits } from "../lib/utils";
+import { chartColors } from "../lib/tokens";
 
-const ACCENT = "#0369A1";        // accent-strong
-const ACCENT_SOFT = "#E0F2FE";    // accent-soft
-const SUCCESS = "#15803D";
-const SUCCESS_SOFT = "#DCFCE7";
-const WARNING = "#A16207";
-const DANGER = "#B91C1C";
-const TEXT_MUTED = "#6B7280";
-
-/** text.primary from tailwind.config.ts — 16.9:1 on white. See {@link legendProps}. */
-const LEGEND_TEXT = "#0F172A";
+/**
+ * The chart palette, from the token module rather than from a copy.
+ *
+ * <p>
+ * These eight names used to be eight hex literals declared here, and three of them had gone
+ * stale without anything saying so. `ACCENT` was `#0369A1` — the sky-blue this product moved off
+ * when it adopted the club's crest colours — so every chart rendered in an accent that appeared
+ * nowhere else on the page around it. `ACCENT_SOFT` was that dead palette's tint. `TEXT_MUTED`
+ * was `#6B7280` against a token of `#5B6879`, two greys nobody chose to be different. Beyond
+ * these, the gridlines and the tooltip border were `#E5E7EB` inline, a fourth grey that is
+ * neither the border token nor the muted one.
+ * </p>
+ *
+ * <p>
+ * Resolved once at module load, which is after `index.css` has applied, so `ACCENT` follows a
+ * tenant override exactly as a `bg-accent-strong` class would.
+ * </p>
+ */
+const {
+  accent: ACCENT,
+  accentSoft: ACCENT_SOFT,
+  success: SUCCESS,
+  successSoft: SUCCESS_SOFT,
+  warning: WARNING,
+  danger: DANGER,
+  muted: TEXT_MUTED,
+  legend: LEGEND_TEXT,
+  grid: GRID,
+} = chartColors();
 
 const CHART_HEIGHT = 240;
 
@@ -154,7 +174,7 @@ function ChartFrame({ children }: { children: React.ReactNode }) {
 
 
 const tooltipStyle = {
-  contentStyle: { borderRadius: 8, border: "1px solid #E5E7EB", fontSize: 12, padding: "6px 10px" },
+  contentStyle: { borderRadius: 8, border: `1px solid ${GRID}`, fontSize: 12, padding: "6px 10px" },
   labelStyle: { color: TEXT_MUTED, fontWeight: 500, marginBottom: 2 },
 } as const;
 
@@ -247,7 +267,7 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
               <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
           <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
@@ -266,7 +286,7 @@ export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
   return (
     <ChartFrame>
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
           <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} domain={SIGNED_DOMAIN} />
           <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
@@ -284,7 +304,7 @@ export function BookingsLineChart({ data }: { data: DailyAdminPoint[] }) {
   return (
     <ChartFrame>
         <LineChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
           <YAxis allowDecimals={false} fontSize={11} stroke={TEXT_MUTED} width={COUNT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} labelFormatter={((l: string) => fmtDate(l)) as never} />
@@ -300,7 +320,7 @@ export function CourtsRevenueBarChart({ data }: { data: { court_name: string; re
   return (
     <ChartFrame>
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="court_name" fontSize={11} stroke={TEXT_MUTED} />
           <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} />
@@ -339,7 +359,7 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
               <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
           <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
@@ -359,7 +379,7 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
   return (
     <ChartFrame>
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
           <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} domain={SIGNED_DOMAIN} />
           <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
@@ -390,7 +410,7 @@ export function MyBookingsBarChart({ data }: { data: DailyMePoint[] }) {
   return (
     <ChartFrame>
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
           <YAxis allowDecimals={false} fontSize={11} stroke={TEXT_MUTED} width={COUNT_AXIS_WIDTH} />
           <Tooltip {...tooltipStyle} labelFormatter={((l: string) => fmtDate(l)) as never} />
