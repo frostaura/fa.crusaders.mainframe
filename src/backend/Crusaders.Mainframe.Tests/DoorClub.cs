@@ -45,7 +45,15 @@ public sealed record DoorClub(
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         await db.Database.MigrateAsync();
 
-        var slug = $"{slugPrefix}-{Guid.NewGuid():N}"[..24];
+        // The PREFIX is truncated and the random half never is.
+        //
+        // Cutting the whole concatenation to a fixed width — which is what the older suites in
+        // this repo do — makes uniqueness depend on the caller's prefix being short. A theory
+        // with a long case name left one guid character surviving, and two cases of one theory
+        // then collided on IX_tenants_Slug intermittently, reading as a broken door setting
+        // rather than as a fixture. Twelve hex characters is 48 bits, which is enough for a
+        // database every test in the tier shares.
+        var slug = $"{(slugPrefix.Length > 12 ? slugPrefix[..12] : slugPrefix)}-{Guid.NewGuid():N}"[..25];
         var tenant = new Tenant
         {
             Slug = slug,

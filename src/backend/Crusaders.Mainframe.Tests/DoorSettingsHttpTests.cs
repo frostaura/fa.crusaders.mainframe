@@ -75,7 +75,7 @@ public sealed class DoorSettingsHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, $"dset-{sent}"[..20], "{}");
+        var club = await DoorClub.SeedAsync(factory, $"dset-{sent}", "{}");
         var client = club.AdminClient(factory);
 
         var res = await PutAsync(client, $"\"{sent}\":{value}");
@@ -95,7 +95,7 @@ public sealed class DoorSettingsHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, $"dsetc-{sent}"[..20], "{}");
+        var club = await DoorClub.SeedAsync(factory, $"dsetc-{sent}", "{}");
         var client = club.AdminClient(factory);
 
         var res = await PutAsync(client, $"\"{sent}\":\"  desk@club.test  \"");
@@ -117,7 +117,7 @@ public sealed class DoorSettingsHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, $"dsetb-{key}{value}"[..22], "{}");
+        var club = await DoorClub.SeedAsync(factory, $"dsetb-{key}{value}", "{}");
         var client = club.AdminClient(factory);
 
         var res = await PutAsync(client, $"\"{key}\":{value}");

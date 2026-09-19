@@ -91,6 +91,17 @@ public static class MeDoorEndpoints
             policy = settings.GateAccessPolicy,
             membership = Membership(status),
 
+            // The SAME fact at two resolutions, and both are wanted.
+            //
+            // `membership` is the three-valued answer to "may this person open a door" and is
+            // what the standing line branches on. `membership_detail` is the club's own recorded
+            // status, so the page can say WHICH not-active this is — "your membership is
+            // suspended, speak to the club" and "your application has not been approved yet"
+            // are two different things for a person outside a building to do next, and the
+            // second is one click away. That is the same argument MembershipAccess already
+            // makes for keeping StatusIfBarredAsync beside IsBarredFromCourtsAsync.
+            membership_detail = MembershipDetail(status),
+
             // §5's carve-out, stated so the page's standing line can say it rather than
             // describe a rule this member is not held to. Club admins pass the booking check
             // under booking_window — and are held to the membership check like everybody.
@@ -112,7 +123,7 @@ public static class MeDoorEndpoints
             // So W1.8's line on the profile page carries the club's own number.
             door_log_retention_days = DoorSettings.LogRetentionDays(settings),
 
-            last_decision = await LastDecisionAsync(db, userId, now, ct),
+            last_decision = await LastDecisionAsync(db, settings, userId, now, ct),
         });
     }
 
@@ -188,7 +199,7 @@ public static class MeDoorEndpoints
     /// never the sentence "no refusals found".
     /// </summary>
     private static async Task<object?> LastDecisionAsync(
-        MainframeDbContext db, Guid userId, DateTimeOffset now, CancellationToken ct)
+        MainframeDbContext db, TenantSettingsView settings, Guid userId, DateTimeOffset now, CancellationToken ct)
     {
         var since = now.AddSeconds(-LastDecisionWindowSeconds);
         var row = await Mine(db, userId)
@@ -197,7 +208,28 @@ public static class MeDoorEndpoints
             .Select(a => new { a.Action, a.CreatedAt, a.DetailsJson })
             .FirstOrDefaultAsync(ct);
 
-        return row is null ? null : Entry(row.Action, row.CreatedAt, row.DetailsJson);
+        if (row is null) return null;
+
+        var details = DoorActivityView.Details(row.DetailsJson);
+        var reason = DoorActivityView.Reason(details)
+                     ?? (DoorTrail.IsRelease(row.Action) ? GateAccess.Ok : null);
+
+        // Only too_early has an instant to count down to. Every other refusal is about the
+        // credential or the membership and is not a matter of waiting — a countdown on one
+        // would be the page promising a door that is never going to open by itself.
+        var opensAt = reason == GateAccess.TooEarly
+            ? await TooEarlyOpensAtAsync(db, settings, userId, now, ct)
+            : null;
+
+        return new
+        {
+            at = row.CreatedAt,
+            door_name = details is { } root ? DoorActivityView.Text(root, "gate_key") : null,
+            released = DoorTrail.IsRelease(row.Action),
+            reason,
+            offline = DoorActivityView.Offline(details),
+            opens_at = opensAt,
+        };
     }
 
     /// <summary>
@@ -233,12 +265,91 @@ public static class MeDoorEndpoints
     /// door they are standing at.
     /// </para>
     /// </summary>
-    private static string Membership(MembershipStatus? status) => status switch
+    /// <remarks>
+    /// Block body, not an expression one: lizard's C# parser mis-scopes an expression-bodied
+    /// member containing braces — a <c>switch</c> expression is enough — into a
+    /// <c>*global*</c> pseudo-function the length of the file, which then fails the length
+    /// gate naming no real function. See <c>memory/gotchas.md</c>.
+    /// </remarks>
+    private static string Membership(MembershipStatus? status)
     {
-        null => "none",
-        MembershipStatus.Active => "active",
-        _ => "not_active",
-    };
+        if (status is null) return "none";
+        return status == MembershipStatus.Active ? "active" : "not_active";
+    }
+
+    /// <summary>
+    /// The club's recorded status, in the domain's own vocabulary rather than an invented one.
+    ///
+    /// <para>
+    /// <b>The set is <see cref="MembershipStatus"/>'s, lowercased, plus <c>none</c>.</b> There
+    /// is deliberately no <c>expired</c>: this product has no expiry concept — a membership is
+    /// taken away by an admin setting <see cref="MembershipStatus.Suspended"/>, and inventing a
+    /// seventh value here would put a state on a member's screen that nothing in the system can
+    /// ever produce and that no door will ever act on. If lapse-with-grace-days ever lands (it
+    /// is on the deferred list), the enum gains the member and this mapping follows it.
+    /// </para>
+    ///
+    /// <para>
+    /// Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static string MembershipDetail(MembershipStatus? status)
+    {
+        if (status is not { } recorded) return "none";
+        return recorded switch
+        {
+            MembershipStatus.Active => "active",
+            MembershipStatus.PendingApproval => "pending_approval",
+            MembershipStatus.Rejected => "rejected",
+            MembershipStatus.Suspended => "suspended",
+            _ => "none",
+        };
+    }
+
+    /// <summary>
+    /// For a <see cref="GateAccess.TooEarly"/> refusal: the instant a door WOULD open for the
+    /// booking behind it — or null when there is no such booking.
+    ///
+    /// <para>
+    /// <b>Computed through <see cref="BookingCodeWindow.DoorHorizonMinutes"/>, which is the
+    /// function the door itself decides with.</b> The page cannot work it out: the horizon is
+    /// <c>max(gate_early_entry, min(roster + cue, 240))</c> under one policy and
+    /// <c>gate_early_entry</c> under the other, and none of those three settings is on a
+    /// member's API surface, nor should it be. A countdown the page computed from its own copy
+    /// is how a member ends up watching a clock reach zero at a door that refuses them.
+    /// </para>
+    ///
+    /// <para>
+    /// It is a separate read from <c>next_booking</c> and has to be: <c>too_early</c> means the
+    /// booking's window has NOT opened, which is exactly the condition under which
+    /// <see cref="NextBookingAsync"/> returns null. The earliest such booking is the one the
+    /// member is standing at the door for.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>Cancelled</c> and <c>AdminBlock</c> are excluded here as they are everywhere a door
+    /// counts a booking — those are decisions the CLUB made about the booking, and counting one
+    /// would promise a member a door that will never open.
+    /// </para>
+    /// </summary>
+    private static async Task<DateTimeOffset?> TooEarlyOpensAtAsync(
+        MainframeDbContext db, TenantSettingsView settings, Guid userId, DateTimeOffset now, CancellationToken ct)
+    {
+        var horizon = BookingCodeWindow.DoorHorizonMinutes(settings);
+        var earliestStart = now.AddMinutes(horizon);
+
+        var startsAt = await db.Bookings.AsNoTracking()
+            .Where(b => b.UserId == userId
+                        && (b.Status == BookingStatus.Booked
+                            || b.Status == BookingStatus.NoShow
+                            || b.Status == BookingStatus.Completed)
+                        && b.StartsAt > earliestStart)
+            .OrderBy(b => b.StartsAt)
+            .Select(b => (DateTimeOffset?)b.StartsAt)
+            .FirstOrDefaultAsync(ct);
+
+        return startsAt?.AddMinutes(-horizon);
+    }
 
     /// <summary>
     /// The member's next booking and the window a door will honour its code in — or null.

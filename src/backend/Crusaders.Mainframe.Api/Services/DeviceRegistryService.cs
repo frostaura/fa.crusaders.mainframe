@@ -179,11 +179,78 @@ public sealed class DeviceRegistryService
     public Task<Device?> FindAsync(Guid id, CancellationToken ct) =>
         _db.Devices.FirstOrDefaultAsync(d => d.Id == id, ct);
 
+    /// <summary>
+    /// One board crossing the in-service line, and everything that instant decides.
+    ///
+    /// <para>
+    /// <b>The switch-off INSTANT is recorded on the transition rather than derived
+    /// afterwards.</b> <c>Enabled</c> is a boolean with no history, and the settlement asks a
+    /// question about the past: "was this court's door shut when that grace window closed?"
+    /// (<c>settlement-model.md</c> S5a). Answering it from the boolean alone let one click
+    /// re-price every deadline still inside the sweep's lookback; answering it from
+    /// <c>LastSeenAt</c> instead reads the board's last heartbeat as the click, which it is
+    /// not — the gap between them is up to a heartbeat cadence wide, and a deadline inside that
+    /// gap was priced one way before the click and the other way after it. Only the instant
+    /// itself answers both, so it is stamped here, where the transition actually happens.
+    /// Cleared on the way back in: a board in service is not out of service since anything.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Taking a board OUT of service closes whatever outage it is in, silently.</b>
+    /// <c>PeripheralHealthWorker</c> skips disabled rows — an admin who switches a box off has
+    /// said it is not expected to call in — so an outage open at that moment stayed open for as
+    /// long as the board was out of service, which can be months. Switch it back on and the
+    /// first heartbeat closed it: "Door gate is back after 43 200 minutes", to every admin,
+    /// about a board the club itself had unplugged. The row is the once-per-outage guard, and a
+    /// guard nobody can clear is a guard that eventually lies.
+    /// </para>
+    ///
+    /// <para>
+    /// Closed at the SWITCH instant rather than at the board's last heartbeat, which is the
+    /// same instant <see cref="Device.OutOfServiceSince"/> records and therefore the last moment
+    /// the club was accountable for this board. That matters to the settlement:
+    /// <c>DeviceOutageIndex</c> reads a closed outage's <c>EndedAt</c> as a witness that the API
+    /// heard from the board, and every instant after the switch is decided by
+    /// <c>OutOfServiceSince</c> instead (see <c>DoorWasShutFor</c>), so no deadline is re-priced
+    /// by this close. No mail either way — the club is doing this on purpose and is looking at
+    /// the screen.
+    /// </para>
+    ///
+    /// <para>
+    /// Extracted from <see cref="UpdateAsync"/> when the door card's fields pushed that method
+    /// past the complexity gate. The gate is the occasion; the reason it is the right cut is
+    /// that everything here is about one instant and nothing here is about a field.
+    /// </para>
+    /// </summary>
+    private async Task SwitchAsync(Device device, bool enabled, CancellationToken ct)
+    {
+        var switchedAt = DateTimeOffset.UtcNow;
+        device.OutOfServiceSince = enabled ? null : switchedAt;
+
+        // A door going back INTO service was not shut by a fleet shut-all any more, whichever
+        // route reopened it. Cleared here rather than only in the fleet reopen, because an admin
+        // reopening ONE door from its own page is the case that would otherwise leave a stale
+        // flag behind — and the next "reopen all" would then report reopening a door that was
+        // already open. Note the asymmetry: shutting a door individually deliberately does NOT
+        // set it. That is the whole distinction the column exists to hold. See
+        // Device.ShutByShutAllAt.
+        if (enabled)
+        {
+            device.ShutByShutAllAt = null;
+            return;
+        }
+
+        var open = await _db.DeviceOutages
+            .Where(o => o.DeviceId == device.Id && o.EndedAt == null)
+            .ToListAsync(ct);
+        foreach (var outage in open) outage.EndedAt = switchedAt;
+    }
+
     public async Task<Device> UpdateAsync(Device device, UpdateDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
     {
         if (cmd.Name is not null) device.Name = cmd.Name.Trim();
 
-        // The switch-off INSTANT, recorded on the transition rather than derived afterwards.
+        // The switch-off instant and the outage it closes: see SwitchAsync.
         //
         // `Enabled` is a boolean with no history, and the settlement asks a question about the
         // past: "was this court's door shut when that grace window closed?" (settlement-model.md
@@ -197,42 +264,7 @@ public sealed class DeviceRegistryService
         // Cleared on the way back in: a board in service is not out of service since anything.
         if (cmd.Enabled is { } enabled && enabled != device.Enabled)
         {
-            var switchedAt = DateTimeOffset.UtcNow;
-            device.OutOfServiceSince = enabled ? null : switchedAt;
-
-            // A door going back INTO service was not shut by a fleet shut-all any more,
-            // whichever route reopened it. Cleared here rather than only in the fleet reopen,
-            // because an admin reopening ONE door from its own page is the case that would
-            // otherwise leave a stale flag behind — and the next "reopen all" would then
-            // report reopening a door that was already open. Note the asymmetry: shutting a
-            // door individually deliberately does NOT set it. That is the whole distinction
-            // the column exists to hold. See Device.ShutByShutAllAt.
-            if (enabled) device.ShutByShutAllAt = null;
-
-            // Taking a board OUT of service closes whatever outage it is in, silently.
-            //
-            // PeripheralHealthWorker skips disabled rows — an admin who switches a box off has
-            // said it is not expected to call in — so an outage open at that moment stayed open
-            // for as long as the board was out of service, which can be months. Switch it back
-            // on and the first heartbeat closed it: "Door gate is back after 43 200 minutes",
-            // to every admin, about a board the club itself had unplugged. The row is the
-            // once-per-outage guard, and a guard nobody can clear is a guard that eventually
-            // lies.
-            //
-            // Closed at the SWITCH instant rather than at the board's last heartbeat, which is
-            // the same instant OutOfServiceSince records and therefore the last moment the club
-            // was accountable for this board. That matters to the settlement: DeviceOutageIndex
-            // reads a closed outage's EndedAt as a witness that the API heard from the board,
-            // and every instant after the switch is decided by OutOfServiceSince instead (see
-            // DoorWasShutFor), so no deadline is re-priced by this close. No mail either way —
-            // the club is doing this on purpose and is looking at the screen.
-            if (!enabled)
-            {
-                var open = await _db.DeviceOutages
-                    .Where(o => o.DeviceId == device.Id && o.EndedAt == null)
-                    .ToListAsync(ct);
-                foreach (var outage in open) outage.EndedAt = switchedAt;
-            }
+            await SwitchAsync(device, enabled, ct);
         }
 
         if (cmd.Enabled is not null) device.Enabled = cmd.Enabled.Value;

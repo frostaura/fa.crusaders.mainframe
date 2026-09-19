@@ -324,6 +324,249 @@ public sealed class MeDoorHttpTests
         Assert.Empty(Items(await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(HistoryPath)));
     }
 
+    /// <summary>
+    /// The domain's own status set, lowered — not an invented one. There is no <c>expired</c>
+    /// because nothing in this product can produce one.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(MembershipStatus.Active, "active")]
+    [InlineData(MembershipStatus.PendingApproval, "pending_approval")]
+    [InlineData(MembershipStatus.Suspended, "suspended")]
+    [InlineData(MembershipStatus.Rejected, "rejected")]
+    public async Task The_membership_detail_is_the_clubs_own_recorded_status(
+        MembershipStatus status, string expected)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, $"medoordet-{(int)status}");
+        await club.AddDoorAsync(factory, $"gate-{Guid.NewGuid():N}"[..14], "front-door");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var membership = await db.Memberships.IgnoreQueryFilters().FirstAsync(m => m.UserId == club.MemberUserId);
+            membership.Status = status;
+            await db.SaveChangesAsync();
+        }
+
+        var body = await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
+
+        Assert.Equal(expected, body.GetProperty("membership_detail").GetString());
+
+        // The flat field stays, and stays coarser — the page branches on one and explains with
+        // the other.
+        Assert.Equal(
+            status == MembershipStatus.Active ? "active" : "not_active",
+            body.GetProperty("membership").GetString());
+    }
+
+    [SkippableFact]
+    public async Task A_user_with_no_membership_row_is_none_in_both_fields()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "medoordetn");
+        await club.AddDoorAsync(factory, "gate-me0017", "front-door");
+
+        Guid strayId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var stray = new User
+            {
+                TenantId = club.TenantId, Email = $"{club.Slug}-stray2@test.local",
+                PasswordHash = "x", EmailVerified = true,
+            };
+            db.Users.Add(stray);
+            await db.SaveChangesAsync();
+            strayId = stray.Id;
+        }
+
+        var body = await club.ClientFor(factory, strayId, null).GetFromJsonAsync<JsonElement>(DoorPath);
+        Assert.Equal("none", body.GetProperty("membership").GetString());
+        Assert.Equal("none", body.GetProperty("membership_detail").GetString());
+    }
+
+    /// <summary>
+    /// The clamped value the door itself reads, never re-derived. A club with an absurd stored
+    /// entry window is shown the number the door will honour, not the number in its column.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_early_entry_minutes_are_the_clamped_value_the_door_uses()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var normal = await DoorClub.SeedAsync(
+            factory, "medoorent",
+            """{"timezone":"UTC","grace_window_minutes":5,"gate_early_entry_minutes":45}""");
+        await normal.AddDoorAsync(factory, "gate-me0018", "front-door");
+
+        var body = await normal.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
+        Assert.Equal(45, body.GetProperty("early_entry_minutes").GetInt32());
+
+        var handEdited = await DoorClub.SeedAsync(
+            factory, "medoorentx",
+            """{"timezone":"UTC","grace_window_minutes":5,"gate_early_entry_minutes":99999}""");
+        await handEdited.AddDoorAsync(factory, "gate-me0019", "front-door");
+
+        var clamped = await handEdited.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
+        Assert.Equal(GateAccess.MaxEarlyEntryMinutes, clamped.GetProperty("early_entry_minutes").GetInt32());
+    }
+
+    /// <summary>
+    /// A <c>too_early</c> refusal is the one a person can wait out, so it is the one that gets
+    /// an instant — computed through the function the door decides with, never by the page.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_too_early_refusal_carries_the_instant_the_door_would_open()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(
+            factory, "medoorearly",
+            """{"timezone":"UTC","grace_window_minutes":5,"gate_early_entry_minutes":30,"roster_window_minutes":5,"activation_cue_window_minutes":0}""");
+        var doorId = await club.AddDoorAsync(factory, "gate-me0020", "front-door");
+
+        // Well outside the club's 30-minute entry window, so the door would refuse it today.
+        var startsAt = DateTimeOffset.UtcNow.AddHours(5);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.Bookings.Add(new Booking
+            {
+                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
+                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
+                AmountChargedCredits = 16m, ChargedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await club.WriteRowAsync(
+            factory, doorId, $"{DeviceGateEndpoint.DeniedActionPrefix}too_early",
+            DateTimeOffset.UtcNow.AddSeconds(-10), subjectUserId: club.MemberUserId, reason: "too_early",
+            gateKey: "front-door");
+
+        var decision = (await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath))
+            .GetProperty("last_decision");
+
+        Assert.Equal("too_early", decision.GetProperty("reason").GetString());
+        Assert.Equal(
+            startsAt.AddMinutes(-30),
+            decision.GetProperty("opens_at").GetDateTimeOffset(),
+            TimeSpan.FromSeconds(1));
+    }
+
+    /// <summary>
+    /// Every other refusal is about the credential or the membership and is not a matter of
+    /// waiting, so there is nothing to count down to and the field is null.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("not_recognised")]
+    [InlineData("member_not_active")]
+    [InlineData("no_booking")]
+    public async Task A_refusal_that_is_not_about_time_carries_no_instant(string reason)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, $"medoornoc-{reason.Length}");
+        var doorId = await club.AddDoorAsync(factory, $"gate-{Guid.NewGuid():N}"[..14], "front-door");
+
+        await club.WriteRowAsync(
+            factory, doorId, $"{DeviceGateEndpoint.DeniedActionPrefix}{reason}",
+            DateTimeOffset.UtcNow.AddSeconds(-10), subjectUserId: club.MemberUserId, reason: reason);
+
+        var decision = (await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath))
+            .GetProperty("last_decision");
+
+        Assert.Equal(reason, decision.GetProperty("reason").GetString());
+        Assert.Equal(JsonValueKind.Null, decision.GetProperty("opens_at").ValueKind);
+    }
+
+    /// <summary>A too_early refusal with no booking behind it has no instant to offer, and says so.</summary>
+    [SkippableFact]
+    public async Task A_too_early_refusal_with_no_booking_behind_it_carries_no_instant()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "medoorearn");
+        var doorId = await club.AddDoorAsync(factory, "gate-me0021", "front-door");
+
+        await club.WriteRowAsync(
+            factory, doorId, $"{DeviceGateEndpoint.DeniedActionPrefix}too_early",
+            DateTimeOffset.UtcNow.AddSeconds(-10), subjectUserId: club.MemberUserId, reason: "too_early");
+
+        var decision = (await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath))
+            .GetProperty("last_decision");
+
+        Assert.Equal(JsonValueKind.Null, decision.GetProperty("opens_at").ValueKind);
+    }
+
+    /// <summary>
+    /// <c>is_club_admin</c> is not decoration: under <c>booking_window</c> it is the difference
+    /// between a page that says "you need a booking" and a door that opens anyway. Driven
+    /// against the REAL decision at the real device route, because a flag that disagreed with
+    /// the door would be the product contradicting the building.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_admin_flag_agrees_with_what_the_door_really_does_under_booking_window()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(
+            factory, "medooradm",
+            """{"timezone":"UTC","grace_window_minutes":5,"gate_access_policy":"booking_window"}""");
+
+        // A board that registered itself, so the MAC on the wire is the MAC on the row.
+        var mac = Guid.NewGuid().ToString("N")[..12];
+        var device = factory.CreateClient();
+        device.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", club.DeviceKey);
+        await device.PostAsync(
+            "/api/v1/device/heartbeat",
+            new StringContent(
+                $$"""{"mac":"{{mac}}","firmware_version":"1.0.0","uptime_ms":60000,"kind":"gate"}""",
+                System.Text.Encoding.UTF8, "application/json"));
+
+        async Task<(bool Flag, bool Opened)> AskAsync(Guid userId, string? role)
+        {
+            var person = club.ClientFor(factory, userId, role);
+            var flag = (await person.GetFromJsonAsync<JsonElement>(DoorPath))
+                .GetProperty("is_club_admin").GetBoolean();
+
+            var minted = await (await person.PostAsync("/api/v1/me/qr/generate?kind=ident", null))
+                .Content.ReadFromJsonAsync<JsonElement>();
+            var token = minted.GetProperty("code").GetString();
+
+            var scanned = await (await device.PostAsync(
+                "/api/v1/device/gate",
+                new StringContent(
+                    $$"""{"mac":"{{mac}}","method":"qr","token":"{{token}}"}""",
+                    System.Text.Encoding.UTF8, "application/json")))
+                .Content.ReadFromJsonAsync<JsonElement>();
+
+            return (flag, scanned.GetProperty("opened").GetBoolean());
+        }
+
+        // Neither of them holds a booking. Under booking_window the admin passes and the member
+        // does not, and the flag has to say exactly that.
+        var admin = await AskAsync(club.AdminUserId, "admin");
+        Assert.True(admin.Flag);
+        Assert.True(admin.Opened);
+
+        var member = await AskAsync(club.MemberUserId, null);
+        Assert.False(member.Flag);
+        Assert.False(member.Opened);
+    }
+
     // ---- W1.8, the history ----
 
     [SkippableFact]
