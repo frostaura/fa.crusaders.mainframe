@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
@@ -18,11 +19,24 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </para>
 ///
 /// <para>
-/// <b>It is the BOARD's trail and not a door-opens feed.</b> An open, a refusal and its
-/// reason, an open the board decided for itself while the link was down, the row that says
-/// the board registered itself, the row that says an admin named it: they answer one question
-/// between them, and splitting them across two screens would mean an admin diagnosing a door
-/// has to know which half to look in before they know what is wrong.
+/// <b>It is the BOARD's trail and not a door-opens feed</b> — but the two halves are now two
+/// ARRAYS rather than one list a console has to sort out for itself. An open, a refusal and
+/// its reason, and an open the board decided for itself are <c>items</c>: they are scans, and
+/// they are the same set the club log, the CSV, the day counts and both member routes read
+/// (<see cref="DoorTrail.IsScanRow"/>). The row that says the board registered itself, the row
+/// that says an admin renamed it, the row that says the server overruled its clock, are
+/// <c>events</c>: the board's own story, each under a neutral word, none of them counted.
+/// </para>
+///
+/// <para>
+/// <b>One list was a screen that lied, and quietly.</b> This route returned every audit row
+/// carrying the board's <c>device_id</c>, and a console renders a row it has no chip for
+/// through whatever branch is last — so <c>device.updated</c> read as a green "Refused" scan,
+/// a door with thirteen admin edits and no scans reported "13 refused scans, newest 1 min ago"
+/// while the club log had nothing for it, and <c>device.event_time_clamped</c> — written beside
+/// every clamped upload with identical details — doubled every offline scan on this screen and
+/// nowhere else. Four readers of one set disagreeing is exactly what <see cref="DoorTrail"/>
+/// exists to prevent, and this was the reader that was not asking it.
 /// </para>
 ///
 /// <para>
@@ -78,27 +92,63 @@ public static class AdminDeviceActivityEndpoint
         // over its text, so a guid that happened to appear in some other field cannot match.
         var containment = JsonSerializer.Serialize(new { device_id = device.Id });
 
-        var rows = await db.AuditLogs.AsNoTracking()
-            .Where(a => a.DetailsJson != null && EF.Functions.JsonContains(a.DetailsJson, containment))
-            .OrderByDescending(a => a.CreatedAt)
-            .ThenByDescending(a => a.Id)
-            .Take(take)
-            .Select(a => new { a.Action, a.CreatedAt, a.SubjectUserId, a.DetailsJson })
-            .ToListAsync(ct);
+        var mine = db.AuditLogs.AsNoTracking()
+            .Where(a => a.DetailsJson != null && EF.Functions.JsonContains(a.DetailsJson, containment));
+
+        // The split is a DOOR's. A court box's trail is activations, releases and the outcomes
+        // they settled — none of those is a door scan, and filtering its feed by the door
+        // predicate would empty the only screen that reads it. `events` is still on the wire
+        // for a box, empty, because one response shape is worth more to a console than a key
+        // that appears and disappears; see DeviceView's own note on the same argument.
+        var isDoor = device.Kind == DeviceKind.Gate;
+
+        // TWO pages, not one page split afterwards. A door that has been renamed fifty times
+        // would otherwise push every scan off a `limit=50` request and leave the page reporting
+        // no activity at a busy door — the limit is what a console asks for of EACH list.
+        var scans = await Page(isDoor ? mine.Where(DoorTrail.IsScanRow) : mine, take, ct);
+        var other = isDoor ? await Page(mine.Where(DoorTrail.IsNotScanRow), take, ct) : [];
 
         // One read for the whole page rather than one per row, and the name comes from the
-        // membership because that is the only name this product shows another person.
-        var subjects = rows.Where(r => r.SubjectUserId is not null).Select(r => r.SubjectUserId!.Value).Distinct().ToList();
+        // membership because that is the only name this product shows another person. Only the
+        // scans can name anybody: a door event is about the BOARD.
+        var subjects = scans.Where(r => r.SubjectUserId is not null).Select(r => r.SubjectUserId!.Value).Distinct().ToList();
         var names = await db.Memberships.AsNoTracking()
             .Where(m => subjects.Contains(m.UserId))
             .Select(m => new { m.UserId, m.FullName })
             .ToDictionaryAsync(m => m.UserId, m => m.FullName, ct);
 
-        var items = rows
+        var items = scans
             .Select(r => Item(r.Action, r.CreatedAt, r.SubjectUserId, r.DetailsJson, names))
             .ToList();
 
-        return Results.Ok(new { items });
+        // The other half, in its own array and its own vocabulary. No outcome, no reason and no
+        // member on any of them: a door event is about the BOARD, and P4 is that an alert — and
+        // by the same argument a row on this screen — is about a door or a credential, never a
+        // person. See DoorAuditActions for the closed set of words and why the list exists.
+        var events = other
+            .Select(r => new
+            {
+                at = r.CreatedAt,
+                action = r.Action,
+                kind = DoorAuditActions.EventKindOf(r.Action),
+            })
+            .ToList();
+
+        return Results.Ok(new { items, events });
+    }
+
+    /// <summary>
+    /// One page of a board's trail, newest first. Block body for the lizard reason in
+    /// <c>memory/gotchas.md</c>.
+    /// </summary>
+    private static async Task<List<ActivityRow>> Page(IQueryable<AuditLog> rows, int take, CancellationToken ct)
+    {
+        return await rows
+            .OrderByDescending(a => a.CreatedAt)
+            .ThenByDescending(a => a.Id)
+            .Take(take)
+            .Select(a => new ActivityRow(a.Action, a.CreatedAt, a.SubjectUserId, a.DetailsJson))
+            .ToListAsync(ct);
     }
 
     /// <summary>
@@ -119,3 +169,9 @@ public static class AdminDeviceActivityEndpoint
         return DoorActivityView.Of(action, at, subjectUserId, detailsJson, names);
     }
 }
+
+/// <summary>
+/// One board-trail row as it comes off the database, before either projection reads it.
+/// Top-level and bodyless for the lizard reason recorded in <c>memory/gotchas.md</c>.
+/// </summary>
+public sealed record ActivityRow(string Action, DateTimeOffset CreatedAt, Guid? SubjectUserId, string? DetailsJson);

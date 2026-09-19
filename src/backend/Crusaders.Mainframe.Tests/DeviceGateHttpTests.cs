@@ -2412,7 +2412,8 @@ public sealed class DeviceGateHttpTests
 
         var response = await admin.GetAsync($"/api/v1/admin/devices/{gateId}/activity");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var items = (await BodyAsync(response)).GetProperty("items").EnumerateArray().ToList();
+        var body = await BodyAsync(response);
+        var items = body.GetProperty("items").EnumerateArray().ToList();
 
         // Newest first: the offline upload is the last thing that happened.
         var times = items.Select(i => i.GetProperty("at").GetDateTimeOffset()).ToList();
@@ -2441,9 +2442,16 @@ public sealed class DeviceGateHttpTests
         // token in any form — see §5.
         Assert.Equal(JsonValueKind.Null, open.GetProperty("fingerprint").ValueKind);
 
-        // The row an admin's own PATCH wrote is here too: this is the BOARD's trail, not a
-        // door-opens-only feed, and "who named this door and when" is the same question.
-        Assert.Contains(items, i => i.GetProperty("action").GetString() == "device.auto_registered");
+        // The row the board's own registration wrote is here too — this is the BOARD's trail,
+        // not a door-opens-only feed, and "when did this door first call in" is the same
+        // question. It is in `events` and NOT in `items`, which is the C4 / B1 rule: a console
+        // renders a row it has no chip for through whatever branch is last, so a registration
+        // or an admin edit left among the scans was painted as a green "Refused".
+        Assert.DoesNotContain(items, i => i.GetProperty("action").GetString() == "device.auto_registered");
+        var events = body.GetProperty("events").EnumerateArray().ToList();
+        var registered = Assert.Single(
+            events, e => e.GetProperty("action").GetString() == "device.auto_registered");
+        Assert.Equal(DoorAuditActions.RegisteredKind, registered.GetProperty("kind").GetString());
     }
 
     /// <summary>
@@ -2582,8 +2590,10 @@ public sealed class DeviceGateHttpTests
     [InlineData(3, 3)]
     [InlineData(0, 1)]
     [InlineData(-9, 1)]
-    [InlineData(200, 60)]
-    [InlineData(10_000, 60)]
+    // Fifty-nine refusals are scans; the registration row is a door EVENT and is on the other
+    // array, so the scan page tops out at 59 rather than 60. See AdminDeviceActivityEndpoint.
+    [InlineData(200, 59)]
+    [InlineData(10_000, 59)]
     public async Task The_activity_limit_is_clamped_and_defaults_to_fifty(int? limit, int expected)
     {
         Skip.IfNot(_pg.Available, Skipped);
@@ -2671,11 +2681,17 @@ public sealed class DeviceGateHttpTests
             $"/api/v1/admin/devices/{boxId}/activity");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var items = (await BodyAsync(response)).GetProperty("items").EnumerateArray().ToList();
+        var body = await BodyAsync(response);
+        var items = body.GetProperty("items").EnumerateArray().ToList();
         var row = Assert.Single(items, i => i.GetProperty("action").GetString() == $"device.{DeviceEventEndpoints.ActivationKind}");
         Assert.True(row.GetProperty("offline").GetBoolean());
         Assert.Matches("^[0-9a-f]{8}$", row.GetProperty("fingerprint").GetString());
         Assert.Equal(ActivationOutcomeOk, row.GetProperty("reason").GetString());
+
+        // The door split does not reach a box: `events` is present and empty, so the console
+        // types one response shape, and the box's whole trail stays where its screen reads it.
+        Assert.Empty(body.GetProperty("events").EnumerateArray());
+        Assert.Contains(items, i => i.GetProperty("action").GetString() == "device.auto_registered");
     }
 
     /// <summary>The outcome an applied activation records, as the activity route reports it.</summary>

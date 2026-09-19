@@ -82,6 +82,20 @@ public static class DoorTrail
              || (a.Action.Length > DeniedPrefix.Length && a.Action.Substring(0, DeniedPrefix.Length) == DeniedPrefix);
 
     /// <summary>
+    /// Everything about a board that is NOT a scan — derived from <see cref="IsScanRow"/> by
+    /// negation rather than restated, so the two can never drift apart.
+    ///
+    /// <para>
+    /// The per-door feed needs both halves as separate pages (<c>items</c> and <c>events</c>),
+    /// and a second hand-written predicate is precisely the shape that produced the defect the
+    /// split exists to close: one reader's idea of "a scan" differing from another's.
+    /// </para>
+    /// </summary>
+    public static readonly Expression<Func<AuditLog, bool>> IsNotScanRow =
+        Expression.Lambda<Func<AuditLog, bool>>(
+            Expression.Not(IsScanRow.Body), IsScanRow.Parameters);
+
+    /// <summary>
     /// Every row <c>RetentionWorker</c> may DELETE at the door's own, shorter horizon.
     ///
     /// <para>
