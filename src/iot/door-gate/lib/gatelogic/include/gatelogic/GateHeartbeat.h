@@ -1,0 +1,78 @@
+// Crusaders Mainframe — the gate's heartbeat: the one extra field it sends,
+// and the one extra field it adopts.
+//
+// WHAT IS DIFFERENT FROM THE COURT BOX'S
+// --------------------------------------
+// Exactly one field each way.
+//
+// Outbound, `kind:"gate"`. It is a HINT and nothing more: the server honours it
+// only when the MAC is unknown, so it auto-registers a Gate row rather than a
+// CourtBox one. On a MAC the server already knows, the row's Kind wins and this
+// field is ignored — a board cannot re-kind itself, which is what stops a
+// mis-flashed image turning a court box into a door.
+//
+// Inbound, `gate.unlock_seconds`. The tenant's release time, clamped by the
+// server to [1, 30] and clamped AGAIN here, because a board that trusted the
+// server to have clamped would hold a lock open for as long as a bad answer
+// said to.
+//
+// Everything else is the court box's, unchanged and shared: `heartbeat_seconds`
+// through devlink::Cadence, the roster through devlink::applyRoster, the body's
+// MAC and 64-bit uptime through devlink's own renderer's rules.
+//
+// No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
+
+#ifndef CRUSADERS_GATELOGIC_GATEHEARTBEAT_H
+#define CRUSADERS_GATELOGIC_GATEHEARTBEAT_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "gatelogic/GateConfig.h"
+
+namespace gatelogic {
+
+/// The smallest buffer renderGateHeartbeatBody is ever given: the court box's
+/// four keys plus `kind`.
+inline constexpr size_t kGateHeartbeatBodyCap = 160U;
+
+/// Renders the `/api/v1/device/heartbeat` body, with `kind` last.
+///
+/// Returns the length written, or 0 — with `out` empty — when it would not fit
+/// or `mac` is missing. Never a truncated body: a half-rendered object is a 400
+/// the board cannot read, and a gate that cannot heartbeat has no roster and
+/// falls back to admitting nobody.
+///
+/// `uptimeMs` is the 64-bit tb::Uptime64 value, not a cast of it — the same
+/// 49.7-day wrap that made the court box report a two-month-old board as ten
+/// days old.
+size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const char* firmwareVersion,
+                               uint64_t uptimeMs);
+
+/// Reads `gate.unlock_seconds` out of a heartbeat response into `unlockMs`,
+/// clamped into [kMinUnlockMs, kGateConfig.unlockHardCapMs].
+///
+/// False, with `unlockMs` untouched, when there is no `gate` object or it
+/// carries no bare integer under that key — an older API that does not send one
+/// must not reset a release time a newer one configured.
+///
+/// The search starts at the `gate` key rather than running over the whole body,
+/// so an `unlock_seconds` that appears anywhere else in a future response
+/// cannot be picked up as this one.
+bool adoptUnlockMs(const char* body, size_t len, uint32_t& unlockMs);
+
+/// Clamps a release time from any source — the server's, or a build flag —
+/// into what the board will actually drive the lock for.
+uint32_t clampUnlockMs(uint32_t requestedMs, uint32_t hardCapMs);
+
+/// The same clamp, applied to a wire value in SECONDS.
+///
+/// Clamping before the multiply rather than after it: 4,300,000 seconds times
+/// 1000 wraps a uint32_t into 4,999,552 ms, which is a plausible-looking number
+/// and an 83-minute release. Every number that arrives from the network is
+/// bounded in its own units first.
+uint32_t unlockMsFromSeconds(uint32_t seconds, uint32_t hardCapMs);
+
+} // namespace gatelogic
+
+#endif // CRUSADERS_GATELOGIC_GATEHEARTBEAT_H

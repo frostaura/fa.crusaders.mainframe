@@ -1,0 +1,49 @@
+// Crusaders Mainframe — one digital output pin, and the ORDER it is set up in.
+//
+// WHY THIS PORT HAS TWO METHODS AND NOT ONE
+// -----------------------------------------
+// On an ESP32 a GPIO comes out of reset as an input with no drive. The instant
+// `pinMode(pin, OUTPUT)` runs, the pin starts driving whatever is already in
+// its output register — which, on a cold boot, is LOW. Carl's sketch does
+// `pinMode(RELAY_PIN, OUTPUT)` and then `digitalWrite(RELAY_PIN, LOW)`; on a
+// board wired so that LOW releases the lock, that is a door that clicks open
+// for a few microseconds on every single boot, including the boots a watchdog
+// reset causes at three in the morning.
+//
+// So the level is written FIRST and the pin is made an output SECOND, and the
+// two are separate calls on this port precisely so a fake can prove the order.
+// A single `configure(level)` would be safe and untestable in the way that
+// matters: nothing outside the driver could show that the order had been
+// swapped back.
+//
+// `readBack()` is what was last COMMANDED, not a sensed level. This board has
+// no readback and nothing measures whether the relay contact actually moved.
+//
+// No Arduino headers, no heap. Compiles for Xtensa and the host test runner.
+
+#ifndef CRUSADERS_GATELOGIC_PINOUT_H
+#define CRUSADERS_GATELOGIC_PINOUT_H
+
+#include "hal/PinLevel.h"
+
+namespace gatelogic {
+
+class IPinOut {
+public:
+  virtual ~IPinOut() = default;
+
+  /// Put `level` in the output register. Legal before the pin drives anything,
+  /// which is the entire reason this is separate from driveOutput().
+  virtual void write(hal::PinLevel level) = 0;
+
+  /// Make the pin an output. From here on it drives whatever write() last put
+  /// in the register.
+  virtual void driveOutput() = 0;
+
+  /// What was last written. Never a measurement.
+  virtual hal::PinLevel readBack() const = 0;
+};
+
+} // namespace gatelogic
+
+#endif // CRUSADERS_GATELOGIC_PINOUT_H

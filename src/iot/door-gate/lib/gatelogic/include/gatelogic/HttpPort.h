@@ -1,0 +1,53 @@
+// Crusaders Mainframe — one POST to the device API, minus the socket.
+//
+// WHY THIS PORT EXISTS WHEN THE COURT BRIDGE HAS NONE
+// ---------------------------------------------------
+// The court bridge makes its calls from `callApi()` inside main.cpp, which
+// `pio test -e native` cannot see (`build_src_filter = -<*>`). That is why its
+// event-body renderer had a 64-bit bug nothing could reach for three reviews:
+// the one place the wrap mattered was the one place no test ran. The gate's
+// scan flow is the same shape of code — "ask, and interpret what came back" —
+// and it is the code path a member is standing in front of, so it goes behind a
+// port and is driven by a fake that can answer 0, 401, 429, 503 and a 200 with
+// the body half-written.
+//
+// WHY IT IS HERE AND NOT IN shared/lib/hal
+// ----------------------------------------
+// The test for shared/lib is not "could a second device want this", it is
+// "would a second device want it UNCHANGED" — and the only other device there
+// is makes its calls without a port at all. Promoting this the day a third
+// firmware wants exactly this signature is one `git mv`; promoting it now would
+// put a port in the shared library on the strength of one user.
+//
+// No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
+
+#ifndef CRUSADERS_GATELOGIC_HTTPPORT_H
+#define CRUSADERS_GATELOGIC_HTTPPORT_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+namespace gatelogic {
+
+class IHttpPort {
+public:
+  virtual ~IHttpPort() = default;
+
+  /// POST `body` as JSON to `path` under the API base URL, with the bearer
+  /// header the implementation holds.
+  ///
+  /// Returns the HTTP status, or 0 when the request never completed — no
+  /// route, no host, a refused connection, a timeout. 0 is not an error code
+  /// to be mapped onto one: it is the one answer that says nothing at all about
+  /// what the server thinks, which is exactly what the breaker counts.
+  ///
+  /// The response body is copied into `out` and NUL-terminated, truncated to
+  /// `outCap - 1` if it is longer. A caller buffer rather than a String because
+  /// the ESP32's heap is shared with the network stack, and a call four times a
+  /// minute that allocates is a heap that fragments over a season in a cupboard.
+  virtual uint16_t post(const char* path, const char* body, char* out, size_t outCap) = 0;
+};
+
+} // namespace gatelogic
+
+#endif // CRUSADERS_GATELOGIC_HTTPPORT_H

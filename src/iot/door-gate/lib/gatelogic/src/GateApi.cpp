@@ -1,0 +1,54 @@
+#include "gatelogic/GateApi.h"
+
+#include <string.h>
+
+#include "gatelogic/GateHeartbeat.h"
+
+namespace gatelogic {
+
+uint16_t GateApi::post(const char* path, const char* body, char* out, size_t outCap) {
+  if (body == nullptr || body[0] == '\0') {
+    // An unrenderable body. Refused here rather than sent as something the
+    // server has to reject — and it teaches the breaker nothing, because it
+    // says nothing about whether the host is reachable.
+    return 0U;
+  }
+  if (out != nullptr && outCap > 0U) {
+    out[0] = '\0';
+  }
+  const uint16_t status = http_.post(path, body, out, outCap);
+  // A fresh clock read: the call may have just spent its whole timeout, and a
+  // backoff window that starts four seconds in the past is four seconds short.
+  breaker_.onResult(status, clock_.nowMs());
+  return status;
+}
+
+ScanDecision GateApi::scan(const char* mac, const char* token, uint32_t adoptedUnlockMs, uint32_t hardCapMs) {
+  char body[kScanBodyCap] = {};
+  if (renderScanBody(body, sizeof(body), mac, token) == 0U) {
+    // Nothing went on the wire, so nothing was decided. The roster gets it,
+    // which is the same answer as an unreachable host.
+    ScanDecision decision;
+    decision.fallbackToRoster = true;
+    return decision;
+  }
+
+  char response[kScanResponseCap] = {};
+  const uint16_t status = post(kPathGate, body, response, sizeof(response));
+  return onGateResponse(status, response, strlen(response), adoptedUnlockMs, hardCapMs);
+}
+
+uint16_t GateApi::heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs, char* out,
+                            size_t outCap) {
+  char body[kGateHeartbeatBodyCap] = {};
+  if (renderGateHeartbeatBody(body, sizeof(body), mac, firmwareVersion, uptimeMs) == 0U) {
+    return 0U;
+  }
+  return post(kPathHeartbeat, body, out, outCap);
+}
+
+uint16_t GateApi::uploadEvent(const char* body, char* out, size_t outCap) {
+  return post(kPathEvents, body, out, outCap);
+}
+
+} // namespace gatelogic

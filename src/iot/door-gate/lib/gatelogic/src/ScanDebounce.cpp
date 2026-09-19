@@ -1,0 +1,45 @@
+#include "gatelogic/ScanDebounce.h"
+
+namespace gatelogic {
+namespace {
+
+bool sameToken(const char* a, const char* b) {
+  if (a == nullptr || b == nullptr) {
+    return false;
+  }
+  size_t i = 0U;
+  while (i < roster::kMaxTokenLen && a[i] != '\0' && a[i] == b[i]) {
+    ++i;
+  }
+  return a[i] == b[i];
+}
+
+} // namespace
+
+bool ScanDebounce::suppresses(const char* token, uint32_t nowMs) const {
+  if (!seen_ || token == nullptr || token[0] == '\0') {
+    return false;
+  }
+  if (!sameToken(last_, token)) {
+    return false;
+  }
+  // tb::since, not subtraction: the window has to survive the 49.7-day wrap,
+  // and a gate in a cupboard runs for months.
+  return tb::since(nowMs, decidedAtMs_) < windowMs_;
+}
+
+void ScanDebounce::decided(const char* token, uint32_t nowMs) {
+  if (token == nullptr) {
+    return;
+  }
+  size_t i = 0U;
+  while (i < roster::kMaxTokenLen && token[i] != '\0') {
+    last_[i] = token[i];
+    ++i;
+  }
+  last_[i] = '\0';
+  decidedAtMs_ = nowMs;
+  seen_ = true;
+}
+
+} // namespace gatelogic

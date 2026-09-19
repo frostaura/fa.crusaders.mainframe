@@ -1,0 +1,465 @@
+// Crusaders Mainframe — ESP32 door-gate firmware: the composition root.
+//
+// WHAT THIS FILE IS
+// -----------------
+// Wiring, and the small amount of sequencing only a composition root can do.
+// Every decision about WHICH implementation of a port to use is here; every
+// decision a host test could want to drive is in lib/gatelogic, where
+// `pio test -e native` reaches it with no board attached. That division is not
+// a preference — `build_src_filter = -<*>` means the host suite cannot see this
+// file at all, so anything decided here is decided where nothing can check it.
+//
+// WHAT THE BOARD IS
+// -----------------
+// One ESP32 per door. A QR scanner on Serial2, one relay driving the lock, one
+// LED. No LCD, no buttons, no second microcontroller. Carl's wiring is fixed
+// and lives in platformio.ini as build flags; README.md carries the table.
+//
+// PULL-ONLY
+// ---------
+// Carl's sketch ran an unauthenticated HTTP server on the board — `/open`
+// unlocked the door for anyone on the club WiFi — with a static IP and a polled
+// single-slot `/read`. None of it survives. This firmware opens no listening
+// socket, calls no WiFi.config(), and takes a DHCP lease. There is no inbound
+// path to the lock at all.
+//
+// ONE FIRMWARE FOR EVERY DOOR
+// ---------------------------
+// Nothing per-gate is compiled in. A door is named in the admin console
+// (`gate_key`) and the board learns its name from the heartbeat, so two doors
+// run byte-identical images and a spare board is a spare board.
+//
+// THE DOOR WORKS WHEN THE NETWORK DOES NOT
+// ----------------------------------------
+// A scan on a board that can reach the API asks the API, because only the API
+// knows about a booking made thirty seconds ago or a membership suspended this
+// morning. Its answer is final — including when the answer is no. When it
+// cannot be asked, the scan is decided from the roster the heartbeat filled, in
+// microseconds, and the board queues what it did. The degraded mode is narrower
+// than the court box's and the contract says so: offline, only a member with a
+// rostered booking gets in.
+//
+// WHAT THIS FILE DOES NOT DECIDE
+// ------------------------------
+// Which level locks the door, how long a release lasts, what a 503 means, what
+// the LED is saying, whether a line of scanner bytes is a token. All of it is
+// in lib/gatelogic. This file owns the radio, the pins, the UART, NVS and the
+// order things happen in at boot.
+
+#include <Arduino.h>
+#include <WiFi.h>
+
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "devapi/DeviceClient.h"
+#include "devapi/Json.h"
+#include "devcrypto/Hex.h"
+#include "devlink/ApiBreaker.h"
+#include "devlink/Cadence.h"
+#include "devlink/EventUpload.h"
+#include "devlink/RosterSync.h"
+#include "esp32_hal/Esp32Hal.h"
+#include "eventq/EventQueue.h"
+#include "fwversion/Version.h"
+#include "gatelogic/GateApi.h"
+#include "gatelogic/GateConfig.h"
+#include "gatelogic/GateFlow.h"
+#include "gatelogic/GateHeartbeat.h"
+#include "gatelogic/LedPattern.h"
+#include "gatelogic/LockDriver.h"
+#include "gatelogic/ScanAssembler.h"
+#include "gatelogic/ScanDebounce.h"
+#include "gatelogic/UnlockTimer.h"
+#include "roster/Roster.h"
+#include "timebase/TimeBase.h"
+
+// The four compiled-in values, all MANDATORY. There is no runtime store and no
+// provisioning line: one club, and the person who flashes a board is the person
+// who knows the WiFi password and holds the API key.
+//
+// The build fails rather than producing an image with a blank in it — an image
+// that joins an empty SSID, or posts to an empty base URL with an empty bearer
+// key, looks identical to a working one until it is screwed to a wall.
+#if !__has_include("common/secrets.h")
+#error                                                                                                       \
+    "src/iot/door-gate/src/common/secrets.h is missing — copy secrets.h.example to secrets.h and fill in WIFI_SSID, WIFI_PASSWORD, API_BASE_URL and DEVICE_API_KEY"
+#endif
+#include "common/secrets.h"
+
+#ifndef WIFI_SSID
+#error "secrets.h does not define WIFI_SSID — see src/iot/door-gate/src/common/secrets.h.example"
+#endif
+#ifndef WIFI_PASSWORD
+#error "secrets.h does not define WIFI_PASSWORD — see src/iot/door-gate/src/common/secrets.h.example"
+#endif
+#ifndef API_BASE_URL
+#error "secrets.h does not define API_BASE_URL — see src/iot/door-gate/src/common/secrets.h.example"
+#endif
+#ifndef DEVICE_API_KEY
+#error "secrets.h does not define DEVICE_API_KEY — see src/iot/door-gate/src/common/secrets.h.example"
+#endif
+static_assert(sizeof(WIFI_SSID) > 1U,
+              "WIFI_SSID in secrets.h is empty — fill it in before flashing the gate");
+static_assert(sizeof(WIFI_PASSWORD) > 1U,
+              "WIFI_PASSWORD in secrets.h is empty — fill it in before flashing the gate");
+static_assert(sizeof(API_BASE_URL) > 1U,
+              "API_BASE_URL in secrets.h is empty — e.g. \"http://192.168.1.10:8088\"");
+static_assert(sizeof(DEVICE_API_KEY) > 1U,
+              "DEVICE_API_KEY in secrets.h is empty — copy it from the admin Devices page");
+static_assert(sizeof(DEVICE_API_KEY) - 1U <= devapi::kMaxApiKeyLen,
+              "DEVICE_API_KEY is longer than devapi::kMaxApiKeyLen — a truncated key is a 401 that "
+              "reads exactly like the wrong key");
+
+// The gate ships its OWN firmware version. platformio.ini's [common] block is
+// kept byte-identical across all three projects and therefore pins the court
+// box's, so `[env:door_gate]` unflags it and sets 1.0.0. An unflag that
+// silently stopped working would put somebody else's version on the Devices
+// screen, which is the one way to tell from a desk which image a board runs.
+static_assert(fw::kFirmwareVersion[0] == '1' && fw::kFirmwareVersion[1] == '.',
+              "this image is not reporting the gate's own firmware version — the build_unflags in "
+              "[env:door_gate] did not take effect");
+
+namespace {
+
+using namespace gatelogic;
+
+/// Blocking HTTP is bounded. A genuinely slow response is retried on the next
+/// heartbeat rather than allowed to hold the loop — and therefore the release
+/// deadline and the watchdog — for the core's five-second default.
+constexpr uint16_t kHttpTimeoutMs = 4000U;
+
+/// Scanner bytes drained per pass. At 9600 baud a pass takes far less than the
+/// time 64 bytes need to arrive, so this is a ceiling rather than a budget; it
+/// exists so a jammed scanner streaming forever cannot starve the loop.
+constexpr uint16_t kScannerBytesPerPass = 64U;
+
+/// The longest idle the loop ever takes. Ten milliseconds of doing nothing
+/// costs nothing a door can notice and keeps the ESP32's own housekeeping tasks
+/// scheduled. It is the ONLY delay in this firmware.
+constexpr uint32_t kIdleDelayMs = 10U;
+
+esp32_hal::Esp32Clock gClock;
+esp32_hal::Esp32Scanner gScanner;
+esp32_hal::Esp32NvsStore gStore;
+esp32_hal::Esp32PinOut gRelayPin(kGateConfig.relayPin);
+esp32_hal::Esp32PinOut gLedPin(kGateConfig.ledPin);
+
+/// This board's MAC as 12 lowercase hex characters, filled once at boot and
+/// then read-only. It is the whole of the board's identity: it goes in the body
+/// of every request, and an unknown one auto-registers a Gate row against the
+/// key's tenant.
+char gMacHex[dc::hex::encodedSize(6U)];
+
+/// `Bearer <DEVICE_API_KEY>`, rendered once at boot. Held rather than rebuilt
+/// per call because it is the same string for the life of the image and the
+/// heap it would churn is shared with the network stack.
+char gAuthHeader[devapi::kAuthorizationBufSize] = {};
+
+esp32_hal::Esp32HttpPort gHttp(API_BASE_URL, gAuthHeader, kHttpTimeoutMs);
+devlink::ApiBreaker gBreaker;
+GateApi gApi(gHttp, gBreaker, gClock);
+
+LockDriver gLock(gRelayPin, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay);
+UnlockTimer gUnlock(kGateConfig.unlockHardCapMs);
+LedPattern gLed;
+ScanAssembler gAssembler;
+ScanDebounce gDebounce;
+
+eventq::EventQueue<EVENTQ_SLOTS> gQueue(&gStore);
+roster::Roster<kGateRosterEntries> gRoster(kGateConfig.rosterMaxAgeMs);
+
+tb::Uptime64 gUptime;
+tb::Deadline gHeartbeat;
+uint32_t gHeartbeatMs = kGateConfig.heartbeatMs;
+
+/// What the last heartbeat said a release should last. The build-flag default
+/// until the first accepted heartbeat, which is what makes a board that has
+/// never spoken to the API still able to open a door for a rostered member.
+uint32_t gUnlockMs = kGateConfig.unlockDefaultMs;
+
+bool gWifiUp = false;
+
+/// The heartbeat response. File scope, not stack: the contract allows 4096
+/// bytes — 48 roster entries plus a 64-character slug and gate key — and a 4.6
+/// KB local under a blocking HTTP call is a crash that reads as a random reset.
+char gHeartbeatBody[kGateResponseCap] = {};
+
+/// Learns this board's MAC and renders the one header every call carries.
+///
+/// The MAC is available before the radio associates — it is a fact about the
+/// part, not about the link — so this runs early in setup() and everything
+/// afterwards can assume both are filled.
+void setupIdentity() {
+  uint8_t mac[6] = {0U, 0U, 0U, 0U, 0U, 0U};
+  WiFi.macAddress(mac);
+  static_cast<void>(dc::hex::encodeLower(mac, sizeof(mac), gMacHex, sizeof(gMacHex)));
+  static_cast<void>(devapi::renderAuthorization(gAuthHeader, sizeof(gAuthHeader), DEVICE_API_KEY));
+}
+
+/// Queues what the board did while the API could not be asked.
+///
+/// Never for a decision the API itself made: the API already wrote its own
+/// audit row, and a second copy would show every member entering twice.
+void queue(const ScanDecision& decision, const char* subject, uint32_t nowMs) {
+  if (!decision.queueEvent) {
+    return;
+  }
+  eventq::Event event;
+  event.kind = decision.eventKind;
+  // A door is not on a court. The queue's sentinel renders as -1 on the wire.
+  event.court = eventq::Event::kNoCourt;
+  event.method = eventq::Method::Qr;
+  event.uptimeMs = nowMs;
+  event.durationMs = decision.released ? decision.unlockMs : 0U;
+  static_cast<void>(event.setSubject(subject));
+  static_cast<void>(gQueue.push(event));
+}
+
+/// Applies a decision to the door and the lamp. ONE function for the online and
+/// the roster paths, so the two cannot disagree about what a decision does.
+void apply(const ScanDecision& decision, uint32_t nowMs) {
+  if (!decision.released) {
+    gLed.cue(LedCue::Denied, nowMs);
+    return;
+  }
+  if (gUnlock.request(nowMs, decision.unlockMs)) {
+    // The opening edge. A re-arm changes only when the door closes, and writing
+    // the relay again for a door that is already open would be a click the
+    // member reads as a second decision.
+    gLock.set(true);
+  }
+  gLed.setReleased(true);
+}
+
+/// One scan, from the assembler to the door.
+void decideScan(const char* token) {
+  uint32_t now = gClock.nowMs();
+  if (gDebounce.suppresses(token, now)) {
+    // The same phone, still held at the window. Not a decision, not an API
+    // call, not an audit row, and not a re-armed lock.
+    return;
+  }
+
+  const bool online = chooseAttempt(gWifiUp, gBreaker.open(now)) == Attempt::Online;
+  ScanDecision decision;
+  if (online) {
+    decision = gApi.scan(gMacHex, token, gUnlockMs, kGateConfig.unlockHardCapMs);
+  } else {
+    decision.fallbackToRoster = true;
+  }
+
+  if (decision.fallbackToRoster) {
+    // A FRESH clock read. gApi.scan may have just spent the whole HTTP timeout,
+    // and a roster age or a release deadline measured from before that call is
+    // four seconds wrong in the direction that shortens the member's window.
+    now = gClock.nowMs();
+    decision = fromRoster(gRoster.decide(token, roster::CourtCount(1U), now), gUnlockMs,
+                          kGateConfig.unlockHardCapMs);
+  }
+
+  apply(decision, now);
+  queue(decision, token, now);
+  gDebounce.decided(token, now);
+}
+
+/// Drains the scanner. Runs EVERY pass, including while the door is released:
+/// the second member of a pair arrives during the first one's window, and a
+/// drain that paused would read their scan seconds late or not at all.
+void pumpScanner(uint32_t nowMs) {
+  uint8_t byte = 0U;
+  for (uint16_t i = 0U; i < kScannerBytesPerPass && gScanner.read(byte); ++i) {
+    switch (gAssembler.feed(byte)) {
+    case ScanEvent::Token:
+      decideScan(gAssembler.token());
+      break;
+    case ScanEvent::Refused: {
+      // Longer than the token cap, so the bytes were discarded rather than cut
+      // short — there is nothing to ask the API about and nothing to match.
+      const ScanDecision decision = refuseUnreadable(!gWifiUp);
+      apply(decision, nowMs);
+      queue(decision, "", nowMs);
+      break;
+    }
+    case ScanEvent::None:
+      break;
+    }
+  }
+}
+
+/// Takes the lock back when its window ends.
+void pumpLock(uint32_t nowMs) {
+  if (!gUnlock.tick(nowMs)) {
+    return;
+  }
+  gLock.set(false);
+  gLed.setReleased(false);
+}
+
+void pumpWifiLink(uint32_t nowMs) {
+  const bool up = WiFi.status() == WL_CONNECTED;
+  if (up == gWifiUp) {
+    return;
+  }
+  gWifiUp = up;
+  gLed.setLinkUp(up);
+  if (up) {
+    // Immediately, not after a full interval: the heartbeat is what fills the
+    // roster, and until it has, an offline scan is refused.
+    gHeartbeat.arm(nowMs, 0U);
+  }
+}
+
+/// Uploads what the board did, oldest first, and releases only what was
+/// acknowledged. Peek-then-release rather than pop-then-upload: an event must
+/// not leave the queue until the API has taken it, or a flaky link loses
+/// exactly the events it produces.
+void pumpEvents(uint32_t nowMs) {
+  if (!gWifiUp || gQueue.empty() || gBreaker.open(nowMs)) {
+    return;
+  }
+
+  // One event per pass. A board back from a week offline has a full ring, and
+  // draining it in one iteration would stop the scanner being read — which is a
+  // member standing at a door that is busy talking about last Tuesday.
+  eventq::Event event;
+  if (!gQueue.peek(event)) {
+    return;
+  }
+
+  char body[devlink::kEventBodyCap];
+  if (devlink::renderEventBody(body, sizeof(body), gMacHex, gUptime.value(), event) == 0U) {
+    // Unrenderable. The caps make this unreachable, but KEEPING it would pin
+    // every later event behind it forever and the board would stop reporting
+    // anything at all.
+    static_cast<void>(gQueue.release());
+    return;
+  }
+
+  char response[192] = {};
+  const uint16_t status = gApi.uploadEvent(body, response, sizeof(response));
+
+  switch (devapi::react(status)) {
+  case devapi::Reaction::Accepted: {
+    uint32_t through = 0U;
+    if (devapi::json::unsignedField(response, strlen(response), "accepted_through", through)) {
+      static_cast<void>(gQueue.releaseThrough(through));
+    }
+    return;
+  }
+  case devapi::Reaction::Rejected:
+    // A 4xx the board caused. Retrying an identical request forever pins every
+    // later event behind one the server will never take.
+    static_cast<void>(gQueue.release());
+    return;
+  case devapi::Reaction::Retry:
+    // Transient, or a 401 saying the compiled-in key is wrong — which is about
+    // every request rather than this event. Keep it and try again.
+    return;
+  }
+}
+
+void pumpHeartbeat(uint32_t nowMs) {
+  if (!gHeartbeat.expired(nowMs) || !gWifiUp) {
+    return;
+  }
+  gHeartbeat.arm(nowMs, gHeartbeatMs);
+
+  gHeartbeatBody[0] = '\0';
+  const uint16_t status =
+      gApi.heartbeat(gMacHex, fw::kFirmwareVersion, gUptime.value(), gHeartbeatBody, sizeof(gHeartbeatBody));
+  if (devapi::react(status) != devapi::Reaction::Accepted) {
+    // Transient, refused, or a key the tenant does not know. Nothing to adopt
+    // and nothing to do but keep the cadence: the heartbeat IS the probe the
+    // breaker closes on, and a board whose key is wrong is fixed by a reflash.
+    return;
+  }
+
+  const size_t len = strlen(gHeartbeatBody);
+  static_cast<void>(adoptUnlockMs(gHeartbeatBody, len, gUnlockMs));
+  // The roster's times are relative to the instant the server produced them,
+  // and `nowMs` was sampled before a call that may have taken four seconds — so
+  // the roster is anchored to a FRESH read. Every accepted heartbeat re-anchors
+  // it, which is what resets staleness; ROSTER_MAX_AGE_MS only governs how long
+  // the last one survives offline.
+  static_cast<void>(devlink::applyRoster(gHeartbeatBody, len, gRoster, gClock.nowMs()));
+  // Takes effect from the NEXT arm. The one above already used the old value,
+  // which is a one-interval delay and not worth a re-arm that could shorten
+  // this interval to nothing.
+  static_cast<void>(devlink::parseHeartbeatInterval(gHeartbeatBody, len, gHeartbeatMs));
+  // Unknown keys — anything a later contract adds — are ignored by
+  // construction: every reader above looks up the key it wants.
+}
+
+} // namespace
+
+void setup() {
+  // FIRST, before anything else can take time or fail. The locked level goes
+  // into the output register and only then does the pin start driving it, so
+  // the relay's first instruction is the one that keeps the door shut. Every
+  // boot runs this, including the ones a watchdog reset causes at 3am.
+  gLock.begin();
+
+  esp32_hal::watchdogBegin(kGateConfig.watchdogSeconds);
+
+  // Dark first, then an output — the same level-before-mode rule the lock
+  // follows. A lamp is not a safety surface, but two pins set up two different
+  // ways is how the safe one eventually gets the unsafe treatment.
+  gLedPin.write(ledPinLevel(false, kGateConfig.ledActiveHigh));
+  gLedPin.driveOutput();
+
+  gScanner.begin(kGateConfig.scannerBaud, kGateConfig.scannerRxPin, kGateConfig.scannerTxPin);
+  static_cast<void>(gStore.begin());
+
+  // The credential is the compiled-in one and nothing else — persistent(false)
+  // keeps the core from writing a second, invisible copy in its own flash
+  // record, which would outlive a reflash and join the wrong network.
+  // DHCP: no WiFi.config(), no static address — see the header.
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  setupIdentity();
+
+  const uint32_t now = gClock.nowMs();
+  gUptime.seed(now);
+  // A fallback only: the link-up edge re-arms this to "now" (pumpWifiLink).
+  gHeartbeat.arm(now, gHeartbeatMs);
+
+  gQueue.begin();
+  eventq::Event boot;
+  boot.kind = eventq::Kind::Boot;
+  boot.court = eventq::Event::kNoCourt;
+  boot.uptimeMs = now;
+  static_cast<void>(gQueue.push(boot));
+
+  gLed.setLinkUp(false);
+  gLed.cue(LedCue::Boot, now);
+}
+
+void loop() {
+  // One clock read per pass, shared by every sub-step, so the release deadline
+  // and the heartbeat are never evaluated against two different instants.
+  const uint32_t now = gClock.nowMs();
+  gUptime.tick(now);
+  esp32_hal::watchdogKick();
+
+  // The scanner FIRST, before the blocking calls below: a scan that arrived a
+  // moment ago should be decided now rather than after a heartbeat has spent
+  // four seconds finding out the API is gone.
+  pumpScanner(now);
+  pumpLock(now);
+  pumpWifiLink(now);
+  pumpEvents(now);
+  pumpHeartbeat(now);
+
+  // The lamp last, off the same instant, so what it shows is the state every
+  // step above just left it in.
+  gLedPin.write(ledPinLevel(gLed.on(now), kGateConfig.ledActiveHigh));
+
+  // The only delay in this firmware. Ten milliseconds is invisible at a door
+  // and is what keeps the ESP32's own housekeeping tasks scheduled.
+  delay(kIdleDelayMs);
+}

@@ -1,0 +1,10 @@
+{
+  "name": "esp32_hal",
+  "version": "1.0.0",
+  "description": "Real drivers for the door gate's ports on an ESP32: the millis() clock, one output pin with a level-before-mode contract, the scanner UART on Serial2, an NVS key/value store, an HTTPClient POST, and the task watchdog. The ONLY place in this project's lib/ allowed to include Arduino headers; every peripheral fact lives here and no decision does.",
+  "keywords": "hal, drivers, esp32, gate",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": { "gatelogic": "*", "hal": "*" },
+  "build": { "flags": ["-I include"] }
+}

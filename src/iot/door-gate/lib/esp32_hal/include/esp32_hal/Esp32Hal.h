@@ -1,0 +1,146 @@
+// Crusaders Mainframe — the door gate's real drivers.
+//
+// THE ONLY PLACE IN THIS PROJECT'S lib/ ALLOWED TO INCLUDE ARDUINO HEADERS.
+// Everything else under lib/ compiles for the host test runner, which is what
+// lets `pio test -e native` prove every decision with no board attached. CI
+// greps for the rule over every project's lib/ at once and excludes exactly
+// three directory names — arduino_hal, posix_hal and this one.
+//
+// Nothing here decides anything. Each class is the thinnest possible bridge
+// between one pure port and one ESP32 peripheral: a clock read, a pin, a UART,
+// an NVS namespace, an HTTP POST, a watchdog. A driver that grew an `if` about
+// a member, a booking or a door would be a decision no host test could reach.
+//
+// One header for all six, unlike the court box's directory of them. There are
+// six short classes, they are all constructed in the same twenty lines of
+// main.cpp, and splitting them would be six files of #include guards around an
+// average of fifteen lines of body.
+
+#ifndef CRUSADERS_ESP32_HAL_ESP32HAL_H
+#define CRUSADERS_ESP32_HAL_ESP32HAL_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "hal/Clock.h"
+#include "hal/PinLevel.h"
+#include "hal/Scanner.h"
+#include "hal/Store.h"
+
+#include "gatelogic/HttpPort.h"
+#include "gatelogic/PinOut.h"
+
+namespace esp32_hal {
+
+/// hal::IClock on millis().
+///
+/// Nothing here wraps or corrects anything: millis() rolls over at 2^32 and
+/// this port hands that value up unaltered, because tb::reached() and
+/// tb::Deadline are correct across the wrap and a second correction layer here
+/// would be a second implementation that can disagree with them.
+class Esp32Clock final : public hal::IClock {
+public:
+  uint32_t nowMs() override;
+};
+
+/// One GPIO, as an output — with the level written before the pin drives it.
+///
+/// See gatelogic/PinOut.h for why those are two calls. In short: a GPIO leaves
+/// reset as an input, and `pinMode(OUTPUT)` starts driving whatever is already
+/// in the output register, which on a cold boot is LOW. On Carl's wiring LOW is
+/// "locked", but on a board wired the other way it is "released" — and a door
+/// that clicks open on every reset, including the 3am watchdog ones, is a
+/// security hole nobody is awake to see.
+class Esp32PinOut final : public gatelogic::IPinOut {
+public:
+  explicit Esp32PinOut(uint8_t pin) : pin_(pin) {}
+
+  void write(hal::PinLevel level) override;
+  void driveOutput() override;
+
+  hal::PinLevel readBack() const override { return level_; }
+
+private:
+  uint8_t pin_;
+  hal::PinLevel level_ = hal::PinLevel::kLow;
+};
+
+/// hal::IScannerPort on Serial2.
+///
+/// Byte at a time and never blocking, for the reason hal/Scanner.h gives: the
+/// same loop that would be blocked also runs the release deadline and feeds the
+/// watchdog. The scanner only ever talks — TX is wired and unused — so nothing
+/// here writes to the port.
+class Esp32Scanner final : public hal::IScannerPort {
+public:
+  /// Opens Serial2 at `baud`, 8N1, on the configured pins.
+  void begin(uint32_t baud, uint8_t rxPin, uint8_t txPin);
+
+  bool read(uint8_t& out) override;
+};
+
+/// hal::IStore on NVS, through Preferences.
+///
+/// ONE record: the event queue's sequence high-water mark. The API deduplicates
+/// events on `(tenant, device, seq)` with a permanent unique index, so a board
+/// that restarted its numbering at 1 after a power cut would have every event
+/// up to its previous high-water silently discarded as a duplicate — and for a
+/// door that is an evening of entries the club never learns about.
+///
+/// NVS rather than a filesystem because that is one record in a partition the
+/// bootloader already creates, against a whole LittleFS image for ten bytes.
+class Esp32NvsStore final : public hal::IStore {
+public:
+  /// Opens the namespace read/write. False when NVS itself will not initialise,
+  /// which is a board that cannot remember its sequence across a power cut —
+  /// worth reporting rather than discovering at the first put().
+  bool begin();
+
+  hal::StoreResult put(const char* key, const uint8_t* value, uint8_t len) override;
+  hal::StoreResult get(const char* key, uint8_t* out, uint8_t cap, uint8_t& outLen) override;
+  hal::StoreResult erase(const char* key) override;
+
+private:
+  bool ready_ = false;
+};
+
+/// gatelogic::IHttpPort on HTTPClient.
+///
+/// Blocking, bounded by a timeout, and reading the response into a caller
+/// buffer rather than a String: the ESP32's heap is shared with the network
+/// stack, and a call four times a minute that allocates is a heap that
+/// fragments over a season in a cupboard.
+class Esp32HttpPort final : public gatelogic::IHttpPort {
+public:
+  /// `baseUrl` and `authorization` are compiled-in and outlive every call; they
+  /// are held by pointer rather than copied for that reason.
+  Esp32HttpPort(const char* baseUrl, const char* authorization, uint16_t timeoutMs)
+      : baseUrl_(baseUrl), authorization_(authorization), timeoutMs_(timeoutMs) {}
+
+  uint16_t post(const char* path, const char* body, char* out, size_t outCap) override;
+
+private:
+  const char* baseUrl_;
+  const char* authorization_;
+  uint16_t timeoutMs_;
+};
+
+/// The ESP32 task watchdog, on the loop task.
+///
+/// What it is behind: this board's only safety-critical loop obligation is that
+/// the release deadline is checked every pass. Anything that stops loop()
+/// returning — a driver spinning on a peripheral, a network call that never
+/// gives up — stops the lock being taken back, with the door open. A reset
+/// re-runs setup(), which asserts LOCKED before the pin is an output.
+///
+/// Eight seconds: longer than the HTTP timeout plus a whole pass, far shorter
+/// than "never".
+void watchdogBegin(uint8_t seconds);
+
+/// Restart the countdown. Once per pass, from the composition root and never
+/// from inside a driver, where it would hide the stall it exists to end.
+void watchdogKick();
+
+} // namespace esp32_hal
+
+#endif // CRUSADERS_ESP32_HAL_ESP32HAL_H

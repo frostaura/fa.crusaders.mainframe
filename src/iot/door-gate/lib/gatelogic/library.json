@@ -1,0 +1,10 @@
+{
+  "name": "gatelogic",
+  "version": "1.0.0",
+  "description": "Every decision the door gate makes: the wiring table as a compile-time struct, the lock's two polarity questions composed in one place, scanner line assembly, the repeat-scan debounce, the online-first flow and its roster fallback, the release window and its hard cap, and the LED patterns. Knows about a door and nothing else, which is why it is not in shared/lib. No Arduino headers, no heap; compiles for Xtensa and host.",
+  "keywords": "gate, door, lock, relay, scanner, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": { "devapi": "*", "devlink": "*", "eventq": "*", "hal": "*", "roster": "*", "timebase": "*" },
+  "build": { "flags": ["-I include"] }
+}
