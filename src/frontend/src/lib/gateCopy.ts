@@ -124,18 +124,43 @@ export function unnamedGateOfflineNotice(): string {
  *       box — waives no-show penalties on a whole court, and an admin who has read that
  *       notice has every reason to assume this one does something similar.</li>
  * </ol>
+ *
+ * <p>
+ * <b>Renamed from `gateOutOfServiceNotice`, and its last clause rewritten (A1.1, A1.4).</b>
+ * Two changes, one reason each. The NAME: `/admin/devices` shipped this same PATCH behind a
+ * button reading "Take out of service", and a volunteer who shuts a door from one screen and
+ * cannot find how to reopen it from another is the whole cost of two names for one
+ * mechanism — so a door is "shut" and "reopened" everywhere, and a court box keeps "out of
+ * service", where it means something else entirely. The CLAUSE: it used to end "Bookings,
+ * check-ins, refunds and no-show penalties are untouched either way: opening a door is not
+ * attendance", which carries two words the doors programme bans outright — in the negative,
+ * which is the only reason an admin ever learns that a door scan is not a court arrival.
+ * Read literally the ban deletes the denial and leaves the inference it was written to kill,
+ * so the ruling is that the ban is on the CLAIM and the clause is rewritten rather than
+ * dropped. Everything else here is character-for-character what it was, because it was
+ * already right and already pinned.
+ * </p>
  */
-export function gateOutOfServiceNotice(): string {
+export function doorShutNotice(): string {
   return "The club is not alerted about its silence, and the API refuses every scan at this door"
     + " from the instant the switch is thrown. A door that can still reach the API hears that"
     + " refusal and opens for nobody, with no fall back to its roster. A door that has also lost"
     + " the network never hears it, and keeps admitting members with a booking from the roster it"
-    + " last downloaded until that goes stale, which takes up to six hours. Bookings, check-ins,"
-    + " refunds and no-show penalties are untouched either way: opening a door is not attendance.";
+    + " last downloaded until that goes stale, which takes up to six hours. Bookings, refunds and"
+    + " no-show penalties are untouched either way, and a door marks nobody as having arrived.";
 }
 
 /**
- * The confirm label for taking a door out of service.
+ * The one name for the 403 path on a gate, on every screen that offers it (A1.4).
+ *
+ * A court box keeps "Take out of service": there the same switch darkens courts and waives
+ * no-show penalties, which is a different consequence and deserves a different word.
+ */
+export const DOOR_SHUT_LABEL = "Shut this door";
+export const DOOR_REOPEN_LABEL = "Reopen this door";
+
+/**
+ * The confirm label for shutting a door.
  *
  * <p>
  * Shorter than the notice — a confirm has room for one clause per consequence — but it must
@@ -144,11 +169,187 @@ export function gateOutOfServiceNotice(): string {
  * three halves that vary are here, compressed: the reachable door that stops opening, the
  * cut-off door that does not, and the fact that nothing settles.
  * </p>
+ *
+ * <p>
+ * It opens with the words on the button rather than with "Out of service?", which is what it
+ * used to say — a confirm whose first word is not the word on the control it is attached to
+ * reads as a different control.
+ * </p>
  */
-export function gateOutOfServiceConfirm(): string {
-  return "Out of service? A door that can reach the API opens for nobody from this click. One that"
-    + " has also lost the network keeps admitting booked members from its cached roster for up to"
-    + " six hours. No booking, check-in or no-show penalty changes.";
+export function doorShutConfirm(): string {
+  return `${DOOR_SHUT_LABEL}? A door that can reach the API opens for nobody from this click. One`
+    + " that has also lost the network keeps admitting booked members from the list it last"
+    + " downloaded for up to six hours. No booking and no no-show penalty changes, and a door marks"
+    + " nobody as having arrived.";
+}
+
+/**
+ * The confirm label for reopening a door, whose honest half is the OPPOSITE of shutting's.
+ *
+ * <p>
+ * A scan is a pull, so a reachable door opens for members again on the very next scan — there
+ * is nothing to queue, nothing to deliver, and no heartbeat to wait for. Saying "it picks
+ * this up on its next heartbeat" here, as the door editors correctly say of a NAME, would
+ * invent a delay the mechanism does not have.
+ * </p>
+ *
+ * <p>
+ * And the cut-off door inverts: it never stopped admitting booked members from its cached
+ * list, so nothing changes there and the reopen is not news to it.
+ * </p>
+ */
+export function doorReopenConfirm(): string {
+  return `${DOOR_REOPEN_LABEL}? A door that can reach the API opens for members again from the very`
+    + " next scan — there is no wait. A door that has lost the network has been admitting booked"
+    + " members from its cached list all along, and nothing changes there.";
+}
+
+/** "all 4 doors" · "the club's one door" — never "all 1 doors". */
+function allDoors(count: number): string {
+  return count === 1 ? "the club's one door" : `all ${count} doors`;
+}
+
+/**
+ * Shutting every door at once, confirmed.
+ *
+ * <p>
+ * It is one unit of work at the server (W1.5), which is what makes "every door … from this
+ * click" true rather than "some of them, probably". The cut-off half is the same caveat one
+ * door carries, said of the fleet — and it is the half that makes a club-wide shut worth a
+ * per-door result screen instead of a toast.
+ * </p>
+ */
+export function doorFleetShutConfirm(count: number): string {
+  return `Shut ${allDoors(count)}? Every door that can reach the club's server opens for nobody from`
+    + " this click. Any door that has lost the network keeps admitting booked members from the list"
+    + " it last downloaded for up to six hours. No booking and no no-show penalty changes.";
+}
+
+/** Reopening every door the club shut together. Same inversion as {@link doorReopenConfirm}. */
+export function doorFleetReopenConfirm(count: number): string {
+  return `Reopen ${allDoors(count)}? Every door that can reach the club's server opens for members`
+    + " again from the very next scan. A door that has lost the network has been admitting booked"
+    + " members from its cached list all along.";
+}
+
+/**
+ * One result row's confirmed half: the server did it AND this door has been heard from.
+ *
+ * <p>
+ * The age is the one the SERVER saw when it did the work, never recomputed on the client — a
+ * panel left open for ten minutes must not drift "confirmed 12s ago" into "confirmed 10m
+ * ago". The panel is a receipt for an instant, and the instant is in its heading.
+ * </p>
+ */
+export function doorConfirmedLine(heardFrom: string): string {
+  return `confirmed — heard from ${heardFrom}`;
+}
+
+/**
+ * One result row's unknown half, which is NOT a failure.
+ *
+ * <p>
+ * The action succeeded at the server. What is unknown is the door's knowledge of it, which
+ * is why this is a warning and not a danger — rendering it as danger would say the shut
+ * failed, the opposite of true.
+ * </p>
+ *
+ * <p>
+ * <b>Four arms, and the reopen pair is written rather than reused.</b> An unconfirmed SHUT
+ * may still be admitting booked members from its cache; an unconfirmed REOPEN has been
+ * admitting them all along and merely does not yet know it is open again. One sentence for
+ * both would describe one of the two states backwards.
+ * </p>
+ *
+ * @param at the club-time clock face this door was last heard at, or null if it never has been.
+ */
+export function doorNotConfirmedLine(action: "shut" | "reopen", at: string | null): string {
+  if (at === null) {
+    return "NOT CONFIRMED — never heard from. It has never called in, so nothing is known about what"
+      + " it is admitting.";
+  }
+  if (action === "reopen") {
+    return `NOT CONFIRMED — last heard ${at}. It has been admitting booked members from its cached`
+      + " list all along, and it will not know it is open again until it reaches the server.";
+  }
+  return `NOT CONFIRMED — last heard ${at}. It may still admit booked members from its cached list`
+    + " for up to six hours.";
+}
+
+/** What an admin recorded about this door's lock with no power. Never inferred from firmware. */
+export const POWER_LOSS_LABELS: Record<string, string> = {
+  not_established: "not established",
+  released: "released",
+  locked: "locked",
+};
+
+/**
+ * The third line of every result row.
+ *
+ * <p>
+ * It is on the result because a club-wide shut is the moment somebody asks what happens when
+ * the power goes, and the answer is a property of the lock rather than of this software. An
+ * unrecognised value reads as the honest default rather than as a blank: a row with nothing
+ * where this sentence goes is read as "nothing happens".
+ * </p>
+ */
+export function doorPowerLossLine(value: string): string {
+  return `With no power this door is: ${POWER_LOSS_LABELS[value] ?? POWER_LOSS_LABELS.not_established}.`;
+}
+
+/** Said once at the foot of a result that carries any `not_established` door. */
+export function doorPowerLossUnknownFooter(): string {
+  return "Nobody has recorded what these doors do with no power. It is a property of the lock, not"
+    + " of this software, and someone has to look.";
+}
+
+/**
+ * The sentence that closes every shut result, and the one nobody thinks to ask for.
+ *
+ * <p>
+ * An admin shutting every door in a club at once is, in that moment, wondering whether they
+ * have trapped anybody. Nothing on this surface is on the exit path — the doors open from the
+ * inside by hand — and the honest thing is to say so where the click is, not to leave the
+ * question standing.
+ * </p>
+ */
+export function doorExitIsMechanical(): string {
+  return "Getting out is mechanical and none of this touches it: the doors open from the inside by"
+    + " hand, with or without power. A door whose lock is released when the power is off is released"
+    + " whatever this says.";
+}
+
+/**
+ * What a door that is already shut says about itself, above its own control.
+ *
+ * Both halves of the time: `out_of_service_since` is an enrichment, and a payload that does
+ * not carry it still has to say the door is shut. A dangling "It was shut on" with nothing
+ * after it would read as a rendering fault.
+ */
+export function doorShutStandingNotice(name: string, since: string | null): string {
+  const head = `${name} is shut. It opens for nobody that can reach the club's server.`;
+  return since === null ? head : `${head} It was shut on ${since}.`;
+}
+
+/**
+ * The club-wide banner, on every admin route while any door is shut (A1.5 / D5).
+ *
+ * <p>
+ * W1.5 gave shut-all one audit row and a result screen, and gave the club nothing that says
+ * at 05:50 the next morning that the doors are still shut. A volunteer club shuts every door
+ * after an incident and finds out with thirty members outside. There is no timed auto-reopen,
+ * so a standing banner is the only thing that gets the state back into an admin's head.
+ * </p>
+ *
+ * <p>
+ * The second sentence is true only when EVERY door is shut, so it appears only then: a club
+ * with one of four doors shut can still let members in, and telling it otherwise is the
+ * overstatement that teaches admins to ignore the banner.
+ * </p>
+ */
+export function doorsShutBanner(shut: number, total: number): string {
+  const head = `${shut} of ${total} ${total === 1 ? "door" : "doors"} ${shut === 1 ? "is" : "are"} shut.`;
+  return shut >= total ? `${head} Members can't get in.` : head;
 }
 
 /**

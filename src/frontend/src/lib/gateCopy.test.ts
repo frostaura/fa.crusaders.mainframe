@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  GATE_KEY_MAX_LENGTH, GATE_POLICY_LABELS, NEW_GATE_BADGE, UNNAMED_GATE,
-  describeCourtSettingDoorReach, describeDoorBookingHorizon, describeEarlyEntry, describeGate,
-  describeGatePolicy, gateDeleteConfirm, gateOfflineFallbackNotice, gateOutOfServiceConfirm,
-  gateOutOfServiceNotice, unnamedGateOfflineNotice,
+  DOOR_REOPEN_LABEL, DOOR_SHUT_LABEL, GATE_KEY_MAX_LENGTH, GATE_POLICY_LABELS, NEW_GATE_BADGE,
+  UNNAMED_GATE, describeCourtSettingDoorReach, describeDoorBookingHorizon, describeEarlyEntry,
+  describeGate, describeGatePolicy, doorConfirmedLine, doorExitIsMechanical,
+  doorFleetReopenConfirm, doorFleetShutConfirm, doorNotConfirmedLine, doorPowerLossLine,
+  doorPowerLossUnknownFooter, doorReopenConfirm, doorShutConfirm, doorShutNotice,
+  doorShutStandingNotice, doorsShutBanner, gateDeleteConfirm, gateOfflineFallbackNotice,
+  unnamedGateOfflineNotice,
 } from "./gateCopy";
 import { GATE_ACCESS_POLICIES } from "./api";
 import { DOOR_BOOKING_HORIZON_MAX_MINUTES, doorBookingHorizonMinutes } from "./tenantSettings";
@@ -72,16 +75,34 @@ describe("NEW_GATE_BADGE", () => {
  * equality goes red on any edit at all and says nothing about which edit mattered.
  * </p>
  */
-describe("gateOutOfServiceNotice", () => {
+describe("doorShutNotice", () => {
   it("is exactly this", () => {
-    expect(gateOutOfServiceNotice()).toBe(
+    expect(doorShutNotice()).toBe(
       "The club is not alerted about its silence, and the API refuses every scan at this door"
       + " from the instant the switch is thrown. A door that can still reach the API hears that"
       + " refusal and opens for nobody, with no fall back to its roster. A door that has also lost"
       + " the network never hears it, and keeps admitting members with a booking from the roster it"
-      + " last downloaded until that goes stale, which takes up to six hours. Bookings, check-ins,"
-      + " refunds and no-show penalties are untouched either way: opening a door is not attendance.",
+      + " last downloaded until that goes stale, which takes up to six hours. Bookings, refunds and"
+      + " no-show penalties are untouched either way, and a door marks nobody as having arrived.",
     );
+  });
+
+  /**
+   * <b>A1.1: the ban is on the CLAIM, and the denial survives it.</b>
+   *
+   * <p>
+   * P5 bans "attendance" and "check-in". This sentence carried both — in the NEGATIVE, and
+   * that denial is the only place an admin learns that a door scan is not a court arrival.
+   * Read literally, P5 deletes the denial and leaves the inference it was written to kill.
+   * A1.1 rules that the clause is REWRITTEN rather than dropped: same claim, neither token.
+   * </p>
+   */
+  it("still denies that a door records an arrival, without using the banned words", () => {
+    const notice = doorShutNotice();
+    expect(notice).toContain("a door marks nobody as having arrived");
+    expect(notice.toLowerCase()).not.toContain("attendance");
+    expect(notice.toLowerCase()).not.toContain("check-in");
+    expect(notice.toLowerCase()).not.toContain("check in");
   });
 
   /**
@@ -103,7 +124,7 @@ describe("gateOutOfServiceNotice", () => {
    * </p>
    */
   it("says both what a reachable door does and what a cut-off one does", () => {
-    const notice = gateOutOfServiceNotice();
+    const notice = doorShutNotice();
     // The reachable board: refused, and explicitly NOT falling back.
     expect(notice).toContain("can still reach the API hears that refusal and opens for nobody");
     expect(notice).toContain("with no fall back to its roster");
@@ -125,14 +146,14 @@ describe("gateOutOfServiceNotice", () => {
    * from the roster.
    */
   it("says explicitly that nothing settles, because the control beside it does settle", () => {
-    expect(gateOutOfServiceNotice()).toContain(
-      "Bookings, check-ins, refunds and no-show penalties are untouched either way",
+    expect(doorShutNotice()).toContain(
+      "Bookings, refunds and no-show penalties are untouched either way",
     );
   });
 
   /** And none of the court-box vocabulary, none of which is true of a door. */
   it("borrows nothing from the court box's copy", () => {
-    const notice = gateOutOfServiceNotice();
+    const notice = doorShutNotice();
     for (const boxOnly of ["court", "relay", "lights", "refunded in full", "judged as normal"]) {
       expect(notice.toLowerCase()).not.toContain(boxOnly);
     }
@@ -143,21 +164,22 @@ describe("gateOutOfServiceNotice", () => {
  * The confirm is shorter than the notice it produces and must not out-promise it. The box
  * pair disagreed twice, at different call sites, about what the very next click would do.
  */
-describe("gateOutOfServiceConfirm", () => {
+describe("doorShutConfirm", () => {
   it("is exactly this", () => {
-    expect(gateOutOfServiceConfirm()).toBe(
-      "Out of service? A door that can reach the API opens for nobody from this click. One that"
-      + " has also lost the network keeps admitting booked members from its cached roster for up to"
-      + " six hours. No booking, check-in or no-show penalty changes.",
+    expect(doorShutConfirm()).toBe(
+      "Shut this door? A door that can reach the API opens for nobody from this click. One that"
+      + " has also lost the network keeps admitting booked members from the list it last downloaded"
+      + " for up to six hours. No booking and no no-show penalty changes, and a door marks nobody"
+      + " as having arrived.",
     );
   });
 
   it("carries all three halves the notice carries, compressed rather than dropped", () => {
-    const confirm = gateOutOfServiceConfirm();
+    const confirm = doorShutConfirm();
     expect(confirm).toContain("can reach the API opens for nobody");
-    expect(confirm).toContain("cached roster");
+    expect(confirm).toContain("the list it last downloaded");
     expect(confirm).toContain("up to six hours");
-    expect(confirm).toContain("No booking, check-in or no-show penalty changes");
+    expect(confirm).toContain("No booking and no no-show penalty changes");
   });
 
   /**
@@ -166,10 +188,208 @@ describe("gateOutOfServiceConfirm", () => {
    * click cannot keep.
    */
   it("does not claim more than the notice the click produces", () => {
-    const confirm = gateOutOfServiceConfirm();
+    const confirm = doorShutConfirm();
     expect(confirm).not.toContain("stops opening");
     expect(confirm).toContain("has also lost the network");
-    expect(gateOutOfServiceNotice()).toContain("has also lost the network");
+    expect(doorShutNotice()).toContain("has also lost the network");
+  });
+
+  /** A1.1 again: the denial is here too, because the confirm is what an admin actually reads. */
+  it("denies the arrival claim without the banned tokens", () => {
+    expect(doorShutConfirm()).toContain("a door marks nobody as having arrived");
+    expect(doorShutConfirm().toLowerCase()).not.toContain("check-in");
+    expect(doorShutConfirm().toLowerCase()).not.toContain("attendance");
+  });
+
+  /**
+   * <b>A1.4: one name for the 403 path on a gate.</b> `AdminDevices` shipped "Take out of
+   * service" over this same PATCH. Two names for one mechanism is the failure this module's
+   * own header documents, one level up — so the vocabulary is "Shut" / "Reopen" everywhere a
+   * DOOR is meant, and the confirm opens with the words on the button.
+   */
+  it("opens with the words on the button, not with the court box's vocabulary", () => {
+    expect(doorShutConfirm().startsWith(`${DOOR_SHUT_LABEL}?`)).toBe(true);
+    expect(doorShutConfirm()).not.toContain("Out of service");
+    expect(DOOR_SHUT_LABEL).toBe("Shut this door");
+    expect(DOOR_REOPEN_LABEL).toBe("Reopen this door");
+  });
+});
+
+/**
+ * Reopening, whose honest half is the OPPOSITE of shutting's.
+ *
+ * <p>
+ * A scan is a pull, so reopening applies at a reachable door on the very next scan with no
+ * heartbeat wait — there is nothing to queue and nothing to deliver. The cut-off door is the
+ * inverted arm: it never stopped admitting booked members, so "reopened" changes nothing
+ * there and saying "the doors are open again" flatly would be a claim about a board nobody
+ * can reach.
+ * </p>
+ */
+describe("doorReopenConfirm", () => {
+  it("is exactly this", () => {
+    expect(doorReopenConfirm()).toBe(
+      "Reopen this door? A door that can reach the API opens for members again from the very next"
+      + " scan — there is no wait. A door that has lost the network has been admitting booked"
+      + " members from its cached list all along, and nothing changes there.",
+    );
+  });
+
+  it("states both halves, and the reachable half has no wait in it", () => {
+    const confirm = doorReopenConfirm();
+    expect(confirm).toContain("from the very next scan — there is no wait");
+    expect(confirm).toContain("has lost the network has been admitting booked members");
+    // The one thing a reopen must never imply: that anything was delivered to a board.
+    expect(confirm.toLowerCase()).not.toContain("heartbeat");
+  });
+});
+
+describe("the fleet confirms", () => {
+  it("name the count and both halves, shutting", () => {
+    expect(doorFleetShutConfirm(4)).toBe(
+      "Shut all 4 doors? Every door that can reach the club's server opens for nobody from this"
+      + " click. Any door that has lost the network keeps admitting booked members from the list it"
+      + " last downloaded for up to six hours. No booking and no no-show penalty changes.",
+    );
+  });
+
+  it("name the count and both halves, reopening", () => {
+    expect(doorFleetReopenConfirm(4)).toBe(
+      "Reopen all 4 doors? Every door that can reach the club's server opens for members again from"
+      + " the very next scan. A door that has lost the network has been admitting booked members"
+      + " from its cached list all along.",
+    );
+  });
+
+  /** A club with one door reads a sentence about its door, not "all 1 doors". */
+  it("do not say 'all 1 doors' to a club with one door", () => {
+    expect(doorFleetShutConfirm(1)).toContain("the club's one door");
+    expect(doorFleetShutConfirm(1)).not.toContain("all 1");
+    expect(doorFleetReopenConfirm(1)).toContain("the club's one door");
+    expect(doorFleetReopenConfirm(1)).not.toContain("all 1");
+  });
+});
+
+/**
+ * The per-door result lines — W1.5's whole point, and the reason the result is a screen
+ * rather than a toast.
+ *
+ * <p>
+ * The server did the work at the server. Whether a DOOR knows is a separate fact, and the
+ * only evidence for it is how recently that door called in. A result that said "4 doors
+ * shut" and stopped would be true of the database and false of the corridor.
+ * </p>
+ */
+describe("doorConfirmedLine / doorNotConfirmedLine", () => {
+  it("confirmed carries the age the server saw, and the literal the tests pin", () => {
+    expect(doorConfirmedLine("12s ago")).toBe("confirmed — heard from 12s ago");
+  });
+
+  it("not confirmed, having been heard from before, bounds how long it may still admit", () => {
+    expect(doorNotConfirmedLine("shut", "04:12")).toBe(
+      "NOT CONFIRMED — last heard 04:12. It may still admit booked members from its cached list for"
+      + " up to six hours.",
+    );
+  });
+
+  it("not confirmed, never heard from, claims nothing about what it is admitting", () => {
+    expect(doorNotConfirmedLine("shut", null)).toBe(
+      "NOT CONFIRMED — never heard from. It has never called in, so nothing is known about what it"
+      + " is admitting.",
+    );
+  });
+
+  /**
+   * <b>The reopen arm is written, not reused.</b> An unconfirmed SHUT may still be letting
+   * booked members in; an unconfirmed REOPEN has been letting them in all along and does not
+   * yet know it is open. Reusing the shut sentence on a reopen result would describe the
+   * state backwards.
+   */
+  it("inverts on a reopen rather than reusing the shut sentence", () => {
+    expect(doorNotConfirmedLine("reopen", "04:12")).toBe(
+      "NOT CONFIRMED — last heard 04:12. It has been admitting booked members from its cached list"
+      + " all along, and it will not know it is open again until it reaches the server.",
+    );
+    expect(doorNotConfirmedLine("reopen", "04:12")).not.toContain("may still admit");
+  });
+
+  it("says NOT CONFIRMED in words on every arm, because colour is not a signal", () => {
+    for (const at of ["04:12", null]) {
+      for (const action of ["shut", "reopen"] as const) {
+        expect(doorNotConfirmedLine(action, at)).toContain("NOT CONFIRMED");
+      }
+    }
+  });
+});
+
+describe("doorPowerLossLine", () => {
+  it("has one sentence per recorded value and none of them is a blank", () => {
+    expect(doorPowerLossLine("released")).toBe("With no power this door is: released.");
+    expect(doorPowerLossLine("locked")).toBe("With no power this door is: locked.");
+    expect(doorPowerLossLine("not_established")).toBe("With no power this door is: not established.");
+  });
+
+  /**
+   * The default is a real answer, not a placeholder — and the footer says whose job it is,
+   * because §11 and the load-shedding moment both turn on somebody walking to the lock.
+   */
+  it("says the unknown is a property of the lock and that somebody has to look", () => {
+    const footer = doorPowerLossUnknownFooter();
+    expect(footer).toContain("a property of the lock, not of this software");
+    expect(footer).toContain("someone has to look");
+  });
+});
+
+describe("doorExitIsMechanical", () => {
+  it("says getting out is untouched, with or without power", () => {
+    const line = doorExitIsMechanical();
+    expect(line).toContain("Getting out is mechanical");
+    expect(line).toContain("from the inside by hand, with or without power");
+  });
+
+  it("uses none of the words this product refuses", () => {
+    for (const banned of ["lockdown", "secure the building", "attendance", "check-in", "hold open", "operator", "relay"]) {
+      expect(doorExitIsMechanical().toLowerCase()).not.toContain(banned);
+    }
+  });
+});
+
+/**
+ * The standing notice on a door that is already shut, and the club-wide banner (D5 / A1.5).
+ *
+ * <p>
+ * W1.5 gave shut-all a result screen and nothing that says, at 05:50 the next morning, that
+ * the doors are still shut. A volunteer club discovers that state with thirty members
+ * outside. Both halves of the time are stated: a shut door whose `out_of_service_since` the
+ * payload does not carry still says it is shut.
+ * </p>
+ */
+describe("doorShutStandingNotice", () => {
+  it("names the door and when it was shut, where the payload says when", () => {
+    expect(doorShutStandingNotice("front-door", "Tue 19:40")).toBe(
+      "front-door is shut. It opens for nobody that can reach the club's server. It was shut on"
+      + " Tue 19:40.",
+    );
+  });
+
+  it("still says the door is shut when nothing recorded when", () => {
+    const notice = doorShutStandingNotice("front-door", null);
+    expect(notice).toBe("front-door is shut. It opens for nobody that can reach the club's server.");
+    expect(notice).not.toContain("It was shut on");
+    expect(notice).not.toContain("null");
+  });
+});
+
+describe("doorsShutBanner", () => {
+  it("says how many of how many, singular and plural both", () => {
+    expect(doorsShutBanner(1, 4)).toBe("1 of 4 doors is shut.");
+    expect(doorsShutBanner(2, 4)).toBe("2 of 4 doors are shut.");
+  });
+
+  /** The second sentence is only true when EVERY door is shut, so it only appears then. */
+  it("adds that members cannot get in only when every door is shut", () => {
+    expect(doorsShutBanner(4, 4)).toBe("4 of 4 doors are shut. Members can't get in.");
+    expect(doorsShutBanner(3, 4)).not.toContain("Members can't get in");
   });
 });
 
