@@ -34,12 +34,52 @@
 
 namespace gatelogic {
 
-/// The smallest buffer renderGateHeartbeatBody is ever given: the court box's
-/// four keys plus `kind`, and `no_push` when there is one to report.
+/// The smallest buffer renderGateHeartbeatBody is ever given.
+///
+/// The court box's four keys plus `kind` is 96 bytes at this firmware's MAC and
+/// version; `,"no_push":2147483647` is 21 more and `,"events_lost":2147483647`
+/// is 25. 192 holds all of it with 50 to spare, and the renderer refuses rather
+/// than truncating if a future key ever makes that untrue.
 inline constexpr size_t kGateHeartbeatBodyCap = 192U;
 
-/// Renders the `/api/v1/device/heartbeat` body, with `kind` last and `no_push`
-/// after it when it is not zero.
+/// THE TWO SINCE-BOOT COUNTERS THAT RIDE IN THE REQUEST.
+///
+/// Carried as one value rather than as two parameters because they travel
+/// together everywhere — the app counts them, the API call forwards them, the
+/// renderer writes them — and because two adjacent `uint32_t` arguments that
+/// mean different things are two arguments a caller can swap silently.
+///
+/// Both are TOTALS SINCE BOOT, not deltas since the last report: the board has
+/// no way to know which reports the server kept, and a delta that is lost is a
+/// delta nobody can reconstruct. Both saturate at `kMaxDiagnosticCount`.
+struct GateDiagnostics {
+  /// Heartbeats the server accepted whose body carried no usable roster — cut
+  /// short, malformed, or missing the key the contract says is always present.
+  uint32_t noPush;
+
+  /// Events the ring discarded because it was full while this board could not
+  /// reach the API. `EventQueue::overflowed()`.
+  uint32_t eventsLost;
+};
+
+/// No board has anything to report yet.
+constexpr GateDiagnostics quietDiagnostics() {
+  return GateDiagnostics{0U, 0U};
+}
+
+/// Adds one without ever wrapping. See `kMaxDiagnosticCount`.
+constexpr uint32_t saturatingIncrement(uint32_t count) {
+  return count >= kMaxDiagnosticCount ? kMaxDiagnosticCount : count + 1U;
+}
+
+/// Bounds a counter this class did not own — `EventQueue::overflowed()` is a
+/// free-running uint32_t — into what the wire may carry.
+constexpr uint32_t saturate(uint32_t count) {
+  return count > kMaxDiagnosticCount ? kMaxDiagnosticCount : count;
+}
+
+/// Renders the `/api/v1/device/heartbeat` body, with `kind` last and the
+/// diagnostic counters after it, each omitted when it is zero.
 ///
 /// Returns the length written, or 0 — with `out` empty — when it would not fit
 /// or `mac` is missing. Never a truncated body: a half-rendered object is a 400
@@ -50,27 +90,36 @@ inline constexpr size_t kGateHeartbeatBodyCap = 192U;
 /// 49.7-day wrap that made the court box report a two-month-old board as ten
 /// days old.
 ///
-/// WHY `no_push` IS OMITTED AT ZERO, AND WHY IT EXISTS AT ALL
-/// ----------------------------------------------------------
-/// A heartbeat the board accepted whose body carried no usable roster — cut
-/// short by a short read, or missing the key the contract says is always
-/// present — is otherwise COMPLETELY UNOBSERVABLE. The roster silently does not
+/// WHY THE TWO COUNTERS ARE OMITTED AT ZERO, AND WHY THEY EXIST AT ALL
+/// --------------------------------------------------------------------
+/// Both name a loss that is otherwise COMPLETELY UNOBSERVABLE.
+///
+/// `no_push`: a heartbeat the board accepted whose body carried no usable
+/// roster — cut short by a short read, malformed chunk framing, or missing the
+/// key the contract says is always present. The roster silently does not
 /// change, its age silently keeps running, and the one feedback surface on this
 /// board is a lamp that has nothing to say about it. A technician standing at
 /// the door cannot tell that case from a healthy one, and neither can anybody
 /// reading the admin console.
 ///
-/// A distinct LED pattern was considered and rejected: this lamp is what tells
-/// a MEMBER their scan was seen, and a diagnostic blink on it is a refusal
-/// nobody can interpret. So the count rides in the request, where an admin can
-/// read it off the device row.
+/// `events_lost`: the event ring overwrites its oldest entry when it is full,
+/// which on a door offline overnight is an evening of entries the club never
+/// learns about. `EventQueue.h` has promised since it was written that "an
+/// overflow is reported, never silent" — and until round G3 `overflowed()` was
+/// read by NOTHING. 64 slots against a door doing 720 scans an hour is a
+/// counter that moves on the first bad night.
+///
+/// A distinct LED pattern was considered and rejected for both: this lamp is
+/// what tells a MEMBER their scan was seen, and a diagnostic blink on it is a
+/// refusal nobody can interpret. So the counts ride in the request, where an
+/// admin can read them off the device row.
 ///
 /// Omitted at zero because a healthy board is the overwhelming case and the
-/// contract corpus's request vector has no such field: a board that sent
+/// contract corpus's request vector has neither field: a board that sent
 /// `"no_push":0` forever would put a key in every request that nothing on the
 /// wire has agreed to.
 size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const char* firmwareVersion,
-                               uint64_t uptimeMs, uint32_t noPush);
+                               uint64_t uptimeMs, const GateDiagnostics& diagnostics);
 
 /// Reads `gate.unlock_seconds` out of a heartbeat response into `unlockMs`,
 /// clamped into [kMinUnlockMs, kGateConfig.unlockHardCapMs].

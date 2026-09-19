@@ -25,8 +25,27 @@ uint32_t unlockMsFromSeconds(uint32_t seconds, uint32_t hardCapMs) {
   return bounded * 1000UL;
 }
 
+namespace {
+
+/// One `,"key":value` suffix, or an empty string when the count is zero.
+///
+/// Rendered as its own suffix rather than with a conditional format string, so
+/// the healthy body is one literal and stays byte-identical to the contract
+/// corpus's request vector. False when it would not fit, which the caller turns
+/// into a refusal rather than a truncated object.
+bool renderCounter(char* out, size_t cap, const char* key, uint32_t count) {
+  out[0] = '\0';
+  if (count == 0U) {
+    return true;
+  }
+  const int written = snprintf(out, cap, ",\"%s\":%lu", key, static_cast<unsigned long>(saturate(count)));
+  return written >= 0 && static_cast<size_t>(written) < cap;
+}
+
+} // namespace
+
 size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const char* firmwareVersion,
-                               uint64_t uptimeMs, uint32_t noPush) {
+                               uint64_t uptimeMs, const GateDiagnostics& diagnostics) {
   if (out == nullptr || cap == 0U) {
     return 0U;
   }
@@ -44,21 +63,18 @@ size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const cha
     return 0U;
   }
 
-  // Rendered as its own suffix rather than with a conditional format string, so
-  // the healthy body is one literal and stays byte-identical to the contract
-  // corpus's request vector.
-  char diagnostic[24] = {};
-  if (noPush != 0U) {
-    const int suffix =
-        snprintf(diagnostic, sizeof(diagnostic), ",\"no_push\":%lu", static_cast<unsigned long>(noPush));
-    if (suffix < 0 || static_cast<size_t>(suffix) >= sizeof(diagnostic)) {
-      return 0U;
-    }
+  // ORDER IS PART OF THE SHAPE: `no_push` then `events_lost`, both after
+  // `kind`, both absent at zero. The corpus asserts the bytes, not the keys.
+  char noPush[24] = {};
+  char eventsLost[28] = {};
+  if (!renderCounter(noPush, sizeof(noPush), "no_push", diagnostics.noPush) ||
+      !renderCounter(eventsLost, sizeof(eventsLost), "events_lost", diagnostics.eventsLost)) {
+    return 0U;
   }
 
-  const int written =
-      snprintf(out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s,\"kind\":\"gate\"%s}",
-               mac, firmwareVersion, uptime, diagnostic);
+  const int written = snprintf(
+      out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s,\"kind\":\"gate\"%s%s}", mac,
+      firmwareVersion, uptime, noPush, eventsLost);
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     out[0] = '\0';
     return 0U;

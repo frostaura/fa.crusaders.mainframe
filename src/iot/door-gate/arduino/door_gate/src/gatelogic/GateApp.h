@@ -58,8 +58,12 @@
 //                        +  kWorstBlockingCallMs   (one call in flight)
 //                        +  kIdleDelayMs           (the pass tick)
 //
-// With this image's numbers that is 8010 ms over the deadline, and against the
-// 30-second hard cap a worst-case physical release of 38.01 s. The deadline is
+// With this image's numbers that is 12 010 ms over the deadline, and against
+// the 30-second hard cap a worst-case physical release of 42.01 s. It was
+// 8 010 ms and 38.01 s until round G3 gave the response BODY its own budget —
+// a call is three phases now, not two, because sharing one budget between the
+// headers and the body is how a slow evening left a 4.6 KB roster no time at
+// all and took every door offline. The deadline is
 // re-checked with a FRESH clock immediately after every blocking call, which is
 // what keeps it to ONE call rather than a whole pass's worth of them, and there
 // is no way to make it zero short of not making calls while the door is open.
@@ -195,12 +199,18 @@ public:
   /// heartbeat that carried no roster, or whose body was cut short.
   const devlink::SyncResult& lastSync() const { return lastSync_; }
 
-  /// Accepted heartbeats, since boot, whose body carried no usable roster —
-  /// cut short, or missing the key the contract says is always present. Sent in
-  /// the next heartbeat REQUEST as `no_push` when it is not zero, because there
-  /// is nowhere else on this board a technician could see it. See
-  /// GateHeartbeat.h.
+  /// Heartbeats, since boot, that the server answered and from which no roster
+  /// could be adopted — a body cut short, malformed chunk framing, a body that
+  /// did not fit, or one missing the key the contract says is always present.
+  /// Sent in the next heartbeat REQUEST as `no_push` when it is not zero,
+  /// because there is nowhere else on this board a technician could see it.
+  /// Saturates rather than wrapping. See GateHeartbeat.h.
   uint32_t noPushHeartbeats() const { return noPushHeartbeats_; }
+
+  /// The two since-boot counters exactly as the next request will carry them.
+  GateDiagnostics diagnostics() const {
+    return GateDiagnostics{noPushHeartbeats_, saturate(queue_.overflowed())};
+  }
 
 private:
   void pumpScanner();
@@ -217,8 +227,19 @@ private:
   /// acknowledges nothing leaves the head exactly where a 429 does.
   void armEventRetry(bool queueMoved);
 
+  /// Whether the heartbeat would take the pass's one blocking call if it got
+  /// it — the cadence, the radio AND the spacing floor. Leaving the floor out
+  /// is a bound that defers a member's scan to a heartbeat that cannot run.
+  bool heartbeatReady(uint32_t nowMs) const;
+
+  /// Whether the event drain would take the pass's one blocking call if it got
+  /// it. Asked in `pass()` so a busy scanner is bounded against BOTH uploads,
+  /// and asked again inside `pumpEvents` because the pass moves on between the
+  /// two and a fresh clock is the rule everywhere here.
+  bool eventDrainReady(uint32_t nowMs) const;
+
   void pumpHeartbeat();
-  void adoptHeartbeat(uint16_t status);
+  void adoptHeartbeat(const HttpOutcome& outcome);
 
   /// The club took this board out of service. A roster committed EMPTY rather
   /// than abandoned, so `everLoaded()` stays true and the refusal is
@@ -266,6 +287,14 @@ private:
 
   tb::Uptime64 uptime_;
   tb::Deadline heartbeatAt_;
+
+  /// THE FLOOR, armed after every heartbeat ATTEMPT. Whatever re-armed
+  /// `heartbeatAt_` — the cadence, or a link-up edge — no attempt happens
+  /// within `kMinHeartbeatSpacingMs` of the last one. A flapping radio re-arms
+  /// the heartbeat to "now" on every up edge, which without this was one call
+  /// per pass: 179 999 heartbeats in a simulated hour against a cadence of 120.
+  tb::Deadline heartbeatFloorAt_;
+
   uint32_t heartbeatMs_ = kGateConfig.heartbeatMs;
 
   /// When the event drain may next try, and how long it is currently waiting.
@@ -274,13 +303,19 @@ private:
   uint32_t eventBackoffMs_ = 0U;
 
   /// Consecutive passes in which a SCAN took the pass's one blocking call while
-  /// a heartbeat was already due. At kMaxScanPassesBeforeHeartbeat the
-  /// heartbeat goes first, so a scanner that never stops talking cannot hold
-  /// the call budget for ever.
+  /// an UPLOAD — a due heartbeat, or a ready event drain — was waiting for it.
+  /// At kMaxScanPassesBeforeUpload the upload goes first, so a scanner that
+  /// never stops talking cannot hold the call budget for ever.
+  ///
+  /// RESET ON A LINK DROP as well as by an upload that got its call. A board
+  /// whose radio went away carries no debt from before the outage: the four
+  /// passes it had spent deferring were spent against a heartbeat that could
+  /// not have run anyway, and carrying them forward makes the first pass after
+  /// the link returns take the call from a member standing at the door.
   uint8_t scanDeferrals_ = 0U;
 
-  /// Accepted heartbeats that pushed no roster, and whether the watchdog took.
-  /// Both are diagnostics with no effect on any decision this class makes.
+  /// Heartbeats the server answered that pushed no roster. A diagnostic with no
+  /// effect on any decision this class makes; saturating, never wrapping.
   uint32_t noPushHeartbeats_ = 0U;
 
   /// What the last heartbeat said a release should last. The build-flag default

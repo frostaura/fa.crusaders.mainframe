@@ -13,51 +13,272 @@ namespace {
 /// pulling a megabyte through a 4.6 KB buffer to discover it does not fit spends
 /// the call's whole deadline learning something the first header line said.
 /// `<` and not `<=`: the terminator needs a byte too.
-bool declaredLengthFits(int expectedLength, size_t outCap) {
-  return expectedLength == kUnknownBodyLength ||
-         (expectedLength > kUnknownBodyLength && static_cast<size_t>(expectedLength) < outCap);
+bool declaredLengthFits(const BodyFrame& frame, size_t outCap) {
+  return frame.framing != BodyFraming::KnownLength ||
+         (frame.length >= 0 && static_cast<size_t>(frame.length) < outCap);
 }
 
-/// Whether the body is over.
+/// The caller's buffer, filled a byte at a time and NEVER truncated.
+class Sink {
+public:
+  Sink(char* out, size_t cap) : out_(out), cap_(cap) {}
+
+  /// False when the byte would not fit. `out` is EMPTIED rather than left
+  /// holding a plausible half of a document.
+  bool append(uint8_t byte) {
+    if (have_ + 1U >= cap_) {
+      out_[0] = '\0';
+      return false;
+    }
+    out_[have_] = static_cast<char>(byte);
+    ++have_;
+    return true;
+  }
+
+  void terminate() { out_[have_] = '\0'; }
+
+  size_t have() const { return have_; }
+
+private:
+  char* out_;
+  size_t cap_;
+  size_t have_ = 0U;
+};
+
+/// Eight hex digits is the whole of a uint32_t. A ninth is a chunk size no body
+/// on this LAN has and a shift that would silently drop the top of it.
+///
+/// A namespace constant rather than a static member: a `static constexpr`
+/// member ODR-used from anywhere needs an out-of-line definition at gnu++11,
+/// which is the standard the generated sketch compiles at.
+constexpr uint8_t kMaxChunkSizeDigits = 8U;
+
+/// 0-15, or 16 for a byte that is not a hexadecimal digit.
+uint8_t hexValue(uint8_t byte) {
+  if (byte >= '0' && byte <= '9') {
+    return static_cast<uint8_t>(byte - '0');
+  }
+  if (byte >= 'a' && byte <= 'f') {
+    return static_cast<uint8_t>(byte - 'a' + 10);
+  }
+  if (byte >= 'A' && byte <= 'F') {
+    return static_cast<uint8_t>(byte - 'A' + 10);
+  }
+  return 16U;
+}
+
+/// The chunked transfer-coding, one byte at a time.
+///
+/// A BYTE AT A TIME BECAUSE THAT IS WHAT THE SOCKET GIVES. A chunk, a chunk's
+/// size line, and the final `0\r\n\r\n` all arrive split across reads on a real
+/// board — there is one 1489-byte chunk in a full 48-entry heartbeat and the
+/// MTU is 1460 — so a decoder that assumed a whole line was available would be
+/// correct on the bench and wrong at the door. Every state below survives the
+/// stream stopping between any two bytes.
+///
+/// WHAT IT DELIBERATELY DOES NOT DO: chunk extensions are skipped rather than
+/// parsed, and trailer fields are skipped rather than collected. Nothing this
+/// firmware talks to sends either, and a parser for a field nobody sends is a
+/// parser nothing tests.
+class ChunkReader {
+public:
+  enum class Step : uint8_t { More, Done, Malformed, TooLarge };
+
+  explicit ChunkReader(Sink& sink) : sink_(sink) {}
+
+  Step feed(uint8_t byte) {
+    switch (state_) {
+    case State::Size:
+      return feedSize(byte);
+    case State::SizeLf:
+      return expect(byte, '\n', size_ == 0U ? State::Trailer : State::Data);
+    case State::Data:
+      return feedData(byte);
+    case State::DataCr:
+      return expect(byte, '\r', State::DataLf);
+    case State::DataLf:
+      return expect(byte, '\n', State::Size);
+    case State::Trailer:
+      return feedTrailer(byte);
+    case State::TrailerLf:
+      return feedTrailerLf(byte);
+    case State::Done:
+      break;
+    }
+    return Step::Done;
+  }
+
+  bool done() const { return state_ == State::Done; }
+
+private:
+  enum class State : uint8_t { Size, SizeLf, Data, DataCr, DataLf, Trailer, TrailerLf, Done };
+
+  /// The one-byte states, so the switch above stays flat.
+  Step expect(uint8_t byte, char wanted, State next) {
+    if (byte != static_cast<uint8_t>(wanted)) {
+      return Step::Malformed;
+    }
+    state_ = next;
+    if (next == State::Data) {
+      pending_ = size_;
+    }
+    if (next == State::Size) {
+      size_ = 0U;
+      digits_ = 0U;
+      inExtension_ = false;
+    }
+    return Step::More;
+  }
+
+  Step feedSize(uint8_t byte) {
+    if (byte == '\r') {
+      // A size line with no digits at all is not a chunk header. Accepting it
+      // would read the next chunk's DATA as a size.
+      return digits_ == 0U ? Step::Malformed : expect(byte, '\r', State::SizeLf);
+    }
+    if (inExtension_) {
+      return Step::More;
+    }
+    if (byte == ';') {
+      inExtension_ = true;
+      return digits_ == 0U ? Step::Malformed : Step::More;
+    }
+    const uint8_t value = hexValue(byte);
+    if (value > 15U || digits_ >= kMaxChunkSizeDigits) {
+      // Not hex, or more digits than a uint32 can hold. Either way the stream
+      // is not what it claims and there is nothing honest to hand up.
+      return Step::Malformed;
+    }
+    size_ = (size_ << 4) | static_cast<uint32_t>(value);
+    ++digits_;
+    return Step::More;
+  }
+
+  Step feedData(uint8_t byte) {
+    if (!sink_.append(byte)) {
+      return Step::TooLarge;
+    }
+    --pending_;
+    if (pending_ == 0U) {
+      state_ = State::DataCr;
+    }
+    return Step::More;
+  }
+
+  Step feedTrailer(uint8_t byte) {
+    if (byte != '\r') {
+      ++trailerLine_;
+      return Step::More;
+    }
+    state_ = State::TrailerLf;
+    return Step::More;
+  }
+
+  Step feedTrailerLf(uint8_t byte) {
+    if (byte != '\n') {
+      return Step::Malformed;
+    }
+    // An EMPTY trailer line ends the message; a non-empty one was a trailer
+    // field and another line follows it.
+    if (trailerLine_ == 0U) {
+      state_ = State::Done;
+      return Step::Done;
+    }
+    trailerLine_ = 0U;
+    state_ = State::Trailer;
+    return Step::More;
+  }
+
+  Sink& sink_;
+  State state_ = State::Size;
+  uint32_t size_ = 0U;
+  uint32_t pending_ = 0U;
+  uint16_t trailerLine_ = 0U;
+  uint8_t digits_ = 0U;
+  bool inExtension_ = false;
+};
+
+/// Whether an unchunked body is over.
 ///
 /// A declared length is over when it is in. One the peer never declared is over
 /// when the peer has hung up AND has nothing left buffered — a socket closed
 /// with bytes still readable is the end of the connection, not the end of the
 /// body.
-bool bodyIsComplete(IResponseStream& stream, int expectedLength, size_t have) {
-  return expectedLength == kUnknownBodyLength ? (!stream.connected() && stream.available() <= 0)
-                                              : have >= static_cast<size_t>(expectedLength);
+bool plainBodyIsComplete(IResponseStream& stream, const BodyFrame& frame, size_t have) {
+  return frame.framing == BodyFraming::KnownLength ? have >= static_cast<size_t>(frame.length)
+                                                   : (!stream.connected() && stream.available() <= 0);
+}
+
+/// One byte, to whichever framing is in force. False on a failure, which is
+/// written into `failure`; the caller reports it and stops.
+///
+/// Separate from the read loop so neither is over the complexity gate: the loop
+/// owns availability, the deadline and the yield, and this owns what a byte
+/// means.
+bool acceptByte(uint8_t byte, bool chunked, ChunkReader& chunks, Sink& sink, BodyResult& failure) {
+  if (!chunked) {
+    // NEVER TRUNCATED. `Sink::append` empties the buffer rather than keeping a
+    // plausible half of a document.
+    if (sink.append(byte)) {
+      return true;
+    }
+    failure = BodyResult::TooLarge;
+    return false;
+  }
+
+  switch (chunks.feed(byte)) {
+  case ChunkReader::Step::Malformed:
+    failure = BodyResult::Malformed;
+    return false;
+  case ChunkReader::Step::TooLarge:
+    failure = BodyResult::TooLarge;
+    return false;
+  case ChunkReader::Step::More:
+  case ChunkReader::Step::Done:
+    break;
+  }
+  return true;
 }
 
 } // namespace
 
-BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadlineAtMs, int expectedLength,
+BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadlineAtMs, BodyFrame frame,
                     char* out, size_t outCap) {
   if (out == nullptr || outCap == 0U) {
     return BodyResult::TooLarge;
   }
   out[0] = '\0';
-  if (!declaredLengthFits(expectedLength, outCap)) {
+  if (!declaredLengthFits(frame, outCap)) {
     return BodyResult::TooLarge;
   }
 
-  size_t have = 0U;
-  while (!bodyIsComplete(stream, expectedLength, have)) {
+  Sink sink(out, outCap);
+  ChunkReader chunks(sink);
+  const bool chunked = frame.framing == BodyFraming::Chunked;
+
+  while (chunked ? !chunks.done() : !plainBodyIsComplete(stream, frame, sink.have())) {
     if (stream.available() > 0) {
       const int value = stream.read();
       if (value >= 0) {
-        if (have + 1U >= outCap) {
-          // NEVER TRUNCATED. Emptied, so a caller that ignores the result reads
-          // an absent body rather than a plausible half of one.
+        BodyResult failure = BodyResult::Ok;
+        if (!acceptByte(static_cast<uint8_t>(value), chunked, chunks, sink, failure)) {
+          // Emptied, so a caller that ignores the result reads an absent body
+          // rather than a plausible half of one.
           out[0] = '\0';
-          return BodyResult::TooLarge;
+          return failure;
         }
-        out[have] = static_cast<char>(value);
-        ++have;
         continue;
       }
       // available() said yes and read() said no. Not a spin: this falls through
       // to the wait below, where the deadline is checked.
+    }
+
+    // A CHUNKED BODY WHOSE PEER HUNG UP BEFORE THE ZERO-SIZE LINE is a body
+    // that was cut, not one that ended. Reported rather than handed up: that is
+    // exactly the truncation the whole file refuses.
+    if (chunked && !stream.connected() && stream.available() <= 0) {
+      out[0] = '\0';
+      return BodyResult::Malformed;
     }
 
     if (tb::reached(clock.nowMs(), deadlineAtMs)) {
@@ -67,7 +288,7 @@ BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadli
     stream.idle();
   }
 
-  out[have] = '\0';
+  sink.terminate();
   return BodyResult::Ok;
 }
 

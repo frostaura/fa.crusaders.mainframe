@@ -35,6 +35,7 @@
 
 #include "../devlink/ApiBreaker.h"
 #include "../gatelogic/GateFlow.h"
+#include "../gatelogic/GateHeartbeat.h"
 #include "../gatelogic/HttpPort.h"
 
 namespace gatelogic {
@@ -51,14 +52,18 @@ public:
   /// with a FRESH clock read.
   ScanDecision scan(const char* mac, const char* token, uint32_t adoptedUnlockMs, uint32_t hardCapMs);
 
-  /// Heartbeat. The response lands in `out`; the status is returned so the
-  /// caller can decide whether to adopt anything from it.
+  /// Heartbeat. The response lands in `out`.
   ///
-  /// `noPush` is the diagnostic counter of accepted heartbeats that carried no
-  /// usable roster. Omitted from the body when it is zero — see
-  /// GateHeartbeat.h for why it exists and why it is not a lamp pattern.
-  uint16_t heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs, uint32_t noPush,
-                     char* out, size_t outCap);
+  /// RETURNS THE WHOLE OUTCOME, not just the status, because this is the one
+  /// caller that needs to tell "the server answered and its body was unusable"
+  /// apart from "nothing came back": the first is what `no_push` counts and the
+  /// second is not. See HttpOutcome.
+  ///
+  /// `diagnostics` are the two since-boot counters that ride in the request,
+  /// each omitted from the body when it is zero — see GateHeartbeat.h for why
+  /// they exist and why neither is a lamp pattern.
+  HttpOutcome heartbeat(const char* mac, const char* firmwareVersion, uint64_t uptimeMs,
+                        const GateDiagnostics& diagnostics, char* out, size_t outCap);
 
   /// One already-rendered event-upload body. Rendered by the caller because
   /// devlink owns that shape and every firmware renders it identically.
@@ -68,7 +73,7 @@ private:
   /// The one place a call reaches the socket, and the one place the breaker is
   /// taught. A call that never left — an unrenderable body — teaches it
   /// nothing: it says nothing about whether the host is there.
-  uint16_t post(const char* path, const char* body, char* out, size_t outCap);
+  HttpOutcome post(const char* path, const char* body, char* out, size_t outCap);
 
   IHttpPort& http_;
   devlink::ApiBreaker& breaker_;

@@ -81,19 +81,38 @@ void GateApp::pass() {
   // has spent its whole timeout finding out the API is gone. A scanner that
   // never stops talking would otherwise win EVERY pass, and a board that never
   // heartbeats is a board whose roster ages out at six hours and then admits
-  // nobody. So the priority is bounded: after kMaxScanPassesBeforeHeartbeat
-  // consecutive passes in which a scan took the call with a heartbeat already
-  // due, the heartbeat goes first and this pass's scan waits ten milliseconds.
-  const bool heartbeatDue = heartbeatAt_.expired(clock_.nowMs()) && linkUp_;
-  if (heartbeatDue && scanDeferrals_ >= kMaxScanPassesBeforeHeartbeat) {
+  // nobody. So the priority is bounded: after kMaxScanPassesBeforeUpload
+  // consecutive passes in which a scan took the call with an upload waiting,
+  // the upload goes first.
+  //
+  // WHAT THAT COSTS THE MEMBER IN THE FIFTH PASS, MEASURED RATHER THAN GUESSED.
+  // This comment said "waits ten milliseconds". It is one whole blocking call
+  // plus the pass tick — kWorstBlockingCallMs + kIdleDelayMs, 12 010 ms with
+  // this image's numbers — and the measured figure against an 8-second
+  // heartbeat was 8 081 ms. Ten milliseconds is what the scan waits when the
+  // upload it queued behind returns instantly.
+  //
+  // AND BOTH UPLOADS ARE BOUNDED, NOT JUST THE HEARTBEAT. Round G2 bounded the
+  // heartbeat alone; round G3 measured what that left: a scan offered every
+  // 210 ms kept the heartbeat at 116 an hour and let the event drain post
+  // NOTHING for the whole hour, so a night's offline entries sat in a ring
+  // that overwrote its own oldest rows.
+  const uint32_t beforeScanner = clock_.nowMs();
+  const bool heartbeatDue = heartbeatReady(beforeScanner);
+  const bool uploadWaiting = heartbeatDue || eventDrainReady(beforeScanner);
+  if (uploadWaiting && scanDeferrals_ >= kMaxScanPassesBeforeUpload) {
+    // The heartbeat first when both are waiting — it is what keeps the roster
+    // fresh and what hears a 403 — and `blocked_` gives the pass to whichever
+    // of the two actually got it.
     pumpHeartbeat();
+    pumpEvents();
   }
 
   const uint16_t callsBeforeScanner = blockingCalls_;
   pumpScanner();
   const bool scanTookTheCall = blockingCalls_ > callsBeforeScanner;
   pumpLock();
-  if (heartbeatDue && scanTookTheCall && scanDeferrals_ < kMaxScanPassesBeforeHeartbeat) {
+  if (uploadWaiting && scanTookTheCall && scanDeferrals_ < kMaxScanPassesBeforeUpload) {
     ++scanDeferrals_;
   }
 
@@ -305,8 +324,18 @@ void GateApp::pumpLink() {
   if (up) {
     // Immediately, not after a full interval: the heartbeat is what fills the
     // roster, and until it has, an offline scan is refused.
+    //
+    // `heartbeatFloorAt_` is what stops this being a hammer. A door at the edge
+    // of the AP's range re-arms this on every pass, and without the floor that
+    // was 179 999 calls in a simulated hour against a cadence of 120.
     heartbeatAt_.arm(clock_.nowMs(), 0U);
+    return;
   }
+  // THE RADIO WENT AWAY. The deferral debt goes with it: those passes were
+  // spent deferring an upload that could not have run, and carrying them
+  // forward makes the first pass after the link returns take the blocking call
+  // from a member standing at the door.
+  scanDeferrals_ = 0U;
 }
 
 void GateApp::pumpLed() {
@@ -315,17 +344,40 @@ void GateApp::pumpLed() {
 
 // --- the two uploads --------------------------------------------------------
 
+bool GateApp::heartbeatReady(uint32_t nowMs) const {
+  // THE FLOOR IS PART OF "READY", and it is here for a TESTABILITY reason
+  // rather than a behavioural one — said plainly, because a comment claiming a
+  // fix nothing can demonstrate is worse than no comment.
+  //
+  // Behaviourally it changes nothing: a forced branch that gives the pass to a
+  // heartbeat the floor then refuses is a no-op, and the scan happens anyway
+  // two lines later. What it changes is what `uploadWaiting` MEANS. A link-up
+  // edge arms `heartbeatAt_` to "now" and `pumpHeartbeat` returns at the floor
+  // without re-arming, so after any link edge `expired()` alone stays true for
+  // up to kMinHeartbeatSpacingMs — which made `uploadWaiting` permanently true
+  // in every scenario with a flapping radio, and therefore made the E3 bound on
+  // the EVENT drain impossible to distinguish from the round-G2 code that did
+  // not have it. A predicate that is always true proves nothing.
+  return heartbeatAt_.expired(nowMs) && linkUp_ && heartbeatFloorAt_.remaining(nowMs) == 0U;
+}
+
+bool GateApp::eventDrainReady(uint32_t nowMs) const {
+  // Everything pumpEvents checks EXCEPT `blocked_`, which is about this pass
+  // rather than about the drain: `pass()` asks this before anything has taken
+  // the call, to decide whether a busy scanner is starving an upload.
+  //
+  // THE BACKOFF IS PART OF "READY". A drain that is backed off is not waiting
+  // for the pass's call and must not make a member's scan wait for one.
+  return linkUp_ && !queue_.empty() && !breaker_.open(nowMs) && eventsAt_.remaining(nowMs) == 0U;
+}
+
 void GateApp::pumpEvents() {
   const uint32_t now = clock_.nowMs();
-  if (blocked_ || !linkUp_ || queue_.empty() || breaker_.open(now)) {
-    return;
-  }
-
   // THE BACKOFF. Disarmed on a healthy board, so this costs nothing; armed by
   // the last post that left the head event exactly where it was. Without it,
   // an endpoint that refuses-and-keeps is a hot loop — which is what starved
   // the heartbeat, and what hammered the API.
-  if (eventsAt_.remaining(now) > 0U) {
+  if (blocked_ || !eventDrainReady(now)) {
     return;
   }
 
@@ -348,6 +400,11 @@ void GateApp::pumpEvents() {
 
   char response[192] = {};
   const uint16_t held = queue_.size();
+  // AN UPLOAD IS TAKING THE PASS, so the scanner owes nothing. Cleared here as
+  // well as in pumpHeartbeat because the bound covers both uploads: counting
+  // only the passes the HEARTBEAT lost is how the drain went a measured hour
+  // without posting anything while the heartbeat kept its cadence.
+  scanDeferrals_ = 0U;
   beforeBlocking();
   const uint16_t status = api_.uploadEvent(body, response, sizeof(response));
   afterBlocking();
@@ -396,6 +453,23 @@ void GateApp::applyEventReaction(uint16_t status, const char* response) {
     return;
   }
 
+  if (status == 404U) {
+    // A 404 ON `/events` IS NOT A REJECTION, AND `devapi::react` SAYS IT IS.
+    //
+    // That mapping is right for the court box — a 4xx the box caused, drop it —
+    // and it is shared, so it is not changed here. On THIS route a 404 has one
+    // production meaning: the API did not recognise this MAC, because the
+    // device row was deleted from the console. The board re-registers on its
+    // next heartbeat and the very same event is accepted, so dropping it throws
+    // away an evening of door entries to save twelve requests an hour.
+    //
+    // The other way to get one is a proxy path that does not reach the API at
+    // all — a base URL with a trailing slash, a misconfigured route — which is
+    // a fault a person fixes and in the meantime is an outage, not a refusal.
+    // Both readings want the event KEPT, at the backoff's pace.
+    return;
+  }
+
   switch (devapi::react(status)) {
   case devapi::Reaction::Accepted: {
     uint32_t through = 0U;
@@ -422,6 +496,21 @@ void GateApp::pumpHeartbeat() {
     return;
   }
 
+  // THE FLOOR, AND IT IS ABOUT THE PREVIOUS ATTEMPT RATHER THAN THE CADENCE.
+  //
+  // `pumpLink` re-arms `heartbeatAt_` to "now" on every link-UP edge, which is
+  // right — the heartbeat is what fills the roster, and until it has, an
+  // offline scan is refused. On a door at the edge of the AP's range it is also
+  // one heartbeat per pass: 179 999 in a simulated hour against a cadence of
+  // 120, an API the club would read as an attack.
+  //
+  // Armed from the ATTEMPT below, not from its success, because a call that
+  // fails must not be retried faster than one that succeeds — a refusing host
+  // is exactly the case a flapping radio produces.
+  if (heartbeatFloorAt_.remaining(now) > 0U) {
+    return;
+  }
+
   // THE HEARTBEAT IGNORES THE BREAKER, DELIBERATELY, AND THIS IS WHAT IT COSTS.
   // It is the probe the breaker closes on: gated by it, a board that lost the
   // API once would never find out it was back. The price is that against a dead
@@ -433,9 +522,15 @@ void GateApp::pumpHeartbeat() {
   // passes the heartbeat actually LOST rather than passes that went by.
   scanDeferrals_ = 0U;
   heartbeatBody_[0] = '\0';
+  // THE FLOOR IS ARMED BEFORE THE CALL, from the instant of the ATTEMPT. It is
+  // the one deadline on this board that is deliberately not sampled afterwards:
+  // arming it from after a four-second call would make the spacing four seconds
+  // longer than it says, and the spacing is a bound on request RATE rather than
+  // a gap the board owes anybody.
+  heartbeatFloorAt_.arm(clock_.nowMs(), kMinHeartbeatSpacingMs);
   beforeBlocking();
-  const uint16_t status = api_.heartbeat(mac_, firmwareVersion_, uptime_.value(), noPushHeartbeats_,
-                                         heartbeatBody_, heartbeatBodyCap_);
+  const HttpOutcome outcome = api_.heartbeat(mac_, firmwareVersion_, uptime_.value(), diagnostics(),
+                                             heartbeatBody_, heartbeatBodyCap_);
   afterBlocking();
 
   // ARMED AFTER THE CALL. Armed before it, the call's own duration comes out of
@@ -444,7 +539,7 @@ void GateApp::pumpHeartbeat() {
   // its whole worst case — every twenty-two.
   heartbeatAt_.arm(clock_.nowMs(), heartbeatMs_);
 
-  adoptHeartbeat(status);
+  adoptHeartbeat(outcome);
 }
 
 void GateApp::commitEmptyRoster() {
@@ -465,16 +560,30 @@ void GateApp::commitEmptyRoster() {
   roster_.commitReplace();
 }
 
-void GateApp::adoptHeartbeat(uint16_t status) {
-  if (status == 403U) {
+void GateApp::adoptHeartbeat(const HttpOutcome& outcome) {
+  if (outcome.status == 403U) {
     commitEmptyRoster();
     return;
   }
 
-  if (devapi::react(status) != devapi::Reaction::Accepted) {
-    // Transient, refused, or a key the tenant does not know. Nothing to adopt
-    // and nothing to do but keep the cadence: the heartbeat IS the probe the
-    // breaker closes on, and a board whose key is wrong is fixed by a reflash.
+  if (devapi::react(outcome.status) != devapi::Reaction::Accepted) {
+    // A BODY THAT DID NOT ARRIVE ON AN OTHERWISE-ACCEPTED HEARTBEAT IS A
+    // NO-PUSH, AND ROUND G2 MADE IT THE QUIETEST PATH IN THE FIRMWARE.
+    //
+    // Before G2 an over-long body was truncated, `applyRoster` refused it, and
+    // the counter below moved. After G2 it became status 0 — correctly, a
+    // transport failure — and this early return skipped the count, so the one
+    // diagnostic that exists to say "the roster is not being refreshed" went
+    // silent in exactly the case it was built for. `peerStatus` is what tells
+    // that apart from a host that never answered, which is not a no-push and
+    // must not inflate the number an admin reads off the device row.
+    if (bodyFailed(outcome) && devapi::react(outcome.peerStatus) == devapi::Reaction::Accepted) {
+      noPushHeartbeats_ = saturatingIncrement(noPushHeartbeats_);
+    }
+    // Otherwise: transient, refused, or a key the tenant does not know. Nothing
+    // to adopt and nothing to do but keep the cadence — the heartbeat IS the
+    // probe the breaker closes on, and a board whose key is wrong is fixed by a
+    // reflash.
     return;
   }
 
@@ -493,7 +602,7 @@ void GateApp::adoptHeartbeat(uint16_t status) {
     // nothing to say about it — so the count goes out in the next request,
     // where an admin can read it off the device row. Counted rather than acted
     // on: it changes no decision here.
-    ++noPushHeartbeats_;
+    noPushHeartbeats_ = saturatingIncrement(noPushHeartbeats_);
   }
   // Takes effect from the NEXT arm. The one above already used the old value,
   // which is a one-interval delay and not worth a re-arm that could shorten

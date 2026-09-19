@@ -35,8 +35,16 @@ Copy `secrets.h.example` to `secrets.h` — in **this** folder, beside
 | Value | What it is |
 |---|---|
 | `WIFI_SSID` / `WIFI_PASSWORD` | The club WiFi. The board takes a DHCP lease; there is no static-IP option. |
-| `API_BASE_URL` | The backend's **LAN IPv4 ADDRESS** and port, `http://` only, no trailing slash — e.g. `http://192.168.1.10:8088`. The sketch `static_assert`s all of that and will not compile otherwise. A **hostname** is an unbounded DNS wait (16 s, then 15 s) that no HTTP timeout covers, so every heartbeat would reset the board; `https://` is accepted by the HTTP client and then sent in **cleartext** to port 443; a trailing slash produces `//api/v1/...` and a 404 that reads at the door as an outage. Not the public tunnel hostname either: that sends every scan out to Cloudflare and back while somebody stands at the door. |
+| `API_BASE_URL` | The backend's **LAN IPv4 ADDRESS** and port, `http://` only, no trailing slash — e.g. `http://192.168.1.10:8088`. The sketch `static_assert`s all of that and will not compile otherwise. A **hostname** is an unbounded DNS wait (16 s, then 15 s) that no HTTP timeout covers, so every heartbeat would reset the board; `https://` is accepted by the HTTP client and then sent in **cleartext** to port 443; a trailing slash produces `//api/v1/...` and a 404 that reads at the door as an outage; `0.0.0.0` is the example file's own placeholder and `255.255.255.255` is the broadcast address, and both are refused. Not the public tunnel hostname either: that sends every scan out to Cloudflare and back while somebody stands at the door. |
 | `DEVICE_API_KEY` | The tenant's device API key, from the admin Devices page. Goes out as `Authorization: Bearer <key>`. |
+
+**Every value in `secrets.h.example` is a placeholder, and every placeholder is
+a compile error.** The file used to ship plausible values — a real-looking SSID
+and LAN address — which compile, flash, and produce a board that joins nothing
+and posts to a machine that is not the club's. There is one LED on this
+hardware, so that board and a board whose server is down look identical from the
+bottom of the ladder. If the Upload fails with `static assertion failed: …
+placeholder`, that is this guard: fill the value in.
 
 Regenerating the key on the Devices page invalidates the old one
 **immediately**, so a regeneration is a reflash of **every** board that carries
@@ -84,7 +92,7 @@ and re-run `make arduino-export`.**
 | `GATE_LED_ACTIVE_HIGH` | 1 | 1 if HIGH lights it. |
 | `GATE_UNLOCK_DEFAULT_MS` | 3000UL | Release time until the first heartbeat tells the board the club's own. |
 | `GATE_UNLOCK_HARD_CAP_MS` | 30000UL | A safety bound, not a default: the lock can never stay released longer than this, whatever the server answers and however often somebody scans. |
-| `GATE_WATCHDOG_SECONDS` | 12 | Task watchdog period. |
+| `GATE_WATCHDOG_SECONDS` | 15 | Task watchdog period. |
 | `HEARTBEAT_INTERVAL_MS` | 30000UL | Starting cadence. The tenant's own is adopted from the first response. |
 | `ROSTER_MAX_AGE_MS` | 21600000UL | 6 h. A roster older than this admits **nobody**, however good the match looks. |
 
@@ -148,8 +156,17 @@ inverts the firmware's whole idea of the door.
 
 After an Upload with the board on the club WiFi, expect two quick blinks and
 then a dark lamp, and the board appears on the admin **Devices** page by itself
-within one heartbeat as `Kind=Gate`. A lamp blinking slowly forever is a radio
-that never associated: check `WIFI_SSID` and `WIFI_PASSWORD` in `secrets.h`.
+within one heartbeat as `Kind=Gate`.
+
+## When something is wrong
+
+| What you see | What it is |
+|---|---|
+| A slow 1 Hz blink that never stops | The radio never associated. Check `WIFI_SSID` and `WIFI_PASSWORD` in `secrets.h`. The door still opens for a member with a rostered booking until the roster goes stale. |
+| A fast 4 Hz blink | The task watchdog refused to arm after three tries. The door is unaffected and still opens; the board is running on the core's 5 s watchdog instead of its own. Report it. |
+| **The lamp stays dark and the board never appears on the Devices page** | Nothing is running. In order: is the board powered and is `GATE_LED_PIN` the pin the lamp is actually on? Open **Tools → Serial Monitor at 115200** and press the board's RESET — one line naming the firmware version, the MAC and the API address should appear. **No line at all** means the Upload did not take (wrong **Port**, or a board that needs BOOT held) or the sketch is not running. **A line, but nothing on the Devices page** means the MAC is reaching no server: check the `api=` address on that line against where the backend actually is, and that the board and the backend are on the same LAN. |
+| The Upload fails on `static assertion failed` | A value in `secrets.h` is still the example file's placeholder, or `API_BASE_URL` is not `http://` + an IPv4 address. The message names which. |
+| The Upload fails with hundreds of `redefinition of …` errors | **iCloud Drive.** A synced folder fabricates numbered duplicates — `Json 2.cpp`, `GateApp 2.h` — and the IDE compiles **every** `.cpp` under `src/` recursively, so each duplicate is a second definition. They are invisible in Finder's default view and are never committed. From the repository root: `make sweep-icloud`. By hand, from this sketch folder: `find . -name '* [0-9].*' -print -delete` and then `find . -name '* [0-9]' -print -delete`. Then Upload again. |
 
 ## What is inside this sketch
 

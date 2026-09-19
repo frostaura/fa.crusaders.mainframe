@@ -140,19 +140,30 @@ private:
 /// `gatelogic::readBody`, which is pure and host-tested; a body that does not
 /// fit or does not arrive is reported as status 0 — a transport failure, which
 /// sends a scan to the roster — and never as a short body.
+///
+/// AND IT ASKS FOR A FRAMING IT CAN READ. `useHTTP10(true)` + `setReuse(false)`
+/// make the real API answer close-delimited instead of `Transfer-Encoding:
+/// chunked` on a socket it holds open — which, with a reader that stops when
+/// the peer closes, was every call timing out on a real board: no roster, and a
+/// door that refused everyone. `collectHeaders("Transfer-Encoding")` is the
+/// belt-and-braces half, because `getSize()` is -1 for a chunked body and a
+/// close-delimited one alike and a proxy may re-chunk anyway.
 class Esp32HttpPort final : public gatelogic::IHttpPort {
 public:
   /// `baseUrl` and `authorization` are compiled-in and outlive every call; they
   /// are held by pointer rather than copied for that reason.
   ///
-  /// The two timeouts are SEPARATE because the core applies them separately —
-  /// one bounds the TCP connect, the other bounds waiting for bytes — and a
-  /// call can spend both. `gatelogic::kWorstBlockingCallMs` is their sum.
+  /// The three budgets are SEPARATE because the phases are: the core bounds the
+  /// TCP connect with `setConnectTimeout` and the header phase with
+  /// `setTimeout`, and this firmware bounds the body itself.
+  /// `gatelogic::kWorstBlockingCallMs` is their sum.
   ///
-  /// The CLOCK is here because the body phase takes an absolute deadline
-  /// computed from the instant the whole call started: `setTimeout` is an
-  /// inter-byte timeout and a peer that dribbles resets it on every byte, so a
-  /// body read bounded by it is not bounded at all.
+  /// The CLOCK is here because the body phase takes an absolute deadline,
+  /// sampled AFTER the headers return: `setTimeout` is an inter-byte timeout
+  /// and a peer that dribbles resets it on every byte, so a body read bounded
+  /// by it is not bounded at all — and a body deadline sampled before the call
+  /// started, which is what round G2 did, is a deadline a slow header phase can
+  /// spend in full before the body has a chance.
   ///
   /// WHAT IS STILL NOT BOUNDED: HTTPClient's own header loop, inside `POST()`,
   /// uses that same inter-byte timeout and cannot be interrupted from here. A
@@ -162,7 +173,7 @@ public:
   Esp32HttpPort(const char* baseUrl, const char* authorization, hal::IClock& clock)
       : baseUrl_(baseUrl), authorization_(authorization), clock_(clock) {}
 
-  uint16_t post(const char* path, const char* body, char* out, size_t outCap) override;
+  gatelogic::HttpOutcome post(const char* path, const char* body, char* out, size_t outCap) override;
 
 private:
   const char* baseUrl_;
