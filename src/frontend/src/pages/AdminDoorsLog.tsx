@@ -101,7 +101,14 @@ export function AdminDoorsLogPage() {
    */
   const [activeFilters, setActiveFilters] = useState<DoorLogFilters | null>(null);
   const appendedRef = useRef<HTMLLIElement>(null);
-  const appendedFrom = useRef(0);
+  /**
+   * Which row "Load older scans" appended first — state, not a ref.
+   *
+   * A ref read during render is exactly what `react-hooks/refs` refuses, and it refuses it
+   * for a real reason: the value a ref holds mid-render is whatever the last commit left
+   * there, so the row that got the focus ref could be a row from the previous page.
+   */
+  const [appendedFrom, setAppendedFrom] = useState(0);
   const base = useId();
 
   const query = params.toString();
@@ -153,7 +160,7 @@ export function AdminDoorsLogPage() {
     setOlderFailed(false);
     try {
       const page = await doorEndpoints.doorActivity({ ...(activeFilters ?? filtersOf(params)), cursor });
-      appendedFrom.current = rows?.length ?? 0;
+      setAppendedFrom(rows?.length ?? 0);
       setRows([...(rows ?? []), ...page.items]);
       setCursor(page.next_cursor);
     } catch {
@@ -294,7 +301,7 @@ export function AdminDoorsLogPage() {
                       entry={entry}
                       now={now}
                       doorName={entry.door.gate_key ?? entry.door.name}
-                      innerRef={i > 0 && i === appendedFrom.current ? appendedRef : undefined}
+                      innerRef={i > 0 && i === appendedFrom ? appendedRef : undefined}
                     />
                   ))}
                 </ul>

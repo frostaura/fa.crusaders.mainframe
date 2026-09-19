@@ -279,8 +279,10 @@ export default function Layout() {
                           onClick={() => { setMenuOpen(false); nav("/admin/doors"); }}
                           icon={<DoorClosed size={16} />}
                           label="Doors"
-                          badge={doorsNeedingAttention}
-                          badgeLabel={`${doorsNeedingAttention} ${doorsNeedingAttention === 1 ? "door needs" : "doors need"} attention`}
+                          badge={{
+                            count: doorsNeedingAttention,
+                            label: `${doorsNeedingAttention} ${doorsNeedingAttention === 1 ? "door needs" : "doors need"} attention`,
+                          }}
                         />
                         <MenuItem
                           onClick={() => { setMenuOpen(false); nav("/admin/devices"); }}
@@ -385,15 +387,18 @@ function NavTab({ to, label, badge = 0 }: { to: string; label: string; badge?: n
 }
 
 function MenuItem({
-  onClick, icon, label, tone = "default", badge = 0, badgeLabel,
+  onClick, icon, label, tone = "default", badge,
 }: {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
   tone?: "default" | "danger";
-  /** doors: admin — the same numeric pill NavTab uses, on the same terms: zero renders nothing. */
-  badge?: number;
-  badgeLabel?: string;
+  /**
+   * doors: admin — the same numeric pill NavTab uses, on the same terms: a zero renders
+   * nothing. The count and its sentence travel together because they are one thing and
+   * because two flat props put this signature over the complexity gate's parameter bound.
+   */
+  badge?: { count: number; label: string };
 }) {
   return (
     <button
@@ -409,15 +414,15 @@ function MenuItem({
     >
       <span className="text-text-muted">{icon}</span>
       <span>{label}</span>
-      {badge > 0 && (
+      {badge && badge.count > 0 && (
         // The digits are decoration; the sentence is the name. Same rule as NavTab's badge —
         // "2" beside the word "Doors" means nothing to a screen reader.
         <span
           className="ml-auto inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-info-soft text-info-strong text-xs font-semibold tabular-nums"
-          aria-label={badgeLabel}
-          title={badgeLabel}
+          aria-label={badge.label}
+          title={badge.label}
         >
-          {badge}
+          {badge.count}
         </span>
       )}
     </button>

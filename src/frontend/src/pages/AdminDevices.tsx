@@ -557,20 +557,26 @@ type BoxEditing = {
   walkUpMax: number | null;
 };
 
+/**
+ * When this board counts as deaf, and the instant that is judged against.
+ *
+ * One prop rather than two because they are one question, and because seven flat props put
+ * `DeviceRow` over the complexity gate's parameter bound the moment a ticking clock arrived.
+ */
+type Liveness = { offlineAfter: number; now: number };
+
 function DeviceRow({
-  device, boxEditing, actions, offlineAfter, coverage, now,
+  device, boxEditing, actions, liveness, coverage,
 }: {
   device: AdminDevice;
   boxEditing: BoxEditing;
   actions: DeviceActions;
-  /** Seconds since the last beat before this board is offline. See offlineAfterSecondsFor. */
-  offlineAfter: number;
+  liveness: Liveness;
   /** What each of this box's courts would be left with without it. See lib/deviceCoverage. */
   coverage: CourtCoverage;
-  /** One instant per paint, from the page's single ticker. */
-  now: number;
 }) {
-  const online = isOnline(device, offlineAfter, now);
+  const { now } = liveness;
+  const online = isOnline(device, liveness.offlineAfter, now);
   const [editing, setEditing] = useState<"details" | "buttons" | null>(null);
   // Presence-gated: an API that does not send the field gets no editor for it.
   const hasOwnMapField = device.button_map !== undefined;
@@ -1023,8 +1029,7 @@ export function AdminDevicesPage() {
                     key={device.id} device={device}
                     boxEditing={{ courts, clubMap: buttonMap, walkUpMax: walkUpCap }}
                     actions={actionsFor(device, coverage)} coverage={coverage}
-                    offlineAfter={offlineAfterSecondsFor(device, tenantHeartbeat)}
-                    now={now}
+                    liveness={{ offlineAfter: offlineAfterSecondsFor(device, tenantHeartbeat), now }}
                   />
                 );
               })}

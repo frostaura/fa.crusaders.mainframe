@@ -56,16 +56,33 @@ export function useDoorsChrome(enabled: boolean, routeKey: string): DoorsChrome 
   return chrome;
 }
 
+/**
+ * Silent, then shut, then unnamed — the same order the doors page puts its tiles in.
+ *
+ * <p>
+ * It matters because the Home row and the gear's tooltip NAME one door and count the rest,
+ * and a cue that names the least urgent of three is a cue that sends an admin to the wrong
+ * board. A door nobody can reach outranks one the club shut on purpose, which outranks one
+ * that merely has a job waiting.
+ * </p>
+ */
+function rank(online: boolean, enabled: boolean, named: boolean): number {
+  if (enabled && !online) return 0;
+  if (!enabled) return 1;
+  return named ? 3 : 2;
+}
+
 function summarise(view: DoorsView): DoorsChrome {
   const now = Date.now();
-  const attention: string[] = [];
+  const ranked: { rank: number; reason: string }[] = [];
   for (const row of view.doors) {
     const online = isOnline(row.device, offlineAfterSecondsFor(row.device, null), now);
     const reason = doorNeedsAttention(row.device, online);
-    if (reason) attention.push(reason);
+    if (reason) ranked.push({ rank: rank(online, row.device.enabled, row.device.gate_key !== null), reason });
   }
+  ranked.sort((a, b) => a.rank - b.rank);
   return {
-    attention,
+    attention: ranked.map((entry) => entry.reason),
     shut: view.doors.filter((row) => !row.device.enabled).length,
     total: view.doors.length,
   };

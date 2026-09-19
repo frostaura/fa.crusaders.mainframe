@@ -713,15 +713,142 @@ function doorOutcomeOf(entry: Record<string, unknown>): string[] {
   return buckets;
 }
 
+/** Everything one doors server is holding, so its three jobs can be functions rather than closures. */
+type DoorsState = {
+  doors: Record<string, unknown>[];
+  activity: Record<string, unknown>[];
+  rows: Record<string, DoorsServerRow>;
+  retentionDays: number;
+  pageSize: number;
+  timezone: string;
+  dayStartedAt: string;
+  /** Which doors a shut-all shut, which is what makes reopen-all selective. */
+  shutByFleet: Set<string>;
+};
+
+/** `GET /admin/doors`. */
+function doorsView(state: DoorsState) {
+  return {
+    day_started_at: state.dayStartedAt,
+    timezone: state.timezone,
+    shut_all_active: state.doors.some((d) => d.enabled === false && state.shutByFleet.has(String(d.id))),
+    doors: [...state.doors]
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      .map((device) => ({
+        device,
+        // `?? ` would turn an EXPLICIT null — the count failed — back into a zero, which is
+        // the very defect the page's copy exists to avoid. Absent means "not interesting to
+        // this test"; null means "the server could not count".
+        today: "today" in (state.rows[String(device.id)] ?? {})
+          ? state.rows[String(device.id)].today
+          : { released: 0, refused: 0 },
+        signals: state.rows[String(device.id)]?.signals ?? [],
+      })),
+  };
+}
+
+/**
+ * `POST /admin/doors/shut-all` and `/reopen-all` — one unit of work over every gate.
+ *
+ * <b>reopen-all reopens only what a shut-all shut.</b> A door an admin shut on its own stays
+ * shut, or the club-wide control quietly undoes an individual decision — which is a rule a
+ * canned `{doors: [...]}` body could never hold a page to.
+ */
+function applyFleet(state: DoorsState, enabled: boolean) {
+  const at = new Date().toISOString();
+  state.doors = state.doors.map((d) => {
+    if (enabled) {
+      if (!state.shutByFleet.has(String(d.id))) return d;
+      state.shutByFleet.delete(String(d.id));
+      return { ...d, enabled: true, out_of_service_since: null };
+    }
+    if (d.enabled === false) return d;
+    state.shutByFleet.add(String(d.id));
+    return { ...d, enabled: false, out_of_service_since: at };
+  });
+  return {
+    doors: state.doors.map((d) => ({
+      id: d.id, name: d.name, gate_key: d.gate_key, enabled: d.enabled,
+      last_seen_at: d.last_seen_at,
+      offline_after_seconds: d.offline_after_seconds ?? 180,
+      power_loss_behaviour: d.power_loss_behaviour ?? "not_established",
+    })),
+  };
+}
+
+/** Whether one log row survives the filters in this query string. */
+function matchesLogFilters(entry: Record<string, unknown>, query: URLSearchParams, floor: number): boolean {
+  const at = new Date(String(entry.at)).getTime();
+  const entryDoor = (entry.door ?? {}) as Record<string, unknown>;
+  const door = query.get("door");
+  const outcome = query.get("outcome");
+  const from = query.get("from");
+  const to = query.get("to");
+  if (door && String(entryDoor.id) !== door) return false;
+  if (outcome && !doorOutcomeOf(entry).includes(outcome)) return false;
+  // The retention clamp the API applies, so a page that states a range states a real one.
+  if (from && at < Math.max(new Date(from).getTime(), floor)) return false;
+  if (to && at > new Date(to).getTime()) return false;
+  return at >= floor;
+}
+
+/** `GET /admin/doors/activity`, cursor-paged. */
+function doorsLogPage(state: DoorsState, path: string) {
+  const query = new URLSearchParams(path.split("?")[1] ?? "");
+  const floor = Date.now() - state.retentionDays * 86_400_000;
+  const matched = state.activity.filter((entry) => matchesLogFilters(entry, query, floor));
+  const start = Number(query.get("cursor") ?? 0);
+  const next = start + state.pageSize;
+  return {
+    items: matched.slice(start, next),
+    // `matched.length > next` rather than `next < matched.length`: a bare `<` in a .tsx file
+    // is read as the start of a JSX tag by lizard's lexer, which then swallows every
+    // function below it into one. See the note inside `stubFetch`.
+    next_cursor: matched.length > next ? String(next) : null,
+    retention_days: state.retentionDays,
+  };
+}
+
+/** The B5 per-device feed, and the device list beneath it. */
+function doorsDeviceRoute(state: DoorsState, path: string) {
+  if (!path.includes("/activity")) return state.doors;
+  const id = path.split("/api/v1/admin/devices/")[1].split("/")[0];
+  return {
+    items: state.activity.filter((e) => {
+      const door = (e.door ?? {}) as Record<string, unknown>;
+      return door.id === undefined || door.id === id;
+    }),
+  };
+}
+
+/** The devices PATCH, applying and refusing what the API applies and refuses. */
+function doorsPatchRoute(state: DoorsState, path: string, body: unknown) {
+  const patch = (body ?? {}) as Record<string, unknown>;
+  const id = path.split("/api/v1/admin/devices/")[1];
+  const index = state.doors.findIndex((d) => String(d.id) === id);
+  if (index < 0) return refuse(404, { error: "not_found" });
+  const refusal = refuseDoorPatch(state.doors[index], patch);
+  if (refusal) return refusal;
+  state.doors[index] = applyDoorPatch(state.doors[index], patch);
+  // An individual shut is NOT a fleet shut, so reopen-all must leave it alone.
+  if (patch.enabled === false) state.shutByFleet.delete(id);
+  return state.doors[index];
+}
+
 /**
  * A stand-in for the doors API: the overview, the club log with its cursor, the CSV, the two
  * fleet writes and the devices PATCH that owns a door's fields.
  *
  * <p>
  * <b>The fleet semantics are the reason this is stateful.</b> `shut-all` is one unit of work
- * over every gate and stamps `shut_by_shut_all_at`; `reopen-all` reopens ONLY the doors that
- * stamp names, so a door an admin shut on its own stays shut. A canned `{doors: [...]}` body
- * would let a page claim either behaviour and stay green.
+ * over every gate and records which doors it shut; `reopen-all` reopens only those. A canned
+ * `{doors: [...]}` body would let a page claim either behaviour and stay green.
+ * </p>
+ *
+ * <p>
+ * Its jobs are module-level functions over one state object rather than closures, because
+ * lizard scores a closure's complexity into the function that holds it and this one was over
+ * the gate as a result.
  * </p>
  */
 export function doorsServer(
@@ -736,79 +863,18 @@ export function doorsServer(
     pageSize?: number;
   } = {},
 ): DoorsServer {
-  let doors = initial.map((d) => ({ ...d }));
-  let activity = [...(options.activity ?? [])];
-  const rows: Record<string, DoorsServerRow> = { ...(options.rows ?? {}) };
-  const retentionDays = options.retentionDays ?? 90;
-  const pageSize = options.pageSize ?? 50;
-  const shutByFleet = new Set<string>();
-
-  const view = () => ({
-    day_started_at: options.dayStartedAt ?? new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
-    timezone: options.timezone ?? "Africa/Johannesburg",
-    shut_all_active: doors.some((d) => d.enabled === false && shutByFleet.has(String(d.id))),
-    doors: [...doors]
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)))
-      .map((device) => ({
-        device,
-        // `?? ` would turn an EXPLICIT null — the count failed — back into a zero, which
-        // is the very defect the page's copy exists to avoid. Absent means "not
-        // interesting to this test"; null means "the server could not count".
-        today: "today" in (rows[String(device.id)] ?? {})
-          ? rows[String(device.id)].today
-          : { released: 0, refused: 0 },
-        signals: rows[String(device.id)]?.signals ?? [],
-      })),
-  });
-
-  /** One fleet write, applied to every gate the club has. */
-  const fleet = (enabled: boolean) => {
-    const at = new Date().toISOString();
-    doors = doors.map((d) => {
-      if (enabled) {
-        if (!shutByFleet.has(String(d.id))) return d;
-        shutByFleet.delete(String(d.id));
-        return { ...d, enabled: true, out_of_service_since: null };
-      }
-      if (d.enabled === false) return d;
-      shutByFleet.add(String(d.id));
-      return { ...d, enabled: false, out_of_service_since: at };
-    });
-    return {
-      doors: doors.map((d) => ({
-        id: d.id, name: d.name, gate_key: d.gate_key, enabled: d.enabled,
-        last_seen_at: d.last_seen_at,
-        offline_after_seconds: d.offline_after_seconds ?? 180,
-        power_loss_behaviour: d.power_loss_behaviour ?? "not_established",
-      })),
-    };
-  };
-
-  const logPage = (path: string) => {
-    const query = new URLSearchParams(path.split("?")[1] ?? "");
-    const door = query.get("door");
-    const outcome = query.get("outcome");
-    const from = query.get("from");
-    const to = query.get("to");
-    // The retention clamp the API applies, so a page that states a range states a real one.
-    const floor = Date.now() - retentionDays * 86_400_000;
-    const matched = activity.filter((e) => {
-      const at = new Date(String(e.at)).getTime();
-      const entryDoor = (e.door ?? {}) as Record<string, unknown>;
-      if (door && String(entryDoor.id) !== door) return false;
-      if (outcome && !doorOutcomeOf(e).includes(outcome)) return false;
-      if (from && at < Math.max(new Date(from).getTime(), floor)) return false;
-      if (to && at > new Date(to).getTime()) return false;
-      return at >= floor;
-    });
-    const start = Number(query.get("cursor") ?? 0);
-    const items = matched.slice(start, start + pageSize);
-    const next = start + pageSize;
-    return {
-      items,
-      next_cursor: next < matched.length ? String(next) : null,
-      retention_days: retentionDays,
-    };
+  // Defaults as one object rather than seven `??`s: each of those is a branch lizard counts,
+  // and this constructor was over the complexity gate on nothing but its own defaults.
+  const state: DoorsState = {
+    activity: [],
+    rows: {},
+    retentionDays: 90,
+    pageSize: 50,
+    timezone: "Africa/Johannesburg",
+    dayStartedAt: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
+    ...options,
+    doors: initial.map((d) => ({ ...d })),
+    shutByFleet: new Set<string>(),
   };
 
   return {
@@ -820,40 +886,20 @@ export function doorsServer(
         headers: { "content-disposition": 'attachment; filename="door-log.csv"' },
         body: "at,door,door_name,outcome,reason,offline,member,fingerprint\n",
       },
-      { path: "/api/v1/admin/doors/activity", respond: (r) => logPage(r.path) },
-      { path: "/api/v1/admin/doors", respond: () => view() },
-      { method: "POST", path: "/api/v1/admin/doors/shut-all", respond: () => fleet(false) },
-      { method: "POST", path: "/api/v1/admin/doors/reopen-all", respond: () => fleet(true) },
-      {
-        // The B5 per-device feed the door detail page reads, and the device list beneath it.
-        path: "/api/v1/admin/devices/",
-        respond: (request) => {
-          if (!request.path.includes("/activity")) return doors;
-          const id = request.path.split("/api/v1/admin/devices/")[1].split("/")[0];
-          return { items: activity.filter((e) => ((e.door ?? {}) as Record<string, unknown>).id === undefined
-            || ((e.door ?? {}) as Record<string, unknown>).id === id) };
-        },
-      },
+      { path: "/api/v1/admin/doors/activity", respond: (r) => doorsLogPage(state, r.path) },
+      { path: "/api/v1/admin/doors", respond: () => doorsView(state) },
+      { method: "POST", path: "/api/v1/admin/doors/shut-all", respond: () => applyFleet(state, false) },
+      { method: "POST", path: "/api/v1/admin/doors/reopen-all", respond: () => applyFleet(state, true) },
+      { path: "/api/v1/admin/devices/", respond: (r) => doorsDeviceRoute(state, r.path) },
       {
         method: "PATCH",
         path: "/api/v1/admin/devices/",
-        respond: (request) => {
-          const patch = (request.body ?? {}) as Record<string, unknown>;
-          const id = request.path.split("/api/v1/admin/devices/")[1];
-          const index = doors.findIndex((d) => String(d.id) === id);
-          if (index < 0) return refuse(404, { error: "not_found" });
-          const refusal = refuseDoorPatch(doors[index], patch);
-          if (refusal) return refusal;
-          doors[index] = applyDoorPatch(doors[index], patch);
-          // An individual shut is NOT a fleet shut, so reopen-all must leave it alone.
-          if (patch.enabled === false) shutByFleet.delete(id);
-          return doors[index];
-        },
+        respond: (r) => doorsPatchRoute(state, r.path, r.body),
       },
     ],
-    current: () => doors,
-    setActivity: (next) => { activity = [...next]; },
-    setRow: (id, row) => { rows[id] = row; },
+    current: () => state.doors,
+    setActivity: (next) => { state.activity = [...next]; },
+    setRow: (id, row) => { state.rows[id] = row; },
   };
 }
 

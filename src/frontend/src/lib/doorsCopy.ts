@@ -1,5 +1,5 @@
 import { DOOR_OUTCOME_CHIPS } from "./deviceActivity";
-import { POWER_LOSS_LABELS, doorShutNotice, unnamedGateOfflineNotice } from "./gateCopy";
+import { POWER_LOSS_LABELS, doorShutNotice } from "./gateCopy";
 import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal, type DoorToday } from "./api";
 
 /**
@@ -11,9 +11,10 @@ import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal, type D
  * is true of this door right now, and how should this record be read". Different question,
  * same noun, and `deviceActivity` is the precedent for splitting on the question rather than
  * on the noun. It <b>delegates</b> rather than restating: the shut branch below calls
- * {@link doorShutNotice} and the unnamed branch leans on
- * {@link unnamedGateOfflineNotice}'s claim, so nothing in `gateCopy` is rewritten and the
- * two cannot disagree about one click.
+ * {@link doorShutNotice}, so nothing in `gateCopy` is rewritten and the two cannot disagree
+ * about one click. (The unnamed branch makes the same claim
+ * `unnamedGateOfflineNotice` does, in the doors surface's own words — "sent an empty list"
+ * rather than "an empty roster" — because "roster" is the court box's noun.)
  * </p>
  *
  * <p>

@@ -101,7 +101,7 @@ export function FleetShutPanel({ doors, loading, failed, reload, onRetry }: {
                   className="h-11 w-full"
                 />
               )}
-              {open < doors.length && (
+              {doors.length > open && (
                 <ConfirmButton
                   idleLabel={open === 0 ? "Reopen all doors" : `Reopen all ${doors.length}`}
                   confirmLabel={doorFleetReopenConfirm(doors.length)}

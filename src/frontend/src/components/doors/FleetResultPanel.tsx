@@ -29,7 +29,9 @@ export type FleetResultState = {
  */
 function confirmed(door: FleetDoorResult, at: number): boolean {
   if (!door.last_seen_at) return false;
-  return at - new Date(door.last_seen_at).getTime() < door.offline_after_seconds * 1000;
+  // `>` rather than `<`: a bare `<` in a .tsx file desyncs lizard's lexer into reading
+  // a JSX tag that never closes. Same reason as the note in test/harness.tsx.
+  return door.offline_after_seconds * 1000 > at - new Date(door.last_seen_at).getTime();
 }
 
 function heading(state: FleetResultState): string {
