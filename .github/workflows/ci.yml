@@ -296,10 +296,10 @@ jobs:
       # proves half the firmware. The Makefile's IOT_PROJECTS list is the single
       # place a third project is added.
       - name: Unit tests (host)
-        run: make test-iot PIO=pio
+        run: make test-iot PIO=pio PY=python3
 
       - name: Unit tests under ASAN + UBSAN
-        run: make test-iot-asan PIO=pio
+        run: make test-iot-asan PIO=pio PY=python3
 
       - name: Complexity (C++, C# and TypeScript)
         run: |
