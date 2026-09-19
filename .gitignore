@@ -153,3 +153,11 @@ src/iot/*/arduino/**/* [0-9]
 **/secrets.h
 **/ota_privkey.pem
 
+
+# Python bytecode. `test/e2e-device/` is two importable modules now — door_evening
+# imports scenario and wire — so running the target writes a __pycache__ beside
+# them. Untracked build output in a tree where `git status` is the check before
+# any `git add` of a generated directory (see the iCloud rule above) is noise that
+# eventually gets committed by somebody in a hurry.
+__pycache__/
+*.pyc
