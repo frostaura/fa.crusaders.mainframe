@@ -1,7 +1,7 @@
 import { Alert } from "../Alert";
 import { ConfirmButton } from "../ConfirmButton";
 import {
-  DOOR_REOPEN_LABEL, DOOR_SHUT_LABEL, doorPowerLossLine, doorReopenConfirm, doorShutConfirm,
+  DOOR_REOPEN_LABEL, DOOR_SHUT_LABEL, doorReopenConfirm, doorShutConfirm,
   doorShutNotice, doorShutStandingNotice,
 } from "../../lib/gateCopy";
 import { type AdminDoorDevice } from "../../lib/api";
@@ -24,38 +24,56 @@ import { type AdminDoorDevice } from "../../lib/api";
  * name.
  * </p>
  */
-export function DoorShutControl({ door, onDone, shutAt }: {
+export function DoorShutControl({ door, onDone, shutAt, online }: {
   door: AdminDoorDevice;
   onDone: (enabled: boolean) => Promise<void>;
   /** A club-time clock face for `out_of_service_since`, or null where the payload has none. */
   shutAt: string | null;
+  /**
+   * Whether this door is reporting right now.
+   *
+   * C5: the reopen confirm promised "from the very next scan" to every door, including one
+   * nobody can reach — a promise about a machine that is not listening. It is the door's own
+   * liveness that decides which half of the pair is true of THIS door today.
+   */
+  online: boolean;
 }) {
   if (!door.enabled) {
     return (
       <div className="space-y-3">
         <Alert tone="danger">{doorShutStandingNotice(door.name, shutAt)}</Alert>
-        <p className="text-sm text-text-secondary">{doorPowerLossLine(door.power_loss_behaviour ?? "not_established")}</p>
+        {/* C2 / C5: shut AND not reporting are two facts and both are shown. A shut door
+            nobody can reach has not heard the refusal and goes on admitting booked members
+            from its cached list — the state the club-wide banner used to deny outright. */}
+        {!online && (
+          <p className="text-sm text-warning-strong">
+            {`Nothing can reach ${door.name}, so it has not been told. It may still be admitting booked`
+              + " members from the list it last downloaded, for up to six hours after its last call."}
+          </p>
+        )}
         <ConfirmButton
           idleLabel={DOOR_REOPEN_LABEL}
-          confirmLabel={doorReopenConfirm()}
-          ariaLabel={`Reopen ${door.name}`}
+          confirmLabel={doorReopenConfirm(online)}
+          ariaLabel={door.name}
           onConfirm={() => onDone(true)}
-          className="h-11 w-full"
+          className="min-h-11 w-full"
         />
       </div>
     );
   }
   return (
     <div className="space-y-3">
+      {/* A14: the power-loss sentence used to be printed here AND on the door card directly
+          above, twice on one screen. The card is where it belongs — it has the room to say
+          it is a property of the lock and not of this app. */}
       <p className="text-sm text-text-secondary">{doorShutNotice()}</p>
-      <p className="text-sm text-text-secondary">{doorPowerLossLine(door.power_loss_behaviour ?? "not_established")}</p>
       <ConfirmButton
         idleLabel={DOOR_SHUT_LABEL}
         confirmLabel={doorShutConfirm()}
-        ariaLabel={`Shut ${door.name}`}
+        ariaLabel={door.name}
         onConfirm={() => onDone(false)}
         tone="danger"
-        className="h-11 w-full"
+        className="min-h-11 w-full"
       />
     </div>
   );

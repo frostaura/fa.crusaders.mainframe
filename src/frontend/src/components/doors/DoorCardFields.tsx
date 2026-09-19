@@ -1,5 +1,3 @@
-import { useId, useState } from "react";
-import { Button, Input, Label } from "../Button";
 import { describePowerLoss } from "../../lib/doorsCopy";
 import { POWER_LOSS_BEHAVIOURS, type AdminDoorDevice, type PowerLossBehaviour } from "../../lib/api";
 
@@ -49,75 +47,43 @@ export function DoorCardRead({ door }: { door: AdminDoorDevice }) {
 }
 
 /**
- * The editor. A radio group rather than a select, because all three answers must be visible
- * at once and the default is a real answer rather than a placeholder an admin skips past.
+ * The three answers, as a radio group rather than a select — all three must be visible at
+ * once and the default is a real answer rather than a placeholder an admin skips past.
+ *
+ * <p>
+ * Split out of what used to be a second editor on this page, so the ONE door form (A19) can
+ * carry it without the location field and the Save button coming with it.
+ * </p>
  */
-export function DoorCardEditor({ door, onSave, onClose }: {
-  door: AdminDoorDevice;
-  onSave: (note: string, behaviour: PowerLossBehaviour) => Promise<boolean>;
-  onClose: () => void;
+export function PowerLossChoice({ value, onChange, disabled, idBase }: {
+  value: PowerLossBehaviour;
+  onChange: (next: PowerLossBehaviour) => void;
+  disabled: boolean;
+  idBase: string;
 }) {
-  const [note, setNote] = useState(door.location_note ?? "");
-  const [behaviour, setBehaviour] = useState<PowerLossBehaviour>(door.power_loss_behaviour ?? "not_established");
-  const [saving, setSaving] = useState(false);
-  const noteId = useId();
-  const hintId = `${noteId}-hint`;
-  const groupId = `${noteId}-power`;
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      // Trimmed here as well as at the API, so the row that comes back is the row the admin
-      // will see. An empty field goes as `""`, which is the API's clear.
-      if (await onSave(note.trim(), behaviour)) onClose();
-    } finally {
-      setSaving(false);
-    }
-  };
-
+  const groupId = `${idBase}-power-hint`;
   return (
-    <div className="space-y-4">
-      <div>
-        <Label htmlFor={noteId}>Where this board is</Label>
-        <Input
-          id={noteId}
-          aria-describedby={hintId}
-          value={note}
-          maxLength={LOCATION_NOTE_MAX_LENGTH}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="In the cupboard above the fuse board"
-          disabled={saving}
-        />
-        <p id={hintId} className="mt-1 text-xs text-text-muted">{LOCATION_HINT}</p>
+    <fieldset aria-describedby={groupId}>
+      <legend className="mb-1 block text-sm font-medium text-text-secondary">With no power, this door is</legend>
+      <div className="space-y-2">
+        {POWER_LOSS_BEHAVIOURS.map((option) => (
+          <label key={option} className="flex min-h-11 items-start gap-2 text-sm">
+            <input
+              type="radio"
+              name={`${idBase}-power-loss`}
+              className="mt-1 h-5 w-5"
+              checked={value === option}
+              disabled={disabled}
+              onChange={() => onChange(option)}
+            />
+            <span>
+              <span className="block font-medium">{describePowerLoss(option)}</span>
+              <span className="block text-text-secondary">{POWER_LOSS_MEANINGS[option]}</span>
+            </span>
+          </label>
+        ))}
       </div>
-
-      <fieldset aria-describedby={groupId}>
-        <legend className="mb-1 block text-sm font-medium text-text-secondary">With no power, this door is</legend>
-        <div className="space-y-2">
-          {POWER_LOSS_BEHAVIOURS.map((value) => (
-            <label key={value} className="flex min-h-11 items-start gap-2 text-sm">
-              <input
-                type="radio"
-                name={`${noteId}-power-loss`}
-                className="mt-1 h-5 w-5"
-                checked={behaviour === value}
-                disabled={saving}
-                onChange={() => setBehaviour(value)}
-              />
-              <span>
-                <span className="block font-medium">{describePowerLoss(value)}</span>
-                <span className="block text-text-secondary">{POWER_LOSS_MEANINGS[value]}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <p id={groupId} className="mt-1 text-xs text-text-muted">{POWER_LOSS_HINT}</p>
-      </fieldset>
-
-      <div className="flex flex-wrap gap-2">
-        <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save door card"}</Button>
-        <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-      </div>
-    </div>
+      <p id={groupId} className="mt-1 text-xs text-text-muted">{POWER_LOSS_HINT}</p>
+    </fieldset>
   );
 }

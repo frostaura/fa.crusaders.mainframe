@@ -1,6 +1,7 @@
 import { ApiError } from "./api";
 import { RELAYS } from "../components/ButtonMapEditor";
 import { GATE_KEY_MAX_LENGTH } from "./gateCopy";
+import { LOCATION_NOTE_MAX_LENGTH } from "../components/doors/DoorCardFields";
 import {
   DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
   GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
@@ -52,6 +53,21 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
   // pasted value or a row edited from somewhere else. It had no entry at all and fell through
   // to the underscore swap — "gate key too long", which names no bound and no field.
   gate_key_too_long: `A door name is at most ${GATE_KEY_MAX_LENGTH} characters. Shorten it and save again.`,
+  /**
+   * The third of the kind refusals, and it had no entry at all.
+   *
+   * The API has answered this since the door-card migration landed and nothing rendered a
+   * sentence for it — an admin met the raw token. It became reachable in practice when the
+   * door page's two editors became one (A19): a single save now carries the door-card
+   * fields as well as the name, so a row that turned out to be a court box is refused on
+   * THESE rather than on `gate_key`, and this is the sentence they get.
+   */
+  door_fields_on_a_court_box: "Where the board is, and what its lock does with no power, are things"
+    + " only a door has — and this row is a court box. Refresh the page; if the board really is a"
+    + " door, delete the row and let it register itself again.",
+  location_note_too_long: `Where the board is has to be at most ${LOCATION_NOTE_MAX_LENGTH} characters. Shorten it and save again.`,
+  power_loss_behaviour_unknown: "What this door does with no power has to be one of the three"
+    + " answers on the form. Pick one and save again.",
 
   // The three tenant numbers, each named with the bound the API holds, because
   // "out of range" alone leaves an admin guessing which end they went past.

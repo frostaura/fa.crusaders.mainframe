@@ -35,10 +35,12 @@ describe("the club door log", () => {
 
   const open = (
     rows: Record<string, unknown>[],
-    options: Parameters<typeof doorsServer>[1] = {},
+    /** `doors` overrides the club's door list; everything else goes to `doorsServer`. */
+    options: Parameters<typeof doorsServer>[1] & { doors?: Record<string, unknown>[] } = {},
     entries = ["/admin/doors/log"],
   ) => {
-    const server = doorsServer([doorFixture()], { activity: rows, ...options });
+    const { doors, ...serverOptions } = options;
+    const server = doorsServer(doors ?? [doorFixture()], { activity: rows, ...serverOptions });
     // A real session, because the CSV's whole defect was a request that went out without
     // one — and a stub that never sees an Authorization header cannot prove it now does.
     const whoami = signIn({ isAdmin: true });
@@ -194,12 +196,26 @@ describe("the club door log", () => {
    * from a log — nobody tried, or the board never reached the club — so the screen names the
    * second rather than implying the first.
    */
-  it("answers the one-door empty case with the possibility an admin came to check", async () => {
+  /**
+   * <b>C7.</b> The second sentence used to be asserted whatever the door was doing, so an
+   * admin who filtered a perfectly healthy door to a quiet range was told its board might
+   * not be reaching the club — and went to look for a fault that did not exist. It is
+   * derived from that door's own liveness now.
+   */
+  it("does not blame a reporting door's board for an empty range", async () => {
     open([], {}, [`/admin/doors/log?door=${DOOR_ID}`]);
 
-    expect(await screen.findByText(/No scans at the Side door between/))
-      .toHaveTextContent("its board may not be reaching the club");
+    expect(await screen.findByText(/No scans at Side door between/))
+      .toHaveTextContent("It is reporting, so the club is hearing from it");
+    expect(screen.queryByText(/may not be reaching the club/)).toBeNull();
     expect(screen.getByRole("link", { name: "Check it on Doors" })).toHaveAttribute("href", "/admin/doors");
+  });
+
+  it("does say so when the door really is not reporting", async () => {
+    open([], { doors: [doorFixture({ last_seen_at: ago(3600) })] }, [`/admin/doors/log?door=${DOOR_ID}`]);
+
+    expect(await screen.findByText(/No scans at Side door between/))
+      .toHaveTextContent("Nothing can reach it, so if members have been using it the club would not know");
   });
 
   // --- paging ---------------------------------------------------------------------
@@ -300,8 +316,108 @@ describe("the club door log", () => {
   it("says at the button what a downloaded file carries and escapes", async () => {
     open([doorLogFixture()], { retentionDays: 90 });
 
-    expect(await screen.findByText(/members' names included/))
+    expect(await screen.findByText(/Members' names are in it/))
       .toHaveTextContent("outside the club's 90-day rule");
+  });
+
+  /**
+   * <b>B3 / A15 — the promise the page could not keep.</b>
+   *
+   * The note said "the same rows as this page". The page shows one cursor page of 50; the
+   * reviewer's file held 165. And the toast then announced "50 scans downloaded" — the
+   * length of the list on screen — which is the number an admin repeats to a committee.
+   */
+  it("promises the filters rather than the page, and never the page's length", async () => {
+    open([doorLogFixture()], { retentionDays: 90 });
+
+    const note = await screen.findByText(/every scan matching the filters above/);
+    expect(note).toHaveTextContent("not just the rows on this page");
+    expect(document.body.textContent).not.toContain("same rows as this page");
+  });
+
+  /**
+   * B3's other half: the count comes from the SERVER's own `X-Crusaders-Rows` header, and
+   * where the header is absent the sentence carries no number at all rather than the wrong
+   * one.
+   */
+  it("announces the server's row count, not the list's length", async () => {
+    const server = doorsServer([doorFixture()], { activity: [doorLogFixture()] });
+    const whoami = signIn({ isAdmin: true });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      {
+        path: "/api/v1/admin/doors/activity.csv",
+        headers: {
+          "content-disposition": 'attachment; filename="door-log.csv"',
+          "x-crusaders-rows": "165",
+        },
+        body: "at,door\n",
+      },
+      ...server.routes,
+    ]);
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
+    expect(await screen.findByText("165 scans downloaded.")).toBeInTheDocument();
+  });
+
+  it("carries no number at all when the server did not send one", async () => {
+    open([doorLogFixture()]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
+    const toast = await screen.findByText(/The file has downloaded/);
+    expect(toast.textContent).not.toMatch(/\d/);
+    expect(toast).toHaveTextContent("may be more than this page shows");
+  });
+
+  /**
+   * <b>B17 / A5 — the log named every row by its SLUG.</b>
+   *
+   * A committee reading a log after an incident saw "front-door" where the club says
+   * "Front door", and the filter's own picker labelled a door that has a display name but
+   * no slug "gate-44c103 — no door name yet" — the board's MAC fragment, where the admin's
+   * own word for it was in `name` the whole time.
+   */
+  it("names a door by what the club calls it, in the rows and in the picker", async () => {
+    open([doorLogFixture({ door: { id: DOOR_ID, name: "Front door", gate_key: "front-door" } })]);
+
+    const rows = await screen.findByRole("list");
+    expect(rows).toHaveTextContent("Front door");
+    expect(rows.textContent).not.toContain("front-door");
+  });
+
+  it("labels an unnamed door by its display name rather than its board code", async () => {
+    open([], { doors: [doorFixture({ name: "Door gate", gate_key: null })] });
+
+    const picker = await screen.findByLabelText("Door");
+    expect(picker).toHaveTextContent("Door gate — no door name yet");
+    expect(picker.textContent).not.toContain("gate-0a1b2c —");
+  });
+
+  /**
+   * <b>A6 — the picker collapsed to "All doors" alone when the doors read failed</b>, which
+   * is indistinguishable from a club with one door; and a `?door=` already in the URL had
+   * no option to select, so the control read "All doors" over a list filtered to one. The
+   * rows themselves each name their own door, so a filtered view can always offer at least
+   * the doors it is showing — and the page says the list may be short.
+   */
+  it("keeps the doors it knows about when the doors read fails, and says the list may be short", async () => {
+    const whoami = signIn({ isAdmin: true });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      { path: "/api/v1/admin/doors/activity", body: { items: [doorLogFixture()], next_cursor: null, retention_days: 90 } },
+      { path: "/api/v1/admin/doors", status: 503, body: {} },
+    ]);
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+
+    const picker = await screen.findByLabelText("Door");
+    expect(picker).toHaveTextContent("Side door");
+    expect(screen.getByText(/this list may be short/))
+      .toHaveTextContent("The scans below are unaffected");
   });
 
   // --- staleness ------------------------------------------------------------------

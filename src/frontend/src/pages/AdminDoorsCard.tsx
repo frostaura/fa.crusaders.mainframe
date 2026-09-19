@@ -5,6 +5,7 @@ import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { PrintSheet } from "../components/doors/PrintSheet";
 import { DOORS_READ_FAILED, describePowerLoss } from "../lib/doorsCopy";
+import { clubDate } from "../lib/clubClock";
 import { UNNAMED_GATE } from "../lib/gateCopy";
 import { doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings } from "../lib/api";
 
@@ -35,8 +36,11 @@ export function AdminDoorsCardPage() {
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
+  /** The instant this sheet was built, stamped once. See `printedOn` below. */
+  const [builtAt, setBuiltAt] = useState(0);
 
   const load = useCallback(async () => {
+    setBuiltAt(Date.now());
     try {
       const view = await doorEndpoints.doors();
       const row = view.doors.find((d) => d.device.id === id);
@@ -67,7 +71,11 @@ export function AdminDoorsCardPage() {
 
   const contact = [settings?.club_contact_phone?.trim(), settings?.club_contact_email?.trim()]
     .filter((part) => part).join(" · ");
-  const printedOn = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  // A13: the one club-locale formatter. This is printed and lives on a wall for months, so
+  // "9/19/26" is the last place a month-first date belongs. Read at LOAD rather than during
+  // render — it is the instant the card was built, and a clock read in a render body is both
+  // impure and a value that can change between two paints of one sheet.
+  const printedOn = clubDate(builtAt);
 
   return (
     <div className="space-y-4">
@@ -86,9 +94,14 @@ export function AdminDoorsCardPage() {
 
       <PrintSheet>
         <p className="text-sm">Crusaders Squash</p>
-        <h1 className="mt-4 break-words text-4xl font-bold uppercase tracking-tight">
+        {/* B22 / C13: the club's OWN name for the door is the headline, and the slug goes
+            beneath it. The heading was the slug — "front-door" in 36 px on a card taped to a
+            wall — which is the one word on the sheet a member or a volunteer does not use.
+            The slug still has to be here: it is what a scan is recorded against. */}
+        <h1 className="mt-4 break-words text-4xl font-bold tracking-tight">{door.name}</h1>
+        <p className="mt-1 break-words text-sm uppercase tracking-wide">
           {door.gate_key ?? UNNAMED_GATE}
-        </h1>
+        </p>
         <dl className="mt-6 space-y-1 text-sm">
           <CardFact label="Board" value={door.device_code} />
           <CardFact label="MAC" value={door.mac_address ?? "not reported"} />

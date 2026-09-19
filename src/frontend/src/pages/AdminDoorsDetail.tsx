@@ -10,17 +10,18 @@ import { DoorFeed } from "../components/doors/DoorFeed";
 import { DoorShutControl } from "../components/doors/DoorShutControl";
 import { DoorSignalNotices } from "../components/doors/DoorSignalNotices";
 import { DoorCardSection } from "../components/doors/DoorCardSection";
-import { GateDetailsEditor } from "../components/doors/GateDetailsEditor";
+import { publishDoorsView } from "../components/doors/useDoorsChrome";
 import { useDoorActions, type DoorActions } from "../components/doors/useDoorActions";
 import { useTicker } from "../lib/useTicker";
+import { clubDayAndClock } from "../lib/clubClock";
 import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
 import { DOORS_READ_FAILED, doorStateNotice } from "../lib/doorsCopy";
-import { UNNAMED_GATE, gateDeleteConfirm } from "../lib/gateCopy";
+import { UNNAMED_GATE, gateDeleteConfirm, gateDeleteStandingNotice } from "../lib/gateCopy";
 import { ACTIVITY_READ_FAILED } from "../lib/deviceActivity";
 import { describeDeviceError } from "../lib/deviceErrors";
 import {
   doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings, type DeviceActivityEntry,
-  type DoorsView,
+  type DoorEventEntry, type DoorsView,
 } from "../lib/api";
 
 /**
@@ -41,11 +42,9 @@ function signalSettingsOf(settings: AdminSettings | null) {
   };
 }
 
-function clubClock(iso: string | null, timezone: string): string | null {
-  if (!iso) return null;
-  return new Date(iso).toLocaleString("en-GB", {
-    weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: timezone,
-  });
+/** A13 / B20: the shared club-locale face, and never a bare weekday. */
+function shutAtFace(iso: string | null, timezone: string): string | null {
+  return iso ? clubDayAndClock(iso, timezone) : null;
 }
 
 function BackToDoors() {
@@ -57,6 +56,8 @@ type DoorPageRead = {
   view: DoorsView | null;
   settings: AdminSettings | null;
   entries: DeviceActivityEntry[] | null;
+  /** Undefined until the read lands, and still undefined against an API that sends none. */
+  events?: DoorEventEntry[] | null;
   feedError: string | null;
   feedLoading: boolean;
   loading: boolean;
@@ -92,6 +93,10 @@ function useDoorPage(id: string) {
   const reload = useCallback(async () => {
     const view = await doorEndpoints.doors();
     setRead((r) => ({ ...r, view, failed: false }));
+    // C3: the chrome's shut banner subscribes to this, so shutting a door from its own page
+    // updates the banner without a navigation. Three readers of one fact is how an admin
+    // came to see three different door counts on one screen.
+    publishDoorsView(view);
   }, []);
 
   const load = useCallback(async () => {
@@ -109,11 +114,13 @@ function useDoorPage(id: string) {
       setRead((r) => ({ ...r, settings }));
     } catch { /* the signal notices take their no-number arm */ }
     try {
-      const items = (await endpoints.adminDeviceActivity(id)).items;
-      setRead((r) => ({ ...r, entries: items, feedError: null, feedLoading: false }));
+      const page = await endpoints.adminDeviceActivity(id);
+      setRead((r) => ({
+        ...r, entries: page.items, events: page.events ?? null, feedError: null, feedLoading: false,
+      }));
     } catch (e) {
       const feedError = describeDeviceError(e, ACTIVITY_READ_FAILED);
-      setRead((r) => ({ ...r, entries: null, feedError, feedLoading: false }));
+      setRead((r) => ({ ...r, entries: null, events: null, feedError, feedLoading: false }));
     }
   }, [id, reload]);
 
@@ -123,36 +130,52 @@ function useDoorPage(id: string) {
   return { read, load, reload };
 }
 
-/** The write controls, under the door card. */
-function DoorControls({ door, actions, editing, onEdit, onClose, shutAt }: {
+/**
+ * The write controls, under the door card.
+ *
+ * <p>
+ * <b>A8 / B12 / C15: it is a headed, explained block now, not an unheaded strip that starts
+ * mid-thought.</b> A volunteer met it as a sentence with no subject, in our vocabulary
+ * ("the API", "roster", "heartbeat", "re-registers"), with the explanation printed ABOVE the
+ * button it belonged to.
+ * </p>
+ *
+ * <p>
+ * <b>A12: every consequence is visible at rest, beside its own control, as a statement.</b>
+ * Delete's was printed permanently while Shut's was hidden until the control was armed — so
+ * the two destructive controls on one card taught opposite lessons about where to look, and
+ * the one with the larger consequence taught the worse one. Both are stated, both as
+ * statements rather than as questions: a question at rest reads as a control that is already
+ * asking, which is what an armed control looks like.
+ * </p>
+ */
+function DoorControls({ door, actions, online, shutAt }: {
   door: AdminDoorDevice;
   actions: DoorActions;
-  editing: boolean;
-  onEdit: () => void;
-  onClose: () => void;
+  online: boolean;
   shutAt: string | null;
 }) {
   return (
-    <Card className="space-y-3">
-      {editing ? (
-        <GateDetailsEditor device={door} onSave={actions.saveName} onClose={onClose} />
-      ) : (
-        <Button variant="outline" className="w-full" onClick={onEdit}>Edit name and door name</Button>
-      )}
-      <DoorShutControl door={door} onDone={actions.setEnabled} shutAt={shutAt} />
-      {/* The consequence is rendered as page text as well as on the confirm, because
-          `ConfirmButton`'s aria-label replaces its contents: without this sentence a
-          screen-reader user arming the control hears only "tap again to confirm". */}
-      <p className="text-sm text-text-secondary">{gateDeleteConfirm()}</p>
-      <ConfirmButton
-        idleLabel="Delete"
-        confirmLabel={gateDeleteConfirm()}
-        ariaLabel={`Delete ${door.name}`}
-        onConfirm={actions.remove}
-        tone="danger"
-        className="h-11 w-full"
-      />
-    </Card>
+    <section aria-labelledby="door-controls-heading" className="space-y-2">
+      <h2 id="door-controls-heading" className="text-lg font-semibold">Shutting or removing this door</h2>
+      <Card className="space-y-4">
+        <DoorShutControl door={door} onDone={actions.setEnabled} shutAt={shutAt} online={online} />
+        <div className="space-y-2 border-t border-border pt-4">
+          {/* The consequence is rendered as page text as well as on the confirm, because
+              `ConfirmButton`'s aria-label replaces its contents: without this sentence a
+              screen-reader user arming the control hears only "tap again to confirm". */}
+          <p className="text-sm text-text-secondary">{gateDeleteStandingNotice(door.name)}</p>
+          <ConfirmButton
+            idleLabel="Delete this door"
+            confirmLabel={gateDeleteConfirm()}
+            ariaLabel={door.name}
+            onConfirm={actions.remove}
+            tone="danger"
+            className="min-h-11 w-full"
+          />
+        </div>
+      </Card>
+    </section>
   );
 }
 
@@ -161,7 +184,9 @@ export function AdminDoorsDetailPage() {
   const nav = useNavigate();
   const now = useTicker(true);
   const { read, load, reload } = useDoorPage(id);
-  const [editing, setEditing] = useState<"name" | "card" | null>(null);
+  // A19: ONE form over all four writable fields, so one boolean rather than a "which of the
+  // two editors is open" discriminator.
+  const [editing, setEditing] = useState(false);
 
   const { row, door, timezone, online } = doorOf(read, id, now);
   const actions = useDoorActions(door, {
@@ -213,7 +238,10 @@ export function AdminDoorsDetailPage() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         <DoorFeed
           door={door}
-          read={{ entries: read.entries, loading: read.feedLoading, error: read.feedError }}
+          today={row.today}
+          read={{
+            entries: read.entries, events: read.events, loading: read.feedLoading, error: read.feedError,
+          }}
           clock={{ now, dayStartedAt: read.view!.day_started_at, timezone }}
         />
 
@@ -221,18 +249,16 @@ export function AdminDoorsDetailPage() {
           <DoorCardSection
             door={door}
             settings={read.settings}
-            editing={editing === "card"}
-            onEdit={() => setEditing("card")}
-            onClose={() => setEditing(null)}
-            onSave={actions.saveCard}
+            editing={editing}
+            onEdit={() => setEditing(true)}
+            onClose={() => setEditing(false)}
+            onSave={actions.save}
           />
           <DoorControls
             door={door}
             actions={actions}
-            editing={editing === "name"}
-            onEdit={() => setEditing("name")}
-            onClose={() => setEditing(null)}
-            shutAt={clubClock(door.out_of_service_since ?? null, timezone)}
+            online={online}
+            shutAt={shutAtFace(door.out_of_service_since ?? null, timezone)}
           />
         </div>
       </div>

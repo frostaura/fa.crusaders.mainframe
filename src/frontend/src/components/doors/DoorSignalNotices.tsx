@@ -45,8 +45,15 @@ export function DoorSignalNotices({ doorName, signals, settings }: {
         <Card key={notice.text} role="status" className="border-l-4 border-warning-strong bg-warning-soft">
           <p className="text-sm text-warning-strong">{notice.text}</p>
           {notice.link && (
-            <Link to="/admin/settings" className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-warning-strong underline">
-              Change the release under Admin settings
+            // A9: this used to be a bare `/admin/settings`, which lands an admin at the top
+            // of a page about 5 400 px long with no idea which of its forty fields was
+            // meant. The hash is the settings page's own `#setting-<key>` convention: it
+            // scrolls that field into view, moves focus to it and highlights it.
+            <Link
+              to="/admin/settings#setting-gate-unlock-seconds"
+              className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-warning-strong underline"
+            >
+              {`Change how long the lock is released — ${doorName}`}
             </Link>
           )}
         </Card>

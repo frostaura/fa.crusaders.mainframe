@@ -1,10 +1,11 @@
 import { useId, useState } from "react";
 import { Button, Input, Label } from "../Button";
+import { PowerLossChoice, LOCATION_HINT, LOCATION_NOTE_MAX_LENGTH } from "./DoorCardFields";
 import { GATE_KEY_MAX_LENGTH, unnamedGateOfflineNotice } from "../../lib/gateCopy";
-import { type AdminDoorDevice } from "../../lib/api";
+import { type AdminDoorDevice, type PowerLossBehaviour } from "../../lib/api";
 
 /**
- * A door's name and its door name, saved together.
+ * Everything an admin can write about one door, in ONE form with ONE Save.
  *
  * <p>
  * <b>Moved here from `pages/AdminDevices.tsx` (A2.5), not copied.</b> `/admin/doors` is now
@@ -16,9 +17,12 @@ import { type AdminDoorDevice } from "../../lib/api";
  * </p>
  *
  * <p>
- * One save because it is one job: a gate arrives named "Door gate" with no key at all, so
- * both are wrong at the same moment and splitting them would be two saves and two chances to
- * finish half of it.
+ * <b>And now one FORM rather than two (A19).</b> The page carried two Edit buttons — "Edit
+ * name and door name" under the controls and "Edit" on the door card — opening two forms
+ * with two Saves over the same four fields of the same row. A reviewer under time pressure
+ * edited one, saved, and could not find where the other field lived. All four go over a
+ * single `PATCH /admin/devices/{id}`, so two saves were never anything but two chances to
+ * finish half the job.
  * </p>
  *
  * <p>
@@ -31,18 +35,25 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
   device: AdminDoorDevice;
   /**
    * An empty key clears the door's name, and `""` is what the API reads as a clear — `null`
-   * on that field means "leave it alone", which is what this used to send.
+   * on that field means "leave it alone", which is what this used to send. `note` binds the
+   * same two-valued way.
    */
-  onSave: (name: string, gateKey: string) => Promise<boolean>;
+  onSave: (fields: {
+    name: string; gateKey: string; note: string; behaviour: PowerLossBehaviour;
+  }) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [name, setName] = useState(device.name);
   const [key, setKey] = useState(device.gate_key ?? "");
+  const [note, setNote] = useState(device.location_note ?? "");
+  const [behaviour, setBehaviour] = useState<PowerLossBehaviour>(device.power_loss_behaviour ?? "not_established");
   const [saving, setSaving] = useState(false);
   const base = useId();
   const nameId = `${base}-name`;
   const keyId = `${base}-gate-key`;
   const keyHintId = `${base}-gate-key-hint`;
+  const noteId = `${base}-note`;
+  const noteHintId = `${base}-note-hint`;
 
   async function save() {
     // Trimmed here as well as on the API, so the row that comes back is the row the admin
@@ -51,7 +62,10 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
     // to go as `null`, which the API discards.
     setSaving(true);
     try {
-      if (await onSave(name.trim() || device.name, key.trim())) onClose();
+      const ok = await onSave({
+        name: name.trim() || device.name, gateKey: key.trim(), note: note.trim(), behaviour,
+      });
+      if (ok) onClose();
     } finally {
       setSaving(false);
     }
@@ -88,8 +102,22 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
           disabled={saving}
         />
       </div>
+      <div>
+        <Label htmlFor={noteId}>Where this board is</Label>
+        <Input
+          id={noteId}
+          aria-describedby={noteHintId}
+          value={note}
+          maxLength={LOCATION_NOTE_MAX_LENGTH}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="In the cupboard above the fuse board"
+          disabled={saving}
+        />
+        <p id={noteHintId} className="mt-1 text-xs text-text-muted">{LOCATION_HINT}</p>
+      </div>
+      <PowerLossChoice value={behaviour} onChange={setBehaviour} disabled={saving} idBase={base} />
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save door"}</Button>
+        <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save this door"}</Button>
         <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
       </div>
     </div>
