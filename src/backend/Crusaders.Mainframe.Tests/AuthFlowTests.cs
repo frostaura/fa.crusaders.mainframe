@@ -23,7 +23,9 @@ public class AuthFlowTests
         }
 
         // Email service should have a verify-email + pending message
-        Assert.Contains(host.EmailService.Sent, m => m.Subject.Contains("Verify"));
+        // Awaited, because registration hands its mail to EmailDispatch.InBackground rather
+        // than blocking the response on SMTP. See StubEmailService.WaitFor.
+        Assert.NotNull(await host.EmailService.WaitFor(m => m.Subject.Contains("Verify")));
 
         // Pull the verify token from the DB and verify
         using (var scope = host.NewScope())

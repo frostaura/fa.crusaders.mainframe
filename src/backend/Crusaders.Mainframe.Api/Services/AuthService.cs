@@ -46,16 +46,28 @@ public sealed class AuthService
     /// record and the mail server are allowed to fail independently, which they will.
     /// </para>
     /// </summary>
-    private async Task SendOrLogAsync(EmailMessage message, string what, CancellationToken ct)
+    private Task SendOrLogAsync(EmailMessage message, string what, CancellationToken ct)
     {
-        try
-        {
-            await _email.SendAsync(message, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Email failed: {What}", what);
-        }
+        // Dispatched, not awaited — and this is the other half of the hazard the comment above
+        // describes.
+        //
+        // Swallowing the SMTP exception stopped a FAILED send from returning 500 for an account
+        // that had already been created. It did nothing about a SLOW one. The sends still
+        // blocked the response, registration raises three of them, and the browser abandons the
+        // request at twenty seconds — so a merely sluggish mail server produced the exact
+        // outcome this class was written to prevent: "couldn't submit your application",
+        // followed on the retry by "that membership number is already registered", for the
+        // member's own invisible account. Reproduced against a real SMTP host.
+        //
+        // EmailDispatch.InBackground is the shape this codebase already uses for the PayFast
+        // ITN and the desk's credit adjustment, for the same reason: the ledger is the record,
+        // and the mail server is allowed to be slow independently of it.
+        //
+        // `ct` is deliberately NOT passed on. It is the request's token, and the request is
+        // over — honouring it would cancel every one of these sends the instant the member sees
+        // their confirmation screen.
+        EmailDispatch.InBackground(_email, _logger, message, what);
+        return Task.CompletedTask;
     }
 
     /// <summary>

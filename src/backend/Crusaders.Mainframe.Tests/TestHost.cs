@@ -422,12 +422,58 @@ public sealed class TestHost : IAsyncDisposable
     }
 }
 
+/// <summary>
+/// Collects the mail the app tried to send.
+///
+/// <para>
+/// <b>Thread-safe on purpose.</b> Several paths — registration, the PayFast ITN, the desk's
+/// credit adjustment — now hand their mail to <c>EmailDispatch.InBackground</c> rather than
+/// awaiting SMTP inside the request, because a slow mail server was otherwise able to make a
+/// member's browser abandon a registration that had already succeeded. That means this list is
+/// appended from thread-pool threads while a test reads it, and a bare <c>List&lt;T&gt;</c> under
+/// concurrent <c>Add</c> can lose entries or throw mid-enumeration. A test suite that fails
+/// once a fortnight for no reason is worse than no test.
+/// </para>
+/// </summary>
 public sealed class StubEmailService : IEmailService
 {
-    public List<EmailMessage> Sent { get; } = new();
+    private readonly List<EmailMessage> _sent = new();
+    private readonly object _gate = new();
+
+    /// <summary>A snapshot. Safe to enumerate while background sends are still arriving.</summary>
+    public IReadOnlyList<EmailMessage> Sent
+    {
+        get { lock (_gate) return _sent.ToList(); }
+    }
+
     public Task SendAsync(EmailMessage message, CancellationToken ct = default)
     {
-        Sent.Add(message);
+        lock (_gate) _sent.Add(message);
         return Task.CompletedTask;
+    }
+
+    public void Clear()
+    {
+        lock (_gate) _sent.Clear();
+    }
+
+    /// <summary>
+    /// Waits for a matching mail, for the paths that dispatch in the background.
+    ///
+    /// <para>
+    /// Three separate private Poll helpers had already grown in this suite for exactly this.
+    /// This is the one place it belongs, next to the thing being polled.
+    /// </para>
+    /// </summary>
+    public async Task<EmailMessage?> WaitFor(Func<EmailMessage, bool> match, int timeoutMs = 5000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            var hit = Sent.FirstOrDefault(match);
+            if (hit is not null) return hit;
+            await Task.Delay(20);
+        }
+        return Sent.FirstOrDefault(match);
     }
 }
