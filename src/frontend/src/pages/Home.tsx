@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import {
-  CalendarDays, ExternalLink, Facebook, Instagram, MapPin, Trophy, Users, Wallet,
+  CalendarDays, ExternalLink, Facebook, Instagram, MapPin, QrCode, Trophy, Users, Wallet,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { Card } from "../components/Card";
@@ -271,7 +271,10 @@ function SignedOutLanding() {
 function SignedInHome({ isAdmin }: { isAdmin: boolean }) {
   const links = [
     { to: "/schedule", label: "Book a court", hint: "Today's grid across all four courts", icon: CalendarDays, primary: true },
-    { to: "/court-code", label: "Your court code", hint: "Show this at the court to turn the lights on", icon: Trophy },
+    // QrCode, not Trophy. The court code IS a QR code shown at the court; a trophy beside it
+    // says "achievement", which is a different thing entirely and the only icon on this screen
+    // that pointed at the wrong idea.
+    { to: "/court-code", label: "Your court code", hint: "Show this at the court to turn the lights on", icon: QrCode },
     { to: "/wallet", label: "Wallet", hint: "Balance, top-ups and charges", icon: Wallet },
     ...(isAdmin ? [{ to: "/admin/members", label: "Admin · Members", hint: "Approve applications and manage members", icon: Users }] : []),
   ];
