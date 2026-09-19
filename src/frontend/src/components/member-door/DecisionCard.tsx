@@ -6,9 +6,11 @@ import { formatClock, formatCountdown } from "../../lib/countdown";
 import type { MemberDoor, MemberDoorDecision } from "../../lib/api";
 import {
   DECISION_DISMISS,
+  type ContactKnowledge,
   type DecisionAction,
   type DecisionTone,
   contactMissingNotice,
+  contactUnknownNotice,
   decisionStamp,
   describeDecision,
 } from "../../lib/memberDoorCopy";
@@ -71,11 +73,20 @@ function ActionControl({ action }: { action: DecisionAction; }) {
 export function DecisionCard(props: {
   decision: MemberDoorDecision;
   door: MemberDoor | null;
+  /**
+   * What the PAGE knows about reaching the club, resolved once above this card.
+   *
+   * <p>
+   * It used to read `door?.contact` and default to two nulls of its own, which meant a
+   * card rendered beside a failed read told the member the club has no number — the same
+   * defect, in a second place, with a second spelling of it to keep in step.
+   * </p>
+   */
+  contact: ContactKnowledge;
   onRefreshCode: () => void;
   onDismiss: () => void;
 }) {
-  const { decision, door, onRefreshCode, onDismiss } = props;
-  const contact = door?.contact ?? { phone: null, email: null };
+  const { decision, door, contact, onRefreshCode, onDismiss } = props;
   /**
    * The countdown belongs to the DECISION, and falls back to the booking only when the
    * decision carried no instant of its own.
@@ -125,14 +136,29 @@ export function DecisionCard(props: {
           The visible line carries the ticking digits and is hidden from the accessibility
           tree; the sr-only twin beside it carries the same sentence with the minutes in
           words, so it only changes once a minute. This split IS the a11y contract.
+
+          It is only a SPLIT when the two differ. On every arm with no countdown — which is
+          six of the seven — they are the same string, so the card held two copies of one
+          sentence inside an atomic live region and the reviewer heard "The lock released."
+          twice. Where there is nothing to hide, nothing is hidden and there is one copy.
         */}
-        <p className={cn("text-base font-medium", TONE_TEXT[copy.tone])} aria-hidden="true">{copy.headline}</p>
-        <p className="sr-only">{spoken.headline}</p>
+        {spoken.headline === copy.headline ? (
+          <p className={cn("text-base font-medium", TONE_TEXT[copy.tone])}>{copy.headline}</p>
+        ) : (
+          <>
+            <p className={cn("text-base font-medium", TONE_TEXT[copy.tone])} aria-hidden="true">{copy.headline}</p>
+            <p className="sr-only">{spoken.headline}</p>
+          </>
+        )}
         <p className="text-sm text-text-secondary">{decisionStamp(decision.door_name, decision.at)}</p>
       </div>
       <p className="text-sm text-text-secondary">{copy.body}</p>
       {copy.actions.length === 0 && (decision.reason === "member_not_active" || decision.reason === "method_not_supported" || decision.reason === "not_a_gate") && (
-        <p className="text-xs text-text-muted">{contactMissingNotice()}</p>
+        // Three states here too: a club with nothing on file, and a page that could not
+        // read what the club has, are not the same admission.
+        <p className="text-xs text-text-muted">
+          {contact.contact ? contactMissingNotice() : contactUnknownNotice()}
+        </p>
       )}
       <div className="flex flex-col sm:flex-row gap-3">
         {copy.actions.map((action) => <ActionControl key={action.kind} action={action} />)}

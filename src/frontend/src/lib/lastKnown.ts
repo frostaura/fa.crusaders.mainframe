@@ -157,11 +157,55 @@ export function rememberDoor(door: MemberDoor): void {
   writeRecord({ ...current, door: { savedAt: new Date().toISOString(), value } });
 }
 
+// --- the walk-up switch's own memory ----------------------------------------------
+
+/**
+ * Where the "walk up / pay for someone" choice lives between renders of this page.
+ *
+ * <p>
+ * <b>`sessionStorage`, not the record above, and the difference is the point.</b> Which
+ * code a member wants is a decision about the next few minutes — they are at the desk
+ * paying for somebody, or starting on a free court — and it should survive a reload, a
+ * trip to the schedule and back, and a phone that killed the tab while it was in a pocket.
+ * It should NOT survive next week: a member who paid for a friend on Tuesday and opens
+ * the page before their own booking on Saturday wants their booking code, and handing
+ * them an ident code that every court but the desk refuses is the original defect with a
+ * longer fuse. A session is exactly that window.
+ * </p>
+ *
+ * <p>
+ * It is also not part of {@link LAST_KNOWN_KEY}'s record, which is a cache of what the
+ * SERVER last said. This is what the member last chose, it is versionless, and mixing the
+ * two would mean a schema bump silently changing somebody's choice.
+ * </p>
+ */
+export const WALK_UP_KEY = "crusaders.member-door.walk-up";
+
+function sessionStore(): Storage | null {
+  try { return window.sessionStorage ?? null; } catch { return null; }
+}
+
+/** What the member last chose, or false. Never throws — see the class comment above. */
+export function readWalkUpChoice(): boolean {
+  const store = sessionStore();
+  if (!store) return false;
+  try { return store.getItem(WALK_UP_KEY) === "1"; } catch { return false; }
+}
+
+/** Remembers the choice for the rest of this session. Silent when storage refuses. */
+export function rememberWalkUpChoice(walkUp: boolean): void {
+  const store = sessionStore();
+  if (!store) return;
+  try { store.setItem(WALK_UP_KEY, walkUp ? "1" : "0"); } catch { /* private mode, or full */ }
+}
+
 /** Drops the lot. Used on sign-out and by tests; never by a failed read. */
 export function forgetLastKnown(): void {
   const store = storage();
-  if (!store) return;
-  try { store.removeItem(LAST_KNOWN_KEY); } catch { /* nothing to do about it */ }
+  try { store?.removeItem(LAST_KNOWN_KEY); } catch { /* nothing to do about it */ }
+  // The member's own choice of code goes with it. Leaving one member's walk-up switch on
+  // for whoever signs in next on the same phone is a small thing that reads as a big one.
+  try { sessionStore()?.removeItem(WALK_UP_KEY); } catch { /* nothing to do about it */ }
 }
 
 /**

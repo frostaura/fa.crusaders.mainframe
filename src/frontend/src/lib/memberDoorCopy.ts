@@ -55,8 +55,27 @@ export const BANNED_IN_MEMBER_DOOR_COPY = [
   "presence",
 ] as const;
 
-/** What a door the club has not got round to naming is called, in words. */
-export const UNNAMED_DOOR = "a door the club hasn't named yet";
+/**
+ * What a door this response carried no name for is called, on a member's screen.
+ *
+ * <p>
+ * <b>It said "a door the club hasn't named yet", and that was two mistakes in one
+ * phrase.</b> The first is that it is an ADMIN fact: whether a club has got round to
+ * typing a name into a field is nothing a member standing outside can act on, and putting
+ * it in front of them reads as a criticism of the club they are trying to get into. The
+ * second is that it was not even reliably true — a named door's offline rows reached the
+ * member with no name on them, so a member's own history showed six releases at "a door
+ * the club hasn't named yet" while the offline disclosure ten pixels away said such a door
+ * "opens nothing while it is cut off". A screen arguing with itself about the building the
+ * reader is standing in.
+ * </p>
+ *
+ * <p>
+ * "A club door" is true whichever of those it was, says the only part a member needs, and
+ * cannot contradict anything.
+ * </p>
+ */
+export const UNNAMED_DOOR = "a club door";
 
 export type DecisionTone = "success" | "info" | "warning" | "danger";
 export type ChipTone = "muted" | "success" | "info" | "warning" | "danger";
@@ -92,6 +111,52 @@ export const MEMBER_DOOR_REASON_LINES: Record<string, string> = {
 
 // --- club contact ------------------------------------------------------------------
 
+/**
+ * What this page KNOWS about how to reach the club — which is three states, not two.
+ *
+ * <p>
+ * <b>The defect this type exists to make unrepresentable.</b> The page held the club's
+ * contact as a bare {@link MemberDoorContact} and defaulted it to two nulls, so a
+ * `/me/door` that failed on first load was indistinguishable from a club that has given
+ * the app no number at all — and every surface that reads it went on to state the second
+ * as a fact. A member standing outside a locked building was told "This club hasn't given
+ * the app a number to call" by a screen that had simply not managed to ask. A failed read
+ * is not an answer, and two nulls is not a way to say so.
+ * </p>
+ *
+ * <p>
+ * So `contact: null` means UNKNOWN and nothing else. Two nulls inside a non-null contact
+ * means the club really has set neither, which is a different and sayable thing. And
+ * `minutesAgo` carries the last-known case: a number the page got earlier is still a
+ * number worth dialling, but its age travels with it rather than being passed off as
+ * current.
+ * </p>
+ */
+export type ContactKnowledge = {
+  /** Null when no answer has ever landed in this browser. The page then claims nothing. */
+  contact: MemberDoorContact | null;
+  /** Whole minutes since that answer landed, or null when it is the live one. */
+  minutesAgo: number | null;
+};
+
+/** No answer has ever landed. The page knows nothing about a number and says so. */
+export const CONTACT_UNKNOWN: ContactKnowledge = { contact: null, minutesAgo: null };
+
+/** The club's own answer, as it stands right now. */
+export function liveContact(contact: MemberDoorContact): ContactKnowledge {
+  return { contact, minutesAgo: null };
+}
+
+/** An answer from earlier, with its age, for a page whose reads are failing. */
+export function staleContact(contact: MemberDoorContact, minutesAgo: number): ContactKnowledge {
+  return { contact, minutesAgo };
+}
+
+/** The details to render links from — two nulls when nothing is known, so nothing renders. */
+export function contactDetails(known: ContactKnowledge): MemberDoorContact {
+  return known.contact ?? { phone: null, email: null };
+}
+
 /** A phone number as a dialable link. Spaces are for reading, not for dialling. */
 function telHref(phone: string): string {
   return `tel:${phone.replace(/\s+/g, "")}`;
@@ -101,12 +166,22 @@ function telHref(phone: string): string {
  * The one control a refused member can press that reaches a human, or none.
  *
  * <p>
- * Both halves of the conditional, and then the third: a club with a number gets a call
- * button, a club with only an address gets an email one, and a club that has given the
- * app neither gets {@link contactMissingNotice} instead of a dead grey rectangle.
+ * Four halves rather than two, now. A club with a number gets a call button, a club with
+ * only an address gets an email one, a club that has given the app neither gets
+ * {@link contactMissingNotice} instead of a dead grey rectangle — and a page that has
+ * never managed to read the answer gets NO button and {@link contactUnknownNotice},
+ * because a call button with nothing behind it is worse than no button at all.
+ * </p>
+ *
+ * <p>
+ * That fourth arm needs no branch of its own and deliberately does not have one: an
+ * unknown contact resolves through {@link contactDetails} to two nulls, which is already
+ * the no-button case. A second spelling of "there is nothing to press" is a second thing
+ * to keep in step — and a mutation pass proved it inert, which is the same finding.
  * </p>
  */
-function contactAction(contact: MemberDoorContact): DecisionAction | null {
+function contactAction(known: ContactKnowledge): DecisionAction | null {
+  const contact = contactDetails(known);
   if (contact.phone) return { kind: "call_the_club", label: "Call the club", href: telHref(contact.phone) };
   if (contact.email) return { kind: "email_the_club", label: "Email the club", href: `mailto:${contact.email}` };
   return null;
@@ -119,14 +194,37 @@ export const CONTACT_LEAD = "Can't get in?";
  * What a member is told when the club has given the app no way to reach it.
  *
  * <p>
- * The parenthesis is shown to every member on purpose. At a volunteer club the person
- * standing outside is quite often also on the committee, and it turns a dead end into a
- * fix somebody can make tonight.
+ * <b>It used to end "(Club admins can add one under Admin settings.)"</b> The reasoning
+ * was that at a volunteer club the person outside is often also on the committee — which
+ * is true, and is still the wrong place to say it. A member at a door cannot open Admin
+ * settings, has no reason to believe they could, and reads an instruction they cannot
+ * follow as the screen not knowing who it is talking to. The club's own admin screens are
+ * where that prompt belongs.
  * </p>
  */
 export function contactMissingNotice(): string {
   return "This club hasn't given the app a number to call. Whatever is written on the door is the only way"
-    + " from here. (Club admins can add one under Admin settings.)";
+    + " from here.";
+}
+
+/**
+ * What a member is told when the page could not read the club's contact at all.
+ *
+ * <p>
+ * Every word of it is about this screen rather than about the club, which is the whole
+ * point: the club may well have a number on file, and asserting otherwise off a request
+ * that never landed is the falsehood {@link ContactKnowledge} exists to prevent.
+ * </p>
+ */
+export function contactUnknownNotice(): string {
+  return "Couldn't load the club's number just now — that's this screen failing to read it, not the club"
+    + " having none. Whatever is written on the door is the way in until it can.";
+}
+
+/** The note beside a number the page got earlier and has not been able to re-read. */
+export function contactStaleNotice(minutesAgo: number): string {
+  const ago = minutesAgo <= 1 ? "a minute ago" : `${minutesAgo} minutes ago`;
+  return `Couldn't reach the club just now. This is the number it gave ${ago}.`;
 }
 
 /** The club's contact, as one line of plain text, or null when there is nothing to say. */
@@ -135,8 +233,14 @@ export function contactLine(contact: MemberDoorContact): string | null {
   return parts.length ? parts.join(" · ") : null;
 }
 
-/** The sentence that closes a conclusion: a number, an address, or the door notice. */
-function reachTheClub(contact: MemberDoorContact): string {
+/**
+ * The sentence that closes a conclusion: a number, an address, the door notice — or an
+ * admission that the page could not find out which of those this club is.
+ */
+function reachTheClub(known: ContactKnowledge): string {
+  const contact = known.contact;
+  if (!contact) return "This screen couldn't load the club's number just now, so whatever is written on the door"
+    + " is the way in until it can.";
   if (contact.phone) return `Phone the club on ${contact.phone}.`;
   if (contact.email) return `Write to the club at ${contact.email}.`;
   return "Whatever is written on the door is the only way from here.";
@@ -160,7 +264,7 @@ export type DecisionContext = {
    * </p>
    */
   earlyEntryMinutes: number;
-  contact: MemberDoorContact;
+  contact: ContactKnowledge;
 };
 
 export type MemberDecisionCopy = {
@@ -366,7 +470,7 @@ const ACTION_LABELS: Record<"book_a_court" | "refresh_the_code", string> = {
   refresh_the_code: "Refresh the code",
 };
 
-function resolveActions(wants: ActionKind[], contact: MemberDoorContact): DecisionAction[] {
+function resolveActions(wants: ActionKind[], contact: ContactKnowledge): DecisionAction[] {
   const out: DecisionAction[] = [];
   for (const want of wants) {
     if (want === "book_a_court" || want === "refresh_the_code") {
@@ -596,21 +700,91 @@ export function describeStanding(door: StandingInput): StandingLine {
 }
 
 /**
+ * WHY a read failed, at the only resolution a member can act on.
+ *
+ * <p>
+ * <b>These are not the same event and the page must never say they are.</b> A request that
+ * never produced a response is the member's own signal, and moving somewhere with a bar or
+ * two fixes it. A response that arrived carrying an error is the CLUB's system, and there
+ * is nothing on the phone to fix — moving to a window will not help, and telling somebody
+ * standing in the rain that their phone cannot reach the club when their phone reached it
+ * perfectly well sends them to solve the wrong problem.
+ * </p>
+ *
+ * <p>
+ * The reviewer's screen said "Your phone can't reach the club" and scored "This phone's
+ * line to the club ✗" over an HTTP 500. Both were false.
+ * </p>
+ */
+export type ReadFailure = "network" | "server";
+
+/** The half of every failed-read sentence that says whose fault it was. */
+function failureLead(failure: ReadFailure): string {
+  return failure === "network"
+    ? "Your phone can't reach the club."
+    : "The club's system answered with an error — this is not your phone.";
+}
+
+/**
  * The standing line when the read failed — with what it last heard, or without.
  *
  * <p>
- * Three silences, three sentences. A stale copy shown as though it were fresh is worse
- * than no copy, so the age and the caveat travel with it; and a member who has no cached
- * copy is told that plainly rather than shown an empty heading.
+ * Four silences, four sentences. A stale copy shown as though it were fresh is worse
+ * than no copy, so the age and the caveat travel with it; a member who has no cached
+ * copy is told that plainly rather than shown an empty heading; and each of those forks
+ * again on {@link ReadFailure}, because who failed decides what the member should do
+ * next.
  * </p>
  */
-export function standingFailed(cached: { body: string; minutesAgo: number } | null): string {
+export function standingFailed(
+  cached: { body: string; minutesAgo: number } | null,
+  failure: ReadFailure,
+): string {
+  const lead = failureLead(failure);
   if (!cached) {
-    return "Your phone can't reach the club, so this screen can't tell you what its doors need. The code"
-      + " below is the last one it managed to get.";
+    return `${lead} This screen can't tell you what its doors need. The code below is the last one it`
+      + " managed to get.";
   }
   const ago = cached.minutesAgo <= 1 ? "A minute ago" : `${cached.minutesAgo} minutes ago`;
-  return `Your phone can't reach the club. ${ago} it said: ${cached.body} That may have changed since.`;
+  return `${lead} ${ago} it said: ${cached.body} That may have changed since.`;
+}
+
+/**
+ * D9 — what the door section says while the one read that feeds it is still in flight.
+ *
+ * <p>
+ * The page used to render nothing at all there and the court-only subtitle above it, both
+ * with complete confidence, for as long as `/me/door` took — measured at four seconds and
+ * more. A member at a door read a screen that had decided their club has no door, off an
+ * answer that had not arrived.
+ * </p>
+ *
+ * <p>
+ * <b>"Whether", not "what", and the word is load-bearing.</b> This sentence fires BEFORE
+ * the answer that says whether this club owns a door at all, so it may not presuppose one:
+ * a club with no gate must say nothing whatever about doors, and "checking what the club's
+ * doors need" is already a claim that it has some.
+ * </p>
+ */
+export const DOOR_SECTION_CHECKING = "Checking whether this club's doors need anything from you…";
+
+/**
+ * D5 — a code that has run out and could not be replaced.
+ *
+ * <p>
+ * The page drew the dead symbol at forty per cent opacity under the label "Expired —
+ * refreshing" and left it there for minutes. Forty per cent is still a scannable QR: a
+ * member held a dead code up to a scanner in the dark, repeatedly, while a screen promised
+ * a refresh that could not happen. Reduced opacity is a decoration, not a sentence, and
+ * "refreshing" was not true.
+ * </p>
+ */
+export function codeExpiredDeadEnd(failure: ReadFailure, contact: ContactKnowledge): string {
+  const why = failure === "network"
+    ? "This code has run out and can't be renewed without signal."
+    : "This code has run out, and the club's system answered with an error when this screen asked for"
+      + " another — that part is not your phone.";
+  return `${why} There's no code on this screen a door or a court box will take. ${reachTheClub(contact)}`;
 }
 
 // --- the offline half of the conditional (P6) ------------------------------------------
@@ -633,16 +807,33 @@ export const OFFLINE_DETAILS_SUMMARY = "What if the door is offline?";
  * field, rather than the page's own idea of a number the board owns. A cap of zero or less
  * is not a cap the club set; it is a field that did not arrive.
  * </p>
+ *
+ * <p>
+ * <b>D12: it was written in the admin's voice and read like a settings page.</b> "Whichever
+ * rule is set above" is a cross-reference to a control this reader does not have, "only a
+ * member with a court booked" is the third person about the person reading it, and "the
+ * first 48 by start time" is a mechanism rather than an answer. Every clause is now about
+ * what it means for YOU, in the second person the rest of this module speaks in.
+ * </p>
+ *
+ * <p>
+ * <b>And its last clause contradicted the member's own history.</b> It said a door "the
+ * club hasn't named yet" opens nothing while cut off, beside a history listing releases at
+ * exactly such a door — because a named door's offline rows were reaching the member with
+ * the name stripped. The mechanism is real and worth stating; the way to state it is by
+ * what it is (a door the club has not finished setting up) rather than by a field a member
+ * cannot see. See {@link UNNAMED_DOOR}.
+ * </p>
  */
 export function offlineDetailsBody(rosterMaxEntries?: number | null): string {
   const cap = rosterMaxEntries !== null && rosterMaxEntries !== undefined && rosterMaxEntries > 0
     ? rosterMaxEntries
     : GATE_ROSTER_MAX_ENTRIES;
-  return "If a door has lost the club's network it decides from a list of bookings it downloaded earlier,"
-    + " and nothing else. During an outage only a member with a court booked soon gets in — whichever rule"
-    + ` is set above — and only if their booking is among the first ${cap} bookings by start`
-    + " time. A door the club hasn't named yet is sent no list at all, so it opens nothing while it is"
-    + " cut off.";
+  return "A door that has lost the club's network can't ask the club anything, so it decides from a list of"
+    + " bookings it downloaded earlier — and nothing else. While that lasts you get in only if you have a"
+    + " court booked soon, even at a club whose doors normally open for any active member; and your booking"
+    + ` has to be near the front of that list, which holds the next ${cap} bookings due to start. A door the`
+    + " club is still setting up is sent no list at all, so it opens nothing while it is cut off.";
 }
 
 // --- the offline page -------------------------------------------------------------------
@@ -658,7 +849,7 @@ export function offlineWithCode(input: { fetchedAtClock: string; minutesAgo: num
 }
 
 /** No live code and no way to get one. No QR is drawn: a dead QR in the dark is cruelty. */
-export function offlineNoCode(contact: MemberDoorContact): string {
+export function offlineNoCode(contact: ContactKnowledge): string {
   return "Your phone can't reach the club, and the code it last had has run out. There's nothing this screen"
     + ` can do from here. ${reachTheClub(contact)}`;
 }
@@ -675,7 +866,7 @@ export function offlineNoCode(contact: MemberDoorContact): string {
  * a hopeful QR.
  * </p>
  */
-export function offlineIdentDeadEnd(contact: MemberDoorContact): string {
+export function offlineIdentDeadEnd(contact: ContactKnowledge): string {
   return "Your phone can't reach the club. The code on this screen lasts about a minute, and a door that has"
     + " also lost the network only opens for members with a court booked — which you don't have right now."
     + ` ${reachTheClub(contact)}`;
@@ -688,7 +879,39 @@ export const DIAGNOSIS_HEADING = "Let's work out why";
 export const DIAGNOSIS_HIDE = "Hide";
 
 export type DiagnosisKey = "membership" | "policy" | "booking" | "window" | "code" | "connection";
-export type DiagnosisState = "passed" | "attention" | "failed";
+
+/**
+ * What a row of the self-check can say about itself.
+ *
+ * <p>
+ * <b>`neutral` is the state this checklist was missing, and its absence was the finding.</b>
+ * Every row had to be a pass, a warning or a failure, so four of the six rows scored a
+ * green tick for a member the club has no membership on file for at all: "What this club's
+ * doors need — an active membership ✓ Passed" beside "Your membership — nothing on file ✓
+ * Passed". Six ticks and a clean bill of health handed to somebody whose record the club
+ * does not have.
+ * </p>
+ *
+ * <p>
+ * Three of those rows were never checks in the first place. The rule row states what the
+ * club's doors want and is a caption. A booking row at a club that does not ask for one
+ * has nothing to pass. A window row with no window has nothing to wait for. And two more
+ * become neutral under conditions the old three could not express: a membership the club
+ * has nothing on file for is ANOMALOUS rather than fine, and the phone's own line is not
+ * the thing that failed when the club's system answered with an error.
+ * </p>
+ *
+ * <p>
+ * A tick is a claim. A row with nothing to claim gets a dash.
+ * </p>
+ */
+export type DiagnosisState = "passed" | "neutral" | "attention" | "failed";
+
+/**
+ * Whether the page could reach the club, and — when it could not — which of the two very
+ * different failures that was. See {@link ReadFailure}.
+ */
+export type DiagnosisConnection = "ok" | ReadFailure;
 
 export const DIAGNOSIS_ROW_LABELS: Record<DiagnosisKey, string> = {
   membership: "Your membership",
@@ -699,9 +922,19 @@ export const DIAGNOSIS_ROW_LABELS: Record<DiagnosisKey, string> = {
   connection: "This phone's line to the club",
 };
 
-/** Colour is never the only signal, so every row carries its state as a word too. */
+/**
+ * Colour is never the only signal, so every row carries its state as a word too.
+ *
+ * <p>
+ * The neutral word here is the DEFAULT one — "this row is not what decides it" — and
+ * {@link row} lets a caller replace it, because neutral covers two different things a
+ * member needs told apart: a check that does not apply at this club, and a reading that is
+ * genuinely odd and worth mentioning to somebody. One dash, two sentences.
+ * </p>
+ */
 const STATE_WORDS: Record<DiagnosisState, string> = {
   passed: "Passed",
+  neutral: "Not what decides it here",
   attention: "Needs attention",
   failed: "Failed",
 };
@@ -726,24 +959,50 @@ export type DiagnosisInput = {
   opensAtClock: string | null;
   opensInWords: string | null;
   codeSecondsLeft: number;
-  connectionOk: boolean;
-  contact: MemberDoorContact;
+  connection: DiagnosisConnection;
+  contact: ContactKnowledge;
 };
 
-function row(key: DiagnosisKey, state: DiagnosisState, value: string): DiagnosisRow {
-  return { key, label: DIAGNOSIS_ROW_LABELS[key], value, state, stateWord: STATE_WORDS[state] };
+function row(key: DiagnosisKey, state: DiagnosisState, value: string, stateWord?: string): DiagnosisRow {
+  return { key, label: DIAGNOSIS_ROW_LABELS[key], value, state, stateWord: stateWord ?? STATE_WORDS[state] };
 }
 
+/**
+ * At a club that opens for any active member there is no booking to have, so there is
+ * nothing here to pass. It scored a tick, which is a claim about a rule this club does
+ * not apply.
+ */
 function bookingRow(input: DiagnosisInput): DiagnosisRow {
-  if (input.policy === "active_member") return row("booking", "passed", "not needed at this club");
+  if (input.policy === "active_member") return row("booking", "neutral", "not needed at this club");
   if (!input.hasBooking) return row("booking", "failed", "none starting soon");
   return row("booking", "passed", input.bookingStartsClock ?? "one coming up");
 }
 
+/** No window is not an open window. A dash, not a tick. */
 function windowRow(input: DiagnosisInput): DiagnosisRow {
-  if (input.doorWindowOpen === null) return row("window", "passed", "no window to wait for");
+  if (input.doorWindowOpen === null) return row("window", "neutral", "no window to wait for");
   if (input.doorWindowOpen) return row("window", "passed", "open for you now");
   return row("window", "attention", `opens for you at ${input.opensAtClock ?? "a time the club sets"}`);
+}
+
+/**
+ * The phone's own line to the club — and the row that blamed the wrong party.
+ *
+ * <p>
+ * A 500 from the club's API scored this row "not reaching the club ✗ Failed" in front of a
+ * member whose phone had just carried the request there and back. The response ARRIVED; it
+ * carried an error. Nothing on the phone is at fault and nothing on it can be moved to fix
+ * it, so this row states what happened and declines to score itself.
+ * </p>
+ */
+function connectionRow(input: DiagnosisInput): DiagnosisRow {
+  if (input.connection === "ok") return row("connection", "passed", "working");
+  if (input.connection === "network") return row("connection", "failed", "not reaching the club");
+  return row(
+    "connection", "neutral",
+    "working — it was the club's system that answered with an error",
+    "Not what failed here",
+  );
 }
 
 /**
@@ -757,27 +1016,40 @@ function windowRow(input: DiagnosisInput): DiagnosisRow {
  * about a rule the door does not apply — sending somebody to the desk to fix a thing that
  * is not stopping them, while whatever IS stopping them goes unnamed.
  * </p>
+ *
+ * <p>
+ * <b>But "nothing on file" is not a pass either.</b> It scored a green tick reading
+ * "nothing on file, and nothing barring you", which is two claims joined by a comma where
+ * only the second one is this row's business — and a member who reads six ticks concludes
+ * the club's records are in order. They are not: there is no record. Neutral, with a word
+ * that says what to do about it, and the conclusion picks it up at the end.
+ * </p>
  */
 function membershipRow(input: DiagnosisInput): DiagnosisRow {
   if (input.membership === "not_active") {
     return row("membership", "failed", MEMBERSHIP_DETAIL_WORDS[input.membership_detail] ?? MEMBERSHIP_DETAIL_FALLBACK);
   }
-  if (input.membership === "none") return row("membership", "passed", "nothing on file, and nothing barring you");
+  if (input.membership === "none") {
+    return row("membership", "neutral", "nothing on file, and nothing barring you", "Unusual — tell the club");
+  }
   return row("membership", "passed", "active");
 }
 
 function diagnosisRows(input: DiagnosisInput): DiagnosisRow[] {
   return [
     membershipRow(input),
-    row("policy", "passed", input.policy === "active_member" ? "an active membership" : "a court booked"),
+    // A caption rather than a check: it states what this club's doors want, which is not
+    // something this member either passes or fails. It ticked, and a tick beside "an
+    // active membership" is exactly the claim a member with none must never be shown.
+    row("policy", "neutral", input.policy === "active_member" ? "an active membership" : "a court booked",
+      "The club's rule, not a check"),
     bookingRow(input),
     windowRow(input),
     // Through the shared formatter, not `${seconds}s`: a booking code has a quarter of an
     // hour on it and "fresh, 900s left" is a number nobody reads as fifteen minutes.
     row("code", input.codeSecondsLeft > 0 ? "passed" : "failed",
       input.codeSecondsLeft > 0 ? `fresh, ${formatCountdown(input.codeSecondsLeft)} left` : "had run out"),
-    row("connection", input.connectionOk ? "passed" : "failed",
-      input.connectionOk ? "working" : "not reaching the club"),
+    connectionRow(input),
   ];
 }
 
@@ -798,9 +1070,15 @@ function concludeFrom(input: DiagnosisInput): string {
     return `The club has your membership as ${word}. That's the whole reason, and only the club can`
       + ` change it. ${reach}`;
   }
-  if (!input.connectionOk) {
+  if (input.connection === "network") {
     return `Your phone can't reach the club, so this check is guessing about half of it. Move somewhere with`
       + ` signal, or reach the club another way. ${reach}`;
+  }
+  // The other half of the same silence, and a different thing to do about it. The member's
+  // phone worked; the answer it brought back was an error. Nothing on this phone will help.
+  if (input.connection === "server") {
+    return "The club's system answered with an error, so this check is guessing about half of it. That part"
+      + ` is not your phone, and there's nothing on it to fix. ${reach}`;
   }
   if (input.policy === "booking_window" && !input.hasBooking) {
     return "This club's doors open only for members with a court booked, and you have none starting soon."
@@ -815,8 +1093,15 @@ function concludeFrom(input: DiagnosisInput): string {
   if (input.codeSecondsLeft <= 0) {
     return "The code you held up had run out. There's a fresh one on this screen now — try that one.";
   }
+  // The all-clear, plus the one anomaly that is worth a member's breath but is not
+  // stopping them. It goes HERE rather than higher up the order on purpose: a missing
+  // membership row bars nobody, so hoisting it would send somebody to the desk over a
+  // thing that is not the reason the door stayed shut.
+  const onFile = input.membership === "none"
+    ? " The club also has no membership on file for you, which is unusual — worth saying while you have them."
+    : "";
   return "Everything on this phone looks right, so whatever went wrong is at the door: it may have lost the"
-    + ` club's network, or its scanner may need a wipe. ${reach}`;
+    + ` club's network, or its scanner may need a wipe. ${reach}${onFile}`;
 }
 
 export function buildDiagnosis(input: DiagnosisInput): { rows: DiagnosisRow[]; conclusion: string } {
@@ -851,6 +1136,53 @@ export const HISTORY_MORE_FAILED = "Couldn't load any more. The rows above are s
 
 export const HISTORY_SHOW_MORE = "Show more";
 export const HISTORY_RETRY = "Try again";
+
+/**
+ * D14 — a record with no date on it is a record nobody can trust twice.
+ *
+ * <p>
+ * This card is read on mount and never polled, deliberately: a member scanning back
+ * through their own record should control every fetch. The cost of that decision is a page
+ * that can sit open for an hour showing rows from an hour ago with nothing to say so, and
+ * no way to ask again short of a full reload. Both halves are cheap to fix and neither was
+ * there.
+ * </p>
+ */
+export function historyAsOf(clock: string): string {
+  return `As of ${clock}.`;
+}
+
+export const HISTORY_REFRESH = "Refresh";
+
+/**
+ * D14 — the way in to the history from the page a member is already on.
+ *
+ * <p>
+ * It was reachable only through the avatar, then Profile, then a scroll — three steps
+ * from the screen where the question "did that actually work?" is asked.
+ * </p>
+ */
+export const HISTORY_LINK_LABEL = "Your door history";
+
+// --- D13: the walk-up switch, and the offer that should not need it ---------------------
+
+export const WALK_UP_LABEL = "Walk up / pay for someone";
+
+/**
+ * What the page says when the booking code on screen has stopped opening a door.
+ *
+ * <p>
+ * <b>The escape hatch existed and nothing pointed at it.</b> A member whose booking's door
+ * window has closed is holding a code that will be refused at the door, with a switch
+ * lower down the page — a sixteen-pixel checkbox labelled for a court errand — as the only
+ * way to the code that might still work. Nothing connected the two, so the member who most
+ * needs the switch is the one least likely to find it.
+ * </p>
+ */
+export const BOOKING_DOOR_WINDOW_CLOSED = "Your booking's door window has closed, so this booking code won't"
+  + " open a club door now.";
+
+export const USE_MEMBER_CODE_INSTEAD = "Use your member code instead";
 
 /** The offline marker on a row: the door decided from the list it had already downloaded. */
 export const HISTORY_OFFLINE_LINE = "From the door's own list — it couldn't reach the club at the time.";

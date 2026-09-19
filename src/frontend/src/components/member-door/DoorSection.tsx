@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Button } from "../Button";
-import type { MemberDoor, MemberDoorContact } from "../../lib/api";
+import type { MemberDoor } from "../../lib/api";
 import type { LastKnown } from "../../lib/lastKnown";
 import { minutesSince } from "../../lib/lastKnown";
 import { formatClock } from "../../lib/countdown";
-import { DIAGNOSIS_TRIGGER } from "../../lib/memberDoorCopy";
+import { DIAGNOSIS_TRIGGER, type ContactKnowledge } from "../../lib/memberDoorCopy";
 import { SelfDiagnosis } from "./SelfDiagnosis";
 import { StandingLine } from "./StandingLine";
 import type { MemberDoorRead } from "./useMemberDoor";
@@ -25,7 +25,7 @@ export function DoorSection(props: {
   door: MemberDoor | null;
   cached: LastKnown;
   doorRead: MemberDoorRead;
-  contact: MemberDoorContact;
+  contact: ContactKnowledge;
   /** Seconds left on the code the member is holding, or 0 when there is none. */
   codeSecondsLeft: number;
   /** Fetches a fresh code and resolves when it has settled. */
@@ -60,7 +60,7 @@ export function DoorSection(props: {
         cached={cached.door}
         cachedMinutesAgo={cached.door ? minutesSince(cached.door.savedAt) : 0}
         loading={doorRead.loading}
-        failed={doorRead.failed}
+        failure={doorRead.failure}
       />
 
       {open ? (
@@ -85,7 +85,10 @@ export function DoorSection(props: {
             opensAtClock: opensAt ? formatClock(opensAt) : null,
             opensInWords: opensIn !== null && opensIn > 0 ? spokenCountdown(opensIn) : null,
             codeSecondsLeft,
-            connectionOk: !doorRead.failed,
+            // Not `!failed`. A 500 from the club's API is a read that failed and a phone
+            // whose line works perfectly, and scoring that row ✗ sent a member to look for
+            // signal they already had. See `MemberDoorRead.failure`.
+            connection: doorRead.failure ?? "ok",
             contact,
           }}
         />

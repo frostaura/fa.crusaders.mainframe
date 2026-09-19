@@ -32,9 +32,16 @@ import {
  * </p>
  */
 
-const STATE_GLYPH: Record<DiagnosisState, string> = { passed: "✓", attention: "⚠", failed: "✗" };
+/**
+ * The glyph is decoration and the colour is emphasis; the WORD in the row's accessible
+ * text is the state. `neutral` gets a dash in the muted colour for the reason it exists:
+ * a tick is a claim, and a row with nothing to claim must not make one. See
+ * `DiagnosisState`.
+ */
+const STATE_GLYPH: Record<DiagnosisState, string> = { passed: "✓", neutral: "–", attention: "⚠", failed: "✗" };
 const STATE_COLOUR: Record<DiagnosisState, string> = {
   passed: "text-success-strong",
+  neutral: "text-text-muted",
   attention: "text-warning-strong",
   failed: "text-danger-strong",
 };

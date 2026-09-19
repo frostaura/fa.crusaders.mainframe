@@ -5,6 +5,7 @@ import {
   OFFLINE_DETAILS_SUMMARY,
   STANDING_HEADING,
   STANDING_LOADING,
+  type ReadFailure,
   describeStanding,
   offlineDetailsBody,
   standingFailed,
@@ -31,9 +32,18 @@ export function StandingLine(props: {
   cached: { value: LastKnownDoor; savedAt: string } | null;
   cachedMinutesAgo: number;
   loading: boolean;
-  failed: boolean;
+  /**
+   * Which failure the last read was, or null while it succeeded.
+   *
+   * <p>
+   * It was a bare `failed` boolean, and the sentence it produced blamed the member's
+   * phone for a 500 the club's own API had answered with. Who failed is the difference
+   * between "move somewhere with signal" and "there is nothing on this phone to fix".
+   * </p>
+   */
+  failure: ReadFailure | null;
 }) {
-  const { door, cached, cachedMinutesAgo, loading, failed } = props;
+  const { door, cached, cachedMinutesAgo, loading, failure } = props;
 
   if (door) {
     const line = describeStanding(door);
@@ -54,7 +64,7 @@ export function StandingLine(props: {
   // Loading before failed: the first load of a page opened in a corridor is not a failure
   // yet, and "can't check" is the wrong sentence to greet somebody with while a request
   // is still in flight. No skeleton — there are none anywhere in this product.
-  if (loading && !failed) {
+  if (loading && !failure) {
     return (
       <section className="space-y-2">
         <h2 className="text-sm font-medium">{STANDING_HEADING}</h2>
@@ -70,7 +80,13 @@ export function StandingLine(props: {
         {STANDING_HEADING} — <span className="text-text-muted">can't check</span>
       </h2>
       <p className="text-sm text-text-secondary">
-        {standingFailed(cachedLine ? { body: cachedLine.body, minutesAgo: cachedMinutesAgo } : null)}
+        {standingFailed(
+          cachedLine ? { body: cachedLine.body, minutesAgo: cachedMinutesAgo } : null,
+          // A read that has neither succeeded nor failed cannot reach this arm, but the
+          // type allows it; "network" is the safer of the two to assume, because it is the
+          // one that offers the member something to do.
+          failure ?? "network",
+        )}
       </p>
       {cachedLine && <OfflineHalf rosterMaxEntries={cached?.value.roster_max_entries ?? null} />}
     </section>

@@ -42,6 +42,71 @@ function describeNotApproved(status: string | number | null): string {
   return "Your account isn't approved yet. An admin will email you once they've reviewed it.";
 }
 
+/**
+ * The club's public contact, off the `not_approved` refusal body.
+ *
+ * <p>
+ * <b>Every one of those three sentences ends by telling the member to talk to the club,
+ * and the screen gave them no way to.</b> A suspended or turned-down member is stopped at
+ * the sign-in screen — before any API that knows a club's phone number is reachable to
+ * them — so "speak to them" was an instruction with nothing behind it, on the one screen
+ * where the member has nothing else to try.
+ * </p>
+ *
+ * <p>
+ * <b>It is read off the refusal and nowhere else, and that boundary is deliberate.</b>
+ * The API attaches the club's PUBLIC contact to this one 403 and to no other response,
+ * so a signed-out caller cannot use the login endpoint to harvest anything: the body is
+ * returned only to somebody who has already proved they hold a real account's credentials
+ * at this club. Nothing here reads a stored value, and nothing is cached.
+ * </p>
+ *
+ * <p>
+ * <b>Absent, null, or the wrong type renders nothing at all.</b> A screen that printed
+ * "Call the club on null" — or an empty link a member presses in the dark — is worse than
+ * a screen that stays quiet, and the backend lane's field is new enough that a client
+ * talking to an older API is the ordinary case rather than the exotic one.
+ * </p>
+ */
+function refusalContact(err: unknown): { phone: string | null; email: string | null } | null {
+  if (!(err instanceof ApiError)) return null;
+  const payload = err.payload;
+  if (!payload || typeof payload !== "object") return null;
+  const raw = (payload as { contact?: unknown }).contact;
+  if (!raw || typeof raw !== "object") return null;
+  const text = (key: "phone" | "email") => {
+    const value = (raw as Record<string, unknown>)[key];
+    return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  };
+  const phone = text("phone");
+  const email = text("email");
+  return phone || email ? { phone, email } : null;
+}
+
+/** The two links, or nothing. Spaces in a number are for reading, not for dialling. */
+function RefusalContact({ contact }: { contact: { phone: string | null; email: string | null } }) {
+  return (
+    <div className="flex flex-col gap-1 text-sm">
+      {contact.phone && (
+        <a
+          href={`tel:${contact.phone.replace(/\s+/g, "")}`}
+          className="inline-flex items-center min-h-11 text-accent-strong underline underline-offset-2 hover:no-underline"
+        >
+          {contact.phone}
+        </a>
+      )}
+      {contact.email && (
+        <a
+          href={`mailto:${contact.email}`}
+          className="inline-flex items-center min-h-11 break-all text-accent-strong underline underline-offset-2 hover:no-underline"
+        >
+          {contact.email}
+        </a>
+      )}
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const auth = useAuth();
   const nav = useNavigate();
@@ -54,6 +119,15 @@ export default function LoginPage() {
   // from this screen. It offers the resend, and then reports what the resend did.
   const [offerResend, setOfferResend] = useState(false);
   const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
+  /**
+   * The club's public contact, when the refusal carried one. D8.
+   *
+   * <p>
+   * Held only for the life of the refusal on screen — cleared at the top of every attempt
+   * — because it belongs to the answer the API just gave, not to this browser.
+   * </p>
+   */
+  const [contact, setContact] = useState<{ phone: string | null; email: string | null } | null>(null);
 
   /**
    * The page the member actually asked for, captured by `RequireAuth` when it turned them away.
@@ -89,6 +163,7 @@ export default function LoginPage() {
   const doLogin = async (e: string, p: string) => {
     setError(null);
     setOfferResend(false);
+    setContact(null);
     setResendState("idle");
     setLoading(true);
     try {
@@ -97,6 +172,9 @@ export default function LoginPage() {
     } catch (err) {
       setError(describeFailure(err));
       setOfferResend(err instanceof ApiError && err.status === 403 && errorCode(err) === "email_not_verified");
+      // Only on the refusal that tells the member to talk to the club, and only from that
+      // refusal's own body. See `refusalContact`.
+      setContact(errorCode(err) === "not_approved" ? refusalContact(err) : null);
     } finally {
       setLoading(false);
     }
@@ -170,7 +248,13 @@ export default function LoginPage() {
           */}
           {error && (
             <Alert>
-              {error}
+              <div className="space-y-2">
+                <p>{error}</p>
+                {/* D8. Each of the not_approved sentences ends by telling the member to
+                    speak to the club, on the one screen that used to give them no way to.
+                    Absent or null renders nothing — never a claim, never a dead link. */}
+                {contact && <RefusalContact contact={contact} />}
+              </div>
             </Alert>
           )}
           {offerResend && (
