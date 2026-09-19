@@ -7,7 +7,7 @@ import {
 } from "../lib/deviceCoverage";
 import {
   GATE_KEY_MAX_LENGTH, NEW_GATE_BADGE, describeGate, gateDeleteConfirm,
-  gateOutOfServiceConfirm, gateOutOfServiceNotice,
+  gateOutOfServiceConfirm, gateOutOfServiceNotice, unnamedGateOfflineNotice,
 } from "../lib/gateCopy";
 import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
@@ -287,8 +287,11 @@ function DeviceButtonMapPanel({
 /** Everything a row can ask the page to do to its device. */
 type DeviceActions = {
   details: (name: string, courtNumbers: number[]) => Promise<boolean>;
-  /** A gate's half of `details`: its name and the door it is on. Never sent for a box. */
-  gateDetails: (name: string, gateKey: string | null) => Promise<boolean>;
+  /**
+   * A gate's half of `details`: its name and the door it is on. Never sent for a box.
+   * `gateKey` is `""` to clear the door's name — see {@link GateDetailsEditor}.
+   */
+  gateDetails: (name: string, gateKey: string) => Promise<boolean>;
   buttonMap: (map: string[] | null) => Promise<boolean>;
   /** Out of service, or back in. See DeviceRow for what the switch actually does. */
   setEnabled: (enabled: boolean) => Promise<void>;
@@ -369,8 +372,11 @@ function GateDetailsEditor({
   device, onSave, onClose,
 }: {
   device: AdminDevice;
-  /** An empty key clears the door's name — the API reads `""` as null. */
-  onSave: (name: string, gateKey: string | null) => Promise<boolean>;
+  /**
+   * An empty key clears the door's name, and `""` is what the API reads as a clear — `null`
+   * on that field means "leave it alone", which is what this used to send.
+   */
+  onSave: (name: string, gateKey: string) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [name, setName] = useState(device.name);
@@ -384,9 +390,9 @@ function GateDetailsEditor({
     try {
       // Trimmed here as well as on the API, so the row that comes back is the row the
       // admin will see — a key saved with a trailing space would otherwise render with an
-      // invisible difference from the one they typed.
-      const trimmed = key.trim();
-      if (await onSave(name.trim() || device.name, trimmed === "" ? null : trimmed)) onClose();
+      // invisible difference from the one they typed. An empty field goes as `""`, which
+      // is the API's clear; it used to go as `null`, which the API discards.
+      if (await onSave(name.trim() || device.name, key.trim())) onClose();
     } finally {
       setSaving(false);
     }
@@ -409,7 +415,7 @@ function GateDetailsEditor({
           Which door this board is on. Every door runs the same firmware and nothing is
           compiled in per door, so this is how the audit trail names the door. Without it a
           scan is recorded against the board code alone. Leave it empty to take the name away
-          again.
+          again. {unnamedGateOfflineNotice()}
         </p>
         <Input
           id={keyId}
@@ -483,6 +489,39 @@ function DeviceRowHeader({ device, online }: { device: AdminDevice; online: bool
           with a larger token. */}
       <div className="mt-1 break-words text-xs text-slate-500">{identityLine(device)}</div>
     </>
+  );
+}
+
+/**
+ * What an unnamed door cannot do, on the row rather than only inside the editor.
+ *
+ * <p>
+ * A gate whose `gate_key` is null is sent an empty roster on every heartbeat, so it has no
+ * offline fallback at all. That is a functional gap rather than a cosmetic one, and the
+ * badge beside it says only that the row is NEW — a different claim, and one that stops
+ * being true the moment anything on the row is edited.
+ * </p>
+ *
+ * <p>
+ * Keyed on the name being absent rather than on `auto_registered`, because clearing a name
+ * takes the roster away from a row that is no longer new. Its own component rather than a
+ * conditional inside {@link DeviceRow}, which the complexity gate already holds at its
+ * bound — and because the condition is then stated once, beside the reason for it.
+ * </p>
+ *
+ * <p>
+ * Silent while the door editor is open, because the field's own hint carries the same
+ * sentence there and the two render one above the other. Seen at phone width: the identical
+ * paragraph twice inside one card, which reads as a rendering fault rather than as emphasis.
+ * </p>
+ */
+function UnnamedGateNotice({ device, editing }: { device: AdminDevice; editing: boolean }) {
+  if (editing) return null;
+  if (!isGate(device) || device.gate_key !== null) return null;
+  return (
+    <p className="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
+      {unnamedGateOfflineNotice()}
+    </p>
   );
 }
 
@@ -591,6 +630,8 @@ function DeviceRow({
           onClose={() => setEditing(null)}
         />
       )}
+
+      <UnnamedGateNotice device={device} editing={editing === "details"} />
 
       {!device.enabled && <OutOfServiceNotice device={device} coverage={coverage} />}
 
@@ -731,17 +772,29 @@ function useDeviceActions(reload: () => Promise<void>) {
       }
     },
     /**
-     * A door's name and key, in one PATCH. `gate_key` binds three-valued exactly as
-     * `button_map` does, so clearing the door's name is `null` on the wire and not `""` —
-     * and `court_numbers` is never sent, because the API refuses it on a Gate row.
+     * A door's name and key, in one PATCH.
+     *
+     * <p>
+     * `gate_key` does NOT bind three-valued the way `button_map` does, which is what this
+     * comment used to say and what the code did: clearing a door's name is `""` on the wire,
+     * because the API applies the field only when it is not null and reads an empty string
+     * as the clear. Sending `null` was a silent no-op that reported success.
+     * </p>
+     *
+     * <p>
+     * `court_numbers` is never sent, because the API refuses it on a Gate row.
+     * </p>
      */
     gateDetails: async (name, gateKey) => {
       try {
         await endpoints.adminDeviceUpdate(device.id, { name, gate_key: gateKey });
         toast.push({
           tone: "success",
-          text: gateKey === null
-            ? `${name} has no door name. Scans at it still work; the audit trail just cannot say which door they were.`
+          // A cleared name is not a cosmetic loss any more: an unnamed gate is sent an empty
+          // roster, so it stops working the moment it loses the network. The toast used to
+          // say "scans at it still work", which is true only while the API is reachable.
+          text: gateKey === ""
+            ? `${name} has no door name. ${unnamedGateOfflineNotice()} The audit trail cannot say which door a scan was, either.`
             : `${name} is the ${gateKey} door. It picks that up on its next heartbeat.`,
         });
         await reload();
@@ -883,7 +936,7 @@ export function AdminDevicesPage() {
     try {
       await refreshDevices();
     } catch (e) {
-      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not re-read the boxes.") });
+      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not re-read the boards.") });
     } finally {
       setRefreshing(false);
     }
@@ -923,14 +976,17 @@ export function AdminDevicesPage() {
           </Button>
         </div>
         <p className="mb-3 text-xs text-slate-500">
-          {checkedAt ? `Checked ${relative(checkedAt)}` : "Checking…"} · this page re-reads the boxes every {REFRESH_MS / 1000} seconds while this tab is in front.
+          {checkedAt ? `Checked ${relative(checkedAt)}` : "Checking…"} · this page re-reads the boards every {REFRESH_MS / 1000} seconds while this tab is in front.
         </p>
 
         {loading ? (
           <p className="text-sm text-slate-500">Loading…</p>
         ) : devices.length === 0 ? (
+          /* A club may own only doors: a gate registers itself on this list exactly as a box
+             does, so "no boxes" told such a club its doors did not count as devices. The
+             heading above is already "Connected boards". */
           <p className="text-sm text-slate-500">
-            No boxes have called in yet. Flash one with the key above and power it on — it registers itself.
+            No boards have called in yet. Flash one with the key above and power it on — it registers itself.
           </p>
         ) : (
           <div className="space-y-3">

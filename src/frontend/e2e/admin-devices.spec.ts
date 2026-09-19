@@ -200,9 +200,13 @@ test.describe("A box that registered itself", () => {
   test("until one has, the empty club says what to do instead of showing nothing", async ({ page }) => {
     await openDevices(page, []);
 
-    await expect(page.getByText(/No boxes have called in yet/)).toBeVisible();
+    // "boards", not "boxes". A gate registers itself on this list exactly as a court box
+    // does, so a club that has installed a door and nothing else was reading a screen that
+    // named a device it does not own. The heading above the list is "Connected boards".
+    await expect(page.getByText(/No boards have called in yet/)).toBeVisible();
+    await expect(page.getByText(/No boxes have called in yet/)).toHaveCount(0);
     // The instruction has to name the key above it, because that is the only thing that
-    // makes a box able to register at all.
+    // makes a board able to register at all.
     await expect(page.getByText(/Flash one with the key above and power it on/)).toBeVisible();
   });
 });
@@ -614,12 +618,15 @@ test.describe("A door gate", () => {
    * The out-of-service copy, which is the door's own and shares nothing with the box's.
    *
    * <p>
-   * The middle clause is the one a shorter sentence would have got wrong, and the one this
-   * test exists for: a 403 is not a refusal to the firmware, it is an outage, so a door
-   * whose API has stopped answering falls back to its cached roster and keeps admitting a
-   * booked member until that goes stale. "The door stops opening" would be the same class of
-   * falsehood as the box side's "nobody can check in there", which survived three rounds and
-   * was read off a production build before anybody noticed.
+   * The middle clause is the one a shorter sentence gets wrong, and the one this test exists
+   * for — and it is now a PAIR of clauses rather than one. A 403 is authoritative for a gate:
+   * a board that reaches the API and is refused denies the scan with no roster fallback, and
+   * a 403 on its heartbeat commits an empty roster, so a door that is merely out of service
+   * on a working network really does open for nobody. A board that has ALSO lost the network
+   * never hears any of it and keeps admitting booked members from its cache for up to six
+   * hours. Either half stated alone is a sentence an admin cannot reconcile with what they
+   * will see, which is the same class of falsehood as the box side's "nobody can check in
+   * there" — that one survived three rounds and was read off a production build.
    * </p>
    */
   test("says what taking a DOOR out of service costs, and none of what it costs a box", async ({ page }) => {
@@ -632,8 +639,9 @@ test.describe("A door gate", () => {
 
     await page.getByRole("button", { name: "Take out of service" }).click();
     const confirm = page.getByRole("button", {
-      name: "Out of service? The API stops answering scans at this door. It may still open from its"
-        + " cached roster until that goes stale. No booking, check-in or no-show penalty changes.",
+      name: "Out of service? A door that can reach the API opens for nobody from this click. One that"
+        + " has also lost the network keeps admitting booked members from its cached roster for up to"
+        + " six hours. No booking, check-in or no-show penalty changes.",
     });
     await expect(confirm).toBeVisible();
     // Never the box's, which promises a court's no-shows stop being penalised.
@@ -653,9 +661,13 @@ test.describe("A door gate", () => {
     // service." Written unanchored first, and this run is what caught it.
     const notice = page.getByText(/^Out of service\. The club is not alerted/);
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText("the API stops answering scans at this door");
-    await expect(notice).toContainText("The door keeps whatever roster it last downloaded");
-    await expect(notice).toContainText("may still get in until it goes stale — nobody else will");
+    await expect(notice).toContainText("the API refuses every scan at this door");
+    // Both halves — the reachable door that opens for nobody, and the cut-off one that does
+    // not hear the refusal and keeps admitting booked members until its roster goes stale.
+    await expect(notice).toContainText("can still reach the API hears that refusal and opens for nobody");
+    await expect(notice).toContainText("has also lost the network never hears it");
+    await expect(notice).toContainText("roster it last downloaded");
+    await expect(notice).toContainText("up to six hours");
     await expect(notice).toContainText(
       "Bookings, check-ins, refunds and no-show penalties are untouched either way");
     // And none of the court-box copy, which is about courts going dark and penalties being
@@ -669,6 +681,68 @@ test.describe("A door gate", () => {
     await expect(page.getByRole("button", {
       name: "Delete? The door re-registers on its next heartbeat with no name.",
     })).toBeVisible();
+  });
+
+  /**
+   * <b>Clearing a door's name, against a server that behaves like the API.</b>
+   *
+   * <p>
+   * The screen sent `gate_key: null`, which `DeviceRegistryService.UpdateAsync` reads as
+   * "leave it alone" — it applies the field only <code>if (cmd.GateKey is not null)</code>,
+   * and <code>Length == 0</code> is what stores a null. So the clear was a silent no-op that
+   * reported success, and neither this spec nor the unit test could see it: both answered
+   * the PATCH with an already-cleared row whatever they were handed.
+   * </p>
+   *
+   * <p>
+   * The route below applies the API's own rule to whatever arrives, and the list route
+   * serves what it produced, so the assertion is on the OUTCOME rather than on the wire text
+   * alone. Sending null leaves the row reading "front-door" after the reload — which is
+   * exactly what an admin saw.
+   * </p>
+   */
+  test("clears a door name for real, rather than reporting a save the API discards", async ({ page }) => {
+    let row: Record<string, unknown> = {
+      ...GATE, name: "Front door", gate_key: "front-door", auto_registered: false,
+    };
+    const gateKeyAware: ApiRoute[] = [
+      { path: "/api/v1/admin/devices/", respond: () => [row] },
+      {
+        method: "PATCH",
+        path: "/api/v1/admin/devices/",
+        respond: (request) => {
+          const patch = (request.body ?? {}) as Record<string, unknown>;
+          // The API's rule, verbatim: null is an absence, "" is the clear.
+          if (typeof patch.name === "string") row = { ...row, name: patch.name };
+          if (typeof patch.gate_key === "string") {
+            const trimmed = patch.gate_key.trim();
+            row = { ...row, gate_key: trimmed === "" ? null : trimmed };
+          }
+          return row;
+        },
+      },
+    ];
+
+    await signIn(page);
+    await serveApi(page, [...routes([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...gateKeyAware]);
+    await page.goto("/admin/devices");
+    await expect(page.getByRole("heading", { name: "Devices" })).toBeVisible();
+    await expect(page.getByText("Door gate · front-door")).toBeVisible();
+
+    const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
+    await page.getByRole("button", { name: "Edit name and door" }).click();
+    await page.getByLabel("Door name", { exact: true }).fill("   ");
+    await page.getByRole("button", { name: "Save door" }).click();
+
+    // The wire value the API honours, and then the row it actually produced.
+    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ name: "Front door", gate_key: "" });
+    await expect(page.getByText("Door gate · no door name yet")).toBeVisible();
+    await expect(page.getByText("Door gate · front-door")).toHaveCount(0);
+
+    // And what the club has just given up, which is no longer only the audit trail: an
+    // unnamed door is sent an empty roster, so it has no offline fallback at all.
+    await expect(page.getByRole("status")).toContainText("only works while it can reach the server");
+    await expect(page.getByText(/^Until you name this door/)).toBeVisible();
   });
 
   /**

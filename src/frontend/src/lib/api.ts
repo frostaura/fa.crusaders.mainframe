@@ -470,14 +470,24 @@ export type AdminSettings = {
  * <p>
  * `active_member` is the default: any member the scan resolves opens the door unless their
  * membership is barred. `booking_window` narrows it to a member whose booking is running, or
- * starts within `gate_early_entry_minutes`. An account with no membership row at all — an
- * admin or an operator — is not barred by either.
+ * starts within `gate_early_entry_minutes`. A CLUB ADMIN passes that booking check whatever
+ * they have booked — the exemption is keyed on `User.IsAdmin`, not on the absence of a
+ * membership row, and there is no "operator" role in this product for it to be keyed on.
+ * Neither policy waives the barred check: a suspended, pending or rejected membership is
+ * turned away, admin or not.
  * </p>
  *
  * <p>
- * Neither says anything about the OFFLINE case: a door that cannot reach the API falls back
- * to its cached roster, which holds bookings and nothing else, so offline only a booked
- * member gets in whichever of these is set.
+ * Neither policy says anything about which CODE was presented, and a booking's activation
+ * code is narrower than both: it opens a door only inside its own booking's window and only
+ * while that booking is still Booked. A member's own ident code is what the policy names.
+ * </p>
+ *
+ * <p>
+ * And neither says anything about the OFFLINE case: a door that cannot reach the API falls
+ * back to its cached roster, which holds bookings and nothing else, so offline only a booked
+ * member gets in whichever of these is set — and a door nobody has named is sent no roster,
+ * so it gets nobody in at all.
  * </p>
  */
 export const GATE_ACCESS_POLICIES = ["active_member", "booking_window"] as const;
@@ -1189,15 +1199,23 @@ export const endpoints = {
    * key leaves it alone. The spread below keeps that contract — a caller that does not
    * mention `button_map` sends no such key, and JSON.stringify drops an `undefined` one.
    *
-   * `gate_key` binds the same three ways and is a GATE row's only editable configuration:
-   * a string names the door (trimmed, at most 64 characters), `null` clears the name, and
-   * an absent key leaves it alone. It is refused on a court box (`gate_key_not_a_gate`),
-   * exactly as `court_numbers` and `button_map` are refused on a gate
-   * (`court_fields_on_a_gate`). `kind` is on neither this request nor the API's, by design.
+   * `gate_key` is a GATE row's only editable configuration and binds TWO ways, not three —
+   * which is the difference from `button_map` directly above, and the one this comment used
+   * to get wrong. `DeviceRegistryService.UpdateAsync` applies it only
+   * `if (cmd.GateKey is not null)`, and then `Length == 0` is what stores a null. So a
+   * non-empty string names the door (trimmed, at most 64 characters), `""` CLEARS the name,
+   * and `null` or an absent key leave it alone — `null` is not a clear, it is an absence.
+   * The type says so: there is no way to spell a clear as null, because for two rounds the
+   * page did exactly that and cleared nothing while reporting success.
+   *
+   * It is refused on a court box (`gate_key_not_a_gate`), exactly as `court_numbers` and
+   * `button_map` are refused on a gate (`court_fields_on_a_gate`), and refused over 64
+   * characters (`gate_key_too_long`). `kind` is on neither this request nor the API's, by
+   * design.
    */
   adminDeviceUpdate: (
     id: string,
-    req: { name?: string; enabled?: boolean; court_numbers?: number[]; button_map?: string[] | null; gate_key?: string | null },
+    req: { name?: string; enabled?: boolean; court_numbers?: number[]; button_map?: string[] | null; gate_key?: string },
   ) => api.patch<AdminDevice>(`/api/v1/admin/devices/${id}`, { ...req }),
   /**
    * Forgets a box. It is not a revocation and does not lock anything out: the box still

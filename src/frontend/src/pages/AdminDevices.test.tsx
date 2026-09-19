@@ -6,6 +6,7 @@ import {
   DEVICE_API_KEY_FIXTURE,
   SETTINGS_FIXTURE,
   deviceFixture,
+  deviceServer,
   gateFixture,
   renderPage,
   stubFetch,
@@ -736,7 +737,9 @@ describe("AdminDevices", () => {
     // drifted into separate paragraphs. One element, found by the slower half, is the form
     // that keeps proving what the test is named for.
     const status = await screen.findByText(/^Checked /);
-    expect(status).toHaveTextContent(/re-reads the boxes every 15 seconds/);
+    // "boards", not "boxes": a gate is on this list exactly as a box is, and a club that owns
+    // only doors was being told this page re-reads something it does not have.
+    expect(status).toHaveTextContent(/re-reads the boards every 15 seconds/);
 
     const atLoad = deviceReads(stub);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -1309,6 +1312,29 @@ describe("AdminDevices", () => {
     expect(courtSelect.className).toContain("min-w-0");
   });
 
+  /**
+   * The empty club, in words that fit whatever it has bought.
+   *
+   * <p>
+   * "No boxes have called in yet" was the only pin on this sentence, and it was in the
+   * browser spec alone. A gate registers itself on this list exactly as a court box does, so
+   * a club that has installed a door and nothing else read a screen telling it no devices
+   * existed in terms of a device it does not own. The heading above the list has said
+   * "Connected boards" all along.
+   * </p>
+   */
+  it("says the club has no boards yet, in words that fit a club with only doors", async () => {
+    stubFetch(baseRoutes());
+
+    renderPage(<AdminDevicesPage />);
+
+    expect(await screen.findByText(/No boards have called in yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/No boxes have called in yet/)).not.toBeInTheDocument();
+    // The instruction has to name the key above it: that is the only thing that lets any
+    // board register at all, door or box.
+    expect(screen.getByText(/Flash one with the key above and power it on/)).toBeInTheDocument();
+  });
+
   // --- door gates -------------------------------------------------------------------
 
   /**
@@ -1459,16 +1485,28 @@ describe("AdminDevices", () => {
     });
 
     /**
-     * Clearing the field is `null` on the wire, not `""`. Sending an empty string would
-     * depend on the server trimming it back, which is a second place for the two to
-     * disagree — and the API binds this field three-valued precisely so that "no name" is
-     * expressible at all.
+     * Clearing the field is `""` on the wire, not `null`.
+     *
+     * <p>
+     * This test used to pin the opposite, and the page obliged: `null` on this field means
+     * "leave the door's name alone" (`DeviceRegistryService.UpdateAsync` applies it only
+     * <code>if (cmd.GateKey is not null)</code>), so clearing a door name was a silent
+     * no-op that reported success. The test could not see it because the PATCH route
+     * answered with an unnamed row whatever it was sent — a canned answer pins the wire
+     * value and nothing about whether the server would have honoured it.
+     * </p>
+     *
+     * <p>
+     * So the server here applies the API's own rule and the assertion is on the OUTCOME:
+     * the row after the reload, and the row the server is holding. Sending `null` leaves
+     * both saying "front-door", which is what production did.
+     * </p>
      */
-    it("clears a door name by sending null", async () => {
+    it("clears a door name by sending an empty string, and the door really loses it", async () => {
+      const server = deviceServer(gateFixture({ name: "Front door", gate_key: "front-door" }));
       const stub = stubFetch([
         ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
-        { path: "/api/v1/admin/devices/", body: [gateFixture({ name: "Front door", gate_key: "front-door" })] },
-        { method: "PATCH", path: "/api/v1/admin/devices/", body: gateFixture({ name: "Front door" }) },
+        ...server.routes,
       ]);
 
       renderPage(<AdminDevicesPage />);
@@ -1479,11 +1517,98 @@ describe("AdminDevices", () => {
       fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
 
       await waitFor(() => {
-        expect(stub.calls.find((c) => c.method === "PATCH")?.raw).toBe('{"name":"Front door","gate_key":null}');
+        expect(stub.calls.find((c) => c.method === "PATCH")?.raw).toBe('{"name":"Front door","gate_key":""}');
       });
+      // The row the server is now holding, and the row the screen shows after its reload.
+      // Either one alone would still pass against a stub that always answers "cleared".
+      await waitFor(() => expect(server.current().gate_key).toBeNull());
+      expect(await screen.findByText(/Door gate · no door name yet/)).toBeInTheDocument();
       // And the toast says what has actually been given up, rather than reporting a success
       // that reads as if the door were now named something.
-      expect(await screen.findByText(/has no door name/)).toHaveTextContent(/cannot say which door they were/);
+      expect(await screen.findByText(/has no door name/))
+        .toHaveTextContent(/only works while it can reach the server/);
+    });
+
+    /**
+     * <b>An unnamed door has no offline fallback, and the row has to say so.</b>
+     *
+     * <p>
+     * A heartbeat for a Gate row whose key is null answers `roster: []`. Online scans work
+     * from the moment the board is plugged in — the install stays plug-and-play — but the
+     * cached-roster fallback does not exist until an admin has named the door, because any
+     * holder of the club's one device key can self-register a "gate" with a random MAC and
+     * before this that handed them the club-wide code set on demand.
+     * </p>
+     *
+     * <p>
+     * The "New" badge beside it says only that the row is new, which is a different claim
+     * and one that stops being true the moment anything on the row is edited.
+     * </p>
+     */
+    it("says an unnamed door has no offline fallback, on the row itself", async () => {
+      stubFetch(withDevices([gateFixture({ gate_key: null })]));
+
+      renderPage(<AdminDevicesPage />);
+
+      const notice = await screen.findByText(/Until you name this door/);
+      expect(notice).toHaveTextContent("only works while it can reach the server");
+      expect(notice).toHaveTextContent("sent an empty roster");
+      expect(notice).toHaveTextContent("opens nothing at all while it is offline");
+    });
+
+    /**
+     * And it is keyed on the NAME, not on the badge: a named door has a roster whether or not
+     * anybody has edited the row since it registered itself.
+     */
+    it("says nothing of the sort once the door has a name", async () => {
+      stubFetch(withDevices([gateFixture({ gate_key: "front-door", auto_registered: true })]));
+
+      renderPage(<AdminDevicesPage />);
+
+      // The badge is still there — the row IS new — and the roster warning is not.
+      expect(await screen.findByText("New — name this door")).toBeInTheDocument();
+      expect(screen.queryByText(/Until you name this door/)).not.toBeInTheDocument();
+    });
+
+    /**
+     * And it stands down while the editor is open, because the door-name field's own hint
+     * carries the same sentence there. Seen at phone width before this: the identical
+     * paragraph twice inside one card, which reads as a rendering fault rather than emphasis.
+     */
+    it("says it once, not twice, while the door editor is open", async () => {
+      stubFetch(withDevices([gateFixture({ gate_key: null })]));
+
+      renderPage(<AdminDevicesPage />);
+
+      expect(await screen.findAllByText(/Until you name this door/)).toHaveLength(1);
+      fireEvent.click(screen.getByRole("button", { name: /Edit name and door/ }));
+      // Still exactly one — the hint's — and it is the hint, not the row notice.
+      const said = screen.getAllByText(/Until you name this door/);
+      expect(said).toHaveLength(1);
+      expect(said[0]).toHaveTextContent("Which door this board is on");
+    });
+
+    /**
+     * A door name past the column's bound. The field's own maxLength stops it at the
+     * keyboard, so this reaches an admin through a paste or a row edited elsewhere — and it
+     * had no entry in the error table at all, falling through to the underscore swap, which
+     * reads "gate key too long" and names neither the field nor the bound.
+     */
+    it("turns a door name that is too long into a sentence with the bound in it", async () => {
+      stubFetch([
+        ...baseRoutes().filter((r) => r.path !== "/api/v1/admin/devices/"),
+        { path: "/api/v1/admin/devices/", body: [gateFixture()] },
+        { method: "PATCH", path: "/api/v1/admin/devices/", status: 400, body: { error: "gate_key_too_long", max_length: 64 } },
+      ]);
+
+      renderPage(<AdminDevicesPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door/ }));
+      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "x".repeat(65) } });
+      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+
+      expect(await screen.findByText(/A door name is at most 64 characters/)).toBeInTheDocument();
+      expect(screen.queryByText(/gate key too long/)).not.toBeInTheDocument();
     });
 
     /** The API's own bound, on the field, so a long name is stopped where it is typed. */
@@ -1519,8 +1644,10 @@ describe("AdminDevices", () => {
       expect(hint).toHaveTextContent("Without it a scan is recorded against the board code alone");
       expect(hint).not.toHaveTextContent("only thing that tells one");
       // And that clearing it is a thing the field can do, which is not obvious from a text
-      // input with a value already in it.
+      // input with a value already in it — together with what clearing it costs, which is no
+      // longer only the audit trail: an unnamed door is sent an empty roster.
       expect(hint).toHaveTextContent("Leave it empty to take the name away again");
+      expect(hint).toHaveTextContent("only works while it can reach the server");
     });
 
     /**
@@ -1554,15 +1681,17 @@ describe("AdminDevices", () => {
 
       renderPage(<AdminDevicesPage />);
 
-      const notice = await screen.findByText(/the API stops answering scans at this door/);
+      const notice = await screen.findByText(/the API refuses every scan at this door/);
       expect(notice).toHaveTextContent("Out of service.");
       expect(notice).toHaveTextContent("not alerted about its silence");
-      // The caveat that makes the sentence true. A 403 is not a refusal to the firmware, it
-      // is an outage, so the door falls back to its cached roster and keeps opening for a
-      // booked member until that goes stale. "The door stops opening" is the same class of
-      // falsehood as the box side's "nobody can check in there", which survived three rounds.
-      expect(notice).toHaveTextContent("The door keeps whatever roster it last downloaded");
-      expect(notice).toHaveTextContent("may still get in until it goes stale — nobody else will");
+      // Both halves, because a 403 is now authoritative for a gate: a board that reaches the
+      // API and is refused denies the scan with NO roster fallback, so a door on a working
+      // network really does open for nobody — while a board that has also lost the network
+      // never hears the refusal and keeps admitting booked members for up to six hours.
+      // Either half alone is a sentence an admin cannot reconcile with what they will see.
+      expect(notice).toHaveTextContent("can still reach the API hears that refusal and opens for nobody");
+      expect(notice).toHaveTextContent("has also lost the network never hears it");
+      expect(notice).toHaveTextContent("up to six hours");
       // And that nothing settles, said out loud because the identical control on a box row
       // does move money.
       expect(notice).toHaveTextContent(
@@ -1591,8 +1720,9 @@ describe("AdminDevices", () => {
       expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
 
       const confirm = await screen.findByRole("button", {
-        name: "Out of service? The API stops answering scans at this door. It may still open from its"
-          + " cached roster until that goes stale. No booking, check-in or no-show penalty changes.",
+        name: "Out of service? A door that can reach the API opens for nobody from this click. One that"
+          + " has also lost the network keeps admitting booked members from its cached roster for up to"
+          + " six hours. No booking, check-in or no-show penalty changes.",
       });
       // Never the box's, which promises a court's no-shows stop being penalised.
       expect(screen.queryByRole("button", { name: /Nothing else drives/ })).not.toBeInTheDocument();
@@ -1621,14 +1751,16 @@ describe("AdminDevices", () => {
       renderPage(<AdminDevicesPage />);
 
       fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
-      fireEvent.click(await screen.findByRole("button", { name: /stops answering scans at this door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /can reach the API opens for nobody/ }));
 
       expect(await screen.findByText(
-        "Front door is out of service. The club is not alerted about its silence, and the API stops"
-        + " answering scans at this door, so it opens nothing from the instant the switch is thrown."
-        + " The door keeps whatever roster it last downloaded, so a member with a booking already in"
-        + " that cache may still get in until it goes stale — nobody else will. Bookings, check-ins,"
-        + " refunds and no-show penalties are untouched either way: opening a door is not attendance.",
+        "Front door is out of service. The club is not alerted about its silence, and the API refuses"
+        + " every scan at this door from the instant the switch is thrown. A door that can still reach"
+        + " the API hears that refusal and opens for nobody, with no fall back to its roster. A door"
+        + " that has also lost the network never hears it, and keeps admitting members with a booking"
+        + " from the roster it last downloaded until that goes stale, which takes up to six hours."
+        + " Bookings, check-ins, refunds and no-show penalties are untouched either way: opening a"
+        + " door is not attendance.",
       )).toBeInTheDocument();
     });
 
