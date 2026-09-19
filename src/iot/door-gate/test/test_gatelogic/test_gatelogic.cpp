@@ -47,6 +47,7 @@
 #include "gatelogic/HttpPort.h"
 #include "gatelogic/LedPattern.h"
 #include "gatelogic/LockDriver.h"
+#include "gatelogic/ResponseBody.h"
 #include "gatelogic/ScanAssembler.h"
 #include "gatelogic/ScanDebounce.h"
 #include "gatelogic/StaticText.h"
@@ -2465,6 +2466,229 @@ void test_app_a_permanently_busy_scanner_cannot_starve_the_heartbeat() {
                            "the roster aged out while the door was busy");
 }
 
+// ---------------------------------------------------------------------------
+// E3 — the response body, bounded by the caller's buffer and the call's clock
+// ---------------------------------------------------------------------------
+
+/// A peer that delivers a body in CHUNKS, with a settable cost per wait.
+///
+/// The cost is what makes a dribbling peer a fixture. `idle()` advancing the
+/// clock is the same trick the HTTP fake plays: without it "waits for ever" is
+/// a story rather than a test, and the deadline the whole of E3 is about cannot
+/// be reached.
+class FakeResponseStream final : public gatelogic::IResponseStream {
+public:
+  FakeResponseStream(fakes::FakeClock& clock, uint32_t idleCostMs) : clock_(clock), idleCost_(idleCostMs) {}
+
+  /// Bytes the peer will hand over, `perWait` at a time.
+  void deliver(const char* text, size_t perWait) {
+    strncpy(body_, text, sizeof(body_) - 1U);
+    body_[sizeof(body_) - 1U] = '\0';
+    len_ = strlen(body_);
+    perWait_ = perWait;
+    ready_ = perWait_;
+  }
+
+  /// The peer hangs up once its bytes are gone. False for a peer that holds the
+  /// socket open after the body, which is what a keep-alive connection does and
+  /// what makes Content-Length the only end marker.
+  void closesWhenDone(bool closes) { closes_ = closes; }
+
+  int available() override { return static_cast<int>(ready_ < len_ - at_ ? ready_ : len_ - at_); }
+
+  int read() override {
+    if (at_ >= len_ || ready_ == 0U) {
+      return -1;
+    }
+    --ready_;
+    const int value = static_cast<unsigned char>(body_[at_]);
+    ++at_;
+    return value;
+  }
+
+  bool connected() override { return !(closes_ && at_ >= len_); }
+
+  void idle() override {
+    clock_.advance(idleCost_);
+    ready_ = perWait_;
+  }
+
+private:
+  fakes::FakeClock& clock_;
+  char body_[512] = {};
+  size_t len_ = 0U;
+  size_t at_ = 0U;
+  size_t perWait_ = 0U;
+  size_t ready_ = 0U;
+  uint32_t idleCost_ = 0U;
+  bool closes_ = true;
+};
+
+constexpr char kScanOk[] = "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3}";
+
+/// E3. A body that FITS arrives whole, however it is chunked and at whatever
+/// clock base.
+void test_body_a_body_that_fits_arrives_whole_however_it_is_chunked() {
+  const size_t chunks[] = {1U, 3U, 16U, 512U};
+
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    for (size_t perWait : chunks) {
+      fakes::FakeClock clock(kBases[b]);
+      FakeResponseStream stream(clock, 1U);
+      stream.deliver(kScanOk, perWait);
+
+      char out[gatelogic::kScanResponseCap] = {};
+      const gatelogic::BodyResult result =
+          gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
+                              static_cast<int>(strlen(kScanOk)), out, sizeof(out));
+
+      TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Ok);
+      TEST_ASSERT_EQUAL_STRING(kScanOk, out);
+    }
+  }
+}
+
+/// E3. A body with NO declared length ends when the peer hangs up.
+void test_body_an_undeclared_length_ends_when_the_peer_closes() {
+  fakes::FakeClock clock(kBaseWrapSoon);
+  FakeResponseStream stream(clock, 1U);
+  stream.deliver(kScanOk, 4U);
+
+  char out[gatelogic::kScanResponseCap] = {};
+  const gatelogic::BodyResult result =
+      gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
+                          gatelogic::kUnknownBodyLength, out, sizeof(out));
+
+  TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Ok);
+  TEST_ASSERT_EQUAL_STRING(kScanOk, out);
+}
+
+/// E3, AND THE REASON IT IS A SAFETY FIX RATHER THAN A HYGIENE ONE.
+///
+/// The driver used to `getString()` the whole body onto the heap and then
+/// `memcpy` the first `outCap - 1` bytes of it into the caller's buffer. An
+/// over-long body therefore arrived TRUNCATED, with a 200 on it — and
+/// `{"opened":true,` cut after the comma is a door that opens for a body nobody
+/// could have read.
+///
+/// It is refused now, and the refusal is a TRANSPORT failure rather than a
+/// short body, so the scan goes to the roster instead of to a parser holding
+/// half an object.
+void test_body_a_body_over_the_cap_is_refused_rather_than_truncated() {
+  // A body that would open the door if its first bytes were believed.
+  char over[256] = {};
+  strncpy(over, kScanOk, sizeof(over) - 1U);
+  for (size_t i = strlen(over); i < sizeof(over) - 1U; ++i) {
+    over[i] = 'x';
+  }
+
+  // Declared, so it is refused before a byte moves...
+  {
+    fakes::FakeClock clock(kBaseMid);
+    FakeResponseStream stream(clock, 8U);
+    stream.deliver(over, 8U);
+    char out[32] = {};
+    const gatelogic::BodyResult result =
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
+                            static_cast<int>(strlen(over)), out, sizeof(out));
+    TEST_ASSERT_TRUE(result == gatelogic::BodyResult::TooLarge);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("", out, "a refused body must be EMPTY, never a plausible prefix");
+    TEST_ASSERT_EQUAL_UINT16(0U, gatelogic::statusForBody(200U, result));
+  }
+
+  // ...and undeclared, so it is refused at the byte that would not fit.
+  {
+    fakes::FakeClock clock(kBaseMid);
+    FakeResponseStream stream(clock, 8U);
+    stream.deliver(over, 8U);
+    char out[32] = {};
+    const gatelogic::BodyResult result =
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
+                            gatelogic::kUnknownBodyLength, out, sizeof(out));
+    TEST_ASSERT_TRUE(result == gatelogic::BodyResult::TooLarge);
+    TEST_ASSERT_EQUAL_STRING("", out);
+  }
+
+  // Exactly one byte short of the buffer still fits — the terminator needs the
+  // last one.
+  {
+    fakes::FakeClock clock(kBaseMid);
+    char exact[32] = {};
+    for (size_t i = 0U; i < sizeof(exact) - 1U; ++i) {
+      exact[i] = 'y';
+    }
+    FakeResponseStream stream(clock, 4U);
+    stream.deliver(exact, 4U);
+    char out[32] = {};
+    const gatelogic::BodyResult result =
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kWorstBlockingCallMs,
+                            static_cast<int>(strlen(exact)), out, sizeof(out));
+    TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::BodyResult::Ok, "outCap - 1 bytes must fit");
+    TEST_ASSERT_EQUAL_size_t(sizeof(out) - 1U, strlen(out));
+  }
+}
+
+/// E3. A DRIBBLING PEER IS BOUNDED BY THE CALL'S OWN DEADLINE.
+///
+/// `HTTPClient::setTimeout` is an INTER-BYTE timeout: a peer sending one byte
+/// every three seconds resets it on every byte and keeps a read alive for ever,
+/// so no number of four-second timeouts bounds it and
+/// `kWorstBlockingCallMs` was not true of the port. The deadline here is
+/// absolute and is computed from the instant the whole call started, so it
+/// cannot be reset by the peer's generosity.
+void test_body_a_dribbling_peer_is_bounded_by_the_calls_deadline() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    fakes::FakeClock clock(kBases[b]);
+    // One byte per three seconds, which is the classic slow-loris rate.
+    FakeResponseStream stream(clock, 3000U);
+    stream.deliver(kScanOk, 1U);
+
+    const uint32_t started = clock.nowMs();
+    const uint32_t deadline = started + gatelogic::kWorstBlockingCallMs;
+    char out[gatelogic::kScanResponseCap] = {};
+    const gatelogic::BodyResult result =
+        gatelogic::readBody(stream, clock, deadline, static_cast<int>(strlen(kScanOk)), out, sizeof(out));
+
+    TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::BodyResult::Timeout, "a dribbling peer must be cut off");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("", out, "and what did arrive is not a body");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(0U, gatelogic::statusForBody(200U, result),
+                                     "a body that did not arrive is a transport failure, not a 200");
+    // AND IT STOPPED AT THE DEADLINE, not at some multiple of it.
+    const uint32_t spent = tb::since(clock.nowMs(), started);
+    TEST_ASSERT_TRUE_MESSAGE(spent <= gatelogic::kWorstBlockingCallMs + 3000U,
+                             "the read outlived its deadline by more than one wait");
+  }
+}
+
+/// E3. A call that has already spent its whole budget before the body starts
+/// has none left for it, and says so rather than borrowing more.
+void test_body_a_deadline_already_passed_is_a_transport_failure() {
+  fakes::FakeClock clock(kBaseMid);
+  FakeResponseStream stream(clock, 0U);
+  stream.deliver(kScanOk, 1U);
+
+  char out[gatelogic::kScanResponseCap] = {};
+  // Chunked one byte at a time, so the first wait meets the deadline.
+  const gatelogic::BodyResult result = gatelogic::readBody(
+      stream, clock, clock.nowMs() - 1U, static_cast<int>(strlen(kScanOk)), out, sizeof(out));
+  TEST_ASSERT_TRUE(result == gatelogic::BodyResult::Timeout);
+  TEST_ASSERT_EQUAL_STRING("", out);
+}
+
+/// E3. The mapping, in the words the door uses. A whole body keeps whatever
+/// status the peer sent — including a refusal, which is authoritative — and
+/// anything else is 0, which is the one answer that sends a scan to the roster.
+void test_body_only_a_whole_body_keeps_the_servers_status() {
+  static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Ok) == 200U, "");
+  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Ok) == 403U, "");
+  static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::TooLarge) == 0U, "");
+  static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Timeout) == 0U, "");
+  // A 403 whose body did not arrive is NOT an out-of-service verdict. The
+  // verdict is the status, and a status nobody finished reading is not one.
+  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Timeout) == 0U, "");
+  TEST_PASS();
+}
+
 /// E5. The link is read BEFORE the scanner decides, not after it.
 ///
 /// `linkUp_` was a pass stale: `pumpLink()` ran after `pumpScanner()`, so the
@@ -2572,6 +2796,12 @@ int main(int, char**) {
   RUN_TEST(test_app_a_403_on_events_takes_the_board_out_of_service_too);
   RUN_TEST(test_app_a_boot_event_the_server_never_acknowledges_is_not_a_hot_loop);
   RUN_TEST(test_app_a_permanently_busy_scanner_cannot_starve_the_heartbeat);
+  RUN_TEST(test_body_a_body_that_fits_arrives_whole_however_it_is_chunked);
+  RUN_TEST(test_body_an_undeclared_length_ends_when_the_peer_closes);
+  RUN_TEST(test_body_a_body_over_the_cap_is_refused_rather_than_truncated);
+  RUN_TEST(test_body_a_dribbling_peer_is_bounded_by_the_calls_deadline);
+  RUN_TEST(test_body_a_deadline_already_passed_is_a_transport_failure);
+  RUN_TEST(test_body_only_a_whole_body_keeps_the_servers_status);
   RUN_TEST(test_app_the_link_is_read_before_the_scanner_decides);
 
   return UNITY_END();

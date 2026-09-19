@@ -166,7 +166,7 @@ char gMacHex[dc::hex::encodedSize(6U)];
 /// heap it would churn is shared with the network stack.
 char gAuthHeader[devapi::kAuthorizationBufSize] = {};
 
-esp32_hal::Esp32HttpPort gHttp(API_BASE_URL, gAuthHeader);
+esp32_hal::Esp32HttpPort gHttp(API_BASE_URL, gAuthHeader, gClock);
 devlink::ApiBreaker gBreaker;
 GateApi gApi(gHttp, gBreaker, gClock);
 

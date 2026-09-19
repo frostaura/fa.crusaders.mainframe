@@ -9,8 +9,11 @@
 #include <esp_task_wdt.h>
 #include <string.h>
 
+#include <atomic>
+
 #include "gatelogic/ApiBaseUrl.h"
 #include "gatelogic/GateConfig.h"
+#include "gatelogic/ResponseBody.h"
 
 namespace esp32_hal {
 namespace {
@@ -21,9 +24,19 @@ constexpr char kNamespace[] = "crusaders";
 Preferences gPrefs;
 
 /// Set from the UART event task when the driver reports an error, read and
-/// cleared from the loop task. `volatile` because those are two tasks and the
-/// compiler has no reason to believe either of them.
-volatile bool gRxError = false;
+/// cleared from the loop task.
+///
+/// `std::atomic<bool>`, NOT `volatile bool`. The two are on different CORES:
+/// the UART event task has no core affinity and runs at the maximum priority,
+/// `loop()` runs on core 1, and `volatile` says only "re-read it", not "nobody
+/// else is mid-write". `takeRxError()` is a read-modify-write — read it, clear
+/// it — so an error signalled in the window between those two halves was
+/// silently swallowed, which is an overrun nothing ever hears about and a holed
+/// line handed up as a token.
+///
+/// `exchange` makes the pair one operation. `<atomic>` is C++11 and the ESP32
+/// core compiles at gnu++11, so it is available on the deployment route too.
+std::atomic<bool> gRxError{false};
 
 } // namespace
 
@@ -67,7 +80,7 @@ void Esp32Scanner::begin(uint32_t baud, uint8_t rxPin, uint8_t txPin) {
     // is discarded through its next terminator. This runs on the UART event
     // task, so it sets a flag and does nothing else.
     if (error != UART_NO_ERROR) {
-      gRxError = true;
+      gRxError.store(true, std::memory_order_relaxed);
     }
   });
 
@@ -88,9 +101,9 @@ bool Esp32Scanner::read(uint8_t& out) {
 }
 
 bool Esp32Scanner::takeRxError() {
-  const bool had = gRxError;
-  gRxError = false;
-  return had;
+  // ONE operation, not a read and then a write. See gRxError: the two halves
+  // run on different cores and an error signalled between them was lost.
+  return gRxError.exchange(false, std::memory_order_relaxed);
 }
 
 // --- store ------------------------------------------------------------------
@@ -149,10 +162,46 @@ hal::StoreResult Esp32NvsStore::erase(const char* key) {
 
 // --- http -------------------------------------------------------------------
 
+namespace {
+
+/// `gatelogic::IResponseStream` on the WiFiClient HTTPClient is holding.
+///
+/// Four one-line forwards and a yield. Everything that decides anything about
+/// the body — the cap, the deadline, what an over-long one means — is in
+/// `gatelogic::readBody`, where the host suite drives it with a peer that
+/// dribbles one byte every three seconds.
+class HttpResponseStream final : public gatelogic::IResponseStream {
+public:
+  explicit HttpResponseStream(WiFiClient& client) : client_(client) {}
+
+  int available() override { return client_.available(); }
+
+  int read() override { return client_.read(); }
+
+  bool connected() override { return client_.connected(); }
+
+  void idle() override {
+    // The core's own one-millisecond yield. Without it this is a spin that
+    // starves the WiFi task the read is waiting on.
+    delay(1);
+  }
+
+private:
+  WiFiClient& client_;
+};
+
+} // namespace
+
 uint16_t Esp32HttpPort::post(const char* path, const char* body, char* out, size_t outCap) {
   if (baseUrl_ == nullptr || authorization_ == nullptr || authorization_[0] == '\0') {
     return 0U;
   }
+
+  // THE WHOLE CALL'S DEADLINE, sampled before anything can spend any of it.
+  // The body phase gets whatever is left of kWorstBlockingCallMs after the
+  // connect and the headers, which is what makes that number true of this port
+  // rather than an aspiration about two timeouts the peer can reset.
+  const uint32_t deadlineAtMs = clock_.nowMs() + gatelogic::kWorstBlockingCallMs;
 
   // Sized from the grammar main.cpp static_asserts API_BASE_URL against, so
   // "the base URL fits" is a compile-time fact rather than a runtime 0 that
@@ -173,12 +222,13 @@ uint16_t Esp32HttpPort::post(const char* path, const char* body, char* out, size
   // gatelogic::kWorstBlockingCallMs, which the watchdog period is asserted
   // against and the release-overrun bound is stated in terms of.
   //
-  // What neither of them bounds is a server that dribbles: setTimeout is an
-  // inter-byte timeout inside HTTPClient's header loop, so a peer sending one
-  // byte every three seconds keeps a call alive indefinitely. That case is the
-  // watchdog's, deliberately — there is no way to interrupt HTTPClient from
-  // here — and it is why the watchdog exists at all rather than being belt and
-  // braces.
+  // NEITHER OF THEM BOUNDS A PEER THAT DRIBBLES, because setTimeout is an
+  // INTER-BYTE timeout: one byte every three seconds resets it for ever. The
+  // BODY phase is bounded by `deadlineAtMs` above, which the peer cannot reset.
+  // HTTPClient's own HEADER loop, inside POST(), still is not — there is no way
+  // to interrupt it from here — and that case is the watchdog's, deliberately.
+  // It is the one precondition on the 8 010 ms release-overrun sentence, and it
+  // is why the watchdog exists rather than being belt and braces.
   http.setConnectTimeout(gatelogic::kHttpConnectTimeoutMs);
   http.setTimeout(gatelogic::kHttpResponseTimeoutMs);
   http.addHeader("Content-Type", "application/json");
@@ -189,17 +239,23 @@ uint16_t Esp32HttpPort::post(const char* path, const char* body, char* out, size
   // cast is the whole of the difference between the two cores here, and it is
   // in the driver rather than anywhere a decision lives.
   const int status = http.POST(const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(body)), strlen(body));
+
+  // NO String, NO getString(). The body goes into the caller's buffer a byte at
+  // a time, under the caller's cap and this call's deadline, and one that does
+  // not fit is refused rather than truncated — see gatelogic/ResponseBody.h for
+  // what the truncation used to cost.
+  gatelogic::BodyResult read = gatelogic::BodyResult::Ok;
   if (status > 0 && out != nullptr && outCap > 0U) {
-    const String payload = http.getString();
-    const size_t n = payload.length() < outCap - 1U ? payload.length() : outCap - 1U;
-    memcpy(out, payload.c_str(), n);
-    out[n] = '\0';
+    HttpResponseStream stream(client);
+    read = gatelogic::readBody(stream, clock_, deadlineAtMs, http.getSize(), out, outCap);
   }
   http.end();
+
   // A negative status is an HTTPClient error code, not an HTTP status. It maps
   // to 0 — "the request never completed" — which is the one answer that says
   // nothing about what the server thinks, and the only one the breaker counts.
-  return status > 0 ? static_cast<uint16_t>(status) : 0U;
+  // So does a body that did not fit or did not arrive.
+  return gatelogic::statusForBody(status > 0 ? static_cast<uint16_t>(status) : 0U, read);
 }
 
 // --- link -------------------------------------------------------------------

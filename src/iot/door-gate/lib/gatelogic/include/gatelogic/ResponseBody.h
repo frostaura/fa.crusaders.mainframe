@@ -1,0 +1,130 @@
+// Crusaders Mainframe — reading a response body into the caller's buffer, with
+// a hard cap and a deadline.
+//
+// WHY THIS IS A LIBRARY AND NOT THREE LINES IN THE DRIVER
+// ------------------------------------------------------
+// It was three lines in the driver, and all three were wrong:
+//
+//     const String payload = http.getString();
+//     const size_t n = payload.length() < outCap - 1U ? payload.length() : outCap - 1U;
+//     memcpy(out, payload.c_str(), n);
+//
+// `getString()` HEAP-ALLOCATES THE WHOLE BODY before any of the caller's bounds
+// are applied. `HttpPort.h` promised "a caller buffer rather than a String
+// because the ESP32's heap is shared with the network stack, and a call four
+// times a minute that allocates is a heap that fragments over a season in a
+// cupboard", and `Esp32Hal.h` repeated it — and the implementation under both
+// sentences allocated, on every call, a String as long as whatever the peer
+// chose to send. A hostile or broken peer sizes that allocation.
+//
+// And what it did with an over-long body was worse than allocating it: it
+// TRUNCATED it into `out` and handed the result up as a perfectly good 200.
+// The roster parser is asked `isCompleteObject` first and refuses a cut body,
+// which is the only reason that was not a silent roster replacement; the scan
+// parser is not, and `{"opened":true,` truncated at exactly the right place is
+// a door that opens.
+//
+// A BODY THAT DOES NOT FIT IS A TRANSPORT FAILURE, NOT A SHORT BODY.
+// ------------------------------------------------------------------
+// Reported as status 0 — "the request never completed" — which is the one
+// answer that says nothing at all about what the server thinks, and which sends
+// the scan to the roster rather than to a parser holding half an object.
+//
+// AND IT IS BOUNDED BY THE CALL'S OWN DEADLINE.
+// ---------------------------------------------
+// `setTimeout` on HTTPClient is an INTER-BYTE timeout, so a peer sending one
+// byte every three seconds keeps a read alive for ever and no number of
+// four-second timeouts bounds it. The body phase is ours now and takes an
+// absolute deadline computed from the instant the whole call started, so
+// `kWorstBlockingCallMs` is true of it.
+//
+// WHAT IS STILL NOT BOUNDED, STATED RATHER THAN GLOSSED. HTTPClient's own
+// header loop runs inside `POST()` with the same inter-byte timeout and there
+// is no way to interrupt it from here. A peer that dribbles HEADERS — not a
+// body — can hold one call past `kWorstBlockingCallMs`, and that case is the
+// watchdog's, deliberately. It is why the watchdog exists rather than being
+// belt and braces, and it is the one precondition on the 8 010 ms sentence in
+// `GateApp.h` and README.md.
+//
+// No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
+
+#ifndef CRUSADERS_GATELOGIC_RESPONSEBODY_H
+#define CRUSADERS_GATELOGIC_RESPONSEBODY_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "hal/Clock.h"
+
+namespace gatelogic {
+
+/// The bytes of one response body, as this reader sees them.
+///
+/// Three questions and one yield, which is all `WiFiClient` offers and all this
+/// needs — and a port rather than a `Stream&` so the whole loop is driven by a
+/// fake on the host, where a dribbling peer is a fixture instead of a story.
+class IResponseStream {
+public:
+  virtual ~IResponseStream() = default;
+
+  /// Bytes ready to read right now. Zero or negative means none yet.
+  virtual int available() = 0;
+
+  /// One byte, or a negative value when none was ready after all.
+  virtual int read() = 0;
+
+  /// Whether the peer is still there. A closed connection with nothing left to
+  /// read is the end of a body that declared no length.
+  virtual bool connected() = 0;
+
+  /// Give the rest of the system a turn while waiting.
+  ///
+  /// The real one is the core's one-millisecond yield; without it this is a
+  /// spin that starves the WiFi task it is waiting on. The FAKE one advances
+  /// the fake clock, which is the single thing that makes "a peer that dribbles
+  /// for ever" expressible as a test rather than as a paragraph.
+  virtual void idle() = 0;
+};
+
+/// A response whose length the peer did not declare. Read until it closes.
+inline constexpr int kUnknownBodyLength = -1;
+
+enum class BodyResult : uint8_t {
+  /// The whole body is in `out`, NUL-terminated.
+  Ok = 0U,
+  /// Longer than the caller's buffer. `out` is EMPTY rather than truncated: a
+  /// body cut at the wrong byte is a different body, and `{"opened":true,` cut
+  /// after the comma is a door that opens.
+  TooLarge = 1U,
+  /// The deadline passed with the body incomplete.
+  Timeout = 2U,
+};
+
+/// Reads one body into `out`, NUL-terminated, never truncated.
+///
+/// `expectedLength` is the peer's declared Content-Length, or
+/// `kUnknownBodyLength`. A declared length that cannot fit is refused before a
+/// single byte is read — there is nothing to be gained by pulling a megabyte
+/// through a 4.6 KB buffer to discover it does not fit.
+///
+/// `deadlineAtMs` is an ABSOLUTE instant, not a duration, and is compared
+/// through `tb::reached`: these calls happen on a board that has been up for
+/// months and the millis() wrap is the normal case.
+BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadlineAtMs, int expectedLength,
+                    char* out, size_t outCap);
+
+/// What a bounded read means to the caller, in one place.
+///
+/// Anything but a whole body is status 0 — "the request never completed". Not
+/// the HTTP status the peer sent: a 200 whose body did not fit or did not
+/// arrive is not a 200 anybody can act on, and at a door the difference between
+/// "the server said no" and "the board learned nothing" is the difference
+/// between a refusal and a roster fallback. One return statement: the generated
+/// sketch compiles at gnu++11.
+constexpr uint16_t statusForBody(uint16_t status, BodyResult result) {
+  return result == BodyResult::Ok ? status : 0U;
+}
+
+} // namespace gatelogic
+
+#endif // CRUSADERS_GATELOGIC_RESPONSEBODY_H
