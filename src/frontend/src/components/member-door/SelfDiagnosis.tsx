@@ -1,0 +1,94 @@
+import { useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
+import { Card } from "../Card";
+import { Button } from "../Button";
+import { cn } from "../../lib/utils";
+import {
+  DIAGNOSIS_HEADING,
+  DIAGNOSIS_HIDE,
+  type DiagnosisInput,
+  type DiagnosisRow,
+  type DiagnosisState,
+  buildDiagnosis,
+} from "../../lib/memberDoorCopy";
+
+/**
+ * "The door didn't open" — the self-diagnosis, expanded in place.
+ *
+ * <p>
+ * <b>Why it is a permanent control rather than something a refusal reveals.</b> Four of
+ * the five refusal reasons can arrive by polling, because the code resolved to a member
+ * before the door said no. `not_recognised` mostly cannot: an unknown, malformed or
+ * another club's token names nobody, so there is no row this member's endpoint may
+ * return, and the poll stays silent forever. That silence is the commonest dark-doorway
+ * case there is, and "never say no refusals found" is satisfied by saying nothing at all
+ * — which is the same dead end wearing better manners.
+ * </p>
+ *
+ * <p>
+ * Never a modal. A member one-handed in the dark should not have to find a close button,
+ * and the container takes focus when it opens so a screen-reader user lands on it instead
+ * of hunting for it.
+ * </p>
+ */
+
+const STATE_GLYPH: Record<DiagnosisState, string> = { passed: "✓", attention: "⚠", failed: "✗" };
+const STATE_COLOUR: Record<DiagnosisState, string> = {
+  passed: "text-success-strong",
+  attention: "text-warning-strong",
+  failed: "text-danger-strong",
+};
+
+function Row({ row }: { row: DiagnosisRow }) {
+  return (
+    <li className="flex items-baseline gap-2 py-1.5 text-sm">
+      {/* The glyph is decoration. The row's accessible text carries the state as a WORD,
+          because colour is never the only signal — and a tick and a cross are a colour
+          for a great many people. */}
+      <span aria-hidden="true" className={cn("shrink-0", STATE_COLOUR[row.state])}>{STATE_GLYPH[row.state]}</span>
+      <span className="flex-1 min-w-0">{row.label}</span>
+      <span className="text-text-secondary text-right">{row.value}</span>
+      <span className="sr-only">— {row.stateWord}</span>
+    </li>
+  );
+}
+
+export function SelfDiagnosis(props: { input: DiagnosisInput; busy: boolean; onHide: () => void }) {
+  const { input, busy, onHide } = props;
+  const container = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { container.current?.focus(); }, []);
+
+  const { rows, conclusion } = buildDiagnosis(input);
+
+  return (
+    // The focusable wrapper is a plain div rather than the Card: `Card` is a bare
+    // function component that spreads HTMLAttributes, and a ref is not one of those.
+    <div ref={container} tabIndex={-1} role="group" aria-label={DIAGNOSIS_HEADING}>
+    <Card className="space-y-3">
+      <h2 className="text-base font-medium">{DIAGNOSIS_HEADING}</h2>
+      {busy ? (
+        // The checklist renders AFTER both reads settle, so it never reports a stale tick.
+        <p className="text-sm text-text-secondary">Checking…</p>
+      ) : (
+        <>
+          <ul className="divide-y divide-border">
+            {rows.map((row) => <Row key={row.key} row={row} />)}
+          </ul>
+          <p className="border-t border-border pt-3 text-sm">{conclusion}</p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            {input.policy === "booking_window" && !input.hasBooking && (
+              <Link
+                to="/schedule"
+                className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-sm font-medium bg-brand-strong text-brand-ink border border-brand-strong hover:bg-brand-strong/90 w-full sm:w-auto"
+              >
+                Book a court
+              </Link>
+            )}
+            <Button variant="outline" className="w-full sm:w-auto" onClick={onHide}>{DIAGNOSIS_HIDE}</Button>
+          </div>
+        </>
+      )}
+    </Card>
+    </div>
+  );
+}

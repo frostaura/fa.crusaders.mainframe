@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
 import HomePage from "./Home";
-import { renderPage, stubFetch } from "../test/harness";
+import { memberDoorFixture, memberDoorsOnFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { forgetLastKnown } from "../lib/lastKnown";
 
 /**
  * What the public page claims, held against what the product does.
@@ -35,7 +36,7 @@ import { renderPage, stubFetch } from "../test/harness";
  * </p>
  */
 describe("the public landing page", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); forgetLastKnown(); });
 
   const source = readFileSync(join(__dirname, "Home.tsx"), "utf8");
   /** Prose only. A comment explaining a retired claim must not read as the claim. */
@@ -55,9 +56,9 @@ describe("the public landing page", () => {
   });
 
   it("says the same thing about the lights as the rest of the product", () => {
-    // /court-code: "what they hold up to the scanner on the court box".
-    const courtCode = readFileSync(join(__dirname, "CourtCode.tsx"), "utf8");
-    expect(courtCode).toMatch(/scanner on the court box/i);
+    // /my-code: "what they hold up to the scanner on the court box".
+    const myCode = readFileSync(join(__dirname, "MyCode.tsx"), "utf8");
+    expect(myCode).toMatch(/scanner on the court box/i);
     expect(prose).toMatch(/scanner on the court box/i);
   });
 
@@ -84,5 +85,72 @@ describe("the public landing page", () => {
     // The date has to sit with "Northwood Crusaders Sports Club", not loose in a paragraph
     // headed "Crusaders Squash" where it reads as the squash section's founding.
     expect(hero.textContent).toMatch(/Northwood Crusaders\s+Sports Club/);
+  });
+
+  /**
+   * The signed-in tile, which is the entry point to the member's code and therefore the
+   * first half of the door feature.
+   *
+   * <p>
+   * The tile said "Your court code" and "Show this at the court to turn the lights on".
+   * Both are true of a court box and neither gives a member standing at a locked front
+   * door any reason to press it — which is the whole of why the page was renamed rather
+   * than merely taught about doors. The hint's second clause is the one that forks: at a
+   * club with no gate it would be a promise about a door that does not exist.
+   * </p>
+   *
+   * <p>
+   * These live in this file deliberately. It exists because a claim on a home page drifts
+   * from what the product does, and nobody in the club is in a position to correct it.
+   * </p>
+   */
+  describe("the signed-in tile", () => {
+    function renderSignedIn(door: Record<string, unknown>) {
+      const session = signIn({ isAdmin: false });
+      stubFetch([
+        { path: "/api/v1/whoami", body: session },
+        { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+        { path: "/api/v1/me/door", body: door },
+      ]);
+      return renderPage(<HomePage />);
+    }
+
+    it("names the member's code rather than the court's, and points at the new route", async () => {
+      renderSignedIn(memberDoorsOnFixture());
+      const tile = await screen.findByRole("link", { name: /Your code/ });
+      expect(tile).toHaveAttribute("href", "/my-code");
+      expect(screen.queryByRole("link", { name: /Your court code/ })).toBeNull();
+    });
+
+    it("names both a court box and the club door at a club with a door", async () => {
+      renderSignedIn(memberDoorsOnFixture());
+      expect(await screen.findByText(/Show this at a court box, or at the club door/)).toBeInTheDocument();
+    });
+
+    /** The silent half. A club with no gate is told nothing whatever about one. */
+    it("names only the court box at a club with no door", async () => {
+      renderSignedIn(memberDoorFixture());
+      await screen.findByRole("link", { name: /Your code/ });
+      expect(screen.getByText("Show this at the court box")).toBeInTheDocument();
+      expect(screen.queryByText(/club door/)).toBeNull();
+    });
+
+    /**
+     * A failed read is the silent half too. Claiming a door on a club that has none is
+     * the same falsehood as denying one that exists, and only one of the two can be got
+     * wrong by guessing.
+     */
+    it("says nothing about a door when it could not find out", async () => {
+      const session = signIn({ isAdmin: false });
+      stubFetch([
+        { path: "/api/v1/whoami", body: session },
+        { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+        { path: "/api/v1/me/door", status: 500, body: { error: "boom" } },
+      ]);
+      renderPage(<HomePage />);
+
+      await screen.findByRole("link", { name: /Your code/ });
+      expect(screen.queryByText(/club door/)).toBeNull();
+    });
   });
 });

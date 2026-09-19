@@ -10,6 +10,10 @@ import { isPasskeySupported, registerPasskey } from "../lib/webauthn";
 import { ChangePasswordForm } from "./ChangePassword";
 import { cn } from "../lib/utils";
 import { describeFailure } from "../lib/errors";
+// doors: member — W1.8, the member's own door history, on the page they already think of
+// as their record. Gated on the club having a door at all; see MemberDoorHistory below.
+import { DoorHistoryCard } from "../components/member-door/DoorHistoryCard";
+import { useDoorsFlag } from "../components/member-door/useMemberDoor";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
@@ -198,9 +202,31 @@ export default function ProfilePage() {
       </Card>
 
       <PasswordCard />
+      <MemberDoorHistory />
       <PasskeysCard />
     </div>
   );
+}
+
+/**
+ * The member's own door history, below the password and above the passkeys.
+ *
+ * <p>
+ * That place is deliberate: door entry is closer to "what the club knows about me" than
+ * to credentials, and this card is the POPIA s.23 right served as a product feature
+ * rather than as an email somebody has to answer by hand.
+ * </p>
+ *
+ * <p>
+ * At a club with no gate it does not render at all — not an empty card, not a heading
+ * with a sentence under it. A member of a club that has never owned a door has no door
+ * history and should not be told they have none.
+ * </p>
+ */
+function MemberDoorHistory() {
+  const doors = useDoorsFlag();
+  if (!doors) return null;
+  return <DoorHistoryCard />;
 }
 
 /**

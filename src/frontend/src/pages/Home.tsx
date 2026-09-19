@@ -6,6 +6,8 @@ import { useAuth } from "../lib/auth";
 import { Card } from "../components/Card";
 // doors: admin
 import { AdminDoorsHomeRow } from "../components/doors/AdminDoorsHomeRow";
+// doors: member — one boolean, for one clause of one tile hint. See SignedInHome.
+import { useDoorsFlag } from "../components/member-door/useMemberDoor";
 
 /**
  * The club's front door, and — while both of Northwood Crusaders' own domains are parked — very
@@ -208,10 +210,10 @@ function SignedOutLanding() {
           collect and nothing to switch on yourself." There is no such thing in this product. A
           booking earns the member a short-lived code; they hold its QR up to the scanner on the
           court box, or type the twelve characters, and THAT is what raises the lights. The
-          signed-in home page one screen away says so — "Show this at the court to turn the
-          lights on" — and so does /court-code, so the public page was the only surface making
-          the claim and it contradicted both of them. Somebody who read it would stand on a dark
-          court waiting for it to notice them.
+          signed-in home page one screen away says so — its tile points at the court box — and
+          so does /my-code, so the public page was the only surface making the claim and it
+          contradicted both of them. Somebody who read it would stand on a dark court waiting
+          for it to notice them.
 
           The slice length is also not stated any more. `slice_minutes` is per-tenant
           configuration (the default is 15) and this page is signed out, so it cannot read it —
@@ -323,12 +325,25 @@ function SignedOutLanding() {
 }
 
 function SignedInHome({ isAdmin }: { isAdmin: boolean }) {
+  // doors: member — the tile's hint forks on whether this club has a door, and on nothing
+  // else. At a club with a gate the member's code is their key to the building as well as
+  // to the court, and a tile that says only "show this at the court" is what sends them
+  // looking for a court box while standing at a locked front door. At a club with no gate
+  // the second clause would be a promise about a door that does not exist, so it is not
+  // said — the same silence `describeDoor()` keeps, for the same reason. A failed read
+  // leaves it silent, which is the safe half of the conditional.
+  const doors = useDoorsFlag();
   const links = [
     { to: "/schedule", label: "Book a court", hint: "Today's grid across all four courts", icon: CalendarDays, primary: true },
-    // QrCode, not Trophy. The court code IS a QR code shown at the court; a trophy beside it
+    // QrCode, not Trophy. The code IS a QR code held up to a scanner; a trophy beside it
     // says "achievement", which is a different thing entirely and the only icon on this screen
     // that pointed at the wrong idea.
-    { to: "/court-code", label: "Your court code", hint: "Show this at the court to turn the lights on", icon: QrCode },
+    {
+      to: "/my-code",
+      label: "Your code",
+      hint: doors ? "Show this at a court box, or at the club door" : "Show this at the court box",
+      icon: QrCode,
+    },
     { to: "/wallet", label: "Wallet", hint: "Balance, top-ups and charges", icon: Wallet },
     ...(isAdmin ? [{ to: "/admin/members", label: "Admin · Members", hint: "Approve applications and manage members", icon: Users }] : []),
   ];

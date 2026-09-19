@@ -951,3 +951,71 @@ export function applyDoorPatch(
   if (patch.enabled === true) next.out_of_service_since = null;
   return next;
 }
+
+// --- doors: member ---------------------------------------------------------------
+
+/**
+ * `GET /api/v1/me/door`, as the wave-1 wire shape defines it.
+ *
+ * <p>
+ * The default is the SILENT club: `doors: false`, because a club with no gate is the
+ * state most of the product is in and the one the page must say nothing whatever about.
+ * A test that wants a door asks for one, which is what makes every doors assertion prove
+ * something. The same reasoning as {@link gateFixture}'s null `gate_key`.
+ * </p>
+ *
+ * <p>
+ * `contact` is populated by default: the club's number is the one thing on this surface
+ * that is always meant to be reachable, so its ABSENCE is the interesting case and a
+ * test that wants it passes nulls.
+ * </p>
+ */
+export function memberDoorFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    doors: false,
+    policy: "active_member",
+    membership: "active",
+    next_booking: null,
+    contact: { phone: "021 555 0134", email: "info@crusaders.co.za" },
+    last_decision: null,
+    ...overrides,
+  };
+}
+
+/** The same club, with a door. The shorthand every doors test on this surface starts from. */
+export function memberDoorsOnFixture(overrides: Record<string, unknown> = {}) {
+  return memberDoorFixture({ doors: true, ...overrides });
+}
+
+/**
+ * One `last_decision`, as the endpoint shapes it.
+ *
+ * <p>
+ * A REFUSAL by default — `released: false`, `too_early` — because a decision the member
+ * is looking at is nearly always one that went wrong; the open is the case they walk away
+ * from. `door_name` is the club's own key, never a device id.
+ * </p>
+ */
+export function memberDoorDecisionFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    at: "2026-09-19T06:04:00Z",
+    door_name: "front-door",
+    released: false,
+    reason: "too_early",
+    ...overrides,
+  };
+}
+
+/** One row of `GET /api/v1/me/door/history`. An open, from a door that could reach the club. */
+export function memberDoorHistoryRowFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    at: "2026-09-19T06:04:00Z",
+    door_name: "front-door",
+    released: true,
+    reason: "ok",
+    offline: false,
+    ...overrides,
+  };
+}
+
+// --- end doors: member -----------------------------------------------------------
