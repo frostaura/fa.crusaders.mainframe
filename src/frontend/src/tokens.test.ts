@@ -272,7 +272,11 @@ describe("nothing keeps its own copy of the palette", () => {
       if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue;
       const body = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
       for (const m of body.matchAll(/#[0-9A-Fa-f]{6}\b|bg-\[#[0-9A-Fa-f]{3,8}\]/g)) {
-        if (file.endsWith("CourtCode.tsx")) continue;
+        // MyCode.tsx (the QR itself) and the full-screen twin of it. Both hardcode
+        // #ffffff/#000000 because a scanner wants contrast, not tokens, and a QR rendered
+        // in the club's palette is a QR that fails a marginal read in a dark doorway.
+        // `CourtCode.tsx` used to be the name of the first of these.
+        if (file.endsWith("MyCode.tsx") || file.endsWith("FullScreenQr.tsx")) continue;
         offenders.push(`${file.split("/src/")[1]}: ${m[0]}`);
       }
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import CourtCodePage from "./CourtCode";
+import MyCodePage from "./MyCode";
 import { encodeQr, qrPath } from "../lib/qr";
 import { renderPage, stubFetch } from "../test/harness";
 
@@ -15,7 +15,7 @@ import { renderPage, stubFetch } from "../test/harness";
  * reintroduce that failure while looking like a perfectly good QR on the phone.
  * </p>
  */
-describe("CourtCode", () => {
+describe("MyCode", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
@@ -81,9 +81,9 @@ describe("CourtCode", () => {
   it("says a booking code also opens the club door, and from when", async () => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: BOOKING_WITH_DOORS }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
-    await screen.findByLabelText("Court code");
+    await screen.findByLabelText("Your code");
     // The hour is the viewer's local clock — the same convention the start time above it
     // already uses — so only the shape is pinned, as in the court test.
     expect(screen.getByText(/It also opens the club door from \d{2}:\d{2} until \d{2}:\d{2}\./))
@@ -104,9 +104,9 @@ describe("CourtCode", () => {
       body: { ...BOOKING_WITH_DOORS, door_closes_at: null },
     }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
-    await screen.findByLabelText("Court code");
+    await screen.findByLabelText("Your code");
     expect(screen.getByText(/It also opens the club door from \d{2}:\d{2} until shortly after your booking ends\./))
       .toBeInTheDocument();
   });
@@ -120,9 +120,9 @@ describe("CourtCode", () => {
   it("says a member code opens the club door under the club's own rules", async () => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: IDENT_WITH_DOORS }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
-    await screen.findByLabelText("Court code");
+    await screen.findByLabelText("Your code");
     expect(screen.getByText(/It also opens the club door whenever the club's door rules allow\./))
       .toBeInTheDocument();
     // Not a promise of any hour: that is true only under one of the two policies, and the
@@ -141,9 +141,9 @@ describe("CourtCode", () => {
   ])("says nothing about doors for %s", async (_name, body) => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
-    await screen.findByLabelText("Court code");
+    await screen.findByLabelText("Your code");
     expect(screen.queryByText(/club door/)).toBeNull();
     expect(screen.queryByText(/lets you in/)).toBeNull();
     // The court sentences are all still there — this is a narrowing, not a replacement.
@@ -157,9 +157,9 @@ describe("CourtCode", () => {
   ])("says nothing about doors for %s", async (_name, body) => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
-    await screen.findByLabelText("Court code");
+    await screen.findByLabelText("Your code");
     expect(screen.queryByText(/club door/)).toBeNull();
     expect(screen.getByText(/pay for someone else's time/)).toBeInTheDocument();
   });
@@ -175,9 +175,9 @@ describe("CourtCode", () => {
   it("tells a member at a door what the code is for, without promising it marks attendance there", async () => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: BOOKING_WITH_DOORS }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
-    await screen.findByLabelText("Court code");
+    await screen.findByLabelText("Your code");
     const subtitle = screen.getByText(/Show this to the scanner/);
     expect(subtitle).toHaveTextContent("or at the club door");
     // Attendance is claimed for the court and only for the court.
@@ -215,9 +215,9 @@ describe("CourtCode", () => {
   ])("does not over-promise what the door will do for %s", async (_name, body) => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
-    await screen.findByLabelText("Court code");
+    await screen.findByLabelText("Your code");
     const said = document.body.textContent ?? "";
     // Located, not assumed: `indexOf` answering -1 would slice the last character of the
     // page and every assertion below would pass over a sentence that is not there.
@@ -238,10 +238,10 @@ describe("CourtCode", () => {
   it("shows a booking code with its court and start time", async () => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: BOOKING }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
     // The code itself is printed, because it is short enough to type at the desk.
-    expect(await screen.findByLabelText("Court code")).toHaveTextContent("7K3M9XQ2RD5A");
+    expect(await screen.findByLabelText("Your code")).toHaveTextContent("7K3M9XQ2RD5A");
     // What presenting it does, in the member's terms — and which of the two codes this
     // is, because they behave differently at the box and look identical on the phone.
     // The hour is the viewer's local time, so only its shape is pinned here.
@@ -254,7 +254,7 @@ describe("CourtCode", () => {
   it("encodes the bare code and nothing else", async () => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: BOOKING }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
     const svg = await screen.findByRole("img", { name: "QR code 7K3M9XQ2RD5A" });
     // Module-for-module the symbol for the twelve characters alone — not a URL around
@@ -266,9 +266,9 @@ describe("CourtCode", () => {
   it("says an ident code identifies the member at any court", async () => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: IDENT }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
-    expect(await screen.findByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(await screen.findByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
     expect(screen.getByText("Walk-up code · any court")).toBeInTheDocument();
     expect(screen.getByText(/pay for someone else's time/)).toBeInTheDocument();
     expect(screen.getByText(/Refreshes in 1m 00s/)).toBeInTheDocument();
@@ -285,8 +285,8 @@ describe("CourtCode", () => {
   it("offers a walk-up code even while a booking code is the one on screen", async () => {
     const stub = stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: BOOKING, sequence: [BOOKING, IDENT] }]);
 
-    renderPage(<CourtCodePage />);
-    expect(await screen.findByLabelText("Court code")).toHaveTextContent("7K3M9XQ2RD5A");
+    renderPage(<MyCodePage />);
+    expect(await screen.findByLabelText("Your code")).toHaveTextContent("7K3M9XQ2RD5A");
     // The default fetch asks for nothing: the server decides.
     expect(stub.calls[0].path).toBe("/api/v1/me/qr/generate");
 
@@ -297,7 +297,7 @@ describe("CourtCode", () => {
     await waitFor(() => {
       expect(stub.calls.some((c) => c.path === "/api/v1/me/qr/generate?kind=ident")).toBe(true);
     });
-    expect(await screen.findByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(await screen.findByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
     expect(screen.getByText("Walk-up code · any court")).toBeInTheDocument();
     // And the QR carries that code, not the booking one still in the member's memory.
     expect(screen.getByRole("img", { name: "QR code ZZ9P4T6WQ8HN" })).toBeInTheDocument();
@@ -306,8 +306,8 @@ describe("CourtCode", () => {
   it("goes back to letting the server choose when the walk-up switch is turned off", async () => {
     const stub = stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: BOOKING, sequence: [BOOKING, IDENT, BOOKING] }]);
 
-    renderPage(<CourtCodePage />);
-    await screen.findByLabelText("Court code");
+    renderPage(<MyCodePage />);
+    await screen.findByLabelText("Your code");
 
     const toggle = screen.getByLabelText("Walk up / pay for someone");
     fireEvent.click(toggle);
@@ -317,14 +317,14 @@ describe("CourtCode", () => {
     await waitFor(() => {
       expect(stub.calls.filter((c) => c.path === "/api/v1/me/qr/generate")).toHaveLength(2);
     });
-    expect(await screen.findByLabelText("Court code")).toHaveTextContent("7K3M9XQ2RD5A");
+    expect(await screen.findByLabelText("Your code")).toHaveTextContent("7K3M9XQ2RD5A");
   });
 
   it("fetches a fresh code on demand", async () => {
     const stub = stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: IDENT }]);
 
-    renderPage(<CourtCodePage />);
-    await screen.findByLabelText("Court code");
+    renderPage(<MyCodePage />);
+    await screen.findByLabelText("Your code");
 
     fireEvent.click(screen.getByRole("button", { name: /Refresh/ }));
 
@@ -346,9 +346,9 @@ describe("CourtCode", () => {
     const stub = stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: IDENT, sequence: [IDENT, NEXT] }]);
     const generates = () => stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/me/qr/generate").length;
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
     await advance(0);
-    expect(screen.getByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(screen.getByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
     expect(screen.getByText(/Refreshes in 1m 00s/)).toBeInTheDocument();
 
     // 49 s in: still the first code, still one call. The rollover used to happen
@@ -356,7 +356,7 @@ describe("CourtCode", () => {
     // paced re-fetch took.
     await advance(49_000);
     expect(generates()).toBe(1);
-    expect(screen.getByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(screen.getByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
     expect(screen.getByText(/Refreshes in 11s/)).toBeInTheDocument();
 
     // Ten seconds out, the next code is fetched and swapped in at once. The old one
@@ -365,7 +365,7 @@ describe("CourtCode", () => {
     await advance(1_000);
     await advance(0);
     expect(generates()).toBe(2);
-    expect(screen.getByLabelText("Court code")).toHaveTextContent("8H2R5V7XM3KP");
+    expect(screen.getByLabelText("Your code")).toHaveTextContent("8H2R5V7XM3KP");
     expect(screen.getByRole("img", { name: "QR code 8H2R5V7XM3KP" })).toBeInTheDocument();
     expect(screen.getByText(/Refreshes in 1m 00s/)).toBeInTheDocument();
     expect(screen.queryByText(/Expired/)).not.toBeInTheDocument();
@@ -392,7 +392,7 @@ describe("CourtCode", () => {
     const stub = stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: IDENT, sequence: [IDENT, REUSED, NEXT] }]);
     const generates = () => stub.calls.filter((c) => c.method === "POST").length;
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
     await advance(0);
     expect(generates()).toBe(1);
 
@@ -402,7 +402,7 @@ describe("CourtCode", () => {
     await advance(50_000);
     await advance(0);
     expect(generates()).toBe(2);
-    expect(screen.getByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(screen.getByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
 
     // Not two seconds later: still nothing, because the short gap has not elapsed.
     await advance(1_500);
@@ -413,7 +413,7 @@ describe("CourtCode", () => {
     await advance(1_000);
     await advance(0);
     expect(generates()).toBe(3);
-    expect(screen.getByLabelText("Court code")).toHaveTextContent("8H2R5V7XM3KP");
+    expect(screen.getByLabelText("Your code")).toHaveTextContent("8H2R5V7XM3KP");
     expect(screen.queryByText(/Expired/)).not.toBeInTheDocument();
   });
 
@@ -429,7 +429,7 @@ describe("CourtCode", () => {
     }]);
     const generates = () => stub.calls.filter((c) => c.method === "POST").length;
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
     await advance(0);
 
     // Ten seconds out: the pre-fetch, answered with the same code.
@@ -451,7 +451,7 @@ describe("CourtCode", () => {
     fakeClock();
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: IDENT }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
     await advance(0);
     expect(screen.getByText(/Refreshes in 1m 00s/)).toBeInTheDocument();
 
@@ -468,7 +468,7 @@ describe("CourtCode", () => {
     const stub = stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", body: DEAD }]);
     const generates = () => stub.calls.filter((c) => c.method === "POST").length;
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
     await advance(0);
     expect(screen.getByText(/Expired — refreshing/)).toBeInTheDocument();
 
@@ -485,7 +485,7 @@ describe("CourtCode", () => {
   it("says so when a code cannot be fetched, and offers to try again", async () => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", status: 500, body: { error: "boom" } }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
     expect(await screen.findByText(/Couldn't get a code/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Try again/ })).toBeInTheDocument();
@@ -513,7 +513,7 @@ describe("CourtCode", () => {
   ])("shows no code and no walk-up offer to a member the club has barred (%s)", async (code, sentence, nextStep) => {
     stubFetch([{ method: "POST", path: "/api/v1/me/qr/generate", status: 403, body: { error: code } }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
     // The refusal, announced — a member who was holding a code a moment ago needs to be
     // told, not left to notice the QR has gone.
@@ -524,7 +524,7 @@ describe("CourtCode", () => {
     expect(document.body.textContent).not.toContain(code);
 
     // Nothing that offers the member a code, or implies one is coming.
-    expect(screen.queryByLabelText("Court code")).toBeNull();
+    expect(screen.queryByLabelText("Your code")).toBeNull();
     expect(screen.queryByRole("img", { name: /QR code/ })).toBeNull();
     expect(screen.queryByLabelText("Walk up / pay for someone")).toBeNull();
     expect(screen.queryByRole("button", { name: /Refresh/ })).toBeNull();
@@ -572,7 +572,7 @@ describe("CourtCode", () => {
       sequence: [{ error: "member_suspended" }, IDENT],
     }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/membership is suspended/i);
     expect(stub.calls.length).toBe(1);
@@ -580,7 +580,7 @@ describe("CourtCode", () => {
     // The club puts it right at the desk. The member presses the only control they have.
     fireEvent.click(screen.getByRole("button", { name: /Check again/ }));
 
-    expect(await screen.findByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(await screen.findByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
     expect(stub.calls.length).toBe(2);
     // The refusal is gone, not sitting behind the code.
     expect(screen.queryByRole("alert")).toBeNull();
@@ -605,14 +605,14 @@ describe("CourtCode", () => {
       sequence: [{ error: "member_suspended" }, { error: "member_not_active" }],
     }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/membership is suspended/i);
 
     fireEvent.click(screen.getByRole("button", { name: /Check again/ }));
 
     await waitFor(() => expect(stub.calls.length).toBe(2));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/isn't active yet/i));
-    expect(screen.queryByLabelText("Court code")).toBeNull();
+    expect(screen.queryByLabelText("Your code")).toBeNull();
     expect(screen.queryByText(/Check your connection/)).toBeNull();
     expect(screen.getByRole("button", { name: /Check again/ })).toBeInTheDocument();
   });
@@ -632,7 +632,7 @@ describe("CourtCode", () => {
       sequence: [{ error: "member_suspended" }, { error: "boom" }],
     }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/membership is suspended/i);
 
     fireEvent.click(screen.getByRole("button", { name: /Check again/ }));
@@ -640,7 +640,7 @@ describe("CourtCode", () => {
     expect(await screen.findByText(/Couldn't get a code/)).toBeInTheDocument();
     // The club's decision still stands and still reads as the club's decision.
     expect(screen.getByRole("alert")).toHaveTextContent(/membership is suspended/i);
-    expect(screen.queryByLabelText("Court code")).toBeNull();
+    expect(screen.queryByLabelText("Your code")).toBeNull();
   });
 
   /**
@@ -653,9 +653,9 @@ describe("CourtCode", () => {
     const stub = stubFetch([
       { method: "POST", path: "/api/v1/me/qr/generate", body: IDENT, sequence: [IDENT] },
     ]);
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
     await advance(0);
-    expect(screen.getByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    expect(screen.getByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
 
     // The next answer is the refusal. Re-stubbing rather than sequencing, because the
     // status changes and `sequence` carries bodies only.
@@ -666,7 +666,7 @@ describe("CourtCode", () => {
     await advanceSeconds(51);
     await advance(0);
 
-    expect(screen.queryByLabelText("Court code")).toBeNull();
+    expect(screen.queryByLabelText("Your code")).toBeNull();
     expect(screen.queryByLabelText("Walk up / pay for someone")).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent(/membership is suspended/i);
   });
@@ -701,7 +701,7 @@ describe("CourtCode", () => {
       sequence: [{ error: "member_suspended" }, { error: "rate_limited" }],
     }]);
 
-    renderPage(<CourtCodePage />);
+    renderPage(<MyCodePage />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/membership is suspended/i);
 
     fireEvent.click(screen.getByRole("button", { name: /Check again/ }));
@@ -728,8 +728,8 @@ describe("CourtCode", () => {
       sequence: [IDENT, { error: "rate_limited" }],
     }]);
 
-    renderPage(<CourtCodePage />);
-    expect(await screen.findByLabelText("Court code")).toHaveTextContent("ZZ9P4T6WQ8HN");
+    renderPage(<MyCodePage />);
+    expect(await screen.findByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
 
     fireEvent.click(screen.getByRole("button", { name: /Refresh/ }));
 

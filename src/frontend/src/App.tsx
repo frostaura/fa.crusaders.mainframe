@@ -22,7 +22,7 @@ import AdminWebhooksPage from "./pages/AdminWebhooks";
 import AdminSettingsPage from "./pages/AdminSettings";
 import AdminLedgerPage from "./pages/AdminLedger";
 import ProfilePage from "./pages/Profile";
-import CourtCodePage from "./pages/CourtCode";
+import MyCodePage from "./pages/MyCode";
 import ReportsPage from "./pages/Reports";
 import { AdminDevicesPage } from "./pages/AdminDevices";
 import NotFoundPage from "./pages/NotFound";
@@ -54,7 +54,14 @@ export default function App() {
             <Route path="/schedule" element={<RequireAuth><SchedulePage /></RequireAuth>} />
             <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
             <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
-            <Route path="/court-code" element={<RequireAuth><CourtCodePage /></RequireAuth>} />
+            {/* doors: member — the code page becomes door-aware, and is renamed with it.
+                `/court-code` is a PERMANENT redirect, not a deletion: it is in bookmarks,
+                in the PWA manifest's shortcut, and in links already emailed to members.
+                A dead link in an email is how a member ends up at the marketing page
+                holding a phone at a locked door. */}
+            <Route path="/my-code" element={<RequireAuth><MyCodePage /></RequireAuth>} />
+            <Route path="/court-code" element={<Navigate to="/my-code" replace />} />
+            {/* end doors: member */}
             <Route path="/reports" element={<RequireAuth><ReportsPage /></RequireAuth>} />
             <Route path="/admin/members" element={<RequireAuth admin><AdminMembersPage /></RequireAuth>} />
             <Route path="/admin/webhooks" element={<RequireAuth admin><AdminWebhooksPage /></RequireAuth>} />

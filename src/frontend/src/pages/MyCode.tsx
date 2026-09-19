@@ -9,7 +9,18 @@ import { Button } from "../components/Button";
 import { cn } from "../lib/utils";
 
 /**
- * The member's court code — what they hold up to the scanner on the court box.
+ * The member's code — what they hold up to the scanner on the court box, and at the
+ * club's door.
+ *
+ * <p>
+ * <b>It was called the court code, and the name was half the defect.</b> Door-awareness
+ * inside a page called "Court code", reached from a tab called "Court code", from a Home
+ * tile that said "Show this at the court to turn the lights on", leaves a member standing
+ * at a locked door with no reason to open it. `/court-code` stays as a permanent redirect
+ * — bookmarks, the PWA start URL, any link already emailed — and everything a member sees
+ * says "your code", which is the only name true both at a club with a door and at one
+ * without.
+ * </p>
  *
  * <p>
  * The QR carries the bare twelve-character code and nothing else. The box's scanner
@@ -244,7 +255,7 @@ function BarredCard(props: {
   const { reason, error, loading, onCheckAgain } = props;
   return (
     <div className="max-w-xl mx-auto space-y-6">
-      <h1 className="text-xl font-semibold">Your court code</h1>
+      <h1 className="text-xl font-semibold">Your code</h1>
       <Card className="space-y-3">
         <p role="alert" className="text-sm text-danger-strong">{reason}</p>
         <p className="text-sm text-text-secondary">
@@ -285,7 +296,7 @@ function WalkUpSwitch(props: { walkUp: boolean; loading: boolean; onChoose: (nex
         <label htmlFor="walk-up" className="text-sm font-medium">Walk up / pay for someone</label>
         {/* A string literal, not JSX text, and it has to stay one: lizard's .tsx lexer
             desyncs on an odd number of bare apostrophes in JSX TEXT, and this sentence
-            carries the file's odd one. Written as text here it swallows CourtCodePage
+            carries the file's odd one. Written as text here it swallows MyCodePage
             whole and `make complexity` reports a function nobody wrote. */}
         <p className="text-xs text-text-muted">
           {"Shows the code that works at any court, even when you have a booking coming up — for starting on a "
@@ -298,7 +309,7 @@ function WalkUpSwitch(props: { walkUp: boolean; loading: boolean; onChoose: (nex
 
 // --- the page -------------------------------------------------------------------
 
-export default function CourtCodePage() {
+export default function MyCodePage() {
   const [qr, setQr] = useState<MyQrCode | null>(null);
   const [deadline, setDeadline] = useState<Deadline | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
@@ -436,7 +447,7 @@ export default function CourtCodePage() {
   return (
     <div className="max-w-xl mx-auto space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Your court code</h1>
+        <h1 className="text-xl font-semibold">Your code</h1>
         <p className="text-sm text-text-secondary">{subtitleFor(qr)}</p>
       </div>
 
@@ -457,7 +468,7 @@ export default function CourtCodePage() {
             </div>
 
             <div className="text-center space-y-1">
-              <p className="font-mono text-2xl tracking-[0.25em]" aria-label="Court code">{qr.code}</p>
+              <p className="font-mono text-2xl tracking-[0.25em]" aria-label="Your code">{qr.code}</p>
               <p className="text-base font-medium">{meaning!.headline}</p>
               <p className="text-sm text-text-secondary">{meaning!.detail}</p>
             </div>

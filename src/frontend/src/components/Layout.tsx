@@ -165,7 +165,7 @@ export default function Layout() {
             // gets — a strip that scrolls beats a gear you cannot press.
             <nav className="hidden lg:flex items-center gap-1 text-sm min-w-0">
               <NavTab to="/schedule" label="Bookings" />
-              <NavTab to="/court-code" label="Court code" />
+              <NavTab to="/my-code" label="My code" />
               {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
               {auth.isAdmin && <NavTab to="/admin/members" label="Members" badge={pendingApplications} />}
               <NavTab to="/reports" label="Reports" />
@@ -285,7 +285,7 @@ export default function Layout() {
             <ScrollArea label="Section tabs">
               <div className="flex items-center gap-1 px-2 py-1 text-sm w-max">
               <NavTab to="/schedule" label="Bookings" />
-              <NavTab to="/court-code" label="Court code" />
+              <NavTab to="/my-code" label="My code" />
               {auth.isAdmin && <NavTab to="/admin/ledger" label="Transactions" />}
               {auth.isAdmin && <NavTab to="/admin/members" label="Members" badge={pendingApplications} />}
               <NavTab to="/reports" label="Reports" />
