@@ -389,40 +389,55 @@ jobs:
       - name: Build door_gate
         run: pio run -d src/iot/door-gate -e door_gate
 
-      # The Arduino IDE is the DEPLOYMENT route and src/iot/court-box/arduino/ is generated,
-      # so a source or platformio.ini change that was not re-exported would leave a
-      # technician flashing last week's firmware from a folder that looks current.
+      # The Arduino IDE is the DEPLOYMENT route for EVERY board here and both
+      # arduino/ trees are generated, so a source or platformio.ini change that was
+      # not re-exported would leave a technician flashing last week's firmware from a
+      # folder that looks current. One target, both projects.
       - name: Arduino sketches are current
         run: make arduino-check PIO=pio PY=python3
 
+      # Keyed on EVERY project's arduino-cli.yaml, not just the court box's. Each
+      # of those files carries its project's core pins in a comment, so a pin
+      # change is what re-downloads the cores — and a key naming only one project
+      # would have served a stale cache after the gate's pin moved.
       - name: Cache the Arduino cores
         uses: actions/cache@v4
         with:
           path: ~/.arduino15
-          key: arduino-cores-${{ runner.os }}-${{ hashFiles('src/iot/court-box/arduino/arduino-cli.yaml') }}
+          key: arduino-cores-${{ runner.os }}-${{ hashFiles('src/iot/*/arduino/arduino-cli.yaml') }}
 
-      - name: Compile both sketches with the Arduino toolchain
+      - name: Compile every sketch with the Arduino toolchain
         run: |
           set -euo pipefail
-          ESP_URL=https://arduino.esp8266.com/stable/package_esp8266com_index.json
+          ESP8266_URL=https://arduino.esp8266.com/stable/package_esp8266com_index.json
+          ESP32_URL=https://espressif.github.io/arduino-esp32/package_esp32_index.json
           # The installer REFUSES to create its own BINDIR — "folder not found. Please create
           # it before continuing." — and exits 1 without installing anything.
           mkdir -p "$RUNNER_TEMP/bin"
           curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
             | BINDIR="$RUNNER_TEMP/bin" sh
           export PATH="$RUNNER_TEMP/bin:$PATH"
-          # Pinned to match the PlatformIO platforms above: framework-arduino-avr
-          # 5.2.0 is core 1.8.6, framework-arduinoespressif8266 3.30102.0 is 3.1.2.
+          # Every core is PINNED to match the PlatformIO platform beside it:
+          # framework-arduino-avr 5.2.0 is core 1.8.6, framework-arduinoespressif8266
+          # 3.30102.0 is 3.1.2, and framework-arduinoespressif32 3.20017 — which is
+          # what espressif32@6.9.0 resolves — is core 2.0.17. Only ONE version of a
+          # core installs at a time, so an unpinned install here is a different
+          # firmware from the tested one with nothing to say so.
           arduino-cli core update-index
           arduino-cli core install arduino:avr@1.8.6
-          arduino-cli core update-index --additional-urls "$ESP_URL"
-          arduino-cli core install esp8266:esp8266@3.1.2 --additional-urls "$ESP_URL"
-          # The sketch reads its OWN secrets.h, beside the .ino. Same throwaway
-          # values written above; gitignored either way.
+          arduino-cli core update-index --additional-urls "$ESP8266_URL"
+          arduino-cli core install esp8266:esp8266@3.1.2 --additional-urls "$ESP8266_URL"
+          arduino-cli core update-index --additional-urls "$ESP32_URL"
+          arduino-cli core install esp32:esp32@2.0.17 --additional-urls "$ESP32_URL"
+          # Each sketch reads its OWN secrets.h, beside its .ino. Same throwaway
+          # values written above; gitignored either way, and removed after.
           cp src/iot/court-box/src/common/secrets.h src/iot/court-box/arduino/court_bridge/secrets.h
+          cp src/iot/door-gate/src/common/secrets.h src/iot/door-gate/arduino/door_gate/secrets.h
           arduino-cli compile --fqbn arduino:avr:mega:cpu=atmega2560 src/iot/court-box/arduino/court_mega
           arduino-cli compile --fqbn esp8266:esp8266:generic:eesz=4M2M,xtal=80,baud=115200 src/iot/court-box/arduino/court_bridge
-          rm -f src/iot/court-box/arduino/court_bridge/secrets.h
+          arduino-cli compile --fqbn esp32:esp32:esp32 src/iot/door-gate/arduino/door_gate
+          rm -f src/iot/court-box/arduino/court_bridge/secrets.h \
+                src/iot/door-gate/arduino/door_gate/secrets.h
 
       # The simulator is what the .NET integration tests talk to, so "it links"
       # is not enough — it has to come up and bind its socket. --port 0 asks the

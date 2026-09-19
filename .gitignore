@@ -133,10 +133,15 @@ src/iot/*/arduino/**/* [0-9]*.*
 src/iot/*/arduino/**/* [0-9]
 
 # Firmware secrets — a filled-in secrets.h was previously committable.
-# Two copies exist per firmware by design and both are covered by this one rule:
-#   src/iot/court-box/src/common/secrets.h              the PlatformIO build's
-#   src/iot/court-box/arduino/court_bridge/secrets.h    the Arduino IDE sketch's
-# Their .example siblings ARE committed.
+# Two copies exist per network-facing firmware by design — the PlatformIO
+# build's and the Arduino IDE sketch's — and all four are covered by this one
+# rule:
+#   src/iot/court-box/src/common/secrets.h              PlatformIO
+#   src/iot/court-box/arduino/court_bridge/secrets.h    Arduino IDE
+#   src/iot/door-gate/src/common/secrets.h              PlatformIO
+#   src/iot/door-gate/arduino/door_gate/secrets.h       Arduino IDE
+# Their .example siblings ARE committed. court_mega has none: the Mega has no
+# radio and no credentials.
 **/secrets.h
 **/ota_privkey.pem
 

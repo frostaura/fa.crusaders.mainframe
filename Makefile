@@ -1,4 +1,5 @@
 .PHONY: install install-iot lint lint-backend lint-frontend lint-iot format-iot build build-iot \
+        sweep-icloud \
         test test-iot test-iot-asan test-integration test-e2e test-e2e-device complexity corpus-check \
         arduino-export arduino-check flash-mega flash-bridge monitor-bridge \
         virt-up virt-down ci-status up down down-reset clean
@@ -23,10 +24,26 @@ IOT_PROJECT_DIRS = $(addprefix $(IOT_DIR)/,$(IOT_PROJECTS))
 IOT_LIB_DIRS = $(addsuffix /lib,$(IOT_PROJECT_DIRS))
 IOT_SRC_DIRS = $(wildcard $(addsuffix /src,$(IOT_PROJECT_DIRS)))
 
-# The court box owns the shared tooling (the Arduino exporter, the corpus
-# generator, the strict-compile gate). strict_compile.sh takes the project list
-# and covers all of them; the other two are court-box-specific by nature.
+# Tooling lives in one of two places, and which one says who it is FOR.
+#
+# $(IOT_TOOLS) — court-box/tools — is what the court box owns: gen_corpus.py
+# writes that project's corpus header, and strict_compile.sh happens to live
+# there for historical reasons while taking the project list and covering all of
+# them.
+#
+# $(IOT_SHARED_TOOLS) — src/iot/tools — is project-neutral and takes --project.
+# The Arduino exporter moved here when the door gate needed one: a court-box
+# script that generated the gate's flashing route would have been a lie about
+# who owns what, and "the gate can only be flashed from PlatformIO" was a
+# go-live blocker precisely because nobody wanted to touch a court-box file to
+# fix it.
 IOT_TOOLS = $(IOT_DIR)/court-box/tools
+IOT_SHARED_TOOLS = $(IOT_DIR)/tools
+
+# Every project with a generated Arduino IDE sketch folder. Both of them: the
+# court box's two sketches and the gate's one.
+IOT_ARDUINO_PROJECTS = court-box door-gate
+IOT_ARDUINO_DIRS = $(foreach p,$(IOT_ARDUINO_PROJECTS),$(IOT_DIR)/$(p)/arduino)
 
 # IOT_VENV is overridable so `make install-iot` can be proven into a scratch
 # path without disturbing the working one.
@@ -89,11 +106,13 @@ lint-frontend:
 	cd src/frontend && npm run lint
 
 # The formatter's file list. Every iot project's sources, generated sketches
-# excluded: src/iot/court-box/arduino/ is written by `make arduino-export` and
-# holds machine-rewritten copies of these same sources plus two vendored
-# third-party libraries. Formatting generated output would either fight the
-# generator or reformat code that is not ours, and the originals under each
-# project's lib/ and src/ are already covered here.
+# excluded: each project's arduino/ is written by `make arduino-export` and
+# holds machine-rewritten copies of these same sources plus, for the court box,
+# two vendored third-party libraries. Formatting generated output would either
+# fight the generator or reformat code that is not ours, and the originals under
+# each project's lib/ and src/ are already covered here. The exclude glob is
+# per-project (`*/arduino/**`), so the gate's sketch folder was covered the day
+# it appeared.
 IOT_FORMAT_FILES = git ls-files -co --exclude-standard \
 	'$(IOT_DIR)/**/*.cpp' '$(IOT_DIR)/**/*.h' ':(exclude)$(IOT_DIR)/*/arduino/**'
 
@@ -144,9 +163,26 @@ build: lint build-iot
 # Both board projects `#error` without their own src/common/secrets.h, which is
 # gitignored. That is what stops an image being built with a blank in it; it also
 # means this target cannot run on a fresh checkout until both exist.
-build-iot:
+build-iot: sweep-icloud
 	$(PIO) run -d $(IOT_DIR)/court-box -e court_mega -e court_bridge -e simulator
 	$(PIO) run -d $(IOT_DIR)/door-gate -e door_gate
+
+# Delete iCloud's fabricated `Name 2.h` / `program 3` copies from under src/iot.
+#
+# This is a prerequisite of the three targets that iCloud actually breaks rather
+# than a chore somebody remembers, because the failure it causes does not look
+# like a filesystem problem. 564 of these accumulated under .pio/build and the
+# generated arduino tree, and every native suite then failed to LINK on
+# `duplicate symbol _unityOutputFlush` — which reads as a broken test harness,
+# and cost real time before anybody thought to run `find`.
+#
+# It CANNOT delete a tracked file: it asks git for the tracked set first and
+# deletes nothing in it, and if git cannot answer it deletes nothing at all and
+# fails. A duplicate that IS tracked fails the run rather than being swept — a
+# committed `Foo 2.cpp` is a problem for a person, and 27 of them were committed
+# once. See the script's header.
+sweep-icloud:
+	@$(PY) $(IOT_SHARED_TOOLS)/sweep_icloud_duplicates.py
 
 # Tests — unit
 test: test-iot
@@ -161,12 +197,12 @@ test: test-iot
 # PlatformIO project with its own platformio.ini. `set -e` inside the loop is
 # what makes a red suite in the FIRST project fail the target — without it the
 # loop runs on and the recipe reports the last project's status only.
-test-iot:
+test-iot: sweep-icloud
 	@set -e; for p in $(IOT_PROJECTS); do \
 	  echo "== $$p =="; $(PIO) test -d $(IOT_DIR)/$$p -e native; \
 	done
 
-test-iot-asan:
+test-iot-asan: sweep-icloud
 	@set -e; for p in $(IOT_PROJECTS); do \
 	  echo "== $$p =="; $(PIO) test -d $(IOT_DIR)/$$p -e native_asan; \
 	done
@@ -187,34 +223,55 @@ corpus-check:
 
 # Regenerate the Arduino IDE sketch folders from the PlatformIO sources.
 #
-# The IDE is the DEPLOYMENT route — open the sketch, pick the board and the
-# port, Upload — and PlatformIO stays the tested build. Two builds of the same
-# firmware only stay the same firmware if the second one is derived, so nothing
-# under src/iot/court-box/arduino/ is ever hand-edited: it is regenerated from
-# court-box/lib/, the shared libraries in ../shared/lib/, court-box/src/ and the
-# -D flags in platformio.ini, with the third-party libraries copied out of
-# .pio/libdeps so the IDE needs nothing from the Library Manager.
+# The IDE is the DEPLOYMENT route for EVERY board this repo ships — open the
+# sketch, pick the board and the port, Upload — and PlatformIO stays the tested
+# build. The people who flash boards at the club do not have PlatformIO, so a
+# firmware with no sketch folder is a firmware nobody at the club can put on a
+# wall.
 #
-# Needs `make build-iot` first, because that is what resolves lib_deps. This
-# target never reaches the network.
+# Two builds of the same firmware only stay the same firmware if the second one
+# is derived, so nothing under any arduino/ directory is ever hand-edited: each
+# is regenerated from its project's lib/, the shared libraries in
+# ../shared/lib/, its src/ and the -D flags in its platformio.ini — with
+# build_unflags applied, which is what makes the gate report 1.0.0 rather than
+# the 2.0.0 that [common] pins for the court box — and with third-party
+# libraries copied out of .pio/libdeps so the IDE needs nothing from the Library
+# Manager.
+#
+# No --project: the exporter does every project it knows about. Needs `make
+# build-iot` first, because that is what resolves lib_deps. This target never
+# reaches the network.
 arduino-export: build-iot
-	$(PY) $(IOT_TOOLS)/arduino_export.py
+	$(PY) $(IOT_SHARED_TOOLS)/arduino_export.py
 
 # Regenerate and fail if the committed sketches are stale — same shape as
 # corpus-check, for the same reason: nothing else runs the generator, so an
 # edited platformio.ini or lib/ file with a forgotten export leaves a technician
 # flashing last week's firmware from a folder that looks current.
+#
+# BOTH checks run for EVERY project before the target fails, so one stale tree
+# does not hide another. The untracked check is not redundant with the diff:
+# `git diff` says nothing about a file that has never been added, and a NEW
+# generated file that nobody committed is exactly what a new sketch folder is
+# made of.
 arduino-check: arduino-export
-	git diff --exit-code -- $(IOT_DIR)/court-box/arduino \
-	  || (echo "$(IOT_DIR)/court-box/arduino is stale — run 'make arduino-export' and commit"; exit 1)
-	@untracked="$$(git ls-files --others --exclude-standard -- $(IOT_DIR)/court-box/arduino)"; \
-	if [ -n "$$untracked" ]; then \
-	  echo "$(IOT_DIR)/court-box/arduino gained generated files that are not committed:"; \
-	  echo "$$untracked"; \
-	  echo "run 'git add $(IOT_DIR)/court-box/arduino' and commit"; \
-	  exit 1; \
-	fi; \
-	echo "$(IOT_DIR)/court-box/arduino is up to date"
+	@failed=""; \
+	for dir in $(IOT_ARDUINO_DIRS); do \
+	  if ! git diff --exit-code --quiet -- "$$dir"; then \
+	    echo "$$dir is stale — run 'make arduino-export' and commit:"; \
+	    git diff --stat -- "$$dir"; \
+	    failed="$$failed $$dir"; \
+	  fi; \
+	  untracked="$$(git ls-files --others --exclude-standard -- "$$dir")"; \
+	  if [ -n "$$untracked" ]; then \
+	    echo "$$dir gained generated files that are not committed:"; \
+	    echo "$$untracked"; \
+	    echo "run 'git add $$dir' and commit"; \
+	    failed="$$failed $$dir"; \
+	  fi; \
+	done; \
+	if [ -n "$$failed" ]; then exit 1; fi; \
+	for dir in $(IOT_ARDUINO_DIRS); do echo "$$dir is up to date"; done
 
 # Flash the ATmega2560 over USB.
 #
