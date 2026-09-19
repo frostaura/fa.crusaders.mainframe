@@ -564,7 +564,15 @@ public sealed class AdminDoorLogHttpTests
         var res = await club.AdminClient(factory).GetAsync($"{CsvPath}?door={doorId}");
         var lines = (await res.Content.ReadAsStringAsync()).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
 
-        Assert.Equal(AdminDoorLogEndpoint.MaxExportRows + 1, lines.Length);
+        // The LITERAL ten thousand, not the constant.
+        //
+        // Asserting `MaxExportRows + 1` was a test that moved with the thing it measured: a
+        // mutant that doubled the cap changed the expectation with it and survived. The number
+        // is a contract WIRE-W1 states in words, so the test states it in figures — and the
+        // constant is checked against the same figure so a change to either is a red test with
+        // an obvious cause rather than a silent widening.
+        Assert.Equal(10_000, AdminDoorLogEndpoint.MaxExportRows);
+        Assert.Equal(10_001, lines.Length);
         Assert.Equal("true", res.Headers.GetValues("X-Crusaders-Truncated").Single());
     }
 }

@@ -475,8 +475,31 @@ public sealed class MeDoorHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, $"medoornoc-{reason.Length}");
+        var club = await DoorClub.SeedAsync(
+            factory, $"medoornoc-{reason.Length}",
+            """{"timezone":"UTC","grace_window_minutes":5,"gate_early_entry_minutes":30,"roster_window_minutes":5,"activation_cue_window_minutes":0}""");
         var doorId = await club.AddDoorAsync(factory, $"gate-{Guid.NewGuid():N}"[..14], "front-door");
+
+        // The member DOES hold a future booking, so there is an instant available — and the
+        // point of the test is that this reason does not get one.
+        //
+        // Without the booking a mutant that dropped the too_early guard entirely survived:
+        // opens_at came back null either way, because there was nothing to compute. Vary the
+        // fixture, not just the code (memory/decisions-method.md).
+        var startsAt = DateTimeOffset.UtcNow.AddHours(5);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.Bookings.Add(new Booking
+            {
+                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
+                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
+                AmountChargedCredits = 16m, ChargedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
 
         await club.WriteRowAsync(
             factory, doorId, $"{DeviceGateEndpoint.DeniedActionPrefix}{reason}",

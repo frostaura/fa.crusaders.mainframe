@@ -80,6 +80,35 @@ Export respects the active filters. Filename pattern: `crusaders-mainframe_<tena
 
 Exports run as a backend job; for >10k rows the user gets an email with a download link rather than a synchronous download. Generated files are kept for 7 days, then deleted.
 
+## The door log is not a report
+
+`GET /api/v1/admin/doors/activity` and its `.csv` (`door-gate.md` §13) look like a report and
+are deliberately not one, and the differences are rules rather than omissions.
+
+- **It is never a reporting DIMENSION.** Nothing here may gain a per-member door filter, a
+  door-scan bucket, a "who comes in most" chart or a door column on a member's ledger view.
+  `door-gate.md` §1 and the P3 rule are explicit: a door scan is never attendance, the admin
+  log filters by door, time and outcome only, and a member's door history belongs to the
+  member (`GET /api/v1/me/door/history`). An entry aggregated by person is the attendance
+  report this product refuses to build.
+- **Its export is synchronous and hard-capped at 10 000 rows**, not queued with an emailed
+  link past 10k. A door log is read at a desk, while somebody is standing there asking what
+  happened last night; a link arriving by email an hour later answers nobody. Rows past the
+  cap are dropped and the response says so in `X-Crusaders-Truncated`.
+- **CSV only** — no XLSX, no PDF. There is no chart to render and no formatting to preserve.
+- **Its filename is `door-log-<from>-<to>.csv`**, not the report pattern above. It is not
+  scoped by tenant in the name because it is downloaded by an admin already inside one club.
+- **Nothing is kept for seven days.** The file is built in memory and handed over; there is no
+  generated artefact on disk to expire, which is the right posture for a file whose rows a club
+  has asked to be deleted after `door_log_retention_days`.
+- **The export IS audited**, as a member-ledger view is: one `doors.log_exported` row naming
+  the actor, the filters and the row count — and, unlike the ledger row above, **no subject**,
+  because an export is about a range of rows rather than about a person.
+
+What it does share with everything here: **the club's timezone**. The doors page's day
+boundary comes from `tenant_settings.timezone` on the server, for the reason this document
+already gives — stored timestamps are UTC and only the server knows which day a club keeps.
+
 ## Implementation notes
 - **No client-side aggregation over large datasets.** Server returns pre-aggregated buckets keyed by the filter dimensions. The frontend consumes ready-to-render data.
 - **Caching:** common reports (today, last 7 days) are cached server-side for 60s per tenant. Player views are not cached (they're cheap and small).
