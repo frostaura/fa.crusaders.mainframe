@@ -6,10 +6,11 @@
 # stack is created; nothing else needs touching. CI stops at the Docker Hub push — it publishes
 # the images this file names and does NOT redeploy; the redeploy is a manual step.
 #
-# Topology, as agreed 2026-09-05: everything here runs on the one on-premises machine the court
-# box reaches over the club LAN. The gateway is the only published port. Cloudflared (outside
-# this stack) maps the public hostname to http://localhost:8088, which is what lets members book
-# from anywhere; the box's secrets.h names http://<this machine's LAN address>:8088. The stack
+# Topology: everything here runs on the one on-premises machine the court box reaches over the
+# club LAN. Cloudflared is a service of THIS stack (2026-09-19), so it reaches the gateway by
+# service name over the compose bridge rather than via a published port. The gateway is still
+# published on 8088 anyway, because the court box is on the LAN and does not come in through
+# the tunnel; the box's secrets.h names http://<this machine's LAN address>:8088. The stack
 # keeps compose's own bridge rather than host networking because the gateway image reaches the
 # API and the SPA by service name (backend:5000, frontend:80), and because the API only believes
 # X-Forwarded-* headers from that bridge's pinned subnet — see the note on `networks` below.
@@ -18,15 +19,22 @@
 # name like JWT_SECRET reaches nothing and the API boots on the appsettings.json placeholder,
 # which is exactly what the previous compose file did. Keep them as they are.
 
-# The compose bridge is PINNED rather than left to docker's default pool, and the API's
-# Gateway:TrustedProxies default names exactly this /24. Change this subnet and you must change
-# Gateway.TrustedProxies in appsettings.json, GatewayTrust.ComposeBridgeNetwork and
-# docker-compose.yml together.
+# The compose bridge is PINNED rather than left to docker's default pool, and the backend below
+# names exactly this /24 in Gateway__TrustedProxies.
+#
+# It sits in 10/8 ON PURPOSE. It used to be 172.29.83.0/24, inside docker's own default address
+# pool (172.17.0.0/12, handed out in /16 chunks): once a host accumulated enough bridge networks
+# docker allocated 172.29.0.0/16 to something else, that /16 swallowed this /24, and the stack
+# failed to deploy with "Pool overlaps with other one on this address space". A range outside
+# the default pool cannot be auto-allocated to anything, so the collision cannot recur.
+#
+# CHECK THIS AGAINST THE CLUB LAN before first deploy — if the club's own network is 10.83.29.x,
+# pick another free /24 and change it in BOTH places below (here and Gateway__TrustedProxies).
 networks:
   default:
     ipam:
       config:
-        - subnet: 172.29.83.0/24
+        - subnet: 10.83.29.0/24
 
 services:
   postgres:
@@ -70,7 +78,7 @@ services:
       # The club's first admin. One-time credential: the account is created with
       # must-change-password set, so this password stops working at first sign-in.
       # At least 12 characters, and not one of the placeholders this project has shipped before.
-      Bootstrap__AdminEmail: CHANGE-ME@frostaura.net
+      Bootstrap__AdminEmail: dean.martin@frostaura.net
       Bootstrap__AdminPassword: CHANGE-ME-at-least-12-characters
       Bootstrap__Courts: "4"
       # Credits charged per booking slice on each court created above. Courts carry their own
@@ -81,18 +89,29 @@ services:
       Jwt__Secret: CHANGE-ME-random-string-of-at-least-32-characters
       # The address members use. Verification, welcome and password-reset links are built from it,
       # and PayFast is told to return here. Cloudflared points this hostname at the gateway.
-      App__PublicBaseUrl: https://CHANGE-ME.frostaura.net
-      Cors__AllowedOrigins__0: https://CHANGE-ME.frostaura.net
+      App__PublicBaseUrl: https://crusaders.frostaura.net
+      Cors__AllowedOrigins__0: https://crusaders.frostaura.net
+      # Loopback plus the ipam subnet pinned above — the network the gateway and cloudflared
+      # containers stand on. SET HERE, not left to the appsettings.json default: a redeploy
+      # moves images and nothing else, so the image still carries the old 172.29.83.0/24
+      # default. Without this line the gateway is an untrusted peer, X-Forwarded-For/-Proto/
+      # -Host are ignored, the whole club lands in one rate-limit bucket, and every absolute
+      # URL the API composes (verification links, PayFast returns, OTA and provisioning URLs)
+      # is built from the gateway's port-less host instead of the public one.
+      # Comma-delimited SCALAR, never the indexed form — .NET merges arrays by index, so the
+      # indexed form cannot narrow a default, only add to it.
+      # Must match the `networks:` subnet above — change the two together.
+      Gateway__TrustedProxies: 127.0.0.1,::1,10.83.29.0/24
       # Passkeys are bound to the hostname members sign in on.
-      WEBAUTHN_RP_ID: CHANGE-ME.frostaura.net
-      WEBAUTHN_ORIGIN: https://CHANGE-ME.frostaura.net
+      WEBAUTHN_RP_ID: crusaders.frostaura.net
+      WEBAUTHN_ORIGIN: https://crusaders.frostaura.net
       WEBAUTHN_RP_NAME: Crusaders Squash
       # Outbound mail: verification, welcome, password reset, receipts, no-show notices.
       Smtp__Host: smtpout.secureserver.net
       Smtp__Port: "587"
-      Smtp__User: mainframe@frostaura.net
+      Smtp__User: dean.martin@frostaura.net
       Smtp__Password: CHANGE-ME-mailbox-password
-      Smtp__From: mainframe@frostaura.net
+      Smtp__From: crusaders@frostaura.net
       Smtp__FromName: Crusaders Squash
       Media__StoragePath: /app/media
       Biometric__TemplateStorePath: /app/biometric/templates
@@ -122,13 +141,34 @@ services:
     image: frostaura/crusaders-mainframe-gateway:latest
     restart: unless-stopped
     ports:
-      # The one published port. Cloudflared dials it; so does the court box, on the LAN address.
+      # STILL PUBLISHED, even though cloudflared now runs inside this stack and reaches the
+      # gateway by service name. Cloudflared carries members in from the internet; it does NOT
+      # carry the court box, which is on the club LAN and dials
+      # http://<this machine's LAN address>:8088 out of its own secrets.h. Drop this line and
+      # members keep booking while the courts stop responding — a failure that looks like
+      # broken hardware and is not.
       - "8088:80"
     depends_on:
       backend:
         condition: service_healthy
       frontend:
         condition: service_started
+
+  # The public edge. Inside this stack rather than beside it, so it reaches the gateway by
+  # service name over the pinned bridge — which also puts it inside Gateway__TrustedProxies
+  # above, which is what lets the API believe the X-Forwarded-* headers it sets. Jwt__Secret
+  # aside, this token is the most sensitive value in the file: anyone holding it can run the
+  # tunnel. Rotate it in the Cloudflare dashboard if it is ever pasted anywhere.
+  #
+  # ForwardLimit is 2 in appsettings.json, which is exactly this chain: cloudflared -> gateway
+  # -> API. Adding another proxy in front means raising it, or every member's client IP
+  # collapses to the gateway's.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    depends_on:
+      - gateway
+    command: tunnel run --token "CHANGE-ME-cloudflare-tunnel-token"
 
 volumes:
   postgres_data:

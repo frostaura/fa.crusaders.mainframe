@@ -93,7 +93,12 @@ Thumbs.db
 # Database / media
 *.sqlite
 *.sqlite3
-/media/
+# Unanchored on purpose. This was `/media/`, which only ever matched a media directory at the
+# repository root — and the one that actually fills up is
+# src/backend/Crusaders.Mainframe.Api/media/, written by any local run of the API. It held real
+# uploaded member photographs and was fully tracked-eligible, so a `git add -A` would have
+# committed members' faces.
+media/
 
 # Secrets — defensive (never commit local secrets even if named oddly)
 *.pem

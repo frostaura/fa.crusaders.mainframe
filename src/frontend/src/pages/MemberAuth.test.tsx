@@ -162,13 +162,21 @@ describe("Login — the page you actually asked for", () => {
 });
 
 describe("Register — one message per mistake", () => {
-  const fill = () => {
+  /**
+   * `await`ed, because PhotoPicker prepares the photo when it is PICKED rather than when the
+   * form is submitted — it decodes, downscales and re-encodes it, which is asynchronous. A
+   * synchronous fill raced that work and submitted with no photo attached, which is the same
+   * race a member hits by picking and immediately pressing submit; the screen guards it by
+   * disabling the button while preparation runs.
+   */
+  const fill = async () => {
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Ada Lovelace" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ada@club.test" } });
     fireEvent.change(screen.getByLabelText("Membership number"), { target: { value: "MEM-1001" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Password123!" } });
     const file = new File(["x"], "me.png", { type: "image/png" });
     fireEvent.change(screen.getByLabelText("Photo of yourself"), { target: { files: [file] } });
+    await screen.findByText(/Photo ready/i);
   };
 
   /**
@@ -184,7 +192,7 @@ describe("Register — one message per mistake", () => {
       err("/api/v1/auth/register", 409, { error: "membership_number_in_use" }),
     ]);
     renderAt(<RegisterPage />);
-    fill();
+    await fill();
     submit();
 
     expect(await screen.findByText(/membership number is already registered/i)).toBeInTheDocument();
@@ -197,7 +205,7 @@ describe("Register — one message per mistake", () => {
       err("/api/v1/auth/register", 400, { error: "missing_fields" }),
     ]);
     renderAt(<RegisterPage />);
-    fill();
+    await fill();
     submit();
 
     expect(await screen.findByText(/fill in every field/i)).toBeInTheDocument();
@@ -212,7 +220,7 @@ describe("Register — one message per mistake", () => {
       err("/api/v1/auth/register", 400, { error: "password_too_short" }),
     ]);
     renderAt(<RegisterPage />);
-    fill();
+    await fill();
     submit();
 
     expect(await screen.findByText(/password must be at least 8 characters/i)).toBeInTheDocument();

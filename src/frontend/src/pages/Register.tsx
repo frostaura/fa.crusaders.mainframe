@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { endpoints, uploadPhoto } from "../lib/api";
 import { describeFailure, isDeploymentFault } from "../lib/errors";
-import { preparePhoto, PhotoError, PHOTO_MESSAGES } from "../lib/photo";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
+import { PhotoPicker } from "../components/PhotoPicker";
 
 /**
  * The API's refusal codes, as sentences.
@@ -43,40 +43,41 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [membershipNumber, setMembershipNumber] = useState("");
+  // Already prepared by PhotoPicker at the moment it was chosen — a small, correctly-rotated
+  // JPEG inside the upload cap. Nothing further to do to it here.
   const [photo, setPhoto] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   /** Set when the failure is the club's to fix, so retrying is pointless — see isDeploymentFault. */
   const [blocked, setBlocked] = useState(false);
+  /** True while PhotoPicker is decoding and re-encoding — see its onBusyChange. */
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (preparingPhoto) {
+      // Distinct from having no photo at all. Telling someone who is watching their photo
+      // being prepared that they have not chosen one is simply false.
+      setError("Your photo is still being prepared — give it a second, then submit again.");
+      return;
+    }
     if (!photo) {
       setError("Please upload a photo of yourself — it's used to identify you on court.");
       return;
     }
     setLoading(true);
     try {
-      // Re-encoded in the browser first: a phone's HEIC or 8MB JPEG is turned into a small,
-      // correctly-rotated JPEG the API accepts. Its failures are distinct from the API's and
-      // are reported as themselves.
-      const prepared = await preparePhoto(photo);
-      const upload = await uploadPhoto(prepared);
+      const upload = await uploadPhoto(photo);
       await endpoints.register({ email, password, fullName, membershipNumber, photoUrl: upload.url });
       setSubmitted(true);
     } catch (err) {
-      if (err instanceof PhotoError) {
-        setError(PHOTO_MESSAGES[err.problem]);
-        setBlocked(false);
-      } else {
-        setError(describeFailure(err, { codes: MESSAGES, action: "submit your application" }));
-        // A missing tenant or a 5xx is not something resubmitting can cure. Hiding the submit
-        // button is the honest response: the previous screen invited the member to keep
-        // pressing it against a fault only the club's operator could clear.
-        setBlocked(isDeploymentFault(err));
-      }
+      setError(describeFailure(err, { codes: MESSAGES, action: "submit your application" }));
+      // A missing tenant or a 5xx is not something resubmitting can cure. Hiding the submit
+      // button is the honest response: the previous screen invited the member to keep
+      // pressing it against a fault only the club's operator could clear.
+      setBlocked(isDeploymentFault(err));
     } finally {
       setLoading(false);
     }
@@ -117,14 +118,12 @@ export default function RegisterPage() {
             <Input id="password" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
             <p className="text-xs text-text-muted mt-1">At least 8 characters.</p>
           </div>
-          <div>
-            <Label htmlFor="photo">Photo of yourself</Label>
-            <Input id="photo" type="file" accept="image/*" required onChange={(e) => setPhoto(e.target.files?.[0] ?? null)} />
-            <p className="text-xs text-text-muted mt-1">Used so other players can identify you on court.</p>
-          </div>
+          <PhotoPicker value={photo} onChange={setPhoto} onError={setError} onBusyChange={setPreparingPhoto} required />
           {error && <p className="text-sm text-danger-strong">{error}</p>}
           {!blocked && (
-            <Button type="submit" disabled={loading} className="w-full">{loading ? "Submitting…" : "Submit application"}</Button>
+            <Button type="submit" disabled={loading || preparingPhoto} className="w-full">
+              {loading ? "Submitting…" : preparingPhoto ? "Preparing your photo…" : "Submit application"}
+            </Button>
           )}
         </form>
         <p className="mt-4 text-sm text-text-secondary">
