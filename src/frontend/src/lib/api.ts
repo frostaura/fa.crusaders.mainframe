@@ -245,6 +245,28 @@ function parseFailureBody(text: string): unknown {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+/**
+ * Builds the {@link ApiError} for a failed response, with its body PARSED.
+ *
+ * <p>
+ * Three endpoints hand-roll their own fetch because they are not JSON in, JSON out — two
+ * multipart uploads and a CSV download — and all three threw
+ * <c>new ApiError(res.status, await res.text())</c>. That puts a STRING on
+ * <c>ApiError.payload</c>, and <c>errorCode()</c> reads <c>payload.error</c> off an object, so
+ * it returned null for every one of them. Every stable error code those endpoints emit was
+ * invisible to the screens calling them, which then fell through to their generic sentence.
+ * </p>
+ *
+ * <p>
+ * That is exactly how a missing tenant row reached the register screen as "that didn't work"
+ * instead of "this club isn't set up yet" — the upload is the first call register makes, and
+ * it is one of the three.
+ * </p>
+ */
+async function failureFrom(res: Response): Promise<ApiError> {
+  return new ApiError(res.status, parseFailureBody(await res.text()));
+}
+
 export const api = {
   get: <T>(p: string) => request<T>("GET", p),
   post: <T>(p: string, b?: unknown) => request<T>("POST", p, b),
@@ -817,7 +839,7 @@ export async function uploadPhoto(file: File): Promise<{ url: string }> {
   const fd = new FormData();
   fd.append("file", file);
   const res = await fetchWithTimeout("/api/v1/uploads/photo", { method: "POST", body: fd }, UPLOAD_TIMEOUT_MS);
-  if (!res.ok) throw new ApiError(res.status, await res.text());
+  if (!res.ok) throw await failureFrom(res);
   return res.json();
 }
 
@@ -1050,7 +1072,7 @@ export const endpoints = {
     const res = await fetchWithTimeout(endpoints.walletCsvUrl(from, to), {
       headers: { ...(tokenStore.get() ? { authorization: `Bearer ${tokenStore.get()}` } : {}) },
     });
-    if (!res.ok) throw new ApiError(res.status, await res.text());
+    if (!res.ok) throw await failureFrom(res);
     const disposition = res.headers.get("content-disposition") ?? "";
     const match = /filename="?([^"]+)"?/.exec(disposition);
     return { blob: await res.blob(), filename: match?.[1] ?? "wallet.csv" };
@@ -1160,7 +1182,7 @@ export const endpoints = {
       headers: tok ? { Authorization: `Bearer ${tok}` } : undefined,
       body: fd,
     }, UPLOAD_TIMEOUT_MS);
-    if (!res.ok) throw new ApiError(res.status, await res.text());
+    if (!res.ok) throw await failureFrom(res);
     return res.json();
   },
 

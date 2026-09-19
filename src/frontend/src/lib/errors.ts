@@ -114,7 +114,13 @@ export function describeFailure(err: unknown, opts: DescribeOptions = {}): strin
   const byStatus = describeStatus(err.status, opts.action);
   if (byStatus) return byStatus;
 
-  return opts.fallback ?? lead(opts.action, "that didn't work. Try again, and tell the club committee if it keeps happening.");
+  // Not "that didn't work": with an action clause in front it reads "Couldn't submit your
+  // application — that didn't work", which says nothing, twice. What is actually true of a
+  // refusal we do not recognise is that the club's system declined it and did not explain.
+  return opts.fallback ?? lead(
+    opts.action,
+    "the club's system refused it without saying why. Try again, and tell the club committee if it keeps happening.",
+  );
 }
 
 /**
