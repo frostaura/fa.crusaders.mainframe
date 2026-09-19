@@ -27,13 +27,14 @@ Why a green suite is not evidence at all is a decision, not a gotcha:
   and green here every time. Diagnosing it needs the CI log and a deliberately tick-offset fixture,
   not another local run. **`-v q` suppresses the assertion message in CI**, leaving only `[FAIL]`
   and a name; pass `-v n` when a CI-only failure has to be read rather than guessed.
-- **NO TEST IN THIS REPOSITORY READS A REAL SOCKET, and round G3 found what that hides.** Every
-  firmware HTTP fixture is a string a fake hands over; the real API frames its responses
-  `Transfer-Encoding: chunked` on a keep-alive connection, and a reader that was correct against
-  every invented fixture timed out on **every** call against the actual server — no roster, and a
-  door that refused everyone. The fixtures are real captured bytes now, and the e2e-device lane
-  reads responses the way the board does. A fixture nobody took off a wire proves the parser, not
-  the protocol.
+- **NOTHING HERE READ A RESPONSE THE WAY THE BOARD DOES, and round G3 found what that hides.**
+  Every firmware HTTP fixture is a string a fake hands over, and `test/e2e-device/scenario.py`
+  talks to the real API through `urllib`, **which de-chunks and closes for you** — so the one
+  thing neither could see was the FRAMING. The real API answers `Transfer-Encoding: chunked` on
+  a keep-alive connection, and a reader that was correct against every invented fixture timed
+  out on **every** call against the actual server: no roster, and a door that refused everyone.
+  The firmware fixtures are real captured bytes now. A fixture nobody took off a wire proves the
+  parser, not the protocol, and a client that handles the protocol for you proves neither.
 - **A test can be green because of its FIXTURE, not its code.** Flipping one boolean on a stale
   device fixture exposed a live money rule — a stale-but-enabled box beside a healthy one waiving
   no-show penalties indefinitely — that no test discriminated. Mutate the rule *and* vary the
