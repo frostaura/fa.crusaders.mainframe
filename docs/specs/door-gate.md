@@ -38,7 +38,9 @@ attribute any of it to.
 This will come under pressure the first time somebody wants entry statistics, or asks why
 the member who scanned at the door is still being swept as a no-show. The answer to the
 second is that the courtside terminal and the court box are what record attendance, and the
-answer to the first is that `gate.opened` audit rows are the statistics.
+answer to the first is that `gate.opened` audit rows are the statistics — readable at
+`GET /api/v1/admin/devices/{id}/activity` (§9), which for one round they were not: this
+document assumed a reader in four places and no route read `audit_log` at all.
 
 ---
 
@@ -861,8 +863,60 @@ on it rather than leaving it to be discovered when the network drops.
 `name` and `enabled` work on a gate exactly as on a box. Taking a gate out of service refuses
 it `403` on every device route, as it does a box.
 
+### `GET /api/v1/admin/devices/{id}/activity` — what this board has been doing
+
+Admin JWT, tenant-scoped, and the same route for a gate and a court box. It is the reader the
+audit trail did not have, and the door is why it had to exist: §1, §5, §6 and go-live §12 all
+assume somebody can read `gate.opened` rows back, and for one round nothing could.
+
+```
+GET /api/v1/admin/devices/{id}/activity?limit=50
+
+{ "items": [ {
+    "at":          "2026-09-19T18:04:11.271+00:00",
+    "action":      "gate.opened" | "gate.denied_<reason>" | "device.gate_open" | …,
+    "reason":      "ok" | "not_recognised" | … | null,
+    "offline":     false,
+    "member":      { "id": "<guid>", "name": "Jane Doe" } | null,
+    "fingerprint": "1f4c9ab2" | null
+} ] }
+```
+
+- **Newest first.** A console pages this and shows the first page; an ordering that was not
+  stated would eventually be changed by an index.
+- **`limit` is 1–200, default 50, and CLAMPED rather than refused.** A console asking for a
+  million rows is a mistake to bound, not a request to answer with an error screen.
+- **404 for another club's board**, because whether a device id exists at all is a fact about
+  that tenant. Both filters are pinned — the device lookup and the row query — by a
+  cross-tenant injection, because rows are attributed to a board by a `device_id` inside a
+  jsonb document with no foreign key behind it.
+- **`action` is the row's own action**, unrenamed. The console owns the dictionary that turns
+  it into a sentence, and it needs both vocabularies: §5's refusal reasons and §6's outcomes.
+- **`reason`** is a gate decision's `reason` or an uploaded event's `outcome`, whichever the
+  row carries, else null. The two are not unified here on purpose: they are written by
+  different paths about different things — a refusal the API decided, and what the server made
+  of something a board had already done.
+- **`offline`** is true when the row came from `POST /device/events`, keyed on the `seq` only
+  that path writes. Not on the action's prefix, which would call an admin's `device.updated`
+  an offline open, and not on a list of kinds, which goes stale the first time a board learns
+  a new one.
+- **It is the BOARD's trail, not a door-opens feed.** The registration row and the admin edit
+  are in it, because an admin diagnosing a door should not have to know which half of the
+  story to look in before they know what is wrong.
+- **`DetailsJson` is never returned**, in whole or in part: it carries the club's internal
+  device id, the gate key and a court box's relay and booking ids.
+- **`fingerprint` is validated to BE one** — eight lowercase hex characters — rather than
+  forwarded. Rows written before §6's fingerprint existed hold a live access code in `subject`
+  in full, and `RetentionWorker` never touches `DetailsJson`, so a reader that trusted the
+  field would have published every one of them to the console on the day it shipped. Such a
+  row is still listed, with `fingerprint: null`: it is evidence, and hiding it would be the
+  wrong half to withhold.
+
 **No EF migration.** `Kind` and `GateKey` have been columns with indexes since the device
-table shipped, and nothing here persists anything new.
+table shipped, and nothing here persists anything new. This route adds no column either — it
+reads `audit_log`, which has always been there. It has no index on `details_json` and does not
+need one at a club's volume; that, and the fact that nothing purges these rows, are recorded
+as residuals in §6 rather than left to be discovered.
 
 ---
 
@@ -1115,6 +1169,10 @@ new sentence above with no row is the defect this table exists to expose.
 | The release is the club's setting, clamped to 1–30 | `DeviceGateTests.The_release_is_the_clubs_setting_clamped`, `DeviceGateHttpTests.The_release_on_the_wire_is_the_clubs_setting` |
 | Every reason has a vector and every vector a reason | `DeviceGateProtocolCorpusTests.The_refusal_reasons_and_their_vectors_are_the_same_set` |
 | One audit row per decision, subject named, token absent | `DeviceGateHttpTests.An_active_member_opens_the_door_and_the_open_is_audited` |
+| The trail has a reader, and it carries the online and offline halves of a board's day | `DeviceGateHttpTests.A_doors_activity_is_readable_and_carries_both_halves_of_its_day`, `…A_court_boxs_activity_is_readable_on_the_same_route` |
+| It returns no raw details and no legacy token, and a fingerprint is validated to be one | `DeviceGateHttpTests.The_activity_route_returns_no_raw_details_and_no_legacy_token` |
+| `limit` is clamped to 1–200 and defaults to 50 | `DeviceGateHttpTests.The_activity_limit_is_clamped_and_defaults_to_fifty` |
+| Another club's board 404s, and another club's ROWS never appear | `DeviceGateHttpTests.Another_clubs_device_has_no_activity_here`, `…Another_clubs_audit_rows_never_appear_in_this_clubs_device_activity` |
 | Another club's code opens nothing here | `DeviceGateTests.Another_clubs_code_is_not_recognised_at_this_clubs_gate`, `DeviceGateHttpTests.Another_clubs_code_does_not_open_this_clubs_door` |
 | Another club's bookings never reach this club's roster | `DeviceGateTests.Another_clubs_booking_never_appears_…`, `DeviceGateHttpTests.Another_clubs_bookings_never_reach_…` |
 | `gate_open` is receipted, names the subject at the scan, settles nothing | `DeviceGateHttpTests.An_offline_gate_open_is_receipted_and_names_the_member_without_checking_them_in` |

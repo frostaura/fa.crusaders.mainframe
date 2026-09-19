@@ -37,6 +37,11 @@ public static class AdminDeviceEndpoints
         g.MapPatch("/{id:guid}", UpdateAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
 
+        // What this board has been doing. On this group rather than beside the audit trail
+        // because the question is about a DEVICE — see AdminDeviceActivityEndpoint for why a
+        // door needs it more than a court box does, and why the trail had no reader at all.
+        g.MapGet("/{id:guid}/activity", AdminDeviceActivityEndpoint.HandleAsync);
+
         return app;
     }
 
