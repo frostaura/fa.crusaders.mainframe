@@ -129,6 +129,30 @@ DecodeError errorOf(const char* name) {
   return DecodeError::None;
 }
 
+/// The overlay half of frameFromSpec, split off it rather than grown into it.
+///
+/// An if-chain over eighteen verbs scores past the complexity gate's limit of
+/// 15, and the gate covers this suite. Two functions over nine each is the
+/// same table read twice, which is what the gate is asking for.
+bool overlayFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
+  const char* v = s.verb;
+  if (eq(v, "ROW")) {
+    out = Frame::row(static_cast<uint8_t>(toU32(s.args[0])), s.args[1]);
+  } else if (eq(v, "SHOW")) {
+    out = Frame::show(toU32(s.args[0]), static_cast<uint8_t>(toU32(s.args[1])));
+  } else if (eq(v, "IDLE")) {
+    out = Frame::idle(static_cast<uint8_t>(toU32(s.args[0])), s.args[1]);
+  } else if (eq(v, "MAP")) {
+    const int16_t numbers[4] = {
+        static_cast<int16_t>(toU32(s.args[0])), static_cast<int16_t>(toU32(s.args[1])),
+        static_cast<int16_t>(toU32(s.args[2])), static_cast<int16_t>(toU32(s.args[3]))};
+    out = Frame::map(numbers);
+  } else {
+    return false;
+  }
+  return true;
+}
+
 /// Build a Frame from a corpus FrameSpec using ONLY the named constructors.
 ///
 /// This is what proves the safety rule is not decorative: there is no generic
@@ -158,13 +182,15 @@ bool frameFromSpec(const corpus::FrameSpec& s, Frame& out) {
     const uint16_t remaining[4] = {toU16(s.args[1]), toU16(s.args[2]), toU16(s.args[3]), toU16(s.args[4])};
     out = Frame::state(static_cast<uint8_t>(toU32(s.args[0])), remaining);
   } else if (eq(v, "PONG")) {
-    out = Frame::pong(s.args[0], toU32(s.args[1]));
+    out = s.argCount >= 5U
+              ? Frame::pong(s.args[0], toU32(s.args[1]), toU16(s.args[2]), toU16(s.args[3]), toU16(s.args[4]))
+              : Frame::pong(s.args[0], toU32(s.args[1]));
   } else if (eq(v, "EVT")) {
     out = Frame::evt(s.args[0], s.args[1]);
   } else if (eq(v, "ERR")) {
     out = Frame::err(errorOf(s.args[0]));
   } else {
-    return false;
+    return overlayFrameFromSpec(s, out);
   }
   return true;
 }
@@ -350,6 +376,73 @@ void test_no_wire_form_produces_an_unbounded_on(void) {
   TEST_ASSERT_EQUAL_size_t(1, feedAll(legacy, "A\n", &r, 1));
   TEST_ASSERT_TRUE(r.isFrame());
   TEST_ASSERT_EQUAL_UINT32(proto::kRelayHardCapSeconds, toU32(r.frame.arg(1)));
+}
+
+/// The screen's half of the safety rule.
+///
+/// A refusal screen that never leaves the glass, with every button dead behind
+/// it, is what GOAL items 11 and 15 are about, and the fix is structural rather
+/// than per-screen: EVERY overlay carries a hold, and the hold is clamped by
+/// the decoder — out of reach of a bridge, of a future firmware, and of any
+/// configuration. So no wire form of `!SHOW` may yield a hold outside the
+/// bounds, and in particular none may yield zero.
+void test_no_wire_form_produces_a_permanent_screen(void) {
+  const char* bodies[] = {"SHOW,0,0",  "SHOW,0,1",     "SHOW,1,0",           "SHOW,120,0",       "SHOW,121,0",
+                          "SHOW,-1,0", "SHOW,NEVER,0", "SHOW,99999999999,0", "SHOW,4294967295,0"};
+  bool sawFrame = false;
+  for (size_t i = 0; i < sizeof(bodies) / sizeof(bodies[0]); ++i) {
+    char line[kScratch];
+    static_cast<void>(v2Line(bodies[i], "\n", line));
+
+    proto::Decoder d(Link::Downlink);
+    proto::Decoder::Result got[4];
+    const size_t n = feedAll(d, line, got, 4);
+    for (size_t k = 0; k < n && k < 4; ++k) {
+      if (got[k].isFrame() && got[k].frame.verb() == Verb::Show) {
+        sawFrame = true;
+        const uint32_t seconds = toU32(got[k].frame.arg(0));
+        TEST_ASSERT_TRUE_MESSAGE(seconds >= proto::kShowHoldMinSeconds, bodies[i]);
+        TEST_ASSERT_TRUE_MESSAGE(seconds <= proto::kShowHoldMaxSeconds, bodies[i]);
+      }
+    }
+  }
+  TEST_ASSERT_TRUE_MESSAGE(sawFrame, "no SHOW body decoded at all — the clamp was never exercised");
+
+  // And the factory, which is the path the bridge actually takes.
+  const uint32_t asked[] = {0U, 1U, 119U, 120U, 121U, 5400U, 0xFFFFFFFFU};
+  for (size_t i = 0; i < sizeof(asked) / sizeof(asked[0]); ++i) {
+    const uint32_t held = toU32(Frame::show(asked[i], 0U).arg(0));
+    TEST_ASSERT_TRUE(held >= proto::kShowHoldMinSeconds);
+    TEST_ASSERT_TRUE(held <= proto::kShowHoldMaxSeconds);
+  }
+}
+
+/// A row index is an index, not a quantity: it is refused, never clamped.
+///
+/// Clamping it would write the text onto the last row the panel has, which
+/// looks like a working screen and hides a peer that disagrees with this one
+/// about how many rows exist.
+void test_row_refuses_a_row_the_protocol_does_not_have(void) {
+  for (uint8_t r = 0U; r < proto::kMaxRows; ++r) {
+    const Frame f = Frame::row(r, "X");
+    TEST_ASSERT_FALSE(f.empty());
+    TEST_ASSERT_EQUAL_UINT32(r, toU32(f.arg(0)));
+  }
+  TEST_ASSERT_TRUE(Frame::row(proto::kMaxRows, "X").empty());
+  TEST_ASSERT_TRUE(Frame::row(255U, "X").empty());
+
+  const char* bodies[] = {"ROW,4,X", "ROW,9,X", "ROW,-1,X", "ROW,TOP,X", "ROW,99999999999,X"};
+  for (size_t i = 0; i < sizeof(bodies) / sizeof(bodies[0]); ++i) {
+    char line[kScratch];
+    static_cast<void>(v2Line(bodies[i], "\n", line));
+
+    proto::Decoder d(Link::Downlink);
+    proto::Decoder::Result got[4];
+    const size_t n = feedAll(d, line, got, 4);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1, n, bodies[i]);
+    TEST_ASSERT_FALSE_MESSAGE(got[0].isFrame(), bodies[i]);
+    TEST_ASSERT_EQUAL_MESSAGE(DecodeError::BadArg, got[0].error, bodies[i]);
+  }
 }
 
 // --- encoder properties ----------------------------------------------------
@@ -838,6 +931,8 @@ int main(int, char**) {
   RUN_TEST(test_corpus_executed_count_matches_the_manifest);
   RUN_TEST(test_on_always_carries_a_duration);
   RUN_TEST(test_no_wire_form_produces_an_unbounded_on);
+  RUN_TEST(test_no_wire_form_produces_a_permanent_screen);
+  RUN_TEST(test_row_refuses_a_row_the_protocol_does_not_have);
   RUN_TEST(test_checksum_is_the_xor_between_bang_and_star);
   RUN_TEST(test_encode_is_all_or_nothing_at_every_capacity);
   RUN_TEST(test_encode_of_an_empty_frame_writes_nothing);

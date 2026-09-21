@@ -52,6 +52,7 @@
 #include "courtlogic/ButtonPanel.h"
 #include "courtlogic/RelayGuard.h"
 #include "courtlogic/ScanAssembler.h"
+#include "courtlogic/ScreenBuffer.h"
 #include "protocol/Codec.h"
 #include "protocol/Protocol.h"
 #include "timebase/TimeBase.h"
@@ -72,25 +73,13 @@ inline constexpr uint32_t kStateIntervalMs = 10000UL;
 /// and the bound only bites when something is wrong.
 inline constexpr uint16_t kBytesPerPass = 64U;
 
-/// The two lines shown when nothing else is. 16 columns, so they fit both the
-/// panel that is fitted and the 16x2 the firmware pretends it is.
-inline constexpr char kIdleLine1[] = "CRUSADERS COURTS";
-inline constexpr char kIdleLine2[] = "SCAN TO START";
-
-/// Painted the instant a scan completes, before any answer exists.
-///
-/// The sketch this replaces painted "VERIFYING..." unconditionally on every
-/// scan; v2 moved every scan-path LCD write to the ESP, so with the bridge
-/// crashed, rebooting or mid-failed-OTA a scan produced NO visible change and
-/// members re-scanned until they reported the scanner as broken (review A2-14).
-/// This is local feedback only — no decision moves onto the Mega — and the
-/// bridge's own `!LCD` overwrites it within a second when the bridge is alive.
-inline constexpr char kScanFeedbackLine1[] = "CHECKING...";
-
-/// How long the feedback stands before the idle screen comes back on its own.
-/// A bridge that has not answered in ten seconds is not going to; leaving
-/// "CHECKING..." up indefinitely would be the same silence with different words.
-inline constexpr uint32_t kScanFeedbackMs = 10000UL;
+// The landing screen, the scan acknowledgement and every deadline that takes a
+// screen away now live in courtlogic::ScreenBuffer, included above.
+//
+// The two lines that composed into the stuck-screen bug are DELETED here rather
+// than patched: `scanFeedback_`, which any `!LCD` disarmed, and the `showIdle()`
+// that the authorisation lapse painted straight over a live grant screen. A
+// screen's deadline is now the screen's own, and nothing else can cancel it.
 
 /// Every port the Mega has, gathered into one argument.
 ///
@@ -149,8 +138,16 @@ public:
   /// stopped sending `!AUTH` and every press is being thrown away".
   uint16_t unauthorisedPresses() const { return unauthorised_; }
 
-  /// Complete scanner lines refused by proto::Frame::scan() as too long.
+  /// Scanner lines thrown away as too long — a reader configured for a
+  /// different symbology, or one appending a suffix.
   uint16_t oversizeScans() const { return oversizeScans_; }
+
+  /// Scanner lines thrown away as corrupt: a byte outside the payload set on a
+  /// 9600 baud line. A cable, a connector or interference — and the count that
+  /// explains a member whose code "sometimes does not work".
+  uint16_t corruptScans() const { return corruptScans_; }
+
+  const ScreenBuffer& screens() const { return screens_; }
 
   uint32_t uptimeSeconds() const { return static_cast<uint32_t>(uptime_.value() / 1000ULL); }
 
@@ -165,7 +162,6 @@ private:
   void pollButtons(uint32_t nowMs);
   void releaseExpired(uint32_t nowMs);
   void noteAuthLapse(uint32_t nowMs);
-  void expireScanFeedback(uint32_t nowMs);
   void flushOverrun();
   void publishState(uint32_t nowMs);
 
@@ -176,6 +172,7 @@ private:
   void applyOn(const proto::Frame& frame, uint32_t nowMs);
   void applyOff(const proto::Frame& frame);
   void applyExt(const proto::Frame& frame, uint32_t nowMs);
+  void applyScreen(const proto::Frame& frame, uint32_t nowMs);
 
   // --- outbound ------------------------------------------------------------
 
@@ -185,35 +182,21 @@ private:
   bool sendFrame(const proto::Frame& frame);
 
   void sendCourtEvent(const char* name, proto::Court court);
+  void reportScanRejects();
+  void sendScanReject(const char* name, uint16_t count);
 
-  /// Repaint one row, space-padded to the full width.
-  ///
-  /// The port does not pad (hal/Display.h says so): a shorter message printed
-  /// over a longer one leaves the old tail on the glass, which is how
-  /// "COURT A 45 MIN" becomes "COURT A 5 MINN". Padding here rather than
-  /// clear()-ing the panel also avoids a ~2 ms I2C stall and the visible flicker
-  /// that comes with it.
-  void paintRow(uint8_t row, const char* text);
-
-  void showIdle();
-
-  hal::IDisplayPort& display_;
   hal::IScannerPort& scanner_;
   hal::ITransport& bridge_;
   hal::IClock& clock_;
 
   RelayGuard relays_;
+  ScreenBuffer screens_;
   ButtonPanel panel_;
   ScanAssembler scan_;
   AuthWindow auth_;
   proto::Decoder rx_;
   tb::Uptime64 uptime_;
   tb::Deadline stateDue_;
-
-  /// Armed when "CHECKING..." goes up; disarmed by the bridge's next `!LCD`;
-  /// expiring it repaints the idle screen. A tb::Deadline, so the wrap cannot
-  /// leave the feedback up for 49 days.
-  tb::Deadline scanFeedback_;
 
   /// The mask `!STATE` last reported, so a change can be detected without
   /// re-deriving it from four deadlines.
@@ -234,6 +217,11 @@ private:
   uint16_t rxErrors_;
   uint16_t unauthorised_;
   uint16_t oversizeScans_;
+  uint16_t corruptScans_;
+
+  /// ScanAssembler's own reject count as of the last pass, so an INCREASE is
+  /// what produces an event. The assembler counts; this is what notices.
+  uint16_t lastScanRejects_;
 };
 
 } // namespace courtlogic

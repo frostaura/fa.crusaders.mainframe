@@ -49,10 +49,17 @@
 
 namespace court {
 
-/// How long a court selection stands before it lapses.
+/// How long a court selection stands before it lapses, until the API says
+/// otherwise.
 ///
 /// Long enough to read the panel and decide; short enough that a member who
 /// walked away has not left a live selection for the next person to complete.
+///
+/// A HALF-MADE PURCHASE IS THE ONE THING ON THIS BOX A TIMEOUT CAN LOSE, which
+/// is why the tenant's `lcd_choice_seconds` (default 20 s) replaces this and
+/// why that screen carries a visible countdown that any press re-arms. Ten
+/// seconds is right for a verdict the member can simply re-scan for; it is not
+/// right for a choice they are halfway through making.
 inline constexpr uint32_t kSelectionTtlMs = 15000UL;
 
 /// What a press produced.
@@ -95,6 +102,19 @@ public:
   /// Forgets any selection. Used when the API has answered, so a slow response
   /// cannot be completed twice by a second duration press.
   void clear();
+
+  /// Adopt the tenant's `lcd_choice_seconds`.
+  ///
+  /// Takes effect from the NEXT selection, never from the live one: shortening
+  /// the window under somebody who is mid-purchase would lapse a selection they
+  /// are looking at. Same rule the heartbeat interval follows.
+  void setTtlMs(uint32_t ttlMs) { ttlMs_ = ttlMs; }
+
+  uint32_t ttlMs() const { return ttlMs_; }
+
+  /// Milliseconds left before the selection lapses, 0 when nothing is selected
+  /// or it has already lapsed. What the countdown in row 3 renders.
+  uint32_t remainingMs(uint32_t nowMs) const;
 
 private:
   uint32_t ttlMs_;

@@ -10,6 +10,17 @@ void WalkUpPad::clear() {
   selectedAtMs_ = 0U;
 }
 
+uint32_t WalkUpPad::remainingMs(uint32_t nowMs) const {
+  if (!selected_) {
+    return 0U;
+  }
+  // tb::since for the same reason tick() uses it: every uint32_t is a legal
+  // millis() reading, so a plain subtraction reads as 49 days on the pass that
+  // straddles the wrap.
+  const uint32_t elapsed = tb::since(nowMs, selectedAtMs_);
+  return elapsed >= ttlMs_ ? 0U : ttlMs_ - elapsed;
+}
+
 bool WalkUpPad::tick(uint32_t nowMs) {
   if (!selected_) {
     return false;

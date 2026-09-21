@@ -17,14 +17,41 @@ HttpOutcome GateApi::post(const char* path, const char* body, char* out, size_t 
     out[0] = '\0';
   }
   const HttpOutcome outcome = http_.post(path, body, out, outCap);
+  // A fresh clock read: the call may have just spent its whole timeout, and a
+  // backoff window that starts four seconds in the past is four seconds short.
+  // The fault below is stamped from the same instant, for the same reason.
+  const uint32_t now = clock_.nowMs();
   // TAUGHT FROM `status`, NOT FROM `peerStatus`. A 200 whose body did not
   // arrive is a call this board learned nothing from, and the breaker exists to
   // count exactly those.
-  //
-  // A fresh clock read: the call may have just spent its whole timeout, and a
-  // backoff window that starts four seconds in the past is four seconds short.
-  breaker_.onResult(outcome.status, clock_.nowMs());
+  breaker_.onResult(outcome.status, now);
+  recordHttpFault(outcome, now);
   return outcome;
+}
+
+void GateApi::recordHttpFault(const HttpOutcome& outcome, uint32_t nowMs) {
+  if (outcome.peerStatus == 0U) {
+    // Nothing came back at all: no route, no host, a refused connection or a
+    // timeout. One code for all of them, because from here they are one thing
+    // — this board could not reach the API — and telling them apart would need
+    // detail no `IHttpPort` reports.
+    faults_.record(kFaultHttpTimeout, nowMs);
+    return;
+  }
+  if (outcome.peerStatus >= 500U) {
+    faults_.record(kFaultHttp5xx, nowMs);
+    return;
+  }
+  if (outcome.peerStatus >= 400U) {
+    faults_.record(kFaultHttp4xx, nowMs);
+    return;
+  }
+  if (bodyFailed(outcome)) {
+    // The server answered and the BODY did not arrive whole — a peer that hung
+    // up, malformed chunk framing, or a body that did not fit. That is a
+    // transport failure with a 200 on it, and it is counted as one.
+    faults_.record(kFaultHttpTimeout, nowMs);
+  }
 }
 
 ScanDecision GateApi::scan(const char* mac, const char* token, uint32_t adoptedUnlockMs, uint32_t hardCapMs) {

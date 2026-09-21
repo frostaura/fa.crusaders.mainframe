@@ -103,7 +103,7 @@ If nothing ever appears, the two halves are not talking: check DIP 1 and 2.
 |---|---|---|
 | PlatformIO environment | `[env:court_mega]` | `[env:court_bridge]` |
 | `lib/` modules | `arduino_hal`, `courtlogic`, `fwversion`, `hal`, `protocol`, `timebase` | `arduino_hal`, `bridgelogic`, `court`, `courtlogic`, `devapi`, `devcrypto`, `devlink`, `eventq`, `fwversion`, `hal`, `protocol`, `roster`, `timebase` |
-| Build flags in `src/build_config.h` | 12 | 9 |
+| Build flags in `src/build_config.h` | 13 | 14 |
 
 Vendored third-party libraries — copied out of `src/iot/court-box/.pio/libdeps/<env>/`,
 which is what PlatformIO resolved from `lib_deps`, so the Library Manager is

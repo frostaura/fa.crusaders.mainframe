@@ -81,11 +81,41 @@ bool isReceiveError(proto::Verb verb, const char* name, const char* detail);
 /// had already ended.
 bool isExtRefusal(proto::Verb verb, const char* name);
 
+/// What an uplink report about the last line the Mega received means for the
+/// remembered frame. One verdict, so the composition root cannot get the
+/// ordering of the two questions wrong — which it did: the BADARG branch was
+/// written first and tested `verb() == Ext` against a memory nothing ever put
+/// an `!EXT` into, so it was unreachable, and BADARG fell through to a
+/// comparison against "BADCRC" that is false by construction.
+enum class ReceiveErrorAction : uint8_t {
+  /// Nothing to do. Not a receive error, or nothing worth replaying.
+  None = 0U,
+  /// `!ERR,BADARG` answering an `!EXT`: the relay is ALREADY OPEN. The frame
+  /// arrived and was understood; the court is simply dark. Forget the
+  /// extension and let `!STATE` reconcile the court.
+  ExtRefused = 1U,
+  /// "your last line did not decode", and a relay-affecting frame is
+  /// remembered: ask OnRetry::shouldResend.
+  Resend = 2U,
+};
+
+/// The one place the two questions are asked, in the one order that is
+/// correct. `remembered` is OnRetry::verb().
+ReceiveErrorAction classifyReceiveError(proto::Verb verb, const char* name, const char* detail,
+                                        proto::Verb remembered);
+
 class OnRetry {
 public:
   /// A relay-affecting frame (`!ON` or `!EXT`) left the bridge at `nowMs`.
-  /// Kept for one retry. Anything else clears the memory rather than replacing
-  /// it: a repaint the Mega missed is a repaint.
+  /// Kept for one retry. Anything else CLEARS the memory rather than replacing
+  /// it: a repaint the Mega missed is a repaint, and a memory kept alive past
+  /// a frame that is not about a relay is a replay attributed to the wrong
+  /// line — see the .cpp, and D1-3.
+  ///
+  /// THE COMPOSITION ROOT REGISTERS EVERY FRAME IT WRITES, through this one
+  /// call in its one write path. Registering only the interesting frames is
+  /// what left the memory alive across the `!AUTH`, `!OFF` and `!PING` that
+  /// a `!ERR,BADCRC` could equally have been about.
   void sent(const proto::Frame& on, uint32_t nowMs);
 
   /// The Mega reported a receive error at `nowMs`. True — with `out` set to

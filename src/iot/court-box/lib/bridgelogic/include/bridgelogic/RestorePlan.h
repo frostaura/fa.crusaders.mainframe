@@ -1,0 +1,109 @@
+// Crusaders Mainframe — what a box does about the courts a power dip took out.
+//
+// WHAT HAPPENS TODAY, TRACED
+// --------------------------
+// Mains blinks. Both halves reset. The Mega's begin() opens every relay —
+// correct, and it must not change: the port drives every pin to the released
+// level BEFORE configuring it as an output, which is the property that makes a
+// watchdog reset safe. The bridge's setup() sets every court dark as of now.
+// The heartbeat response carries nothing about relays at all. So the courts
+// stay dark, the member's booking is still live, they are still charged, and
+// the roster will not re-grant them because `regrantsHeldCourt` does not fire
+// for a court nothing is holding — they get a FRESH grant instead, which is a
+// second `!ON` and a second Activation event for one booking.
+//
+// The founder's note said "I imagine the state should be returned by the
+// heartbeat so not sure why this is currently broken". It is not broken. It
+// was never built.
+//
+// WHO HOLDS THE TRUTH
+// -------------------
+// Only the API. The box's event ring is RAM, the Mega's deadlines are RAM, and
+// the only durable record that court B was lit until 20:27 is the booking's
+// check-in time and end time on the server. So the API computes what should be
+// on and for how much longer, and the box applies it EXACTLY ONCE, on the
+// first accepted heartbeat after boot.
+//
+// WHY ONE-SHOT AND NOT A RECONCILE — three reasons, in order of weight
+// --------------------------------------------------------------------
+//  1. A continuous reconcile makes the API the authority on the relay, which
+//     contradicts the founding Mega/ESP split: the whole reason the auto-off
+//     timer lives on the Mega is that the lights must still go off when the
+//     ESP hangs, the WiFi drops and the backend dies. A WiFi hiccup or a stale
+//     read would darken a court mid-game.
+//  2. A member who pressed OFF early would have their court RE-LIT by the next
+//     heartbeat. The server's lights-off mark is set by the slot-end sweep,
+//     not by the device's release, so for thirty seconds after somebody
+//     finishes early the server still believes their court should be on.
+//  3. Idempotency is then free. The restore runs once per boot; a second boot
+//     is a second restore against a server view that has by then moved on.
+//     There is no accumulating state to get wrong.
+//
+// AN EMPTY LIST SWITCHES NOTHING OFF. It is information that nothing SHOULD be
+// on, which matters only at boot — when nothing IS on. Making it an
+// off-command would hand the API a way to darken a court, which it must not
+// have.
+//
+// NOBODY IS CHARGED TWICE. The restore queues NO Activation event: the event
+// queue is the record of what the API did NOT hear, and the API is the source
+// of the restore, so it has already heard. Nothing re-stamps the check-in —
+// the box never could. The `!ON` is a relay command and nothing else.
+//
+// This header holds the PLAN, which is pure and host-tested. The composition
+// root sends the frames, because only it has a Mega link.
+//
+// No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
+
+#ifndef CRUSADERS_BRIDGELOGIC_RESTOREPLAN_H
+#define CRUSADERS_BRIDGELOGIC_RESTOREPLAN_H
+
+#include <stdint.h>
+
+#include "bridgelogic/StateReconcile.h"
+#include "devlink/RelayRestore.h"
+#include "protocol/Protocol.h"
+
+namespace bridgelogic {
+
+/// One relay to re-energise.
+struct RestoreAction {
+  uint8_t court = 0U;
+
+  /// What the `!ON` carries: the remaining time CLAMPED to the relay hard cap,
+  /// because that is all one command can buy. The Mega clamps it again — this
+  /// is not trust, it is agreement.
+  uint16_t seconds = 0U;
+
+  /// What the extension logic is armed from: the UNCAPPED remainder. A booking
+  /// with two hours left is a court that needs an `!EXT` before the cap runs
+  /// out, and arming from the clamped value is how it would go dark at minute
+  /// ninety with nobody expecting it.
+  uint32_t bookingRemainingMs = 0U;
+};
+
+struct RestorePlan {
+  RestoreAction action[kStateCourts];
+  uint8_t count = 0U;
+
+  /// Elements the server sent that this box will not act on: a relay it does
+  /// not drive, or more relays than it has. Counted rather than ignored — the
+  /// server believing this box owns a court it does not is a configuration
+  /// fault an admin has to see, not a rounding error.
+  uint8_t rejected = 0U;
+};
+
+/// Turn what the server said should be on into what this box will do about it.
+///
+/// `courtCount` is how many relays the heartbeat has actually mapped. A box
+/// that has not been told its court numbers drives nothing: it refuses every
+/// walk-up locally rather than selling court zero, and it must not light a
+/// relay on the same reasoning.
+///
+/// `remainingSeconds == 0` is skipped rather than clamped up to the relay
+/// minimum: zero means the booking ends now, and a one-second flash of the
+/// lights is a worse answer than leaving them off.
+RestorePlan planRestore(const devlink::RelayRestore* entries, uint8_t entryCount, uint8_t courtCount);
+
+} // namespace bridgelogic
+
+#endif // CRUSADERS_BRIDGELOGIC_RESTOREPLAN_H

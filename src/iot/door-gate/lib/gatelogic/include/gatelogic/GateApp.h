@@ -119,6 +119,7 @@
 #include "devlink/RosterSync.h"
 #include "eventq/EventQueue.h"
 #include "gatelogic/BootRecovery.h"
+#include "gatelogic/FaultLog.h"
 #include "gatelogic/GateApi.h"
 #include "gatelogic/GateConfig.h"
 #include "gatelogic/GateFlow.h"
@@ -168,6 +169,16 @@ public:
     GateRoster* roster = nullptr;
     GateQueue* queue = nullptr;
 
+    /// WHAT THIS BOARD NOTICES ABOUT ITSELF, aggregated. Required, like every
+    /// other port here except the decision log: a board whose fault counts are
+    /// silently always zero is indistinguishable from a healthy one, which is
+    /// the failure every counter in this firmware exists to end.
+    ///
+    /// It is the SAME instance `GateApi` and `FaultingStore` hold, because a
+    /// second log would be a second set of windows and a board reporting each
+    /// code twice at half the rate it thinks.
+    FaultLog* faults = nullptr;
+
     /// OPTIONAL, and nullptr on every board. The native simulator's console —
     /// see IDecisionLog for why a refusal reason is otherwise unobservable
     /// outside this class.
@@ -202,6 +213,21 @@ public:
     /// and a loop that reached for them could only be tested against itself.
     /// `BootRecovery.h` carries what it means and what it costs.
     uint32_t watchdogResetRun = 0U;
+
+    /// WHY THE PART RESTARTED, as a whole fault code — `boot_reason_power_on`,
+    /// `boot_reason_task_wdt`, `boot_reason_brownout` and the rest.
+    ///
+    /// A PORT, AND THE WHOLE STRING RATHER THAN AN ENUM, for the same reason
+    /// `bootId` and `watchdogResetRun` are ports: `esp_reset_reason()` is an
+    /// IDF call, no `lib/` but `esp32_hal/` may include one, and a loop that
+    /// reached for it could only ever be tested against itself. Handing over
+    /// the assembled code rather than a number keeps the mapping in the one
+    /// file that already knows the enumerators, and keeps the closed
+    /// vocabulary in `FaultLog.h` from needing an IDF header to express it.
+    ///
+    /// `nullptr` means "this board does not know", which records nothing —
+    /// which is what a host test and a simulator honestly are.
+    const char* bootReason = nullptr;
 
     /// The heartbeat response buffer. Owned by the composition root and static
     /// there, because the contract allows 4096 bytes and a 4.6 KB local under a
@@ -288,6 +314,10 @@ public:
     return GateDiagnostics{noPushHeartbeats_, saturate(queue_.overflowed())};
   }
 
+  /// The fault aggregator, for the host suite and the simulator's console.
+  /// Non-const because a console prints a drain in the simulator's own loop.
+  FaultLog& faults() { return faults_; }
+
 private:
   void pumpScanner();
   void feedByte(uint8_t byte);
@@ -296,7 +326,31 @@ private:
   void pumpLock();
   void pumpLink();
   void pumpEvents();
+
+  /// THE FAULT PASS. Reads the two faults that are only observable as a CHANGE
+  /// — the ring's since-boot loss total and the breaker's closed→open edge —
+  /// and then drains AT MOST ONE fault event into the queue.
+  ///
+  /// One per pass for the reason the event drain is one per pass: eight due
+  /// codes pushed in one iteration is eight of a 64-slot ring spent on
+  /// diagnostics in a single millisecond, which is the eviction the whole of
+  /// `FaultLog` exists to prevent, arriving from the other direction.
+  ///
+  /// It makes NO blocking call, so it is outside the one-call-per-pass rule and
+  /// runs on every pass including the ones an upload took.
+  void pumpFaults();
+
+  /// One occurrence of `code`, stamped from a fresh clock read like every other
+  /// instant on this side of a blocking call.
+  void fault(const char* code);
+
   void applyEventReaction(uint16_t status, const char* response);
+
+  /// Applies whatever the heartbeat's `gate` object carried — the release time,
+  /// whether the board's own clamp had to change it, and the two fault
+  /// settings. Separate from `adoptHeartbeat` so that one keeps a shape a
+  /// reader can hold, and so the complexity gate stays satisfied.
+  void adoptGateSettings(const char* body, size_t len);
 
   /// Arms or clears the drain's backoff, from whether the post that just
   /// finished actually MOVED the queue. Not from its status: a 200 that
@@ -362,6 +416,7 @@ private:
   ScanDebounce& debounce_;
   GateRoster& roster_;
   GateQueue& queue_;
+  FaultLog& faults_;
 
   /// A POINTER, unlike every other port here, because it is the only one that
   /// is genuinely absent on the hardware.
@@ -373,6 +428,8 @@ private:
   uint32_t bootId_;
   /// Consecutive watchdog resets before this boot. See Ports::watchdogResetRun.
   uint32_t watchdogResetRun_;
+  /// Why the part restarted, as a whole fault code. See Ports::bootReason.
+  const char* bootReason_;
   char* heartbeatBody_;
   size_t heartbeatBodyCap_;
   bool ledActiveHigh_;
@@ -457,6 +514,18 @@ private:
   /// until the first accepted one, which is what makes a board that has never
   /// spoken to the API still able to open a door for a rostered member.
   uint32_t unlockMs_ = kGateConfig.unlockDefaultMs;
+
+  /// The ring's since-boot loss total as this class last saw it.
+  ///
+  /// `EventQueue::overflowed()` is a TOTAL and the fault channel wants
+  /// OCCURRENCES, so what is recorded is the jump between two passes. A board
+  /// back from an evening offline can jump by hundreds in one pass, which is
+  /// why `FaultLog::recordMany` exists rather than a loop.
+  uint32_t eventsLostSeen_ = 0U;
+
+  /// The breaker's state as this class last saw it, so the closed→OPEN edge is
+  /// one fault rather than one per pass for as long as it stays open.
+  bool breakerWasOpen_ = false;
 
   bool linkUp_ = false;
   bool blocked_ = false;

@@ -18,6 +18,7 @@
 #include <string.h>
 #include <unity.h>
 
+#include "bridgelogic/MegaLink.h"
 #include "court/ButtonMap.h"
 #include "court/Session.h"
 #include "court/WalkUpPad.h"
@@ -1171,6 +1172,48 @@ void test_pad_an_unmapped_button_is_inert() {
   TEST_ASSERT_TRUE(pad.hasSelection());
 }
 
+/// D1-7. `loop()`'s `gPad.tick(now)` branch painted kIdentityOfflineLine1/2
+/// UNCONDITIONALLY — the OFFLINE identity screen, on a box that is on the WiFi
+/// — while `showIdentityScreen()`, which branches on gWifiUp, sat a few lines
+/// away and was what every other caller used. A member who selected a court and
+/// walked off left the box claiming to be offline until the next WiFi edge, a
+/// Mega reset or a scan; nothing about the link had changed, so the next member
+/// read a working box as a broken one.
+///
+/// The rule is bridgelogic's now rather than the composition root's, for the
+/// reason this whole suite exists: `pio test -e native` sets
+/// `build_src_filter = -<*>`, so a screen chosen in main.cpp is a screen no
+/// test can reach — which is precisely how the two callers drifted apart.
+void test_the_identity_screen_a_pad_lapse_paints_follows_the_link() {
+  const bridgelogic::IdentityScreen online = bridgelogic::identityScreen(true);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kIdentityOnlineLine1, online.line1);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kIdentityOnlineLine2, online.line2);
+  TEST_ASSERT_EQUAL_STRING("CONNECTED", online.line1);
+
+  const bridgelogic::IdentityScreen offline = bridgelogic::identityScreen(false);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kIdentityOfflineLine1, offline.line1);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kIdentityOfflineLine2, offline.line2);
+  TEST_ASSERT_EQUAL_STRING("CRUSADERS COURTS", offline.line1);
+
+  // The two screens differ on line 1 and agree on line 2, which is the whole
+  // of the difference a lapse was throwing away.
+  TEST_ASSERT_TRUE(strcmp(online.line1, offline.line1) != 0);
+  TEST_ASSERT_EQUAL_STRING(online.line2, offline.line2);
+
+  // Driven through a real lapse, so the test fails if the pad ever stops
+  // reporting the edge that triggers the repaint.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    court::ButtonMap map;
+    court::WalkUpPad pad;
+    TEST_ASSERT_TRUE(pad.press(map, 1U, base) == court::PadResult::CourtSelected);
+    TEST_ASSERT_FALSE(pad.tick(base + pad.ttlMs() - 1U));
+    TEST_ASSERT_TRUE(pad.tick(base + pad.ttlMs()));
+    // A box on the WiFi says so. Painting the offline lines here was the lie.
+    TEST_ASSERT_EQUAL_STRING("CONNECTED", bridgelogic::identityScreen(true).line1);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // JSON scanning — three fields out of a small body, no parser, no heap
 // ---------------------------------------------------------------------------
@@ -1421,6 +1464,7 @@ int main(int, char**) {
   RUN_TEST(test_pad_a_second_court_press_replaces_the_first);
   RUN_TEST(test_pad_honours_a_remapped_panel);
   RUN_TEST(test_pad_an_unmapped_button_is_inert);
+  RUN_TEST(test_the_identity_screen_a_pad_lapse_paints_follows_the_link);
 
   RUN_TEST(test_session_a_booked_member_gets_the_lights_and_an_activation_event);
   RUN_TEST(test_session_records_a_refused_scan_too);

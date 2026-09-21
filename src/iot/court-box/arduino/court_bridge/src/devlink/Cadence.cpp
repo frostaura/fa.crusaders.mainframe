@@ -11,7 +11,12 @@ namespace devlink {
 
 bool parseHeartbeatInterval(const char* body, size_t len, uint32_t& intervalMs) {
   uint32_t seconds = 0U;
-  if (!devapi::json::unsignedField(body, len, "heartbeat_seconds", seconds)) {
+  // Top level, not the first `heartbeat_seconds` anywhere in the document. It
+  // is read on a path that ACTS on it — the box's whole cadence, and with it
+  // how fresh its roster ever is — and a field sharing the name inside a
+  // nested object would be adopted ahead of the real one. Round G4's B2, in
+  // the one field that decides how often this board speaks at all.
+  if (!devapi::json::topLevelUnsignedField(body, len, "heartbeat_seconds", seconds)) {
     return false;
   }
   // Clamp in seconds first so the multiply cannot wrap a huge value into a
@@ -23,8 +28,72 @@ bool parseHeartbeatInterval(const char* body, size_t len, uint32_t& intervalMs) 
   return true;
 }
 
+namespace {
+
+/// `,"restored_relays":N`, or an empty string at zero.
+///
+/// Its own suffix rather than a conditional format string, so the quiet body is
+/// ONE literal and stays byte-identical to the contract corpus's
+/// `heartbeat-request` vector. The gate's `renderCounter` is the same idiom for
+/// the same reason.
+void renderRestored(char* out, size_t cap, uint8_t restored) {
+  out[0] = '\0';
+  if (restored == 0U) {
+    return;
+  }
+  const int written = snprintf(out, cap, ",\"restored_relays\":%u", static_cast<unsigned>(restored));
+  if (written < 0 || static_cast<size_t>(written) >= cap) {
+    out[0] = '\0'; // unreachable at kHeartbeatBodyCap; a lie beats a truncation
+  }
+}
+
+/// `,"relay_state":["0|1834","2|600"]`, or an empty string when the caller does
+/// not report relay state at all.
+///
+/// A DIAGNOSTIC MUST NEVER STOP A HEARTBEAT, so every failure mode here degrades
+/// rather than refuses: an element whose relay is not 0-3 is skipped, a count
+/// past the cap is truncated to it, and a count with no array behind it renders
+/// nothing. See the header.
+void renderRelayState(char* out, size_t cap, const RelayState* state, uint8_t count) {
+  out[0] = '\0';
+  if (state == nullptr) {
+    return;
+  }
+
+  const uint8_t bounded = count > kMaxRelayStateElements ? kMaxRelayStateElements : count;
+  size_t at = 0U;
+  int written = snprintf(out, cap, ",\"relay_state\":[");
+  if (written < 0) {
+    return;
+  }
+  at = static_cast<size_t>(written);
+
+  uint8_t rendered = 0U;
+  for (uint8_t i = 0U; i < bounded && at < cap; ++i) {
+    if (state[i].relay > 3U) {
+      continue; // no such relay: a caller bug, not a reason to lose the heartbeat
+    }
+    written = snprintf(out + at, cap - at, "%s\"%u|%lu\"", rendered == 0U ? "" : ",",
+                       static_cast<unsigned>(state[i].relay),
+                       static_cast<unsigned long>(state[i].remainingSeconds));
+    if (written < 0 || static_cast<size_t>(written) >= cap - at) {
+      out[0] = '\0';
+      return;
+    }
+    at += static_cast<size_t>(written);
+    ++rendered;
+  }
+
+  written = snprintf(out + at, cap - at, "]");
+  if (written < 0 || static_cast<size_t>(written) >= cap - at) {
+    out[0] = '\0';
+  }
+}
+
+} // namespace
+
 size_t renderHeartbeatBody(char* out, size_t cap, const char* mac, const char* firmwareVersion,
-                           uint64_t uptimeMs) {
+                           uint64_t uptimeMs, const HeartbeatReport& report) {
   if (out == nullptr || cap == 0U) {
     return 0U;
   }
@@ -42,8 +111,16 @@ size_t renderHeartbeatBody(char* out, size_t cap, const char* mac, const char* f
     return 0U;
   }
 
-  const int written = snprintf(out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s}", mac,
-                               firmwareVersion, uptime);
+  // ORDER IS PART OF THE SHAPE: `restored_relays` then `relay_state`, both
+  // after `uptime_ms`, both absent at their nothing value. The corpus asserts
+  // the bytes, not the keys.
+  char restored[28] = {};
+  char relayState[80] = {};
+  renderRestored(restored, sizeof(restored), report.restoredRelays);
+  renderRelayState(relayState, sizeof(relayState), report.relayState, report.relayStateCount);
+
+  const int written = snprintf(out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s%s%s}",
+                               mac, firmwareVersion, uptime, restored, relayState);
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     out[0] = '\0';
     return 0U;

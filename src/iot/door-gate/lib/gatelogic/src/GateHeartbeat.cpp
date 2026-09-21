@@ -116,4 +116,65 @@ bool adoptUnlockMs(const char* body, size_t len, uint32_t& unlockMs) {
   return true;
 }
 
+bool unlockSecondsWereClamped(const char* body, size_t len) {
+  if (body == nullptr) {
+    return false;
+  }
+  size_t innerLen = 0U;
+  const size_t at = devapi::json::findTopLevelObject(body, len, "gate", innerLen);
+  if (at == devapi::json::kNotFound) {
+    return false;
+  }
+  uint32_t seconds = 0U;
+  if (!devapi::json::unsignedField(body + at, innerLen, "unlock_seconds", seconds)) {
+    return false;
+  }
+  // AGAINST THE SAME BOUNDS THE CLAMP USES, derived rather than written out, so
+  // a change to either end of the contract's range cannot leave this predicate
+  // answering about the old one.
+  const uint32_t minSeconds = kMinUnlockMs / 1000UL;
+  const uint32_t maxSeconds = kGateConfig.unlockHardCapMs / 1000UL;
+  return seconds < minSeconds || seconds > maxSeconds;
+}
+
+bool adoptFaultSettings(const char* body, size_t len, GateFaultSettings& settings) {
+  if (body == nullptr) {
+    return false;
+  }
+  // BOUNDED TO THE TOP-LEVEL `gate` OBJECT, both ends, for exactly the reason
+  // adoptUnlockMs is: `findKey` is a flat scan by design, so a key of this name
+  // added anywhere else in a future response — or in a nested object placed
+  // before the real one, which is round G4's B2 — is not this one.
+  size_t innerLen = 0U;
+  const size_t at = devapi::json::findTopLevelObject(body, len, "gate", innerLen);
+  if (at == devapi::json::kNotFound) {
+    return false;
+  }
+
+  bool read = false;
+
+  // INDEPENDENTLY, AND THAT IS THE WHOLE POINT OF TWO STATEMENTS RATHER THAN
+  // ONE. An API that sends the rate and not the switch must not reset the
+  // switch, and an absent key is not "false" — it is silence.
+  bool reporting = settings.reporting;
+  if (devapi::json::boolField(body + at, innerLen, "device_fault_reporting", reporting)) {
+    settings.reporting = reporting;
+    read = true;
+  }
+
+  uint32_t perHour = 0U;
+  if (devapi::json::unsignedField(body + at, innerLen, "device_fault_max_per_hour", perHour)) {
+    // Clamped BEFORE it can reach a divisor: windowMs() is 3600000 / this, and
+    // a zero is a division by zero rather than a slow board. The same rule as
+    // clamping unlock_seconds in seconds before the multiply.
+    const uint32_t bounded = perHour < kMinFaultMaxPerHour
+                                 ? kMinFaultMaxPerHour
+                                 : (perHour > kMaxFaultMaxPerHour ? kMaxFaultMaxPerHour : perHour);
+    settings.maxPerHour = static_cast<uint16_t>(bounded);
+    read = true;
+  }
+
+  return read;
+}
+
 } // namespace gatelogic

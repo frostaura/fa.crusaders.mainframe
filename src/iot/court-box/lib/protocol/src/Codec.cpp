@@ -127,12 +127,12 @@ bool parseU32(const Arg& a, uint32_t& out) {
   return true;
 }
 
-uint16_t clampTo(uint32_t seconds, uint16_t lowest) {
+uint16_t clampTo(uint32_t seconds, uint16_t lowest, uint16_t highest) {
   if (seconds < lowest) {
     return lowest;
   }
-  if (seconds > kRelayHardCapSeconds) {
-    return kRelayHardCapSeconds;
+  if (seconds > highest) {
+    return highest;
   }
   return static_cast<uint16_t>(seconds);
 }
@@ -429,6 +429,27 @@ DecodeError Decoder::splitBody(const char* body, size_t n, Arg* fields, uint8_t&
   return DecodeError::None;
 }
 
+namespace {
+
+/// `!ROW`'s row index, validated.
+///
+/// It has no column in kVerbSpecs because it is neither a court nor a duration
+/// — and unlike either of those it is the argument whose being wrong would put
+/// the text somewhere the sender did not mean, silently. So it is REFUSED
+/// rather than clamped: `!ROW,4` on a four-row protocol is a peer that
+/// disagrees with this one about the hardware, and folding it onto row 3 would
+/// hide the disagreement behind a screen that merely looks odd.
+DecodeError rowIndexOf(const Arg& a, uint8_t& out) {
+  uint32_t raw = 0;
+  if (!parseU32(a, raw) || raw >= kMaxRows) {
+    return DecodeError::BadArg;
+  }
+  out = static_cast<uint8_t>(raw);
+  return DecodeError::None;
+}
+
+} // namespace
+
 DecodeError Decoder::buildFrame(Arg* fields, uint8_t count, Frame& out) {
   const Verb v = verbFromName(fields[0].c_str());
   if (v == Verb::Unknown) {
@@ -441,6 +462,19 @@ DecodeError Decoder::buildFrame(Arg* fields, uint8_t count, Frame& out) {
   }
 
   Arg* args = fields + 1;
+  if (v == Verb::Row) {
+    uint8_t rowIndex = 0;
+    const DecodeError e = rowIndexOf(args[0], rowIndex);
+    if (e != DecodeError::None) {
+      return e;
+    }
+    // Through its own constructor, for the same reason ON is: the refusal rule
+    // then lives in ONE place and the wire cannot mint a frame the factory
+    // would not have built.
+    out = Frame::row(rowIndex, args[1].c_str());
+    return DecodeError::None;
+  }
+
   Court court = Court::A;
   if (spec.courtArg >= 0) {
     const Arg& a = args[spec.courtArg];
@@ -455,7 +489,7 @@ DecodeError Decoder::buildFrame(Arg* fields, uint8_t count, Frame& out) {
     if (!parseU32(args[spec.secondsArg], raw)) {
       return DecodeError::BadArg;
     }
-    seconds = clampTo(raw, spec.minSeconds);
+    seconds = clampTo(raw, spec.minSeconds, spec.maxSeconds);
     args[spec.secondsArg].setU32(seconds);
   }
 

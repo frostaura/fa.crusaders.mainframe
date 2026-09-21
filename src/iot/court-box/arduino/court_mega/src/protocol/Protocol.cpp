@@ -157,14 +157,23 @@ namespace {
 
 const char* const kEmpty = "";
 
-uint16_t clampSeconds(uint32_t seconds, uint16_t lowest) {
+uint16_t clampSeconds(uint32_t seconds, uint16_t lowest, uint16_t highest) {
   if (seconds < lowest) {
     return lowest;
   }
-  if (seconds > kRelayHardCapSeconds) {
-    return kRelayHardCapSeconds;
+  if (seconds > highest) {
+    return highest;
   }
   return static_cast<uint16_t>(seconds);
+}
+
+/// A court number as the glass can show it. Negative is not a court number and
+/// four digits is all the cell has.
+uint32_t clampCourtNumber(int16_t number) {
+  if (number <= 0) {
+    return 0U;
+  }
+  return number > 9999 ? 9999U : static_cast<uint32_t>(number);
 }
 
 } // namespace
@@ -217,7 +226,7 @@ Frame Frame::fromValidated(const VerbSpec& spec, const Arg* args, uint8_t argc) 
 Frame Frame::on(Court court, uint32_t seconds) {
   Frame f = ofVerb(Verb::On);
   static_cast<void>(f.pushArgChar(courtChar(court)));
-  static_cast<void>(f.pushArgU32(clampSeconds(seconds, kRelayMinSeconds)));
+  static_cast<void>(f.pushArgU32(clampSeconds(seconds, kRelayMinSeconds, kRelayHardCapSeconds)));
   return f;
 }
 
@@ -230,7 +239,7 @@ Frame Frame::off(Court court) {
 Frame Frame::ext(Court court, uint32_t seconds) {
   Frame f = ofVerb(Verb::Ext);
   static_cast<void>(f.pushArgChar(courtChar(court)));
-  static_cast<void>(f.pushArgU32(clampSeconds(seconds, kRelayMinSeconds)));
+  static_cast<void>(f.pushArgU32(clampSeconds(seconds, kRelayMinSeconds, kRelayHardCapSeconds)));
   return f;
 }
 
@@ -243,10 +252,45 @@ Frame Frame::lcd(const char* line1, const char* line2) {
   return f;
 }
 
+Frame Frame::row(uint8_t row, const char* text) {
+  if (row >= kMaxRows) {
+    return Frame();
+  }
+  Frame f = ofVerb(Verb::Row);
+  static_cast<void>(f.pushArgU32(row));
+  // Truncation, as lcd()'s: a row wider than the panel was never going to be
+  // read. The ROW INDEX is what is refused, because that is the one that names
+  // somewhere the text would silently land instead.
+  static_cast<void>(f.pushArg(text));
+  return f;
+}
+
+Frame Frame::show(uint32_t seconds, uint8_t flags) {
+  Frame f = ofVerb(Verb::Show);
+  static_cast<void>(f.pushArgU32(clampSeconds(seconds, kShowHoldMinSeconds, kShowHoldMaxSeconds)));
+  static_cast<void>(f.pushArgU32(flags));
+  return f;
+}
+
+Frame Frame::idle(uint8_t flags, const char* hhmm) {
+  Frame f = ofVerb(Verb::Idle);
+  static_cast<void>(f.pushArgU32(flags));
+  static_cast<void>(f.pushArg(hhmm == nullptr ? kNoClock : hhmm));
+  return f;
+}
+
+Frame Frame::map(const int16_t numbers[4]) {
+  Frame f = ofVerb(Verb::Map);
+  for (size_t i = 0; i < 4; ++i) {
+    static_cast<void>(f.pushArgU32(clampCourtNumber(numbers[i])));
+  }
+  return f;
+}
+
 Frame Frame::auth(uint16_t seconds) {
   // No lower clamp: !AUTH,0 is how the bridge disarms the buttons.
   Frame f = ofVerb(Verb::Auth);
-  static_cast<void>(f.pushArgU32(clampSeconds(seconds, 0)));
+  static_cast<void>(f.pushArgU32(clampSeconds(seconds, 0, kRelayHardCapSeconds)));
   return f;
 }
 
@@ -287,6 +331,15 @@ Frame Frame::pong(const char* version, uint32_t uptimeSeconds) {
   Frame f = ofVerb(Verb::Pong);
   static_cast<void>(f.pushArg(version));
   static_cast<void>(f.pushArgU32(uptimeSeconds));
+  return f;
+}
+
+Frame Frame::pong(const char* version, uint32_t uptimeSeconds, uint16_t txDropped, uint16_t rxErrors,
+                  uint16_t unauthorised) {
+  Frame f = pong(version, uptimeSeconds);
+  static_cast<void>(f.pushArgU32(txDropped));
+  static_cast<void>(f.pushArgU32(rxErrors));
+  static_cast<void>(f.pushArgU32(unauthorised));
   return f;
 }
 

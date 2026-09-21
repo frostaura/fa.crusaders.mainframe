@@ -405,7 +405,7 @@ ul.tight li{margin:5px 0}
 <section id="courtbox">
   <div class="eyebrow">Hardware · Overview</div>
   <h2>The court box</h2>
-  <p class="lede">A WeMos Mega 2560 with its onboard ESP8266, driving four court-light relays, a 20×4 2004A LCD driven as 16×2, an eight-button panel and a QR scanner. The wiring is fixed and cannot change — every pin, serial port, baud rate and DIP position below reflects hardware already built and working. Firmware adapts to the hardware, never the reverse.</p>
+  <p class="lede">A WeMos Mega 2560 with its onboard ESP8266, driving four court-light relays, a 20×4 2004A LCD driven as 20×4, an eight-button panel and a QR scanner. The wiring is fixed and cannot change — every pin, serial port, baud rate and DIP position below reflects hardware already built and working. Firmware adapts to the hardware, never the reverse.</p>
 
   <div class="grid2">
     <div class="card pad">
@@ -415,11 +415,11 @@ ul.tight li{margin:5px 0}
         <thead><tr><th></th><th>ATmega2560</th><th>ESP8266</th></tr></thead>
         <tbody>
           <tr><td><b>Role</b></td><td>thin I/O, near-static</td><td>all the brains</td></tr>
-          <tr><td><b>Owns</b></td><td>buttons, scanner framing, relay drive, LCD — including the <span class="mono">CHECKING...</span> it paints itself on every scan, so a dead ESP is visible on the glass — and the <b>independent auto-off timer</b></td><td>protocol, device auth, heartbeat, the <b>scan decision</b> (<span class="mono">lib/bridgelogic</span>: online-first, roster fallback), <span class="mono">!AUTH</span> arming, <span class="mono">!STATE</span> reconciliation, roster cache, event queue</td></tr>
+          <tr><td><b>Owns</b></td><td>buttons, scanner framing, relay drive, the LCD — <b>the landing screen, every screen’s deadline</b>, the live court row, the hint row, and the <span class="mono">CHECKING YOUR CODE</span> it paints itself on every scan so a dead ESP is visible on the glass — and the <b>independent auto-off timer</b></td><td>protocol, device auth, heartbeat, the <b>scan decision</b> (<span class="mono">lib/bridgelogic</span>: online-first, roster fallback), <span class="mono">!AUTH</span> arming, <span class="mono">!STATE</span> reconciliation, roster cache, event queue — and <b>the words on every screen</b>, because verdict wording is exactly what a club changes its mind about and the Mega is the half that needs a screwdriver</td></tr>
           <tr><td><b>Updated by</b></td><td>USB, rarely</td><td><b>USB too</b> — the Arduino IDE, whenever a value in <span class="mono">secrets.h</span> changes. OTA was removed at firmware 2.0.0: a fleet-update mechanism for one box is a way for the box to break itself and nothing else</td></tr>
         </tbody>
       </table>
-      <p style="font-size:13px; margin-top:10px; color:var(--muted)">In the system this replaces, the off command was scheduled inside an Excel macro on a Windows PC — close the workbook mid-session and a court burned until somebody noticed. The Mega's timer is independent precisely so that if the ESP hangs, WiFi drops and the backend dies, <b>the lights still go off</b>.</p>
+      <p style="font-size:13px; margin-top:10px; color:var(--muted)">In the system this replaces, the off command was scheduled inside an Excel macro on a Windows PC — close the workbook mid-session and a court burned until somebody noticed. The Mega's timer is independent precisely so that if the ESP hangs, WiFi drops and the backend dies, <b>the lights still go off</b>. <b>The screen-revert deadline moved to the Mega for the same reason</b>, and that is the whole argument for it: the ESP is the half that goes away, so a timer that rescues the glass from a stuck screen is useless on the half whose crash left it stuck. A refusal screen that never left the panel, with every button dead behind it, is a failure this box has actually had.</p>
     </div>
     <div>
       <div class="callout danger" style="margin-top:0">
@@ -427,8 +427,8 @@ ul.tight li{margin:5px 0}
         <p>The relay module is rated <b>10 A @ 250 VAC</b>. Plausible for one modern LED court bank; inadequate for older metal-halide. Standard practice is relay → <b>contactor coil</b>, contactor carries the lighting load. <b>Not yet confirmed on the installed hardware.</b> If relays switch lighting directly, a qualified electrician is required before anything ships. No software decision changes this.</p>
       </div>
       <div class="callout">
-        <div class="t">The display is 20×4 driven as 16×2</div>
-        <p>The physical panel is a 2004A, but firmware drives it as 16×2 by decision — works on either panel. Geometry is a compile-time constant (<code>LCD_COLS</code>/<code>LCD_ROWS</code>): widening later is a one-line change plus a corpus update.</p>
+        <div class="t">The display is a 20×4, driven as 20×4</div>
+        <p>The panel always was a 2004A and the firmware now uses all of it. <b>No wire changed</b> — two build flags did (<code>LCD_COLS</code>/<code>LCD_ROWS</code>), and <code>court::kLineLen</code> is <em>derived</em> from them. That derivation is the fix: the width was hardcoded at 16 while the flags said otherwise, so four columns of every line were unreachable on the glass that is actually fitted. What makes widening it safe is a <b>contract, not a flag</b>: rows 0–1 cut at column 16 must still be a complete message on every screen, so a 1602 fitted by mistake degrades to exactly the old behaviour rather than to half a sentence. Rows 2–3 and the columns past 16 carry enrichment only. Somebody still has to look at the fitted panel before a club box is flashed.</p>
       </div>
       <div class="callout good">
         <div class="t">Hard limits burned into the Mega</div>
@@ -515,7 +515,7 @@ ul.tight li{margin:5px 0}
     <text x="185" y="437" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">Status LED <tspan class="m" font-size="10" opacity=".65">← D13</tspan></text>
 
     <rect x="40" y="462" width="290" height="60" rx="10" fill="var(--card)" stroke="var(--amber-fill)" stroke-width="1.8"/>
-    <text x="185" y="486" text-anchor="middle" font-size="12.5" font-weight="800" fill="currentColor">LCD 2004A — driven 16×2</text>
+    <text x="185" y="486" text-anchor="middle" font-size="12.5" font-weight="800" fill="currentColor">LCD 2004A — driven 20×4</text>
     <text x="185" y="506" text-anchor="middle" font-size="10" class="m" fill="currentColor" opacity=".7">I²C addr 0x27 · SDA 20 · SCL 21</text>
 
     <!-- right peripherals -->
@@ -759,7 +759,7 @@ ul.tight li{margin:5px 0}
     <div class="frow">
       <div><label>Verb</label>
         <span class="seg" id="fb-verb">
-          <button class="on" data-v="ON">ON</button><button data-v="OFF">OFF</button><button data-v="EXT">EXT</button><button data-v="AUTH">AUTH</button><button data-v="LCD">LCD</button><button data-v="RST">RST</button><button data-v="PING">PING</button>
+          <button class="on" data-v="ON">ON</button><button data-v="OFF">OFF</button><button data-v="EXT">EXT</button><button data-v="AUTH">AUTH</button><button data-v="LCD">LCD</button><button data-v="ROW">ROW</button><button data-v="SHOW">SHOW</button><button data-v="IDLE">IDLE</button><button data-v="MAP">MAP</button><button data-v="RST">RST</button><button data-v="PING">PING</button>
         </span>
       </div>
       <div id="fb-courtwrap"><label>Court</label>
@@ -784,13 +784,17 @@ ul.tight li{margin:5px 0}
           <tr><td class="mono">!ON,&lt;court&gt;,&lt;seconds&gt;</td><td>Close relay for <b>at most</b> that long. Duration is <b>mandatory</b></td></tr>
           <tr><td class="mono">!OFF,&lt;court&gt;</td><td>Open the relay now</td></tr>
           <tr><td class="mono">!EXT,&lt;court&gt;,&lt;seconds&gt;</td><td>Extend deadline to now + s. Refused <span class="mono">!ERR,BADARG</span> if the relay is open — which the bridge reads as "that court is already dark". <span class="mono">bridgelogic::Relight</span> sends one <b>60 s before each cap expiry</b>, which is how a two-hour booking outlives a ninety-minute relay cap and still fails open when the ESP dies</td></tr>
-          <tr><td class="mono">!LCD,&lt;line1&gt;,&lt;line2&gt;</td><td>Display; truncated to 16 columns</td></tr>
+          <tr><td class="mono">!LCD,&lt;line1&gt;,&lt;line2&gt;</td><td>The two-row form, kept — it stages rows 0 and 1 and commits them with the default hold, so <b>an un-upgraded bridge can no longer paint a screen that never leaves</b>. Text truncates at 20 columns</td></tr>
+          <tr><td class="mono">!ROW,&lt;row&gt;,&lt;text&gt;</td><td>Stage one row of the pending screen; <b>paints nothing</b>. A row the protocol does not have is <span class="mono">!ERR,BADARG</span>, never folded onto the last row — that is a peer disagreeing about the hardware, and hiding it behind a screen that merely looks odd is how it stays hidden</td></tr>
+          <tr><td class="mono">!SHOW,&lt;seconds&gt;,&lt;flags&gt;</td><td>Commit the staged rows <b>atomically</b> and start their clock. Clamped to <b>[1, 120] s</b> — a two-row repaint made of two writes is one a member sees half of, and <span class="mono">CRUSADERS COURTS / 45 MIN</span> was the observed torn frame. <span class="mono">flags</span> bit0 = countdown in the action row; bit1 = replace the action row only, leaving rows 0–2 alone</td></tr>
+          <tr><td class="mono">!IDLE,&lt;flags&gt;,&lt;hhmm&gt;</td><td>What the Mega-rendered landing screen’s status row says. bit0 WiFi up · bit1 API reachable · bit2 clock trusted · bit3 a power-dip restore still pending. <span class="mono">hhmm</span> is club-local wall time, or <span class="mono">----</span> — a blank clock is honest, a stale one is not</td></tr>
+          <tr><td class="mono">!MAP,&lt;n0&gt;,&lt;n1&gt;,&lt;n2&gt;,&lt;n3&gt;</td><td>The club’s court number behind each relay; <span class="mono">0</span> is unmapped and renders <b>blank</b> rather than as a dark court — the box does not drive it and should not claim to. Clamped to [0, 9999]</td></tr>
           <tr><td class="mono">!AUTH,&lt;seconds&gt;</td><td>Accept button input this long; <span class="mono">0</span> disarms</td></tr>
           <tr><td class="mono">!RST</td><td>Relays open, buttons disarmed, default screen</td></tr>
           <tr><td class="mono">!PING</td><td>Answered with <span class="mono">!PONG</span></td></tr>
         </tbody>
       </table>
-      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Seconds are <b>clamped, never rejected</b> (saturating, not wrapping): a clamped light is a wrong-length game; a rejected one is a dark court. <span class="mono">AUTH</span> clamps 0–5400; <span class="mono">ON</span>/<span class="mono">EXT</span> clamp 1–5400 — zero is an OFF wearing an ON's clothes.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">Seconds are <b>clamped, never rejected</b> (saturating, not wrapping): a clamped light is a wrong-length game; a rejected one is a dark court. <span class="mono">AUTH</span> clamps 0–5400; <span class="mono">ON</span>/<span class="mono">EXT</span> clamp 1–5400 — zero is an OFF wearing an ON's clothes. <b><span class="mono">SHOW</span> clamps 1–120</b>, and the two ranges are <em>separate fields</em> rather than one constant because they bound different things: a relay duration by the ninety minutes that stop an unattended court burning, a screen hold by the two minutes that stop a screen becoming permanent. One constant serving both would have let a <span class="mono">!SHOW,5400</span> stand on the glass for an hour and a half.</p><p style="font-size:12.5px;color:var(--muted);margin-top:8px"><b>The verb table is append-only.</b> Four verbs were added by appending, because the grammar table is indexed by the verb’s value — a row in the wrong place would silently give every verb someone else’s grammar, and <span class="mono">ON</span> would inherit <span class="mono">OFF</span>’s arity and lose the mandatory duration that v2 exists for. A compile-time check fails the build instead. Never reorder, never insert.</p>
     </div>
     <div class="card pad scroll">
       <h3 style="margin-top:0">Uplink — Mega → bridge</h3>
@@ -800,7 +804,7 @@ ul.tight li{margin:5px 0}
           <tr><td class="mono">!BTN,&lt;key&gt;</td><td>Debounced press, key ∈ A–D, 1–4</td></tr>
           <tr><td class="mono">!SCAN,&lt;code&gt;</td><td>Complete line from the QR scanner</td></tr>
           <tr><td class="mono">!STATE,&lt;mask&gt;,&lt;remA..D&gt;</td><td>Relay bitmask + seconds remaining — on change and every 10 s. <b>Read, not just logged</b>: the bridge reconciles its held state from the mask (review A2-6)</td></tr>
-          <tr><td class="mono">!PONG,&lt;ver&gt;,&lt;uptime&gt;</td><td>Answer to PING</td></tr>
+          <tr><td class="mono">!PONG,&lt;ver&gt;,&lt;uptime&gt;</td><td>Answer to PING. <b>Or five arguments</b>, carrying the Mega’s own since-boot counters — frames it could not send, frames it could not read, presses it dropped because the button window was shut. They existed on the Mega and nothing off the board could read them, so a stuck button was invisible from the office. The two-argument form still decodes: the Mega is the half nobody can reflash over the air, so a bridge flashed ahead of it has to keep working</td></tr>
           <tr><td class="mono">!EVT,&lt;name&gt;,&lt;detail&gt;</td><td>AUTOOFF · OFF (every commanded release, so early release is billed as time used) · AUTHEXPIRED · BADFRAME · OVERRUN. <b>BADFRAME is the commonest</b>, not the rarest: the production Mega classifies a line by its first byte, so a glitch byte ahead of an <span class="mono">!ON</span> is a BADFRAME, not a BADCRC</td></tr>
           <tr><td class="mono">!ERR,&lt;code&gt;</td><td>BADCRC · BADVERB · BADARG · NOCOURT</td></tr>
         </tbody>
@@ -994,16 +998,19 @@ ul.tight li{margin:5px 0}
           <tr><td class="mono">GATE_RELAY_ACTIVE_HIGH</td><td class="num">1</td><td><b>the relay module:</b> 1 if driving its input HIGH energises the coil</td></tr>
           <tr><td class="mono">GATE_UNLOCK_ENERGISES_RELAY</td><td class="num">1</td><td><b>the lock's wiring:</b> 1 if an energised coil <em>releases</em> the lock</td></tr>
           <tr><td class="mono">GATE_LED_PIN / _ACTIVE_HIGH</td><td class="num">27 / 1</td><td>the lamp and its polarity</td></tr>
-          <tr><td class="mono">GATE_UNLOCK_DEFAULT_MS</td><td class="num">3000</td><td>release time until the first heartbeat</td></tr>
-          <tr><td class="mono">GATE_UNLOCK_HARD_CAP_MS</td><td class="num">30000</td><td>the lock can never be <em>granted</em> longer</td></tr>
+          <tr><td class="mono">GATE_UNLOCK_DEFAULT_MS</td><td class="num">15000</td><td>release time until the first heartbeat. <b>Was Carl's 3000</b> — three seconds is how long a lock takes to throw, not how long a person takes to notice a lamp, move a bag and pull a handle</td></tr>
+          <tr><td class="mono">GATE_UNLOCK_HARD_CAP_MS</td><td class="num">30000</td><td>the lock can never be <em>granted</em> longer — <b>and no sequence of re-arms may pass it either</b>, measured from the moment the door first opened</td></tr>
+          <tr><td class="mono">GATE_RELOCK_DWELL_MS</td><td class="num">3000</td><td>after a close the <em>cap</em> forced, the lock stays locked at least this long. <b>No longer "the same as the default"</b>: the two only ever looked like one number</td></tr>
+          <tr><td class="mono">GATE_MIN_RELOCK_MS</td><td class="num">400</td><td>the floor under <em>every</em> close. A relay written OFF and ON in one pass was never de-energised at all</td></tr>
           <tr><td class="mono">GATE_MAX_TOKEN_LEN</td><td class="num">20</td><td><span class="mono">= roster::kMaxTokenLen</span>, asserted</td></tr>
-          <tr><td class="mono">GATE_WATCHDOG_SECONDS</td><td class="num">12</td><td>task watchdog; <b>asserted to exceed one worst-case HTTP call</b> plus a margin</td></tr>
+          <tr><td class="mono">GATE_WATCHDOG_SECONDS</td><td class="num">15</td><td>task watchdog; <b>asserted to exceed one worst-case HTTP call</b> plus a margin — 12 s of call plus 2 s of margin</td></tr>
           <tr><td class="mono">HEARTBEAT_INTERVAL_MS</td><td class="num">30000</td><td>starting cadence; the club's <span class="mono">heartbeat_seconds</span> is adopted</td></tr>
           <tr><td class="mono">ROSTER_MAX_AGE_MS</td><td class="num">6 h</td><td>past this the board admits nobody — the court box's number</td></tr>
           <tr><td class="mono">EVENTQ_SLOTS</td><td class="num">64</td><td>offline events held before the oldest is lost</td></tr>
         </tbody>
       </table>
-      <p style="font-size:12.5px;color:var(--muted);margin-top:10px">The watchdog number is the one that was wrong and is the reason the assertion exists. It was exactly one worst-case call, which against an API host that silently drops packets is a <b>guaranteed reset loop</b>: the board panics before the call it is waiting on can return, boots, heartbeats, and does it again — never loading a roster and admitting nobody. The two HTTP timeouts are separate budgets and one call can spend both, which is the trap the single number hid.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:10px">The watchdog number is the one that was wrong and is the reason the assertion exists. It was exactly one worst-case call, which against an API host that silently drops packets is a <b>guaranteed reset loop</b>: the board panics before the call it is waiting on can return, boots, heartbeats, and does it again — never loading a roster and admitting nobody. A call is <b>three</b> separate budgets and one call can spend all three, which is the trap the single number hid: the TCP connect, the status line and headers, and the response body, four seconds each. Twelve was right for a two-phase call; the body got its own budget when sharing one with the headers left a 4.6 KB roster no time at all on a slow evening, and the assertion moved with it.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:10px"><b>The two release bounds are different numbers with different jobs, and used to be the same number by coincidence.</b> The <em>default</em> is how long a member is given to get through a door — longer is kinder, and the cap is what stops it being unsafe. The <em>dwell</em> is how long a door somebody has held open for the whole cap has to stay shut — longer is a queue of innocent members refused for something one person did. Raising the default to fifteen seconds did not move the dwell, and a later edit that re-collapses them fails a test.</p>
     </div>
     <div class="card pad scroll">
       <h3 style="margin-top:0">The two polarity flags are independent</h3>
@@ -1027,13 +1034,16 @@ ul.tight li{margin:5px 0}
       <table>
         <thead><tr><th>What the board gets</th><th>What it means</th><th>What it does</th></tr></thead>
         <tbody>
-          <tr><td class="mono">200</td><td>the club decided</td><td><span class="mono">opened:true</span> → release for <span class="mono">unlock_seconds</span>, clamped to [1 s, hard cap]. <span class="mono">opened:false</span> → <b>refuse, and never second-guess it against the roster</b></td></tr>
+          <tr><td class="mono">200</td><td>the club decided</td><td><span class="mono">opened:true</span> → release for <span class="mono">unlock_seconds</span>, clamped to [1 s, hard cap] — <b>15 s</b> at the club's default. <span class="mono">opened:false</span> → <b>refuse, and never second-guess it against the roster</b></td></tr>
+          <tr><td><i>no call at all</i></td><td>the lock is still relatching</td><td><b>Refused before the API is asked at all</b>, with its own word (<span class="mono">relocking</span>). A 200 answering <span class="mono">opened</span> would put a door opening in the club's audit trail that never happened, and a whole blocking call spent to be told yes about a door that cannot open is the pass spent on nothing</td></tr>
+          <tr><td><i>no call at all</i></td><td>this board is being hammered</td><td><b>Refused</b>, with its own word (<span class="mono">too_fast</span>), if a scan arrives inside 250 ms of the last one the board asked about — whatever the token. Refused rather than answered from the roster, deliberately: the roster does not know about a membership barred this morning, so letting the board's own throttle fall back would be the throttle opening a door the API would have refused. A scanner repeats while a code is held up, so the re-read a moment later is decided normally</td></tr>
           <tr><td class="mono">403</td><td>the club took this board <b>out of service</b></td><td>deny, with <b>no roster fallback</b>; on the <em>heartbeat</em>, commit an <b>empty</b> roster</td></tr>
           <tr><td class="mono">0 · 401 · 404 · 408 · 429 · 5xx · malformed 200</td><td>the server could not be reached or could not answer</td><td>the board learned nothing — <b>the cached roster decides</b></td></tr>
         </tbody>
       </table>
       <p style="font-size:13px;margin-top:10px">The asymmetry is the whole point, and both directions have a victim. Second-guessing a <em>refusal</em> admits the member the club barred this morning, through a booking nobody cancelled. Refusing on an <em>outage</em> leaves a member with a valid booking outside because a container was restarting. And a 403 is evidence about the club's decision rather than about the link: a board that fell back after one would keep admitting rostered members for the whole staleness window after an admin pressed the button that exists to stop exactly that.</p>
       <p style="font-size:13px"><b>Offline, the roster is the fallback and nothing else.</b> Only a member with a <em>rostered booking</em> gets in — a walk-up member's sixty-second identity code can never be in a cache fetched minutes ago, by construction. A roster older than <span class="mono">ROSTER_MAX_AGE_MS</span> admits <b>nobody</b>, however good the match looks, and so does a board that has never had a heartbeat. What the board queues is only what the API does not already know: an open it decided itself, a refusal it decided itself, and its boot.</p>
+      <p style="font-size:13px"><b>Fifteen seconds buys one extension, not nine.</b> The thirty-second cap bounds the <em>whole</em> opening, measured from the moment the door first released, not each answer — so a longer grant spends more of that budget per scan. A member at a fifteen-second door who scans again at 14 s carries the deadline to 29 s; a third arrival just before that gets the ~1 s left; and the scan after it is refused <span class="mono">relocking</span>, because the cap-forced close owes the door three seconds of dark time. At the old three-second default the identical rule allowed <b>nine</b> extensions. That is the safe direction: nobody who scans once notices it, and somebody holding a phone at the reader reaches the cap nine times faster and then meets the dwell — which is exactly what the cap and the dwell are for.</p>
     </div>
     <div>
       <div class="card pad scroll" style="margin-bottom:16px">
@@ -1041,7 +1051,7 @@ ul.tight li{margin:5px 0}
         <table>
           <thead><tr><th>Setting</th><th>Default</th><th>Range</th></tr></thead>
           <tbody>
-            <tr><td class="mono">gate_unlock_seconds</td><td class="num">3</td><td class="num">1–30</td></tr>
+            <tr><td class="mono">gate_unlock_seconds</td><td class="num">15</td><td class="num">1–30</td></tr>
             <tr><td class="mono">gate_access_policy</td><td class="mono">active_member</td><td class="mono">active_member | booking_window</td></tr>
             <tr><td class="mono">gate_early_entry_minutes</td><td class="num">30</td><td class="num">0–240</td></tr>
           </tbody>
@@ -1712,9 +1722,24 @@ litMin   = clamp(ceil(litEnd − litStart), 0, min(M, 90))</pre>
   var secWrap = document.getElementById('fb-secwrap');
   if(out){
     var state = {verb:'ON', court:'A', sec:1800};
+    // Every verb's grammar, as the firmware's kVerbSpecs has it: whether it
+    // carries a court, whether it carries a CLAMPED duration, and — the part a
+    // single global clamp got wrong — what that duration's own bounds are. A
+    // relay duration is bounded by the ninety-minute hard cap; a screen hold by
+    // the two minutes that stop a screen becoming permanent. `args` is the
+    // fixed remainder for the verbs whose arguments are neither.
     var needs = {
-      ON:{court:true, sec:true}, OFF:{court:true, sec:false}, EXT:{court:true, sec:true},
-      AUTH:{court:false, sec:true}, LCD:{court:false, sec:false}, RST:{court:false, sec:false}, PING:{court:false, sec:false}
+      ON:  {court:true,  sec:true,  lo:1, hi:5400},
+      OFF: {court:true,  sec:false},
+      EXT: {court:true,  sec:true,  lo:1, hi:5400},
+      AUTH:{court:false, sec:true,  lo:0, hi:5400},
+      LCD: {court:false, sec:false, args:['LOW BALANCE','TOP UP']},
+      ROW: {court:false, sec:false, args:['1','COURT C  30 MIN']},
+      SHOW:{court:false, sec:true,  lo:1, hi:120, args:['1']},
+      IDLE:{court:false, sec:false, args:['7','1845']},
+      MAP: {court:false, sec:false, args:['1','2','3','4']},
+      RST: {court:false, sec:false},
+      PING:{court:false, sec:false}
     };
     var notes = {
       ON:'The Mega closes the relay and arms its <b>own</b> deadline — auto-off happens even if the ESP, the WiFi and the backend are all gone. Duration is mandatory: v2 has nowhere to put an indefinite-on.',
@@ -1722,17 +1747,49 @@ litMin   = clamp(ceil(litEnd − litStart), 0, min(M, 90))</pre>
       EXT:'Extends the deadline to now + seconds — how back-to-back bookings flow through without flicker. Refused if the relay is open.',
       AUTH:'Arms the button panel for a bounded window (30 s = AUTH_TTL_MS). The bridge sends it on every remembered scan and sends 0 the moment any path lights the court. Zero disarms — the one verb where 0 is legal.',
       LCD:'Two display lines, truncated to 16 columns. Commas ride as %2C, percent as %25 — the only frames that ever need escaping.',
-      RST:'Relays open, buttons disarmed, default screen.',
-      PING:'Answered with <span class="mono">!PONG,&lt;version&gt;,&lt;uptime&gt;</span>.'
+      ROW:'Stages ONE row of the next screen and paints nothing \u2014 <span class="mono">!SHOW</span> is what commits. A row index the protocol does not have is refused (<span class="mono">BADARG</span>) rather than folded onto the last row: that is a peer disagreeing about the hardware, and quietly writing the text somewhere else hides the disagreement behind a screen that merely looks odd.',
+      SHOW:'Commits the staged rows <b>atomically</b> and starts their clock. The hold is clamped <b>on the way in, by the Mega</b>, so no screen a bridge paints can outlive two minutes \u2014 not one from a confused firmware, not one from a firmware that does not exist yet, and not one from a bridge that has stopped running. <span class="mono">flags</span> bit0 puts a countdown in the action row; bit1 replaces the action row ALONE, leaving the screen underneath it.',
+      IDLE:'What the Mega-rendered landing screen\'s status row says. bit0 WiFi up, bit1 API reachable, bit2 clock trusted, bit3 a power-dip restore still pending \u2014 7 is the first three. The time is club-local <span class="mono">hhmm</span>, or <span class="mono">----</span> when the box does not trust its clock: a blank clock is honest, a stale one is not.',
+      MAP:'The club\'s court number behind each relay index, A to D. <span class="mono">0</span> means unmapped and renders BLANK rather than as a dark court \u2014 the box does not drive that relay and should not claim to.',
+      RST:'Relays open, buttons disarmed, back to the landing screen.',
+      PING:'Answered with <span class="mono">!PONG,&lt;version&gt;,&lt;uptime&gt;</span> \u2014 or with five arguments, adding the Mega\'s own dropped-frame, read-error and dropped-press counters.'
     };
     function xor(s){
       var c=0; for(var i=0;i<s.length;i++){ c ^= s.charCodeAt(i); }
       var h=c.toString(16).toUpperCase(); return h.length<2 ? '0'+h : h;
     }
     function clamp(v, verb){
-      var lo = verb==='AUTH' ? 0 : 1;
-      var hi = 5400;
+      // Per verb, from the table above. A single global 1..5400 was the bug this
+      // widget could have taught: it would have shown !SHOW,5400 as a legal
+      // frame, which is a screen standing on the glass for ninety minutes.
+      var n = needs[verb] || {};
+      var lo = (typeof n.lo === 'number') ? n.lo : 1;
+      var hi = (typeof n.hi === 'number') ? n.hi : 5400;
       return Math.max(lo, Math.min(hi, v));
+    }
+    // The slider follows the verb's own range. One 60..6000 slider for every
+    // verb would show a !SHOW frame permanently clamped, which reads as an
+    // error rather than as the ordinary frame it is.
+    function fitSlider(){
+      var n = needs[state.verb] || {};
+      if(!n.sec){ return; }
+      var lo = (typeof n.lo === 'number') ? n.lo : 1;
+      var hi = (typeof n.hi === 'number') ? n.hi : 5400;
+      var step = hi <= 300 ? 1 : 60;
+      // Deliberately past the top of the range, so the clamp is reachable and
+      // visible — that is half of what this widget is for.
+      var max = hi + (hi <= 300 ? 60 : 600);
+      // The value is read BEFORE the bounds move: setting `max` on an input
+      // whose value is outside it makes the browser rewrite the value, and then
+      // "was it in range" can no longer be asked.
+      var v = Number(sec.value);
+      sec.step = String(step);
+      sec.min = String(Math.max(lo, step));
+      sec.max = String(max);
+      if(!(v >= lo && v <= hi)){
+        var mid = Math.round(hi / 2 / step) * step;
+        sec.value = String(mid < step ? step : mid);
+      }
     }
     function render(){
       var n = needs[state.verb];
@@ -1741,8 +1798,13 @@ litMin   = clamp(ceil(litEnd − litStart), 0, min(M, 90))</pre>
       var raw = Number(sec.value);
       var eff = clamp(raw, state.verb);
       secv.textContent = raw;
+      // The clamped duration comes FIRST for SHOW and last for ON/EXT/AUTH,
+      // because that is where each verb's grammar puts it. Getting this from a
+      // table rather than from an if-chain is the same reason the firmware has
+      // one: an argument in the wrong position is a different frame.
       var args=[];
-      if(state.verb==='LCD'){ args=['LOW BALANCE','TOP UP']; }
+      if(state.verb==='SHOW'){ args=[String(eff)].concat(n.args||[]); }
+      else if(n.args){ args = n.args.slice(); }
       else{
         if(n.court) args.push(state.court);
         if(n.sec) args.push(String(eff));
@@ -1760,7 +1822,7 @@ litMin   = clamp(ceil(litEnd − litStart), 0, min(M, 90))</pre>
     }
     verbBtns.forEach(function(b){ b.addEventListener('click', function(){
       verbBtns.forEach(function(x){ x.classList.remove('on'); }); b.classList.add('on');
-      state.verb = b.getAttribute('data-v'); render();
+      state.verb = b.getAttribute('data-v'); fitSlider(); render();
     });});
     courtBtns.forEach(function(b){ b.addEventListener('click', function(){
       courtBtns.forEach(function(x){ x.classList.remove('on'); }); b.classList.add('on');

@@ -58,6 +58,23 @@ inline constexpr char kIdentityOnlineLine2[] = "SCAN TO START";
 inline constexpr char kIdentityOfflineLine1[] = "CRUSADERS COURTS";
 inline constexpr char kIdentityOfflineLine2[] = "SCAN TO START";
 
+/// The two lines the glass should carry whenever the screen may be stale.
+struct IdentityScreen {
+  const char* line1;
+  const char* line2;
+};
+
+/// Which of the two screens above, by whether the box is on the club WiFi.
+///
+/// A FUNCTION RATHER THAN A BRANCH IN THE COMPOSITION ROOT, because there were
+/// two branches and one of them was wrong (D1-7). `loop()`'s pad-lapse repaint
+/// painted the OFFLINE lines unconditionally while `showIdentityScreen()`, a
+/// few lines away, chose properly — so a member who selected a court and walked
+/// off left a box on the WiFi claiming to be offline until the next WiFi edge,
+/// a Mega reset or a scan. `pio test -e native` filters `src/` out entirely, so
+/// neither branch was reachable from a test and nothing said they had drifted.
+IdentityScreen identityScreen(bool wifiUp);
+
 } // namespace bridgelogic
 
 #endif // CRUSADERS_BRIDGELOGIC_MEGALINK_H

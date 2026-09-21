@@ -27,17 +27,22 @@
 #include <unity.h>
 
 #include "bridgelogic/AuthPolicy.h"
+#include "bridgelogic/BootId.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterTokenFits.h"
 #include "bridgelogic/ScanFlow.h"
+#include "bridgelogic/ScreenScript.h"
 #include "bridgelogic/StateReconcile.h"
 #include "bridgelogic/WalkUp.h"
+#include "bridgelogic/WallClock.h"
 #include "court/Session.h"
 #include "devapi/DeviceClient.h"
 #include "devlink/Cadence.h"
 #include "devlink/EventUpload.h"
+#include "devlink/LcdSettings.h"
+#include "devlink/RelayRestore.h"
 #include "devlink/RosterSync.h"
 #include "eventq/EventQueue.h"
 #include "fakes/FakeStore.h"
@@ -57,6 +62,7 @@ constexpr uint32_t kBases[] = {kBaseZero, kBaseMid, kBaseWrapSoon, kBaseWrapNow}
 constexpr size_t kBaseCount = sizeof(kBases) / sizeof(kBases[0]);
 
 constexpr uint32_t kSixHoursMs = 21600000UL;
+constexpr uint32_t kSecondsPerDayLocal = 86400UL;
 constexpr uint32_t kHourMs = 3600000UL;
 
 using Cache = roster::Roster<devlink::kMaxRosterEntries>;
@@ -967,7 +973,10 @@ const char* corpusMac() {
 /// Decodes a vector's `body_hex` into `out` as a NUL-terminated string,
 /// returning its byte length.
 size_t bodyOf(const char* vector, char* out, size_t cap) {
-  uint8_t bytes[512] = {};
+  // Static, and 1280 rather than 512: the settings vectors carry all nine
+  // operator keys beside the button map and the roster, and a decode buffer
+  // that is quietly too small reports "body_hex" and reads as a corpus fault.
+  static uint8_t bytes[1280] = {};
   size_t n = 0U;
   TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(vector, "body_hex", bytes, sizeof(bytes), &n), "body_hex");
   TEST_ASSERT_TRUE(n < cap);
@@ -1265,6 +1274,232 @@ void test_corpus_roster_pushes_load_exactly_as_the_contract_declares_them() {
   TEST_ASSERT_TRUE(cache.decide("K4TQ8N2ZV7BM", 0U, kBaseMid).verdict == roster::Verdict::Allow);
 }
 
+/// B5 — the three `member_display` vectors the contracts lane pinned.
+///
+/// THE BACKEND DOES NOT EMIT THIS FIELD YET. The corpus declares the contract
+/// the server must then satisfy, which is the direction this corpus is allowed
+/// to run in — so the firmware half reads it TOLERANTLY: absent is the ordinary
+/// case today and stays the ordinary case for a club that never fills the field
+/// in, and an unnamed member must still get their court.
+void test_corpus_member_display_names_the_member_or_greets_them_anyway() {
+  loadHttpCorpus();
+  const bridgelogic::ScanFlow flow;
+  char body[512] = {};
+  bridgelogic::ScreenFacts facts;
+
+  // Present. The greeting is the member's only confirmation that the box knows
+  // who they are, and it never changes what they are granted.
+  size_t n = bodyOf(responseVector("activate-response-ok-named"), body, sizeof(body));
+  bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(2U, r.outcome.court); // court_number 3 of [1,2,3,4]
+  bridgelogic::readMemberDisplay(body, n, facts);
+  TEST_ASSERT_EQUAL_STRING("DEAN M", facts.name);
+  TEST_ASSERT_EQUAL_STRING("HI DEAN M",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+
+  // Absent: HI THERE, and the court still comes on. Absence changes the
+  // greeting and nothing else.
+  n = bodyOf(responseVector("activate-response-unnamed"), body, sizeof(body));
+  r = flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(1U, r.outcome.court);
+  TEST_ASSERT_EQUAL_UINT32(1800U * 1000U, r.outcome.durationMs);
+  bridgelogic::readMemberDisplay(body, n, facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+  TEST_ASSERT_EQUAL_STRING("HI THERE",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+
+  // Forty characters. devapi::json REFUSES rather than truncates — half a name
+  // is a different member's — so the box greets and NEVER shows a cut name.
+  n = bodyOf(responseVector("activate-response-name-too-long"), body, sizeof(body));
+  r = flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(0U, r.outcome.court);
+  bridgelogic::readMemberDisplay(body, n, facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+  const bridgelogic::Screen card = bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts);
+  TEST_ASSERT_EQUAL_STRING("HI THERE", card.rows[0]);
+  TEST_ASSERT_NULL(strstr(card.rows[0], "BARTHOLOMEW"));
+}
+
+/// B8 — the court box's events, now carrying a real boot id.
+///
+/// The vector is the same event as the millis-wrap one with a non-zero
+/// `boot_id` in it, which is the whole of the change: `boot_id` sits second,
+/// between `mac` and the batch `uptime_ms`, and is OMITTED when it is zero —
+/// the compatibility hinge that let this box render the old body byte for byte
+/// while it still passed 0.
+void test_corpus_the_event_body_carries_this_boots_id() {
+  loadHttpCorpus();
+  char expected[512] = {};
+  const size_t n = bodyOf(requestVector("event-request-boot-id"), expected, sizeof(expected));
+
+  eventq::Event event;
+  event.seq = 41U;
+  event.kind = eventq::Kind::Activation;
+  event.court = 1U;
+  event.method = eventq::Method::Qr;
+  event.durationMs = 2700000UL;
+  event.uptimeMs = 0xFFFFF000UL;
+  TEST_ASSERT_TRUE(event.setSubject("TOKEN-B"));
+
+  char rendered[devlink::kEventBodyCap] = {};
+  const size_t renderedLen =
+      devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), bridgelogic::bootIdFrom(2596069104UL),
+                               0x100000000ULL + 20000ULL, event);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
+}
+
+/// B9 — the power-dip restore's five response vectors, through the parser that
+/// actually consumes them.
+///
+/// The court box is the half that ACTS on these, so this suite is where they
+/// are bound: a vector nobody executes is a contract the two sides only think
+/// they agree on.
+void test_corpus_the_relay_restore_vectors_parse_exactly_as_declared() {
+  loadHttpCorpus();
+  char body[1024] = {};
+  devlink::RelayRestore restored[bridgelogic::kStateCourts] = {};
+  uint8_t count = 0U;
+  uint8_t rejected = 0U;
+
+  // Two relays to restore, with their booking references.
+  size_t n = bodyOf(responseVector("heartbeat-response-relays-restore"), body, sizeof(body));
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(2U, count);
+  TEST_ASSERT_EQUAL_UINT8(0U, rejected);
+  TEST_ASSERT_EQUAL_UINT8(0U, restored[0].relay);
+  TEST_ASSERT_EQUAL_UINT32(1834U, restored[0].remainingSeconds);
+  TEST_ASSERT_EQUAL_STRING("3fa85f64", restored[0].bookingRef);
+  TEST_ASSERT_EQUAL_UINT8(2U, restored[1].relay);
+  TEST_ASSERT_EQUAL_UINT32(600U, restored[1].remainingSeconds);
+
+  // AN EMPTY ARRAY SWITCHES NOTHING OFF. It is information that nothing SHOULD
+  // be on, which matters only at boot when nothing IS on — making it an
+  // off-command would hand the API a way to darken a court, which it must not
+  // have. The key is PRESENT, so it is a served restore of zero relays.
+  count = 0xFFU;
+  rejected = 0xFFU;
+  n = bodyOf(responseVector("heartbeat-response-relays-empty"), body, sizeof(body));
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(0U, count);
+  TEST_ASSERT_EQUAL_UINT8(0U, rejected);
+
+  // Absent is a THIRD state: the server said nothing about relays at all.
+  n = bodyOf(responseVector("heartbeat-response-relays-absent"), body, sizeof(body));
+  TEST_ASSERT_FALSE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+
+  // Mixed malformed: two are skipped and COUNTED, the third is applied. A
+  // diagnostic that silently drops what it could not read is a contract drift
+  // nobody hears about.
+  n = bodyOf(responseVector("heartbeat-response-relays-malformed"), body, sizeof(body));
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(1U, count);
+  TEST_ASSERT_EQUAL_UINT8(2U, rejected);
+  TEST_ASSERT_EQUAL_UINT8(1U, restored[0].relay);
+  TEST_ASSERT_EQUAL_UINT32(500U, restored[0].remainingSeconds);
+
+  // Past the relay cap, UNCAPPED on the wire: the wire carries what the server
+  // believes and the clamp is the device's, applied once at the point of use.
+  // Narrowing it here would make the two halves of a disagreement invisible.
+  n = bodyOf(responseVector("heartbeat-response-relays-over-cap"), body, sizeof(body));
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(1U, count);
+  TEST_ASSERT_EQUAL_UINT32(9999U, restored[0].remainingSeconds);
+  TEST_ASSERT_TRUE(restored[0].remainingSeconds > proto::kRelayHardCapSeconds);
+}
+
+/// B9 — the nine operator settings, in range and out of it.
+///
+/// They are read ONE LEVEL DEEP from the top-level `config` and nowhere else:
+/// devapi's flat scan takes the FIRST match in document order, so a vendor or
+/// diagnostics block nesting the same names would otherwise drive the screen.
+void test_corpus_the_lcd_settings_are_adopted_and_clamped() {
+  loadHttpCorpus();
+  char body[1024] = {};
+
+  devlink::LcdSettings settings;
+  size_t n = bodyOf(responseVector("heartbeat-response-lcd-settings"), body, sizeof(body));
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(body, n, settings));
+  TEST_ASSERT_EQUAL_UINT32(25000UL, settings.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(45000UL, settings.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(6000UL, settings.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(7000UL, settings.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(200000UL, settings.scanMemoryMs);
+  TEST_ASSERT_EQUAL_UINT32(240UL * 60000UL, settings.clockTrustMs);
+  TEST_ASSERT_FALSE(settings.relayRestoreEnabled);
+  TEST_ASSERT_FALSE(settings.faultReporting);
+  TEST_ASSERT_EQUAL_UINT16(75U, settings.faultMaxPerHour);
+  // The cross-key invariant: the box must not forget who scanned while their
+  // selection is still live on the pad, or the next person's presses buy on
+  // their token.
+  TEST_ASSERT_TRUE(settings.scanMemoryMs >= settings.choiceMs);
+
+  // Every numeric setting past a bound, in BOTH directions across the set.
+  // Each is CLAMPED and none refuses the eight beside it: a club that typed
+  // 3600 into one field must not thereby lose its button map.
+  devlink::LcdSettings clamped;
+  n = bodyOf(responseVector("heartbeat-response-lcd-settings-out-of-range"), body, sizeof(body));
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(body, n, clamped));
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdRevertMaxSeconds * 1000UL, clamped.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdChoiceMinSeconds * 1000UL, clamped.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdCardMaxSeconds * 1000UL, clamped.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdHintMinSeconds * 1000UL, clamped.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kClockTrustMaxMinutes * 60000UL, clamped.clockTrustMs);
+  TEST_ASSERT_EQUAL_UINT16(devlink::kMaxFaultMaxPerHour, clamped.faultMaxPerHour);
+  TEST_ASSERT_TRUE(clamped.faultReporting);
+  // The invariant is held by RAISING the memory, never by lowering the choice
+  // window: shortening a window somebody is mid-decision in is the one timeout
+  // on this box that can lose a half-made purchase.
+  TEST_ASSERT_TRUE(clamped.scanMemoryMs >= clamped.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(clamped.choiceMs, clamped.scanMemoryMs);
+
+  // The button map beside them is untouched by any of it.
+  const size_t at = devapi::json::findArray(body, n, "button_map");
+  TEST_ASSERT_NOT_EQUAL(devapi::json::kNotFound, at);
+}
+
+/// B9 — the two heartbeat REQUEST vectors the box's own diagnostics produce,
+/// byte for byte. Every field is omitted at its nothing value, so a box with
+/// nothing to report renders the body it has always rendered.
+void test_corpus_the_heartbeat_report_fields_are_byte_identical_to_the_contract() {
+  loadHttpCorpus();
+  char expected[512] = {};
+
+  devlink::HeartbeatReport report;
+  report.restoredRelays = 2U;
+
+  size_t n = bodyOf(requestVector("heartbeat-request-restored"), expected, sizeof(expected));
+  char rendered[devlink::kHeartbeatBodyCap] = {};
+  size_t renderedLen =
+      devlink::renderHeartbeatBody(rendered, sizeof(rendered), corpusMac(), "2.0.0", 86400000ULL, report);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+
+  // `relay_state` is THREE states, not two: a null pointer omits the key, and a
+  // non-null pointer with a count of zero renders `[]`. A board that could not
+  // tell those apart would show a dark court as unknown and an unknown court as
+  // dark.
+  const devlink::RelayState state[2] = {{0U, 1834U}, {2U, 600U}};
+  report.relayState = state;
+  report.relayStateCount = 2U;
+  n = bodyOf(requestVector("heartbeat-request-relay-state"), expected, sizeof(expected));
+  renderedLen =
+      devlink::renderHeartbeatBody(rendered, sizeof(rendered), corpusMac(), "2.0.0", 86400000ULL, report);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
+}
+
 /// Every http vector this suite binds to, by id. The executed-count gate below
 /// compares this against the corpus and the manifest in both directions.
 const char* const kBoundHttpVectors[] = {
@@ -1281,6 +1516,19 @@ const char* const kBoundHttpVectors[] = {
     "heartbeat-response-roster-single",
     "heartbeat-response-roster-full",
     "heartbeat-response-roster-negative-opens",
+    "activate-response-ok-named",
+    "activate-response-unnamed",
+    "activate-response-name-too-long",
+    "event-request-boot-id",
+    "heartbeat-request-restored",
+    "heartbeat-request-relay-state",
+    "heartbeat-response-relays-restore",
+    "heartbeat-response-relays-empty",
+    "heartbeat-response-relays-absent",
+    "heartbeat-response-relays-malformed",
+    "heartbeat-response-relays-over-cap",
+    "heartbeat-response-lcd-settings",
+    "heartbeat-response-lcd-settings-out-of-range",
 };
 
 bool isBound(const char* id) {
@@ -1979,6 +2227,841 @@ void test_the_uplink_decoder_keeps_every_mega_frame_around_the_noise() {
   TEST_ASSERT_EQUAL_UINT16(0U, uplink.droppedResults());
 }
 
+// ---------------------------------------------------------------------------
+// OnRetry — D1-3: the replay that lit the wrong court
+// ---------------------------------------------------------------------------
+//
+// THE LIVE DEFECT CARL AND DEAN HIT. `!ERR,BADCRC` says only "the last line I
+// received did not decode" — it does not say WHICH line. The bridge sends
+// several frames in quick succession, and `OnRetry::sent` returned EARLY for
+// any non-relay verb WITHOUT clearing, contradicting its own header ("Anything
+// else clears the memory rather than replacing it"). So a CRC failure on the
+// `!AUTH,<n>` that follows every grant by under a millisecond replayed the
+// `!ON` before it; and when the corrupted frame was the `!OFF,B` a release
+// press sends, the replay lit A for a fresh FULL duration while B was never
+// released. That is "it added time to the wrong court".
+
+void test_on_retry_a_non_relay_frame_clears_the_memory_rather_than_skipping_it() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::OnRetry retry;
+    proto::Frame out;
+
+    // settleScan's order, to the millisecond: applyOutcome writes `!LCD` then
+    // `!ON`, and applyAuth writes `!AUTH,30` under a millisecond later.
+    retry.sent(proto::Frame::lcd("COURT A", "45 MIN"), base);
+    retry.sent(proto::Frame::on(proto::Court::A, 2700U), base);
+    retry.sent(proto::Frame::auth(30U), base + 1U);
+
+    // The `!AUTH` is the line that died on the wire. It is not relay-affecting,
+    // so there is nothing to replay — and nothing to attribute to court A.
+    TEST_ASSERT_TRUE(bridgelogic::isReceiveError(proto::Verb::Err, "BADCRC", ""));
+    TEST_ASSERT_FALSE(retry.pending());
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 2U, out));
+    TEST_ASSERT_EQUAL_UINT8(bridgelogic::kNoRetryCourt, retry.court());
+    TEST_ASSERT_TRUE(retry.verb() == proto::Verb::Unknown);
+    TEST_ASSERT_EQUAL_UINT16(0U, retry.retries());
+  }
+}
+
+void test_on_retry_an_off_for_b_after_an_on_for_a_replays_neither() {
+  // handleButton's release path writes `!OFF,B`. `!OFF` is not one of the two
+  // frames this type replays — re-sending an OFF is harmless but pointless, and
+  // the Mega's own timer is the authority — so it CLEARS. Before the fix it
+  // skipped, and the BADCRC that followed lit court A all over again.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::OnRetry retry;
+    proto::Frame out;
+
+    retry.sent(proto::Frame::on(proto::Court::A, 2700U), base);
+    retry.sent(proto::Frame::off(proto::Court::B), base + 1U);
+
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 2U, out));
+    TEST_ASSERT_EQUAL_UINT8(bridgelogic::kNoRetryCourt, retry.court());
+    // Nothing was re-sent, so nothing can have named a court at all.
+    TEST_ASSERT_TRUE(out.empty());
+  }
+}
+
+void test_on_retry_a_badcrc_after_a_non_relay_frame_never_moves_a_relay_deadline() {
+  // The MEASURED effect, pinned rather than argued: a replayed `!ON` re-arms
+  // the Mega's relay from the moment of the replay, which is what "it added
+  // time to the wrong court" looks like from the glass. The bridge's own model
+  // of that deadline is Relight's, so the property is that it never jumps
+  // forward across a BADCRC that followed a non-relay frame.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::OnRetry retry;
+    bridgelogic::Relight relight;
+    proto::Frame out;
+
+    // Court A, two-hour booking, ninety minutes on the relay.
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 0U, true);
+    grant.durationMs = 5400000UL;
+    grant.bookingRemainingMs = 7200000UL;
+    relight.onGrant(grant, base);
+    retry.sent(proto::Frame::on(proto::Court::A, 5400U), base);
+
+    // When the extension falls due, before anything else happens.
+    const uint32_t dueAt = base + 5400000UL - 60000UL;
+    TEST_ASSERT_FALSE(relight.check(0U, dueAt - 1U).due);
+    TEST_ASSERT_TRUE(relight.check(0U, dueAt).due);
+
+    // The grant's `!AUTH` dies on the wire. Nothing is replayed, so nothing
+    // re-arms the relay — the deadline is exactly where it was.
+    retry.sent(proto::Frame::auth(30U), base + 1U);
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 2U, out));
+    TEST_ASSERT_FALSE(relight.check(0U, dueAt - 1U).due);
+    TEST_ASSERT_TRUE(relight.check(0U, dueAt).due);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OnRetry — D1-6: the `!EXT` retry that was never wired up
+// ---------------------------------------------------------------------------
+//
+// `pumpRelight` sent `!EXT` and stamped `Relight::extended`, but nothing
+// registered the frame with OnRetry and nothing else did either. Three things
+// followed, all of them verified: the header's "WHY `!EXT` IS KEPT AS WELL AS
+// `!ON`" described behaviour the composition root did not have;
+// `handleReceiveError`'s first branch required `verb() == Ext` and was
+// therefore UNREACHABLE, because verb() could only ever be `On` or `Unknown`;
+// and so `!ERR,BADARG` — the Mega refusing to extend a relay that is already
+// open — fell to the second branch, where "BADARG" is compared against
+// "BADCRC" and nothing at all happens. gRelight went on believing it held a
+// court the Mega had released.
+
+void test_a_refused_ext_releases_the_court_instead_of_reading_as_a_lost_frame() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::Relight relight;
+    bridgelogic::OnRetry retry;
+
+    // Court B, two-hour booking: ninety minutes on the relay, thirty to come.
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 1U, true);
+    grant.durationMs = 5400000UL;
+    grant.bookingRemainingMs = 7200000UL;
+    relight.onGrant(grant, base);
+
+    const uint32_t due = base + 5400000UL - 60000UL;
+    const bridgelogic::Extension ext = relight.check(1U, due);
+    TEST_ASSERT_TRUE(ext.due);
+
+    // The frame is written. sendToMega registers EVERY frame it writes, so the
+    // `!EXT` is what the retry memory now holds — which is the whole of what
+    // made the branch below reachable.
+    retry.sent(proto::Frame::ext(proto::Court::B, ext.seconds), due);
+    relight.extended(1U, ext.seconds, due);
+    TEST_ASSERT_TRUE(retry.verb() == proto::Verb::Ext);
+    TEST_ASSERT_EQUAL_UINT8(1U, retry.court());
+
+    // The Mega answers `!ERR,BADARG`: the relay is already open, the court is
+    // dark, there is nothing to extend. Not a lost frame — a verdict.
+    const bridgelogic::ReceiveErrorAction action =
+        bridgelogic::classifyReceiveError(proto::Verb::Err, "BADARG", "", retry.verb());
+    TEST_ASSERT_TRUE(action == bridgelogic::ReceiveErrorAction::ExtRefused);
+
+    const uint8_t court = retry.court();
+    retry.clear();
+    relight.onRelease(court);
+
+    TEST_ASSERT_FALSE(relight.tracking(1U));
+    TEST_ASSERT_FALSE(relight.check(1U, due + 1U).due);
+    TEST_ASSERT_FALSE(relight.check(1U, due + 60000UL).due);
+  }
+}
+
+void test_a_refused_ext_on_a_dark_court_is_sent_exactly_once() {
+  // THE FLOOD. `Relight::check` goes on saying "due" for as long as the bridge
+  // believes the court is held and the Mega keeps reporting nothing left on the
+  // relay — `relayLeft` is 0, so neither `relayLeft > kExtLeadMs` nor
+  // `bookingLeft <= relayLeft` holds. Without the refusal branch that is an
+  // `!EXT` every time a `!STATE` re-zeroes the reading, on a 9600 link, in
+  // exactly the window a scan or an `!EVT,AUTOOFF` has to share it. The refusal
+  // is what ends it in one frame instead of waiting for handleState's reconcile.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::Relight relight;
+    bridgelogic::OnRetry retry;
+
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 2U, true);
+    grant.durationMs = 5400000UL;
+    grant.bookingRemainingMs = 7200000UL;
+    relight.onGrant(grant, base);
+
+    const uint32_t start = base + 5400000UL - 60000UL;
+    uint16_t sends = 0U;
+    bool refusalDelivered = false;
+
+    // Two seconds of loop passes at 10 ms, with the Mega's own `!STATE` — every
+    // change and every ten seconds — reporting a dark relay twice a second.
+    for (uint32_t dt = 0U; dt <= 2000U; dt += 10U) {
+      const uint32_t now = start + dt;
+      if (dt % 500U == 0U) {
+        relight.observeRelayRemaining(2U, 0U, now);
+      }
+      const bridgelogic::Extension ext = relight.check(2U, now);
+      if (!ext.due) {
+        continue;
+      }
+      ++sends;
+      retry.sent(proto::Frame::ext(proto::Court::C, ext.seconds), now);
+      relight.extended(2U, ext.seconds, now);
+      if (refusalDelivered) {
+        continue;
+      }
+      refusalDelivered = true;
+      if (bridgelogic::classifyReceiveError(proto::Verb::Err, "BADARG", "", retry.verb()) ==
+          bridgelogic::ReceiveErrorAction::ExtRefused) {
+        const uint8_t court = retry.court();
+        retry.clear();
+        relight.onRelease(court);
+      }
+    }
+
+    TEST_ASSERT_EQUAL_UINT16(1U, sends);
+  }
+}
+
+void test_a_badarg_with_no_ext_remembered_is_not_a_release() {
+  // The branch is about an `!EXT` and nothing else. A BADARG answering an `!ON`
+  // — or answering nothing this half remembers — must not release a court that
+  // was only just lit.
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Err, "BADARG", "", proto::Verb::On) ==
+                   bridgelogic::ReceiveErrorAction::None);
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Err, "BADARG", "", proto::Verb::Unknown) ==
+                   bridgelogic::ReceiveErrorAction::None);
+  // And a genuine "did not decode" is still a resend, whatever is remembered.
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Err, "BADCRC", "", proto::Verb::Ext) ==
+                   bridgelogic::ReceiveErrorAction::Resend);
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Evt, "BADFRAME", "RX", proto::Verb::On) ==
+                   bridgelogic::ReceiveErrorAction::Resend);
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Evt, "OVERRUN", "TX", proto::Verb::On) ==
+                   bridgelogic::ReceiveErrorAction::None);
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Evt, "AUTOOFF", "B", proto::Verb::Ext) ==
+                   bridgelogic::ReceiveErrorAction::None);
+}
+
+// ---------------------------------------------------------------------------
+// B7 — the JSON-read audit the court box had never had
+// ---------------------------------------------------------------------------
+//
+// Round G4's B2 found `onGateResponse` reading `opened` — the one field that
+// drives a lock — with the FLAT any-depth scanner, so `{"outer":{"opened":true}}`
+// released the lock, and so did `{"opened":false,"detail":{"opened":true}}`:
+// `findKey` returns the FIRST match in document order, and a decoy placed
+// before the real field wins outright.
+//
+// The court box's activate and walk-up readers had the same shape and had never
+// been audited. Every field below is ACTED ON — it lights a relay, decides how
+// long for, decides which relay, or decides whether an unknown barcode gets
+// thirty seconds of button control — so every one is scoped to the outermost
+// object. What is deliberately NOT narrowed is stated at the end.
+//
+// The bodies are the server's, so this is not a hypothetical: `reason` is a
+// free-form string the API chooses, a roster token is a member's own barcode,
+// and a nested object is one field away at any time.
+
+void test_activate_reads_every_field_it_acts_on_from_the_top_level() {
+  const bridgelogic::ScanFlow flow;
+
+  // `activated` — the field that lights a court. A decoy BEFORE the real one
+  // is the case findKey loses outright.
+  const char decoyFirst[] = "{\"detail\":{\"activated\":true},\"activated\":false,\"reason\":\"no_booking\"}";
+  bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, decoyFirst, len(decoyFirst), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+
+  const char decoyAfter[] = "{\"activated\":false,\"reason\":\"no_booking\",\"detail\":{\"activated\":true}}";
+  r = flow.onActivateResponse(200U, decoyAfter, len(decoyAfter), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+
+  // An ARRAY is not an object with members, so nothing in it is a top-level
+  // field. `[{"activated":true}]` used to light a court.
+  const char array[] = "[{\"activated\":true,\"granted_seconds\":2700,\"court_number\":7}]";
+  r = flow.onActivateResponse(200U, array, len(array), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(r.fallbackToRoster);
+
+  // `granted_seconds` — HOW LONG the court is lit, and the money the club is
+  // paid for. A nested 5400 in front of a real 0 is ninety minutes given away.
+  const char seconds[] = "{\"activated\":true,\"court_number\":7,"
+                         "\"detail\":{\"granted_seconds\":5400},\"granted_seconds\":0}";
+  r = flow.onActivateResponse(200U, seconds, len(seconds), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+  TEST_ASSERT_EQUAL_UINT32(0U, r.outcome.durationMs);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+
+  // `court_number` — WHICH relay. A nested 7 in front of a real 99 lights court
+  // A for a booking on a court this box does not drive.
+  const char number[] = "{\"activated\":true,\"granted_seconds\":600,"
+                        "\"detail\":{\"court_number\":7},\"court_number\":99}";
+  r = flow.onActivateResponse(200U, number, len(number), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+
+  // `reason` — which decides `recognised`, which is the only thing that arms
+  // the Mega's button window. A nested "insufficient_balance" in front of a
+  // real "not_recognised" is thirty seconds of relay control for a barcode the
+  // API said it did not know.
+  const char reason[] = "{\"activated\":false,\"detail\":{\"reason\":\"insufficient_balance\"},"
+                        "\"reason\":\"not_recognised\"}";
+  r = flow.onActivateResponse(200U, reason, len(reason), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(r.outcome.recognised);
+
+  // A truncated body yields no top-level field at all, which is a fallback
+  // rather than a guess.
+  const char cut[] = "{\"activated\":true,\"granted_seconds\":27";
+  TEST_ASSERT_TRUE(flow.onActivateResponse(200U, cut, len(cut), kCourts, kCourtCount).fallbackToRoster);
+
+  // A field of the wrong JSON type is absent, not coerced.
+  const char quoted[] = "{\"activated\":\"true\"}";
+  TEST_ASSERT_TRUE(flow.onActivateResponse(200U, quoted, len(quoted), kCourts, kCourtCount).fallbackToRoster);
+}
+
+void test_walkup_reads_every_field_it_acts_on_from_the_top_level() {
+  // `granted_minutes` — how long the member is lit for, on the one path that
+  // charges money at the moment of the request.
+  const char minutes[] = "{\"granted_minutes\":15,\"detail\":{\"granted_minutes\":90}}";
+  bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(200U, minutes, len(minutes), 1U, 30U);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT32(15UL * 60000UL, r.outcome.durationMs);
+
+  const char minutesFirst[] = "{\"detail\":{\"granted_minutes\":90},\"granted_minutes\":15}";
+  r = bridgelogic::onWalkUpResponse(200U, minutesFirst, len(minutesFirst), 1U, 30U);
+  TEST_ASSERT_EQUAL_UINT32(15UL * 60000UL, r.outcome.durationMs);
+
+  // `error` — which decides `recognised`, which arms the button window. A
+  // nested verdict about a known member in front of a real `not_recognised`
+  // hands the panel to a stranger's barcode.
+  const char error[] = "{\"detail\":{\"error\":\"insufficient_balance\"},\"error\":\"not_recognised\"}";
+  r = bridgelogic::onWalkUpResponse(402U, error, len(error), 1U, 30U);
+  TEST_ASSERT_FALSE(r.outcome.recognised);
+
+  // `opens_at` — what the member is told to come back for.
+  const char opens[] =
+      "{\"error\":\"club_closed\",\"detail\":{\"opens_at\":\"23:59\"},\"opens_at\":\"06:00\"}";
+  r = bridgelogic::onWalkUpResponse(400U, opens, len(opens), 1U, 30U);
+  TEST_ASSERT_NOT_NULL(strstr(r.outcome.line2, "06:00"));
+  TEST_ASSERT_NULL(strstr(r.outcome.line2, "23:59"));
+}
+
+void test_the_flat_scan_is_kept_where_it_is_genuinely_wanted() {
+  // NOT narrowed, and this is a decision rather than an omission. The court box
+  // reads `button_map`, `slice_minutes` and `walk_up_max_minutes` out of the
+  // heartbeat's NESTED `config` object with no path expression at all, and
+  // `devapi::json::findKey`'s own header says that is depended upon. Narrowing
+  // findKey itself is a breaking change for every reader of that object.
+  //
+  // The distinction that decides it: nothing in `config` is a verdict about a
+  // member or a court. A decoy there costs a wrong panel label until the next
+  // heartbeat; a decoy in `activated` costs a lit court.
+  const char body[] = "{\"config\":{\"slice_minutes\":15,\"button_map\":[\"court:A\",\"minutes:30\"]}}";
+  TEST_ASSERT_NOT_EQUAL(devapi::json::kNotFound, devapi::json::findArray(body, len(body), "button_map"));
+  TEST_ASSERT_EQUAL(devapi::json::kNotFound, devapi::json::findTopLevelArray(body, len(body), "button_map"));
+
+  // `accepted_through` IS narrowed, at its call site in the composition root's
+  // drainEvents: it decides which queued attendance events are dropped, and
+  // under charge-at-booking a dropped activation is a member refunded and
+  // penalised for a game they played. Pinned here because main.cpp is filtered
+  // out of this build.
+  const char ack[] = "{\"detail\":{\"accepted_through\":9999},\"accepted_through\":4}";
+  uint32_t through = 0U;
+  TEST_ASSERT_TRUE(devapi::json::topLevelUnsignedField(ack, len(ack), "accepted_through", through));
+  TEST_ASSERT_EQUAL_UINT32(4U, through);
+}
+
+// ---------------------------------------------------------------------------
+// B8 — a real per-boot id on this box's events
+// ---------------------------------------------------------------------------
+
+void test_this_boot_has_an_identity_and_it_is_never_the_wires_absent_value() {
+  // Zero is the wire's "this board has no boot identity": renderEventBody omits
+  // the field and the server falls back to (device, seq), which is the defect
+  // round G4's C2 describes. A one-in-four-billion draw must not put one boot of
+  // one board back on it.
+  TEST_ASSERT_EQUAL_UINT32(bridgelogic::kBootIdForZeroDraw, bridgelogic::bootIdFrom(0U));
+  TEST_ASSERT_NOT_EQUAL(0U, bridgelogic::bootIdFrom(0U));
+
+  // Everything else is carried through unchanged: the value is a de-duplication
+  // tag, and folding draws together would make collisions MORE likely.
+  TEST_ASSERT_EQUAL_UINT32(1U, bridgelogic::bootIdFrom(1U));
+  TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFUL, bridgelogic::bootIdFrom(0xFFFFFFFFUL));
+  TEST_ASSERT_EQUAL_UINT32(0x5A5A5A5AUL, bridgelogic::bootIdFrom(0x5A5A5A5AUL));
+
+  // And it reaches the wire. The same event, the same seq, two boots: the
+  // bodies must differ, or a renumbered board's whole evening is receipted as
+  // duplicates of the previous one's.
+  eventq::Event event;
+  event.kind = eventq::Kind::Activation;
+  event.court = 1U;
+  event.method = eventq::Method::Qr;
+  event.durationMs = 2700000UL;
+  event.uptimeMs = 1000U;
+  event.seq = 7U;
+  static_cast<void>(event.setSubject("TOKALICE"));
+
+  char first[devlink::kEventBodyCap] = {};
+  char second[devlink::kEventBodyCap] = {};
+  TEST_ASSERT_TRUE(devlink::renderEventBody(first, sizeof(first), "aabbccddeeff",
+                                            bridgelogic::bootIdFrom(0x11223344UL), 2000U, event) > 0U);
+  TEST_ASSERT_TRUE(devlink::renderEventBody(second, sizeof(second), "aabbccddeeff",
+                                            bridgelogic::bootIdFrom(0x55667788UL), 2000U, event) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(first, "boot_id"));
+  TEST_ASSERT_TRUE(strcmp(first, second) != 0);
+
+  // Zero is what the box used to send, and it omits the field entirely — which
+  // is the compatibility hinge, and is why passing 0 fixed nothing.
+  char legacy[devlink::kEventBodyCap] = {};
+  TEST_ASSERT_TRUE(devlink::renderEventBody(legacy, sizeof(legacy), "aabbccddeeff", 0U, 2000U, event) > 0U);
+  TEST_ASSERT_NULL(strstr(legacy, "boot_id"));
+}
+
+// ---------------------------------------------------------------------------
+// B6 — the wall clock the box borrows, and the blank when it cannot
+// ---------------------------------------------------------------------------
+
+void test_server_time_is_read_as_club_local_wall_time_or_refused() {
+  uint32_t second = 0U;
+  TEST_ASSERT_TRUE(bridgelogic::secondOfDayFrom("2026-09-21T18:45:07+02:00", second));
+  TEST_ASSERT_EQUAL_UINT32(18UL * 3600UL + 45UL * 60UL + 7UL, second);
+  // A `Z`, a fractional part, a space separator: the same nineteen characters.
+  TEST_ASSERT_TRUE(bridgelogic::secondOfDayFrom("2026-09-21T06:00:00Z", second));
+  TEST_ASSERT_EQUAL_UINT32(6UL * 3600UL, second);
+  TEST_ASSERT_TRUE(bridgelogic::secondOfDayFrom("2026-09-21T23:59:59.9999999+02:00", second));
+  TEST_ASSERT_EQUAL_UINT32(kSecondsPerDayLocal - 1UL, second);
+  TEST_ASSERT_TRUE(bridgelogic::secondOfDayFrom("2026-01-01 00:00:00", second));
+  TEST_ASSERT_EQUAL_UINT32(0U, second);
+
+  // Refused, every one, with the caller's value untouched: printing whatever
+  // two bytes sat at offset 11 is exactly the failure this shape check exists
+  // to stop.
+  second = 12345U;
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom(nullptr, second));
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("", second));
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:45", second));    // truncated
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026/09/21T18:45:07", second)); // wrong separators
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21X18:45:07", second)); // wrong date/time mark
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21Tab:45:07", second)); // not a digit
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("20x6-09-21T18:45:07", second)); // nor in the date
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T24:00:00", second)); // out of range
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:60:07", second));
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:45:60", second)); // leap second
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T-8:45:07", second));
+  TEST_ASSERT_EQUAL_UINT32(12345U, second);
+}
+
+void test_the_clock_advances_between_heartbeats_and_wraps_at_midnight() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::WallClock clock;
+
+    // Nothing adopted: the box does not know the time and says so, rather than
+    // reporting midnight.
+    TEST_ASSERT_FALSE(clock.trusted(base));
+    char wire[bridgelogic::kWireTimeLen] = {};
+    clock.wireTime(base, wire, sizeof(wire));
+    TEST_ASSERT_EQUAL_STRING(proto::kNoClock, wire);
+    char shown[bridgelogic::kDisplayTimeLen] = {};
+    clock.displayTime(base, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("", shown);
+
+    TEST_ASSERT_TRUE(clock.adopt("2026-09-21T23:58:30+02:00", base));
+    TEST_ASSERT_TRUE(clock.trusted(base));
+    clock.displayTime(base, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("23:58", shown);
+    clock.wireTime(base, wire, sizeof(wire));
+    TEST_ASSERT_EQUAL_STRING("2358", wire);
+
+    // Advanced on millis(), across the wrap of BOTH clocks: the club's midnight
+    // and the 49.7-day millis() rollover the bases put inside this scenario.
+    clock.displayTime(base + 60000UL, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("23:59", shown);
+    clock.displayTime(base + 120000UL, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("00:00", shown);
+    clock.wireTime(base + 120000UL, wire, sizeof(wire));
+    TEST_ASSERT_EQUAL_STRING("0000", wire);
+    clock.displayTime(base + 3600000UL, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("00:58", shown);
+
+    // A time that is not NOW: what "Ends 18:45" is built from.
+    TEST_ASSERT_TRUE(clock.adopt("2026-09-21T18:00:00+02:00", base));
+    clock.displayTimeAt(base, clock.secondOfDayIn(base, 2700U), shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("18:45", shown);
+    // ...and past midnight, which a late booking really does reach.
+    clock.displayTimeAt(base, clock.secondOfDayIn(base, 8UL * 3600UL), shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("02:00", shown);
+  }
+}
+
+void test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::WallClock clock;
+    TEST_ASSERT_EQUAL_UINT32(bridgelogic::kDefaultClockTrustMinutes, clock.trustMinutes());
+    TEST_ASSERT_TRUE(clock.adopt("2026-09-21T18:00:00+02:00", base));
+
+    const uint32_t window = bridgelogic::kDefaultClockTrustMinutes * 60000UL;
+    TEST_ASSERT_TRUE(clock.trusted(base + window));
+    TEST_ASSERT_FALSE(clock.trusted(base + window + 1U));
+
+    char wire[bridgelogic::kWireTimeLen] = {};
+    char shown[bridgelogic::kDisplayTimeLen] = {};
+    clock.wireTime(base + window + 1U, wire, sizeof(wire));
+    clock.displayTime(base + window + 1U, shown, sizeof(shown));
+    // A stale clock reads exactly like a live one, which is why it is worse
+    // than none: "19:30" on a box that has been offline since lunchtime is a
+    // number the member will plan around.
+    TEST_ASSERT_EQUAL_STRING(proto::kNoClock, wire);
+    TEST_ASSERT_EQUAL_STRING("", shown);
+    // And every row that names a FUTURE time blanks with it, not just "now".
+    clock.displayTimeAt(base + window + 1U, 12345U, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("", shown);
+
+    // A fresh heartbeat restores it whole.
+    TEST_ASSERT_TRUE(clock.adopt("2026-09-21T19:31:00+02:00", base + window + 1U));
+    TEST_ASSERT_TRUE(clock.trusted(base + window + 1U));
+    clock.displayTime(base + window + 1U, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("19:31", shown);
+
+    // A malformed `server_time` is not evidence that the last good one has gone
+    // stale — the box keeps the clock it has and lets it age out normally.
+    TEST_ASSERT_FALSE(clock.adopt("not a time", base + window + 2U));
+    TEST_ASSERT_TRUE(clock.trusted(base + window + 2U));
+    clock.displayTime(base + window + 2U, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("19:31", shown);
+
+    // The tenant's setting, clamped, and immediate: an admin who shortens this
+    // wants the stale clock gone now, and there is nobody mid-interaction.
+    clock.setTrustMinutes(0U);
+    TEST_ASSERT_EQUAL_UINT32(bridgelogic::kMinClockTrustMinutes, clock.trustMinutes());
+    clock.setTrustMinutes(999999UL);
+    TEST_ASSERT_EQUAL_UINT32(bridgelogic::kMaxClockTrustMinutes, clock.trustMinutes());
+    // Measured from the last ADOPTION, which was at base + window + 1.
+    clock.setTrustMinutes(5U);
+    TEST_ASSERT_TRUE(clock.trusted(base + window + 1U + (5UL * 60000UL)));
+    TEST_ASSERT_FALSE(clock.trusted(base + window + 1U + (5UL * 60000UL) + 1U));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// B4 — the layout contract, over EVERY screen at once
+// ---------------------------------------------------------------------------
+//
+// THIS TABLE IS THE DELIVERABLE, not a nicety. Before ScreenScript there was no
+// place any test could stand and look at every screen the box can paint, so a
+// screen that read as half a sentence on the panel that is actually fitted was
+// only ever found by somebody standing in front of one. It found `WRONG COURT`
+// / `Your booking is on` while the table was being written: that clips at
+// column 16 to "Your booking is", a sentence that stops one word before the
+// only word that matters.
+
+struct ScreenContract {
+  bridgelogic::ScreenId id;
+  /// The word rows 0-1 must still carry when a 1602 clips them at column 16.
+  const char* keyNoun;
+  /// Row 3 is generated from the live button map rather than being fixed text.
+  bool actionRowFromMap;
+  /// The greeting carve-out: row 0 is `HI <NAME>`, and a clipped name is a
+  /// shortened name rather than a broken sentence.
+  bool greeting;
+};
+
+const ScreenContract kContract[] = {
+    {bridgelogic::ScreenId::Grant, "COURT", false, false},
+    {bridgelogic::ScreenId::AlreadyOn, "COURT", false, false},
+    {bridgelogic::ScreenId::NoBooking, "BOOKING", true, false},
+    {bridgelogic::ScreenId::InsufficientBalance, "CREDITS", false, false},
+    {bridgelogic::ScreenId::WrongCourt, "COURT", false, false},
+    {bridgelogic::ScreenId::TooEarly, "EARLY", false, false},
+    {bridgelogic::ScreenId::NotRecognised, "CODE", false, false},
+    {bridgelogic::ScreenId::SlotEnded, "ENDED", true, false},
+    {bridgelogic::ScreenId::CourtInUse, "COURT", true, false},
+    {bridgelogic::ScreenId::NoTimeAvailable, "TIME", true, false},
+    {bridgelogic::ScreenId::MinutesOutOfRange, "LONG", true, false},
+    {bridgelogic::ScreenId::ClubClosed, "CLOSED", false, false},
+    {bridgelogic::ScreenId::PurchaseEnded, "ENDED", true, false},
+    {bridgelogic::ScreenId::ActivationRefused, "START", false, false},
+    {bridgelogic::ScreenId::NoConnection, "CONNECTION", false, false},
+    {bridgelogic::ScreenId::SeeTheDesk, "DESK", false, false},
+    {bridgelogic::ScreenId::OnNotSent, "AGAIN", false, false},
+    {bridgelogic::ScreenId::NotYourCourt, "COURT", false, false},
+    {bridgelogic::ScreenId::ScanFirst, "SCAN", false, false},
+    {bridgelogic::ScreenId::ChooseTime, "COURT", true, false},
+    {bridgelogic::ScreenId::OneMoment, "MOMENT", false, false},
+    {bridgelogic::ScreenId::CardBooked, "COURT", false, true},
+    {bridgelogic::ScreenId::CardNoBooking, "BOOKING", true, true},
+    {bridgelogic::ScreenId::CardBookedOffline, "BOOKING", false, false},
+};
+
+constexpr size_t kContractCount = sizeof(kContract) / sizeof(kContract[0]);
+
+/// Facts every screen can be built from, all of them present, so the contract
+/// is checked against the WIDEST rendering of each row rather than a convenient
+/// one. The court number is four digits and the minutes two, which is the most
+/// either can be on this panel.
+bridgelogic::ScreenFacts fullFacts(const court::ButtonMap* map) {
+  bridgelogic::ScreenFacts facts;
+  facts.court = 3U; // D, the widest letter position
+  facts.courtNumber = 9999;
+  facts.minutes = 90U;
+  snprintf(facts.endsAt, sizeof(facts.endsAt), "%s", "18:45");
+  snprintf(facts.atTime, sizeof(facts.atTime), "%s", "06:00");
+  snprintf(facts.fromTime, sizeof(facts.fromTime), "%s", "18:00");
+  snprintf(facts.toTime, sizeof(facts.toTime), "%s", "18:45");
+  snprintf(facts.name, sizeof(facts.name), "%s", "Dean");
+  facts.buttons = map;
+  return facts;
+}
+
+bool endsMidWord(const char* row, size_t cutAt) {
+  // A row that survives the cut whole cannot end mid-word.
+  if (strlen(row) <= cutAt) {
+    return false;
+  }
+  // Cut inside the text: the character at the cut, and the one before it, must
+  // not both be part of one word.
+  return row[cutAt] != ' ' && row[cutAt - 1U] != ' ';
+}
+
+void test_every_screen_holds_the_layout_contract() {
+  // Every screen is in the table, and the table is every screen: a screen added
+  // without a contract row is a screen nothing checks.
+  TEST_ASSERT_EQUAL_size_t(bridgelogic::kScreenCount, kContractCount);
+
+  court::ButtonMap map;
+  const bridgelogic::ScreenFacts facts = fullFacts(&map);
+
+  for (size_t i = 0U; i < kContractCount; ++i) {
+    const ScreenContract& contract = kContract[i];
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(i), static_cast<uint8_t>(contract.id),
+                                    "the contract table must be indexed by ScreenId");
+    const bridgelogic::Screen screen = bridgelogic::screenFor(contract.id, facts);
+
+    char label[64] = {};
+    snprintf(label, sizeof(label), "screen %u: %s", static_cast<unsigned>(i), screen.rows[0]);
+
+    // --- rule 1: rows 0-1 are a whole message at sixteen columns -----------
+    TEST_ASSERT_TRUE_MESSAGE(screen.rows[0][0] != '\0', label);
+    TEST_ASSERT_TRUE_MESSAGE(screen.rows[1][0] != '\0', label);
+    for (size_t row = 0U; row < 2U; ++row) {
+      TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[row]) <= court::kSafeSubsetCols, label);
+      if (!contract.greeting) {
+        TEST_ASSERT_FALSE_MESSAGE(endsMidWord(screen.rows[row], court::kSafeSubsetCols), label);
+      }
+    }
+    // The key noun survives the clip, in the pair.
+    char pair[(court::kSafeSubsetCols * 2U) + 2U] = {};
+    snprintf(pair, sizeof(pair), "%s %s", screen.rows[0], screen.rows[1]);
+    if (!contract.greeting) {
+      TEST_ASSERT_NOT_NULL_MESSAGE(strstr(pair, contract.keyNoun), label);
+    }
+
+    // --- rule 2: row 3 leaves columns 16-19 to the countdown ---------------
+    TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[3]) <= court::kSafeSubsetCols, label);
+
+    // --- every row fits the panel that is actually fitted ------------------
+    for (size_t row = 0U; row < proto::kMaxRows; ++row) {
+      TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[row]) <= court::kLineLen, label);
+    }
+
+    // --- rule 4: no code, no id, no number the member did not choose -------
+    // A relay index never reaches the glass — courts are letters — and the only
+    // numbers here are a club court number, a duration and a clock.
+    TEST_ASSERT_NULL_MESSAGE(strstr(pair, "relay"), label);
+    TEST_ASSERT_NULL_MESSAGE(strstr(pair, "booking_id"), label);
+
+    // --- the hold is bounded, always ---------------------------------------
+    TEST_ASSERT_TRUE_MESSAGE(screen.holdSeconds >= proto::kShowHoldMinSeconds, label);
+    TEST_ASSERT_TRUE_MESSAGE(screen.holdSeconds <= proto::kShowHoldMaxSeconds, label);
+    // Unallocated flag bits stay zero: a bit this build sets and the Mega does
+    // not know is a screen nobody designed.
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, screen.flags & static_cast<uint8_t>(~bridgelogic::kShowFlagCountdown),
+                                    label);
+
+    // --- rule 3: the action row is generated where the table says it is ----
+    if (contract.actionRowFromMap) {
+      TEST_ASSERT_TRUE_MESSAGE(screen.rows[3][0] != '\0', label);
+    }
+  }
+}
+
+void test_a_sixteen_character_name_still_fits_the_panel() {
+  // `member_display` is server-truncated to sixteen characters, so `HI ` plus a
+  // name is nineteen — inside the 2004A's twenty and past the 1602's sixteen.
+  // That is the ONE carve-out from rule 1, and it is a shortened name rather
+  // than a broken sentence: the message is still complete and still correct.
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+  snprintf(facts.name, sizeof(facts.name), "%s", "Bartholomew Jone");
+  TEST_ASSERT_EQUAL_size_t(bridgelogic::kMaxMemberNameLen, strlen(facts.name));
+
+  const bridgelogic::Screen card = bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts);
+  TEST_ASSERT_EQUAL_STRING("HI Bartholomew Jone", card.rows[0]);
+  TEST_ASSERT_TRUE(strlen(card.rows[0]) <= court::kLineLen);
+
+  // A one-character name, and none at all.
+  snprintf(facts.name, sizeof(facts.name), "%s", "X");
+  TEST_ASSERT_EQUAL_STRING("HI X", bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+  facts.name[0] = '\0';
+  TEST_ASSERT_EQUAL_STRING("HI THERE",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+}
+
+void test_the_screens_say_what_the_table_says_they_say() {
+  // The wording itself, for the screens whose exact words are the point.
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+  facts.court = 1U;
+  facts.courtNumber = 9;
+  facts.minutes = 45U;
+
+  bridgelogic::Screen s = bridgelogic::screenFor(bridgelogic::ScreenId::Grant, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT B IS ON", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("45 MINUTES", s.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("Ends 18:45", s.rows[2]);
+  TEST_ASSERT_EQUAL_STRING("ENJOY YOUR GAME", s.rows[3]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kRevertSeconds, s.holdSeconds);
+  TEST_ASSERT_EQUAL_UINT8(bridgelogic::kShowFlagCountdown, s.flags);
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::AlreadyOn, facts);
+  TEST_ASSERT_EQUAL_STRING("45 MINUTES LEFT", s.rows[1]);
+
+  // The screen the contract caught: the court NUMBER on row 1, where sixteen
+  // columns can hold it.
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::WrongCourt, facts);
+  TEST_ASSERT_EQUAL_STRING("WRONG COURT", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("GO TO COURT 9", s.rows[1]);
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::ChooseTime, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT B", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("HOW LONG?", s.rows[1]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kChoiceSeconds, s.holdSeconds);
+  TEST_ASSERT_EQUAL_UINT8(bridgelogic::kShowFlagCountdown, s.flags);
+
+  // Never indefinite, and never longer than the blocking call plus slack.
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::OneMoment, facts);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kWaitSeconds, s.holdSeconds);
+  TEST_ASSERT_EQUAL_STRING("", s.rows[2]);
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts);
+  TEST_ASSERT_EQUAL_STRING("Booked 18:00-18:45", s.rows[2]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kCardSeconds, s.holdSeconds);
+
+  // The offline roster path has no name and does not pretend to.
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::CardBookedOffline, facts);
+  TEST_ASSERT_EQUAL_STRING("BOOKING FOUND", s.rows[0]);
+}
+
+void test_a_row_that_would_name_a_time_blanks_when_the_clock_is_not_trusted() {
+  // B6's rule, seen from the glass: a stale clock reads exactly like a live
+  // one, so a row whose only content is a blanked time renders BLANK rather
+  // than "Ends " — a prefix with its answer missing reads as a screen that is
+  // still loading.
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+  facts.endsAt[0] = '\0';
+  facts.atTime[0] = '\0';
+  facts.toTime[0] = '\0';
+
+  TEST_ASSERT_EQUAL_STRING("", bridgelogic::screenFor(bridgelogic::ScreenId::Grant, facts).rows[2]);
+  TEST_ASSERT_EQUAL_STRING("", bridgelogic::screenFor(bridgelogic::ScreenId::TooEarly, facts).rows[2]);
+  TEST_ASSERT_EQUAL_STRING("", bridgelogic::screenFor(bridgelogic::ScreenId::ClubClosed, facts).rows[1]);
+  TEST_ASSERT_EQUAL_STRING("", bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[2]);
+
+  // And the rows that do NOT name a time are untouched: a blank clock must not
+  // blank the screen.
+  const bridgelogic::Screen grant = bridgelogic::screenFor(bridgelogic::ScreenId::Grant, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT D IS ON", grant.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("ENJOY YOUR GAME", grant.rows[3]);
+}
+
+void test_the_action_row_is_the_live_panel_and_never_a_hardcoded_one() {
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+
+  // The default panel: courts A-D on the green row, 15/30/45/60 on the black.
+  char row[court::kLineLen + 1U] = {};
+  bridgelogic::renderActionRow(map, bridgelogic::kCourtCellsFrom, row, sizeof(row));
+  TEST_ASSERT_EQUAL_STRING("A   B   C   D", row);
+  bridgelogic::renderActionRow(map, bridgelogic::kDurationCellsFrom, row, sizeof(row));
+  TEST_ASSERT_EQUAL_STRING("15  30  45  60", row);
+  TEST_ASSERT_TRUE(strlen(row) <= court::kSafeSubsetCols);
+
+  // A club that maps `minutes:20` must see 20. Hardcoding the row is how a
+  // screen tells a member to press a button that buys something else.
+  TEST_ASSERT_TRUE(map.setFromWire(4U, "minutes:20"));
+  TEST_ASSERT_TRUE(map.setFromWire(5U, "off"));
+  TEST_ASSERT_TRUE(map.setFromWire(6U, "none"));
+  bridgelogic::renderActionRow(map, bridgelogic::kDurationCellsFrom, row, sizeof(row));
+  // `off` and `none` render BLANK: a button that does nothing must not
+  // advertise a duration somebody would press.
+  TEST_ASSERT_EQUAL_STRING("20          60", row);
+
+  facts.buttons = &map;
+  TEST_ASSERT_EQUAL_STRING("20          60",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::ChooseTime, facts).rows[3]);
+
+  // No map at all falls back to the original wiring, which is what a box that
+  // has never had a heartbeat actually has.
+  facts.buttons = nullptr;
+  TEST_ASSERT_EQUAL_STRING("15  30  45  60",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::ChooseTime, facts).rows[3]);
+}
+
+void test_member_display_is_read_tolerantly_and_never_truncated() {
+  bridgelogic::ScreenFacts facts;
+
+  // The ordinary case today: the backend does not send the field yet.
+  const char none[] = "{\"activated\":true,\"granted_seconds\":2700,\"court_number\":7}";
+  bridgelogic::readMemberDisplay(none, len(none), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+
+  const char one[] = "{\"member_display\":\"X\"}";
+  bridgelogic::readMemberDisplay(one, len(one), facts);
+  TEST_ASSERT_EQUAL_STRING("X", facts.name);
+
+  const char sixteen[] = "{\"member_display\":\"Bartholomew Jone\"}";
+  bridgelogic::readMemberDisplay(sixteen, len(sixteen), facts);
+  TEST_ASSERT_EQUAL_STRING("Bartholomew Jone", facts.name);
+
+  // The frame's escape set. These are the bytes that would re-write the fields
+  // around a name if it were ever interpolated into a body — it is not, it only
+  // ever reaches the glass — and the scanner must still find the string's end.
+  const char escapes[] = "{\"member_display\":\"A,B*C%D\"}";
+  bridgelogic::readMemberDisplay(escapes, len(escapes), facts);
+  TEST_ASSERT_EQUAL_STRING("A,B*C%D", facts.name);
+
+  // Forty characters: REFUSED by devapi::json rather than truncated, because
+  // half a name is a different member's. It degrades to the greeting, never to
+  // a missing screen.
+  const char long40[] = "{\"member_display\":\"0123456789012345678901234567890123456789\"}";
+  bridgelogic::readMemberDisplay(long40, len(long40), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+  court::ButtonMap map;
+  facts.buttons = &map;
+  TEST_ASSERT_EQUAL_STRING("HI THERE",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+
+  // A decoy at a deeper level, before and after. The greeting is the member's
+  // only confirmation that the box knows who they are.
+  const char decoyFirst[] = "{\"detail\":{\"member_display\":\"Mallory\"},\"member_display\":\"Dean\"}";
+  bridgelogic::readMemberDisplay(decoyFirst, len(decoyFirst), facts);
+  TEST_ASSERT_EQUAL_STRING("Dean", facts.name);
+  const char decoyOnly[] = "{\"detail\":{\"member_display\":\"Mallory\"}}";
+  bridgelogic::readMemberDisplay(decoyOnly, len(decoyOnly), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+
+  // Wrong type, and a truncated body.
+  const char wrongType[] = "{\"member_display\":42}";
+  bridgelogic::readMemberDisplay(wrongType, len(wrongType), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+  const char cut[] = "{\"member_display\":\"Dea";
+  bridgelogic::readMemberDisplay(cut, len(cut), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+}
+
 } // namespace
 
 void setUp() {
@@ -2037,6 +3120,11 @@ int main(int, char**) {
   RUN_TEST(test_corpus_walkup_body_is_byte_identical_to_the_contract);
   RUN_TEST(test_corpus_events_body_is_byte_identical_to_the_contract);
   RUN_TEST(test_corpus_roster_pushes_load_exactly_as_the_contract_declares_them);
+  RUN_TEST(test_corpus_the_relay_restore_vectors_parse_exactly_as_declared);
+  RUN_TEST(test_corpus_the_lcd_settings_are_adopted_and_clamped);
+  RUN_TEST(test_corpus_the_heartbeat_report_fields_are_byte_identical_to_the_contract);
+  RUN_TEST(test_corpus_member_display_names_the_member_or_greets_them_anyway);
+  RUN_TEST(test_corpus_the_event_body_carries_this_boots_id);
   RUN_TEST(test_corpus_every_http_section_is_declared_and_every_vector_is_bound);
 
   RUN_TEST(test_scan_flow_a_box_with_no_court_list_is_not_online);
@@ -2054,6 +3142,25 @@ int main(int, char**) {
   RUN_TEST(test_on_retry_resends_the_last_on_once_and_only_inside_the_window);
   RUN_TEST(test_on_retry_keeps_an_ext_too_and_a_lost_one_is_sent_again);
   RUN_TEST(test_on_retry_a_release_on_another_court_keeps_this_courts_retry);
+  RUN_TEST(test_on_retry_a_non_relay_frame_clears_the_memory_rather_than_skipping_it);
+  RUN_TEST(test_on_retry_an_off_for_b_after_an_on_for_a_replays_neither);
+  RUN_TEST(test_on_retry_a_badcrc_after_a_non_relay_frame_never_moves_a_relay_deadline);
+  RUN_TEST(test_a_refused_ext_releases_the_court_instead_of_reading_as_a_lost_frame);
+  RUN_TEST(test_a_refused_ext_on_a_dark_court_is_sent_exactly_once);
+  RUN_TEST(test_a_badarg_with_no_ext_remembered_is_not_a_release);
+  RUN_TEST(test_activate_reads_every_field_it_acts_on_from_the_top_level);
+  RUN_TEST(test_walkup_reads_every_field_it_acts_on_from_the_top_level);
+  RUN_TEST(test_the_flat_scan_is_kept_where_it_is_genuinely_wanted);
+  RUN_TEST(test_this_boot_has_an_identity_and_it_is_never_the_wires_absent_value);
+  RUN_TEST(test_server_time_is_read_as_club_local_wall_time_or_refused);
+  RUN_TEST(test_the_clock_advances_between_heartbeats_and_wraps_at_midnight);
+  RUN_TEST(test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies);
+  RUN_TEST(test_every_screen_holds_the_layout_contract);
+  RUN_TEST(test_a_sixteen_character_name_still_fits_the_panel);
+  RUN_TEST(test_the_screens_say_what_the_table_says_they_say);
+  RUN_TEST(test_a_row_that_would_name_a_time_blanks_when_the_clock_is_not_trusted);
+  RUN_TEST(test_the_action_row_is_the_live_panel_and_never_a_hardcoded_one);
+  RUN_TEST(test_member_display_is_read_tolerantly_and_never_truncated);
   RUN_TEST(test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent);
   RUN_TEST(test_state_seconds_parse_decimal_and_refuse_everything_else);
   RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);

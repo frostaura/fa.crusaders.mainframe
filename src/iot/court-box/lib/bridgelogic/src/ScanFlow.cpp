@@ -51,7 +51,7 @@ court::Outcome refusal(const char* line1, const char* line2, bool recognised) {
 /// member sees one screen for one situation whichever path decided it.
 court::Outcome tooEarly(const char* body, size_t len) {
   uint32_t startsIn = 0U;
-  if (!devapi::json::unsignedField(body, len, "starts_in_seconds", startsIn)) {
+  if (!devapi::json::topLevelUnsignedField(body, len, "starts_in_seconds", startsIn)) {
     return refusal("TOO EARLY", "SEE THE DESK", true);
   }
   court::Outcome outcome = refusal("TOO EARLY", "", true);
@@ -62,7 +62,7 @@ court::Outcome tooEarly(const char* body, size_t len) {
 
 court::Outcome refusedFor(const char* body, size_t len) {
   char reason[24] = {};
-  if (devapi::json::stringField(body, len, "reason", reason, sizeof(reason))) {
+  if (devapi::json::topLevelStringField(body, len, "reason", reason, sizeof(reason))) {
     if (strcmp(reason, "too_early") == 0) {
       return tooEarly(body, len);
     }
@@ -185,8 +185,24 @@ ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body,
     return fallback();
   }
 
+  // A BODY THIS READER CANNOT SEE THE WHOLE OF IS NOT A DECISION.
+  //
+  // The composition root reads the response into a fixed buffer and a payload
+  // that does not fit is cut, not refused. A cut grant loses whichever fields
+  // were at the end — `court_number` above all — and the old reader then
+  // refused a court the API had ALREADY recorded the attendance for: the member
+  // is charged, the club's record says they played, and the lights are off.
+  // Falling back means the roster decides, which for a booking it holds is the
+  // same court for what is left of the same slot.
+  //
+  // Same rule devlink::applyRoster follows, and for the same reason: a reader
+  // that ACTS on what it found must know it found all of it.
+  if (!devapi::json::isCompleteObject(body, len)) {
+    return fallback();
+  }
+
   bool activated = false;
-  if (!devapi::json::boolField(body, len, "activated", activated)) {
+  if (!devapi::json::topLevelBoolField(body, len, "activated", activated)) {
     return fallback();
   }
   if (!activated) {
@@ -196,13 +212,13 @@ ActivationResult ScanFlow::onActivateResponse(uint16_t status, const char* body,
   }
 
   uint32_t grantedSeconds = 0U;
-  if (!devapi::json::unsignedField(body, len, "granted_seconds", grantedSeconds)) {
+  if (!devapi::json::topLevelUnsignedField(body, len, "granted_seconds", grantedSeconds)) {
     return fallback();
   }
 
   uint32_t courtNumber = 0U;
   uint8_t relay = 0U;
-  if (!devapi::json::unsignedField(body, len, "court_number", courtNumber) ||
+  if (!devapi::json::topLevelUnsignedField(body, len, "court_number", courtNumber) ||
       courtNumber > static_cast<uint32_t>(INT16_MAX) ||
       !relayForCourtNumber(static_cast<int16_t>(courtNumber), courtNumbers, courtCount, relay)) {
     // The API lit a court this box does not drive, or did not say which. It has

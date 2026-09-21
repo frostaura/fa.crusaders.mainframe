@@ -15,4 +15,11 @@ bool shouldRepaintIdentity(bool seenPong, uint32_t previousSeconds, uint32_t sec
   return seconds < previousSeconds;
 }
 
+IdentityScreen identityScreen(bool wifiUp) {
+  if (wifiUp) {
+    return IdentityScreen{kIdentityOnlineLine1, kIdentityOnlineLine2};
+  }
+  return IdentityScreen{kIdentityOfflineLine1, kIdentityOfflineLine2};
+}
+
 } // namespace bridgelogic

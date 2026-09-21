@@ -90,7 +90,7 @@ and re-run `make arduino-export`.**
 | `GATE_UNLOCK_ENERGISES_RELAY` | 1 | **The LOCK's wiring.** 1 if an energised coil *releases* the lock. See the truth table below before touching this one. |
 | `GATE_LED_PIN` | 27 | The lamp — the board's entire user interface. |
 | `GATE_LED_ACTIVE_HIGH` | 1 | 1 if HIGH lights it. |
-| `GATE_UNLOCK_DEFAULT_MS` | 3000UL | Release time until the first heartbeat tells the board the club's own. |
+| `GATE_UNLOCK_DEFAULT_MS` | 15000UL | Release time until the first heartbeat tells the board the club's own. |
 | `GATE_UNLOCK_HARD_CAP_MS` | 30000UL | A safety bound, not a default: the longest ONE release window may last, whatever the server answers and however often somebody scans. On its own it bounds the WINDOW and not the door — the two dwells below are what make it bound the door. |
 | `GATE_RELOCK_DWELL_MS` | 3000UL | After a window the hard cap ended, the lock stays locked for at least this long and no grant may energise the relay inside it. Without it the cap closed a window and the very next scan opened a fresh one in the same pass — relay OFF and ON at the same millisecond, so the strike never dropped and the door never relatched. |
 | `GATE_MIN_RELOCK_MS` | 400UL | The same floor after ANY close, so two back-to-back members are two openings rather than one continuous one. Long enough for a strike to drop or a maglock to re-magnetise; short enough that the second member does not notice it. |
@@ -177,7 +177,7 @@ within one heartbeat as `Kind=Gate`.
 | PlatformIO environment | `[env:door_gate]` |
 | Board | `esp32:esp32` 2.0.17, FQBN `esp32:esp32:esp32` |
 | `lib/` modules | `devapi`, `devcrypto`, `devlink`, `esp32_hal`, `eventq`, `fwversion`, `gatelogic`, `hal`, `roster`, `timebase` |
-| Build flags in `src/build_config.h` | 21 |
+| Build flags in `src/build_config.h` | 23 |
 
 | Library | Version | Where | Licence file |
 |---|---|---|---|

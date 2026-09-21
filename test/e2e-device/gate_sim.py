@@ -105,6 +105,14 @@ RELEASE_TOLERANCE_MS = 400
 RELOCK_DWELL_MS = 400
 CAP_RELOCK_DWELL_MS = 3000
 
+# GATE_UNLOCK_HARD_CAP_MS, from src/iot/door-gate/platformio.ini. The longest the
+# lock may be released by ANY sequence of grants, measured from the first
+# energise and NOT reset by a re-arm. It is a safety bound rather than a default,
+# and it is what makes the release default moving from 3 s to 15 s a visible
+# change at a busy door: the cap allowed nine extensions at three seconds and
+# allows one at fifteen.
+CAP_MS = 30000
+
 #: `kScanDebounceMs`. A repeat of the SAME token inside this of a decision for it
 #: is dropped without a decision — so a harness re-scanning one code has to wait
 #: it out or the simulator answers nothing at all, which reads as a dead board.
@@ -1124,6 +1132,77 @@ def dsim_firmware(door: Any) -> None:
         sim.relay_window(back_from, timeout=12.0)
         sim.let_the_lock_relatch()
 
+
+        # -- D S 5 c : back-to-back scans, and what the hard cap now costs ---
+        #
+        # THE RELEASE DEFAULT MOVED FROM THREE SECONDS TO FIFTEEN (GOAL item 2),
+        # and the interesting consequence is not the fifteen. It is that
+        # GATE_UNLOCK_HARD_CAP_MS bounds the TOTAL release across RE-ARMS, from
+        # the first energise. At three seconds that allowed nine extensions; at
+        # fifteen it allows ONE. A second member scanning at t = 14 s gets fifteen
+        # seconds more and a third at t = 29 s gets one — and then the door shuts
+        # on whoever is still walking through it.
+        #
+        # That is CORRECT and must stay: the cap is the property that stops a busy
+        # doorway holding a lock open indefinitely one scan at a time. It is also
+        # a visible behaviour change at a busy door, which is why it is measured
+        # here rather than reasoned about.
+        #
+        # ASSERTED AS A RELATION, NOT AS A LITERAL. The served `unlock_seconds` is
+        # the club's, the firmware default and the backend default are separate
+        # changes landing in separate lanes, and a step pinned to either number
+        # would go red on whichever arrived second.
+        served = door.unlock_seconds()
+        rescan_at = (SCAN_DEBOUNCE_MS / 1000.0) + 0.4
+        if served < 5:
+            # LOUD, not silent. A skip nobody can see is worse than an absent
+            # step, and the reason is a number somebody can go and change.
+            chk("DSIM", f"SKIPPED — the club serves unlock_seconds={served}, and this harness cannot "
+                        f"get a second scan inside a {served} s release: the same token is debounced "
+                        f"for {SCAN_DEBOUNCE_MS} ms. Raise gate_unlock_seconds to 5 or more (the "
+                        f"firmware default is 15) and this step measures the cap.", True,
+                f"served={served}s")
+        else:
+            time.sleep((SCAN_DEBOUNCE_MS / 1000.0) + 0.3)
+            first_from = sim.mark()
+            first = sim.scan(live_code)
+            chk("DSIM", "back to back: the first member is let in", first.flag("released"), first.raw)
+            on = sim.expect(lambda l: l.channel == "relay" and l.state == "ON", 12.0,
+                            "the relay energising", first_from)
+
+            # MID-RELEASE, which is the whole point: the lock has not closed, so
+            # this is a re-arm rather than a fresh open, and the relock dwell —
+            # which only exists just after a CLOSE — must not fire for it.
+            time.sleep(rescan_at)
+            second_from = sim.mark()
+            second = sim.scan(live_code)
+            chk("DSIM", "  ...and a second scan ARRIVING MID-RELEASE is accepted rather than refused "
+                        "as `relocking`: the dwell is about a lock that has closed, and this one has "
+                        "not",
+                second.flag("released") and second.get("reason") != "relocking", second.raw)
+            chk("DSIM", "  ...and the lock is never DE-ENERGISED between the two — one continuous "
+                        "release, not a drop and a re-open, which is a strike that clicks in "
+                        "somebody's face",
+                not any(l.channel == "relay" and l.state == "OFF" for l in sim.since(first_from,
+                                                                                     "relay")[:-0] or
+                        [l for l in sim.since(first_from, "relay") if l.state == "OFF"]),
+                f"relay: {[l.raw for l in sim.since(first_from, 'relay')]}")
+
+            off = sim.expect(lambda l: l.channel == "relay" and l.state == "OFF", float(CAP_MS / 1000) + 15.0,
+                             "the extended release finally closing", first_from)
+            held = off.at_ms - on.at_ms
+            asked = int(rescan_at * 1000) + (served * 1000)
+            want = min(asked, CAP_MS)
+            chk("DSIM", f"  ...the extension is granted and BOUNDED: one release of {held} ms from the "
+                        f"first energise, where the two scans asked for about {asked} ms and the "
+                        f"{CAP_MS} ms whole-window cap allows {want} ms. The cap bounds the TOTAL "
+                        f"across re-arms, which is why a {served} s release allows so few of them.",
+                abs(held - want) <= (RELEASE_TOLERANCE_MS + 600),
+                f"held={held}ms want={want}ms asked={asked}ms served={served}s cap={CAP_MS}ms")
+            chk("DSIM", f"  ...and it NEVER exceeds the cap, whatever the club configures",
+                held <= CAP_MS + RELEASE_TOLERANCE_MS, f"held={held}ms cap={CAP_MS}ms")
+            sim.let_the_lock_relatch()
+            time.sleep((SCAN_DEBOUNCE_MS / 1000.0) + 0.3)
 
         # -- D S 6 : the club shuts the door --------------------------------
         #

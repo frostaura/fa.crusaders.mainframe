@@ -357,7 +357,7 @@ SCAN TO START</span>.</li>
 </section>
 
 <section id="doors">
-  <header><h2>…and the doors</h2><p>The same club, the same key, the same API — one small board per door instead of one per four courts. A member holds up the code their phone already shows them and the lock lets go for three seconds. Nothing here touches a court, a booking or a credit.</p></header>
+  <header><h2>…and the doors</h2><p>The same club, the same key, the same API — one small board per door instead of one per four courts. A member holds up the code their phone already shows them and the lock lets go for fifteen seconds. Nothing here touches a court, a booking or a credit.</p></header>
 
   <div class="tiles">
     <div class="tile"><div class="k">The board</div><div class="v">One ESP32, one lock, one lamp.</div><div class="d">A QR scanner on a serial port, one relay on the lock, one LED. No screen and no buttons — the lamp is the whole of what a member sees. It calls out and never listens, exactly like the court box.</div></div>
@@ -376,7 +376,7 @@ SCAN TO START</span>.</li>
         <li>In the Arduino IDE install the <b>esp32 core, exactly 2.0.17</b> — the sketch folder's own README carries the boards-manager URL. Only one version of a core installs at a time and 3.x is not a small difference.</li>
         <li>Open <code>src/iot/door-gate/arduino/door_gate/door_gate.ino</code>, board <b>ESP32 Dev Module</b>, pick the port, <b>Upload</b>. No DIP positions to set and nothing to install from the Library Manager — the folder vendors every library it needs, and it is generated, so never hand-edit it.</li>
         <li>Within a minute the door is on the <b>Devices</b> page by itself as <code>gate-xxxxxx</code>. <b>Give it a name</b> — "front-door", "side-door". Until you do, it works only while it can reach the server.</li>
-        <li>Under <b>Settings</b>, the three numbers a door runs on: how long the lock releases (3 seconds, anything from 1 to 30), who may open a door (<i>any active member</i>, the default, or <i>only members with a booking</i>), and how early before a booking its holder may come in (30 minutes).</li>
+        <li>Under <b>Settings</b>, the three numbers a door runs on: how long the lock releases (<b>15 seconds</b>, anything from 1 to 30 — long enough to notice the lamp, move a bag and pull a handle, which three seconds was not), who may open a door (<i>any active member</i>, the default, or <i>only members with a booking</i>), and how early before a booking its holder may come in (30 minutes).</li>
       </ul>
     </li>
     <li>
@@ -403,13 +403,27 @@ SCAN TO START</span>.</li>
 
 <section id="trouble">
   <header><h2>What the glass is telling you</h2><p>Every screen the box can show, and what it means.</p></header>
+
+  <div class="panel" style="margin-bottom:18px">
+    <div class="k">The glass is four rows now, and no screen can get stuck on it</div>
+    <table>
+      <tr><td><b>Four rows, not two</b></td><td>The panel always was a 20×4; the firmware used to drive it as 16×2, so four columns of every line and two whole rows were unreachable. <b>No wire changed</b> — two build flags did. Row 0 is the title, row 1 the detail, row 2 the <i>live</i> state of the four courts, row 3 what to press plus a clock or a countdown. The zones never swap meaning, so you learn where to look once.</td></tr>
+      <tr><td><b>Fit a 1602 by mistake and it still reads</b></td><td>Rows 0 and 1, cut at column 16, are a complete sentence on every screen — never half of one. A smaller panel degrades to exactly the old behaviour rather than to nonsense. Somebody still has to <i>look</i> at the panel before a club box is flashed; that is on the go-live list.</td></tr>
+      <tr><td><b>Every screen expires</b></td><td>The landing screen and the revert timer live on the <b>Mega</b>, for the same reason its lights-off timer does: the ESP is the half that goes away, and a timer that rescues you from a stuck screen is useless if it lives on the thing whose crash caused it. Every screen the bridge paints is an overlay with a deadline, clamped by the Mega into <b>1 to 120 seconds</b> on the way in — so nothing can leave a refusal on the glass all evening with the buttons dead behind it, which is a failure this box has actually had.</td></tr>
+      <tr><td><b>Plain digits, no bar</b></td><td>The countdown counts in numerals on purpose. A progress bar costs custom characters the display has to be given back after every bus hiccup, and tells you nothing the digits do not.</td></tr>
+      <tr><td><b>Press anything and the screen waits for you</b></td><td>Any button press re-arms the screen you are reading, so nobody loses a half-made choice because they were still reading it. A press the box could not act on answers on row 3 alone and leaves the rest of the screen where it was.</td></tr>
+    </table>
+  </div>
+
   <div class="tblwrap"><table class="tt">
     <thead><tr><th>LCD</th><th>Meaning</th><th>Do</th></tr></thead>
     <tbody>
+      <tr><td><span class="lcd">CRUSADERS COURTS
+SCAN YOUR CODE</span></td><td>The <b>Mega's own</b> landing screen — no frame from the bridge involved, which is what makes it the screen everything else falls back to. Row 2 shows which courts are lit and for how much longer; row 3 says what to press, with the club clock on the right.</td><td>Nothing. This is a healthy idle box.</td></tr>
       <tr><td><span class="lcd">CONNECTED
 SCAN TO START</span></td><td>Idle, WiFi up, backend reachable at the last heartbeat.</td><td>Nothing.</td></tr>
       <tr><td><span class="lcd">CRUSADERS COURTS
-SCAN TO START</span></td><td>Not connected: WiFi not joined, or no heartbeat has succeeded yet (wrong URL or key, server down). Bookings in a previously fetched roster still light.</td><td>Check the router and the server. If the WiFi password, address or key changed, reflash the bridge.</td></tr>
+SCAN TO START</span></td><td>Not connected: WiFi not joined, or no heartbeat has succeeded yet (wrong URL or key, server down). Bookings in a previously fetched roster still light. Told apart from the landing screen above by its second line — this one is the <i>bridge</i> saying it has no radio.</td><td>Check the router and the server. If the WiFi password, address or key changed, reflash the bridge.</td></tr>
       <tr><td><span class="lcd">NO CONNECTION
 SEE THE DESK</span></td><td>The backend isn't answering and the scanned code isn't in the cached roster.</td><td>Check the server is running. Bookings in the roster still light.</td></tr>
       <tr><td><span class="lcd">NO CONNECTION
@@ -434,7 +448,9 @@ NEXT BOOKING</span></td><td>Walk-up refused by the backend: balance, the court i
 SCAN TO START</span></td><td>OFF pressed for a court by someone other than the person who lit it.</td><td>Nothing; the timer will end it.</td></tr>
       <tr><td><span class="lcd">TRY AGAIN
 SCAN TO START</span></td><td>The ESP sent the light-on command but the Mega never confirmed it, even after a retry.</td><td>Scan again. If it repeats, power cycle the box.</td></tr>
-      <tr><td><span class="lcd">CHECKING...</span> for 10 s then idle</td><td>The Mega got a scan but the ESP never answered.</td><td>Power cycle the box; if it repeats, reflash the bridge.</td></tr>
+      <tr><td><span class="lcd">CHECKING YOUR CODE
+Please wait</span> then back to the landing screen</td><td>The Mega painted this <i>itself</i> the instant the scan completed, before any answer existed — and the bridge never replaced it. So the bridge is crashed, rebooting, or mid-failed-flash. Before this screen existed a scan in that state changed nothing at all on the glass and members re-scanned until they reported the scanner as broken.</td><td>Power cycle the box; if it repeats, reflash the bridge.</td></tr>
+      <tr><td><i>Any screen, returning to the landing screen on its own</i></td><td>Not a fault. Every screen the bridge paints carries a deadline the Mega holds, capped at two minutes, so the glass always finds its way home — even if the bridge has stopped running.</td><td>Nothing.</td></tr>
     </tbody>
   </table></div>
 </section>
@@ -493,7 +509,7 @@ var FLOWS=[
 {id:'scan-on',t:'Scan at the box, backend reachable',tags:['member','hardware'],tg:['online first'],
  s:'The box asks the backend and lights the court on the answer. The backend\'s word is final.',
  steps:[
-  {l:'mega',t:'Scanner → frame',d:'The scanner reads the QR and the Mega forwards the 12 characters to the ESP as a checksummed frame.<small>If the ESP never answers, the Mega returns to idle after ten seconds so a dead bridge can\'t freeze the glass.</small>',lcd:L('CHECKING...')},
+  {l:'mega',t:'Scanner → frame',d:'The scanner reads the QR and the Mega forwards the 12 characters to the ESP as a checksummed frame.<small>The Mega paints this itself, before any answer exists, so a scan is visibly happening even with the bridge dead. It is an overlay like every other screen: if the ESP never answers, its own deadline returns the glass to the landing screen. No screen on this box can outlive two minutes.</small>',lcd:L('CHECKING YOUR CODE','Please wait')},
   {l:'box',t:'POST activate',d:'Refuses anything over 20 characters or outside the code alphabet. Otherwise sends <code>{mac, method, token}</code>.',lcd:L('ONE MOMENT')},
   {l:'api',t:'Look up, decide',d:'Looks the code up in this club\'s table. On <code>ok</code> it stamps attendance and settles whatever the settlement model says is owed, then answers granted seconds and the court number.<small>The cue window is 10 minutes before the start. A refusal is never second-guessed against the local roster.</small>',
    o:[{t:'too_early',d:'More than 10 minutes before the start. Nothing charged, nothing stamped.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'wrong_court',d:'Booking on a court this box doesn\'t switch.',lcd:L('WRONG COURT','SEE THE DESK')},{t:'already_active',d:'Court already lit for this booking: answered with the remaining seconds, so a re-scan simply re-lights.'},{t:'not_recognised',d:'Unknown or expired code.',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'no_booking',d:'Known code, nothing to light behind it.',lcd:L('NO BOOKING','SEE THE DESK')}]},
@@ -504,7 +520,7 @@ var FLOWS=[
 {id:'scan-off',t:'Scan at the box, backend unreachable',tags:['member','offline','hardware'],tg:['offline'],
  s:'The box decides from the roster it already holds, lights the court, and remembers what it did for later.',
  steps:[
-  {l:'mega',t:'Scanner → frame',d:'Same as online: the Mega forwards the code to the ESP.',lcd:L('CHECKING...')},
+  {l:'mega',t:'Scanner → frame',d:'Same as online: the Mega forwards the code to the ESP.',lcd:L('CHECKING YOUR CODE','Please wait')},
   {l:'box',t:'Activate fails',d:'The call times out, returns 5xx, or the breaker is open. Only transport failures fall back; a real answer never does.'},
   {l:'box',t:'Match the roster',d:'Compares the scanned string, exactly, to the roster tokens.<small>Only booking codes are ever in the roster. A walk-up code offline is refused because money can\'t be decided without the backend.</small>',
    o:[{t:'match, open',d:'Light the relay for what is left of the booking (a late arrival gets what\'s left) and queue an activation event.',lcd:L('COURT B  38 MIN')},{t:'match, not yet',d:'The booking exists but its window hasn\'t opened.',lcd:L('TOO EARLY','WAIT 7 MIN')},{t:'no match',d:'',lcd:L('NOT RECOGNISED','SEE THE DESK')},{t:'walk-up code',d:'',lcd:L('NO CONNECTION','SEE THE DESK')},{t:'court already lit',d:'Refused, and the button window is bound to that court so the member\'s own OFF still works.',lcd:L('COURT B IS ON','ALREADY LIT')}]},
@@ -512,12 +528,14 @@ var FLOWS=[
   {l:'box',t:'Queue the event',d:'Token, relay and uptime go into the RAM ring (64 slots) until the link returns.<small>A power cut before upload loses queued events; attendance for them is then whatever the desk records.</small>'}
  ]},
 {id:'walkup',t:'Walk-up, or paying for a friend',tags:['member','money','hardware'],tg:['charge on grant'],
- s:'A 60-second identity code arms the buttons; the backend prices and charges the press before anything lights.',
+ s:'Scan, then card, then court, then time. A 60-second identity code arms the buttons; the backend prices and charges the press before anything lights.',
  steps:[
   {l:'phone',t:'Walk-up code',d:'On the Court Code page, switch to <b>Walk up / pay for someone</b>. A fresh identity code appears; it lives 60 seconds and the page swaps it before it dies.'},
-  {l:'box',t:'Scan → recognised',d:'Activate → the backend answers <code>recognised</code>. The box arms the buttons for that member for 30 seconds.<small>Buttons are dead until a recognised scan. What each of the 15 buttons means comes from the button map.</small>',
-   o:[{t:'press without scan',d:'',lcd:L('SCAN FIRST','THEN PICK A TIME')}]},
-  {l:'mega',t:'Court + minutes',d:'The member presses a court and a duration; the ESP turns the presses into an intent: court C, 30 minutes.',lcd:L('COURT C','CHOOSE TIME')},
+  {l:'mega',t:'Scan',d:'The Mega paints its own <b>CHECKING YOUR CODE</b> the instant the scan completes, before any answer exists, so the member sees something happen even if the bridge is dead. The bridge\'s answer replaces it within a second when the bridge is alive.'},
+  {l:'box',t:'Card',d:'Activate → the backend answers <code>recognised</code>. The box arms the buttons for that member for 30 seconds.<small>Buttons are dead until a recognised scan. What each of the 15 buttons means comes from the button map.</small>',
+   o:[{t:'press without scan',d:'Row 3 alone says so, for three seconds, and the rest of the screen is left exactly as it was — a member part-way through reading does not lose the screen they were reading. Repeated presses are counted rather than repainted, so a jammed button cannot strobe the glass.',lcd:L('SCAN YOUR CODE FIRST')}]},
+  {l:'mega',t:'Court',d:'The member presses a court; the glass names it and asks for a time, while row 2 goes on showing which courts are already lit and for how long.',lcd:L('COURT C','CHOOSE TIME')},
+  {l:'mega',t:'Time',d:'They press a duration and the ESP turns the two presses into an intent: court C, 30 minutes. Any press re-arms the screen\'s own clock, so reading it slowly never loses the choice.'},
   {l:'box',t:'POST walkup',d:'Sends <code>{mac, court, minutes, token, nonce}</code>. The nonce is reused on a retry so a flaky link can\'t charge twice.'},
   {l:'api',t:'Price, charge, grant',d:'Checks the balance, creates a walk-up booking, posts the charge, answers granted seconds. A replayed nonce returns the original grant.',
    o:[{t:'insufficient_balance',d:'',lcd:L('TOO FEW CREDITS','TOP UP & RETRY')},{t:'court_in_use',d:'',lcd:L('COURT NOT FREE','SCAN TO START')},{t:'no_time_available',d:'The court is free but a booking starts before the requested time would end.',lcd:L('NO TIME BEFORE','NEXT BOOKING')},{t:'offline',d:'Money needs the backend.',lcd:L('NO CONNECTION','SCAN TO START')}]},
@@ -573,10 +591,14 @@ var FLOWS=[
 {id:'link',t:'Inside the box: Mega and ESP keep each other honest',tags:['hardware'],tg:['9600 baud'],
  s:'A noisy serial line next to four relay coils is assumed, not hoped against. Every frame is checksummed, every important one is retried, and the Mega reports truth on a timer.',
  steps:[
-  {l:'box',t:'!ON / !EXT / !LCD',d:'Checksummed frames to the Mega.'},
+  {l:'box',t:'!ON / !EXT / !LCD',d:'Checksummed frames to the Mega.<small>The screen verbs were added the same way: <code>!ROW</code> stages one row and paints nothing, <code>!SHOW</code> commits the staged rows in one go and starts their clock, <code>!IDLE</code> says what the status row shows, <code>!MAP</code> gives each relay its club court number. A two-row repaint made of two writes is one a member sees half of — <code>CRUSADERS COURTS / 45 MIN</code> was the actual torn frame — so a commit is all-or-nothing.</small>'},
+  {l:'mega',t:'Clamp the screen\'s clock',d:'The Mega bounds every screen deadline it is given into 1 to 120 seconds <b>as it reads the frame</b>, before the screen exists.',
+   o:[{t:'why on the way in',d:'Because then no bridge can paint a screen that outlives two minutes — not a future firmware, not a confused one, and not one that has stopped running. A timeout written into each screen instead would be one somebody forgets on the screen they add next year.'},{t:'a row that does not exist',d:'A frame naming row 4 on a four-row panel is refused outright rather than folded onto the last row: that is a disagreement about the hardware, and hiding it behind a screen that merely looks odd is how it stays hidden.'}]},
   {l:'mega',t:'ACK or error',d:'The Mega answers, or reports <code>BADCRC</code> / <code>BADFRAME</code> / <code>OVERRUN</code>.',
    o:[{t:'error → retry',d:'A relay-affecting frame that draws an error is re-sent within 1.5 s, per court, so a release on court A can\'t cancel court B\'s retry.'}]},
-  {l:'mega',t:'!STATE every few s',d:'Which relays are closed and seconds remaining.'},
+  {l:'mega',t:'!STATE every few s',d:'Which relays are closed and seconds remaining.<small>Row 2 of the glass is rendered from the Mega\'s own copy of exactly this, so the live court line costs nothing on the wire — pushing a per-second countdown from the ESP over 9600 baud would spend most of every second on it.</small>'},
+  {l:'mega',t:'!PONG carries the Mega\'s own counters',d:'The answer to a ping now carries three since-boot numbers as well as the version and uptime: frames the Mega could not send, frames it could not read, and presses it threw away because the button window was shut.',
+   o:[{t:'why it matters',d:'Those counters existed on the Mega and nothing off the board could read them, so a stuck button — or a bridge that stopped arming the window — was invisible from the office. The bridge compares them between heartbeats and reports the difference; no difference reports nothing at all.'},{t:'an older Mega',d:'The two-number answer still decodes, on purpose. The Mega is the half nobody can reflash over the air, so a bridge flashed ahead of it has to keep working.'}]},
   {l:'box',t:'Reconcile',d:'Adopts a court it believed dark but finds lit, synthesises a release for one it believed lit but finds dark, corrects a re-light deadline that drifted, and repaints the identity screen when it sees the Mega restart.'},
   {l:'mega',t:'Watchdog + I²C guard',d:'A watchdog guards the whole loop; the display bus has a timeout and re-syncs itself after a hiccup instead of freezing the glass or the board.<small>The Mega\'s relay timer is independent of the ESP: a court never stays lit because the bridge stopped talking.</small>'}
  ]},
@@ -706,7 +728,8 @@ var DOORS=[
   {l:'gate',t:'Ask the backend',d:'With the radio up it posts the code and waits. Only the backend knows about a booking made a minute ago or a membership suspended this morning.'},
   {l:'api',t:'Decide, and record',d:'Under the default policy any member the club has not barred gets in; under the other they need a live booking on any court, and club admins always pass that check. A booking\'s QR opens a door only inside that booking\'s own window.<small>One audit row per decision, naming the member — and never the code itself. That row is the whole record that anything happened: no ledger entry, no booking, nothing else to reconstruct it from.</small>',
    o:[{t:'too early',d:'A real booking, but its entry window has not opened yet. Told plainly, because the club minted that code for that person and a desk may not be staffed.'},{t:'not recognised',d:'Unknown, expired, another club\'s — or a booking code presented after its slot ended. Deliberately one answer for all of them: a door that told them apart would be a way to test which codes are real.'},{t:'not an active member',d:'Suspended, rejected, or not yet approved.'},{t:'no booking',d:'Only under the bookings-only policy, and only for somebody who is not a club admin.'}]},
-  {l:'gate',t:'Release the lock',d:'For the club\'s release time — three seconds by default, and never more than thirty however the setting is edited. The lamp goes solid.<small>Never for "what is left of the booking": a door held open for twenty-five minutes is not a door.</small>'},
+  {l:'gate',t:'Release the lock',d:'For the club\'s release time — <b>fifteen seconds</b> by default, and never more than thirty however the setting is edited. The lamp goes solid.<small>Never for "what is left of the booking": a door held open for twenty-five minutes is not a door.</small>',
+   o:[{t:'a second member arrives while it is open',d:'The thirty-second cap is a budget for the whole opening, not for one scan, so a longer release buys fewer extensions. At fifteen seconds a queue gets <b>one</b>: scan at 14 s and the door stays open to 29 s; the next scan gets the second that is left, and the one after that is refused while the lock relatches. At the old three seconds the same rule allowed nine. Nobody who scans once notices; somebody holding a phone at the reader meets the cap nine times sooner, which is what the cap is for.'}]},
   {l:'api',t:'Nothing else happens',d:'No attendance stamped, no no-show reversed, no credit moved, no booking touched. Walking through a door says nothing about a court.'}
  ]},
 {id:'door-off',t:'The door when the network is gone',tags:[],tg:['offline'],
