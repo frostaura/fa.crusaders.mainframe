@@ -137,7 +137,13 @@ const EVENTS: EventDef[] = [
   {
     name: "credit.adjusted",
     label: "Credit adjusted by hand",
-    description: "An admin credited or debited a member from the console.",
+    description: "An admin credited or debited a member from the console — a goodwill gesture, a correction, or a refund made outside the system. NOT money the club took: that is credit.topped_up_by_admin.",
+    vars: ["entry_id", "user_id", "entry_type", "amount_credits", "booking_id", "reason"],
+  },
+  {
+    name: "credit.topped_up_by_admin",
+    label: "Topped up at the desk",
+    description: "An admin took money over the counter — cash, an EFT that cleared, or a card on the club's own terminal — and converted it to credits. It is revenue, exactly like a PayFast top-up, which is why it is a separate event from credit.adjusted.",
     vars: ["entry_id", "user_id", "entry_type", "amount_credits", "booking_id", "reason"],
   },
   {
