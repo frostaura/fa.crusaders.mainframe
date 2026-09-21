@@ -1076,10 +1076,24 @@ public sealed class DoorOutageFlapTests
     }
 
     /// <summary>
-    /// And the settlement does not read that close as contact. <c>DeviceOutageIndex</c> takes a
-    /// closed outage's <c>EndedAt</c> as an instant the API heard from the board and prices
-    /// no-show waivers off it — so a close nobody was present for would tell the money that a
-    /// dark court box had come back.
+    /// And the settlement does not read that close as contact.
+    ///
+    /// <para>
+    /// <c>DeviceOutageIndex</c> takes a closed outage's <c>EndedAt</c> as an instant the API
+    /// HEARD from the board, and prices no-show waivers off it — so a close nobody was present
+    /// for tells the money that a dark court box came back.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The fixture is built so that the witness is the ONLY thing that can decide it, and
+    /// the first version of this test was not.</b> That one left the board out of service, so
+    /// <c>OutOfServiceSince</c> answered the question on its own and the assertion held with the
+    /// fix reverted — a mutant walked straight through it. The board here is back IN service (an
+    /// admin shut a dark door and reopened it, which is the case R3-2 is about), it is still
+    /// silent, and the deadline sits ONE MINUTE after the false <c>EndedAt</c> — inside
+    /// <c>offline_after_seconds</c> of it. Believe the close and the box looks reachable at that
+    /// deadline; read the silence as the unbroken thing it is and it does not.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task A_switch_closed_outage_is_not_read_as_evidence_the_board_came_back()
@@ -1087,9 +1101,14 @@ public sealed class DoorOutageFlapTests
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        var offlineAfter = HeartbeatCadence.OfflineAfterSeconds(settings.HeartbeatSeconds);
 
         var now = DateTimeOffset.UtcNow;
         var lastSeen = now.AddHours(-4);
+        var switchedAt = now.AddSeconds(-offlineAfter + 60);
+        var deadline = switchedAt.AddSeconds(30);
+
         var box = new Device
         {
             TenantId = host.Tenant.Id,
@@ -1097,33 +1116,39 @@ public sealed class DoorOutageFlapTests
             Name = "Front panel",
             MacAddress = Guid.NewGuid().ToString("N")[..12],
             CourtNumbers = [host.Courts[0].CourtNumber],
-            Enabled = false,
+
+            // Back in service and still dark: shut while it was already silent, then reopened.
+            Enabled = true,
             LastSeenAt = lastSeen,
-            OutOfServiceSince = now.AddHours(-1),
+            OutOfServiceSince = null,
             CreatedAt = now.AddDays(-30),
         };
         db.Devices.Add(box);
 
-        // One row over the whole silence, closed an hour ago by the switch.
         db.DeviceOutages.Add(new DeviceOutage
         {
             TenantId = host.Tenant.Id,
             DeviceId = box.Id,
             StartedAt = lastSeen,
-            DetectedAt = now.AddHours(-3),
-            EndedAt = now.AddHours(-1),
+            DetectedAt = lastSeen.AddSeconds(offlineAfter),
+            EndedAt = switchedAt,
             EndedByContact = false,
         });
         await db.SaveChangesAsync();
 
-        // A deadline half an hour ago — AFTER the switch-close, which is exactly the window the
-        // false witness reopened.
-        var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
-        var index = await DeviceOutageIndex.BuildAsync(
-            db, now.AddHours(-6), HeartbeatCadence.OfflineAfterSeconds(settings.HeartbeatSeconds), default);
+        var index = await DeviceOutageIndex.BuildAsync(db, now.AddHours(-6), offlineAfter, default);
 
         Assert.True(
-            index.CourtWasDark(host.Courts[0].Id, now.AddMinutes(-30)),
-            "a close nobody witnessed must not make the court look reachable");
+            index.CourtWasDark(host.Courts[0].Id, deadline),
+            "a close nobody witnessed must not make the court look reachable at the next deadline");
+
+        // The control, which is what makes the assertion above about the WITNESS and not about
+        // the arithmetic: the identical row closed by a real heartbeat does make it lit.
+        var heard = await db.DeviceOutages.IgnoreQueryFilters().FirstAsync();
+        heard.EndedByContact = true;
+        await db.SaveChangesAsync();
+
+        var believed = await DeviceOutageIndex.BuildAsync(db, now.AddHours(-6), offlineAfter, default);
+        Assert.False(believed.CourtWasDark(host.Courts[0].Id, deadline));
     }
 }
