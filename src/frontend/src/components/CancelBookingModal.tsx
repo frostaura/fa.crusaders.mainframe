@@ -94,8 +94,15 @@ export function CancelBookingModal(props: Props) {
       )}
 
       <div className="flex gap-2 justify-end">
-        <Button variant="ghost" onClick={onClose} disabled={busy}>Keep the booking</Button>
-        <Button variant="danger" onClick={confirm} disabled={busy || reasonMissing || (!quote && !error)}>
+        <Button intent="decline" variant="ghost" onClick={onClose} disabled={busy}>Keep the booking</Button>
+        {/*
+          `destructive`, and this is the example ruling 4 was written about. The consequence
+          this button commits to is stated two paragraphs above it in figures — 35.00 back,
+          15.00 kept as a penalty, or nothing at all once somebody has scanned in. A thumbs-up
+          over that is the software congratulating a member on losing money. No thumb, no
+          celebration on success, and it settles rather than snapping.
+        */}
+        <Button intent="destructive" variant="danger" onClick={confirm} disabled={busy || reasonMissing || (!quote && !error)}>
           {busy ? "Cancelling…" : "Cancel the booking"}
         </Button>
       </div>

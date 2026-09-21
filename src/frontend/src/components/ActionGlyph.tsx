@@ -49,9 +49,20 @@ type GlyphProps = {
   draw?: boolean;
 };
 
-/** The one set of attributes every glyph below shares. */
-function glyphFrame(size: number, className?: string) {
+/**
+ * The one set of attributes every glyph below shares.
+ *
+ * <p>
+ * `data-glyph` names the MARK, not the meaning: two clubs on opposite settings draw a
+ * different shape for the same `affirm`, and the question a browser check has to be able to
+ * ask is which shape is on the glass. Without it, "is a thumb actually there" is a pixel
+ * comparison — which passes for a ✓ shipped where a thumb was ordered, and fails for a 1 px
+ * nudge to a curve. One attribute, and `e2e/action-feedback.spec.ts` asks the real question.
+ * </p>
+ */
+function glyphFrame(name: string, size: number, className?: string) {
   return {
+    "data-glyph": name,
     width: size,
     height: size,
     viewBox: "0 0 24 24",
@@ -90,7 +101,7 @@ function drawAttrs(draw: boolean | undefined) {
 
 export function CheckGlyph({ size = 16, className, draw }: GlyphProps) {
   return (
-    <svg {...glyphFrame(size, className)}>
+    <svg {...glyphFrame("check", size, className)}>
       <path d="M4.5 12.5 L9.75 18 L19.5 6.5" {...drawAttrs(draw)} />
     </svg>
   );
@@ -98,7 +109,7 @@ export function CheckGlyph({ size = 16, className, draw }: GlyphProps) {
 
 export function CrossGlyph({ size = 16, className, draw }: GlyphProps) {
   return (
-    <svg {...glyphFrame(size, className)}>
+    <svg {...glyphFrame("cross", size, className)}>
       {/* Two strokes rather than one polyline: a cross drawn as a single path has to travel
           back across itself, and the draw animation shows it doing so. */}
       <path d="M6.5 6.5 L17.5 17.5" {...drawAttrs(draw)} />
@@ -130,7 +141,7 @@ function ThumbShape({ draw }: { draw?: boolean }) {
 
 export function ThumbsUpGlyph({ size = 16, className, draw }: GlyphProps) {
   return (
-    <svg {...glyphFrame(size, className)}>
+    <svg {...glyphFrame("thumbs-up", size, className)}>
       <ThumbShape draw={draw} />
     </svg>
   );
@@ -145,7 +156,7 @@ export function ThumbsUpGlyph({ size = 16, className, draw }: GlyphProps) {
  */
 export function ThumbsDownGlyph({ size = 16, className, draw }: GlyphProps) {
   return (
-    <svg {...glyphFrame(size, className)}>
+    <svg {...glyphFrame("thumbs-down", size, className)}>
       <g transform="rotate(180 12 12)">
         <ThumbShape draw={draw} />
       </g>
@@ -161,7 +172,7 @@ export function ThumbsDownGlyph({ size = 16, className, draw }: GlyphProps) {
  */
 export function AlertGlyph({ size = 16, className, draw }: GlyphProps) {
   return (
-    <svg {...glyphFrame(size, className)}>
+    <svg {...glyphFrame("alert", size, className)}>
       <circle cx="12" cy="12" r="9.25" {...drawAttrs(draw)} />
       <path d="M12 7.25 v5.25" {...drawAttrs(draw)} />
       <path d="M12 16.4 v0.01" {...drawAttrs(draw)} />

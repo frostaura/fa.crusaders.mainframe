@@ -139,8 +139,12 @@ export default function RegisterPage() {
               {error}
             </Alert>
           )}
+          {/* The one commitment on the page, and item 12's `affirm`. No `onAction`: the form's
+              own handler already owns the redirect-or-explain, and its failure is the `Alert`
+              above rather than a shake on the button. */}
           {!blocked && (
             <Button
+              intent="affirm"
               type="submit"
               variant="primary"
               loading={loading || preparingPhoto}

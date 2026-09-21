@@ -124,7 +124,10 @@ export function BulkCancelSheet({ day, targets, onClose, onSettled }: {
       <p className="text-sm font-medium">{cancelConsequence(totals.refundCredits - totals.penaltyCredits, members)}</p>
 
       <div className="flex flex-wrap gap-2 justify-end">
-        <Button variant="ghost" onClick={onClose}>Keep them</Button>
+        <Button intent="decline" variant="ghost" onClick={onClose}>Keep them</Button>
+        {/* The confirm's intent is `destructive`, derived from `tone="danger"` by
+            `INTENT_BY_TONE` — stated here because the absence of an `intent` prop on the one
+            button that most needs the carve-out otherwise reads as an omission. */}
         <ConfirmButton
           tone="danger"
           disabled={reason.trim().length === 0 || waitingForQuotes}

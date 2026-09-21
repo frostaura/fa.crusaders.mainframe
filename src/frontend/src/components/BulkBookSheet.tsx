@@ -102,7 +102,13 @@ export function BulkBookSheet({ day, slots, members, actorUserId, onClose, onSet
       <div className="space-y-4">
         <WhoPicker who={who} members={members} actorUserId={actorUserId} onChange={setWho} />
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          {/*
+            `Cancel` abandons the whole sheet, so it is the decline. `Next` is not the affirm:
+            it commits to nothing, and a glyph on it would teach the mark to mean "forward".
+            The glyph marks the COMMIT and the ABANDON; moving between two halves of one
+            decision is neither — see `Back` on step 2.
+          */}
+          <Button intent="decline" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={!isComplete(who)} onClick={() => setStep(2)}>Next</Button>
         </div>
       </div>
@@ -140,8 +146,9 @@ export function BulkBookSheet({ day, slots, members, actorUserId, onClose, onSet
       {error && <p role="alert" className="text-sm text-danger-strong">{error}</p>}
 
       <div className="flex justify-end gap-2">
+        {/* Unthemed on purpose: a step back declines nothing and keeps every choice. */}
         <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
-        <Button variant="primary" loading={busy} onClick={() => run(false)}>
+        <Button intent="affirm" variant="primary" loading={busy} onClick={() => run(false)}>
           Book {slots.length} {slots.length === 1 ? "slot" : "slots"}
         </Button>
       </div>

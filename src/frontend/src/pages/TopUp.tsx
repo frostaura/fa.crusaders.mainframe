@@ -297,8 +297,12 @@ export default function TopUpPage() {
           {(error ?? (amount.trim() !== "" && problem)) && (
             <p className="text-sm text-danger-strong">{error ?? problem}</p>
           )}
-          <Button type="submit" disabled={loading || !canSubmit} className="w-full">{loading ? "Redirecting…" : "Continue to PayFast"}</Button>
-          <Button type="button" variant="ghost" onClick={() => nav("/wallet")} className="w-full">Cancel</Button>
+          {/* Item 12's pair on the page that spends real money. No `onAction`: this is a
+              form submit that ends in a redirect to PayFast, so "it worked" is the payment
+              page appearing, and a green tick on a button the member is about to leave behind
+              would be a claim about a payment that has not happened yet. */}
+          <Button intent="affirm" type="submit" disabled={loading || !canSubmit} className="w-full">{loading ? "Redirecting…" : "Continue to PayFast"}</Button>
+          <Button intent="decline" type="button" variant="ghost" onClick={() => nav("/wallet")} className="w-full">Cancel</Button>
         </form>
       </Card>
     </div>
