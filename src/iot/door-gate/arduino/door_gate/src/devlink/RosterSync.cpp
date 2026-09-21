@@ -11,17 +11,6 @@ namespace {
 /// The largest second count whose millisecond value still fits a uint32_t.
 constexpr uint32_t kMaxSeconds = UINT32_MAX / 1000U;
 
-/// Characters a roster token may contain. The contract's Crockford alphabet is
-/// uppercase alphanumerics; lowercase, `-` and `_` are tolerated so a token
-/// minted in a neighbouring alphabet is not refused for being wire-safe in a
-/// way this build did not anticipate. Everything else — whitespace, quotes,
-/// the `|` separator, a backslash, the frame's `,`/`*`/`%` — is refused, because
-/// each of those breaks either the JSON string, the element, or the `!SCAN`
-/// frame the token will later have to match through.
-bool isTokenChar(char c) {
-  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '_';
-}
-
 /// One field of the element: `[start, end)` within `text`.
 struct Field {
   size_t start;
@@ -106,7 +95,7 @@ bool parseToken(const char* text, Field field, char* out, size_t outCap) {
     return false;
   }
   for (size_t i = 0U; i < n; ++i) {
-    if (!isTokenChar(text[field.start + i])) {
+    if (!roster::isTokenChar(text[field.start + i])) {
       return false;
     }
     out[i] = text[field.start + i];

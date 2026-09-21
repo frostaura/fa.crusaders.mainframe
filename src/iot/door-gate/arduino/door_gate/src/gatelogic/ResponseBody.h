@@ -199,16 +199,42 @@ enum class BodyResult : uint8_t {
 BodyResult readBody(IResponseStream& stream, hal::IClock& clock, uint32_t deadlineAtMs, BodyFrame frame,
                     char* out, size_t outCap);
 
+/// The first status whose meaning is in the STATUS LINE rather than in the
+/// body. Everything below it — every 1xx, 2xx and 3xx — says nothing on its own
+/// that this firmware acts on.
+inline constexpr uint16_t kFirstStatusThatSpeaksForItself = 400U;
+
 /// What a bounded read means to the caller, in one place.
 ///
-/// Anything but a whole body is status 0 — "the request never completed". Not
-/// the HTTP status the peer sent: a 200 whose body did not fit or did not
-/// arrive is not a 200 anybody can act on, and at a door the difference between
-/// "the server said no" and "the board learned nothing" is the difference
-/// between a refusal and a roster fallback. One return statement: the generated
-/// sketch compiles at gnu++11.
+/// A SUCCESS whose body did not arrive whole is status 0 — "the request never
+/// completed". Not the 200 the peer sent: a 200 carries its decision in its
+/// body, and at a door the difference between "the server said no" and "the
+/// board learned nothing" is the difference between a refusal and a roster
+/// fallback.
+///
+/// A FAILURE STATUS SURVIVES A BODY THAT DID NOT, and that is round G4's other
+/// half of C1. The status line is in the FIRST bytes of the response — it is
+/// known before a single body byte is read — so a 403 or a 400 is a fact about
+/// this request whatever happened afterwards. Collapsing those to 0 had two
+/// costs, both real:
+///
+///   * a 403 whose body overflowed the 4.6 KB buffer became an OUTAGE, so the
+///     board fell back to its roster and kept admitting every rostered member
+///     through a door an admin had just taken out of service — which is the
+///     exact window the whole 403 rule exists to close; and
+///   * a 400 on `/events` from a server in Development, which answers a binder
+///     refusal with a developer HTML page far larger than the 192-byte response
+///     buffer, became status 0 = Retry = keep, so the head of the ring was
+///     re-posted for ever and the queue JAMMED. Every later door entry sat
+///     behind it and never arrived.
+///
+/// A 5xx is unaffected in practice — 0 and 5xx both map to `Reaction::Retry` —
+/// but it is included because the rule is about where a status's meaning lives,
+/// not about which statuses happen to differ today.
+///
+/// One return statement: the generated sketch compiles at gnu++11.
 constexpr uint16_t statusForBody(uint16_t status, BodyResult result) {
-  return result == BodyResult::Ok ? status : 0U;
+  return result == BodyResult::Ok ? status : (status >= kFirstStatusThatSpeaksForItself ? status : 0U);
 }
 
 } // namespace gatelogic

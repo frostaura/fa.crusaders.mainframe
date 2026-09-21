@@ -63,6 +63,31 @@ namespace roster {
 /// serial codec into a firmware that speaks a different link.
 inline constexpr size_t kMaxTokenLen = 20U;
 
+/// Characters a roster token may contain, and therefore the only characters a
+/// scanned line can ever MATCH one with.
+///
+/// The contract's Crockford alphabet is uppercase alphanumerics; lowercase, `-`
+/// and `_` are tolerated so a token minted in a neighbouring alphabet is not
+/// refused for being wire-safe in a way a given build did not anticipate.
+/// Everything else — whitespace, quotes, the `|` separator, a backslash, the
+/// `!SCAN` frame's `,`/`*`/`%` — is refused, because each of those breaks
+/// either the JSON string, the roster element, or the frame the token will
+/// later have to match through.
+///
+/// IT LIVES HERE, IN THE LIBRARY THAT OWNS THE TOKENS, and that is round G4's
+/// B1. It used to be a file-local helper inside `devlink`'s roster-element
+/// parser, so the ELEMENT was checked against it and the SCANNER was not: the
+/// door admitted every printable byte, `"` and `\` included, and a twenty-
+/// character QR code re-wrote the fields of the JSON body it was interpolated
+/// into. A token outside this set can never match anything in the roster, so
+/// admitting one only ever spends an API call or forges a record — it is a
+/// refusal, and now it is one in both places from one definition.
+///
+/// One return statement: the generated sketches compile at gnu++11.
+constexpr bool isTokenChar(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '_';
+}
+
 /// One booking, as far as the box needs to know about it.
 ///
 /// No member name and no membership number. See the header — the box holds a
