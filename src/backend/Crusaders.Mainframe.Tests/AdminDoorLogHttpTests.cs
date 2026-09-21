@@ -417,9 +417,21 @@ public sealed class AdminDoorLogHttpTests
 
         Assert.Single(Items(await client.GetFromJsonAsync<JsonElement>(LogPath)));
 
-        // And asking for their door by id answers nothing rather than their rows.
-        var byTheirDoor = await client.GetFromJsonAsync<JsonElement>($"{LogPath}?door={theirDoor}");
-        Assert.Empty(Items(byTheirDoor));
+        // And asking for their door by id answers nothing rather than their rows — which since
+        // R3-13 is a NAMED refusal rather than an empty page, because an empty page is also
+        // what a stale link to a DELETED door got and a console cannot tell those apart.
+        //
+        // The refusal is the stronger isolation claim of the two, and the second request is
+        // what makes that true rather than asserted: an id this club has never had gets the
+        // byte-identical answer, so nothing about it says whether their board exists.
+        var byTheirDoor = await client.GetAsync($"{LogPath}?door={theirDoor}");
+        var byNothing = await client.GetAsync($"{LogPath}?door={Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, byTheirDoor.StatusCode);
+        Assert.Equal(
+            await byNothing.Content.ReadAsStringAsync(), await byTheirDoor.Content.ReadAsStringAsync());
+        Assert.Equal(
+            $"{{\"error\":\"{DoorLogQuery.DoorNotFound}\"}}", await byTheirDoor.Content.ReadAsStringAsync());
     }
 
     [SkippableFact]
