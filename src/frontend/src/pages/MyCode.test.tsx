@@ -2361,9 +2361,14 @@ describe("MyCode at a club with a door", () => {
     }));
 
     expect(await screen.findByText(/12 min ago/)).toBeInTheDocument();
-    // Collapsed: the body of the card is gone, the headline and the stamp are not.
+    // Collapsed: the body of the card is gone, the headline and the stamp are not. The
+    // fixture is the OFFLINE open, so the body to look for is that arm's — a negative
+    // assertion aimed at the online arm's sentence passes whether or not anything
+    // collapsed, which is how this one first went green against a mutation.
     expect(screen.getByText(/The lock released/)).toBeInTheDocument();
-    expect(screen.queryByText(/There is no sensor on a door here/)).toBeNull();
+    expect(screen.queryByText(/decided from the list of/)).toBeNull();
+    // One line: the headline and its stamp, and nothing else.
+    expect(screen.queryByText(/Nothing about your booking changed/)).toBeNull();
     // And it can still be got rid of. A collapsed card a member cannot dismiss is worse
     // than a big one they can.
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
