@@ -174,6 +174,14 @@ describe("no doors surface writes a time in the reader's own locale", () => {
     "lib/gateCopy.ts",
     "lib/memberDoorCopy.ts",
     "lib/countdown.ts",
+    // The repeating-bookings surface. Its INSTANTS (next_occurrence, a change record's
+    // occurred_at, a conflict's starts_at) go through this module; its bare club-local dates
+    // do not and must not — see the header of `lib/scheduleCopy.ts` for why turning a
+    // YYYY-MM-DD into an instant to format it is the DST bug in the last place anyone looks.
+    "components/schedules",
+    "pages/AdminSchedules.tsx",
+    "pages/AdminScheduleDetail.tsx",
+    "lib/scheduleCopy.ts",
   ];
 
   const sourcesUnder = (rel: string): string[] => {

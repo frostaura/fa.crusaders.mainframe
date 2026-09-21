@@ -367,7 +367,8 @@ export function skipConsequence(courtCount: number, date: string): string {
 }
 
 export type EndWords = {
-  remaining: number;
+  /** Null when the dates could not be read — never rendered as "0 more". */
+  remaining: number | null;
   days: readonly Weekday[];
   /** Null when we cannot count what is held — never rendered as zero. */
   slots: number | null;
@@ -385,7 +386,9 @@ function pluralNoun(days: readonly Weekday[]): string {
 }
 
 export function endConsequence({ remaining, days, slots, refundCredits }: EndWords): string {
-  const stops = `Ending this stops ${remaining} more ${remaining === 1 ? singularNoun(days) : pluralNoun(days)}`;
+  const stops = remaining === null
+    ? "Ending this stops every date still ahead"
+    : `Ending this stops ${remaining} more ${remaining === 1 ? singularNoun(days) : pluralNoun(days)}`;
   const release = slots === null
     ? `${stops}, and the slots it was holding can be booked again.`
     : `${stops} and releases ${slots} held slot${slots === 1 ? "" : "s"}, which members can then book.`;

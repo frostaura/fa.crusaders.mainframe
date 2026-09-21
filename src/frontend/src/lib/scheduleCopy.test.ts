@@ -333,6 +333,18 @@ describe("skipping and ending", () => {
     expect(line).not.toContain("null");
     expect(line).not.toContain("0 held slots");
   });
+
+  it("does not count the dates ahead when the dates could not be read", () => {
+    // "stops 0 more Tuesdays" out of a failed read is the page telling an admin that ending
+    // the series costs nothing, in the armed consequence of the control that ends it.
+    const line = endConsequence({ remaining: null, days: ["tue"], slots: null, refundCredits: 0 });
+    expect(line).toBe(
+      "Ending this stops every date still ahead, and the slots it was holding can be booked again. "
+      + "Nobody is refunded — nobody was charged for a hold. "
+      + "Tuesdays that have already happened stay exactly as they are.",
+    );
+    expect(line).not.toContain("0 more");
+  });
 });
 
 describe("the list and the detail page", () => {
