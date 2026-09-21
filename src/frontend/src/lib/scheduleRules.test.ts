@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import type { WeeklyRule } from "./scheduleRules";
 import {
   addDays, daysBetween, enumerateOccurrences, formatHhMm, inIntervalPhase, isSliceAligned,
   isoWeekStart, parseHhMm, rowsToCreate, slotsHeld, slotsPerOccurrence, validateRule,
@@ -34,8 +35,8 @@ import {
 const RUNNER_ZONES = ["Africa/Johannesburg", "America/Chicago", "Pacific/Auckland"] as const;
 
 /** A Tuesday. US clocks go back on 2026-11-01, so this season straddles the transition. */
-const LEAGUE = {
-  days: ["tue"] as const,
+const LEAGUE: WeeklyRule = {
+  days: ["tue"],
   start: "18:00",
   end: "21:00",
   startDate: "2026-10-06",
@@ -275,8 +276,8 @@ describe.each(RUNNER_ZONES)("with the runner's own clock in %s", (runnerZone) =>
 
   describe("validating a sentence before it may be checked", () => {
     const ctx = { sliceMinutes: 15, dayStartMinute: 360, maxRows: 2000, activeCourtIds: ["c1", "c2", "c3"] };
-    const body = {
-      name: "Tuesday league", label: "League night", days: ["tue"] as const,
+    const body: WeeklyRule & { name: string; label: string; courtIds: string[] } = {
+      name: "Tuesday league", label: "League night", days: ["tue"],
       start: "18:00", end: "21:00", startDate: "2026-10-06", endDate: "2026-12-15",
       intervalWeeks: 1, courtIds: ["c1", "c2", "c3"],
     };

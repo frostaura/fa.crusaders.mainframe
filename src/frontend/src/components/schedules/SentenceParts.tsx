@@ -111,14 +111,23 @@ export function SentenceSelect({
 }
 
 /**
- * A field whose value is a SET: a button reading the current choice, and a real fieldset below.
+ * A field whose value is a SET: a button reading the current choice, and a group below it.
  *
  * <p>
- * `aria-expanded` and `aria-controls` rather than a popover, and the fieldset stays in the
+ * `aria-expanded` and `aria-controls` rather than a popover, and the panel stays in the
  * document flow: a reader who opens it and tabs forward lands in the checkboxes, and one who
  * tabs past it lands on the next word of the sentence. No trap to escape, nothing to restore
  * focus to, and nothing that behaves differently under `forced-colors` — the disclosure's
  * state is carried by `aria-expanded` and by the chevron's rotation, never by colour.
+ * </p>
+ *
+ * <p>
+ * <b>`role="group"` on a span rather than a real `<fieldset>`, and that is a correctness fix
+ * rather than a preference.</b> The sentence this field sits inside is a paragraph, and a
+ * `<fieldset>` is flow content: React's own DOM-nesting check rejects it outright, and a
+ * browser SILENTLY CLOSES the paragraph at it, which moves every word after this field out of
+ * the sentence. Every element below is phrasing content, and the grouping and its name are
+ * carried by ARIA, which is what a screen reader reads either way.
  * </p>
  */
 export function SentenceDisclosure({
@@ -147,14 +156,15 @@ export function SentenceDisclosure({
         {summary}
         <ChevronDown aria-hidden className={cn("h-4 w-4 shrink-0 transition-transform", open && "rotate-180")} />
       </button>
-      <fieldset
+      <span
         id={panelId}
+        role="group"
+        aria-label={label}
         hidden={!open}
-        className="mt-2 block rounded-lg border border-border bg-bg-surface p-3"
+        className="mt-2 grid gap-1 rounded-lg border border-border bg-bg-surface p-3 text-base sm:grid-cols-2"
       >
-        <legend className="px-1 text-sm font-medium text-text-secondary">{label}</legend>
         {children}
-      </fieldset>
+      </span>
     </span>
   );
 }
