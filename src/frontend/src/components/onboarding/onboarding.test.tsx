@@ -57,22 +57,36 @@ describe("the club's own button labels", () => {
     const map = ["court:1", "court:2", "court:3", "court:4", "minutes:20", "minutes:40", "minutes:60", "off"];
     const box = guideSteps({ buttonMap: map }).find((s) => s.id === "box")!.body.join(" ");
     expect(box).toMatch(/the green buttons marked 1, 2, 3 and 4/);
-    // One slot is `off`, which is not a label. The row is described rather than half-quoted:
-    // printing three of four durations would be a guide that is wrong about the fourth.
-    expect(box).toMatch(/a black time button/);
+    // One slot is `off`, which is not a label. Half a row is not a row, so that half falls
+    // back to the keys the box is built with rather than quoting three of four durations —
+    // a guide that is wrong about the fourth is worse than one that describes the panel.
+    expect(box).toMatch(/the black buttons marked 15, 30, 45 and 60/);
   });
 
+  /**
+   * With no map served, the guide names the keys the box is PHYSICALLY built with — four
+   * green A B C D over four black 15 30 45 60, confirmed by the devices lane — because that
+   * is a description of hardware rather than a guess at a label. What it must never do is
+   * invent one, so nothing is ever in quotation marks.
+   */
   it.each([
     ["absent", undefined],
     ["null", null],
     ["short", ["court:A", "court:B"]],
     ["all non-labels", ["off", "none", "off", "none", "off", "none", "off", "none"]],
-  ])("describes the row rather than quoting a guess when the map is %s", (_why, map) => {
+  ])("names the box's own keys when the map is %s", (_why, map) => {
     expect(buttonRow(map as string[] | null | undefined, "court")).toEqual([]);
     const box = guideSteps({ buttonMap: map as string[] | null | undefined }).find((s) => s.id === "box")!;
-    expect(box.body.join(" ")).toMatch(/a green court button/);
-    // Never in quotation marks: a described button is honest, a quoted guess is not.
-    expect(box.body.join(" ")).not.toMatch(/"/);
+    const text = box.body.join(" ");
+    expect(text).toMatch(/the green buttons marked A, B, C and D/);
+    expect(text).toMatch(/the black buttons marked 15, 30, 45 and 60/);
+    expect(text).not.toMatch(/"/);
+  });
+
+  /** The greeting is the box's own: HI, then the member's name. */
+  it("says the box greets you by name", () => {
+    const box = guideSteps().find((s) => s.id === "box")!;
+    expect(box.body.join(" ")).toMatch(/HI and your name/);
   });
 });
 

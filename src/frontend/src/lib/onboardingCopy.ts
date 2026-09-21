@@ -46,6 +46,20 @@ export const COURT_BUTTON_ROLE = "a green court button";
 export const TIME_BUTTON_ROLE = "a black time button";
 
 /**
+ * What the keys on the hand-built box physically READ, confirmed by the devices lane.
+ *
+ * <p>
+ * Four green court keys marked <b>A B C D</b> over four black duration keys marked
+ * <b>15 30 45 60</b>, and no OK, Cancel or Back anywhere on the panel. These are the firmware
+ * defaults as well as the labels on the plastic, so they are what a member is looking at
+ * unless the club has re-mapped a key — at which point `button_map` wins and the club's own
+ * words are printed instead. This is a description of hardware, not a guess at a label.
+ * </p>
+ */
+export const DEFAULT_COURT_KEYS = ["A", "B", "C", "D"] as const;
+export const DEFAULT_TIME_KEYS = ["15", "30", "45", "60"] as const;
+
+/**
  * The club's eight button labels, split into the two rows a member actually presses.
  *
  * <p>
@@ -102,8 +116,8 @@ export type GuideInput = {
 };
 
 /** "the green buttons marked A, B, C and D" — or the role, when the club has not been read. */
-function namedRow(labels: string[], role: string, colour: "green" | "black"): string {
-  if (labels.length === 0) return role;
+function namedRow(labels: readonly string[], colour: "green" | "black"): string {
+  if (labels.length === 0) return colour === "green" ? COURT_BUTTON_ROLE : TIME_BUTTON_ROLE;
   const last = labels[labels.length - 1];
   const list = labels.length === 1 ? last : `${labels.slice(0, -1).join(", ")} and ${last}`;
   return `the ${colour} buttons marked ${list}`;
@@ -124,8 +138,15 @@ export const GUIDE_INTRO = "From booking a court to walking off it. Nothing here
  * </p>
  */
 export function guideSteps(input: GuideInput = {}): GuideStep[] {
-  const courts = namedRow(buttonRow(input.buttonMap, "court"), COURT_BUTTON_ROLE, "green");
-  const times = namedRow(buttonRow(input.buttonMap, "time"), TIME_BUTTON_ROLE, "black");
+  /*
+    The club's own map wins; where it has not been served, the keys the box is physically
+    built with are named. Both are true statements about a button a member can see — what is
+    never printed is a label invented to fill the sentence.
+  */
+  const courtKeys = buttonRow(input.buttonMap, "court");
+  const timeKeys = buttonRow(input.buttonMap, "time");
+  const courts = namedRow(courtKeys.length ? courtKeys : DEFAULT_COURT_KEYS, "green");
+  const times = namedRow(timeKeys.length ? timeKeys : DEFAULT_TIME_KEYS, "black");
   const steps: GuideStep[] = [
     {
       id: "book",
@@ -169,11 +190,11 @@ export function guideSteps(input: GuideInput = {}): GuideStep[] {
       body: [
         "On the wall by the courts is a box with a small screen. When nobody is using it, it says SCAN YOUR CODE.",
         "Hold your phone up to the scanner on the box. The screen says it is checking.",
-        "Then it greets you by name and shows what it found.",
-        `If you have a court booked, the box knows which one and for how long. The lights come on by themselves — `
+        "Then it greets you: HI and your name, with what it found underneath.",
+        "If you have a court booked, the box knows which one and for how long. The lights come on by themselves — "
           + "there is nothing to press.",
         `If you have not booked, the box asks you to choose. Press ${courts} for the court you want, then press `
-          + `${times} for how long you want it.`,
+          + `${times} for how long you want it. The lights come on straight after.`,
       ],
     },
     {

@@ -69,9 +69,10 @@ test.describe("the always-reachable guide", () => {
     // "confirm" could map onto. That asymmetry is the whole point of the step.
     await expect(box).toContainText(/lights come on by themselves/);
     await expect(box).toContainText(/there is nothing to press/);
-    // A walk-up presses a green one then a black one.
-    await expect(box).toContainText(/green court button/);
-    await expect(box).toContainText(/black time button/);
+    // The greeting the box actually paints, and the two presses a walk-up makes, in order.
+    await expect(box).toContainText(/HI and your name/);
+    await expect(box).toContainText(/the green buttons marked A, B, C and D/);
+    await expect(box).toContainText(/the black buttons marked 15, 30, 45 and 60/);
     // And nothing quotes a label nobody served.
     expect(await box.innerText()).not.toMatch(/"/);
   });
