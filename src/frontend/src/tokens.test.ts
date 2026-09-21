@@ -191,7 +191,9 @@ describe("a control's boundary can actually be seen", () => {
       const body = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
       // A className string that dresses a control — h-11 is this product's control height —
       // and still reaches for the decorative border.
-      for (const m of body.matchAll(/"[^"]*\bh-11\b[^"]*"/g)) {
+      // `h-11` OR the pixel floor that replaced it on the primitives (B12): a control that
+      // stopped expressing its height in rem must not fall out of this check by doing so.
+      for (const m of body.matchAll(/"[^"]*(?:\bh-11\b|min-h-\[44px\])[^"]*"/g)) {
         if (/\bborder-border\b/.test(m[0])) offenders.push(`${relativeToSrc(file)}: ${m[0].slice(0, 70)}`);
       }
     }

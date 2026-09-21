@@ -169,7 +169,22 @@ export function Button({
       */
       {...(themed ? feedback.props : {})}
       className={cn(
-        "inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-sm font-medium",
+        /*
+          B12, applied to the primitive itself — the box in PIXELS, the text in rem.
+
+          `h-11 px-5` is 44 px and 20 px a side at a 16 px root font size, and 88 px and 40 px
+          at a 32 px one: a button twice as tall as a fingertip needs, with 80 px of horizontal
+          padding inside it, on a 320 px screen. Measured on /schedule and /my-code, that is
+          most of why the page scrolled sideways at large text. `ConfirmButton` already solved
+          this for its own control and records the arithmetic at length; this is the same fix
+          on the primitive every other screen reaches for.
+
+          `min-h`, not `h`: a fixed height cannot contain its own words once they wrap, which
+          is the other half of what `withoutFixedHeight` exists to strip off call sites. The
+          TEXT still scales — that is what a root font size is for — and the box around it
+          stops growing at the size a fingertip needs.
+        */
+        "inline-flex items-center justify-center gap-2 min-h-[44px] px-[20px] py-[8px] rounded-lg text-sm font-medium",
         BUTTON_VARIANT_CLASS[variant],
         // The disabled LOOK is suppressed while loading, but `disabled` itself is kept — it is
         // what stops a double submit, which on register means uploading the photo twice. A

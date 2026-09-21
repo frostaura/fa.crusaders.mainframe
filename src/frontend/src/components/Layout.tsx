@@ -184,7 +184,7 @@ export default function Layout() {
   if (headerless) {
     return (
       <div className="h-full flex flex-col">
-        <main className="flex-1 min-h-0 flex flex-col overflow-auto"><div className="max-w-5xl w-full mx-auto px-4 py-6 flex-1 min-h-0 flex flex-col"><Outlet /></div></main>
+        <main className="flex-1 min-h-0 flex flex-col overflow-auto"><div className="max-w-5xl w-full mx-auto px-[16px] py-[24px] flex-1 min-h-0 flex flex-col"><Outlet /></div></main>
       </div>
     );
   }
@@ -403,7 +403,10 @@ export default function Layout() {
           document, so the next Tab lands back on the club name and the skip link has
           achieved nothing. */}
       <main id="main-content" tabIndex={-1} className="flex-1 min-h-0 flex flex-col overflow-auto"><div className={cn(
-        "w-full mx-auto px-4 py-6 flex-1 min-h-0 flex flex-col",
+        /* B12 — pixels. The page gutter is the last thing that should eat a 320 px screen when
+           the club turns the text up; at a 32 px root `px-4 py-6` was 32 px a side and 48 px
+           top and bottom, which is a fifth of the width gone before any content. */
+        "w-full mx-auto px-[16px] py-[24px] flex-1 min-h-0 flex flex-col",
         location.pathname.startsWith("/admin/") ? "max-w-7xl" : "max-w-5xl",
       )}>
         {/*
