@@ -76,10 +76,18 @@ public static class AdminDoorLogEndpoint
     /// inserted beside <c>at_utc</c>, because a club's saved spreadsheet formulae address
     /// columns by position.
     /// </para>
+    /// <para>
+    /// <c>time_uncertain</c> goes IMMEDIATELY BEFORE it, which WIRE-R3 §2 pins and which is the
+    /// one place a column may be inserted rather than appended: the two are read together —
+    /// the flag is about the relationship between the scan's time and the delivery's — and a
+    /// club that has to scroll past six columns to find out that the time beside it is
+    /// approximate will not. It moves <c>delivered_at_utc</c> by one position, which is why the
+    /// header is a pinned constant and <c>AdminDoorLogHttpTests</c> asserts the whole line.
+    /// </para>
     /// </remarks>
     public const string Header =
         "date,time,timezone,at_utc,door,door_name,outcome,reason,reason_code,offline,member," +
-        "code_fingerprint,delivered_at_utc";
+        "code_fingerprint,time_uncertain,delivered_at_utc";
 
     /// <summary>
     /// <c>GET /api/v1/admin/doors/activity</c> — one page of the club's door log.
@@ -91,10 +99,17 @@ public static class AdminDoorLogEndpoint
         var (query, error) = DoorLogQuery.Parse(ctx.Request, settings, DateTimeOffset.UtcNow);
         if (error is not null || query is null) return Results.BadRequest(new { error });
 
+        // A door this club has never had, or one another club has. See DoorLogQuery.DoorNotFound
+        // for what answering an empty list under the normal heading told an admin (A-C2).
+        if (!await query.DoorIsKnownAsync(db, ct))
+        {
+            return Results.BadRequest(new { error = DoorLogQuery.DoorNotFound });
+        }
+
         // One row more than asked for, which is how "is there a next page" is answered without
         // a second COUNT over an append-only table.
         var rows = await query.Apply(db).Take(query.Limit + 1)
-            .Select(a => new { a.Id, a.Action, a.CreatedAt, a.SubjectUserId, a.DetailsJson })
+            .Select(a => new { a.Id, a.Action, a.CreatedAt, a.ScanAt, a.SubjectUserId, a.DetailsJson })
             .ToListAsync(ct);
 
         var page = rows.Take(query.Limit).ToList();
@@ -109,7 +124,7 @@ public static class AdminDoorLogEndpoint
                     DoorRowDoor.Of(DoorActivityView.Details(r.DetailsJson), doors)))
                 .ToList(),
             next_cursor = rows.Count > query.Limit && page.Count > 0
-                ? new DoorLogCursor(page[^1].CreatedAt, page[^1].Id).Encode()
+                ? new DoorLogCursor(page[^1].ScanAt, page[^1].Id).Encode()
                 : null,
 
             // How many rows the RANGE holds, not how many this page carries (A6 / E-M2). See
@@ -238,6 +253,14 @@ public static class AdminDoorLogEndpoint
         var settings = await settingsAccessor.GetAsync(ct);
         var (query, error) = DoorLogQuery.Parse(ctx.Request, settings, DateTimeOffset.UtcNow);
         if (error is not null || query is null) return Results.BadRequest(new { error });
+
+        // Refused BEFORE a file is built, and before the export audit row is written: a zero-row
+        // CSV under the ordinary filename is the worst of the three answers, because it is
+        // forwarded and filed as evidence that nothing happened. See DoorLogQuery.DoorNotFound.
+        if (!await query.DoorIsKnownAsync(db, ct))
+        {
+            return Results.BadRequest(new { error = DoorLogQuery.DoorNotFound });
+        }
 
         var rows = await query.Apply(db).Take(MaxExportRows + 1)
             .Select(a => new { a.Action, a.CreatedAt, a.SubjectUserId, a.DetailsJson })
@@ -383,14 +406,22 @@ public static class AdminDoorLogEndpoint
             door.Key,
             door.Name,
             DoorWords.OutcomeOf(action) ?? "",
-            DoorWords.ReasonOf(action, DoorActivityView.Reason(details)),
+            DoorWords.ReasonOf(action, DoorActivityView.Reason(action, details)),
 
             // The machine value beside the words: a club filtering a spreadsheet wants the
             // stable one, and a club reading it wants the sentence.
-            DoorActivityView.Reason(details) ?? "",
+            DoorActivityView.Reason(action, details) ?? "",
             DoorActivityView.Offline(details) ? "yes" : "no",
             member,
             DoorActivityView.Fingerprint(details) ?? "",
+
+            // "yes" or blank, BEFORE delivered_at_utc as WIRE-R3 §2 pins it. A spreadsheet is
+            // the copy most likely to be printed and quoted, and it is the one surface with no
+            // room for the sentence the console puts beside an approximate time — so the flag
+            // has to be its own column rather than a footnote nobody exports. Blank rather than
+            // "no" for the same reason the delivery column is blank on an online row: the
+            // absence is the ordinary case and a column of "no" reads as an assertion.
+            DoorActivityView.TimeUncertain(details, at) ? "yes" : "",
 
             // Blank on an online row rather than a copy of at_utc, for the same reason
             // `delivered_at` is null there: a delivery time for a decision the server made as

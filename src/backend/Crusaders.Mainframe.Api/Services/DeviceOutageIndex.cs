@@ -387,6 +387,14 @@ public sealed class DeviceOutageIndex
         var heard = devices.ToDictionary(d => d.Id, d => new List<DateTimeOffset> { d.LastSeenAt!.Value });
         foreach (var outage in outages)
         {
+            // A row closed because an admin took the board OUT OF SERVICE is not a witness to
+            // anything: nobody heard from the board at that instant and the switch is what
+            // ended the row. Reading it as contact re-priced every deadline behind it as though
+            // the box had come back — see DeviceOutage.EndedByContact, and note that the
+            // instants after the switch are decided by Device.OutOfServiceSince instead, so
+            // excluding it here leaves no gap.
+            if (!outage.EndedByContact) continue;
+
             if (outage.EndedAt is { } ended && heard.TryGetValue(outage.DeviceId, out var instants))
             {
                 instants.Add(ended);

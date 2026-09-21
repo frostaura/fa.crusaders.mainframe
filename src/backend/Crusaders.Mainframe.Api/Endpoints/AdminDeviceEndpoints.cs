@@ -131,6 +131,37 @@ public static class AdminDeviceEndpoints
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
 
+        // BEFORE EVERY OTHER CHECK, AND BEFORE ANYTHING IS WRITTEN (B13 / R3-34, WIRE-R3 §3).
+        //
+        // A console tab left open overnight still offers "Shut this door" for a door another
+        // admin reopened at 06:00, and sending it shut a door somebody had deliberately opened
+        // — with a success panel and no sign anywhere that the screen had been out of date. The
+        // PATCH is a blind write: it carries the state the admin WANTS and nothing about the
+        // state they were looking at when they decided.
+        //
+        // `expected_enabled` is that missing half, and it is optional because most callers
+        // genuinely do not care — this is an If-Match, not a version column, and a request
+        // without it behaves exactly as it always has. With it, a mismatch is a 409 and NOTHING
+        // IS WRITTEN: not the name, not the card, not the switch. A partial apply would be the
+        // worst answer available, because the admin would be told their request was rejected
+        // while some of it had landed.
+        //
+        // Distinct from `unchanged: true`, which is a 200: that is a request that asked for the
+        // state the row is already in, which is success. This is a request built on a reading
+        // of the row that is no longer true.
+        if (req.ExpectedEnabled is { } expected && expected != device.Enabled)
+        {
+            return Results.Conflict(new { error = DoorChanged });
+        }
+
+        // Before anything else: a value the column cannot hold is refused by name rather than
+        // left to throw out of SaveChangesAsync as a 500 (A-M4 / B2). Checked for BOTH kinds
+        // and before the kind rules, because the width of the column is not a door question.
+        if (req.Name is { } proposed && proposed.Trim().Length > Device.NameMaxLength)
+        {
+            return Results.BadRequest(new { error = NameTooLong, max = Device.NameMaxLength });
+        }
+
         // Before the button map is even parsed: a field that does not belong on this kind of
         // row is refused rather than parsed and then ignored.
         if (KindFieldsRefusal(device, req) is { } wrongKind) return wrongKind;
@@ -174,6 +205,19 @@ public static class AdminDeviceEndpoints
             updated, await HeartbeatSecondsAsync(settingsAccessor, ct),
             PersonNames.Of(updated.ShutByUserId, names), unchanged: changes.Count == 0));
     }
+
+    /// <summary>
+    /// Error code for a <c>name</c> longer than <see cref="Device.NameMaxLength"/>. Carries
+    /// <c>max</c>, which is the number the console puts in front of the admin — WIRE-R3 §3.
+    /// </summary>
+    public const string NameTooLong = "name_too_long";
+
+    /// <summary>
+    /// Error code — on a <c>409</c>, not a <c>400</c> — for a PATCH whose <c>expected_enabled</c>
+    /// does not match the row. See <see cref="UpdateAsync"/>: it means "this door changed since
+    /// you looked", and nothing was written.
+    /// </summary>
+    public const string DoorChanged = "door_changed";
 
     /// <summary>Error code for <c>gate_key</c> sent to a court box.</summary>
     public const string GateKeyNotAGate = "gate_key_not_a_gate";
@@ -407,7 +451,18 @@ public sealed record UpdateDeviceRequest(
     /// refusal: see <c>DoorCardRefusal</c>.
     /// </summary>
     [property: JsonPropertyName("power_loss_behaviour")] JsonElement PowerLossBehaviour = default,
-    [property: JsonPropertyName("powerLossBehaviour")] JsonElement PowerLossBehaviourCamel = default)
+    [property: JsonPropertyName("powerLossBehaviour")] JsonElement PowerLossBehaviourCamel = default,
+
+    /// <summary>
+    /// The value of <c>enabled</c> the caller believes this row holds — an If-Match on the one
+    /// field that is a decision rather than a description (B13 / R3-34, WIRE-R3 §3). Optional;
+    /// absent means the caller is not asserting anything and the PATCH behaves as it always
+    /// has. Present and wrong is a <c>409</c> <see cref="AdminDeviceEndpoints.DoorChanged"/>
+    /// with nothing written. There is deliberately no camelCase twin: it is new in this round,
+    /// so there is no client spelling it the other way, and a second binding is a second thing
+    /// to keep in step.
+    /// </summary>
+    [property: JsonPropertyName("expected_enabled")] bool? ExpectedEnabled = null)
 {
     /// <summary>
     /// The door's name as the caller asked for it, under either spelling — or null when

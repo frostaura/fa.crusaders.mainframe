@@ -87,19 +87,41 @@ public static class DoorPeriod
         };
     }
 
+    /// <summary>The earliest club day this server will resolve. No club's door log predates it.</summary>
+    public static readonly DateOnly EarliestDay = new(2000, 1, 1);
+
     /// <summary>
     /// The range one club-local calendar day covers — its own midnight to the next — or null
-    /// when the text is not a <c>YYYY-MM-DD</c> date.
+    /// when the text is not a <c>YYYY-MM-DD</c> date <b>inside the bounds a day may take</b>.
     ///
     /// <para>
-    /// <b>The upper edge is the next midnight and is not capped at <c>now</c>.</b> An admin who
-    /// asks for today is asking for today, and a range that silently ended at 10:43 would put
-    /// 10:43 in the export's filename and in the sentence above the rows — which is the "half of
-    /// yesterday" complaint wearing a different hat. The rows that do not exist yet simply are
-    /// not there. Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// <b>The bounds are not tidiness; without them this method threw (R3-15).</b>
+    /// <c>?day=9999-12-31</c> parses, and the next line asks <see cref="DateOnly"/> for the day
+    /// after it — which is outside <see cref="DateOnly.MaxValue"/>, so
+    /// <c>ArgumentOutOfRangeException</c> came out of a query-string parser as an unhandled
+    /// <c>500</c> carrying a developer exception page. A date this server cannot bound is a
+    /// <see cref="DayInvalid"/>, exactly as an unparseable one is: the two are the same mistake
+    /// and deserve the same answer.
+    /// </para>
+    ///
+    /// <para>
+    /// The upper bound is TOMORROW in the club's own zone rather than today. An admin whose
+    /// club is an hour ahead of the server asking for "today" must not be told their own date
+    /// does not exist, and a day with no rows in it is an empty list rather than an error. The
+    /// lower bound is <see cref="EarliestDay"/>, far below any club's retention.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The upper edge of the RANGE is the next midnight and is not capped at <c>now</c>.</b>
+    /// An admin who asks for today is asking for today, and a range that silently ended at
+    /// 10:43 would put 10:43 in the export's filename and in the sentence above the rows —
+    /// which is the "half of yesterday" complaint wearing a different hat. The rows that do not
+    /// exist yet simply are not there. Block body for the lizard reason in
+    /// <c>memory/gotchas.md</c>.
     /// </para>
     /// </summary>
-    public static (DateTimeOffset From, DateTimeOffset To)? Day(string text, TimeZoneInfo zone)
+    public static (DateTimeOffset From, DateTimeOffset To)? Day(
+        string text, TimeZoneInfo zone, DateTimeOffset now)
     {
         if (!DateOnly.TryParseExact(
                 text, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
@@ -107,6 +129,8 @@ public static class DoorPeriod
         {
             return null;
         }
+
+        if (day < EarliestDay || day > DoorClock.LocalDateOf(zone, now).AddDays(1)) return null;
 
         return (DoorClock.StartOfLocalDay(zone, day), DoorClock.StartOfLocalDay(zone, day.AddDays(1)));
     }

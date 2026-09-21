@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Crusaders.Mainframe.Api.Services;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
@@ -39,8 +40,9 @@ public static class DoorActivityView
         {
             at = ScannedAt(details, at),
             delivered_at = DeliveredAt(details, at),
+            time_uncertain = TimeUncertain(details, at),
             action,
-            reason = Reason(details),
+            reason = Reason(action, details),
             offline = Offline(details),
             member = Member(subjectUserId, names),
             fingerprint = Fingerprint(details),
@@ -75,14 +77,51 @@ public static class DoorActivityView
         {
             at = ScannedAt(details, at),
             delivered_at = DeliveredAt(details, at),
+            time_uncertain = TimeUncertain(details, at),
             action,
-            reason = Reason(details),
+            reason = Reason(action, details),
             offline = Offline(details),
             member = Member(subjectUserId, names),
             fingerprint = Fingerprint(details),
             door,
         };
     }
+
+    /// <summary>
+    /// Whether this row's own time is a value the product is prepared to stand behind, or one it
+    /// had to overrule or cannot reconcile (E8 / C-H4 / A-H1 / D-H2, R3-17).
+    ///
+    /// <para>
+    /// <b>Two different things go wrong with a board's clock and both end at the same sentence.</b>
+    /// The board has no RTC: it dates an uploaded scan by subtracting its own uptime counter at
+    /// the scan from its uptime at the upload. A counter that rebooted, wrapped or drifted puts
+    /// the scan in the FUTURE or a month in the past, and <c>DeviceEventEndpoints.TimeOf</c>
+    /// clamps both to the upload instant and keeps the claim as
+    /// <c>occurred_at_clamped_from</c> — so the time on screen is the delivery, not the scan, and
+    /// nothing said so. The second is a row whose delivery is EARLIER than the scan it delivers,
+    /// which is not a thing that can have happened: a page printing "the door told us at 19:22"
+    /// above "scanned 19:48" is asserting an impossible order, and the honest answer is that one
+    /// of the two instants is not trustworthy.
+    /// </para>
+    ///
+    /// <para>
+    /// False on every online row, where the server decided the scan as it wrote it and there is
+    /// no second clock to disagree with. Block body for the lizard reason in
+    /// <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    public static bool TimeUncertain(JsonElement? details, DateTimeOffset createdAt)
+    {
+        if (Instant(details, ClampedFromField) is not null) return true;
+        return DeliveredAt(details, createdAt) is { } delivered && delivered < ScannedAt(details, createdAt);
+    }
+
+    /// <summary>
+    /// The instant a board CLAIMED an uploaded event happened at, present only when the server
+    /// refused to believe it. Written by <c>DeviceEventEndpoints.RecordAsync</c>; named here
+    /// because this is the projection that reads it.
+    /// </summary>
+    public const string ClampedFromField = "occurred_at_clamped_from";
 
     /// <summary>
     /// When somebody stood at the door — which for an offline row is NOT when the row was
@@ -169,11 +208,30 @@ public static class DoorActivityView
     /// covers both sets; see <c>door-gate.md</c> §5's Reasons table and §6's outcomes.
     /// </para>
     /// </summary>
-    public static string? Reason(JsonElement? details)
+    public static string? Reason(string action, JsonElement? details)
     {
-        if (details is not { } root) return null;
-        if (Text(root, "reason") is { } reason) return reason;
-        return Text(root, "outcome");
+        if (details is { } root)
+        {
+            if (Text(root, "reason") is { } reason) return reason;
+            if (Text(root, "outcome") is { } outcome) return outcome;
+        }
+
+        // The one row whose reason is the ACTION and is written nowhere in its details
+        // (E4 / A-M1 / R3-16). An offline refusal carries `outcome: null`, because the upload
+        // path has no ActivationOutcome for a scan a board decided alone — so this row reached
+        // three surfaces with three different answers: the log LABELLED it "Not recognised"
+        // from the action, the `reason=not_recognised` filter did not return it because the
+        // filter reads the details, and the export's reason_code column was blank. A refusal
+        // the product can name in words but cannot filter by is a filter that under-reports a
+        // club's refusals, and the count beside it then disagrees with the list.
+        //
+        // The board has exactly one way to refuse — the code was not on the list it last
+        // downloaded — and `not_recognised` is what the ONLINE path calls that same refusal.
+        // Naming it here, in the one projection all four surfaces read, is what makes the
+        // filter, the label, the count and the CSV agree. The distinction between deciding it
+        // online and deciding it from a cache is not lost: `offline` is its own field on every
+        // one of those surfaces, and DoorWords still prints the offline sentence.
+        return action == DoorTrail.OfflineUnknownScanAction ? GateAccess.NotRecognised : null;
     }
 
     /// <summary>

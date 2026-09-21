@@ -63,6 +63,35 @@ public sealed record DoorLogQuery(
     public const string DoorInvalid = "door_invalid";
 
     /// <summary>
+    /// The refusal when <c>?door=</c> is a well-formed uuid that names neither a board this club
+    /// has nor one it has removed.
+    ///
+    /// <para>
+    /// <b>A stale door link lied, and quietly (A-C2 / R3-13).</b> A bookmark or a back button
+    /// carrying the id of a board that has since been deleted — or a pasted id from another
+    /// club, which this tenant can never see — answered <c>200</c> with an empty list. The
+    /// console then reset its Door select to "All doors" and printed "No scans at any door in
+    /// the last 24 hours" over a filter that was in fact narrowed to one, and the export handed
+    /// the admin a zero-row file under the ordinary filename. Every one of those sentences is
+    /// false and all three are the same missing answer: this server cannot answer for that
+    /// door.
+    /// </para>
+    ///
+    /// <para>
+    /// A REMOVED door is not this error. Its rows survive it and the log offers it in
+    /// <c>removed_doors</c>, so filtering by one is a real question with a real answer — which
+    /// is exactly the distinction a bare "no rows" could not make.
+    /// </para>
+    /// </summary>
+    public const string DoorNotFound = "door_not_found";
+
+    /// <summary>
+    /// The refusal when <c>?limit=</c> is present and is not an integer. See <see cref="Number"/>
+    /// for why a value out of RANGE is clamped instead.
+    /// </summary>
+    public const string LimitInvalid = "limit_invalid";
+
+    /// <summary>
     /// The refusal when <c>?reason=</c> is not one this server can write.
     ///
     /// <para>
@@ -169,13 +198,16 @@ public sealed record DoorLogQuery(
         var cursor = DoorLogCursor.Parse(cursorText);
         if (cursorText is not null && cursor is null) return (null, CursorInvalid);
 
+        var (limit, limitBad) = Number(request, "limit");
+        if (limitBad) return (null, LimitInvalid);
+
         return (new DoorLogQuery(
             Door: door,
             From: from,
             To: to,
             Outcome: outcome,
             Reason: reason,
-            Limit: Math.Clamp(Number(request, "limit") ?? DefaultLimit, 1, MaxLimit),
+            Limit: Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit),
             Cursor: cursor,
             RetentionDays: retentionDays)
         {
@@ -245,7 +277,7 @@ public sealed record DoorLogQuery(
 
         if (day is not null)
         {
-            var resolved = DoorPeriod.Day(day, zone);
+            var resolved = DoorPeriod.Day(day, zone, now);
             return resolved is { } window
                 ? ((window.From.ToUniversalTime(), window.To.ToUniversalTime()), null)
                 : (null, DoorPeriod.DayInvalid);
@@ -270,16 +302,48 @@ public sealed record DoorLogQuery(
     /// other field cannot match.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Whether the door this query names is one this club can answer for — a board it still has,
+    /// or one it has removed whose rows survive. True when the query names no door at all.
+    ///
+    /// <para>
+    /// Both reads are tenant-filtered by the context's global query filter, which is what makes
+    /// another club's door id indistinguishable from an invented one: the isolation is
+    /// structural rather than a claim compared. See <see cref="DoorNotFound"/> for what the
+    /// alternative — an empty list under a normal heading — told an admin.
+    /// </para>
+    ///
+    /// <para>
+    /// The removed half asks the audit trail rather than the <c>device.deleted</c> row alone,
+    /// because a board may have been removed before that row carried an id and because the
+    /// question the admin asked is "are there rows for this door", which is the same question.
+    /// </para>
+    /// </summary>
+    public async Task<bool> DoorIsKnownAsync(MainframeDbContext db, CancellationToken ct)
+    {
+        if (Door is not { } door) return true;
+        if (await db.Devices.AsNoTracking().AnyAsync(d => d.Id == door, ct)) return true;
+
+        var containment = System.Text.Json.JsonSerializer.Serialize(new { device_id = door });
+        return await db.AuditLogs.AsNoTracking()
+            .AnyAsync(a => a.DetailsJson != null && EF.Functions.JsonContains(a.DetailsJson, containment), ct);
+    }
+
     public IQueryable<AuditLog> Apply(MainframeDbContext db)
     {
         var rows = Filtered(db);
 
         if (Cursor is { } cursor)
         {
-            rows = rows.Where(a => a.CreatedAt < cursor.At || (a.CreatedAt == cursor.At && a.Id.CompareTo(cursor.Id) < 0));
+            rows = rows.Where(a => a.ScanAt < cursor.At || (a.ScanAt == cursor.At && a.Id.CompareTo(cursor.Id) < 0));
         }
 
-        return rows.OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id);
+        // ORDERED BY THE INSTANT THE ROW PRINTS, which is what "newest first" claims and was not
+        // (R3-17, WIRE-R3 §2). See AuditLog.ScanAt: an offline batch delivered at 21:10 carrying
+        // 18:40 scans used to sit at the top of this list showing 18:40. The cursor moves with
+        // it — a keyset over one column while the list is ordered by another skips and repeats
+        // rows at every page boundary.
+        return rows.OrderByDescending(a => a.ScanAt).ThenByDescending(a => a.Id);
     }
 
     /// <summary>
@@ -307,9 +371,16 @@ public sealed record DoorLogQuery(
         // under which two adjacent days each contain that instant exactly once, and it is
         // already what DoorDay's own counts do (`s.At >= day.DayStartedAt`). On a caller-supplied
         // `to` it moves the edge by one tick, which is the price of the days being right.
+        // RANGED ON THE SAME INSTANT THE ROWS ARE SORTED AND PRINTED BY (AuditLog.ScanAt), not on
+        // when the club heard. The range was on CreatedAt while the times on screen — and the
+        // per-door day counts on /admin/doors, which have always used the scan's instant — were
+        // not, so "yesterday" held an offline scan from the night before and omitted one of
+        // yesterday's that arrived this morning. An admin asking what happened at a door
+        // yesterday is asking about people standing at a door, and the day counts beside the
+        // list have to be countable from the list.
         var rows = db.AuditLogs.AsNoTracking()
             .Where(DoorTrail.IsScanRow)
-            .Where(a => a.CreatedAt >= From && a.CreatedAt < To);
+            .Where(a => a.ScanAt >= From && a.ScanAt < To);
 
         if (Door is { } door)
         {
@@ -344,6 +415,22 @@ public sealed record DoorLogQuery(
     {
         var asReason = System.Text.Json.JsonSerializer.Serialize(new { reason });
         var asOutcome = System.Text.Json.JsonSerializer.Serialize(new { outcome = reason });
+
+        // The third vocabulary: the row whose reason is its ACTION (E4 / A-M1 / R3-16). An
+        // offline refusal writes `outcome: null` — the upload path has no outcome for a scan the
+        // board decided alone — so neither containment above can ever match it, and
+        // `?reason=not_recognised` returned ten online refusals while the same window held nine
+        // offline ones the page itself labelled "Not recognised". The filter, the label, the
+        // count and the export now read one rule, stated in DoorActivityView.Reason and mirrored
+        // here because a jsonb containment cannot call it.
+        if (reason == GateAccess.NotRecognised)
+        {
+            return a => a.Action == DoorTrail.OfflineUnknownScanAction
+                        || (a.DetailsJson != null
+                            && (EF.Functions.JsonContains(a.DetailsJson, asReason)
+                                || EF.Functions.JsonContains(a.DetailsJson, asOutcome)));
+        }
+
         return a => a.DetailsJson != null
                     && (EF.Functions.JsonContains(a.DetailsJson, asReason)
                         || EF.Functions.JsonContains(a.DetailsJson, asOutcome));
@@ -355,8 +442,28 @@ public sealed record DoorLogQuery(
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
-    private static int? Number(HttpRequest request, string key)
-        => int.TryParse(Text(request, key), out var value) ? value : null;
+    /// <summary>
+    /// The integer this parameter names, and whether it was present and is not one.
+    ///
+    /// <para>
+    /// <b>The three answers are different and only two of them used to exist (E7 / R3-32).</b>
+    /// <c>?limit=abc</c> and <c>?limit=1e9</c> both failed <c>int.TryParse</c> and fell through
+    /// to the DEFAULT of fifty — so a console asking for a thousand rows and a console with a
+    /// typo got the same fifty, and nothing on the wire said which had happened. A number
+    /// OUTSIDE the range is still clamped, because a request for too many rows is unambiguous
+    /// and an error screen is not what the admin wanted; a value that is not a number at all
+    /// cannot be clamped to anything, so it is refused by name. Block body for the lizard
+    /// reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static (int? Value, bool Invalid) Number(HttpRequest request, string key)
+    {
+        if (Text(request, key) is not { } text) return (null, false);
+        return int.TryParse(text, System.Globalization.NumberStyles.AllowLeadingSign,
+            System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? (value, false)
+            : (null, true);
+    }
 
     /// <summary>
     /// The instant this parameter names, and whether it was present and unreadable — which is

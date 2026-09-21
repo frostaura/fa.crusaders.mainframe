@@ -50,6 +50,41 @@ public sealed class DeviceOutage : ITenantScoped
     /// </summary>
     public DateTimeOffset? EndedAt { get; set; }
 
+    /// <summary>
+    /// Whether <see cref="EndedAt"/> is an instant the API actually HEARD from this board, or
+    /// merely the instant the row stopped being open. True on every row a heartbeat closed;
+    /// false on a row closed because an admin took the board out of service.
+    ///
+    /// <para>
+    /// <b>Without it one continuous silence was recorded as four outages, three of them
+    /// claiming the board came back (E9 / R3-2).</b> Taking a board out of service closes its
+    /// open outage — it has to, or a guard nobody can clear eventually mails the club "Door gate
+    /// is back after 43 200 minutes" about a board they unplugged themselves. But the close
+    /// wrote an <c>EndedAt</c> indistinguishable from a recovery, so every shut/reopen of a door
+    /// that was ALREADY dark minted another closed row over the same unbroken silence, while
+    /// <see cref="Device.LastSeenAt"/> never moved once. The page then read a fleet of
+    /// short outages that had each "recovered" where there was one that never had.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>It is a fact about evidence, and the settlement is what needs it.</b>
+    /// <c>DeviceOutageIndex</c> reads a closed outage's <c>EndedAt</c> as a WITNESS that the API
+    /// heard from the board at that instant, and prices no-show waivers off it. A close that
+    /// nobody was present for is not a witness to anything, so it must not be read as one — the
+    /// instants after an out-of-service switch are decided by <see cref="Device.OutOfServiceSince"/>
+    /// instead, which is what that column is for.
+    /// </para>
+    ///
+    /// <para>
+    /// Defaults to true, which is the status quo reading for every row written before this
+    /// column existed: the sweep and the heartbeat, which wrote nearly all of them, close on
+    /// real contact. The handful of pre-existing rows closed by a switch cannot be told apart
+    /// retrospectively and are left claiming contact rather than having a claim invented for
+    /// them in the other direction.
+    /// </para>
+    /// </summary>
+    public bool EndedByContact { get; set; } = true;
+
     /// <summary>Whether this outage covers <paramref name="instant"/>.</summary>
     public bool Covers(DateTimeOffset instant) =>
         instant >= StartedAt && (EndedAt is null || instant < EndedAt);

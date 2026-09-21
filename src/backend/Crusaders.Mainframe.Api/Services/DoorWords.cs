@@ -74,10 +74,17 @@ public static class DoorWords
     /// </summary>
     public static string ReasonOf(string action, string? reason)
     {
-        if (string.IsNullOrWhiteSpace(reason))
-        {
-            return action == DoorTrail.OfflineUnknownScanAction ? NotOnTheSavedList : NoReason;
-        }
+        // The ACTION wins here, and it has to now that DoorActivityView names this row's reason
+        // `not_recognised` so the filter and the count can reach it (R3-16). The code is the
+        // right machine value — it is the same refusal the online path decides — and "Code not
+        // recognised" would be the wrong SENTENCE for it, because it drops the one fact that
+        // explains why some offline rows name a member and this one cannot: the board was
+        // deciding from a saved list. Checked before the reason rather than after, so the
+        // sentence cannot drift when the code changes.
+        if (action == DoorTrail.OfflineUnknownScanAction) return NotOnTheSavedList;
+
+        if (string.IsNullOrWhiteSpace(reason)) return NoReason;
+
         return reason switch
         {
             GateAccess.Ok => "Recognised and allowed",

@@ -105,7 +105,7 @@ public static class AdminDoorFleetEndpoint
         var leftShut = shut
             ? []
             : doors.Where(d => !d.Enabled && d.ShutByShutAllAt is null)
-                .Select(d => new { id = d.Id, name = d.Name, gate_key = d.GateKey })
+                .Select(d => new { id = d.Id, name = DeviceView.Named(d.Name), gate_key = d.GateKey })
                 .ToList();
 
         // Taking a board out of service closes whatever outage it is in, silently — the same
@@ -116,7 +116,14 @@ public static class AdminDoorFleetEndpoint
         {
             var ids = changing.Select(d => d.Id).ToList();
             var open = await db.DeviceOutages.Where(o => ids.Contains(o.DeviceId) && o.EndedAt == null).ToListAsync(ct);
-            foreach (var outage in open) outage.EndedAt = now;
+            foreach (var outage in open)
+            {
+                outage.EndedAt = now;
+
+                // Closed BY THE SWITCH and not by contact — the same rule and the same reason
+                // as the single-door path. See DeviceOutage.EndedByContact (R3-2).
+                outage.EndedByContact = false;
+            }
         }
 
         var actor = ctx.User.Id() ?? Guid.Empty;
@@ -180,7 +187,7 @@ public static class AdminDoorFleetEndpoint
         return new
         {
             id = door.Id,
-            name = door.Name,
+            name = DeviceView.Named(door.Name),
             gate_key = door.GateKey,
             enabled = door.Enabled,
             last_seen_at = door.LastSeenAt,

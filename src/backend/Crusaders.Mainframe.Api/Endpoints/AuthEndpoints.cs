@@ -24,7 +24,15 @@ public static class AuthEndpoints
             if (req.Password.Length < 8)
                 return Results.BadRequest(new { error = "password_too_short" });
 
-            var result = await auth.RegisterAsync(req.Email, req.Password, req.FullName, req.MembershipNumber, req.PhotoUrl, ct);
+            // The same bound PUT /me/profile has always enforced, on the route that actually
+            // creates every membership row in the product. See PersonNames.MaxFullNameLength
+            // for what its absence here cost (D-L4 / R3-37). Trimmed before the check so the
+            // value validated and the value stored are one value — RegisterAsync stored the
+            // string exactly as sent, spaces and all.
+            if (!PersonNames.IsAcceptable(req.FullName.Trim()))
+                return Results.BadRequest(new { error = PersonNames.FullNameInvalid, max = PersonNames.MaxFullNameLength });
+
+            var result = await auth.RegisterAsync(req.Email, req.Password, req.FullName.Trim(), req.MembershipNumber, req.PhotoUrl, ct);
             return result switch
             {
                 RegistrationResult.Created c => Results.Ok(new { user_id = c.UserId, status = "pending_email_verification" }),
