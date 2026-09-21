@@ -1,4 +1,5 @@
-import { Children, isValidElement, useEffect, useRef, useState } from "react";
+import { Children, isValidElement, useContext, useEffect, useRef, useState } from "react";
+import { UNSAFE_LocationContext } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -6,41 +7,57 @@ export type ConfirmTone = "info" | "danger";
 
 type ConfirmButtonProps = {
   idleLabel: React.ReactNode;
+  /**
+   * The CONSEQUENCE, in a sentence — and, since B5, a block of ordinary page text rather
+   * than the label of a button.
+   *
+   * <p>
+   * It used to be the armed control's own label, which is what made it unreadable: a 45-word
+   * consequence rendered inside a control has to be sized, clipped or wrapped by the control,
+   * and at 320 px with a 32 px root font that came to a 1 232 px button with its Cancel
+   * 1 061 px below the fold. It is now a paragraph ABOVE two side-by-side buttons, at the
+   * page's own 14 px, wrapping freely, clipped by nothing.
+   * </p>
+   */
   confirmLabel?: React.ReactNode;
-  /** May return a Promise — the button stays armed with a spinner until it resolves. */
-  onConfirm: () => void | Promise<void>;
+  /**
+   * What the way out says. "Cancel" unless the call site has a better word for it — the
+   * doors screens say "Keep it open", which names the outcome rather than the mechanism.
+   *
+   * <p>
+   * Additive and optional: every call site that says nothing keeps "Cancel".
+   * </p>
+   */
+  cancelLabel?: string;
+  /**
+   * May return a Promise — both buttons stay up, with a spinner on the confirm, until it
+   * resolves. A resolved STRING is announced as the result; anything else announces "Done."
+   */
+  onConfirm: () => void | string | Promise<void | string>;
   className?: string;
   /** Idle (resting) variant. Defaults to "info" — soft blue. */
   idleClassName?: string;
   /** Armed (confirm) variant. Defaults to a warm orange alert. */
   armedClassName?: string;
   /**
-   * ms to keep the armed state before snapping back. **8000 by default.**
+   * <b>Ignored. There is no timed auto-disarm.</b>
    *
    * <p>
-   * It defaulted to 3000 once, and that silently broke the one control it most needed to
-   * get right. A member who took longer than three seconds to read "Reserve for 50.00 cr?"
-   * tapped a button that had already gone back to idle, so the second tap re-armed instead
-   * of confirming — a slow reader could tap for ever and never book anything, with no
-   * request leaving the browser and nothing on screen to explain it. The default was then
-   * taken off altogether, which traded that defect for the opposite one: an armed control
-   * on an admin screen in a club office stayed armed indefinitely, one tap from whoever
-   * walked past next.
+   * It was 8 000 ms, and reviewers B and C measured what that bought: a 45-word confirm takes
+   * about thirteen seconds to hear, the window was 8.07 s, there was no countdown, and the
+   * control went back to idle underneath somebody who was still reading it. That is the 3 000 ms
+   * defect again with a bigger number — a confirmation exists to be read, and one with a
+   * stopwatch on it punishes exactly the people who read it.
    * </p>
    *
    * <p>
-   * <b>8000 is not a re-run of 3000.</b> Three things are different. The booking grid — the
-   * control the timer broke — no longer uses this component at all. The armed control now
-   * GROWS to fit its consequence at 14 px instead of clipping it to a 44 px box, so the
-   * sentence can actually be read inside the window. And a visible Cancel stands beside it,
-   * so leaving is a control you can see rather than a gesture you have to know. Eight
-   * seconds is long enough to read a four-line consequence and short enough that an
-   * abandoned screen is not left loaded.
+   * The armed state that a timer was guarding against — a loaded control left on a screen in a
+   * club office — is closed by the four disarms that do not need a clock: Escape, the visible
+   * Cancel, focus leaving the control group, and a route change. The prop is kept so that no
+   * call site has to change to compile; passing it does nothing.
    * </p>
    *
-   * <p>
-   * Escape, a click outside and a blur all still disarm, and none of them wait for a timer.
-   * </p>
+   * @deprecated There is no timer. Remove the prop at the call site.
    */
   armedTimeoutMs?: number;
   disabled?: boolean;
@@ -86,6 +103,12 @@ const IDLE_BY_TONE: Record<ConfirmTone, string> = {
   danger: "bg-danger-soft text-danger-strong hover:bg-danger-soft/70",
 };
 
+/** What the live region says when the control goes back to rest without acting. (C3) */
+export const CONFIRM_CANCELLED_ANNOUNCEMENT = "Cancelled — nothing was changed.";
+
+/** What it says when the caller's action finished and named no result of its own. (C3) */
+export const CONFIRM_DONE_ANNOUNCEMENT = "Done.";
+
 /**
  * The words inside a label, whatever it is made of.
  *
@@ -103,8 +126,8 @@ function textOf(node: React.ReactNode): string {
   // .tsx file reads that as a JSX tag it then never finds the close of — so every brace
   // after it is swallowed as tag content, three functions vanish from its output and the
   // last one it does see is measured as running to the end of the file. That is what failed
-  // `make complexity` on the 200-line bound: `withoutFixedHeight` reported 15 NLOC at a
-  // length of 224. Same family as the bare-`<` trap recorded in `test/harness.tsx`.
+  // `make complexity` on the 200-line bound. Same family as the bare-`<` trap recorded in
+  // `test/harness.tsx`.
   if (isValidElement(node)) {
     const props = node.props as { children?: React.ReactNode };
     return Children.toArray(props.children).map(textOf).join("");
@@ -113,30 +136,46 @@ function textOf(node: React.ReactNode): string {
 }
 
 /**
- * The accessible name: what the button says, then what it acts on, then the state it is in.
+ * The idle control's accessible name: what the button says, then what it acts on.
  *
  * <p>
  * <b>The visible idle label is always the prefix.</b> `ariaLabel` used to be the whole name,
  * which is the WCAG 2.5.3 failure described on the prop: "Shut all doors" on screen,
  * "Shut every door the club has open — 3 of 3" to a screen reader and to speech control, and
- * nothing tying the two together. Composing them costs a little redundancy on a long control
- * and buys back the guarantee that whatever a person can read out, they can also say.
+ * nothing tying the two together.
  * </p>
  *
  * <p>
  * Returns undefined when no context was given, which leaves the button named by its visible
- * text exactly as before — the visible text IS the whole name then, so label-in-name holds
- * trivially. This is opt-in, and a call site that has nothing to add adds nothing.
+ * text exactly as before.
  * </p>
  */
-function accessibleName(
-  idleText: string, context: string | undefined, armed: boolean, pending: boolean,
-): string | undefined {
+function accessibleName(idleText: string, context: string | undefined): string | undefined {
   if (!context) return undefined;
-  const base = composeName(idleText, context);
-  if (pending) return `${base} — working`;
-  if (armed) return `${base} — tap again to confirm`;
-  return base;
+  return composeName(idleText, context);
+}
+
+/**
+ * The CONFIRM button's accessible name — and why it is not simply the visible label.
+ *
+ * <p>
+ * The confirm button shows the same words the trigger did ("Shut this door"), because the
+ * consequence is now a paragraph above it rather than its label. Two buttons reading the same
+ * thing one above the other would be fine on screen and useless in a list of controls, so the
+ * name carries the context the call site gave AND says which of the two states it is in:
+ * "Shut this door — Side door — tap again to confirm".
+ * </p>
+ *
+ * <p>
+ * Where the call site gave no context the CONSEQUENCE is the context — "Delete? The box
+ * re-registers on its next heartbeat." already opens with the word on the button, so
+ * {@link composeName} leaves it alone and label-in-name holds on the sentence itself.
+ * </p>
+ */
+function confirmName(idleText: string, context: string | undefined, consequence: string): string | undefined {
+  if (context) return `${composeName(idleText, context)} — tap again to confirm`;
+  if (!consequence) return undefined;
+  return composeName(idleText, consequence);
 }
 
 /**
@@ -196,69 +235,260 @@ function withoutFixedHeight(className?: string): string | undefined {
     .join(" ");
 }
 
+/**
+ * A route change, if there is a router above this control — and nothing at all if there is not.
+ *
+ * <p>
+ * `useLocation` would be the obvious thing and it throws outside a `Router`, which this
+ * component is rendered outside of by its own unit tests and by half a dozen primitive tests
+ * that have no business mounting a router. Reading the context directly answers the same
+ * question and answers "there is no router" instead of raising.
+ * </p>
+ */
+function useRouteKey(): string {
+  const located = useContext(UNSAFE_LocationContext) as
+    { location?: { pathname?: string; search?: string; hash?: string } } | null;
+  const location = located?.location;
+  if (!location) return "";
+  return `${location.pathname ?? ""}${location.search ?? ""}${location.hash ?? ""}`;
+}
+
+/** The base look of both buttons in the armed pair, and of the trigger they replace. */
+const CONTROL_CLASS = cn(
+  /**
+   * `items-stretch`, not `items-center` — and this is what actually made `break-words` work.
+   *
+   * <p>
+   * In a column flex box, `align-items: center` sizes each item to its own MAX-CONTENT
+   * width and centres that box. So the label's box was as wide as the word regardless of
+   * the button, and `overflow-wrap: break-word` had nothing to break inside: there was no
+   * line to be too long for. Stretching the label to the button's content width is what
+   * gives the break a boundary; `text-center` keeps it looking the same as before.
+   * </p>
+   */
+  /**
+   * The padding is in PIXELS for B12's reason, and it is not cosmetic here.
+   *
+   * `px-3 py-2` is 24 px and 16 px a side at a 32 px root font size — 48 px of horizontal
+   * padding inside a 128 px column, which left 80 px for a word that needs 95 and broke
+   * "Cancel" into "Cance / l". The text scales; the padding around it does not need to.
+   */
+  "flex flex-col items-stretch justify-center rounded-md px-[12px] py-[8px] text-center text-sm font-medium",
+  "transition-colors duration-200 ease-out",
+  /**
+   * `min-h-11`, and no `overflow-hidden`.
+   *
+   * 44 px is the touch target, and there is nothing left on this control that could clip its
+   * own words: the consequence is no longer inside it.
+   */
+  "min-h-11 max-w-full min-w-0",
+  /**
+   * `break-words`, found by looking at it.
+   *
+   * <p>
+   * Two buttons side by side in the Courts row's last grid column is about 135 px each, and
+   * at a 32 px root font size "Deactivate" is wider than that. It did not wrap — a word has
+   * no break opportunity in it — so it rendered straight out of the red fill on both sides:
+   * a screenshot at 320 px with a 32 px root shows "activ" sitting on the card behind the
+   * button. `overflow-wrap: break-word` breaks the word rather than the layout, which on a
+   * control whose whole job is to be legible is the right way round.
+   * </p>
+   */
+  "break-words",
+  // C8 — a transparent boundary that forced colours turns into a real one. A filled button
+  // whose only edge is its fill looks like body text once the fill is forced away; the
+  // `forced-colors` block in index.css is the other half.
+  "border border-transparent",
+  // The lift, the cursor and the focus ring come from the base layer in index.css; this
+  // control keeps only its own colour transition. `no-lift` because a grid cell that rises
+  // would shift the cells packed against it.
+  "no-lift",
+);
+
+/**
+ * Side by side wherever side by side is legible, and stacked where it is not. (B5)
+ *
+ * <p>
+ * <b>Why not simply `grid-cols-2`.</b> That is `minmax(0, 1fr)` twice, so neither button
+ * contributes any width to the track around it — and the Courts row's last column is `auto`.
+ * Measured at 320 px with a 32 px root font: the pair got 135 px between them, and
+ * "Deactivate" rendered straight out of its own red fill on both sides. Letting the word
+ * break instead produced one LETTER per line, which is worse than the overflow it replaced.
+ * A 96 px floor on each button fixed the overflow and left the words barely readable.
+ * </p>
+ *
+ * <p>
+ * <b>What `auto-fit` does that a fixed pair cannot.</b> Two columns whenever 96 px each will
+ * fit, and one column — the buttons stacked — when they will not. That is the B5 ruling
+ * where the ruling is about anything: side by side is what keeps the Cancel on screen beside
+ * the confirm, and at a width where side by side means four letters a line it has stopped
+ * doing that. Stacked, the pair is 2 × 44 px plus a gap, which is on screen at every size
+ * this product is used at; the failure B5 was raised on was a 1 232 px CONSEQUENCE pushing
+ * the Cancel below the fold, and the consequence is no longer inside the control at all.
+ * </p>
+ */
+const ARMED_GRID_CLASS = "grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] gap-2";
+
 export function ConfirmButton({
   idleLabel,
   confirmLabel = "Tap to confirm",
+  cancelLabel = "Cancel",
   onConfirm,
   className,
   tone = "info",
   idleClassName = IDLE_BY_TONE[tone],
   armedClassName = "bg-armed-strong text-armed-ink",
-  armedTimeoutMs = 8000,
   disabled = false,
   ariaLabel,
 }: ConfirmButtonProps) {
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
-  // On the WRAPPER, not the button: the Cancel beside it is part of this control, and a
-  // pointerdown on it is not a click outside.
-  const ref = useRef<HTMLDivElement>(null);
-  const timer = useRef<number | null>(null);
+  // `seq` so that two identical announcements in a row are two announcements: a live region
+  // whose text does not change is a live region that says nothing, and cancelling twice is
+  // exactly the case where silence reads as "the control ignored me". (C3)
+  const [announcement, setAnnouncement] = useState<{ text: string; seq: number }>({ text: "", seq: 0 });
+  // On the WRAPPER, not on a button: the Cancel beside the confirm is part of this control,
+  // and focus moving between the two is not focus leaving.
+  const groupRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const mounted = useRef(true);
-  // Set on mount as well as cleared on unmount. Without the assignment this effect
-  // only ever wrote `false`, and React's development double-invoke runs
-  // mount → cleanup → mount — so `mounted.current` was false from the first render
-  // onwards and the `finally` below never cleared `pending`. The button stuck on
-  // "Working…" for ever after one successful action, in dev, on every screen that
-  // uses it. It reads as a hung request and is not one.
+  /** Set when the control settles after an action, so focus is restored rather than dropped. */
+  const restoreFocus = useRef(false);
+  /** Whether the press that armed it came from a person whose focus was on the trigger. */
+  const armedFromTrigger = useRef(false);
+  const routeKey = useRouteKey();
+
+  const say = (text: string) => setAnnouncement((previous) => ({ text, seq: previous.seq + 1 }));
+
+  // Set on mount as well as cleared on unmount. Without the assignment this effect only ever
+  // wrote `false`, and React's development double-invoke runs mount → cleanup → mount — so
+  // `mounted.current` was false from the first render onwards and the `finally` below never
+  // cleared `pending`. The button stuck on "Working…" for ever after one successful action.
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
 
+  /** Back to rest, saying so. Every way out of the armed state comes through here. */
   const disarm = () => {
-    if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
     setArmed(false);
+    say(CONFIRM_CANCELLED_ANNOUNCEMENT);
   };
 
+  /**
+   * Whether focus is inside this control right now.
+   *
+   * <p>
+   * Every focus move this component makes is conditional on it, and that is the whole rule:
+   * <b>a control may move focus within itself, and may put back focus it is about to destroy;
+   * it may never take focus from somewhere else.</b> A pointer user reading a form with an
+   * armed control on the far side of the page has their focus wherever they left it, and a
+   * confirm that yanks it is a worse defect than the silent disarm this replaced.
+   * </p>
+   */
+  const holdsFocus = () => {
+    const active = document.activeElement;
+    return active !== null && Boolean(groupRef.current?.contains(active));
+  };
+
+  /** Cancel, from the button or from Escape: focus goes back to the control it came from. */
+  const cancel = () => {
+    restoreFocus.current = holdsFocus();
+    disarm();
+  };
+
+  // Escape, and a pointer press anywhere outside the group. Neither waits for anything.
   useEffect(() => {
-    // Only run idle-disarm bookkeeping when armed and NOT in flight.
     if (!armed || pending) return;
-    if (armedTimeoutMs > 0) timer.current = window.setTimeout(disarm, armedTimeoutMs);
     const onDocPointerDown = (e: PointerEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) disarm();
+      if (groupRef.current && !groupRef.current.contains(e.target as Node)) disarm();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") disarm(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") cancel(); };
     document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onKey);
     return () => {
-      if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
       document.removeEventListener("pointerdown", onDocPointerDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [armed, pending, armedTimeoutMs]);
+  }, [armed, pending]);
 
-  const handleClick = async (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
+  /**
+   * A route change disarms it. (B5)
+   *
+   * <p>
+   * The banner store re-reads on navigation and the page under this control is replaced, so an
+   * armed control that survived the navigation would be armed about a screen that is no longer
+   * there. Silent rather than announced: the route announcer is already saying where the person
+   * has arrived, and two live regions talking at once is worse than one of them being quiet.
+   * </p>
+   */
+  const firstRoute = useRef(routeKey);
+  useEffect(() => {
+    if (routeKey === firstRoute.current) return;
+    firstRoute.current = routeKey;
+    setArmed(false);
+    setPending(false);
+    setAnnouncement((previous) => ({ text: "", seq: previous.seq + 1 }));
+  }, [routeKey]);
+
+  /**
+   * Where focus is, at each step. (C3 / C4)
+   *
+   * <ul>
+   *   <li><b>Armed</b> — the Cancel, which is the safe one. Arming with focus on the
+   *       destructive button is how a second Enter, pressed by somebody who has not finished
+   *       hearing the prompt, does the thing.</li>
+   *   <li><b>Cancelled</b> — the trigger the person pressed, which is where they were.</li>
+   *   <li><b>Settled after an action</b> — the trigger, but only if nothing else has claimed
+   *       focus. The doors pages move focus to a receipt heading when a fleet action lands,
+   *       and this effect runs before theirs (children settle first), so theirs wins.</li>
+   * </ul>
+   */
+  useEffect(() => {
+    if (armed && !pending) {
+      if (armedFromTrigger.current) cancelRef.current?.focus();
+      armedFromTrigger.current = false;
+      return;
+    }
+    if (!restoreFocus.current) return;
+    restoreFocus.current = false;
+    const active = document.activeElement;
+    // Only where focus is genuinely adrift. The doors pages move focus to a receipt heading
+    // when a fleet action lands; a child effect runs before a parent's, so by the time
+    // theirs runs this has already declined to compete with it.
+    if (active === null || active === document.body) triggerRef.current?.focus();
+  }, [armed, pending]);
+
+  /** The armed block, brought to where it can be read — never past what the caller needs. */
+  useEffect(() => {
+    if (!armed) return;
+    groupRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [armed]);
+
+  const arm = () => {
     if (disabled || pending) return;
-    if (!armed) { setArmed(true); return; }
-    // Stop the auto-disarm timer immediately and switch to pending visual.
-    if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
+    // Captured HERE rather than read in the effect: by the time the effect runs the trigger
+    // has been unmounted, so "was the person's focus on the thing they just pressed" is a
+    // question only this moment can answer.
+    armedFromTrigger.current = holdsFocus();
+    setArmed(true);
+    // The consequence, and then what to do about it. The trailing sentence is not padding:
+    // it is the only thing that tells a listener the control has become TWO controls, and it
+    // is also what keeps this region's text from being character-identical to the paragraph
+    // on screen — a `getByText` for the consequence would otherwise match both.
+    say(`${textOf(confirmLabel)} Choose the same button again to confirm, or Cancel to stop.`);
+  };
+
+  const confirm = async () => {
+    if (disabled || pending) return;
     setPending(true);
     try {
-      await Promise.resolve(onConfirm());
+      const result = await Promise.resolve(onConfirm());
+      if (mounted.current) say(typeof result === "string" && result ? result : CONFIRM_DONE_ANNOUNCEMENT);
     } finally {
       if (mounted.current) {
+        restoreFocus.current = holdsFocus();
         setPending(false);
         setArmed(false);
       }
@@ -266,140 +496,124 @@ export function ConfirmButton({
   };
 
   /**
-   * Focus leaving the control disarms it — unless it landed on the Cancel next to it.
+   * Focus leaving the whole group disarms it — and does NOT drag focus back.
    *
-   * A browser moves focus on POINTERDOWN, so a press on Cancel fires this focusout before
-   * the Cancel's own click. Disarming on it would unmount the Cancel mid-press and the click
-   * would never land: a get-out control that does nothing when you press it.
+   * A browser moves focus on POINTERDOWN, so a press on Cancel fires this focusout before the
+   * Cancel's own click; `relatedTarget` inside the group is what tells the two apart. Leaving
+   * on purpose is announced and left alone: yanking focus back to a control somebody has just
+   * tabbed away from is worse than the armed state it is tidying up.
    */
   const handleBlur = (e: React.FocusEvent<HTMLDivElement>) => {
     if (!armed || pending) return;
     const next = e.relatedTarget as Node | null;
-    if (next && ref.current?.contains(next)) return;
+    if (next && groupRef.current?.contains(next)) return;
     disarm();
   };
 
   const idleText = textOf(idleLabel);
-  const showingConfirm = armed && !pending;
+  const consequence = textOf(confirmLabel);
+  const showingArmed = armed;
 
   return (
-    <div ref={ref} onBlur={handleBlur} className={cn("min-w-0", showingConfirm && "space-y-2")}>
-      <button
-        type="button"
-        disabled={disabled || pending}
-        aria-label={accessibleName(idleText, ariaLabel, armed, pending)}
-        // No `aria-pressed`. It was set to the armed flag, so a screen reader said "pressed"
-        // on a control that had done nothing yet — the word for "done" used for "about to".
-        // This is not a toggle either: the second press is a different action, not the off
-        // half of the first, so aria-pressed="false" would be its own lie. The armed prompt
-        // is ANNOUNCED instead, through the polite live region below.
-        aria-busy={pending}
-        onClick={handleClick}
-        className={cn(
-          "flex flex-col items-center justify-center rounded-md px-3 py-2 text-center text-sm font-medium",
-          "transition-colors duration-200 ease-out",
-          /**
-           * `min-h-11`, and no `overflow-hidden`.
-           *
-           * Both halves of B7/C6. The control carried `overflow-hidden` and stacked all three
-           * label states `absolute inset-0`, so the only thing contributing height was an
-           * invisible width sentinel — the armed consequence was simply cut off, mid-sentence,
-           * top and bottom. It grows now, and there is nothing left that could clip it if it
-           * did not.
-           */
-          "min-h-11",
-          // Never wider than what holds it. See the sentinel below.
-          "max-w-full min-w-0",
-          // The lift, the cursor and the focus ring come from the base layer in index.css;
-          // this control keeps only its own colour transition. `no-lift` because a grid
-          // cell that rises would shift the cells packed against it.
-          "no-lift",
-          // While pending we keep the armed visual instead of greying out via the disabled style.
-          (armed || pending) ? armedClassName : idleClassName,
-          pending && "cursor-wait",
-          withoutFixedHeight(className),
-        )}
-      >
-        {/* Width sentinel: both labels in one grid cell, so the button sizes to
-            max(idleLabel, confirmLabel) intrinsic width and does not resize as it arms.
-
-            `h-0` and clipped to itself, because it is a WIDTH sentinel and nothing else. It
-            used to be the only child in normal flow, which meant it was also the only thing
-            setting the control's height — so a one-line box was measured for a four-line
-            consequence and the absolutely-positioned armed label was cut off inside it. The
-            label on show is in flow below; this contributes width and no height at all.
-
-            `whitespace-nowrap` here was a phone-sized bug of its own. The sentinel sized the
-            button to the confirm label as ONE unbreakable line, so the Devices page's
-            "Delete? The box re-registers on its next heartbeat." measured 319 px and, with
-            the paddings around it, pushed the whole page to 435 px inside a 375 px phone —
-            far enough that the API key's Copy button sat 23 px off the right edge, reachable
-            only by a horizontal drag macOS draws no scrollbar for. The label is a sentence; a
-            sentence may wrap. */}
-        <span aria-hidden className="invisible grid h-0 overflow-hidden">
-          <span className="col-start-1 row-start-1 flex items-center justify-center gap-2">{idleLabel}</span>
-          <span className="col-start-1 row-start-1 flex items-center justify-center gap-2">{confirmLabel}</span>
-        </span>
-        {/* One label, in normal flow, so the control is as tall as what it is saying. */}
-        <span className="flex items-center justify-center gap-2">
-          {pending ? (
-            <>
-              {/* `motion-reduce:animate-none`: there is no global rule that stands Tailwind's
-                  animations down, only the lift and the transition durations in index.css. */}
-              <Loader2 className="animate-spin motion-reduce:animate-none" size={16} strokeWidth={2.5} />
-              <span>Working…</span>
-            </>
-          ) : armed ? confirmLabel : idleLabel}
-        </span>
-      </button>
-
-      {/**
-        * The way out, as a control rather than as folklore.
-        *
-        * Escape and a click outside both disarmed before this existed, and neither is
-        * discoverable: a phone has no Escape key, and "tap somewhere else" is a thing you
-        * either already know or do not. On a control whose armed state is a paragraph about
-        * something irreversible, the absence of a visible cancel reads as being committed.
-        *
-        * It has to live OUTSIDE the button — a button cannot contain a button — which is why
-        * this component is a wrapper rather than a single element. The primary control keeps
-        * its own name, so `getByRole("button", { name: ... })` still finds exactly it.
-        *
-        * <b>It is named by the visible label alone, never by the composed name.</b> "Cancel"
-        * on its own, heard in a list of controls, names nothing — but `Cancel — <the whole
-        * accessible name>` makes this button's name a superstring of the control's, and every
-        * `getByRole("button", { name: /…/ })` in the suite then matched two elements the
-        * moment the control armed. The action without the call site's context says what is
-        * being cancelled and cannot swallow the name of the thing it sits beside.
-        */}
-      {showingConfirm && (
+    <div
+      ref={groupRef}
+      onBlur={handleBlur}
+      className={cn("min-w-0", showingArmed && ARMED_GRID_CLASS)}
+    >
+      {showingArmed ? (
+        <>
+          {/**
+            * The consequence, as page text. (B5 / C2 / C7)
+            *
+            * `col-span-2` above the pair, at the page's own 14 px, wrapping freely, with
+            * nothing that could clip it. It was the armed control's LABEL until this round,
+            * which is what made a 45-word sentence a layout problem instead of a sentence.
+            */}
+          <p className="col-span-full text-sm leading-snug text-text-primary">{confirmLabel}</p>
+          <button
+            type="button"
+            disabled={disabled || pending}
+            aria-label={confirmName(idleText, ariaLabel, consequence)}
+            // No `aria-pressed`. It was set to the armed flag, so a screen reader said
+            // "pressed" on a control that had done nothing yet — the word for "done" used for
+            // "about to". This is not a toggle either: the confirm is a different button, not
+            // the off half of the first. The prompt is ANNOUNCED instead, below.
+            aria-busy={pending}
+            onClick={(e) => { e.stopPropagation(); void confirm(); }}
+            className={cn(CONTROL_CLASS, armedClassName, pending && "cursor-wait", withoutFixedHeight(className))}
+          >
+            {pending ? (
+              <span className="flex items-center justify-center gap-2">
+                {/* `motion-reduce:animate-none`: there is no global rule that stands Tailwind's
+                    animations down, only the lift and the transition durations in index.css. */}
+                <Loader2 className="animate-spin motion-reduce:animate-none" size={16} strokeWidth={2.5} />
+                <span>Working…</span>
+              </span>
+            ) : idleLabel}
+          </button>
+          {/**
+            * The way out, beside the thing it is a way out of. (B5 / C10)
+            *
+            * <p>
+            * Side by side rather than stacked, because the finding was that the Cancel was
+            * below the fold — at 320×568 by 19 px, and at a 32 px root font size by 1 061 px.
+            * Two buttons on one row are as tall as one button; one above the other is twice
+            * as far from the top of the block.
+            * </p>
+            *
+            * <p>
+            * <b>Named by its own label plus the trigger's, never by the composed name.</b>
+            * "Cancel" alone, heard in a list of controls, names nothing — but
+            * `Cancel — <the whole accessible name>` makes this button's name a superstring of
+            * the control's, and every `getByRole("button", { name: /…/ })` in the suite then
+            * matched two elements the moment the control armed.
+            * </p>
+            */}
+          <button
+            ref={cancelRef}
+            type="button"
+            disabled={pending}
+            aria-label={`${cancelLabel} — ${idleText}`}
+            onClick={(e) => { e.stopPropagation(); cancel(); }}
+            className={cn(CONTROL_CLASS, "border-control bg-bg-surface text-text-secondary")}
+          >
+            {cancelLabel}
+          </button>
+        </>
+      ) : (
         <button
+          ref={triggerRef}
           type="button"
-          aria-label={`Cancel — ${idleText}`}
-          onClick={(e) => { e.stopPropagation(); disarm(); }}
-          className="min-h-11 w-full rounded-md border border-control px-3 text-sm font-medium text-text-secondary"
+          disabled={disabled}
+          aria-label={accessibleName(idleText, ariaLabel)}
+          aria-busy={false}
+          onClick={(e) => { e.stopPropagation(); arm(); }}
+          className={cn(CONTROL_CLASS, idleClassName, withoutFixedHeight(className))}
         >
-          Cancel
+          {idleLabel}
         </button>
       )}
 
       {/**
-        * What replaced `aria-pressed`.
+        * What replaced `aria-pressed` — ONE polite region, for every state this control has.
         *
-        * Polite, because arming is something the person just did on purpose — it does not
-        * interrupt. Emptied on disarm, so the region does not sit holding a consequence for
-        * a control that is back at rest. It is outside the button on purpose: inside, its
-        * text would join the button's own accessible name and the name would become the
-        * whole paragraph.
+        * <p>
+        * Polite, because arming is something the person just did on purpose. It carries the
+        * consequence on arm, "Cancelled — nothing was changed." on every disarm (C3: the
+        * disarm used to be silent, so a screen-reader user could not tell whether the control
+        * was loaded or at rest), and the caller's result — or "Done." — on completion.
+        * </p>
         *
+        * <p>
         * `aria-live` WITHOUT `role="status"`, deliberately. The role is the same live region
-        * plus a landmark, and a screen full of these controls — the doors overview renders
-        * one per door and two for the fleet — would carry a dozen status landmarks that are
-        * empty most of the time. It also collides with the one status region a page really
-        * does have: `getByRole("status")` on the doors overview started finding eleven.
+        * plus a landmark, and a screen full of these controls — the doors overview renders one
+        * per door and two for the fleet — would carry a dozen status landmarks that are empty
+        * most of the time. It also collides with the one status region a page really does have:
+        * `getByRole("status")` on the doors overview started finding eleven.
+        * </p>
         */}
-      <span aria-live="polite" className="sr-only">
-        {showingConfirm ? `${textOf(confirmLabel)} Choose it again to confirm, or Cancel to stop.` : ""}
+      <span aria-live="polite" className={cn("sr-only", showingArmed && "col-span-full")}>
+        <span key={announcement.seq}>{announcement.text}</span>
       </span>
     </div>
   );

@@ -88,26 +88,37 @@ describe("Card", () => {
 
 describe("ConfirmButton", () => {
   /**
-   * R2 I-F6. The width sentinel that makes the button size to max(idle, confirm) held that
-   * measurement on ONE unbreakable line, so a confirm label that is a sentence — Devices'
-   * "Delete? The box re-registers on its next heartbeat." — measured 319 px and pushed the
-   * whole page to 435 px inside a 375 px phone, far enough that the club API key's Copy
-   * button sat 23 px off the right edge with no scrollbar to say so.
+   * R2 I-F6, and what B5 did to it.
    *
    * <p>
-   * jsdom has no layout, so this holds the two properties the pixels depend on; the pixels
-   * themselves were re-measured in a headed Chromium at 375 px (435 → 375 page width, Copy
-   * on screen) and are quoted in the commit.
+   * The width sentinel that made the button size to max(idle, confirm) held that measurement
+   * on ONE unbreakable line, so a confirm label that is a sentence — Devices' "Delete? The box
+   * re-registers on its next heartbeat." — measured 319 px and pushed the whole page to 435 px
+   * inside a 375 px phone.
+   * </p>
+   *
+   * <p>
+   * The sentinel is <b>gone</b> rather than fixed: the consequence is no longer a label, so
+   * there is nothing for the control to resize to when it arms — it shows the same words in
+   * both states. The guarantee it bought (the page does not widen) is now a property of the
+   * consequence being an ordinary wrapping paragraph, which is what this holds.
    * </p>
    */
-  it("lets a sentence-long confirm label wrap instead of widening the page", () => {
+  it("lets a sentence-long consequence wrap instead of widening the page", () => {
     render(<ConfirmButton idleLabel="Delete" confirmLabel="Delete? The box re-registers on its next heartbeat." onConfirm={() => {}} />);
 
     const button = screen.getByRole("button", { name: "Delete" });
     expect(button.className).toContain("max-w-full");
-    const sentinel = button.querySelector("span[aria-hidden].invisible")!;
-    expect(sentinel).toBeTruthy();
-    expect(sentinel.className).not.toContain("whitespace-nowrap");
+    // Nothing invisible inside the control carrying a second copy of anything.
+    expect(button.querySelector("span[aria-hidden].invisible")).toBeNull();
+
+    fireEvent.click(button);
+    const consequence = screen.getByText("Delete? The box re-registers on its next heartbeat.");
+    expect(consequence.tagName).toBe("P");
+    // A sentence may wrap: nothing pins it to one line, and nothing clips it.
+    expect(consequence.className).not.toContain("whitespace-nowrap");
+    expect(consequence.className).not.toContain("truncate");
+    expect(consequence.className).not.toContain("overflow-hidden");
   });
 
   it("needs two presses before it does anything", async () => {
@@ -121,45 +132,50 @@ describe("ConfirmButton", () => {
     // cancelling a booking is not something a mis-tap on a phone should do.
     expect(onConfirm).not.toHaveBeenCalled();
 
-    await user.click(await screen.findByRole("button", { name: "Really revoke?" }));
+    // B5 — the second press is on a DIFFERENT button. It shows the same words the trigger
+    // did, with the consequence above it and a Cancel beside it, so its accessible name is
+    // the label plus the consequence rather than the consequence alone.
+    await user.click(await screen.findByRole("button", { name: "Revoke — Really revoke?" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
   /**
-   * <b>This used to pin the opposite rule</b> — "stays armed indefinitely unless a caller
-   * asks for a timeout" — and the reasoning behind that is worth keeping, because it is
-   * what stops 8000 from being a re-run of the defect it replaced.
+   * <b>There is no timer, and this is the third position this file has held on that.</b>
    *
    * <p>
-   * The default was 3000 once. On the booking grid that meant a member who paused to read
-   * "Reserve for 50.00 cr?" tapped a control that had already gone back to idle: the second
-   * tap re-armed instead of confirming, no request left the browser, nothing on screen said
-   * why, and a slow reader could tap for ever without booking anything. A confirmation
-   * exists to be read, and one with a stopwatch on it punishes the people who read it. So
-   * the timer was removed altogether.
+   * 3000 ms first: on the booking grid a member who paused to read "Reserve for 50.00 cr?"
+   * tapped a control that had already gone back to idle, so the second tap re-armed instead
+   * of confirming and a slow reader could tap for ever without booking anything. Removed,
+   * which left an armed destructive control on an admin screen loaded indefinitely. Then
+   * 8000 ms, which reviewers B and C measured on the real screens: a 45-word confirm takes
+   * about thirteen seconds to hear and the window was 8.07 s, with no countdown — the 3000 ms
+   * defect again with a bigger number.
    * </p>
    *
    * <p>
-   * That traded the defect for its mirror image, which two reviewers found on the doors
-   * screens (B9/C10): an armed destructive control on an admin screen stayed armed for
-   * ever, one tap from whoever touched the screen next. 8000 is the answer, and it is not
-   * 3000 again for three reasons — the booking grid no longer uses this control at all; the
-   * armed control now grows to fit its consequence at 14 px rather than clipping it into a
-   * 44 px box, so the reading is possible inside the window; and a visible Cancel stands
-   * beside it, so leaving early is a control rather than a guess.
+   * So: no clock. What the clock was guarding against is closed by four disarms that do not
+   * need one — Escape, the visible Cancel, focus leaving the control, and a route change —
+   * and the last two are what actually clear an abandoned screen. A confirmation exists to be
+   * read, and this one now waits.
    * </p>
    */
-  it("disarms itself after eight seconds when no caller says otherwise", async () => {
+  it("stays armed for as long as it takes to read, with no timer to run out", async () => {
     vi.useFakeTimers();
     try {
       const onConfirm = vi.fn();
-      render(<ConfirmButton idleLabel="Revoke" confirmLabel="Really revoke?" onConfirm={onConfirm} />);
+      // The prop is kept so no call site has to change to compile; it does nothing.
+      render(<ConfirmButton idleLabel="Revoke" confirmLabel="Really revoke?" onConfirm={onConfirm} armedTimeoutMs={1000} />);
 
+      // fireEvent, not user-event: mixing user-event with fake timers deadlocks under
+      // jsdom 28 + vitest 4, and the point here is the absence of a timer.
       act(() => { fireEvent.click(screen.getByRole("button", { name: "Revoke" })); });
-      // Long enough to read the consequence: still armed most of the way through.
-      act(() => { vi.advanceTimersByTime(7_000); });
-      expect(screen.getByRole("button", { name: "Really revoke?" })).toBeInTheDocument();
-      act(() => { fireEvent.click(screen.getByRole("button", { name: "Really revoke?" })); });
+      act(() => { vi.advanceTimersByTime(60_000); });
+
+      const confirm = screen.getByRole("button", { name: "Revoke — Really revoke?" });
+      expect(confirm).toBeInTheDocument();
+      expect(onConfirm).not.toHaveBeenCalled();
+
+      act(() => { fireEvent.click(confirm); });
       expect(onConfirm).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -180,39 +196,16 @@ describe("ConfirmButton", () => {
       </StrictMode>,
     );
     await user.click(screen.getByRole("button", { name: "Revoke" }));
-    await user.click(await screen.findByRole("button", { name: "Really revoke?" }));
+    await user.click(await screen.findByRole("button", { name: "Revoke — Really revoke?" }));
 
     // The `mounted` ref was only ever written on UNMOUNT, so React's development
     // double-invoke (mount → cleanup → mount) left it false from the first render — and
     // the `finally` that clears `pending` was then skipped for ever. The button stuck on
     // "Working…" after its first successful action, on every screen that uses it, and it
     // reads as a hung request rather than as a lifecycle bug.
-    // `aria-busy` and the accessible name, not the CSS: jsdom does not compute Tailwind's
-    // opacity, so every one of the stacked labels is "visible" to it. What a screen reader
-    // and a test can both check is which label the button is currently announcing.
     const settled = await screen.findByRole("button", { name: "Revoke" });
     expect(settled).toHaveAttribute("aria-busy", "false");
     expect(settled).toBeEnabled();
-  });
-
-  it("disarms itself again after a while", async () => {
-    vi.useFakeTimers();
-    try {
-      const onConfirm = vi.fn();
-      render(<ConfirmButton idleLabel="Revoke" confirmLabel="Really revoke?" onConfirm={onConfirm} armedTimeoutMs={1000} />);
-
-      // fireEvent, not user-event: mixing user-event with fake timers deadlocks under
-      // jsdom 28 + vitest 4, and the point of this test is the timer, not the pointer.
-      act(() => { fireEvent.click(screen.getByRole("button", { name: "Revoke" })); });
-      expect(screen.getByRole("button", { name: "Really revoke?" })).toBeInTheDocument();
-
-      // An armed button left on screen is a trap for the next person to touch it.
-      act(() => { vi.advanceTimersByTime(1500); });
-      expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
-      expect(onConfirm).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });
 

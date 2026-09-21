@@ -969,9 +969,14 @@ describe("AdminDevices", () => {
     const confirms = await screen.findAllByRole("button", { name: "Take out of service" });
     fireEvent.click(confirms[0]);
     expect(await screen.findByRole("button", {
-      name: "Out of service? Nothing else drives court 1 — the API stops taking anything from that box, and"
-        + " from that instant its no-shows stop being penalised. No other box on court 2 is reporting, so"
-        + " its no-shows stop being penalised too.",
+      // B5 — the armed control is no longer LABELLED by its consequence: the consequence is a
+      // block of page text above two side-by-side buttons, and the confirm button shows the
+      // words the trigger showed. WCAG 2.5.3 then makes its accessible name open with those
+      // words, so the sentence this test is about is a SUFFIX of the name rather than the
+      // whole of it. The sentence itself is unchanged and is still what is being held here.
+      name: "Take out of service — Out of service? Nothing else drives court 1 — the API stops taking"
+        + " anything from that box, and from that instant its no-shows stop being penalised. No other box"
+        + " on court 2 is reporting, so its no-shows stop being penalised too.",
     })).toBeInTheDocument();
   });
 
@@ -1019,7 +1024,13 @@ describe("AdminDevices", () => {
     const confirms = screen.getAllByRole("button", { name: "Take out of service" });
     fireEvent.click(confirms[0]);
     expect(await screen.findByRole("button", {
-      name: "Out of service? No other box on court 2 is reporting, so its no-shows stop being penalised.",
+      // B5 — the armed control is no longer LABELLED by its consequence: the consequence is a
+      // block of page text above two side-by-side buttons, and the confirm button shows the
+      // words the trigger showed. WCAG 2.5.3 then makes its accessible name open with those
+      // words, so the sentence this test is about is a SUFFIX of the name rather than the
+      // whole of it. The sentence itself is unchanged and is still what is being held here.
+      name: "Take out of service — Out of service? No other box on court 2 is reporting, so its no-shows"
+        + " stop being penalised.",
     })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /The box stops switching lights on/ })).not.toBeInTheDocument();
     // And not the stronger claim, which this page cannot support: a silent box may still be
@@ -1149,8 +1160,13 @@ describe("AdminDevices", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
     expect(await screen.findByRole("button", {
-      name: "Out of service? Nothing else drives courts 1 and 2 — the API stops taking anything from that box,"
-        + " and from that instant their no-shows stop being penalised.",
+      // B5 — the armed control is no longer LABELLED by its consequence: the consequence is a
+      // block of page text above two side-by-side buttons, and the confirm button shows the
+      // words the trigger showed. WCAG 2.5.3 then makes its accessible name open with those
+      // words, so the sentence this test is about is a SUFFIX of the name rather than the
+      // whole of it. The sentence itself is unchanged and is still what is being held here.
+      name: "Take out of service — Out of service? Nothing else drives courts 1 and 2 — the API stops"
+        + " taking anything from that box, and from that instant their no-shows stop being penalised.",
     })).toBeInTheDocument();
   });
 
