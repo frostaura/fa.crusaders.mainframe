@@ -181,6 +181,23 @@ public sealed class CourtLightStateService
     }
 
     /// <summary>
+    /// Records WHICH board and relay drove a court, without touching the belief itself.
+    ///
+    /// <para>
+    /// The activation path stamps the belief where attendance is stamped — one place for the
+    /// online scan, the walk-up and the kiosk alike — and that place has no idea which relay
+    /// the box closed. This fills that in afterwards from the event the box uploads, so the
+    /// control board can say "relay C" and an admin can see a box lighting the wrong one.
+    /// </para>
+    /// </summary>
+    public async Task NoteRelayAsync(Guid courtId, Guid deviceId, int? relay, CancellationToken ct)
+    {
+        var row = await RowForAsync(courtId, ct);
+        row.DeviceId = deviceId;
+        if (relay is >= 0) row.Relay = relay;
+    }
+
+    /// <summary>
     /// Every court this board drives, in relay order, for the restore and outage paths.
     ///
     /// <para>

@@ -177,6 +177,48 @@ public static class DeviceEventEndpoints
     /// </summary>
     public const string Malformed = "malformed";
 
+    /// <summary>
+    /// What a COURT BOX's unrecognised scan is filed as, so it never enters the door
+    /// vocabulary — D2-B27.
+    ///
+    /// <para>
+    /// <c>unknown_scan</c> is a real thing for a court box to emit: somebody held a code up to
+    /// the scanner at a court and the box did not recognise it. But the action
+    /// <c>device.unknown_scan</c> is one of the three that <c>DoorTrail</c> matches by
+    /// EQUALITY as a door refusal, and the door log filters on "is a scan row" with no
+    /// device-kind predicate at all. So a court box uploading one put a <b>refused door
+    /// scan at a court box</b> into the club's door activity, counted in its per-day door
+    /// totals — and the night trace would have inherited it.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Separated at INGEST rather than filtered at the door log</b>, which is the same
+    /// remedy <c>gate_open when device.Kind != Gate</c> already applies one case above: the
+    /// door log's query is a keyset read over an append-only table, and excluding a court
+    /// box's rows there would mean joining to <c>devices</c> on every page. Filing it under
+    /// its own action means the four readers of the door vocabulary are correct by
+    /// construction and none of them needs to know this case exists.
+    /// </para>
+    ///
+    /// <para>
+    /// The event is still receipted, still audited and still acknowledged — nothing about the
+    /// box's queue drain changes. Only the name it is filed under does.
+    /// </para>
+    /// </summary>
+    public const string CourtUnknownScanKind = "court_unknown_scan";
+
+    /// <summary>
+    /// The kind as it will be STORED, which for one case is not the kind the board sent.
+    ///
+    /// <para>
+    /// A court box's <c>unknown_scan</c> becomes <see cref="CourtUnknownScanKind"/> — see
+    /// there for why the separation happens here and not in the door log's query. Every other
+    /// kind is stored exactly as it arrived.
+    /// </para>
+    /// </summary>
+    private static string KindFor(string kind, Device device)
+        => kind == UnknownScanKind && device.Kind != DeviceKind.Gate ? CourtUnknownScanKind : kind;
+
     /// <summary>Whether this <c>kind</c> is one this endpoint can store at all.</summary>
     private static bool Unusable(string? kind) =>
         string.IsNullOrWhiteSpace(kind) || kind.Trim().Length > MaxKindLength;
@@ -302,7 +344,11 @@ public static class DeviceEventEndpoints
             // is what lets the box release it and move on.
             if (!alreadyRecorded.Contains(e.Seq))
             {
-                var time = TimeOf(batch, e, now) with { Kind = AuditKind(e.Kind), BootId = batch.BootId };
+                var time = TimeOf(batch, e, now) with
+                {
+                    Kind = KindFor(AuditKind(e.Kind), device!),
+                    BootId = batch.BootId,
+                };
 
                 // EVERY decision below reads the normalised kind, never e.Kind. See AuditKind:
                 // two readings of one field on one request is what let one space around
@@ -575,16 +621,36 @@ public static class DeviceEventEndpoints
         var target = new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline", occurredAt, e.DurationMs);
         var settled = await SettleAsync(services, target, ct);
 
-        // The server's belief about this court's relay, moved by the one event that proves the
-        // lights went on. Only on a settled success: a refusal means the box lit a court the
-        // API would not have, and recording it as a grant would make the control board agree
-        // with a box that broke the rule.
-        if (settled.Code is ActivationOutcome.Ok or ActivationOutcome.ReversedNoShow)
+        // The server's belief about this court's relay.
+        //
+        // ONLY the reversal branch is written here. Every other settled success reaches
+        // CourtActivationService.ActivateAsync, which writes the projection itself — that is
+        // the one place attendance is stamped, so it is the one place the belief can be moved
+        // for the online scan, the walk-up and the kiosk alike. Writing it here as well would
+        // put two `court.lights_on` rows in the night trace for one scan. A reversal does NOT
+        // go through that method — it undoes a settled no-show through the booking service —
+        // so without this line a member whose late upload rescued their evening would light a
+        // court the control board still showed as dark.
+        if (settled.Code == ActivationOutcome.ReversedNoShow)
         {
             await NoteLightsOnAsync(services, device, booking, court, resolved.UserId, e, occurredAt, ct);
         }
+        else if (settled.Code == ActivationOutcome.Ok)
+        {
+            // The relay and the sequence number, which ActivateAsync cannot know. Diagnosis
+            // only — the row is keyed on the court — but it is what lets an admin see that a
+            // box lit relay C for a court-1 booking.
+            await NoteRelayAsync(services, court.Id, device.Id, e.Court, ct);
+        }
 
         return new ActivationOutcome(settled.Code, booking.Id, ActivationKind, settled.RelatedBookingId);
+    }
+
+    /// <summary>Stamps which relay a box used on a court whose belief another path has already moved.</summary>
+    private static async Task NoteRelayAsync(
+        DeviceEventServices services, Guid courtId, Guid deviceId, int? relay, CancellationToken ct)
+    {
+        await services.Lights.NoteRelayAsync(courtId, deviceId, relay, ct);
     }
 
     /// <summary>
