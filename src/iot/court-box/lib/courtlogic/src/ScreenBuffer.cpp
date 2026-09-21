@@ -1,0 +1,423 @@
+// The glass. See include/courtlogic/ScreenBuffer.h for why the deadline and the
+// landing screen live on this half of the board.
+
+#include "courtlogic/ScreenBuffer.h"
+
+namespace courtlogic {
+
+namespace {
+
+/// The action row's left zone: everything up to the clock/countdown cells.
+constexpr uint8_t leftZoneCols() {
+  return hal::kDisplayCols > kStatusTailCols ? static_cast<uint8_t>(hal::kDisplayCols - kStatusTailCols)
+                                             : hal::kDisplayCols;
+}
+
+/// One court's cell on the live row: `<letter><space><2 right-aligned><space>`.
+constexpr uint8_t kCourtCellCols = 5U;
+
+/// Minutes, rounded UP, capped at what two columns can show.
+///
+/// Up, not down, and for the reason court::detail::minutesCeil already gives:
+/// a member with thirty seconds left should read `1`, not `0`. Rounding down
+/// tells them their booking is over while the lights are still on.
+uint8_t minutesCeilCapped(uint16_t seconds) {
+  const uint16_t minutes = static_cast<uint16_t>((seconds + 59U) / 60U);
+  return minutes > 99U ? 99U : static_cast<uint8_t>(minutes);
+}
+
+/// Copy `text` into `out`, space-padded to `cols`, NUL-terminated.
+///
+/// Padding rather than clearing: the port does not pad, so a shorter message
+/// printed over a longer one leaves the old tail on the glass — which is how
+/// "COURT A 45 MIN" becomes "COURT A 5 MINN" — and clear() costs a ~2 ms I2C
+/// stall and the flicker that comes with it.
+void padInto(char* out, const char* text, uint8_t cols) {
+  uint8_t i = 0U;
+  while (i < cols && text != nullptr && text[i] != '\0') {
+    out[i] = text[i];
+    ++i;
+  }
+  while (i < cols) {
+    out[i] = ' ';
+    ++i;
+  }
+  out[cols] = '\0';
+}
+
+/// Right-align an unsigned value of at most three digits into `width` columns,
+/// space-filling the rest. No printf: rendering an integer with it costs about
+/// 1.5 KB of flash on this part.
+void rightAlign(char* out, uint8_t width, uint16_t value) {
+  for (uint8_t i = 0U; i < width; ++i) {
+    out[i] = ' ';
+  }
+  uint8_t at = width;
+  uint16_t v = value;
+  do {
+    if (at == 0U) {
+      break;
+    }
+    --at;
+    out[at] = static_cast<char>('0' + static_cast<int>(v % 10U));
+    v = static_cast<uint16_t>(v / 10U);
+  } while (v != 0U);
+}
+
+/// `READY IN <n> s`, built without printf for the same reason.
+void readyIn(char* out, uint8_t cols, uint16_t seconds) {
+  char text[16] = "READY IN ";
+  uint8_t at = 9U;
+  if (seconds >= 10U) {
+    text[at] = static_cast<char>('0' + static_cast<int>(seconds / 10U));
+    ++at;
+  }
+  text[at] = static_cast<char>('0' + static_cast<int>(seconds % 10U));
+  ++at;
+  text[at] = ' ';
+  text[at + 1U] = 's';
+  text[at + 2U] = '\0';
+  padInto(out, text, cols);
+}
+
+} // namespace
+
+ScreenBuffer::ScreenBuffer(hal::IDisplayPort& display)
+    : display_(display), staged_(), live_(), hold_(), hintUntil_(), hintAllowedAt_(), refresh_(),
+      holdMs_(kDefaultHoldMs), clockMinute_(kNoClockMinute), clockStampMs_(0U), courtNumbers_(),
+      // "No complaint" until the bridge says otherwise. The Mega cannot know
+      // what the link is doing and must not guess in either direction: the
+      // quiet row claims nothing, where starting at NO WIFI would announce an
+      // outage on every Mega reset for as long as it took the next heartbeat
+      // to arrive.
+      linkFlags_(kLinkWifiUp | kLinkApiUp), showFlags_(0U), suppressedHints_(0U) {
+  for (uint8_t r = 0U; r < proto::kMaxRows; ++r) {
+    padInto(staged_[r], "", hal::kDisplayCols);
+    padInto(live_[r], "", hal::kDisplayCols);
+  }
+  // Every relay is unmapped until a heartbeat says otherwise, so a box that has
+  // never had one shows no court cells rather than four it may not drive.
+  for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
+    courtNumbers_[i] = 0;
+  }
+}
+
+bool ScreenBuffer::owns(proto::Verb verb) {
+  return verb == proto::Verb::Lcd || verb == proto::Verb::Row || verb == proto::Verb::Show ||
+         verb == proto::Verb::Idle || verb == proto::Verb::Map;
+}
+
+void ScreenBuffer::begin(uint32_t nowMs) {
+  hold_.disarm();
+  hintUntil_.disarm();
+  hintAllowedAt_.disarm();
+  holdMs_ = kDefaultHoldMs;
+  showFlags_ = 0U;
+  clockMinute_ = kNoClockMinute;
+  refresh_.arm(nowMs, kLandingRefreshMs);
+  for (uint8_t r = 0U; r < proto::kMaxRows; ++r) {
+    padInto(staged_[r], "", hal::kDisplayCols);
+  }
+  // No RelayGuard argument here: begin() runs when every relay has just been
+  // opened, so the live row is four dark courts by construction. The next
+  // poll() refreshes it from the real thing a second later.
+  padInto(live_[0], kIdleLine1, hal::kDisplayCols);
+  padInto(live_[1], kIdleLine2, hal::kDisplayCols);
+  padInto(live_[2], "", hal::kDisplayCols);
+  renderActionRow(nowMs, live_[3]);
+  for (uint8_t r = 0U; r < proto::kMaxRows; ++r) {
+    paintRow(r, live_[r]);
+  }
+}
+
+// --- inbound ----------------------------------------------------------------
+
+void ScreenBuffer::stageRow(uint8_t row, const char* text) {
+  if (row >= proto::kMaxRows) {
+    return;
+  }
+  padInto(staged_[row], text, hal::kDisplayCols);
+}
+
+void ScreenBuffer::show(uint32_t seconds, uint8_t flags, uint32_t nowMs) {
+  if ((flags & kShowActionRowOnly) != 0U) {
+    static_cast<void>(showActionRowOnly(seconds, nowMs));
+    return;
+  }
+  uint32_t held = seconds;
+  if (held < proto::kShowHoldMinSeconds) {
+    held = proto::kShowHoldMinSeconds;
+  }
+  if (held > proto::kShowHoldMaxSeconds) {
+    held = proto::kShowHoldMaxSeconds;
+  }
+  showFlags_ = flags;
+  holdMs_ = held * 1000UL;
+  hold_.arm(nowMs, holdMs_);
+  // The hint belongs to the screen underneath; a new screen is a new subject.
+  hintUntil_.disarm();
+  commit();
+  refresh_.arm(nowMs, kLandingRefreshMs);
+  if ((showFlags_ & kShowCountdown) != 0U) {
+    // Paint the count immediately rather than up to a second later: a screen
+    // that shows its countdown starting at 9 reads as a screen that lost a
+    // second somewhere.
+    writeCountdown(live_[3], holdLeftSeconds(nowMs));
+    paintRow(3U, live_[3]);
+  }
+}
+
+void ScreenBuffer::overlay(const char* line1, const char* line2, uint32_t nowMs) {
+  stageRow(0U, line1);
+  stageRow(1U, line2);
+  stageRow(2U, "");
+  stageRow(3U, "");
+  show(kDefaultHoldMs / 1000UL, 0U, nowMs);
+}
+
+void ScreenBuffer::setLink(uint8_t flags, const char* hhmm, uint32_t nowMs) {
+  linkFlags_ = flags;
+  clockMinute_ = kNoClockMinute;
+  const bool trusted = (flags & kLinkClockValid) != 0U && hhmm != nullptr && hhmm[0] >= '0' &&
+                       hhmm[0] <= '9' && hhmm[1] >= '0' && hhmm[1] <= '9' && hhmm[2] >= '0' &&
+                       hhmm[2] <= '9' && hhmm[3] >= '0' && hhmm[3] <= '9' && hhmm[4] == '\0';
+  if (trusted) {
+    const uint16_t hours = static_cast<uint16_t>((hhmm[0] - '0') * 10 + (hhmm[1] - '0'));
+    const uint16_t mins = static_cast<uint16_t>((hhmm[2] - '0') * 10 + (hhmm[3] - '0'));
+    if (hours < 24U && mins < 60U) {
+      clockMinute_ = static_cast<uint16_t>(hours * 60U + mins);
+      clockStampMs_ = nowMs;
+    }
+  }
+  if (!hold_.isArmed()) {
+    renderActionRow(nowMs, live_[3]);
+    paintRow(3U, live_[3]);
+  }
+}
+
+void ScreenBuffer::setCourtNumbers(const int16_t numbers[hal::kRelayChannelCount]) {
+  for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
+    courtNumbers_[i] = numbers[i];
+  }
+}
+
+/// One rate limit, shared by the Mega's own hint and the bridge's.
+///
+/// A stuck contact and a confused bridge are the same failure from the glass's
+/// point of view, and both are answered by counting rather than by painting.
+bool ScreenBuffer::hintRateLimited(uint32_t nowMs) {
+  if (hintAllowedAt_.isArmed() && !hintAllowedAt_.expired(nowMs)) {
+    if (suppressedHints_ < UINT16_MAX) {
+      ++suppressedHints_;
+    }
+    return true;
+  }
+  hintAllowedAt_.arm(nowMs, kHintRateLimitMs);
+  return false;
+}
+
+/// Paint the action row that row 3 was staged with, for `seconds`, and leave
+/// rows 0-2 exactly as they are. Never arms the overlay hold: the screen
+/// underneath keeps its own deadline, so a hint cannot extend a stuck screen
+/// and cannot shorten a live one.
+bool ScreenBuffer::showActionRowOnly(uint32_t seconds, uint32_t nowMs) {
+  if (hintRateLimited(nowMs)) {
+    return false;
+  }
+  uint32_t ms = seconds * 1000UL;
+  if (ms == 0U || ms > kHintMs) {
+    ms = kHintMs;
+  }
+  hintUntil_.arm(nowMs, ms);
+
+  char row[hal::kDisplayCols + 1U];
+  padInto(row, staged_[3], leftZoneCols());
+  for (uint8_t c = leftZoneCols(); c < hal::kDisplayCols; ++c) {
+    row[c] = live_[3][c];
+  }
+  row[hal::kDisplayCols] = '\0';
+  paintRow(3U, row);
+  return true;
+}
+
+void ScreenBuffer::hint(uint32_t nowMs) {
+  if (hintRateLimited(nowMs)) {
+    return;
+  }
+  hintUntil_.arm(nowMs, kHintMs);
+
+  // The WHOLE row, clock cells included, unlike the bridge's action-row hint
+  // above. This hint only ever fires when the authorisation window is shut,
+  // which means no purchase is in flight and there is no countdown to freeze —
+  // and the sentence does not fit beside a clock. Three seconds later the
+  // ordinary refresh puts the clock back.
+  char row[hal::kDisplayCols + 1U];
+  padInto(row, "SCAN YOUR CODE FIRST", hal::kDisplayCols);
+  paintRow(3U, row);
+}
+
+void ScreenBuffer::noteActivity(uint32_t nowMs) {
+  if (hold_.isArmed()) {
+    hold_.arm(nowMs, holdMs_);
+  }
+}
+
+// --- one pass ---------------------------------------------------------------
+
+void ScreenBuffer::poll(const RelayGuard& relays, uint32_t nowMs) {
+  if (hintUntil_.isArmed() && hintUntil_.expired(nowMs)) {
+    hintUntil_.disarm();
+    paintRow(3U, live_[3]);
+  }
+  if (hold_.isArmed() && hold_.expired(nowMs)) {
+    hold_.disarm();
+    showFlags_ = 0U;
+    renderLanding(relays, nowMs);
+    refresh_.arm(nowMs, kLandingRefreshMs);
+    return;
+  }
+  if (!refresh_.expired(nowMs)) {
+    return;
+  }
+  refresh_.arm(nowMs, kLandingRefreshMs);
+  refreshLive(relays, nowMs);
+}
+
+void ScreenBuffer::refreshLive(const RelayGuard& relays, uint32_t nowMs) {
+  if (hold_.isArmed()) {
+    if ((showFlags_ & kShowCountdown) == 0U) {
+      return;
+    }
+    const uint16_t left = holdLeftSeconds(nowMs);
+    if (left <= kReadyInSeconds) {
+      // The hold, surfaced as what it MEANS. There is no separate cooldown
+      // state and no second timer — inventing one would be a state that can get
+      // stuck, which is the whole failure class this file exists to close.
+      readyIn(live_[3], leftZoneCols(), left);
+    }
+    writeCountdown(live_[3], left);
+    if (!hintUntil_.isArmed()) {
+      paintRow(3U, live_[3]);
+    }
+    return;
+  }
+
+  renderCourtRow(relays, nowMs, live_[2]);
+  renderActionRow(nowMs, live_[3]);
+  paintRow(2U, live_[2]);
+  if (!hintUntil_.isArmed()) {
+    paintRow(3U, live_[3]);
+  }
+}
+
+// --- rendering --------------------------------------------------------------
+
+void ScreenBuffer::commit() {
+  for (uint8_t r = 0U; r < proto::kMaxRows; ++r) {
+    for (uint8_t c = 0U; c <= hal::kDisplayCols; ++c) {
+      live_[r][c] = staged_[r][c];
+    }
+    paintRow(r, live_[r]);
+  }
+}
+
+void ScreenBuffer::renderLanding(const RelayGuard& relays, uint32_t nowMs) {
+  padInto(live_[0], kIdleLine1, hal::kDisplayCols);
+  padInto(live_[1], kIdleLine2, hal::kDisplayCols);
+  renderCourtRow(relays, nowMs, live_[2]);
+  renderActionRow(nowMs, live_[3]);
+  for (uint8_t r = 0U; r < proto::kMaxRows; ++r) {
+    paintRow(r, live_[r]);
+  }
+}
+
+void ScreenBuffer::renderCourtRow(const RelayGuard& relays, uint32_t nowMs, char* out) const {
+  padInto(out, "", hal::kDisplayCols);
+  for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
+    const uint8_t at = static_cast<uint8_t>(i * kCourtCellCols);
+    if (static_cast<uint8_t>(at + kCourtCellCols) > hal::kDisplayCols) {
+      // A narrower panel than this box was built for. The cells that do not fit
+      // are simply not shown; rows 0-1 still carry the whole message.
+      return;
+    }
+    if (courtNumbers_[i] <= 0) {
+      // Unmapped. Blank, not `--`: a dash claims the box drives a dark court,
+      // and it does not drive this one at all.
+      continue;
+    }
+    out[at] = static_cast<char>('A' + static_cast<int>(i));
+    const uint16_t left = relays.remainingSeconds(i, nowMs);
+    if (left == 0U) {
+      out[at + 2U] = '-';
+      out[at + 3U] = '-';
+      continue;
+    }
+    rightAlign(&out[at + 2U], 2U, minutesCeilCapped(left));
+  }
+}
+
+void ScreenBuffer::renderActionRow(uint32_t nowMs, char* out) const {
+  const char* left = "READY";
+  if ((linkFlags_ & kLinkRestorePending) != 0U) {
+    // The box has not heard from the club yet and a restore may be owed. A
+    // member whose court SHOULD be lit needs to know the box knows.
+    left = "STARTING UP";
+  } else if ((linkFlags_ & kLinkWifiUp) == 0U) {
+    left = "READY NO WIFI";
+  } else if ((linkFlags_ & kLinkApiUp) == 0U) {
+    left = "READY NO SERVER";
+  }
+  padInto(out, left, hal::kDisplayCols);
+
+  if (clockMinute_ == kNoClockMinute) {
+    // Blank, not a guess. The box has no RTC; a stale clock is a lie where an
+    // empty one is merely a silence.
+    return;
+  }
+  const uint32_t advanced = clockMinute_ + (tb::since(nowMs, clockStampMs_) / 60000UL);
+  const uint16_t minuteOfDay = static_cast<uint16_t>(advanced % 1440UL);
+  char clock[6];
+  rightAlign(clock, 2U, static_cast<uint16_t>(minuteOfDay / 60U));
+  clock[0] = clock[0] == ' ' ? '0' : clock[0];
+  clock[2] = ':';
+  rightAlign(&clock[3], 2U, static_cast<uint16_t>(minuteOfDay % 60U));
+  clock[3] = clock[3] == ' ' ? '0' : clock[3];
+  clock[5] = '\0';
+  writeTail(out, clock);
+}
+
+void ScreenBuffer::writeTail(char* row, const char* tail) const {
+  const uint8_t at = leftZoneCols();
+  for (uint8_t i = 0U; i < kStatusTailCols && static_cast<uint8_t>(at + i) < hal::kDisplayCols; ++i) {
+    row[at + i] = tail[i] == '\0' ? ' ' : tail[i];
+  }
+}
+
+void ScreenBuffer::writeCountdown(char* row, uint16_t seconds) const {
+  char tail[kStatusTailCols + 1U];
+  rightAlign(tail, kStatusTailCols, seconds);
+  tail[kStatusTailCols] = '\0';
+  writeTail(row, tail);
+}
+
+uint16_t ScreenBuffer::holdLeftSeconds(uint32_t nowMs) const {
+  if (!hold_.isArmed()) {
+    return 0U;
+  }
+  const uint32_t leftMs = hold_.remaining(nowMs);
+  // Rounded UP, so a screen with 200 ms left still reads `1` rather than
+  // spending its last second claiming to be finished.
+  return static_cast<uint16_t>((leftMs + 999UL) / 1000UL);
+}
+
+void ScreenBuffer::paintRow(uint8_t row, const char* text) {
+  if (row >= hal::kDisplayRows) {
+    // A row the fitted panel does not have. Dropped here rather than at the
+    // port so the SAFE-SUBSET contract is what degrades: rows 0-1 still carry
+    // the whole message, and a 1602 shows exactly what it always showed.
+    return;
+  }
+  display_.print(row, 0U, text);
+}
+
+} // namespace courtlogic

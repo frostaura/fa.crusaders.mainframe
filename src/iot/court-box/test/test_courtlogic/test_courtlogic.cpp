@@ -955,7 +955,7 @@ void test_box_a_dead_bridge_still_gets_the_scan_acknowledged(void) {
   TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kScanFeedbackLine1), b.display.row(0U));
 }
 
-void test_box_the_bridges_answer_replaces_the_acknowledgement_and_stays(void) {
+void test_box_the_bridges_answer_replaces_the_acknowledgement_and_then_leaves(void) {
   Box b(kBaseMid);
 
   TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
@@ -965,12 +965,18 @@ void test_box_the_bridges_answer_replaces_the_acknowledgement_and_stays(void) {
   b.step(kBaseMid + 800U);
   TEST_ASSERT_EQUAL_STRING(padded("COURT A"), b.display.row(0U));
 
-  // Ten seconds on, the answer must NOT be painted over with the idle screen:
-  // the bridge answered, so the feedback timer was disarmed.
-  b.step(kBaseMid + 1U + courtlogic::kScanFeedbackMs);
-  b.step(kBaseMid + 1U + courtlogic::kScanFeedbackMs + 5000U);
+  // The answer keeps its OWN hold rather than inheriting the acknowledgement's,
+  // so it is still up a second before its deadline...
+  b.step(kBaseMid + 800U + courtlogic::kDefaultHoldMs - 1U);
   TEST_ASSERT_EQUAL_STRING(padded("COURT A"), b.display.row(0U));
-  TEST_ASSERT_EQUAL_STRING(padded("45 MIN"), b.display.row(1U));
+
+  // ...and gone a millisecond after it. It used to STAY: the bridge's repaint
+  // disarmed the Mega's only timer, so every screen the bridge painted was
+  // permanent. That is the whole of D1-1 and it is asserted here rather than
+  // assumed.
+  b.step(kBaseMid + 800U + courtlogic::kDefaultHoldMs);
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine2), b.display.row(1U));
 }
 
 void test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds(void) {
@@ -985,13 +991,331 @@ void test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds(void) {
     // Still waiting one millisecond before the deadline — across the wrap for
     // the two wrap bases, where a naive comparison would repaint immediately
     // or never.
-    b.step(base + courtlogic::kScanFeedbackMs - 1U);
+    b.step(base + courtlogic::kDefaultHoldMs - 1U);
     TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kScanFeedbackLine1), b.display.row(0U));
 
-    b.step(base + courtlogic::kScanFeedbackMs);
+    b.step(base + courtlogic::kDefaultHoldMs);
     TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
     TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine2), b.display.row(1U));
   }
+}
+
+// --- D1-1: no screen outlives its hold, whatever painted it -----------------
+//
+// The regression test for the stuck screen, and it runs for EVERY verb the
+// bridge can send rather than for the one that broke. That is the point of
+// moving the deadline onto this half: a screen added next year inherits it
+// without anybody remembering to add a timeout to it.
+
+void test_box_a_refusal_plus_auth_zero_still_leaves_the_glass(void) {
+  // The exact sequence the bridge emits for reason=not_recognised, which stood
+  // on the panel for fifty seconds with every button dead behind it.
+  for (size_t i = 0; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    Box b(base);
+
+    TEST_ASSERT_TRUE(b.scanner.feed("RANDOMRECEIPT42\r\n"));
+    b.step(base + 1U);
+
+    feedFrame(b.bridge, proto::Frame::lcd("CODE NOT RECOGNISED", "THEN SCAN AGAIN"));
+    feedFrame(b.bridge, proto::Frame::auth(0U));
+    b.step(base + 2U);
+    TEST_ASSERT_EQUAL_STRING(padded("CODE NOT RECOGNISED"), b.display.row(0U));
+
+    // `!AUTH,0` disarms WITHOUT a lapse edge — that is documented behaviour and
+    // is not what changed. What changed is that it is no longer the only thing
+    // standing between a member and the landing screen.
+    TEST_ASSERT_FALSE(b.box.auth().allows(base + 3U));
+
+    b.step(base + 2U + courtlogic::kDefaultHoldMs);
+    TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+  }
+}
+
+void test_box_no_screen_from_any_verb_outlives_two_minutes(void) {
+  const uint32_t base = kBaseWrapSoon;
+  const uint32_t ceilingMs = static_cast<uint32_t>(proto::kShowHoldMaxSeconds) * 1000UL;
+
+  // Every downlink shape that can put words on the glass, including one asking
+  // for a hold of 0xFFFFFFFF seconds and one from a bridge that only ever
+  // learned `!LCD`.
+  for (uint8_t shape = 0U; shape < 4U; ++shape) {
+    Box b(base);
+    if (shape == 0U) {
+      feedFrame(b.bridge, proto::Frame::lcd("STUCK", "FOREVER"));
+    } else if (shape == 1U) {
+      feedFrame(b.bridge, proto::Frame::row(0U, "STUCK"));
+      feedFrame(b.bridge, proto::Frame::show(0xFFFFFFFFU, 0U));
+    } else if (shape == 2U) {
+      feedFrame(b.bridge, proto::Frame::row(0U, "STUCK"));
+      feedFrame(b.bridge, proto::Frame::show(0U, 1U));
+    } else {
+      feedFrame(b.bridge, proto::Frame::lcd("STUCK", "FOREVER"));
+      feedFrame(b.bridge, proto::Frame::auth(0U));
+    }
+    b.step(base + 1U);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(padded("STUCK"), b.display.row(0U), "the overlay never appeared");
+
+    b.step(base + 1U + ceilingMs + 1000U);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(padded(courtlogic::kIdleLine1), b.display.row(0U),
+                                     "a screen outlived the two-minute ceiling");
+  }
+}
+
+void test_box_a_press_re_arms_the_hold_rather_than_losing_the_screen(void) {
+  Box b(kBaseMid);
+
+  feedFrame(b.bridge, proto::Frame::auth(600U));
+  feedFrame(b.bridge, proto::Frame::row(0U, "COURT A"));
+  feedFrame(b.bridge, proto::Frame::row(1U, "HOW LONG?"));
+  feedFrame(b.bridge, proto::Frame::show(20U, courtlogic::kShowCountdown));
+  // Two passes: the Mega drains at most kBytesPerPass from the link per pass,
+  // which is a real bound and not a test artefact — four frames is more than
+  // sixty-four bytes, so the commit lands on the second pass exactly as it
+  // would on the board.
+  b.step(kBaseMid + 1U);
+  b.step(kBaseMid + 2U);
+  TEST_ASSERT_EQUAL_STRING(padded("COURT A"), b.display.row(0U));
+
+  // Nineteen seconds of reading, then a press. The choice must not be taken
+  // away under somebody part-way through making it.
+  b.buttons.press(0U);
+  b.step(kBaseMid + 19000U);
+  b.step(kBaseMid + 19000U + courtlogic::kDebounceMs);
+  b.buttons.release(0U);
+
+  // The original deadline was 20 s from t=2; a screen that had not been
+  // re-armed is long gone by here.
+  b.step(kBaseMid + 38000U);
+  TEST_ASSERT_EQUAL_STRING(padded("COURT A"), b.display.row(0U));
+
+  b.step(kBaseMid + 19000U + courtlogic::kDebounceMs + 20001U);
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+}
+
+void test_box_the_button_window_closing_does_not_take_the_screen_away(void) {
+  // D1-5's second half. The authorisation window and the screen are two
+  // different deadlines about two different things — one is about BUTTONS, the
+  // other about WORDS — and the lapse used to repaint the landing screen over
+  // whatever was there. Thirty seconds after a grant, a member reading
+  // `COURT A IS ON / 45 MINUTES` had it replaced mid-sentence, and not
+  // atomically: `CRUSADERS COURTS / 45 MIN` was on the glass for one I2C write.
+  for (size_t i = 0; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    Box b(base);
+
+    feedFrame(b.bridge, proto::Frame::row(0U, "COURT A IS ON"));
+    feedFrame(b.bridge, proto::Frame::row(1U, "45 MINUTES"));
+    b.step(base + 1U);
+    feedFrame(b.bridge, proto::Frame::show(60U, 0U));
+    feedFrame(b.bridge, proto::Frame::auth(5U));
+    b.step(base + 2U);
+    TEST_ASSERT_EQUAL_STRING(padded("COURT A IS ON"), b.display.row(0U));
+
+    // The window lapses on its own and says so on the wire.
+    b.step(base + 6000U);
+    TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!EVT,AUTHEXPIRED"));
+    TEST_ASSERT_FALSE(b.box.auth().allows(base + 6000U));
+
+    // And the screen is untouched: it has fifty-four seconds of its own left.
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(padded("COURT A IS ON"), b.display.row(0U),
+                                     "the button window took the screen away");
+    TEST_ASSERT_EQUAL_STRING(padded("45 MINUTES"), b.display.row(1U));
+  }
+}
+
+// --- D1-4: a press the box cannot act on says so ---------------------------
+
+void test_box_a_dropped_press_paints_a_hint_and_is_rate_limited(void) {
+  Box b(kBaseMid);
+
+  // The window is shut: the press is correctly dropped and correctly counted.
+  b.buttons.press(0U);
+  b.step(kBaseMid + 10U);
+  b.step(kBaseMid + 10U + courtlogic::kDebounceMs);
+  TEST_ASSERT_EQUAL_UINT16(1U, b.box.unauthorisedPresses());
+  TEST_ASSERT_FALSE(sentLineStarting(b.bridge, "!BTN"));
+
+  // What is new is that the member can tell the difference between a dropped
+  // press and a dead box.
+  TEST_ASSERT_EQUAL_STRING(padded("SCAN YOUR CODE FIRST"), b.display.row(3U));
+
+  // A second press inside the rate limit paints nothing more — a jammed contact
+  // must not strobe the glass or flood the I2C bus at loop rate.
+  b.buttons.release(0U);
+  b.step(kBaseMid + 200U);
+  b.step(kBaseMid + 200U + courtlogic::kDebounceMs);
+  b.buttons.press(0U);
+  b.step(kBaseMid + 400U);
+  b.step(kBaseMid + 400U + courtlogic::kDebounceMs);
+  TEST_ASSERT_EQUAL_UINT16(1U, b.box.screens().suppressedHints());
+
+  // And it reverts on its own, back to the action row underneath it.
+  b.buttons.release(0U);
+  b.step(kBaseMid + 600U);
+  b.step(kBaseMid + courtlogic::kHintMs + 1200U);
+  TEST_ASSERT_EQUAL_STRING(padded("READY"), b.display.row(3U));
+}
+
+// --- D1-5: a lit court is visible ------------------------------------------
+
+void test_box_the_landing_screen_shows_what_is_burning(void) {
+  Box b(kBaseMid);
+
+  const int16_t numbers[4] = {1, 2, 3, 4};
+  feedFrame(b.bridge, proto::Frame::map(numbers));
+  feedFrame(b.bridge, proto::Frame::on(proto::Court::A, 2700U));
+  b.step(kBaseMid + 1U);
+  b.step(kBaseMid + 1100U);
+
+  // Forty-five minutes on court A, rendered locally from the relay deadline. It
+  // costs no serial traffic at all: the Mega already knows.
+  TEST_ASSERT_EQUAL_STRING(padded("A 45 B -- C -- D --"), b.display.row(2U));
+
+  b.step(kBaseMid + 61100U);
+  TEST_ASSERT_EQUAL_STRING(padded("A 44 B -- C -- D --"), b.display.row(2U));
+
+  // Thirty seconds after a grant the authorisation window lapses. It used to
+  // paint the landing screen straight over the grant — and not atomically, so
+  // `CRUSADERS COURTS / 45 MIN` was on the glass for one I2C write. Now the
+  // grant's own hold has already taken it away and the court is still visible.
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+}
+
+void test_box_an_unmapped_relay_is_blank_not_a_dark_court(void) {
+  Box b(kBaseMid);
+
+  // Two courts only. A dash on C and D would claim the box drives them.
+  const int16_t numbers[4] = {1, 2, 0, 0};
+  feedFrame(b.bridge, proto::Frame::map(numbers));
+  b.step(kBaseMid + 1U);
+  b.step(kBaseMid + 1100U);
+  TEST_ASSERT_EQUAL_STRING(padded("A -- B --"), b.display.row(2U));
+}
+
+// --- the action row is honest about the link -------------------------------
+
+void test_box_the_action_row_says_which_thing_is_missing(void) {
+  Box b(kBaseMid);
+  uint32_t at = kBaseMid;
+
+  struct Case {
+    uint8_t flags;
+    const char* hhmm;
+    const char* expectLeft;
+  };
+  const Case cases[] = {
+      {courtlogic::kLinkWifiUp | courtlogic::kLinkApiUp, proto::kNoClock, "READY"},
+      {courtlogic::kLinkWifiUp, proto::kNoClock, "READY NO SERVER"},
+      {0U, proto::kNoClock, "READY NO WIFI"},
+      {courtlogic::kLinkWifiUp | courtlogic::kLinkApiUp | courtlogic::kLinkRestorePending,
+       proto::kNoClock, "STARTING UP"},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    feedFrame(b.bridge, proto::Frame::idle(cases[i].flags, cases[i].hhmm));
+    at += 1100U;
+    b.step(at);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(padded(cases[i].expectLeft), b.display.row(3U),
+                                     cases[i].expectLeft);
+  }
+}
+
+void test_box_an_untrusted_clock_is_blank_not_stale(void) {
+  Box b(kBaseMid);
+
+  feedFrame(b.bridge,
+            proto::Frame::idle(courtlogic::kLinkWifiUp | courtlogic::kLinkApiUp | courtlogic::kLinkClockValid,
+                               "1942"));
+  b.step(kBaseMid + 1100U);
+  TEST_ASSERT_EQUAL_STRING(padded("READY          19:42"), b.display.row(3U));
+
+  // Advanced locally between heartbeats: the box has no RTC, but it does have
+  // millis(), and a clock that only moves once a minute-and-a-half reads as a
+  // frozen one.
+  b.step(kBaseMid + 1100U + 180000U);
+  TEST_ASSERT_EQUAL_STRING(padded("READY          19:45"), b.display.row(3U));
+
+  // The bridge stops trusting it. Blank, never the last value it had: loading,
+  // failed and empty are three different states and only one of them lies.
+  feedFrame(b.bridge, proto::Frame::idle(courtlogic::kLinkWifiUp | courtlogic::kLinkApiUp, proto::kNoClock));
+  b.step(kBaseMid + 1100U + 181100U);
+  TEST_ASSERT_EQUAL_STRING(padded("READY"), b.display.row(3U));
+}
+
+void test_box_a_screen_is_committed_in_one_piece(void) {
+  Box b(kBaseMid);
+  b.display.resetCounters();
+
+  feedFrame(b.bridge, proto::Frame::row(0U, "COURT B IS ON"));
+  feedFrame(b.bridge, proto::Frame::row(1U, "45 MINUTES"));
+  feedFrame(b.bridge, proto::Frame::row(2U, "Ends 20:27"));
+  feedFrame(b.bridge, proto::Frame::row(3U, "ENJOY YOUR GAME"));
+  b.step(kBaseMid + 1U);
+
+  // Four staged rows and nothing on the glass yet: `!ROW` paints nothing, which
+  // is what makes the commit atomic.
+  TEST_ASSERT_EQUAL_UINT16(0U, b.display.printCalls());
+
+  feedFrame(b.bridge, proto::Frame::show(10U, courtlogic::kShowCountdown));
+  b.step(kBaseMid + 2U);
+  TEST_ASSERT_EQUAL_STRING(padded("COURT B IS ON"), b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded("45 MINUTES"), b.display.row(1U));
+  TEST_ASSERT_EQUAL_STRING(padded("Ends 20:27"), b.display.row(2U));
+  TEST_ASSERT_EQUAL_STRING("ENJOY YOUR GAME   10", b.display.row(3U));
+
+  // The countdown says what it MEANS in the last five seconds, which is GOAL
+  // item 18's rapid-scan window made visible without a second state.
+  b.step(kBaseMid + 2U + 6000U);
+  TEST_ASSERT_EQUAL_STRING("READY IN 4 s       4", b.display.row(3U));
+}
+
+void test_box_a_scan_pre_empts_a_screen_that_is_still_counting_down(void) {
+  Box b(kBaseMid);
+
+  feedFrame(b.bridge, proto::Frame::lcd("COURT B IS ON", "45 MINUTES"));
+  b.step(kBaseMid + 1U);
+  TEST_ASSERT_EQUAL_STRING(padded("COURT B IS ON"), b.display.row(0U));
+
+  // Three seconds in, the next member scans. The countdown is INFORMATION, not
+  // a gate: nothing is blocked and the answer is immediate.
+  TEST_ASSERT_TRUE(b.scanner.feed("MEM-0043\r\n"));
+  b.step(kBaseMid + 3000U);
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kScanFeedbackLine1), b.display.row(0U));
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!SCAN,MEM-0043"));
+}
+
+void test_box_pong_carries_the_counters_nothing_could_read(void) {
+  Box b(kBaseMid);
+
+  b.buttons.press(0U);
+  b.step(kBaseMid + 10U);
+  b.step(kBaseMid + 10U + courtlogic::kDebounceMs);
+  TEST_ASSERT_EQUAL_UINT16(1U, b.box.unauthorisedPresses());
+
+  feedRaw(b.bridge, "GARBAGE\n");
+  b.step(kBaseMid + 200U);
+
+  feedFrame(b.bridge, proto::Frame::ping());
+  b.step(kBaseMid + 300U);
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!PONG,"));
+
+  // version, uptime, txDropped, rxErrors, unauthorised — five arguments, at
+  // kMaxArgs exactly.
+  const char* pong = nullptr;
+  for (uint8_t i = 0U; i < b.bridge.lineCount(); ++i) {
+    if (strncmp(b.bridge.line(i), "!PONG,", 6U) == 0) {
+      pong = b.bridge.line(i);
+    }
+  }
+  TEST_ASSERT_NOT_NULL(pong);
+  uint8_t commas = 0U;
+  for (size_t i = 0U; pong[i] != '\0' && pong[i] != '*'; ++i) {
+    if (pong[i] == ',') {
+      ++commas;
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT8(5U, commas);
+  TEST_ASSERT_EQUAL_UINT16(1U, b.box.rxErrors());
 }
 
 int main(int, char**) {
@@ -999,7 +1323,19 @@ int main(int, char**) {
 
   RUN_TEST(test_box_a_scan_is_acknowledged_on_the_glass_before_any_answer);
   RUN_TEST(test_box_a_dead_bridge_still_gets_the_scan_acknowledged);
-  RUN_TEST(test_box_the_bridges_answer_replaces_the_acknowledgement_and_stays);
+  RUN_TEST(test_box_the_bridges_answer_replaces_the_acknowledgement_and_then_leaves);
+  RUN_TEST(test_box_a_refusal_plus_auth_zero_still_leaves_the_glass);
+  RUN_TEST(test_box_no_screen_from_any_verb_outlives_two_minutes);
+  RUN_TEST(test_box_a_press_re_arms_the_hold_rather_than_losing_the_screen);
+  RUN_TEST(test_box_the_button_window_closing_does_not_take_the_screen_away);
+  RUN_TEST(test_box_a_dropped_press_paints_a_hint_and_is_rate_limited);
+  RUN_TEST(test_box_the_landing_screen_shows_what_is_burning);
+  RUN_TEST(test_box_an_unmapped_relay_is_blank_not_a_dark_court);
+  RUN_TEST(test_box_the_action_row_says_which_thing_is_missing);
+  RUN_TEST(test_box_an_untrusted_clock_is_blank_not_stale);
+  RUN_TEST(test_box_a_screen_is_committed_in_one_piece);
+  RUN_TEST(test_box_a_scan_pre_empts_a_screen_that_is_still_counting_down);
+  RUN_TEST(test_box_pong_carries_the_counters_nothing_could_read);
   RUN_TEST(test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds);
 
   RUN_TEST(test_relay_guard_drives_the_active_low_level);

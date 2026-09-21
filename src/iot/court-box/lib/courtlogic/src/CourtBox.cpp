@@ -24,6 +24,16 @@ static_assert(static_cast<uint8_t>(proto::Key::Slot1) == hal::kDurationButtonBas
 static_assert(static_cast<uint8_t>(proto::Key::Slot4) + 1U == hal::kButtonCount,
               "proto::Key and hal button channels must cover the same eight buttons");
 
+// The wire addresses four rows whatever panel is fitted, and the DISPLAY layer
+// is what drops a row this glass does not have — that is what makes `!ROW,3` a
+// well-formed frame on a box built for a 1602 rather than a protocol error. The
+// assertion lives HERE, on the device side that knows about both, for the same
+// reason bridgelogic/RosterTokenFits.h does.
+static_assert(hal::kDisplayRows <= proto::kMaxRows,
+              "the panel has more rows than the protocol can address");
+static_assert(hal::kDisplayCols <= proto::kMaxArgLen,
+              "a full-width row would not fit a !ROW argument");
+
 /// Decimal parse of an argument the decoder has already validated and clamped.
 ///
 /// Saturating rather than wrapping, and stopping at the first non-digit. Both
@@ -50,10 +60,10 @@ uint32_t parseU32(const char* text) {
 } // namespace
 
 CourtBox::CourtBox(const CourtPorts& ports, proto::LegacyDialect legacy)
-    : display_(ports.display), scanner_(ports.scanner), bridge_(ports.bridge), clock_(ports.clock),
-      relays_(ports.relay), panel_(ports.buttons), scan_(), auth_(), rx_(proto::Link::Downlink, legacy),
-      uptime_(), stateDue_(), scanFeedback_(), lastMask_(0U), overrunPending_(false), txBuf_(),
-      txDropped_(0U), rxErrors_(0U), unauthorised_(0U), oversizeScans_(0U) {
+    : scanner_(ports.scanner), bridge_(ports.bridge), clock_(ports.clock), relays_(ports.relay),
+      screens_(ports.display), panel_(ports.buttons), scan_(), auth_(), rx_(proto::Link::Downlink, legacy),
+      uptime_(), stateDue_(), lastMask_(0U), overrunPending_(false), txBuf_(), txDropped_(0U),
+      rxErrors_(0U), unauthorised_(0U), oversizeScans_(0U) {
 }
 
 void CourtBox::begin() {
@@ -61,12 +71,11 @@ void CourtBox::begin() {
   auth_.disarm();
   scan_.reset();
   rx_.reset();
-  scanFeedback_.disarm();
   const uint32_t now = clock_.nowMs();
   uptime_.seed(now);
   stateDue_.arm(now, kStateIntervalMs);
   lastMask_ = 0U;
-  showIdle();
+  screens_.begin(now);
 }
 
 void CourtBox::poll() {
@@ -79,7 +88,7 @@ void CourtBox::poll() {
   pollButtons(now);
   releaseExpired(now);
   noteAuthLapse(now);
-  expireScanFeedback(now);
+  screens_.poll(relays_, now);
   flushOverrun();
   publishState(now);
 }
@@ -119,17 +128,18 @@ void CourtBox::drainScanner(uint32_t nowMs) {
     static_cast<void>(sendFrame(frame));
     // Painted whether or not the frame got out. A full TX ring IS the dead-ESP
     // case, and that is exactly when the member most needs to see that the
-    // scanner heard them — see kScanFeedbackLine1.
-    paintRow(0U, kScanFeedbackLine1);
-    paintRow(1U, "");
-    scanFeedback_.arm(nowMs, kScanFeedbackMs);
-  }
-}
-
-void CourtBox::expireScanFeedback(uint32_t nowMs) {
-  if (scanFeedback_.expired(nowMs)) {
-    scanFeedback_.disarm();
-    showIdle();
+    // scanner heard them.
+    //
+    // A COMPLETED SCAN PRE-EMPTS WHATEVER IS ON THE GLASS, immediately. That is
+    // what makes rapid scanning real rather than cosmetic: the countdown on the
+    // previous member's verdict is INFORMATION, not a gate, and a second person
+    // who scans three seconds into it is answered at once rather than made to
+    // wait for a screen that is about to leave anyway.
+    screens_.stageRow(0U, kScanFeedbackLine1);
+    screens_.stageRow(1U, kScanFeedbackLine2);
+    screens_.stageRow(2U, kScanFeedbackLine3);
+    screens_.stageRow(3U, "");
+    screens_.show(kDefaultHoldMs / 1000UL, kShowCountdown, nowMs);
   }
 }
 
@@ -138,13 +148,22 @@ void CourtBox::pollButtons(uint32_t nowMs) {
   if (pressed == 0U) {
     return;
   }
+  // BEFORE the authorisation check, and deliberately. Every debounced press is
+  // activity whether or not the box may act on it, and a member part-way
+  // through choosing must not lose the choice because they stopped to read. It
+  // costs nothing: the Mega sees the press either way.
+  screens_.noteActivity(nowMs);
   if (!auth_.allows(nowMs)) {
     // Dropped, not queued. A press held until the next authorisation window
     // opens would fire a relay on the NEXT member's scan, which is precisely
     // the unexpiring-flag defect this window exists to close.
+    //
+    // The drop was always right; the SILENCE was the bug. Six presses across
+    // all eight channels produced no frame, no pixel and no sound.
     if (unauthorised_ < UINT16_MAX) {
       ++unauthorised_;
     }
+    screens_.hint(nowMs);
     return;
   }
   for (uint8_t i = 0U; i < hal::kButtonCount; ++i) {
@@ -174,10 +193,18 @@ void CourtBox::releaseExpired(uint32_t nowMs) {
 }
 
 void CourtBox::noteAuthLapse(uint32_t nowMs) {
-  if (auth_.lapsed(nowMs)) {
-    static_cast<void>(sendFrame(proto::Frame::evt("AUTHEXPIRED", "")));
-    showIdle();
+  if (!auth_.lapsed(nowMs)) {
+    return;
   }
+  static_cast<void>(sendFrame(proto::Frame::evt("AUTHEXPIRED", "")));
+  // NO REPAINT. This used to call showIdle(), which painted the landing screen
+  // straight over a live grant screen thirty seconds after a court was lit —
+  // and not atomically, so the member saw `CRUSADERS COURTS / 45 MIN` for one
+  // I2C write on the way past. The window closing is about the BUTTONS; the
+  // screen has its own deadline and is nobody else's to take away. What the
+  // member sees after their verdict leaves is the landing screen with their
+  // court counting down on it, which is the fact the old landing screen threw
+  // away.
 }
 
 void CourtBox::flushOverrun() {
@@ -231,18 +258,22 @@ void CourtBox::handleFrame(const proto::Frame& frame, uint32_t nowMs) {
     applyOff(frame);
   } else if (verb == proto::Verb::Ext) {
     applyExt(frame, nowMs);
-  } else if (verb == proto::Verb::Lcd) {
-    // The bridge answered, so its text stands and the local feedback must not
-    // repaint idle over it ten seconds later.
-    scanFeedback_.disarm();
-    paintRow(0U, frame.arg(0));
-    paintRow(1U, frame.arg(1));
+  } else if (ScreenBuffer::owns(verb)) {
+    // ONE branch for five verbs. The chain's own comment records that it is at
+    // the complexity gate's limit, so the screen verbs delegate rather than
+    // each taking a branch — which is where the host tests want them anyway.
+    applyScreen(frame, nowMs);
   } else if (verb == proto::Verb::Auth) {
     auth_.arm(nowMs, parseU32(frame.arg(0)));
   } else if (verb == proto::Verb::Rst) {
     begin();
   } else if (verb == proto::Verb::Ping) {
-    static_cast<void>(sendFrame(proto::Frame::pong(fw::kFirmwareVersion, uptimeSeconds())));
+    // With the three counters. They have existed on this board since the
+    // beginning and nothing off it could read them, so a climbing "presses
+    // thrown away because the window was shut" — a stuck contact, or a bridge
+    // that stopped sending `!AUTH` — was invisible from the office.
+    static_cast<void>(sendFrame(
+        proto::Frame::pong(fw::kFirmwareVersion, uptimeSeconds(), txDropped_, rxErrors_, unauthorised_)));
   } else {
     // A well-formed uplink verb arriving on the downlink. The peer is confused
     // about which direction it is talking in, which is worth saying out loud
@@ -301,6 +332,37 @@ void CourtBox::applyOff(const proto::Frame& frame) {
   // 9600 baud link for one change.
 }
 
+/// Everything that is about the glass, in one place.
+///
+/// Numeric arguments are re-parsed here rather than trusted: the decoder has
+/// already validated and clamped them, and this is belt and braces on the same
+/// grounds RelayGuard's independence rests on — nothing on this path assumes
+/// the bytes came from a well-behaved peer.
+void CourtBox::applyScreen(const proto::Frame& frame, uint32_t nowMs) {
+  const proto::Verb verb = frame.verb();
+  if (verb == proto::Verb::Lcd) {
+    screens_.overlay(frame.arg(0), frame.arg(1), nowMs);
+    return;
+  }
+  if (verb == proto::Verb::Row) {
+    screens_.stageRow(static_cast<uint8_t>(parseU32(frame.arg(0))), frame.arg(1));
+    return;
+  }
+  if (verb == proto::Verb::Show) {
+    screens_.show(parseU32(frame.arg(0)), static_cast<uint8_t>(parseU32(frame.arg(1))), nowMs);
+    return;
+  }
+  if (verb == proto::Verb::Idle) {
+    screens_.setLink(static_cast<uint8_t>(parseU32(frame.arg(0))), frame.arg(1), nowMs);
+    return;
+  }
+  int16_t numbers[hal::kRelayChannelCount];
+  for (uint8_t i = 0U; i < hal::kRelayChannelCount; ++i) {
+    numbers[i] = static_cast<int16_t>(parseU32(frame.arg(i)));
+  }
+  screens_.setCourtNumbers(numbers);
+}
+
 void CourtBox::applyExt(const proto::Frame& frame, uint32_t nowMs) {
   proto::Court court = proto::Court::A;
   if (!proto::courtFromChar(frame.arg(0)[0], court)) {
@@ -348,24 +410,5 @@ void CourtBox::sendCourtEvent(const char* name, proto::Court court) {
   static_cast<void>(sendFrame(proto::Frame::evt(name, detail)));
 }
 
-void CourtBox::paintRow(uint8_t row, const char* text) {
-  char padded[hal::kDisplayCols + 1U];
-  uint8_t i = 0U;
-  while (i < hal::kDisplayCols && text[i] != '\0') {
-    padded[i] = text[i];
-    ++i;
-  }
-  while (i < hal::kDisplayCols) {
-    padded[i] = ' ';
-    ++i;
-  }
-  padded[hal::kDisplayCols] = '\0';
-  display_.print(row, 0U, padded);
-}
-
-void CourtBox::showIdle() {
-  paintRow(0U, kIdleLine1);
-  paintRow(1U, kIdleLine2);
-}
 
 } // namespace courtlogic
