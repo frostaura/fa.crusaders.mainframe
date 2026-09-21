@@ -108,6 +108,12 @@ public sealed class TenantSettingsAccessor
             DoorRefusalSpikeMinutes = TryInt(root, "door_refusal_spike_minutes", DoorSettings.DefaultRefusalSpikeMinutes),
             ClubContactPhone = TryString(root, "club_contact_phone", ""),
             ClubContactEmail = TryString(root, "club_contact_email", ""),
+
+            // Bounded at BulkSettings, for the same reason the five above are bounded at
+            // DoorSettings: this method's contract is "what the column says", and "what an
+            // admin bulk action may act on" is a different question with a different answer
+            // for a hand-edited document.
+            AdminBulkMaxItems = TryInt(root, "admin_bulk_max_items", BulkSettings.DefaultMaxItems),
         };
     }
 
@@ -293,6 +299,17 @@ public sealed record TenantSettingsView(
 
     /// <summary>The window those refusals are counted in, minutes. Read via <see cref="DoorSettings.RefusalSpikeMinutes"/>.</summary>
     public int DoorRefusalSpikeMinutes { get; init; } = DoorSettings.DefaultRefusalSpikeMinutes;
+
+    /// <summary>
+    /// Most items one admin bulk action may carry. Read via <see cref="BulkSettings.MaxItems"/>.
+    ///
+    /// <para>
+    /// Raw as stored, like everything else on this record, and bounded at the reader — a
+    /// hand-edited document is not a PUT, and this number decides how many payer locks and
+    /// GiST index writes one request may take.
+    /// </para>
+    /// </summary>
+    public int AdminBulkMaxItems { get; init; } = BulkSettings.DefaultMaxItems;
 
     /// <summary>
     /// The number a member refused at a door should ring. Empty by default — a club that has

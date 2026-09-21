@@ -112,6 +112,7 @@ public sealed class TestHost : IAsyncDisposable
         // suite carry nulls the application never writes.
         services.AddHttpContextAccessor();
         services.AddScoped<AdminChangeRecorder>();
+        services.AddScoped<AdminBulkBookingService>();
 
         var sp = services.BuildServiceProvider();
 

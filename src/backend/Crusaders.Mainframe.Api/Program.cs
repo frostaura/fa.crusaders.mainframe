@@ -289,6 +289,8 @@ builder.Services.AddScoped<MemberApprovalService>();
 // The club's undeletable admin change record. Every admin mutation in every lane writes
 // through this one service; see AdminChangeRecorder for why staging and recording differ.
 builder.Services.AddScoped<AdminChangeRecorder>();
+// Items 5 + 13 — the per-item, never-transactional bulk cancel and bulk book.
+builder.Services.AddScoped<AdminBulkBookingService>();
 
 // Phase 4 — webhook engine + lights cue worker + no-show worker
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
@@ -502,6 +504,7 @@ app.MapAdminDeviceEndpoints();
 app.MapAdminDoorEndpoints();
 app.MapAdminLedgerEndpoints();
 app.MapAdminChangeEndpoints();
+app.MapAdminBulkBookingEndpoints();
 app.MapMeProfileEndpoints();
 app.MapMeDoorEndpoints();
 app.MapWebhookEndpoints();
