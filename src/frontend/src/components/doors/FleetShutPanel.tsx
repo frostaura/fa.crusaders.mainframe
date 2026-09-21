@@ -8,7 +8,7 @@ import {
 } from "../../lib/gateCopy";
 import { describeDeviceError } from "../../lib/deviceErrors";
 import { doorEndpoints } from "../../lib/api";
-import { type DoorsChrome } from "./useDoorsChrome";
+import { markOwnDoorsAction, type DoorsChrome } from "./useDoorsChrome";
 
 /** What the count line says about a club whose doors are not all in one state. */
 function tally(total: number, open: number): string {
@@ -46,6 +46,9 @@ async function fleetAction(action: "shut" | "reopen", context: {
 }) {
   context.onError(null);
   try {
+    // C11: the biggest change on this surface, and the one an admin is most plainly
+    // looking at the result of. Polite for them; assertive for everybody else's tab.
+    markOwnDoorsAction();
     const answer = action === "shut"
       ? await doorEndpoints.doorsShutAll()
       : await doorEndpoints.doorsReopenAll();

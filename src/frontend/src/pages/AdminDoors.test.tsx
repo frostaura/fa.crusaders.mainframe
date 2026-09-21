@@ -1054,6 +1054,35 @@ describe("the doors surface", () => {
     });
 
     /**
+     * <b>A7 / E-M5 / O1, one list along from where it was fixed.</b>
+     *
+     * <p>
+     * The scan rows were given the club's zone and the EVENT rows were not, so on a page
+     * read from anywhere but the club's own timezone the two lists above and below each
+     * other dated the same evening differently — and the events list, which is the one that
+     * answers "when did somebody shut this door", was the one telling the viewer's time.
+     * One formatter on this surface means one ZONE on this surface.
+     * </p>
+     */
+    it("dates a door event in the club's zone, not the viewer's", async () => {
+      openDoor([doorFixture()], {
+        // A club five hours west of the runner's pinned Africa/Johannesburg.
+        timezone: "America/New_York",
+        activity: [{
+          ...activityFixture({ at: "2026-09-19T22:30:00Z", action: "device.updated", reason: null }),
+          change: "shut",
+          actor_name: "Priya Naidoo",
+        }],
+      });
+
+      const events = await screen.findByRole("region", { name: "Door events" });
+      // 22:30 UTC is 18:30 in New York and 00:30 the NEXT DAY in Johannesburg — so a page
+      // that reads the runner's zone gets both the time and the date wrong.
+      expect(events).toHaveTextContent("18:30");
+      expect(events.textContent).not.toContain("00:30");
+    });
+
+    /**
      * A row written before the server recorded WHICH of the four an edit was still has to
      * say something true. "Details or state changed" is that; guessing a verb — "Someone
      * renamed this door" over a shut — would be this round's own defect in a new place.

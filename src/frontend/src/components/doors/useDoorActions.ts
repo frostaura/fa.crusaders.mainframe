@@ -3,6 +3,7 @@ import { doorStateNotice } from "../../lib/doorsCopy";
 import { clubDayAndClock } from "../../lib/clubClock";
 import { doorAlreadyNotice, unnamedGateOfflineNotice } from "../../lib/gateCopy";
 import { describeDeviceError } from "../../lib/deviceErrors";
+import { markOwnDoorsAction } from "./useDoorsChrome";
 import { doorEndpoints, endpoints, type AdminDoorDevice, type PowerLossBehaviour } from "../../lib/api";
 
 /** Everything an admin can write about one door, in the one shape the one form sends. */
@@ -73,6 +74,9 @@ export function useDoorActions(
 
     setEnabled: async (enabled) => {
       try {
+        // C11: this tab caused what the next read will find, so the banner states it
+        // politely rather than interrupting the admin who just pressed the button.
+        markOwnDoorsAction();
         const answer = await doorEndpoints.doorSetEnabled(door.id, enabled);
         /**
          * <b>B10 — a tab left open overnight "shut" a door somebody else had already shut,
@@ -118,6 +122,8 @@ export function useDoorActions(
 
     remove: async () => {
       try {
+        // C11: a deleted door leaves the shut set, which is a change this tab caused.
+        markOwnDoorsAction();
         await endpoints.adminDeviceDelete(door.id);
         toast.push({
           tone: "success",

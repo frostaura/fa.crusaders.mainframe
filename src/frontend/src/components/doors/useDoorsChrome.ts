@@ -52,10 +52,35 @@ export type DoorsChrome = {
   /** The `shut_all_active` flag the fleet control and the banner both key on (C1). */
   shutAllActive: boolean;
   doors: DoorSummary[];
+  /**
+   * <b>C11 — when the shut state last changed under somebody who did not cause it.</b>
+   *
+   * <p>
+   * The standing banner was `role="alert"`, so a blind admin was interrupted mid-word with
+   * the same sentence on every route they visited for the rest of the session — including
+   * the admin who had shut the door themselves and had already been told by the control,
+   * the toast and the banner's arrival. What is standing is polite; what is NEWS is the
+   * club's doors changing state under a reader who did not do it, and only that earns an
+   * interruption.
+   * </p>
+   *
+   * <p>
+   * A timestamp rather than a boolean because the banner has to be able to tell one
+   * interruption from the next: two shuts by two other admins, five minutes apart, are two
+   * announcements, and a boolean that is already `true` produces one.
+   * </p>
+   */
+  shutChangedElsewhereAt: number | null;
 };
 
 const NOTHING: DoorsChrome = {
-  attention: [], homeAttention: [], shut: 0, total: 0, shutAllActive: false, doors: [],
+  attention: [],
+  homeAttention: [],
+  shut: 0,
+  total: 0,
+  shutAllActive: false,
+  doors: [],
+  shutChangedElsewhereAt: null,
 };
 
 /**
@@ -159,6 +184,61 @@ let listening = false;
  */
 let inFlight: Promise<void> | null = null;
 
+// --- C11: whose change was it? ------------------------------------------------------
+
+/**
+ * The shut set as it stood at the last successful read, or null before the first one.
+ *
+ * Null is load-bearing: the FIRST read is not a change, it is the state an admin arrived
+ * in. Announcing it assertively would interrupt every admin at sign-in with a fact the
+ * banner is about to state politely two inches below.
+ */
+let lastShutSignature: string | null = null;
+
+/**
+ * Set by an action THIS TAB performed, consumed by the next successful read.
+ *
+ * <p>
+ * An admin who shuts a door is looking at the result of their own press: the control says
+ * it, the toast says it, and the banner arrives. A fourth telling, assertively, over
+ * whatever they were reading, is the noise that teaches somebody to tune out the third.
+ * </p>
+ */
+let ownActionPending = false;
+
+/** Called by every control on this surface that changes a door, BEFORE it re-reads. */
+export function markOwnDoorsAction() {
+  ownActionPending = true;
+}
+
+/** Which doors are shut, as one comparable string. Sorted, so ordering is never a "change". */
+function shutSignatureOf(chrome: DoorsChrome): string {
+  return chrome.doors.filter((d) => !d.enabled).map((d) => d.id).sort().join(",");
+}
+
+/**
+ * Stamp a freshly summarised chrome with whether somebody ELSE changed the shut state.
+ *
+ * <p>
+ * <b>The stamp lives for exactly one publish</b>, and that is what makes the banner's
+ * announcement a pure function of what it is handed rather than a piece of local state it
+ * has to remember having announced. The next read — thirty seconds later at the outside —
+ * clears it, so the interruption is said once, and the sr-only node it lives in does not
+ * settle into a permanent second copy of a sentence already on screen.
+ * </p>
+ */
+function attributeShutChange(chrome: DoorsChrome): DoorsChrome {
+  const signature = shutSignatureOf(chrome);
+  const previous = lastShutSignature;
+  lastShutSignature = signature;
+  const ours = ownActionPending;
+  ownActionPending = false;
+  // `previous === null` is the FIRST read, which is an arrival rather than news: without it,
+  // signing in at a club whose doors are shut interrupts every admin at every sign-in.
+  const elsewhere = previous !== null && previous !== signature && !ours;
+  return { ...chrome, shutChangedElsewhereAt: elsewhere ? Date.now() : null };
+}
+
 function publish(next: DoorsState) {
   state = next;
   for (const fn of subscribers) fn(next);
@@ -170,7 +250,13 @@ export function refreshDoorsView(): Promise<void> {
   inFlight = doorEndpoints.doors()
     .then((view) => {
       publish({
-        chrome: summarise(view), view, loading: false, failed: false, failures: 0,
+        // C11: attributed as it is published, because the answer depends on what was on
+        // screen a moment ago — a reader working it out later has only the current state.
+        chrome: attributeShutChange(summarise(view)),
+        view,
+        loading: false,
+        failed: false,
+        failures: 0,
         checkedAt: Date.now(),
       });
     })
@@ -219,6 +305,10 @@ function stopPolling() {
   // Back to the state a fresh admin session starts in, so a sign-out cannot leave a previous
   // club's counts sitting in the chrome.
   state = IDLE;
+  // C11: and a fresh session's first read is an ARRIVAL, not a change somebody made under
+  // this reader. Without this, signing in at a club whose doors are shut interrupts.
+  lastShutSignature = null;
+  ownActionPending = false;
 }
 
 /**
@@ -273,7 +363,11 @@ export function storeCheckedSince(since: number | null): boolean {
  */
 export function publishDoorsView(view: DoorsView) {
   publish({
-    chrome: summarise(view), view, loading: false, failed: false, failures: 0,
+    chrome: attributeShutChange(summarise(view)),
+    view,
+    loading: false,
+    failed: false,
+    failures: 0,
     checkedAt: Date.now(),
   });
 }
@@ -376,5 +470,9 @@ function summarise(view: DoorsView): DoorsChrome {
     total: doors.length,
     shutAllActive: view.shut_all_active === true,
     doors,
+    // C11: `summarise` is pure and cannot know whose change this is — it sees one view and
+    // no history. The attribution is stamped on at publish time, where the previous read is
+    // still in hand; a reader that summarises a view of its own gets the honest null.
+    shutChangedElsewhereAt: null,
   };
 }

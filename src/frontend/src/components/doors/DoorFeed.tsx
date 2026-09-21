@@ -140,7 +140,7 @@ function FeedBody({ read, clock, expanded, onExpand, firstMoreRef }: {
  * as "Unrecognised event" with its raw token, rather than being guessed at or dropped.
  * </p>
  */
-function DoorEvents({ read }: { read: FeedRead }) {
+function DoorEvents({ read, timezone }: { read: FeedRead; timezone: string }) {
   if (read.loading || read.error) return null;
   const rows = doorEventRows(read.entries, read.events);
   if (rows.length === 0) return null;
@@ -155,13 +155,18 @@ function DoorEvents({ read }: { read: FeedRead }) {
               <div className="flex flex-wrap items-baseline gap-2">
                 {/* The raw token only on an UNRECOGNISED row: on a recognised one the
                     sentence already says what happened, and on an unrecognised one the token
-                    is the only thing a reader can report upstream. There is no actor on the
-                    wire (WIRE-R1 §1), so no row names one. */}
+                    is the only thing a reader can report upstream. Who did it is in the
+                    sentence itself where the API says (WIRE-R2 §2's `actor_name`) — see
+                    {@link doorEventRows}. */}
                 <span className="min-w-0 break-words text-sm text-text-secondary">
                   {row.token ? `${row.text} · ${row.token}` : row.text}
                 </span>
+                {/* A7 / E-M5 / O1: the CLUB's zone, exactly as the scan rows above get.
+                    This list was the one reading the VIEWER's clock, so an admin reading
+                    from anywhere else saw the shut and the scans it explains dated
+                    differently — and on a club five hours away, on different days. */}
                 <time dateTime={row.at} className="ml-auto shrink-0 text-xs text-text-muted">
-                  {clubDayAndClock(row.at)}
+                  {clubDayAndClock(row.at, timezone)}
                 </time>
               </div>
             </li>
@@ -226,7 +231,7 @@ export function DoorFeed({ door, today, read, clock }: {
           </Link>
         </Card>
       </section>
-      <DoorEvents read={read} />
+      <DoorEvents read={read} timezone={clock.timezone} />
     </div>
   );
 }
