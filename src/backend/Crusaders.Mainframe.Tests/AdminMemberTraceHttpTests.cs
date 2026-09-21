@@ -33,9 +33,6 @@ public sealed class AdminMemberTraceHttpTests
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
     private const string Unwired = "The trace route is not registered — Program.cs needs app.MapAdminMemberTraceEndpoints().";
 
-    /// <summary>A club that runs on the documented defaults, in UTC so a day boundary is testable.</summary>
-    private const string Utc = DoorClub.DefaultSettings;
-
     /// <summary>
     /// A club on the southern hemisphere's DST, whose clocks move in September — the fixture
     /// <c>memory/decisions-method.md</c> asks for, and the one that catches a day computed at
@@ -349,6 +346,99 @@ public sealed class AdminMemberTraceHttpTests
 
         Assert.Empty(Events(body));
         Assert.Equal(0, body.GetProperty("summary").GetProperty("doors_refused").GetInt32());
+    }
+
+    /// <summary>
+    /// The lights strand, and the one number on this surface that is MEASURED rather than
+    /// inferred.
+    ///
+    /// <para>
+    /// <c>minutes_on_court</c> is the span between a booking's first and last receipt — what the
+    /// relays did — and never the booking's own length, which is the club's INTENTION. This
+    /// product's settlement model rests on those being different numbers, and a summary that
+    /// quietly used the second would be reporting a court somebody paid for and never walked
+    /// onto as forty-five minutes of play.
+    /// </para>
+    ///
+    /// <para>
+    /// The actor on a receipt row is the BOARD. A receipt names a device and a relay index and
+    /// no person at all, so a row claiming the member switched the relay would be a guess — and
+    /// on this surface a guess about who did something is the failure the whole design is built
+    /// against.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_lights_strand_is_measured_and_the_board_is_its_actor()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+        await using var factory = CreateFactory();
+        Skip.IfNot(Wired(factory), Unwired);
+
+        var club = await DoorClub.SeedAsync(factory, "trlight");
+        var boxId = await club.AddCourtBoxAsync(factory, "box-tr00004");
+        var now = DateTimeOffset.UtcNow;
+
+        // A booking of two slices — thirty minutes of INTENTION — whose relay ran for forty-five.
+        var booking = await BookingAsync(factory, club, club.MemberUserId, now.AddMinutes(-90));
+        await ReceiptAsync(factory, club, boxId, booking, "activation", now.AddMinutes(-88), seq: 1);
+        await ReceiptAsync(factory, club, boxId, booking, "release", now.AddMinutes(-43), seq: 2);
+
+        var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(Trace(club.MemberUserId));
+        var events = Events(body);
+
+        Assert.Equal(2, events.Count);
+        Assert.Equal(TraceKinds.LightsOn, events[0].GetProperty("kind").GetString());
+        Assert.Equal(TraceKinds.LightsOff, events[1].GetProperty("kind").GetString());
+        Assert.All(events, e => Assert.Equal(TraceKinds.LightsStrand, e.GetProperty("strand").GetString()));
+
+        // The board did it, and the wire says so rather than naming the member.
+        Assert.All(events, e =>
+        {
+            var actor = e.GetProperty("actor");
+            Assert.Equal(TraceActors.Device, actor.GetProperty("kind").GetString());
+            Assert.False(actor.GetProperty("is_admin").GetBoolean());
+            Assert.False(actor.GetProperty("is_self").GetBoolean());
+        });
+
+        // Both rows name the court the booking was on, resolved through the booking.
+        Assert.All(events, e => Assert.Equal("Court 1", e.GetProperty("court").GetProperty("name").GetString()));
+
+        var summary = body.GetProperty("summary");
+        Assert.Equal(45, summary.GetProperty("minutes_on_court").GetInt32());
+        Assert.Equal(["Court 1"], summary.GetProperty("courts").EnumerateArray().Select(c => c.GetString()).ToList());
+
+        // And she was SEEN across the whole measured span, not merely at one end of it.
+        Assert.Equal(
+            events[0].GetProperty("at").GetDateTimeOffset(),
+            summary.GetProperty("first_seen_at").GetDateTimeOffset());
+        Assert.Equal(
+            events[1].GetProperty("at").GetDateTimeOffset(),
+            summary.GetProperty("last_seen_at").GetDateTimeOffset());
+    }
+
+    /// <summary>
+    /// A relay that came on and has NOT been reported off contributes nothing to the measured
+    /// total — a session this product cannot measure the length of, where guessing it is how a
+    /// measurement becomes an estimate nobody labelled.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_unfinished_session_is_not_guessed_at()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+        await using var factory = CreateFactory();
+        Skip.IfNot(Wired(factory), Unwired);
+
+        var club = await DoorClub.SeedAsync(factory, "tropen");
+        var boxId = await club.AddCourtBoxAsync(factory, "box-tr00005");
+        var now = DateTimeOffset.UtcNow;
+
+        var booking = await BookingAsync(factory, club, club.MemberUserId, now.AddMinutes(-40));
+        await ReceiptAsync(factory, club, boxId, booking, "activation", now.AddMinutes(-38), seq: 1);
+
+        var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(Trace(club.MemberUserId));
+
+        Assert.Single(Events(body));
+        Assert.Equal(0, body.GetProperty("summary").GetProperty("minutes_on_court").GetInt32());
     }
 
     // ------------------------------------------------------------------ privacy
