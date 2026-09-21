@@ -29,7 +29,7 @@ import { ConfirmButton } from "../components/ConfirmButton";
 import { ButtonMapEditor, buttonMapWithinCap, MAX_GRANT_MINUTES, RELAYS } from "../components/ButtonMapEditor";
 import { ClubButtonMapCard, WalkUpCapNotice } from "../components/ClubButtonMapCard";
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
-import { MonitoringNav } from "../components/monitoring/MonitoringNav";
+import { MonitoringNav } from "../components/monitoring/MonitoringSection";
 import { useToast } from "../components/Toast";
 
 /**

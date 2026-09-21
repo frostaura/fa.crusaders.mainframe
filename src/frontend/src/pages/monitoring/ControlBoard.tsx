@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert } from "../../components/Alert";
 import { Button } from "../../components/Button";
-import { MonitoringNav } from "../../components/monitoring/MonitoringNav";
+import { MonitoringNav } from "../../components/monitoring/MonitoringSection";
 import { CourtTile } from "../../components/monitoring/CourtTile";
 import { StateBlock } from "../../components/StateBlock";
 import { useControlBoard } from "../../lib/useControlBoard";

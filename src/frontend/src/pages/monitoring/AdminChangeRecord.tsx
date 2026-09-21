@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert } from "../../components/Alert";
 import { Label, Select } from "../../components/Button";
 import { Card } from "../../components/Card";
-import { MonitoringNav } from "../../components/monitoring/MonitoringNav";
+import { MonitoringNav } from "../../components/monitoring/MonitoringSection";
 import { StateBlock } from "../../components/StateBlock";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {

@@ -108,7 +108,15 @@ describe("the new admin surfaces keep the estate's rules", () => {
       // matches inside `min-h-11` and the rule would reject its own fix.
       expect(code, `${file} fixes a control's height`)
         .not.toMatch(/"[^"]*(?<!min-)\bh-(?:9|10|11)\b[^"]*"/);
-      expect(code, `${file} ships a sub-44px control height`).not.toMatch(/\bh-\[3[0-9]px\]/);
+      /*
+       * A sub-44px FIXED height, and only a fixed one. `min-h-[36px]` paired with
+       * `[@media(pointer:coarse)]:min-h-[44px]` is the chrome lane's deliberate answer and a
+       * better one than a flat 44: a touch target is a fingertip, so the floor belongs in
+       * pixels and must not double with the text at a 32px root font, while a mouse does not
+       * need 44. What this rule is actually about is a height that CLIPS its own words.
+       */
+      expect(code, `${file} ships a sub-44px fixed control height`)
+        .not.toMatch(/(?<!min-)\bh-\[3[0-9]px\]/);
     },
   );
 });

@@ -3,7 +3,7 @@ import { Alert } from "../../components/Alert";
 import { Button, Input, Label } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { MemberPicker, type PickableMember } from "../../components/MemberPicker";
-import { MonitoringNav } from "../../components/monitoring/MonitoringNav";
+import { MonitoringNav } from "../../components/monitoring/MonitoringSection";
 import { StateBlock } from "../../components/StateBlock";
 import { clubClock, clubDate } from "../../lib/clubClock";
 import { endpoints, type AdminMember } from "../../lib/api";

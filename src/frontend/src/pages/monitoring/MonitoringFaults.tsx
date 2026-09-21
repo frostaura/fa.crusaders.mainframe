@@ -4,7 +4,7 @@ import { Badge, Button, Label, Select } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { StateBlock } from "../../components/StateBlock";
-import { MonitoringNav } from "../../components/monitoring/MonitoringNav";
+import { MonitoringNav } from "../../components/monitoring/MonitoringSection";
 import { useToast } from "../../components/Toast";
 import { useTicker } from "../../lib/useTicker";
 import { clubDayAndClock, clubRowTime } from "../../lib/clubClock";

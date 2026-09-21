@@ -15,7 +15,7 @@ import {
   doorAttentionReason, doorDisplayName, doorStaleChecksNotice, doorsAttentionSummary,
 } from "../lib/doorsCopy";
 import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
-import { MonitoringNav } from "../components/monitoring/MonitoringNav";
+import { MonitoringNav } from "../components/monitoring/MonitoringSection";
 import { endpoints, type AdminSettings, type DoorRow } from "../lib/api";
 
 /**
