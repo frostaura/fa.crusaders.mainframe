@@ -1,0 +1,231 @@
+import { useCallback, useMemo, useState } from "react";
+import type { ScheduleDay, ScheduleSlot } from "./api";
+import type { GridReason, ViewerRules } from "./gridRules";
+import type { TimeSlice } from "./scheduleGrid";
+import {
+  closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence, groupRateLine,
+  quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
+} from "./gridCopy";
+
+/**
+ * Everything the grid says ABOUT itself: the standing notices above it, the sentence an
+ * unavailable cell answers with, and the past wall's disclosure.
+ *
+ * <p>
+ * One hook rather than five pieces of page state, because all five read the same two things —
+ * the day and the viewer's rules — and because `pages/Schedule.tsx` is already at the
+ * complexity gate's limit with the schedule's own state machine in it.
+ * </p>
+ */
+
+export type Notice = {
+  id: string;
+  tone: "warning" | "info";
+  title: string;
+  body?: string;
+  /**
+   * A real way out, always. A notice with nothing to do about it is a wall.
+   *
+   * `to` is a route; `nextDay` asks the page to move the date on by one, which is the other
+   * half of "cancel one of them, or pick another day".
+   */
+  action?: { label: string; to?: string; nextDay?: boolean };
+};
+
+export type GridExplainer = {
+  /** The polite live region's current text. Empty except in the moment after something happened. */
+  live: string;
+  announce: (text: string) => void;
+  explain: (reason: GridReason, where: string) => void;
+  notices: (balanceCredits: number | null, day: ScheduleDay | null) => Notice[];
+  /** `null` until the member has booked something today — a counter from zero is noise. */
+  quotaPill: { text: string; atLimit: boolean } | null;
+  rateLine: string | null;
+  collapsedRows: (
+    slices: TimeSlice[], pastThresholdMs: number, expanded: boolean,
+    isAdmin: boolean, slotsByCourt: Map<string, ScheduleSlot[]>,
+  ) => { rows: number; label: string | null };
+};
+
+/**
+ * The invisible nudge that makes a repeated announcement a second announcement.
+ *
+ * <p>
+ * Built with `fromCharCode` rather than written as an escape in a template literal so it is a
+ * deliberate character an `no-irregular-whitespace` rule can see the reason for, rather than
+ * an invisible one somebody later deletes as a typo.
+ * </p>
+ */
+const HAIR_SPACE = String.fromCharCode(0x200A);
+
+export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules): GridExplainer {
+  const [live, setLive] = useState("");
+
+  // A live region only announces a change MADE to a node already in the document, and two
+  // taps on the same cell must speak twice — a member pressing a locked cell again is asking
+  // again. So the text is nudged with a hair space when it repeats, rather than churned to ""
+  // (see `lib/announce`: an emptied region is itself an interruption on a braille display).
+  const announce = useCallback((text: string) => {
+    setLive((prev) => (prev === text ? text + HAIR_SPACE : text));
+  }, []);
+
+  const explain = useCallback((reason: GridReason, where: string) => {
+    announce(sentenceFor(reason, where, day, rules));
+  }, [announce, day, rules]);
+
+  const notices = useCallback(
+    (balanceCredits: number | null, current: ScheduleDay | null) => buildNotices(rules, balanceCredits, current),
+    [rules],
+  );
+
+  const pill = useMemo(() => {
+    const booked = rules.bookedSlotsToday;
+    const max = rules.maxSlotsPerDay;
+    if (rules.adminExempt || booked === null || max === null || max <= 0 || booked <= 0) return null;
+    // Approaching a limit is not a warning. Only arriving at it is.
+    return { text: quotaPill(booked, max), atLimit: booked >= max };
+  }, [rules]);
+
+  const rateLine = useMemo(
+    () => (rules.known && !rules.adminExempt && rules.groups.length > 0 ? groupRateLine(rules.groups) : null),
+    [rules],
+  );
+
+  const collapsedRows = useCallback(
+    (slices: TimeSlice[], pastThresholdMs: number, expanded: boolean, isAdmin: boolean,
+      slotsByCourt: Map<string, ScheduleSlot[]>) =>
+      collapseEarlier(slices, pastThresholdMs, expanded, isAdmin, slotsByCourt),
+    [],
+  );
+
+  return { live, announce, explain, notices, quotaPill: pill, rateLine, collapsedRows };
+}
+
+/** The one sentence a cell answers with. Never a code, never "an error occurred". */
+function sentenceFor(reason: GridReason, where: string, day: ScheduleDay | null, rules: ViewerRules): string {
+  const clubDay = rules.clubDay ?? day?.date ?? "";
+  switch (reason) {
+    case "out_of_hours":
+      // The hours are on the day payload already (`dayStartMinute` / `dayEndMinute`, per
+      // weekday), so the sentence names them even on a server that sends no `rules` block at
+      // all. "The club is shut at that time" is the honest fallback; it is not the best answer
+      // available, and the best answer is already in the client's hands.
+      return `${where}: ${closedSentence(clubDay, rules.clubHours ?? hoursFromDay(day))}`;
+    case "no_bookable_window":
+      return emptyWindowSentence(rules.emptyWindow?.groups ?? rules.groups.map((g) => g.name), clubDay);
+    case "group_window":
+      return restrictionSentence(where, rules.groups, rules.allowedWindows ?? []);
+    case "peak_league_only":
+      return `${where} is reserved for league and senior members until closer to the time. `
+        + "It becomes yours to book if it is still free then.";
+    case "per_day_slot_cap":
+      return `${quotaBannerTitle(rules.maxSlotsPerDay ?? 0, clubDay)} ${quotaBannerBody(rules.maxSlotsPerDay ?? 0)}`;
+    case "per_day_minute_cap":
+      return `You've booked your ${rules.maxMinutesPerDay ?? 0} minutes of court time for that day. `
+        + "Cancel one of them, or pick another day.";
+    case "court_inactive":
+      return `${where} is not in use at the moment. The club can tell you when it is back.`;
+    default:
+      return `${where} isn't available.`;
+  }
+}
+
+/**
+ * The standing notices above the grid.
+ *
+ * <p>
+ * Banners, never toasts. A toast for a STANDING condition clears itself after four seconds and
+ * leaves the member staring at a locked grid with no explanation — and the toast viewport
+ * deliberately carries no live region of its own (`Toast.tsx`), so a member who looked away
+ * gets nothing at all.
+ * </p>
+ */
+function buildNotices(rules: ViewerRules, balanceCredits: number | null, day: ScheduleDay | null): Notice[] {
+  const out: Notice[] = [];
+  const clubDay = rules.clubDay ?? day?.date ?? "";
+
+  if (rules.emptyWindow) {
+    out.push({
+      id: "empty-window", tone: "warning",
+      title: emptyWindowSentence(rules.emptyWindow.groups, clubDay),
+    });
+  } else if (rules.remainingToday === 0 && !rules.adminExempt && (rules.maxSlotsPerDay ?? 0) > 0) {
+    out.push({
+      id: "quota", tone: "warning",
+      title: quotaBannerTitle(rules.maxSlotsPerDay ?? 0, clubDay),
+      body: quotaBannerBody(rules.maxSlotsPerDay ?? 0),
+      action: { label: "Try tomorrow", nextDay: true },
+    });
+  }
+
+  // D4 §2.6. A member with 0.00 credits was shown thirty-one green cells and found out in the
+  // dialog, after picking a court and a time. `null` is UNKNOWN — a wallet read that has not
+  // landed — and says nothing, because a grid that shouted "no credits" at a slow network
+  // would be wrong more often than right.
+  if (balanceCredits !== null && balanceCredits <= 0) {
+    out.push({
+      id: "wallet", tone: "warning",
+      title: emptyWalletSentence(cheapestSlice(day)),
+      action: { label: "Top up", to: "/wallet/topup" },
+    });
+  }
+  return out;
+}
+
+/** The club's own opening and closing for THIS weekday, as clock faces. */
+function hoursFromDay(day: ScheduleDay | null): { start: string; end: string } | null {
+  if (!day || typeof day.dayStartMinute !== "number" || typeof day.dayEndMinute !== "number") return null;
+  if (day.dayEndMinute <= day.dayStartMinute) return null;
+  return { start: asClock(day.dayStartMinute), end: asClock(day.dayEndMinute) };
+}
+
+function asClock(minutes: number): string {
+  return `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function cheapestSlice(day: ScheduleDay | null): number | null {
+  const prices = (day?.courts ?? []).map((c) => c.slicePriceCredits).filter((p) => typeof p === "number");
+  return prices.length ? Math.min(...prices) : null;
+}
+
+/**
+ * How many leading rows the past wall swallows, and what its disclosure says.
+ *
+ * <p>
+ * D4 §7.4 and D3-B01. Measured at 375×812: 247 past cells and the first bookable slot
+ * <b>3 670 px</b> below the top — 74 rows, about four and a half phone screens. The rows are
+ * not deleted, because `gridWindow`'s own comment records the member who was sold 03:00 on a
+ * Sunday and could find it on no screen in the product. They collapse.
+ * </p>
+ *
+ * <p>
+ * <b>Expanded by default when any of them is the viewer's own</b>, and for an admin, who is
+ * reconciling the day rather than shopping for a court. A member who played this morning must
+ * not have to find a disclosure to see their own booking.
+ * </p>
+ */
+export function collapseEarlier(
+  slices: TimeSlice[], pastThresholdMs: number, expanded: boolean, isAdmin: boolean,
+  slotsByCourt: Map<string, ScheduleSlot[]>,
+): { rows: number; label: string | null } {
+  let past = 0;
+  for (const t of slices) {
+    if (Date.parse(t.utc) > pastThresholdMs) break;
+    past += 1;
+  }
+  // One or two dead rows are not a wall, and a disclosure over them costs more than it saves.
+  if (past < 4 || past === slices.length) return { rows: 0, label: null };
+
+  const until = Date.parse(slices[past - 1].utc);
+  const mine = countMine(slotsByCourt, until);
+  if (expanded || isAdmin || mine > 0) return { rows: 0, label: null };
+  return { rows: past, label: earlierSummary(past, mine, slices[0].label, slices[past - 1].label) };
+}
+
+function countMine(slotsByCourt: Map<string, ScheduleSlot[]>, untilMs: number): number {
+  let n = 0;
+  for (const slots of slotsByCourt.values()) {
+    for (const s of slots) if (s.isMine && Date.parse(s.startsAtUtc) <= untilMs) n += 1;
+  }
+  return n;
+}

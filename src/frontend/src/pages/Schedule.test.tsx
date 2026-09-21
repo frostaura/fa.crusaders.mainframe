@@ -1190,14 +1190,26 @@ describe("Schedule — peak-hour slots a member cannot book are not offered as i
 
   it("draws a peak cell as reserved rather than as an offer a click would withdraw", async () => {
     openDay(PEAK_DAY);
-    await screen.findByLabelText(/Court 1 at 07:00/);
+    await screen.findByRole("button", { name: /^Book Court 1 at 07:00/ });
 
     // The cell that used to carry "Book Court 1 at 17:00 for 50.00 cr" and open a priced modal.
-    expect(screen.queryByRole("button", { name: /^Book Court 1 at 17:00/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Book Court 1 at 17:00 for/ })).not.toBeInTheDocument();
     const cell = screen.getByLabelText(/Court 1 at 17:00 — reserved for league and senior members/);
     expect(cell).toBeInTheDocument();
-    // Inert, like `out_of_hours`: rendered so the member can see the slot exists, not clickable.
-    expect(cell.tagName).not.toBe("BUTTON");
+    // It IS a button now, and `aria-disabled` rather than `disabled` — D4 §2.9. It was an inert
+    // `div` with an `aria-label` no sighted member ever hears: a member tapped it and NOTHING
+    // happened, with no explanation and no route to one. A `disabled` button would be no better
+    // — a hole in the tab order that explains nothing — so it stays focusable and answers.
+    expect(cell.tagName).toBe("BUTTON");
+    expect(cell).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("answers when that reserved cell is pressed, instead of doing nothing — D4 §2.9", async () => {
+    openDay(PEAK_DAY);
+    const cell = await screen.findByLabelText(/Court 1 at 17:00 — reserved for league and senior members/);
+    fireEvent.click(cell);
+    await waitFor(() => expect(document.body.textContent)
+      .toMatch(/reserved for league and senior members until closer to the time/));
   });
 
   it("leaves every cell outside the window bookable, so it is a rule and not a blanked grid", async () => {

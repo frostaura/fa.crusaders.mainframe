@@ -460,6 +460,34 @@ export type ScheduleDay = {
   courts: ScheduleCourt[]; slots: ScheduleSlot[]
 };
 
+/**
+ * One row of a bulk outcome, as it comes off the wire.
+ *
+ * <p>
+ * Deliberately loose: every field is optional and both spellings of each are tolerated by
+ * `lib/bulkResults`. The backend for these two routes is being built alongside this screen, and
+ * a result row that renders as a blank because one key was `booking_id` where this client
+ * expected `bookingId` is a batch an admin cannot audit — on the one screen that moves other
+ * people's money in bulk.
+ * </p>
+ */
+export type BulkResultRow = Record<string, unknown>;
+
+export type BulkCancelResponse = {
+  requested?: number; succeeded?: number; failed?: number;
+  total_refunded_credits?: number; total_penalty_credits?: number;
+  results?: BulkResultRow[];
+} & Record<string, unknown>;
+
+export type BulkBookResponse = {
+  requested?: number; succeeded?: number; failed?: number;
+  total_charged_credits?: number;
+  payer?: { user_id?: string; name?: string; balance_before_credits?: number; balance_after_credits?: number };
+  results?: BulkResultRow[];
+  /** D2 §5.3 — the batch stopped here because the payer ran out of credit. */
+  halted_at?: number; halted_reason?: string;
+} & Record<string, unknown>;
+
 /** What cancelling a booking would cost right now — server-computed, read when the modal opens. */
 export type CancellationQuote = {
   bookingId: string;
@@ -1622,6 +1650,44 @@ export const endpoints = {
   adminBlock: (courtId: string, startsAt: string, sliceCount: number, label: string) =>
     api.post<{ booking_id: string }>("/api/v1/admin/blocks/", { courtId, startsAt, sliceCount, label }),
   adminUnblock: (blockId: string) => api.del<void>(`/api/v1/admin/blocks/${blockId}`),
+
+  /**
+   * Items 5 + 13 — a list of checkboxes answered with a list of outcomes.
+   *
+   * <p>
+   * <b>Both routes answer 200 with per-item results, never all-or-nothing</b> (D2 §5.1). Each
+   * booking is its own money movement behind its own payer lock, a collision is normal traffic
+   * rather than an error, and the honest answer to a list of ticks is a list of outcomes. A
+   * partially-successful batch is a RESULT the admin has to read either way, so it is data and
+   * not a status code — which is also why the console renders the returned list rather than a
+   * spinner ending in a toast that cannot say "11 cancelled, 1 was already gone".
+   * </p>
+   *
+   * <p>
+   * <b>`idempotencyKey` is mandatory on both</b>, because the retry is the point: a bulk book
+   * that halts on `insufficient_balance` is retried under the SAME key with the override, and
+   * the items that landed answer `duplicate` rather than being booked twice.
+   * </p>
+   *
+   * <p>
+   * <b>Request bodies are camelCase</b>, per D2 §13's stated convention and every existing POST
+   * in this client; responses are read through `lib/bulkResults`, which accepts both spellings
+   * because a mismatch there is a batch whose outcomes render as blanks.
+   * </p>
+   */
+  adminBulkCancel: (body: {
+    idempotencyKey: string; reason: string; waivePenalty: boolean;
+    items: { bookingId: string; waivePenalty?: boolean }[];
+  }) => api.post<BulkCancelResponse>("/api/v1/admin/bookings/bulk-cancel", body),
+
+  adminBulkBook: (body: {
+    idempotencyKey: string;
+    /** At least one of the two. Neither ⇒ the admin's own booking, on their own wallet. */
+    onBehalf?: { userId?: string; guestName?: string };
+    allowNegativeBalance: boolean;
+    note?: string;
+    items: { courtId: string; startsAt: string; sliceCount: number }[];
+  }) => api.post<BulkBookResponse>("/api/v1/admin/bookings/bulk", body),
 
   adminMembers: (status?: string) => api.get<AdminMember[]>(`/api/v1/admin/members/${status ? `?status=${status}` : ""}`),
   /**

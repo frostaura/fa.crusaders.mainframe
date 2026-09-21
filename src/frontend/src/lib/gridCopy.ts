@@ -36,11 +36,6 @@ export const CELL_WORD = {
   hold: "Club hold",
 } as const;
 
-const WEEKDAYS: Record<string, string> = {
-  sun: "Sunday", mon: "Monday", tue: "Tuesday", wed: "Wednesday",
-  thu: "Thursday", fri: "Friday", sat: "Saturday",
-};
-
 /** "Monday" from a `YYYY-MM-DD`, in the club's own spelling, never the reader's locale. */
 export function weekdayName(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
@@ -134,6 +129,28 @@ export function minuteQuotaBannerTitle(maxMinutes: number, day: string): string 
 }
 
 /* ─────────────────────────── Item 3 — groups, on the member's grid ─────────────────────────── */
+
+/**
+ * Why this cell is not the viewer's, in a clause — the CELL's accessible name, as distinct
+ * from the word it wears and from the sentence it says when pressed.
+ *
+ * <p>
+ * D4 §7.3 asks for three carriers on every unavailable state: border style, glyph and word.
+ * The word has to be short enough for a 120 px column at a 32 px root font ("League only"),
+ * and a screen-reader user hears no border and no glyph — so the NAME carries the clause the
+ * word cannot. Pressing it gives the whole sentence; this is what is announced by merely
+ * arriving at it.
+ * </p>
+ */
+export function unavailableWhy(reason: string): string {
+  switch (reason) {
+    case "peak_league_only": return "reserved for league and senior members until closer to the time";
+    case "group_window": return "outside the times you can book";
+    case "no_bookable_window": return "not open to you on this day";
+    case "court_inactive": return "this court is not in use";
+    default: return "not available";
+  }
+}
 
 /** The short word a restricted cell wears. Never a code, never a group's internal name. */
 export function restrictionLabel(reason: string, windows: readonly { start: string; end: string }[]): string {
