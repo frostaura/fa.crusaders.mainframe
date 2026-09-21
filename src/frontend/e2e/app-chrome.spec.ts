@@ -171,9 +171,45 @@ test.describe("B12 — the chrome at a large root font size", () => {
       const header = document.querySelector("header")!.getBoundingClientRect().height;
       return { header, content: (window.innerHeight - header) / window.innerHeight };
     });
-    // eslint-disable-next-line no-console -- the measurement IS the point of this test
     console.log(`[B12] header+strip ${Math.round(share.header)}px of 568; content ${(share.content * 100).toFixed(1)}%`);
     expect(share.content).toBeGreaterThanOrEqual(0.6);
+  });
+
+  /**
+   * And the rule underneath the percentage: <b>the text scales, the boxes do not</b>.
+   *
+   * <p>
+   * Found by mutation. Putting the header row's paddings and gaps back into `rem`, and putting
+   * the tab strip's touch minimum back to `h-11`, each left the test above green — at 60.2 %,
+   * which is inside a 60 % bar by two tenths of a point. A threshold the shipped code clears by
+   * eight points and a regression clears by nothing is a threshold that will be crossed by the
+   * change after next, silently, and the reviewer's finding will be back.
+   * </p>
+   *
+   * <p>
+   * So this measures the mechanism rather than the symptom. Every box in the chrome is sized in
+   * pixels precisely so that doubling the root font size grows the header by the height of its
+   * TEXT and nothing else: measured on a 320 px phone, 154 px at a 16 px root and 182 px at a
+   * 32 px one. In `rem` the whole row doubles — 44 px touch targets become 88 px ones — and the
+   * growth is two and a half times that. The bound is set with room for a genuine text change
+   * and none for a unit change.
+   * </p>
+   */
+  test("grows only by its text when the root font size doubles", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await openAdmin(page, "/admin/settings");
+
+    const heightAt = async (rootPx: number) => {
+      await page.addStyleTag({ content: `html { font-size: ${rootPx}px !important; }` });
+      return page.evaluate(() => document.querySelector("header")!.getBoundingClientRect().height);
+    };
+
+    const small = await heightAt(16);
+    const large = await heightAt(32);
+    const growth = large - small;
+    console.log(`[B12] header ${Math.round(small)}px at a 16px root, ${Math.round(large)}px at 32px — grew ${Math.round(growth)}px`);
+    expect(growth, `the chrome grew ${Math.round(growth)}px for a doubling of the text: its boxes are scaling, not just its words`)
+      .toBeLessThanOrEqual(45);
   });
 
   /** The wallet chip showed a balance of 0 as "0…". */
@@ -296,7 +332,6 @@ test("reaches the door settings within twelve tab stops of the skip link", async
     const name = await page.evaluate(() => document.activeElement?.textContent?.trim() ?? "");
     if (name === "Door gates") break;
   }
-  // eslint-disable-next-line no-console -- the measurement IS the point of this test
   console.log(`[C14] door settings reached in ${stops + 1} tab stops from the skip link`);
   expect(stops).toBeLessThan(12);
 

@@ -169,12 +169,55 @@ for (const size of SIZES) {
         expect(await clippedByAnAncestor(consequence), `confirm ${i} ("${idle}")`).toBeNull();
 
         // 44 px on both, and the way out is not the harder one to hit.
+        const boxes: Record<string, { x: number; y: number; width: number; height: number }> = {};
         for (const [name, button] of [["confirm", confirm], ["cancel", cancel]] as const) {
           const box = (await button.boundingBox())!;
+          boxes[name] = box;
           expect(box.height, `confirm ${i}'s ${name} is ${box.height} px tall`).toBeGreaterThanOrEqual(44);
           // And nothing spills sideways off a 320 px phone.
           expect(box.x + box.width, `confirm ${i}'s ${name} runs past the right edge`)
             .toBeLessThanOrEqual(size.width + 1);
+        }
+
+        /**
+         * SIDE BY SIDE, wherever side by side fits — the other half of the B5 ruling.
+         *
+         * <p>
+         * Found by mutation: replacing the armed grid with a plain `block`, which stacks the
+         * pair everywhere, left every assertion above green. Both buttons were still on screen,
+         * still 44 px, still inside the phone — and the ruling says "two side-by-side buttons,
+         * both visible together", because one above the other puts the Cancel twice as far from
+         * the top of the block, which is the geometry the finding was raised on.
+         * </p>
+         *
+         * <p>
+         * <b>The bound is the CONTAINER's width, not the viewport's.</b> A first draft asserted
+         * side-by-side at 820×1180 and found a real counter-example: "Deactivate" lives in the
+         * Courts row's last grid column, which is an `auto` track about 135 px wide however wide
+         * the window is. `auto-fit, minmax(96px, 1fr)` is deliberate — two columns whenever
+         * 96 px each will fit, one when they will not, because two columns of four letters a
+         * line is worse than stacking. So the contract to hold is that promise, measured against
+         * the width the control was actually given.
+         * </p>
+         */
+        const room = (await wrapper.boundingBox())!.width;
+        const fits = room >= 96 * 2 + 8;
+        if (fits) {
+          expect(
+            Math.abs(boxes.confirm.y - boxes.cancel.y),
+            `confirm ${i} ("${idle}") stacks its buttons in ${Math.round(room)} px of room, which is enough for both`,
+          ).toBeLessThanOrEqual(1);
+          expect(
+            boxes.cancel.x,
+            `confirm ${i} ("${idle}") does not put the Cancel beside the confirm`,
+          ).toBeGreaterThan(boxes.confirm.x);
+        } else {
+          // Stacked is the right answer here, and both are still on screen and still 44 px —
+          // which the assertions above have already established.
+          expect(
+            boxes.cancel.y,
+            `confirm ${i} ("${idle}") has only ${Math.round(room)} px of room, so the pair must stack`,
+          ).toBeGreaterThan(boxes.confirm.y);
         }
 
         // C3 — focus is on the SAFE one, so a second Enter cannot do the thing.
@@ -234,6 +277,36 @@ test("brings the armed block into view when the trigger was at the bottom edge",
   const after = await page.evaluate(() => document.querySelector("main")!.scrollTop);
   expect(after, "nothing scrolled, so the block cannot have been brought anywhere")
     .toBeGreaterThan(before);
+
+  /**
+   * And again with focus NOWHERE NEAR the control, which is the case only the explicit
+   * `scrollIntoView` covers.
+   *
+   * <p>
+   * Found by mutation: deleting that call left the assertions above green, because a press
+   * that lands on the trigger also focuses it, so `armedFromTrigger` is true, so focus moves
+   * to the Cancel — and moving focus scrolls the focused element into view all by itself. The
+   * explicit call is what happens when focus is somewhere else entirely and the control is
+   * therefore forbidden from taking it: `node.click()` dispatches the activation without
+   * focusing, which is exactly that shape.
+   * </p>
+   */
+  await cancel.click();
+  await expect(wrapper.locator("> button")).toHaveCount(1);
+  await page.getByRole("link", { name: "Skip to main content" }).focus();
+  await trigger.evaluate((node) => node.scrollIntoView({ block: "end" }));
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await trigger.evaluate((node: HTMLElement) => node.click());
+
+  await expect(wrapper.locator("> button")).toHaveCount(2);
+  // `ratio: 0.99` — a bare `toBeInViewport()` passes on a single visible pixel, and a Cancel
+  // whose top row of pixels is on screen is exactly the defect C7 describes. That looseness is
+  // what let the mutant survive the first draft of this case.
+  await expect(
+    wrapper.locator("> button").nth(1),
+    "armed without focus, nothing brought the block back into view",
+  ).toBeInViewport({ ratio: 0.99 });
+  await expect(wrapper.locator("> p")).toBeInViewport({ ratio: 0.99 });
 
   // And the other half: a control with room around it must not move the page at all.
   // `block: "center"` leaves 400-odd pixels below the trigger at this viewport, which is far
@@ -414,7 +487,6 @@ test.describe("under forced colours", () => {
       expect(row.width, `the ${row.variant} variant changes width when forced colours fires`).toBe(before.width);
       expect(row.height, `the ${row.variant} variant changes height when forced colours fires`).toBe(before.height);
     }
-    // eslint-disable-next-line no-console -- the measurement IS the point of this test
     console.log(`[C8] ${forced.map((r) => `${r.variant} ${r.border}px ${r.width}×${r.height}`).join(" · ")}`);
   });
 
