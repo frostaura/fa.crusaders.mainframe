@@ -788,7 +788,14 @@ test("nothing that arrives or leaves moves the QR", async ({ page }) => {
   const before = await contentY();
   const beforeInView = await viewportY();
 
-  const card = page.getByText("The lock released.");
+  /*
+    Scoped to the card itself, because R3-29 gave the headline a twin: while the card is
+    below the fold a one-line copy of it is pinned to the bottom of the glass, and an
+    unscoped text locator resolves to both. That pin is `aria-hidden` and out of the tab
+    order — it is a visual affordance, not a second announcement — and what this test is
+    about is where the CARD sits, so the card is what it names.
+  */
+  const card = page.locator("#door-decision").getByText("The lock released.");
   await expect(card).toBeVisible({ timeout: 15_000 });
   expect(await contentY()).toBe(before);
   // Arrival moves nothing at all, on a page nobody has scrolled: this is the 290px jump.
@@ -1123,25 +1130,30 @@ test("a too-early booking refusal names the code it was about, not the member's 
  */
 test("a code that dies with no signal says so once, offers one retry and promises nothing", async ({ page }) => {
   await signIn(page);
-  let generated = 0;
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
     { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    // A code that is already spent, which is what a member holding a sixty-second ident
+    // code through a dead minute is left with.
     {
       method: "POST", path: "/api/v1/me/qr/generate",
-      respond: () => {
-        generated += 1;
-        // The first answer is a code that is already spent — which is what a member holding
-        // a sixty-second code through a dead minute is left with — and every renewal after
-        // it fails, which is what no signal means.
-        if (generated === 1) return { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 0, doors: true };
-        return null;
-      },
-      status: 503,
+      body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 0, doors: true },
     },
     { path: "/api/v1/me/door", body: door({ policy: "active_member", early_entry_minutes: null, next_booking: null }) },
   ]);
+  /*
+    And no signal for the renewal. Installed AFTER `serveApi` so it runs first — Playwright
+    handlers are last-in-first-out — and it falls through for the FIRST call so the page has
+    a code to have lost. `serveApi` fixes a route's status for the life of the route, so a
+    call that succeeds and then a call that fails cannot be expressed as one route.
+  */
+  let posts = 0;
+  await page.route("**/api/v1/me/qr/generate", async (route) => {
+    posts += 1;
+    if (posts === 1) { await route.fallback(); return; }
+    await route.abort("failed");
+  });
 
   await page.goto("/my-code");
 
@@ -1216,15 +1228,23 @@ test("a decision below the fold is still on the glass", async ({ page }) => {
  */
 test("the member-code switch says what it did and offers the way back", async ({ page }) => {
   await signIn(page);
+  let asked = 0;
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
     { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    /*
+      The server picks the code, and it is asked three times: on load (a booking code,
+      because the member has one), when the switch goes on (an ident one), and when it goes
+      off again. Keyed on the CALL rather than on `?kind=ident`, because `serveApi` hands
+      `respond` the pathname alone and the kind travels in the query string.
+    */
     {
       method: "POST", path: "/api/v1/me/qr/generate",
-      respond: (req) => (req.path.includes("kind=ident")
-        ? { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true }
-        : CODE),
+      respond: () => {
+        asked += 1;
+        return asked === 2 ? { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true } : CODE;
+      },
     },
     { path: "/api/v1/me/door", body: door({ policy: "active_member", early_entry_minutes: null }) },
   ]);

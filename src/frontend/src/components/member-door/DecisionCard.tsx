@@ -141,7 +141,10 @@ function DecisionPeek({ headline, tone }: { headline: string; tone: DecisionTone
         type="button"
         tabIndex={-1}
         onClick={() => document.getElementById(DECISION_ANCHOR)?.scrollIntoView?.({ block: "center" })}
-        className={cn("flex w-full items-center gap-2 rounded-lg border-l-4 px-3 py-2 text-left text-sm", PEEK_TONE[tone])}
+        /* `min-h-11` like every other control on this page: it is pressed one-handed, in
+           the dark, by somebody who is not aiming — and the sweep in `e2e/my-code.spec.ts`
+           holds that rule with no exemptions, which is how this was caught at 36px. */
+        className={cn("flex min-h-11 w-full items-center gap-2 rounded-lg border-l-4 px-3 py-2 text-left text-sm", PEEK_TONE[tone])}
       >
         <span className="flex-1">{headline}</span>
         <span className="shrink-0 text-xs text-text-muted">{"▾"}</span>
