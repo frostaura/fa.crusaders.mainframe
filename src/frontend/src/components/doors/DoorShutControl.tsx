@@ -41,7 +41,10 @@ export function DoorShutControl({ door, onDone, shutAt, online }: {
   if (!door.enabled) {
     return (
       <div className="space-y-3">
-        <Alert tone="danger">{doorShutStandingNotice(door.name, shutAt)}</Alert>
+        {/* `live="polite"` — this is a STANDING fact about the door whose page you have just
+            opened, not something that happened because you pressed anything. Assertive, it cut
+            across the heading on arrival and again on every poll. */}
+        <Alert tone="danger" live="polite">{doorShutStandingNotice(door.name, shutAt)}</Alert>
         {/* C2 / C5: shut AND not reporting are two facts and both are shown. A shut door
             nobody can reach has not heard the refusal and goes on admitting booked members
             from its cached list — the state the club-wide banner used to deny outright. */}
