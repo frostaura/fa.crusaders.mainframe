@@ -40,6 +40,12 @@ public class MainframeDbContext : DbContext
     public DbSet<WebAuthnCredential> WebAuthnCredentials => Set<WebAuthnCredential>();
     public DbSet<AccessCode> AccessCodes => Set<AccessCode>();
 
+    /// <summary>What the server BELIEVES each court's lights are doing. See <see cref="CourtLightState"/>.</summary>
+    public DbSet<CourtLightState> CourtLightStates => Set<CourtLightState>();
+
+    /// <summary>The IoT error log (GOAL item 7). See <see cref="DeviceError"/>.</summary>
+    public DbSet<DeviceError> DeviceErrors => Set<DeviceError>();
+
     /// <summary>
     /// Builds the model, including the global query filter on every tenant-scoped entity.
     /// </summary>
@@ -123,6 +129,8 @@ public class MainframeDbContext : DbContext
 
         ConfigureDevices(modelBuilder);
         ConfigureAccessCodes(modelBuilder);
+        ConfigureCourtLightState(modelBuilder);
+        ConfigureDeviceErrors(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -456,6 +464,88 @@ public class MainframeDbContext : DbContext
             entry.Entity.ScanAt = DoorTrail.ScanAtOf(
                 entry.Entity.Action, entry.Entity.DetailsJson, entry.Entity.CreatedAt);
         }
+    }
+
+    /// <summary>
+    /// The server's belief about each court's relay — one row per court, never per event.
+    ///
+    /// <para>
+    /// Its own method rather than another block in <see cref="OnModelCreating"/>, for the
+    /// length reason the devices and the audit log are already lifted out for.
+    /// </para>
+    /// </summary>
+    private void ConfigureCourtLightState(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<CourtLightState>(e =>
+        {
+            e.ToTable("court_light_state");
+
+            // Composite key on (tenant, court) rather than a surrogate id. The table holds
+            // exactly one row per court by construction, and a surrogate would permit two —
+            // which is the state where the control board and the restore answer disagree and
+            // neither is wrong.
+            e.HasKey(s => new { s.TenantId, s.CourtId });
+
+            e.Property(s => s.State).HasConversion<int>();
+            e.Property(s => s.Cause).HasConversion<int>();
+            e.HasQueryFilter(s => s.TenantId == _tenant.TenantId);
+
+            // The control board reads every row for the tenant in one go, and the restore
+            // answer reads the handful a device drives. The primary key already serves the
+            // first; this serves the second without a scan per heartbeat.
+            e.HasIndex(s => new { s.TenantId, s.DeviceId });
+        });
+    }
+
+    /// <summary>
+    /// The IoT error log. See <see cref="DeviceError"/> for why de-duplication is a uniqueness
+    /// rule about the present rather than a read-then-write.
+    /// </summary>
+    private void ConfigureDeviceErrors(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<DeviceError>(e =>
+        {
+            e.ToTable("device_errors");
+            e.HasKey(r => r.Id);
+            e.HasQueryFilter(r => r.TenantId == _tenant.TenantId);
+
+            e.Property(r => r.Code).HasMaxLength(DeviceError.MaxCodeLength).IsRequired();
+            e.Property(r => r.Fingerprint).HasMaxLength(DeviceError.MaxFingerprintLength).IsRequired();
+            e.Property(r => r.Detail).HasMaxLength(DeviceError.MaxDetailLength);
+            e.Property(r => r.ResolutionNote).HasMaxLength(DeviceError.MaxDetailLength);
+            e.Property(r => r.ClaimedDeviceCode).HasMaxLength(DeviceError.MaxClaimedDeviceCodeLength);
+            e.Property(r => r.ClaimedMac).HasMaxLength(DeviceError.MaxClaimedMacLength);
+            e.Property(r => r.Source).HasConversion<int>();
+            e.Property(r => r.Severity).HasConversion<int>();
+
+            // The monitoring list, newest first, keyset-paged.
+            e.HasIndex(r => new { r.TenantId, r.LastSeenAt });
+
+            // The per-board feed, and the control board's open-error count per device.
+            e.HasIndex(r => new { r.TenantId, r.DeviceId, r.LastSeenAt });
+
+            // The summary's counts.
+            e.HasIndex(r => new { r.TenantId, r.Severity, r.ResolvedAt });
+
+            // ONE OPEN ROW PER DISTINCT FAULT. Exactly the DeviceOutage pattern above, for
+            // exactly its stated reason: this makes de-duplication a rule the database
+            // enforces about the present, rather than a check-then-insert that two concurrent
+            // reports both pass. Resolved rows fall out of the filter, so history accumulates
+            // freely and a fault that returns in month four opens a fresh row with a truthful
+            // FirstSeenAt rather than resurrecting a stale one.
+            e.HasIndex(r => new { r.TenantId, r.Fingerprint })
+                .IsUnique()
+                .HasFilter("\"ResolvedAt\" IS NULL");
+
+            // The enum-range guard ledger_entries already carries, and a count that cannot be
+            // zero: a row standing for no occurrences is a row that should not exist, and the
+            // upsert's `Count = Count + EXCLUDED.Count` has no other floor.
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_device_errors_count", "\"Count\" >= 1");
+                t.HasCheckConstraint("ck_device_errors_severity", "\"Severity\" BETWEEN 0 AND 3");
+            });
+        });
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)

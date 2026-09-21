@@ -313,6 +313,57 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("courts", (string)null);
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.CourtLightState", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CourtId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("BookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Cause")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CausedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("LastEventAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("LastEventBootId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("LastEventSeq")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("OnSince")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("OnUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Relay")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("TenantId", "CourtId");
+
+                    b.HasIndex("TenantId", "DeviceId");
+
+                    b.ToTable("court_light_state", (string)null);
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.Device", b =>
                 {
                     b.Property<Guid>("Id")
@@ -414,6 +465,88 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("devices", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.DeviceError", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ClaimedDeviceCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ClaimedMac")
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Court")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Fingerprint")
+                        .IsUnique()
+                        .HasFilter("\"ResolvedAt\" IS NULL");
+
+                    b.HasIndex("TenantId", "LastSeenAt");
+
+                    b.HasIndex("TenantId", "DeviceId", "LastSeenAt");
+
+                    b.HasIndex("TenantId", "Severity", "ResolvedAt");
+
+                    b.ToTable("device_errors", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_device_errors_count", "\"Count\" >= 1");
+
+                            t.HasCheckConstraint("ck_device_errors_severity", "\"Severity\" BETWEEN 0 AND 3");
+                        });
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.DeviceEventReceipt", b =>
