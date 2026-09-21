@@ -390,6 +390,10 @@ function AdminDoorsLogPageBody() {
       setAppendedFrom(rows?.length ?? 0);
       setRows([...(rows ?? []), ...older.items]);
       setCursor(older.next_cursor);
+      // C-L3 / R3-26: it announced nothing. Focus moves to the first appended row (C4),
+      // which says where the reader is and not what happened — and on a list that grew by
+      // fifty rows those are different questions. The page's own result region carries the
+      // new count on the next render, so nothing extra is needed here beyond letting it.
     } catch {
       setOlderFailed(true);
     } finally {
@@ -849,6 +853,7 @@ function AdminDoorsLogPageBody() {
                 <Button variant="outline" className="w-full" onClick={() => void loadOlder()} aria-busy={loadingOlder}>
                   {olderFailed ? "Try again" : loadingOlder ? "Loading…" : "Load older scans"}
                 </Button>
+
               ) : (
                 // C4: `tabIndex={-1}` so that on the LAST page — where the button above
                 // unmounts — focus has somewhere to land other than `<body>`. See the effect.

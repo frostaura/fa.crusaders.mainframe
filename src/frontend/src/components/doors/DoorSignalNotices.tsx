@@ -56,7 +56,18 @@ export function DoorSignalNotices({ doorName, signals, settings, enabled = true,
   return (
     <>
       {notices.map((notice) => (
-        <Card key={notice.text} role="status" className="border-l-4 border-warning-strong bg-warning-soft">
+        /*
+          <b>C-M2 / R3-26 — a ~50-word advisory re-spoken every fifteen seconds.</b>
+
+          This page re-reads while the tab is in front, and a `role="status"` on a STANDING
+          advisory means a screen reader is handed the whole paragraph again on every
+          re-render that touches it. A signal is a windowed reading that comes and goes on
+          its own; it is not an event, and it is not news each time the page checks. It is
+          page text, in a headed block, reached by browsing — and the one thing on this
+          surface that IS news when it changes (the shut state) has its own region in the
+          chrome. See {@link ShutDoorsBanner}.
+        */
+        <Card key={notice.text} className="border-l-4 border-warning-strong bg-warning-soft">
           <p className="text-sm text-warning-strong">{notice.text}</p>
           {notice.link && (
             // A9: this used to be a bare `/admin/settings`, which lands an admin at the top

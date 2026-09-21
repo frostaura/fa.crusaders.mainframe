@@ -69,12 +69,14 @@ export type FeedClock = {
  */
 export const FEED_FIRST_PAGE = 10;
 
-function FeedBody({ read, clock, expanded, onExpand, firstMoreRef }: {
+function FeedBody({ read, clock, expanded, onExpand, firstMoreRef, onAnnounce }: {
   read: FeedRead;
   clock: FeedClock;
   expanded: boolean;
   onExpand: () => void;
   firstMoreRef: React.Ref<HTMLLIElement>;
+  /** C-L3 / R3-26: what the press did, for the region the section keeps. */
+  onAnnounce: (said: string) => void;
 }) {
   if (read.loading) return <p className="text-sm text-text-secondary">Loading…</p>;
   if (read.error) return <p className="text-sm text-danger-strong">{read.error || ACTIVITY_READ_FAILED}</p>;
@@ -99,7 +101,10 @@ function FeedBody({ read, clock, expanded, onExpand, firstMoreRef }: {
   const shown = expanded ? scans : scans.slice(0, FEED_FIRST_PAGE);
   return (
     <>
-      {quiet && <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">{quiet}</p>}
+      {/* C-M2 / R3-26: standing, not news. "No scans at this door since Wed 18:40 — that is
+          3 days" is as true on the fifth poll as on the first, and a live region re-speaks
+          it on every re-render that touches it. */}
+      {quiet && <p className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">{quiet}</p>}
       {anyOffline && <p className="text-xs text-text-muted">{OFFLINE_WHO_NOTE}</p>}
       <ul>
         {shown.map((entry, i) => (
@@ -120,7 +125,13 @@ function FeedBody({ read, clock, expanded, onExpand, firstMoreRef }: {
       {!expanded && scans.length > FEED_FIRST_PAGE && (
         <button
           type="button"
-          onClick={onExpand}
+          // C-L3 / R3-26: it announced nothing at all. Focus moves to the first revealed
+          // row (C4), which tells a screen-reader user where they are and not what
+          // happened — so the count is said as well.
+          onClick={() => {
+            onExpand();
+            onAnnounce(`Showing all ${scans.length} scans at this door.`);
+          }}
           className="min-h-11 w-full rounded-lg border border-control px-5 text-sm font-medium"
         >
           {`Show the other ${scans.length - FEED_FIRST_PAGE} scans`}
@@ -214,6 +225,8 @@ export function DoorFeed({ door, today, read, clock }: {
   clock: FeedClock;
 }) {
   const [expanded, setExpanded] = useState(false);
+  /** C-L3 / R3-26: what the last press did. Empty most of the time, so it says nothing. */
+  const [announcement, setAnnouncement] = useState("");
   const firstMoreRef = useRef<HTMLLIElement>(null);
   // C4: after the press, the first row it revealed takes focus.
   useEffect(() => { if (expanded) firstMoreRef.current?.focus(); }, [expanded]);
@@ -236,7 +249,11 @@ export function DoorFeed({ door, today, read, clock }: {
             expanded={expanded}
             onExpand={() => setExpanded(true)}
             firstMoreRef={firstMoreRef}
+            onAnnounce={setAnnouncement}
           />
+          {/* C-L3 / R3-26: one polite region for this section, written by a press and
+              nothing else. Standing text on this page carries no live role at all. */}
+          <p aria-live="polite" className="sr-only">{announcement}</p>
           <Link
             to={`/admin/doors/log?door=${encodeURIComponent(door.id)}`}
             className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-control px-5 text-sm font-medium"

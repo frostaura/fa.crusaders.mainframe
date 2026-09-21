@@ -66,9 +66,12 @@ function adminChromeRoutes() {
  * assert against somebody else's live region.
  */
 async function shutBanner(): Promise<HTMLElement> {
-  const regions = await screen.findAllByRole("status");
-  const banner = regions.find((node) => /doors? shut|shut .*door/i.test(node.textContent ?? ""));
-  if (!banner) throw new Error("no shut banner in any polite region");
+  // C-M1 / R3-26: the VISIBLE banner is no longer itself a live region. It was a
+  // `role="status"` mirrored into a `role="alert"` — two regions carrying one fact, in a
+  // layout that re-renders on every navigation and re-reads every fifteen seconds. The
+  // sentence is now announced once, when it starts being true, by the sr-only pair; the
+  // banner is page text, and this helper finds it as such.
+  const banner = await screen.findByTestId("shut-doors-banner");
   return banner;
 }
 

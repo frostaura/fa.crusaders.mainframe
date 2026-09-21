@@ -1873,3 +1873,108 @@ describe("a door page acting on a state that has moved", () => {
     expect(server.current()[0].enabled).toBe(false);
   });
 });
+
+/**
+ * <b>C-M1 / C-M2 / C-L3 / R3-26 — what a screen reader is TOLD, and how often.</b>
+ *
+ * <p>
+ * These pages re-read every fifteen seconds while the tab is in front. Everything standing on
+ * them — a ~50-word advisory about a dirty scanner, a "no scans since Wednesday" notice, the
+ * club-wide shut sentence — sat in a live region, so a reader was handed the whole paragraph
+ * again on every poll. A live region is for what has just changed; a page that puts its
+ * standing text in one has made itself unreadable by exactly the people who cannot skim past.
+ * </p>
+ */
+describe("what the door pages say out loud", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  // The spike sentence states the club's OWN window, and renders nothing at all without it —
+  // a threshold with a guessed number is worse than no notice.
+  const settingsRoute = (extra: Record<string, unknown> = {}) =>
+    ({ path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...extra } });
+
+  it("does not put a standing signal advisory in a live region", async () => {
+    const server = doorsServer([doorFixture()], {
+      rows: {
+        [DOOR_ID]: {
+          signals: [{
+            kind: "refusal_spike",
+            since: new Date(Date.now() - 1200_000).toISOString(),
+            until: new Date().toISOString(),
+            scans: 30,
+          }],
+        },
+      },
+    });
+    stubFetch([settingsRoute({ door_refusal_spike_minutes: 20 }), ...server.routes]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+    );
+
+    const advisory = await screen.findByText(/turned away 30 scans/);
+    // It is on the page, in a headed block, reached by browsing — not announced on every
+    // one of the four polls a minute this page makes.
+    const live = advisory.closest('[role="status"], [role="alert"], [aria-live]');
+    expect(live).toBeNull();
+  });
+
+  it("does not put the quiet notice in a live region either", async () => {
+    const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const server = doorsServer([doorFixture()], {
+      activity: [activityFixture({ at: twoDaysAgo })],
+    });
+    stubFetch([settingsRoute(), ...server.routes]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+    );
+
+    const quiet = await screen.findByText(/No scans at this door since/);
+    expect(quiet.closest('[role="status"], [role="alert"], [aria-live]')).toBeNull();
+  });
+
+  /**
+   * <b>C-L3 / R3-26 — "Show the other 38 scans" announced nothing at all.</b>
+   *
+   * Focus moves to the first revealed row, which tells a reader WHERE they are. It does not
+   * tell them what happened, and on a list that just quadrupled those are different
+   * questions.
+   */
+  it("says what the show-more control did", async () => {
+    const scans = Array.from({ length: 14 }, (_, i) => activityFixture({
+      at: new Date(Date.now() - (i + 1) * 60_000).toISOString(),
+    }));
+    const server = doorsServer([doorFixture()], { activity: scans });
+    stubFetch([settingsRoute(), ...server.routes]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /Show the other 4 scans/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Showing all 14 scans at this door.")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * <b>C-M7 / R3-26 — the chips that carry a door's whole state were bare spans.</b>
+   *
+   * The log's rows have said "Outcome: Refused" since B17. Tabbing the overview read "Side
+   * door. Shut. Not told yet." as three unattached words, with nothing saying what kind of
+   * fact any of them was.
+   */
+  it("labels a door's status chips for a screen reader", async () => {
+    const server = doorsServer([doorFixture({ enabled: false, shut_heard_at: null })]);
+    stubFetch([settingsRoute(), ...server.routes]);
+    renderPage(<AdminDoorsPage />);
+
+    expect(await screen.findByText("Status:")).toBeInTheDocument();
+    // And the shut door's second chip is about whether it has been TOLD, which is the
+    // question, rather than about whether it happens to be reporting (R3-1).
+    expect(screen.getByText("Not told yet")).toBeInTheDocument();
+  });
+});
