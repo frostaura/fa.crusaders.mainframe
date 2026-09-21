@@ -386,13 +386,8 @@ bool sendToMega(const proto::Frame& frame) {
 /// link-up, a link-down. The lines themselves are bridgelogic::MegaLink's, so
 /// the composition root cannot invent a third screen nothing tests.
 void showIdentityScreen() {
-  if (gWifiUp) {
-    static_cast<void>(
-        sendToMega(proto::Frame::lcd(bridgelogic::kIdentityOnlineLine1, bridgelogic::kIdentityOnlineLine2)));
-    return;
-  }
-  static_cast<void>(
-      sendToMega(proto::Frame::lcd(bridgelogic::kIdentityOfflineLine1, bridgelogic::kIdentityOfflineLine2)));
+  const bridgelogic::IdentityScreen screen = bridgelogic::identityScreen(gWifiUp);
+  static_cast<void>(sendToMega(proto::Frame::lcd(screen.line1, screen.line2)));
 }
 
 /// Sends what bridgelogic::AuthPolicy decided to the Mega, whose window is the
@@ -1172,9 +1167,13 @@ void loop() {
 
   // A court selected and then abandoned lapses on its own, so the next member to
   // press a duration button does not inherit somebody else's half-made purchase.
+  //
+  // showIdentityScreen(), not the offline lines: this branch painted
+  // kIdentityOffline* unconditionally, so a member who selected a court and
+  // walked away left a box that is on the WiFi telling the next member it is
+  // not — until a WiFi edge, a Mega reset or a scan repainted it (D1-7).
   if (gPad.tick(now)) {
-    static_cast<void>(sendToMega(
-        proto::Frame::lcd(bridgelogic::kIdentityOfflineLine1, bridgelogic::kIdentityOfflineLine2)));
+    showIdentityScreen();
   }
   if (gLastScan[0] != '\0' && gScanAt.expired(now)) {
     // Lapsed unspent. The Mega's own window lapses at the same TTL, but the
