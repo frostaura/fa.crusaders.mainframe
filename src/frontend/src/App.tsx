@@ -33,10 +33,18 @@ import { AdminDoorsCardPage } from "./pages/AdminDoorsCard";
 import NotFoundPage from "./pages/NotFound";
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
+import { RouteAnnouncer } from "./components/RouteAnnouncer";
 
 export default function App() {
   return (
     <BrowserRouter>
+      {/*
+        C6 — the three things a real page load does that a single-page app does not: name the
+        document, move focus to where the new page begins, and say where you have arrived.
+        Above `Routes` rather than inside `Layout`, because `Layout` returns early for the
+        public landing and for every auth-flow screen, and those are routes too.
+      */}
+      <RouteAnnouncer />
       <AuthProvider>
         <ProfileProvider>
         <BalanceProvider>
