@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { DoorTile } from "../components/doors/DoorTile";
@@ -146,6 +146,7 @@ function DoorsList({ store, rows, now, livenessOf, settings }: {
         failed={false}
         reload={refreshDoorsView}
         onRetry={() => void refreshDoorsView()}
+        timezone={view?.timezone}
       />
       {/* `items-stretch` and an internal footer: B18. Tiles misaligned whenever one door
           carried more chips than its neighbour, so three cards in a row ended with their
@@ -179,6 +180,26 @@ function AdminDoorsPageBody() {
   /** C4: what Refresh says back, so pressing it offline is not silence. */
   const [refreshNote, setRefreshNote] = useState<string | null>(null);
   const now = useTicker(true);
+  /**
+   * <b>A-M7 / R3-14 — what the door page said on its way here.</b>
+   *
+   * <p>
+   * A delete pushed a toast and navigated in the same tick, so the confirmation for the most
+   * destructive control on the surface was in practice never seen. This page polls, so one
+   * fewer row reads as a board dropping off rather than as a thing the club did on purpose —
+   * and the two facts a delete's own confirm promised (the scans are kept, the board is not
+   * locked out) had nowhere left to be said.
+   * </p>
+   *
+   * <p>
+   * Read from the navigation's `state` rather than from a store, because it belongs to ONE
+   * arrival: a refresh, or coming back later, should not re-announce a delete that happened
+   * this morning. `assertive` because it is the result of an action the reader just took and
+   * has now been moved away from — this is the one case on this surface that earns it.
+   * </p>
+   */
+  const location = useLocation();
+  const arrivedWith = (location.state as { doorsNotice?: string } | null)?.doorsNotice ?? null;
 
   useEffect(() => {
     // The club's declared heartbeat, for boards that do not carry their own, and the two
@@ -267,6 +288,11 @@ function AdminDoorsPageBody() {
       {/* A8 / C4: one polite region carrying what Refresh found and whether this page can
           currently say anything about liveness at all. */}
       <p role="status" className="sr-only">{refreshNote ?? ""}</p>
+      {arrivedWith && (
+        <p role="alert" className="rounded-lg border-l-4 border-accent-strong bg-accent-soft px-3 py-2.5 text-sm">
+          {arrivedWith}
+        </p>
+      )}
       {livenessSuspended && (
         <p className="rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning-strong">
           {DOORS_LIVENESS_SUSPENDED}
@@ -278,14 +304,30 @@ function AdminDoorsPageBody() {
         phone moves the card a thumb is already descending on. The slot is reserved, so the
         summary appearing and disappearing across polls costs no layout at all.
       */}
-      <div className="min-h-14">
+      {/*
+        A-L1 / R3-27 raised this reserve. The summary's link to the door is a 44 px target
+        now — it was 17 px — so the banner is taller than the 56 px slot it used to fit in,
+        and a slot that is too small is the A10 defect it exists to prevent: the banner
+        ARRIVES on a poll and shifts the card a thumb is already descending on.
+      */}
+      <div className="min-h-[76px]">
         {summary && (
           <p role="status" className="rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning-strong">
             {summary}
             {first?.doorId && (
               <>
                 {" "}
-                <Link to={`/admin/doors/${first.doorId}`} className="font-medium underline">
+                {/*
+                  A-L1 / C-L1 / R3-27: it measured 17 px tall. This is the control the
+                  summary exists to offer — the whole point of naming one door rather than
+                  counting three is that the reader can get to it — and it was a third of
+                  the 44 px every other control on this surface is built to. `inline-flex`
+                  with a minimum on BOTH axes, so a door called "A" is still a target.
+                */}
+                <Link
+                  to={`/admin/doors/${first.doorId}`}
+                  className="inline-flex min-h-11 min-w-11 items-center font-medium underline"
+                >
                   {`Go to ${first.doorName}`}
                 </Link>
               </>

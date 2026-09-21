@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { doorFleetReopenLabel, doorsShutBannerLine, doorsShutIndividuallyBanner } from "../../lib/gateCopy";
 import { type DoorsChrome } from "./useDoorsChrome";
@@ -91,12 +92,31 @@ export function ShutDoorsBanner({ chrome }: { chrome: DoorsChrome }) {
     : doorsShutIndividuallyBanner(shut, chrome.total);
   return (
     <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong print:hidden">
-      {/* C11: assertive, and empty unless this reader is being told something they did not
-          already do. An empty live region announces nothing, so this costs silence when
-          there is nothing to interrupt for. */}
-      <span role="alert" className="sr-only">{interrupt ? sentence : ""}</span>
-      {/* C11: the polite region is the sentence alone — see the note on the component. */}
-      <span role="status" className="min-w-0 break-words">
+      {/*
+        <b>C-M1 / R3-26 — one region, written only when the words change.</b>
+
+        The sentence was in a `role="status"` AND mirrored into a `role="alert"` that was
+        churned back to `""` whenever the interrupt stood down. Two live regions carrying one
+        fact is two announcements of it; a region that is unmounted and remounted on every
+        navigation announces on every navigation; and this banner is on EVERY admin route,
+        re-rendered by a store that polls every fifteen seconds. A blind admin met the
+        consequence of their own decision over and over for a session.
+
+        What is standing is not news. {@link Announcement} below holds the words and writes
+        them into a region only when they differ from what it last said — so a poll that
+        finds the same three doors shut is silent, and the admin who is told is the one for
+        whom something actually changed.
+      */}
+      <Interruption text={sentence} when={interrupt} />
+      {/*
+        <b>ONE region for the standing sentence, and it is the visible banner itself.</b>
+        This lives in the layout and does not unmount on navigation, so its text changes
+        exactly when the club's shut state changes — which is when a polite announcement is
+        wanted and the only time one is made. What C-M1 found was the MIRROR: the same
+        sentence also written into a `role="alert"` that was churned back to `""`, so one
+        fact was two announcements and the assertive one repeated for the session.
+      */}
+      <span role="status" data-testid="shut-doors-banner" className="min-w-0 break-words">
         {sentence}
       </span>
       {onDoorsPage ? null : byFleet.length > 0 ? (
@@ -123,4 +143,70 @@ export function ShutDoorsBanner({ chrome }: { chrome: DoorsChrome }) {
       )}
     </div>
   );
+}
+
+
+/**
+ * <b>The one change that is genuinely news, said once (C11 / C-M1 / R3-26).</b>
+ *
+ * <p>
+ * Somebody else shutting the club's doors while this admin reads another page is an event
+ * this reader has no other way to see. Everything else about the shut state is STANDING, and
+ * standing facts are the visible banner's own polite region — mirroring them here was one
+ * fact announced twice, on a component that is re-rendered on every navigation an admin makes
+ * and re-read every fifteen seconds.
+ * </p>
+ */
+/**
+ * <b>What has already been said, at MODULE scope — and the scope is the whole fix.</b>
+ *
+ * <p>
+ * A ref inside the component remembers nothing across an unmount, and this banner lives in a
+ * layout that re-renders on every navigation. Kept per session, so a sentence is announced
+ * when it starts being true and never again — which is what "standing" means.
+ * </p>
+ */
+let lastAnnounced: string | null = null;
+
+/**
+ * How long the sentence stays in the live region before it is emptied again.
+ *
+ * Long enough that a mutation observer — and a screen reader's own queue — has it; short
+ * enough that it is not a second, permanent copy of the banner in the reading order.
+ */
+const ANNOUNCE_MS = 150;
+
+/** Tests get a fresh session. Nothing in the app calls this; a page load is the real reset. */
+export function resetShutBannerAnnouncements(): void {
+  lastAnnounced = null;
+}
+
+function Interruption({ text, when }: { text: string; when: boolean }) {
+  const [said, setSaid] = useState("");
+
+  useEffect(() => {
+    if (!when) return;
+    if (lastAnnounced === text) return;
+    lastAnnounced = text;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- writes the region exactly once per change of words
+    setSaid(text);
+    /**
+     * <b>Announce, then empty.</b>
+     *
+     * A screen reader queues on the MUTATION; the text does not have to stay. Leaving it
+     * there puts a second copy of the sentence in the reading order two nodes from the
+     * visible banner, so somebody browsing the page meets the same fact twice — which is
+     * exactly the mirroring C-M1 found, reintroduced by its own fix.
+     */
+    const clear = window.setTimeout(() => setSaid(""), ANNOUNCE_MS);
+    return () => window.clearTimeout(clear);
+  }, [text, when]);
+
+  // One assertive region, always mounted — a live region has to be in the document before it
+  // can announce — and empty except for the moment it is saying something. TWO things empty
+  // it, and both matter: the store's own stamp lives for exactly one read, so `when` stands
+  // down on the next poll, and the timer covers a tab that is not polling. What must never
+  // happen is that it keeps the sentence: an sr-only region that does is a second copy of
+  // the banner two nodes away, which is the mirroring C-M1 found.
+  return <span role="alert" className="sr-only">{when ? said : ""}</span>;
 }

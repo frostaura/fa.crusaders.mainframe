@@ -66,9 +66,12 @@ function adminChromeRoutes() {
  * assert against somebody else's live region.
  */
 async function shutBanner(): Promise<HTMLElement> {
-  const regions = await screen.findAllByRole("status");
-  const banner = regions.find((node) => /doors? shut|shut .*door/i.test(node.textContent ?? ""));
-  if (!banner) throw new Error("no shut banner in any polite region");
+  // C-M1 / R3-26: the VISIBLE banner is no longer itself a live region. It was a
+  // `role="status"` mirrored into a `role="alert"` — two regions carrying one fact, in a
+  // layout that re-renders on every navigation and re-reads every fifteen seconds. The
+  // sentence is now announced once, when it starts being true, by the sr-only pair; the
+  // banner is page text, and this helper finds it as such.
+  const banner = await screen.findByTestId("shut-doors-banner");
   return banner;
 }
 
@@ -528,8 +531,29 @@ describe("the admin Home row", () => {
   it("does not claim nobody gets in through a shut door it has never heard from", async () => {
     home([doorFixture({ name: "Side door", enabled: false, last_seen_at: null })]);
 
-    expect(await screen.findByText(/Side door is shut, but nothing can reach it/))
-      .toHaveTextContent("may not have been told");
+    // R3-1: and it does not claim the opposite either. With no `shut_heard_at` on the row
+    // the page says it cannot tell — the previous sentence ("it may not have been told") was
+    // derived from an age that the shut itself froze, and was printed over boards that had
+    // heard the refusal inside one heartbeat.
+    expect(await screen.findByText(/Side door is shut, and the club has not heard from it since/))
+      .toHaveTextContent("this page cannot say whether it was told");
+  });
+
+  /**
+   * <b>R3-1 on the row an admin meets without going looking.</b>
+   *
+   * Home is the screen somebody sees on a visit that was about something else, so a door
+   * described there as possibly still admitting people is a door somebody drives to the club
+   * for. `shut_heard_at` settles it and Home says which.
+   */
+  it("says a shut door has been told, where the server says so", async () => {
+    home([doorFixture({
+      name: "Side door", enabled: false, last_seen_at: null,
+      shut_heard_at: "2026-09-21T06:09:00Z",
+    })]);
+
+    expect(await screen.findByText(/Side door is shut and has been told/))
+      .toHaveTextContent("Nobody gets in through it");
   });
 
   it("names one door and counts the others", async () => {

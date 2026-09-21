@@ -1,5 +1,7 @@
 import { Badge } from "../Button";
-import { doorSetupChip, doorSignalChip, doorStateChip, type DoorChip } from "../../lib/doorsCopy";
+import {
+  doorSetupChip, doorShutHeard, doorSignalChip, doorStateChip, type DoorChip,
+} from "../../lib/doorsCopy";
 import { type AdminDoorDevice, type DoorSignal } from "../../lib/api";
 
 /**
@@ -32,7 +34,14 @@ export function DoorChips({ device, online, signals }: {
   // confirmed, 1 not yet" over three tiles that all looked identical.
   const state = doorStateChip(device, online);
   const chips: DoorChip[] = state ? [state] : [];
-  if (!device.enabled && online === false) chips.push({ label: "Not reporting", tone: "danger" });
+  // R3-1: a shut door's SECOND chip is about whether it has been told, not about whether it
+  // is reporting — and those were the same chip while the shut itself froze `last_seen_at`.
+  // A door that heard the shut and has since gone quiet wore "Not reporting" beside "Shut"
+  // and sent an admin to look at a board that was refusing everybody exactly as asked.
+  const heard = doorShutHeard(device);
+  if (!device.enabled && heard.state === "confirmed") chips.push({ label: "Told", tone: "success" });
+  else if (!device.enabled && heard.state === "not_told") chips.push({ label: "Not told yet", tone: "warning" });
+  else if (!device.enabled && online === false) chips.push({ label: "Not reporting", tone: "danger" });
   const setup = doorSetupChip(device);
   if (setup) chips.push(setup);
   // B9 / A9: a signal chip is a reading of recent scans, and on a shut or unreachable door
@@ -43,6 +52,21 @@ export function DoorChips({ device, online, signals }: {
   }
   return (
     <span className="flex flex-wrap items-center gap-1.5">
+      {/*
+        <b>C-M7 / R3-26 — the chips that carry a door's whole state were bare spans.</b>
+
+        The log's rows have said "Outcome: Refused" to a screen reader since B17. Tabbing the
+        overview read "Side door. Shut. Not told yet." as three unattached words with nothing
+        saying what kind of fact any of them was.
+
+        It labels the group from BESIDE the badges rather than from inside the first one.
+        Inside, the prefix becomes part of that badge's own text — the badge then reads
+        "Status: Reporting" to every exact text query in the suite and to speech control,
+        which is the WCAG 2.5.3 failure `ConfirmButton` documents at length, one component
+        along. Said once rather than before each of three chips, which is the noise that
+        teaches somebody to skip the row.
+      */}
+      <span className="sr-only">Status: </span>
       {chips.map((chip) => <Badge key={chip.label} tone={chip.tone}>{chip.label}</Badge>)}
     </span>
   );

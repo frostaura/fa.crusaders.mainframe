@@ -4,7 +4,7 @@ import { Printer } from "lucide-react";
 import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { PrintSheet } from "../components/doors/PrintSheet";
-import { DOORS_READ_FAILED, describePowerLoss } from "../lib/doorsCopy";
+import { DOORS_READ_FAILED, describePowerLoss, doorDisplayName } from "../lib/doorsCopy";
 import { clubDate } from "../lib/clubClock";
 import { UNNAMED_GATE } from "../lib/gateCopy";
 import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
@@ -39,12 +39,17 @@ function AdminDoorsCardPageBody() {
   const [loading, setLoading] = useState(true);
   /** The instant this sheet was built, stamped once. See `printedOn` below. */
   const [builtAt, setBuiltAt] = useState(0);
+  const [timezone, setTimezone] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     setBuiltAt(Date.now());
     try {
       const view = await doorEndpoints.doors();
       const row = view.doors.find((d) => d.device.id === id);
+      // E2 / R3-3: the club's zone. This sheet is printed and goes on a wall for months, so
+      // a date written in whichever zone the printing admin's laptop was in is the one
+      // mistake on it nobody can catch afterwards.
+      setTimezone(view.timezone);
       setDoor(row?.device ?? null);
       setFailed(false);
     } catch {
@@ -60,12 +65,34 @@ function AdminDoorsCardPageBody() {
   useEffect(() => { void load(); }, [load]);
 
   if (loading) return <p className="text-sm text-text-secondary">Loading this door's card…</p>;
-  if (failed || !door) {
+  /**
+   * <b>A-M6 / R3-14 — "The doors could not be read" about a door that is not there.</b>
+   *
+   * <p>
+   * The two were one branch, so a card URL for a deleted or mistyped door reported a FAILED
+   * READ: an admin following a stale link was told the club's doors could not be read at all,
+   * and went looking for an outage. A read that landed and found no such door is a different
+   * fact and gets the door page's own sentence, word for word, because an admin who reaches
+   * both should not have to reconcile two descriptions of one state.
+   * </p>
+   */
+  if (failed) {
     return (
       <div className="space-y-3">
         <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
         <Alert tone="danger">{DOORS_READ_FAILED}</Alert>
         <Button variant="outline" onClick={() => void load()}>Try again</Button>
+      </div>
+    );
+  }
+  if (!door) {
+    return (
+      <div className="space-y-3">
+        <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
+        <p className="text-sm text-text-secondary">
+          That door is not on the club's list. It may have been deleted — a board re-registers itself
+          on its next heartbeat, with no name.
+        </p>
       </div>
     );
   }
@@ -76,13 +103,13 @@ function AdminDoorsCardPageBody() {
   // "9/19/26" is the last place a month-first date belongs. Read at LOAD rather than during
   // render — it is the instant the card was built, and a clock read in a render body is both
   // impure and a value that can change between two paints of one sheet.
-  const printedOn = clubDate(builtAt);
+  const printedOn = clubDate(builtAt, timezone);
 
   return (
     <div className="space-y-4">
       <div data-print-hide className="space-y-3">
         <Link to={`/admin/doors/${door.id}`} className="inline-flex min-h-11 items-center text-sm text-accent-strong">
-          {`← ${door.name}`}
+          {`← ${doorDisplayName(door)}`}
         </Link>
         <p className="text-sm text-text-secondary">
           Print this and put it in the cupboard beside the board. It is what somebody standing at the
@@ -99,7 +126,10 @@ function AdminDoorsCardPageBody() {
             beneath it. The heading was the slug — "front-door" in 36 px on a card taped to a
             wall — which is the one word on the sheet a member or a volunteer does not use.
             The slug still has to be here: it is what a scan is recorded against. */}
-        <h1 className="mt-4 break-words text-4xl font-bold tracking-tight">{door.name}</h1>
+        {/* A11 / R3-21: ONE fallback, and it matters most here — this sheet goes on a wall
+            in a corridor for months, and "Door gate" in 36 px names none of the boards in
+            the same state. */}
+        <h1 className="mt-4 break-words text-4xl font-bold tracking-tight">{doorDisplayName(door)}</h1>
         <p className="mt-1 break-words text-sm uppercase tracking-wide">
           {door.gate_key ?? UNNAMED_GATE}
         </p>
@@ -143,7 +173,11 @@ function CardBlock({ title, children }: { title: string; children: React.ReactNo
   return (
     <section className="mt-5">
       <h2 className="text-sm font-semibold">{title}</h2>
-      <p className="min-w-0 break-words text-sm">{children}</p>
+      {/* B8 / R3-27: `break-all` as well. The club contact block goes through here and an
+          email address is one unbreakable token — `break-words` breaks a LINE, not a word
+          that has no break opportunity in it, and at 320 px with a 32 px root font that
+          token is wider than the sheet. This one is printed on a wall, so it cannot spill. */}
+      <p className="min-w-0 break-all text-sm">{children}</p>
     </section>
   );
 }

@@ -211,6 +211,13 @@ export const UNRECOGNISED_EVENT = "Unrecognised event";
  */
 export const DOOR_EVENT_KIND_WORDS: Record<string, string> = {
   registered: "The board registered itself",
+  // WIRE-R3 §6's `kind` vocabulary, which is the `change` vocabulary: the two fields have
+  // converged, so a row carrying only `kind` now says which of the four an edit was.
+  renamed: "Renamed",
+  details_changed: "Details changed",
+  shut: "Shut",
+  reopened: "Reopened",
+  deleted: "This door was deleted",
   /**
    * ONE kind for four things, and the copy must not pretend otherwise.
    *
@@ -250,11 +257,21 @@ export const DOOR_EVENT_CHANGE_WORDS: Record<string, string> = {
   registered: "The board registered itself",
   renamed: "Renamed",
   details: "Details changed",
+  /**
+   * WIRE-R3 §6 renames two of these, and BOTH spellings resolve.
+   *
+   * Rows written under `details`/`removed` and rows written under
+   * `details_changed`/`deleted` are inside retention at the same time, and a screen that
+   * knows only the newer one renders the older as "Unrecognised event" — which is the honest
+   * arm for a genuinely unknown action and the wrong answer for one we have words for.
+   */
+  details_changed: "Details changed",
   shut: "Shut",
   reopened: "Reopened",
   shut_all: "Shut with every other door",
   reopened_all: "Reopened with the doors shut together",
   removed: "Deleted",
+  deleted: "Deleted",
   clock_corrected: "The board's clock was out and was corrected",
   /** A row written before the server recorded which of the four an edit was. */
   other: "Details or state changed",

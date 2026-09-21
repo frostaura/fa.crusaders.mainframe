@@ -369,8 +369,8 @@ test.describe("One door's page", () => {
 
     await expect(page.getByText("Needs a door name")).toBeVisible();
     await page.getByRole("button", { name: /^Edit / }).click();
-    await page.getByLabel("Name", { exact: true }).fill("Front door");
-    await page.getByLabel("Door name", { exact: true }).fill("front-door");
+    await page.getByLabel("What the club calls it", { exact: true }).fill("Front door");
+    await page.getByLabel(/Name the board uses offline/).fill("front-door");
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
     // Re-served WITH the PATCH route: `serveApi` replaces the whole table, and a re-serve
@@ -425,7 +425,7 @@ test.describe("One door's page", () => {
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
     await page.getByRole("button", { name: /^Edit / }).click();
-    await page.getByLabel("Door name", { exact: true }).fill("   ");
+    await page.getByLabel(/Name the board uses offline/).fill("   ");
     await page.getByRole("button", { name: /Save this door/ }).click();
 
     // A19: one form over all four writable fields, so one PATCH carrying all four. `""`,
@@ -448,11 +448,15 @@ test.describe("One door's page", () => {
   test("says what shutting a DOOR costs, and none of what it costs a box", async ({ page }) => {
     await openDoor(page, [door({ name: "Front door", gate_key: "front-door" })]);
 
-    const notice = page.getByText(/^The club is not alerted about its silence/);
+    // B4 / R3-24: it used to open "The club is not alerted about its silence…" — a clause
+    // with no subject, about ALERTS, under a heading about shutting a door. Both halves are
+    // still said; the order and the subject changed.
+    const notice = page.getByText(/^Shutting a door refuses every scan at it/);
     await expect(notice).toBeVisible();
     await expect(notice).toContainText("can still reach the club hears that refusal and opens for nobody");
     await expect(notice).toContainText("has also lost the network never hears it");
     await expect(notice).toContainText("up to six hours");
+    await expect(notice).toContainText("stops raising its silence as a fault");
     // A1.1: the denial survives P5's ban on the tokens.
     await expect(notice).toContainText("a door marks nobody as having arrived");
     await expect(notice).not.toContainText("check-in");
@@ -467,7 +471,14 @@ test.describe("One door's page", () => {
     await expect(page.getByRole("button", { name: /Take out of service/ })).toHaveCount(0);
   });
 
-  test("sends only enabled when a door is shut", async ({ page }) => {
+  /**
+   * <b>B13 / R3-34: and what this page last READ, so a stale tab is refused.</b>
+   *
+   * Still only those two keys — no name, no gate key, no court fields. `expected_enabled` is
+   * the negation of the request by construction: a control offering "Shut" was rendered from
+   * a door the page read as open.
+   */
+  test("sends only enabled, and what it expected, when a door is shut", async ({ page }) => {
     const only = door({ name: "Front door", gate_key: "front-door" });
     await openDoor(page, [only], [
       { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...only, enabled: false } },
@@ -477,7 +488,7 @@ test.describe("One door's page", () => {
     await page.getByRole("button", { name: "Shut this door — Front door" }).click();
     await page.getByRole("button", { name: "Shut this door — Front door — choose again to confirm" }).click();
 
-    expect((await patch).postData()).toBe('{"enabled":false}');
+    expect((await patch).postData()).toBe('{"enabled":false,"expected_enabled":true}');
   });
 
   /**
@@ -1378,5 +1389,132 @@ test.describe("One door's page, reachable with a thumb", () => {
     // is the point — so this asserts the first rather than asserting there is only one.
     await expect(page.getByText(/Shut by Priya Naidoo/).first()).toBeVisible();
     await expect(page.getByText(/You shut this door/)).toHaveCount(0);
+  });
+});
+
+/**
+ * <b>A-L1 / C-L1 / B8 / R3-27 — the doors surface at a 32 px root font.</b>
+ *
+ * <p>
+ * This surface is built to 44 px throughout because it is used standing up in a club with a
+ * member waiting. Two things were not: the "Go to <door>" link in the attention summary, which
+ * is the whole point of naming one door rather than counting three, measured 17 px; and the
+ * club contact on a door's card, which is an email address with no break opportunity in it and
+ * pushed the whole page sideways.
+ * </p>
+ */
+test.describe("The doors pages at 320 px with a 32 px root font", () => {
+  const large = async (page: Page) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
+    await page.waitForTimeout(400);
+  };
+
+  test("gives the summary's link to a door the same 44 px as everything else", async ({ page }) => {
+    await openDoors(page, [door({ name: "Side door", enabled: false })]);
+    await large(page);
+
+    const link = page.getByRole("link", { name: "Go to Side door" });
+    await expect(link).toBeVisible();
+    const box = await link.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(43.5);
+  });
+
+  test("does not let a club contact email push the door page sideways", async ({ page }) => {
+    // The fixture sorts by prefix LENGTH and these are the same path, so declaration order
+    // decides and the base route wins — the settings route is overridden in place instead.
+    // The fixture sorts by prefix LENGTH and both entries are the same path, so declaration
+    // order decides — an `extra` route for settings would lose to the base one. The whole
+    // route list is built here instead.
+    await signIn(page);
+    await serveApi(page, [
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS, club_contact_email: "treasurer@crusaderssquashclub.co.za" } },
+      ...routes([door()]).filter((r) => r.path !== "/api/v1/admin/settings/"),
+    ]);
+    await page.goto(`/admin/doors/${DOOR_ID}`);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await large(page);
+
+    await expect(page.getByText(/treasurer@crusaderssquashclub/)).toBeVisible();
+    const stuck = await page.evaluate(() => [...document.querySelectorAll("main *")]
+      .filter((el) => {
+        const e = el as HTMLElement;
+        // The app shell's own rem-scaled padding is the chrome lane's — see the same
+        // exclusion, with its measurement, in admin-devices.spec.ts.
+        if (e.classList.contains("flex-1") && e.classList.contains("min-h-0")) return false;
+        // `sr-only` is a 1 px clipped box by construction, so its content always "overflows"
+        // it. That is what the utility is; it is not a layout fault.
+        if (e.classList.contains("sr-only")) return false;
+        return e.scrollWidth - e.clientWidth > 1 && e.getBoundingClientRect().width > 0;
+      })
+      .map((el) => ({
+        over: (el as HTMLElement).scrollWidth - (el as HTMLElement).clientWidth,
+        cls: el.className?.toString().slice(0, 50) ?? "",
+        text: (el.textContent ?? "").trim().slice(0, 40),
+      })));
+    expect(stuck, `boxes that cannot hold their content: ${JSON.stringify(stuck)}`).toEqual([]);
+  });
+});
+
+/**
+ * <b>R3-1 and R3-13, driven in a real browser.</b>
+ *
+ * <p>
+ * Both are about what a screen ASSERTS when the thing it is asserting about cannot be seen —
+ * a shut door whose age froze the moment it was shut, and a filter pointing at a board that
+ * has been replaced. Both produced sentences a volunteer acts on, and neither is visible to a
+ * test that cannot render a page.
+ * </p>
+ */
+test.describe("What a door page claims about a shut it cannot see", () => {
+  test("reports a confirmed shut as confirmed, though the door has gone quiet since", async ({ page }) => {
+    const heardAt = new Date(Date.now() - 3600_000).toISOString();
+    await openDoor(page, [door({
+      name: "Front door",
+      enabled: false,
+      last_seen_at: heardAt,
+      shut_heard_at: heardAt,
+    })]);
+
+    // Twice, and both are wanted: the state paragraph at the top of the page and the
+    // clause beside the control an admin is about to press.
+    await expect(page.getByText(/Confirmed: this door heard the shut at/).first()).toBeVisible();
+    await expect(page.getByText(/Confirmed: this door heard the shut at/)).toHaveCount(2);
+    // The three sentences a reviewer read over a board that had emptied its roster.
+    await expect(page.getByText(/may still be admitting/)).toHaveCount(0);
+    await expect(page.getByText(/Nothing can reach/)).toHaveCount(0);
+
+    await page.getByRole("button", { name: /^Reopen this door/ }).click();
+    await expect(page.getByText(/was told of the shut and has been opening for nobody/).first())
+      .toBeVisible();
+  });
+
+  test("says it cannot tell where the server has not said", async ({ page }) => {
+    await openDoor(page, [door({
+      name: "Front door", enabled: false, last_seen_at: new Date(Date.now() - 3600_000).toISOString(),
+    })]);
+
+    await expect(page.getByText(/this page cannot say whether it was told/)).toBeVisible();
+  });
+});
+
+test.describe("A club log filtered to a door that is gone", () => {
+  test("says the door is gone rather than that nothing happened at any door", async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, [
+      ...routes([door()]),
+      {
+        path: "/api/v1/admin/doors/activity",
+        status: 400,
+        body: { error: "door_not_found" },
+      },
+    ]);
+    await page.goto("/admin/doors/log?door=11111111-2222-3333-4444-555555555555");
+
+    await expect(page.getByText(/no longer on the club's list/)).toBeVisible();
+    await expect(page.getByText("No scans at any door in the last 24 hours")).toHaveCount(0);
+    // And the export that would have written a nought-row file under the ordinary name.
+    await expect(page.getByRole("button", { name: "Download CSV" })).toHaveCount(0);
   });
 });

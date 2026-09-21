@@ -7,10 +7,12 @@ import { useToast } from "../components/Toast";
 import { DoorFeedRow } from "../components/doors/DoorFeedRow";
 import { useTicker } from "../lib/useTicker";
 import {
-  LOG_EMPTY_FILTERED, LOG_EMPTY_FILTERED_HINT, LOG_EMPTY_NOTHING, LOG_OLDER_FAILED,
-  LOG_READ_FAILED, OFFLINE_WHO_NOTE, doorCsvDownloaded, doorCsvNotice, doorDisplayName,
-  doorExhaustedNotice, doorLogCountLine, doorLogEmptyOneDoor, doorLogHowToRead, doorPickerLabel,
-  doorRetentionNotice, doorRowIdentity, doorRowName, removedDoorName, removedDoorsCapNotice,
+  LOG_CSV_BLOCKED_DOOR_GONE, LOG_DOOR_GONE, LOG_DOOR_GONE_HINT, LOG_EMPTY_FILTERED,
+  LOG_EMPTY_FILTERED_HINT, LOG_EMPTY_NOTHING, LOG_OLDER_FAILED, LOG_PICK_A_DAY, LOG_READ_FAILED,
+  OFFLINE_WHO_NOTE, doorCsvDownloaded, doorCsvFailed, doorCsvNotice, doorDisplayName,
+  doorExhaustedNotice, doorLogCountLine, doorLogEmptyOneDoor, doorLogHeading, doorLogHowToRead,
+  doorPickerLabel, doorRetentionNotice, doorRowIdentity, doorRowName, removedDoorName,
+  removedDoorsCapNotice,
 } from "../lib/doorsCopy";
 import { clubClock, clubDayAndClock, clubRangeInWords } from "../lib/clubClock";
 import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
@@ -18,8 +20,8 @@ import { DOOR_OUTCOME_CHIPS, isDoorScan } from "../lib/deviceActivity";
 import { describeDeviceError } from "../lib/deviceErrors";
 import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
 import {
-  doorEndpoints, type DoorLogEntry, type DoorLogFilters, type DoorLogPeriod, type DoorsView,
-  type RemovedDoor,
+  ApiError, doorEndpoints, type DoorLogEntry, type DoorLogFilters, type DoorLogPeriod,
+  type DoorsView, type RemovedDoor,
 } from "../lib/api";
 
 /**
@@ -119,6 +121,20 @@ function filtersOf(params: URLSearchParams): DoorLogFilters {
 }
 
 /**
+ * <b>A-L3 / R3-12 — "A specific day" with no day chosen is not a question yet.</b>
+ *
+ * <p>
+ * {@link filtersOf} falls back to the default period, which is right for the REQUEST and
+ * wrong for the page: the rows that came back were the last 24 hours, the When control said
+ * "A specific day", and nothing on the screen reconciled the two. A rolling window presented
+ * as a calendar day is the same class of falsehood A4 was raised on, one control along.
+ * </p>
+ */
+function awaitingDay(params: URLSearchParams): boolean {
+  return (params.get("range") ?? DEFAULT_RANGE) === "day" && !isClubDay(params.get("day") ?? "");
+}
+
+/**
  * Which empty sentence is true here — narrowed, one door, or genuinely nothing.
  *
  * C7: the one-door sentence used to assert "its board may not be reaching the club" whatever
@@ -189,6 +205,22 @@ function AdminDoorsLogPageBody() {
   const [olderFailed, setOlderFailed] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  /**
+   * A-H2 / R3-14: the export's failure, beside the button, until the next attempt.
+   *
+   * A toast alone was the whole of what this page said when a download failed — and a toast
+   * floats, times out, and is gone by the time an admin looks for the file that was never
+   * written.
+   */
+  const [csvFailed, setCsvFailed] = useState<string | null>(null);
+  /**
+   * A-C2 / R3-13: the door filter names a door the club no longer has.
+   *
+   * Set from the API's own `door_not_found` (WIRE-R3 §4), and inferred where an older backend
+   * answers 200-and-empty instead — see {@link doorGone} below. It is not a failed read and
+   * it must never render as "no scans at any door", which is a claim about the CLUB.
+   */
+  const [doorNotFound, setDoorNotFound] = useState(false);
   const [readAt, setReadAt] = useState<number | null>(null);
   /**
    * The filters the visible rows were actually read with.
@@ -228,17 +260,38 @@ function AdminDoorsLogPageBody() {
    * there, so the row that got the focus ref could be a row from the previous page.
    */
   const [appendedFrom, setAppendedFrom] = useState(0);
+  /**
+   * The date field's own value while it is being typed (C-H2 / R3-12).
+   *
+   * Seeded from the URL so a shared `?day=` link fills the control, and thereafter the
+   * field's, because a controlled input whose value round-trips through the query string
+   * cannot hold a half-typed date without publishing it.
+   */
+  const [dayDraft, setDayDraft] = useState(params.get("day") ?? "");
   const base = useId();
 
   const query = params.toString();
 
   const load = useCallback(async () => {
+    const asked = filtersOf(new URLSearchParams(query));
+    // A-L3 / R3-12: no day chosen is not a narrower question, it is no question. Asking the
+    // default period here is what put a rolling window on screen under a calendar heading.
+    if (awaitingDay(new URLSearchParams(query))) {
+      setLoading(false);
+      setFailed(false);
+      setDoorNotFound(false);
+      setRows([]);
+      setCursor(null);
+      setActiveFilters(null);
+      setReadAt(Date.now());
+      return;
+    }
     setLoading(true);
     setOlderFailed(false);
     try {
-      const asked = filtersOf(new URLSearchParams(query));
       const read = await doorEndpoints.doorActivity(asked);
       setActiveFilters(asked);
+      setDoorNotFound(false);
       setRows(read.items);
       setCursor(read.next_cursor);
       setRetention(read.retention_days);
@@ -253,9 +306,16 @@ function AdminDoorsLogPageBody() {
       });
       setFailed(false);
       setReadAt(Date.now());
-    } catch {
-      setFailed(true);
-      setRows(null);
+    } catch (e) {
+      // A-C2 / R3-13: `door_not_found` is not a failed read and must not take the failed-read
+      // sentence — "these scans could not be read" would send an admin to look for an outage
+      // when the only thing wrong is a link to a board that has been replaced.
+      const gone = e instanceof ApiError
+        && (e.payload as { error?: string } | null | undefined)?.error === "door_not_found";
+      setDoorNotFound(gone);
+      setFailed(!gone);
+      setRows(gone ? [] : null);
+      if (gone) { setCursor(null); setReadAt(Date.now()); }
     } finally {
       setLoading(false);
     }
@@ -285,12 +345,37 @@ function AdminDoorsLogPageBody() {
     if (appendedFrom > 0 && !cursor) exhaustedRef.current?.focus();
   }, [rows, appendedFrom, cursor]);
 
+  /**
+   * <b>A-M5 / C-H3 / R3-12 — a filter change is a navigation, and it keeps its place.</b>
+   *
+   * <p>
+   * <b>It PUSHES.</b> It used to replace, so Back from a narrowed log left the page entirely
+   * rather than undoing the narrowing — and Back is what everybody reaches for after
+   * filtering to something that turned out to be wrong. Three taps leaving three history
+   * entries is the cost, and it is the cheaper one: an extra Back press is an annoyance, and
+   * a Back that throws away the log you were reading is a lost place.
+   * </p>
+   *
+   * <p>
+   * <b>And focus stays where the person put it.</b> The control that caused the change is
+   * still on screen and still the thing they are using; a re-render that leaves focus adrift
+   * is how a keyboard user ends up at the top of the document after choosing a door. It is
+   * restored only where focus has genuinely been dropped, never taken from somewhere else.
+   * </p>
+   */
+  const keepFocus = () => {
+    const active = document.activeElement as HTMLElement | null;
+    if (!active || active === document.body) return;
+    queueMicrotask(() => {
+      if (document.activeElement === document.body) active.focus();
+    });
+  };
+
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value === "") next.delete(key); else next.set(key, value);
-    // `replace`, so three taps on a phone do not leave three history entries between the
-    // admin and the page they came from.
-    setParams(next, { replace: true });
+    keepFocus();
+    setParams(next);
   };
 
   const loadOlder = async () => {
@@ -305,6 +390,10 @@ function AdminDoorsLogPageBody() {
       setAppendedFrom(rows?.length ?? 0);
       setRows([...(rows ?? []), ...older.items]);
       setCursor(older.next_cursor);
+      // C-L3 / R3-26: it announced nothing. Focus moves to the first appended row (C4),
+      // which says where the reader is and not what happened — and on a list that grew by
+      // fifty rows those are different questions. The page's own result region carries the
+      // new count on the next render, so nothing extra is needed here beyond letting it.
     } catch {
       setOlderFailed(true);
     } finally {
@@ -315,6 +404,7 @@ function AdminDoorsLogPageBody() {
   const download = async () => {
     if (downloading) return;
     setDownloading(true);
+    setCsvFailed(null);
     try {
       const { blob, filename, rows: counted, truncated } = await doorEndpoints.doorActivityCsv(activeFilters ?? filtersOf(params));
       const url = URL.createObjectURL(blob);
@@ -328,11 +418,36 @@ function AdminDoorsLogPageBody() {
       // repeats to a committee.
       toast.push({ tone: "success", text: doorCsvDownloaded(counted, truncated), durationMs: 8000 });
     } catch (e) {
-      toast.push({ tone: "danger", text: describeDeviceError(e, "Could not build that CSV.") });
+      // A-H2 / R3-14: both. The toast is what a sighted admin notices; the sentence beside
+      // the button is what is still there when they look for the file.
+      const said = doorCsvFailed(describeDeviceError(e, "Could not build that CSV."));
+      setCsvFailed(said);
+      toast.push({ tone: "danger", text: said, durationMs: 8000 });
     } finally {
       setDownloading(false);
     }
   };
+
+  /**
+   * E6 / R3-19: what the heading has to say, read off the same params the request is built
+   * from so the two cannot disagree. Each is null at its default, and the generator omits
+   * the clause rather than printing "all outcomes".
+   */
+  const outcomeLabel = (() => {
+    const reason = params.get("reason");
+    if (reason) return DOOR_OUTCOME_CHIPS[reason] ?? reason.replace(/_/g, " ");
+    const outcome = params.get("outcome");
+    if (outcome === "released") return DOOR_OUTCOME_CHIPS.ok;
+    if (outcome === "refused") return "Refused";
+    if (outcome === "offline") return "Offline";
+    return null;
+  })();
+  const rangeValue = params.get("range") ?? DEFAULT_RANGE;
+  const rangeLabel = rangeValue === DEFAULT_RANGE
+    ? null
+    : rangeValue === "day"
+      ? (isClubDay(params.get("day") ?? "") ? params.get("day") : "a day not yet chosen")
+      : RANGES.find((r) => r.value === rangeValue)?.label ?? null;
 
   const [banner1, banner2] = doorLogHowToRead();
   const doorId = params.get("door") ?? "";
@@ -345,8 +460,38 @@ function AdminDoorsLogPageBody() {
    */
   const chosen = doors?.doors.find((d) => d.device.id === doorId) ?? null;
   const pickerDoors = doorOptions(doors, rows);
-  /** The rows that ARE scans — see the note beside the count below (B1). */
-  const scans = (rows ?? []).filter(isDoorScan);
+  /**
+   * The rows that ARE scans — see the note beside the count below (B1) — <b>in the order the
+   * page prints them (E8 / R3-17).</b>
+   *
+   * <p>
+   * The list says "newest first" and it was not. Lists are ordered, paged and counted on the
+   * DELIVERY axis (WIRE-R1 §2), each row prints its SCAN instant (A7), and an offline row
+   * delivered at 21:05 for a scan decided at 18:40 therefore sat above rows scanned at 20:00.
+   * A reader checking a log after an incident reads the column of times, finds it out of
+   * order, and stops trusting the page — which is the whole value of the page.
+   * </p>
+   *
+   * <p>
+   * WIRE-R3 §2 settles it: the sort key is the instant that is displayed. This side holds up
+   * its end by ordering what it shows by what it prints. It is a stable sort over the rows
+   * already in hand, so it re-orders only where the page would otherwise be printing an order
+   * that is not the one it claims — and never invents rows or drops them.
+   * </p>
+   */
+  const scans = (rows ?? []).filter(isDoorScan)
+    .map((entry, i) => ({ entry, i }))
+    .sort((a, b) => (a.entry.at === b.entry.at ? a.i - b.i : b.entry.at.localeCompare(a.entry.at)))
+    .map(({ entry }) => entry);
+  /**
+   * Which row "Load older scans" appended first, AFTER the sort — C4's focus target.
+   *
+   * It used to be a position in the unsorted list, which is a different row once the list is
+   * ordered by what it prints. Identity rather than index: the appended entry itself is found
+   * in the sorted array.
+   */
+  const firstAppended = appendedFrom > 0 ? (rows ?? [])[appendedFrom] ?? null : null;
+  const appendedAt = firstAppended === null ? -1 : scans.indexOf(firstAppended);
   const removedDoorKey = params.get("removed_door") ?? "";
   const chosenRemoved = page.removedDoors.find((d) => d.key === removedDoorKey) ?? null;
   const doorName = chosen ? doorDisplayName(chosen.device)
@@ -372,12 +517,29 @@ function AdminDoorsLogPageBody() {
    * fallback, which is also what an API that sends no total gets.
    */
   const trustedTotal = rows !== null && rows.length === scans.length ? page.total : null;
+  /**
+   * <b>A-C2 / R3-13, and the half that has to work against the CURRENT backend too.</b>
+   *
+   * <p>
+   * WIRE-R3 §4 makes an unknown door a 400 `door_not_found`, which {@link load} catches. An
+   * older backend answers 200 with nothing — and that is exactly the shape that printed "No
+   * scans at any door in the last 24 hours". So the page also infers it: a `?door=` that no
+   * read can put a name to, with the doors read LANDED (so the picker is complete) and no
+   * rows, is a door that is not there. Guarded on `doors !== null` because the other reason
+   * a door has no name is that the doors read failed, and that is a different sentence.
+   * </p>
+   */
+  const doorGone = doorNotFound
+    || (doorId !== "" && doors !== null && doorName === null && !loading && !failed);
+  const pickADay = awaitingDay(params);
   const resultSentence = failed ? LOG_READ_FAILED
-    : loading ? "Reading the log…"
-      // The FIRST sentence only. The rest of an empty state is a hint about what to do next,
-      // which is page text; the region carries the RESULT.
-      : scans.length === 0 ? emptySentence(params, doorName, doorOnline, page.range, page.timezone)[0]
-        : doorLogCountLine(scans.length, trustedTotal);
+    : pickADay ? LOG_PICK_A_DAY
+      : doorGone ? LOG_DOOR_GONE
+        : loading ? "Reading the log…"
+          // The FIRST sentence only. The rest of an empty state is a hint about what to do
+          // next, which is page text; the region carries the RESULT.
+          : scans.length === 0 ? emptySentence(params, doorName, doorOnline, page.range, page.timezone)[0]
+            : doorLogCountLine(scans.length, trustedTotal, cursor !== null);
   /** A3: said once, where the offline rows are, rather than repeated on each of them. */
   const anyOffline = scans.some((entry) => entry.offline);
 
@@ -386,9 +548,22 @@ function AdminDoorsLogPageBody() {
       <header className="space-y-2 sm:flex sm:items-start sm:justify-between sm:gap-4 sm:space-y-0">
         <div>
           <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
-          <h1 className="text-2xl font-bold tracking-tight">All scans, all doors</h1>
+          {/* E6 / R3-19: the heading is what a screenshot of this page is read as, and it
+              said "All scans, all doors" over one door's refusals on one Tuesday. */}
+          <h1 className="text-2xl font-bold tracking-tight">
+            {doorLogHeading({ doorName, outcomeLabel, rangeLabel })}
+          </h1>
           <p className="text-xs text-text-muted">
-            {readAt === null ? "Reading…" : `Read at ${clubClock(readAt, page.timezone)} club time`}
+            {/*
+              E2 / R3-3, at this call site. `clubClock` renders in whatever zone it is given
+              and falls back to the BROWSER's — which is right, because a volunteer standing
+              in the club is in the club's zone. What is not right is labelling it "club
+              time" when the API has sent no zone: a reviewer with `Pacific/Auckland` read
+              "Read at 06:09 club time" over their own clock. The words are the claim, so
+              they are attached to the fact rather than printed unconditionally.
+            */}
+            {readAt === null ? "Reading…" : `Read at ${clubClock(readAt, page.timezone)}`}
+            {readAt !== null && page.timezone ? " club time" : ""}
           </p>
         </div>
         {/*
@@ -423,7 +598,8 @@ function AdminDoorsLogPageBody() {
                   // stored. Never both parameters — the API answers 400 for the pair.
                   if (value.startsWith("removed:")) next.set("removed_door", value.slice("removed:".length));
                   else if (value !== "") next.set("door", value);
-                  setParams(next, { replace: true });
+                  keepFocus();
+                  setParams(next);
                 }}
               >
                 <option value="">All doors</option>
@@ -483,11 +659,35 @@ function AdminDoorsLogPageBody() {
               {(params.get("range") ?? DEFAULT_RANGE) === "day" && (
                 <>
                   <Label htmlFor={`${base}-day`} className="mt-2 block">Which day</Label>
+                  {/*
+                    <b>C-H2 / R3-12 — this field could not be typed into.</b>
+
+                    Every keystroke went straight to the query string, so typing a date by
+                    keyboard wrote `day=2` then `day=20` then `day=200920-02-06`: half-typed
+                    values committed to a shared, bookmarkable URL, a request per character,
+                    and the reader's place thrown away in between. A date input is the one
+                    control in this product whose value is INCOMPLETE for most of the time a
+                    person is entering it — a select is valid at every keystroke and a text
+                    filter is meaningful part-typed, and this is neither.
+
+                    So the field holds its own draft and the URL takes only a complete club
+                    day. `onBlur` commits as well, for a picker that fires no change this
+                    side of closing, and an emptied field clears the filter rather than
+                    leaving the log narrowed to a day the control no longer shows.
+                  */}
                   <input
                     id={`${base}-day`}
                     type="date"
-                    value={params.get("day") ?? ""}
-                    onChange={(e) => setFilter("day", e.target.value)}
+                    value={dayDraft}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setDayDraft(value);
+                      if (isClubDay(value) || value === "") setFilter("day", value);
+                    }}
+                    onBlur={(e) => {
+                      const value = e.target.value;
+                      if (isClubDay(value) || value === "") setFilter("day", value);
+                    }}
                     className="min-h-11 w-full rounded-lg border border-control bg-bg-surface px-3 text-sm"
                   />
                   {!isClubDay(params.get("day") ?? "") && (
@@ -508,7 +708,8 @@ function AdminDoorsLogPageBody() {
                   next.delete("reason");
                   if (value === "released" || value === "refused") next.set("outcome", value);
                   else if (value !== "") next.set("reason", value);
-                  setParams(next, { replace: true });
+                  keepFocus();
+                  setParams(next);
                 }}
               >
                 <option value="">All outcomes</option>
@@ -532,11 +733,35 @@ function AdminDoorsLogPageBody() {
           </p>
 
           <div className="space-y-2">
-            {/* C4: enabled throughout, for the reason on Refresh above — `disabled` blurs. */}
-            <Button variant="outline" onClick={() => void download()} aria-busy={downloading}>
-              {downloading ? "Preparing…" : "Download CSV"}
-            </Button>
-            <p className="text-xs text-text-muted">{doorCsvNotice(retention)}</p>
+            {/* A-C2 / R3-13: no export while the door filter names a door the club no longer
+                has. The old behaviour produced a nought-row file under the ordinary
+                filename, which outlives the screen that explained it. */}
+            {doorGone ? (
+              <p className="text-sm text-warning-strong">{LOG_CSV_BLOCKED_DOOR_GONE}</p>
+            ) : pickADay ? (
+              // A-L3 / R3-12, the export half: with no day chosen there is no range to
+              // export, and the filters the file would be built from are the DEFAULT period
+              // — so the button would hand a chair a file of the last 24 hours named for a
+              // day they had not picked. That is A4's finding with a different filter.
+              <p className="text-sm text-text-muted">Pick a day above before exporting.</p>
+            ) : (
+              <>
+                {/* C4: enabled throughout, for the reason on Refresh above — `disabled` blurs. */}
+                <Button variant="outline" onClick={() => void download()} aria-busy={downloading}>
+                  {downloading ? "Preparing…" : "Download CSV"}
+                </Button>
+                {/* A-H2 / R3-14: the failure stays on the page until the next attempt. The
+                    toast is still pushed — it is what a sighted admin sees first — but a
+                    message that floats away is not a record of a file that was never
+                    written. */}
+                {csvFailed && (
+                  <p role="alert" className="rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong">
+                    {csvFailed}
+                  </p>
+                )}
+                <p className="text-xs text-text-muted">{doorCsvNotice(retention)}</p>
+              </>
+            )}
           </div>
 
           {/*
@@ -570,6 +795,24 @@ function AdminDoorsLogPageBody() {
 
           {failed ? (
             <Button variant="outline" onClick={() => void load()}>Try again</Button>
+          ) : pickADay ? (
+            // A-L3 / R3-12: the rows are deliberately absent. Listing the default period
+            // here is what put a rolling window under a calendar heading.
+            <p className="text-sm text-text-secondary">Choose a day above.</p>
+          ) : doorGone ? (
+            <div className="space-y-2">
+              <p className="text-sm text-text-secondary">{LOG_DOOR_GONE_HINT}</p>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const next = new URLSearchParams(params);
+                  next.delete("door");
+                  setParams(next);
+                }}
+              >
+                Show all doors
+              </Button>
+            </div>
           ) : loading ? null : scans.length === 0 ? (
             <div className="space-y-2">
               {/* The FIRST sentence is in the region above — printing it twice is how the
@@ -606,7 +849,7 @@ function AdminDoorsLogPageBody() {
                       // A7 / O1: the CLUB's zone, from this read. One formatter on this
                       // surface, always given a zone where the API supplies one.
                       timezone={page.timezone}
-                      innerRef={i > 0 && i === appendedFrom ? appendedRef : undefined}
+                      innerRef={i > 0 && i === appendedAt ? appendedRef : undefined}
                     />
                   ))}
                 </ul>
@@ -616,6 +859,7 @@ function AdminDoorsLogPageBody() {
                 <Button variant="outline" className="w-full" onClick={() => void loadOlder()} aria-busy={loadingOlder}>
                   {olderFailed ? "Try again" : loadingOlder ? "Loading…" : "Load older scans"}
                 </Button>
+
               ) : (
                 // C4: `tabIndex={-1}` so that on the LAST page — where the button above
                 // unmounts — focus has somewhere to land other than `<body>`. See the effect.

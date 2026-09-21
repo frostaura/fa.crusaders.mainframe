@@ -898,12 +898,16 @@ describe("the doors surface", () => {
       expect(screen.getAllByText("Shut this door? It hears this at once and opens for nobody.")[0])
         .toBeInTheDocument();
       // And the long explanation is still on the page, beside the control, as plain text.
-      expect(screen.getByText(/refuses every scan at this door from the instant the switch is thrown/))
+      expect(screen.getByText(/refuses every scan at it from the instant the switch is thrown/))
         .toHaveTextContent("a door marks nobody as having arrived");
       fireEvent.click(confirm);
 
       await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
-      expect(stub.calls.find((c) => c.method === "PATCH")!.raw).toBe('{"enabled":false}');
+      // B13 / R3-34: the write carries what this page last READ, so a door somebody else has
+      // moved since is refused with 409 `door_changed` rather than quietly overwritten. It
+      // is still ONLY those two keys — no court fields, no name, no gate key.
+      expect(stub.calls.find((c) => c.method === "PATCH")!.raw)
+        .toBe('{"enabled":false,"expected_enabled":true}');
     });
 
     /** Never "Take out of service" on a door, and never the box's consequence. */
@@ -929,7 +933,8 @@ describe("the doors surface", () => {
         .toBeInTheDocument();
       fireEvent.click(confirm);
 
-      await waitFor(() => expect(stub.calls.find((c) => c.method === "PATCH")?.raw).toBe('{"enabled":true}'));
+      await waitFor(() => expect(stub.calls.find((c) => c.method === "PATCH")?.raw)
+        .toBe('{"enabled":true,"expected_enabled":false}'));
     });
 
     /**
@@ -1272,7 +1277,7 @@ describe("the doors surface", () => {
       fireEvent.click(edit);
 
       // The editor takes focus to its first field rather than leaving it on a hidden button.
-      await waitFor(() => expect(screen.getByLabelText("Name")).toHaveFocus());
+      await waitFor(() => expect(screen.getByLabelText("What the club calls it")).toHaveFocus());
 
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       await waitFor(() => {
@@ -1479,8 +1484,8 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Front door" } });
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "front-door" } });
+      fireEvent.change(screen.getByLabelText("What the club calls it"), { target: { value: "Front door" } });
+      fireEvent.change(screen.getByLabelText(/Name the board uses offline/), { target: { value: "front-door" } });
       fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       await waitFor(() => {
@@ -1509,7 +1514,7 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "  front-door  " } });
+      fireEvent.change(screen.getByLabelText(/Name the board uses offline/), { target: { value: "  front-door  " } });
       fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       await waitFor(() => {
@@ -1531,8 +1536,8 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
-      expect(screen.getByLabelText("Door name")).toHaveValue("front-door");
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "   " } });
+      expect(screen.getByLabelText(/Name the board uses offline/)).toHaveValue("front-door");
+      fireEvent.change(screen.getByLabelText(/Name the board uses offline/), { target: { value: "   " } });
       fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       await waitFor(() => {
@@ -1557,7 +1562,7 @@ describe("the doors surface", () => {
       openDoor([doorFixture()]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
-      expect(screen.getByLabelText("Door name")).toHaveAttribute("maxLength", "64");
+      expect(screen.getByLabelText(/Name the board uses offline/)).toHaveAttribute("maxLength", "64");
     });
 
     /** And the server's bound, refused by a mock that mirrors it rather than a canned 400. */
@@ -1569,14 +1574,14 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "x".repeat(65) } });
+      fireEvent.change(screen.getByLabelText(/Name the board uses offline/), { target: { value: "x".repeat(65) } });
       fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       expect(await screen.findByText(/A door name is at most 64 characters/)).toBeInTheDocument();
       // A refused PATCH applies nothing.
       expect(server.current()[0].gate_key).toBe("front-door");
 
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "y".repeat(64) } });
+      fireEvent.change(screen.getByLabelText(/Name the board uses offline/), { target: { value: "y".repeat(64) } });
       fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
       await waitFor(() => expect(server.current()[0].gate_key).toBe("y".repeat(64)));
     });
@@ -1594,7 +1599,7 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "side-door" } });
+      fireEvent.change(screen.getByLabelText(/Name the board uses offline/), { target: { value: "side-door" } });
       fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       // A19 moved WHICH refusal this is: the one save now carries the door-card fields as
@@ -1622,7 +1627,7 @@ describe("the doors surface", () => {
 
       expect(await screen.findByText("Needs a door name")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: /^Edit / }));
-      fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "front-door" } });
+      fireEvent.change(screen.getByLabelText(/Name the board uses offline/), { target: { value: "front-door" } });
       fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       await waitFor(() => expect(server.current()[0].auto_registered).toBe(false));
@@ -1673,6 +1678,336 @@ describe("the doors surface", () => {
       expect(name.className).toContain("min-w-0");
       const identity = screen.getAllByText(new RegExp(longKey))[0];
       expect(identity.className).toContain("break-words");
+    });
+  });
+});
+
+/**
+ * <b>Round-3 findings on the door pages, each with the falsehood it closes.</b>
+ *
+ * <p>
+ * These are deliberately in their own block rather than folded into the suite above: they are
+ * a reviewer's findings against a rendered app, and keeping the reason beside the assertion is
+ * what stops the next round "tidying" one of them back into the defect it replaced.
+ * </p>
+ */
+describe("the door pages, round 3", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const settingsRoute = () => ({ path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE });
+
+  const openDoor = (
+    doors: Record<string, unknown>[],
+    options: Parameters<typeof doorsServer>[1] = {},
+    id = DOOR_ID,
+  ) => {
+    const server = doorsServer(doors, options);
+    const stub = stubFetch([settingsRoute(), ...server.routes]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/doors/${id}`] },
+    );
+    return { server, stub };
+  };
+
+  /**
+   * <b>R3-1 on the control itself.</b>
+   *
+   * The reopen confirm told an admin, about a board that had been served a 403 within one
+   * heartbeat and had emptied its roster, that it "has been admitting booked members from its
+   * saved list all along". Every input to that sentence came from an age the shut itself had
+   * frozen.
+   */
+  it("does not tell an admin a door that HEARD the shut has been admitting people", async () => {
+    openDoor([doorFixture({
+      enabled: false,
+      last_seen_at: new Date(Date.now() - 4000 * 1000).toISOString(),
+      shut_heard_at: new Date(Date.now() - 3900 * 1000).toISOString(),
+    })]);
+
+    const control = await screen.findByRole("button", { name: /Reopen this door/ });
+    fireEvent.click(control);
+
+    // Two of them, and both are wanted: the armed consequence as page text, and the same
+    // words in `ConfirmButton`'s live region so the sentence is heard as well as read.
+    expect((await screen.findAllByText(/was told of the shut and has been opening for nobody/)).length)
+      .toBeGreaterThan(0);
+    expect(document.body.textContent).not.toContain("admitting booked members");
+    // And the standing notice above it says the same thing, with the instant it happened.
+    expect(document.body.textContent).toContain("Confirmed: this door heard the shut at");
+  });
+
+  it("says it cannot tell, where the API has not said", async () => {
+    openDoor([doorFixture({
+      enabled: false,
+      last_seen_at: new Date(Date.now() - 4000 * 1000).toISOString(),
+    })]);
+
+    // Not "it has not been told" — that was a conclusion from a frozen age — and not
+    // "confirmed" either. The page says which of the two it does not know.
+    expect(await screen.findByText(/this page cannot say whether it was told/))
+      .toBeInTheDocument();
+  });
+
+  /**
+   * <b>C-C2 / R3-10 — confirming the most consequential action on the surface dropped focus
+   * to `&lt;body&gt;`.</b>
+   *
+   * The two branches of the control are different elements, so the state change an admin has
+   * just caused unmounts the very control they pressed. A keyboard user was returned to the
+   * top of the document with nothing announced.
+   */
+  it("leaves focus on the new state's control after a shut is confirmed", async () => {
+    openDoor([doorFixture()]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Shut this door/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+
+    const reopen = await screen.findByRole("button", { name: /Reopen this door/ });
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(reopen).toHaveFocus();
+  });
+
+  /**
+   * <b>A-M3 / B12 / R3-21 — one unnamed door had three names on one surface.</b>
+   *
+   * The tile that links here said "Unnamed scanner (gate-0a1b2c)", this heading said "Door
+   * gate" — the registration placeholder, which is identical for every unnamed board in the
+   * club — and the line under it said "no door name yet".
+   */
+  it("calls an unnamed door the same thing in the heading as everywhere else", async () => {
+    openDoor([doorFixture({ name: "Door gate", gate_key: null, device_code: "gate-0a1b2c" })]);
+
+    const heading = await screen.findByRole("heading", { level: 1 });
+    expect(heading).toHaveTextContent("Unnamed scanner (gate-0a1b2c)");
+    expect(heading.textContent).not.toBe("Door gate");
+  });
+
+  /**
+   * <b>A2 / B2 / R3-15 — clearing the name reported success and changed nothing.</b>
+   *
+   * The editor substituted the existing name for an empty field before sending, so the PATCH
+   * carried the name the admin had just deleted. The screen said "saved".
+   */
+  it("really clears a door's name when the field is emptied", async () => {
+    const { server, stub } = openDoor([doorFixture({ name: "Side door" })]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Edit/ }));
+    fireEvent.change(screen.getByLabelText("What the club calls it"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save this door" }));
+
+    await waitFor(() => {
+      const patch = stub.calls.filter((c) => c.method === "PATCH").at(-1);
+      expect((patch?.body as { name?: string }).name).toBe("");
+    });
+    await waitFor(() => expect(server.current()[0].name).toBeNull());
+  });
+
+  it("stops a name at the length the column actually stores", async () => {
+    openDoor([doorFixture()]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Edit/ }));
+    // A2 / B2: over it, the API answered 500 with the EF exception in it.
+    expect(screen.getByLabelText("What the club calls it")).toHaveAttribute("maxLength", "128");
+  });
+
+  /**
+   * <b>A-M6 / R3-14 — the printed card said the club's doors could not be read.</b>
+   *
+   * A read that LANDED and found no such door is not a failed read, and telling an admin
+   * following a stale link that the doors are unreadable sends them to look for an outage.
+   */
+  it("tells a stale card link the door is gone, not that the doors could not be read", async () => {
+    const server = doorsServer([doorFixture()]);
+    stubFetch([settingsRoute(), ...server.routes]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id/card" element={<AdminDoorsCardPage />} /></Routes>,
+      { initialEntries: ["/admin/doors/11111111-1111-1111-1111-111111111111/card"] },
+    );
+
+    expect(await screen.findByText(/That door is not on the club's list/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("The doors could not be read");
+  });
+});
+
+
+/**
+ * <b>B13 / R3-34 — a background tab acts on a state that is hours old.</b>
+ *
+ * <p>
+ * `unchanged: true` catches only the case where the door is already where the click would put
+ * it. It cannot catch the other one: somebody else shut the door and reopened it since this
+ * tab read, or the tab has been in the background all night and the screen the admin is
+ * looking at is a photograph. The write then lands on a door whose state nobody on this
+ * screen has seen, and the console reports success.
+ * </p>
+ */
+describe("a door page acting on a state that has moved", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("says the door changed since this page looked, and changes nothing", async () => {
+    const server = doorsServer([doorFixture()]);
+    const stub = stubFetch([
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      ...server.routes,
+    ]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
+    // Somebody else shuts it between the arm and the confirm — the exact window a tab left
+    // open overnight is permanently inside.
+    server.current()[0].enabled = false;
+    fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+
+    expect(await screen.findByText(/shut or reopened by somebody else/)).toBeInTheDocument();
+    // Nothing was written: the server refused before applying, so the door is as the other
+    // admin left it rather than as this tab's stale render would have had it.
+    await waitFor(() => {
+      expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
+    });
+    expect(server.current()[0].enabled).toBe(false);
+  });
+});
+
+/**
+ * <b>C-M1 / C-M2 / C-L3 / R3-26 — what a screen reader is TOLD, and how often.</b>
+ *
+ * <p>
+ * These pages re-read every fifteen seconds while the tab is in front. Everything standing on
+ * them — a ~50-word advisory about a dirty scanner, a "no scans since Wednesday" notice, the
+ * club-wide shut sentence — sat in a live region, so a reader was handed the whole paragraph
+ * again on every poll. A live region is for what has just changed; a page that puts its
+ * standing text in one has made itself unreadable by exactly the people who cannot skim past.
+ * </p>
+ */
+describe("what the door pages say out loud", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  // The spike sentence states the club's OWN window, and renders nothing at all without it —
+  // a threshold with a guessed number is worse than no notice.
+  const settingsRoute = (extra: Record<string, unknown> = {}) =>
+    ({ path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...extra } });
+
+  it("does not put a standing signal advisory in a live region", async () => {
+    const server = doorsServer([doorFixture()], {
+      rows: {
+        [DOOR_ID]: {
+          signals: [{
+            kind: "refusal_spike",
+            since: new Date(Date.now() - 1200_000).toISOString(),
+            until: new Date().toISOString(),
+            scans: 30,
+          }],
+        },
+      },
+    });
+    stubFetch([settingsRoute({ door_refusal_spike_minutes: 20 }), ...server.routes]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+    );
+
+    const advisory = await screen.findByText(/turned away 30 scans/);
+    // It is on the page, in a headed block, reached by browsing — not announced on every
+    // one of the four polls a minute this page makes.
+    const live = advisory.closest('[role="status"], [role="alert"], [aria-live]');
+    expect(live).toBeNull();
+  });
+
+  it("does not put the quiet notice in a live region either", async () => {
+    const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const server = doorsServer([doorFixture()], {
+      activity: [activityFixture({ at: twoDaysAgo })],
+    });
+    stubFetch([settingsRoute(), ...server.routes]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+    );
+
+    const quiet = await screen.findByText(/No scans at this door since/);
+    expect(quiet.closest('[role="status"], [role="alert"], [aria-live]')).toBeNull();
+  });
+
+  /**
+   * <b>C-L3 / R3-26 — "Show the other 38 scans" announced nothing at all.</b>
+   *
+   * Focus moves to the first revealed row, which tells a reader WHERE they are. It does not
+   * tell them what happened, and on a list that just quadrupled those are different
+   * questions.
+   */
+  it("says what the show-more control did", async () => {
+    const scans = Array.from({ length: 14 }, (_, i) => activityFixture({
+      at: new Date(Date.now() - (i + 1) * 60_000).toISOString(),
+    }));
+    const server = doorsServer([doorFixture()], { activity: scans });
+    stubFetch([settingsRoute(), ...server.routes]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /Show the other 4 scans/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Showing all 14 scans at this door.")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * <b>C-M7 / R3-26 — the chips that carry a door's whole state were bare spans.</b>
+   *
+   * The log's rows have said "Outcome: Refused" since B17. Tabbing the overview read "Side
+   * door. Shut. Not told yet." as three unattached words, with nothing saying what kind of
+   * fact any of them was.
+   */
+  it("labels a door's status chips for a screen reader", async () => {
+    const server = doorsServer([doorFixture({ enabled: false, shut_heard_at: null })]);
+    stubFetch([settingsRoute(), ...server.routes]);
+    renderPage(<AdminDoorsPage />);
+
+    expect(await screen.findByText("Status:")).toBeInTheDocument();
+    // And the shut door's second chip is about whether it has been TOLD, which is the
+    // question, rather than about whether it happens to be reporting (R3-1).
+    expect(screen.getByText("Not told yet")).toBeInTheDocument();
+  });
+});
+
+/**
+ * <b>E2 / R3-3 at this surface's own call sites.</b>
+ *
+ * <p>
+ * `clubClock` renders in whatever zone it is handed and falls back to the BROWSER's — which
+ * is right for a volunteer standing in the club and wrong for everybody else. A reviewer on
+ * `Pacific/Auckland` read a log header "06:09 club time" against their own clock, and the
+ * fleet receipt and the printed door card took the same fallback with no label at all.
+ * </p>
+ */
+describe("the club's own clock, on every doors face", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("dates a fleet result in the club's zone, not the reader's", async () => {
+    // A club five hours from the runner's own zone, so the two answers differ visibly.
+    const server = doorsServer([doorFixture({ last_seen_at: "2026-09-19T04:09:00Z" })], {
+      timezone: "Pacific/Auckland",
+    });
+    stubFetch([{ path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE }, ...server.routes]);
+    renderPage(<AdminDoorsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Shut all doors|Shut the/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+
+    // 04:09 UTC is 16:09 in Auckland and 06:09 in Johannesburg — the fixture's zone is the
+    // one that must win, whatever zone the test runner is pinned to.
+    await waitFor(() => {
+      expect(screen.getByText(/last heard 16:09/)).toBeInTheDocument();
     });
   });
 });

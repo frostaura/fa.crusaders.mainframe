@@ -18,8 +18,10 @@ import { type AdminDoorDevice, type AdminSettings, type PowerLossBehaviour } fro
  * lived. Everything writable about the door is now behind this button.
  * </p>
  */
-export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSave }: {
+export function DoorCardSection({ door, displayName, settings, editing, onEdit, onClose, onSave }: {
   door: AdminDoorDevice;
+  /** A11 / R3-21: what an admin calls this door — never the raw registration placeholder. */
+  displayName: string;
   settings: AdminSettings | null;
   editing: boolean;
   onEdit: () => void;
@@ -74,7 +76,7 @@ export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSa
           {/* The door's NAME in the accessible name: three "Manage"-shaped controls on
               one admin's screen all reading "Edit" is reviewer B's repeated-link
               finding one control along. */}
-          <Button variant="outline" onClick={onEdit} aria-label={`Edit ${door.name}`}>
+          <Button variant="outline" onClick={onEdit} aria-label={`Edit ${displayName}`}>
             Edit this door
           </Button>
           <Link
@@ -92,7 +94,13 @@ export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSa
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-wrap gap-2">
-      <dt className="w-24 shrink-0 text-text-muted">{label}</dt>
+      {/* B8 / R3-27: a PIXEL width. `w-24` is 6 rem, which at the 32 px root font an older
+          volunteer uses is 192 px — wider than the card's whole content box on a 320 px
+          phone, so the label alone pushed the row out. What this width protects is a column
+          of labels lining up, which does not need to grow with the text — and it is a
+          MINIMUM, because at a 32 px root "Firmware" is itself wider than 96 px and a fixed
+          width would clip the word to keep the column. */}
+      <dt className="min-w-[96px] shrink-0 text-text-muted">{label}</dt>
       <dd className="min-w-0 break-words">{value}</dd>
     </div>
   );
@@ -109,7 +117,17 @@ function ClubContact({ settings }: { settings: AdminSettings | null }) {
   const parts = [settings?.club_contact_phone?.trim(), settings?.club_contact_email?.trim()]
     .filter((part) => part);
   if (parts.length > 0) {
-    return <p className="text-sm"><span className="text-text-muted">Club contact</span> {parts.join(" · ")}</p>;
+    // B8 / R3-27: an email address has no break opportunity in it, so at 320 px with a 32 px
+    // root font `treasurer@crusaderssquash.co.za` pushed the WHOLE PAGE sideways — a card in
+    // a grid column sized to its widest unbreakable token. `break-all` rather than
+    // `break-words`: an address is one long token and `overflow-wrap: break-word` only
+    // breaks where there is nothing else to do, which at this size there is not.
+    return (
+      <p className="min-w-0 text-sm">
+        <span className="text-text-muted">Club contact</span>{" "}
+        <span className="break-all">{parts.join(" · ")}</span>
+      </p>
+    );
   }
   return (
     <p className="text-sm text-text-secondary">

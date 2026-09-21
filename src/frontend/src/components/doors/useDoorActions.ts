@@ -1,5 +1,5 @@
 import { useToast } from "../Toast";
-import { doorStateNotice } from "../../lib/doorsCopy";
+import { doorDeletedNotice, doorDisplayName, doorStateNotice } from "../../lib/doorsCopy";
 import { clubDayAndClock } from "../../lib/clubClock";
 import { doorAlreadyNotice, unnamedGateOfflineNotice } from "../../lib/gateCopy";
 import { describeDeviceError } from "../../lib/deviceErrors";
@@ -43,9 +43,26 @@ export type DoorActions = {
  */
 export function useDoorActions(
   door: AdminDoorDevice,
-  context: { online: boolean; timezone: string; reload: () => Promise<void>; afterDelete: () => void },
+  context: {
+    online: boolean;
+    timezone: string;
+    reload: () => Promise<void>;
+    /**
+     * A-M7 / R3-14: it takes the CONFIRMATION with it.
+     *
+     * The toast was pushed and the page navigated in the same tick, so the confirmation for
+     * the most destructive control on this surface was in practice invisible — an admin
+     * arrived back at a list of doors with one fewer row and nothing saying the club had
+     * done it, which on a page that also polls looks exactly like a board dropping off.
+     */
+    afterDelete: (said: string) => void;
+  },
 ): DoorActions {
   const toast = useToast();
+  // A11 / R3-21: ONE fallback for a door nobody has named. `door.name` is the registration
+  // placeholder "Door gate", so every toast on this surface named every unnamed board in the
+  // club identically while the heading above it said "Unnamed scanner (gate-44c103)".
+  const name = doorDisplayName(door);
 
   return {
     save: async ({ name, gateKey, note, behaviour }) => {
@@ -77,7 +94,26 @@ export function useDoorActions(
         // C11: this tab caused what the next read will find, so the banner states it
         // politely rather than interrupting the admin who just pressed the button.
         markOwnDoorsAction();
-        const answer = await doorEndpoints.doorSetEnabled(door.id, enabled);
+        /**
+         * <b>B13 / R3-34 — a tab acts on a state that is hours old.</b>
+         *
+         * <p>
+         * `unchanged: true` catches only the case where the door is already where this click
+         * would put it. It cannot catch the other one: somebody else shut the door and
+         * reopened it since this tab read, or this tab has been in the background all night
+         * and the screen the admin is looking at is a photograph. The write then lands on a
+         * door whose state nobody on this screen has seen, and the console reports success.
+         * </p>
+         *
+         * <p>
+         * The expectation is what the page last READ — which is `door.enabled`, the value the
+         * control was rendered from and the value the admin acted on — so the server can
+         * refuse with 409 `door_changed` rather than quietly winning. It is the negation of
+         * the request by construction: a control offering "Shut" was rendered from an open
+         * door.
+         * </p>
+         */
+        const answer = await doorEndpoints.doorSetEnabled(door.id, enabled, door.enabled);
         /**
          * <b>B10 — a tab left open overnight "shut" a door somebody else had already shut,
          * and was told it had worked.</b>
@@ -93,7 +129,7 @@ export function useDoorActions(
           toast.push({
             tone: "info",
             text: doorAlreadyNotice(
-              door.name,
+              name,
               !enabled,
               answer.shut_by_name ?? null,
               answer.out_of_service_since ? clubDayAndClock(answer.out_of_service_since, context.timezone) : null,
@@ -106,8 +142,8 @@ export function useDoorActions(
         toast.push({
           tone: "success",
           text: enabled
-            ? `${door.name} is open again. A door that can reach the club opens for members from its very next scan.`
-            : `${door.name} is shut. ${doorStateNotice({ ...door, ...answer, enabled: false }, context.online, context.timezone) ?? ""}`,
+            ? `${name} is open again. A door that can reach the club opens for members from its very next scan.`
+            : `${name} is shut. ${doorStateNotice({ ...door, ...answer, enabled: false }, context.online, context.timezone) ?? ""}`,
           durationMs: 8000,
         });
         await context.reload();
@@ -117,6 +153,11 @@ export function useDoorActions(
           text: describeDeviceError(e, enabled ? "Could not reopen that door." : "Could not shut that door."),
           durationMs: 8000,
         });
+        // R3-34: a 409 means the door is not where this page thinks it is, so the next thing
+        // the admin reads has to be the truth rather than the stale render they just acted
+        // on. Re-read on every failure, not only on the conflict: a refusal is exactly when
+        // a screen is least entitled to go on asserting what it was showing.
+        await context.reload();
       }
     },
 
@@ -125,12 +166,13 @@ export function useDoorActions(
         // C11: a deleted door leaves the shut set, which is a change this tab caused.
         markOwnDoorsAction();
         await endpoints.adminDeviceDelete(door.id);
-        toast.push({
-          tone: "success",
-          text: `${door.name} deleted. It still has the club's key, so it re-registers on its next heartbeat as a new door with no name — unplug it if you meant to retire it.`,
-          durationMs: 8000,
-        });
-        context.afterDelete();
+        // A-M7 / R3-14: the same sentence goes to the toast AND travels with the navigation,
+        // because the navigation is what made the toast invisible. One generator, so the
+        // two cannot say different things about one click — which is the lesson `gateCopy`'s
+        // own header records.
+        const said = doorDeletedNotice(name);
+        toast.push({ tone: "success", text: said, durationMs: 8000 });
+        context.afterDelete(said);
       } catch (e) {
         toast.push({ tone: "danger", text: describeDeviceError(e, "Could not delete that door.") });
       }

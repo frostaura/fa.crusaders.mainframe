@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { doorEndpoints, type DoorsView } from "../../lib/api";
 import { isOnline, offlineAfterSecondsFor } from "../../lib/deviceLiveness";
-import { doorAttentionReason, type DoorAttention } from "../../lib/doorsCopy";
+import {
+  doorAttentionReason, doorDisplayName, doorShutHeard, type DoorAttention,
+} from "../../lib/doorsCopy";
 
 /**
  * One door, reduced to the five facts every reader of the shut state needs.
@@ -26,6 +28,14 @@ export type DoorSummary = {
   named: boolean;
   /** True while this door is one a shut-all shut, as opposed to one an admin shut on its own. */
   shutByFleet: boolean;
+  /**
+   * <b>R3-1: has this SHUT door been told?</b> `undefined` where the API cannot say.
+   *
+   * It travels with the summary for the reason `named` does: the banner renders from this
+   * shape and cannot reach the device rows, and the banner is where "2 confirmed, 1 not yet"
+   * was being counted off liveness — which the shut itself froze.
+   */
+  heardShut?: boolean;
 };
 
 /** What the chrome and the doors page both read, and the ONE place either of them reads it. */
@@ -443,9 +453,14 @@ function summarise(view: DoorsView): DoorsChrome {
         rank: attentionRankOf(attention), reason: attention.reason, signal: attention.kind === "signal",
       });
     }
+    const heard = doorShutHeard(row.device);
     doors.push({
       id: row.device.id,
-      name: row.device.name,
+      // A11 / R3-21: ONE fallback for a door nobody has named. The raw `name` is the
+      // registration placeholder "Door gate", so the banner and the per-door links named
+      // every unnamed board in the club identically while the tiles beside them said
+      // "Unnamed scanner (gate-44c103)".
+      name: doorDisplayName(row.device),
       enabled: row.device.enabled,
       online,
       named: row.device.gate_key !== null,
@@ -460,6 +475,7 @@ function summarise(view: DoorsView): DoorsChrome {
       // is a case the tenant flag cannot distinguish at all, so it is a reason to want the
       // field, not a reason to guess differently.
       shutByFleet: !row.device.enabled && shutTogetherHas(view, row.device.id),
+      heardShut: heard.state === "unknown" ? undefined : heard.state === "confirmed",
     });
   }
   ranked.sort((a, b) => a.rank - b.rank);

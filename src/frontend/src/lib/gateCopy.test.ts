@@ -81,13 +81,39 @@ describe("NEW_GATE_BADGE", () => {
 describe("doorShutNotice", () => {
   it("is exactly this", () => {
     expect(doorShutNotice()).toBe(
-      "The club is not alerted about its silence, and the club's system refuses every scan at"
-      + " this door from the instant the switch is thrown. A door that can still reach the club hears"
+      "Shutting a door refuses every scan at it from the instant the switch is thrown, at the"
+      + " club's server. A shut door is expected to be quiet, so the club stops raising its silence"
+      + " as a fault while it is shut. A door that can still reach the club hears"
       + " that refusal and opens for nobody, with no fall back to its saved list. A door that has also"
       + " lost the network never hears it, and keeps admitting members with a booking from the list it"
       + " last downloaded until that goes stale, which takes up to six hours. Bookings, refunds and"
       + " no-show penalties are untouched either way, and a door marks nobody as having arrived.",
     );
+  });
+
+  /**
+   * <b>B4 / R3-24 — it opened with a clause that had no subject and was not about the block
+   * it headed.</b>
+   *
+   * <p>
+   * Under "Shutting or removing this door" a volunteer's first sentence was "The club is not
+   * alerted about its silence, and…": "its" is a door nobody has mentioned yet, and ALERTS
+   * are not what the block is about. It is also a consequence of shutting stated as a
+   * standing fact about the club. Both halves are still said — the refusal AND the alert
+   * suppression — in that order, each with its subject.
+   * </p>
+   *
+   * <p>
+   * The suppression claim is verified rather than assumed: `PeripheralHealthWorker` reads
+   * `db.Devices.Where(d => d.Enabled)`, so a shut door genuinely raises no silence alert.
+   * </p>
+   */
+  it("opens with what shutting does, and names its subject", () => {
+    const notice = doorShutNotice();
+    expect(notice.startsWith("Shutting a door refuses every scan at it")).toBe(true);
+    // The alert half is kept, second, and attached to a subject.
+    expect(notice).toContain("A shut door is expected to be quiet");
+    expect(notice).toContain("stops raising its silence as a fault");
   });
 
   /**
@@ -248,10 +274,50 @@ describe("the armed consequence, over contact × named × enabled", () => {
       "Shut this door? Nothing can reach it, so it keeps admitting booked members from its saved"
       + " list for up to six hours.",
     );
+    // R3-1: with NO `heardShut` the server has not said, so the reopen sentence hedges. The
+    // flat "has been admitting ... all along" now belongs only to the door the server says
+    // never called in — see the three arms below.
     expect(doorReopenConsequence({ online: false, named: true })).toBe(
-      "Reopen this door? Nothing can reach it. It has been admitting booked members from its saved"
-      + " list all along.",
+      "Reopen this door? Nothing can reach it. It may have been admitting booked members from its"
+      + " saved list all along.",
     );
+  });
+
+  /**
+   * <b>R3-1 — the sentence that was the exact opposite of the truth, on the control an admin
+   * was about to press.</b>
+   *
+   * <p>
+   * A shut board is served a 403, denies every scan outright and commits an EMPTY roster. Its
+   * `last_seen_at` then froze, because `ResolveAsync` returned `Forbid()` before it noted
+   * contact — so after 180 s the screen decided the door was unreachable and told the admin
+   * it "has been admitting booked members from its saved list all along". It had been
+   * admitting nobody, for exactly the reason the admin asked for.
+   * </p>
+   *
+   * <p>
+   * Three arms, and the fixture is varied on the one field: told / not told / cannot say.
+   * </p>
+   */
+  it("never says a door that HEARD the shut has been admitting people (R3-1)", () => {
+    const told = doorReopenConsequence({ online: false, named: true, heardShut: true });
+    expect(told).toBe(
+      "Reopen this door? It was told of the shut and has been opening for nobody. It opens for"
+      + " members again from its next call in.",
+    );
+    expect(told).not.toContain("admitting booked members");
+
+    // The server says it never called since the shut: the cache claim is flat, and true.
+    expect(doorReopenConsequence({ online: false, named: true, heardShut: false })).toContain(
+      "It has been admitting booked members from its cached list all along"
+        .replace("cached", "saved"),
+    );
+
+    // And a door that heard it is told so even while it is reporting — `heardShut` outranks
+    // `online`, because "from the very next scan" is about a door that never stopped
+    // deciding, and this one has been refusing everybody.
+    expect(doorReopenConsequence({ online: true, named: true, heardShut: true }))
+      .toContain("was told of the shut");
   });
 
   it("says what is actually true of an unnamed door that cannot be reached", () => {
@@ -370,11 +436,20 @@ describe("doorConfirmedLine / doorNotConfirmedLine", () => {
    * state backwards.
    */
   it("inverts on a reopen rather than reusing the shut sentence", () => {
+    // R3-1: with no evidence either way the receipt hedges. The flat claim is reserved for a
+    // door the server says never called in since the shut.
     expect(doorNotConfirmedLine("reopen", "04:12")).toBe(
-      "NOT CONFIRMED — last heard 04:12. It has been admitting booked members from its cached list"
-      + " all along, and it will not know it is open again until it reaches the server.",
+      "NOT CONFIRMED — last heard 04:12. It may have been admitting booked members from its cached"
+      + " list all along, and it will not know it is open again until it reaches the server.",
     );
     expect(doorNotConfirmedLine("reopen", "04:12")).not.toContain("may still admit");
+    expect(doorNotConfirmedLine("reopen", "04:12", false))
+      .toContain("It has been admitting booked members from its cached list all along");
+    // The door that heard the shut: it has been opening for NOBODY, and a receipt that said
+    // otherwise is R3-1 on the screen an admin reads immediately after acting.
+    const told = doorNotConfirmedLine("reopen", "04:12", true);
+    expect(told).toContain("was told of the shut and has been opening for nobody");
+    expect(told).not.toContain("admitting booked members");
   });
 
   it("says NOT CONFIRMED in words on every arm, because colour is not a signal", () => {
@@ -1099,5 +1174,32 @@ describe("GATE_KEY_MAX_LENGTH", () => {
   /** Mirrors the API's `gate_key` column — `HasMaxLength(64)`. */
   it("is the API's own bound", () => {
     expect(GATE_KEY_MAX_LENGTH).toBe(64);
+  });
+});
+
+
+/**
+ * <b>B6 / C-L2 / R3-23 — "Shut all 2 doors?" in a club with three.</b>
+ *
+ * <p>
+ * False twice: it is not all of them, and a reader with one door already shut is told the
+ * control reaches every door the club has. The idle label has counted what is still open
+ * since C1; the confirm — the sentence somebody commits on — had not caught up.
+ * </p>
+ */
+describe("doorFleetShutConfirm, in a club that is not all one way", () => {
+  it("counts what is still open when that is not the whole club", () => {
+    expect(doorFleetShutConfirm(2, [], 3)).toContain("Shut the 2 doors still open?");
+    expect(doorFleetShutConfirm(2, [], 3)).not.toContain("all 2 doors");
+  });
+
+  it("still says all of them when it really is all of them", () => {
+    expect(doorFleetShutConfirm(3, [], 3)).toContain("Shut all 3 doors?");
+    // And the one-door club keeps its own words rather than "all 1 doors".
+    expect(doorFleetShutConfirm(1, [], 1)).toContain("the club's one door");
+  });
+
+  it("names one door correctly when it is the only one left open", () => {
+    expect(doorFleetShutConfirm(1, [], 4)).toContain("Shut the 1 door still open?");
   });
 });

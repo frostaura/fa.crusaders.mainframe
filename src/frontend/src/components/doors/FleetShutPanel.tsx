@@ -40,6 +40,8 @@ const FLEET_FAILED = "Nothing was shut. The club's server refused the request an
 async function fleetAction(action: "shut" | "reopen", context: {
   /** The names the page already knows, for an API that does not send `left_shut` yet. */
   leftShutFallback: { id: string; name: string; gate_key: string | null }[];
+  /** The club's zone, for the receipt's own clock faces (E2 / R3-3). */
+  timezone: string | undefined;
   reload: () => Promise<void>;
   onResult: (result: FleetResultState | null) => void;
   onError: (message: string | null) => void;
@@ -59,6 +61,8 @@ async function fleetAction(action: "shut" | "reopen", context: {
       // the page already knows otherwise, so the result is never silent about them.
       leftShut: answer.left_shut ?? context.leftShutFallback,
       at: Date.now(),
+      // E2 / R3-3: the club's zone, so this receipt is dated in the club's day.
+      timezone: context.timezone,
     });
     await context.reload();
   } catch (e) {
@@ -94,13 +98,15 @@ async function fleetAction(action: "shut" | "reopen", context: {
  * would name a number that is wrong: the label counts what is still open.
  * </p>
  */
-export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
+export function FleetShutPanel({ chrome, loading, failed, reload, onRetry, timezone }: {
   /** The one shut-state source. See `useDoorsChrome` — this panel never derives its own. */
   chrome: DoorsChrome;
   loading: boolean;
   failed: boolean;
   reload: () => Promise<void>;
   onRetry: () => void;
+  /** The club's zone, for the result receipt's clock faces (E2 / R3-3). */
+  timezone: string | undefined;
 }) {
   const [result, setResult] = useState<FleetResultState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +130,7 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
 
   const run = (action: "shut" | "reopen") => fleetAction(action, {
     leftShutFallback,
+    timezone,
     reload,
     onResult: setResult,
     onError: setError,
@@ -157,7 +164,10 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
                 <ConfirmButton
                   idleLabel={open === chrome.total ? "Shut all doors" : `Shut the ${open} ${open === 1 ? "door" : "doors"} still open`}
                   cancelLabel="Keep them open"
-                  confirmLabel={doorFleetShutConfirm(open, shutUnreachable)}
+                  // B6 / C-L2 / R3-23: the club's TOTAL as well as the count this will shut.
+                  // "Shut all 2 doors?" over a club of three is false twice — it is not all
+                  // of them, and it tells a reader the control reaches every door there is.
+                  confirmLabel={doorFleetShutConfirm(open, shutUnreachable, chrome.total)}
                   ariaLabel={`every door the club has open — ${open} of ${chrome.total}`}
                   onConfirm={() => run("shut")}
                   tone="danger"

@@ -188,12 +188,96 @@ export function removedDoorsCapNotice(shown: number): string | null {
  * falling back to the page length is how the wrong number got printed in the first place.
  * </p>
  */
-export function doorLogCountLine(showing: number, total: number | null): string {
+export function doorLogCountLine(
+  showing: number, total: number | null, more = true,
+): string {
   const scans = showing === 1 ? "scan" : "scans";
-  if (total === null) return `Showing ${showing} ${scans} so far, newest first.`;
+  if (total === null) {
+    // A-M9 / R3-20: "so far" was printed at the END of the list too, so an admin who had
+    // pressed "Load older scans" until it went away still could not tell whether they were
+    // looking at all of them. `more` is whether the API handed back another cursor — the one
+    // fact that settles it — and with no cursor left the page HAS the total: it is what is
+    // on screen. It is not invented from a page length; it is the end of the range.
+    return more
+      ? `Showing ${showing} ${scans} so far, newest first.`
+      : `Showing all ${showing} ${scans} in this range, newest first.`;
+  }
   if (showing >= total) return `Showing all ${plural(total, "scan")} in this range, newest first.`;
   return `Showing ${showing} of ${plural(total, "scan")} in this range, newest first.`;
 }
+
+/**
+ * <b>E6 / R3-19 — the heading said "All scans, all doors" over a filtered log.</b>
+ *
+ * <p>
+ * It is the one line a reader takes the page's meaning from, it is what a printed or
+ * screenshotted page is read as afterwards, and it was a constant. An admin filtering to one
+ * door's refusals on Tuesday, screenshotting it for a committee, handed over a picture headed
+ * "All scans, all doors" — which is a caption that contradicts its own contents.
+ * </p>
+ *
+ * <p>
+ * Every clause is omitted when the filter is at its default, so the unfiltered page reads
+ * exactly as it always did and an admin who has narrowed nothing is not made to read a
+ * sentence about it.
+ * </p>
+ */
+export function doorLogHeading(filters: {
+  doorName: string | null;
+  outcomeLabel: string | null;
+  rangeLabel: string | null;
+}): string {
+  const what = filters.outcomeLabel ? `${filters.outcomeLabel} scans` : "All scans";
+  const where = filters.doorName ? `at ${filters.doorName}` : "all doors";
+  const head = `${what}, ${where}`;
+  return filters.rangeLabel ? `${head} — ${filters.rangeLabel.toLowerCase()}` : head;
+}
+
+/**
+ * <b>A-C2 / R3-13 — a stale door link, and the three lies it told at once.</b>
+ *
+ * <p>
+ * `/admin/doors/log?door=<an id that is no longer a door>` showed "All doors" in the picker,
+ * "No scans at any door in the last 24 hours" on the page, and exported a nought-row CSV
+ * under the ordinary filename. Each of those is a claim about the CLUB derived from a filter
+ * pointing at nothing — and the sentence in the middle is the one a committee reads as "the
+ * doors recorded nothing that night".
+ * </p>
+ *
+ * <p>
+ * The link is not rare: it is what every bookmark, every emailed link and every browser
+ * history entry pointing at a door becomes the day that board is replaced. The rows are still
+ * there — deleting a door deletes no scans — and the sentence says both halves: this filter
+ * matches nothing, and the records were not destroyed.
+ * </p>
+ */
+export const LOG_DOOR_GONE = "That door is no longer on the club's list, so this filter matches"
+  + " nothing. It is not that nothing happened: a deleted door's past scans are kept until the"
+  + " club's retention rule takes them.";
+
+export const LOG_DOOR_GONE_HINT = "Pick it under “Removed doors” if it is there, or choose All"
+  + " doors.";
+
+/**
+ * Said where the CSV button is, instead of the button, while the filter names no real door.
+ *
+ * A-C2's third lie: the export ran, produced a nought-row file under the ordinary filename,
+ * and said nothing. A file named for the club's whole log and holding nothing is the worst of
+ * the three, because it outlives the screen that produced it.
+ */
+export const LOG_CSV_BLOCKED_DOOR_GONE = "There is nothing to export while the door filter names"
+  + " a door the club no longer has — a file of nought rows under the usual name is worse than"
+  + " no file.";
+
+/**
+ * <b>A-L3 / R3-12 — "A specific day" with no day chosen listed the last 24 hours.</b>
+ *
+ * The page fell back to its default period, so the When control said one thing and the rows
+ * were another — and the rows were a rolling window presented as a calendar day. It asks for
+ * the day instead and lists nothing.
+ */
+export const LOG_PICK_A_DAY = "Pick a day to see its scans. Nothing is listed until you do — the"
+  + " rows below would be the last 24 hours, which is not the day you asked for.";
 
 /** The row's whole door clause — the name, and the removal said once after it. */
 export function doorRowName(door: DoorLogDoor | null | undefined): string {
@@ -268,6 +352,82 @@ export function doorSetupChip(device: AdminDoorDevice): DoorChip | null {
 }
 
 /**
+ * <b>R3-1 — whether this SHUT door has been told, and the three answers that exist.</b>
+ *
+ * <p>
+ * <b>The falsehood this closes, in full, because it is the worst one this surface has
+ * shipped.</b> `DeviceIdentity.ResolveAsync` returned `Forbid()` <i>before</i>
+ * `DeviceSilenceLog.NoteContact`, so the moment a door was shut its `last_seen_at` froze. One
+ * hundred and eighty seconds later the chip flipped to "Not reporting", the page said
+ * "Nothing can reach Front door, so it has not been told. It may still be admitting booked
+ * members from its saved list", and the reopen confirm said "It has been admitting booked
+ * members from its saved list all along". Every word of that was false: the board had been
+ * served a 403 within one heartbeat, had denied every scan outright and had committed an
+ * empty roster. The console reported a working shut as a failed one and invited an admin to
+ * go and stand at a door that was already refusing everybody.
+ * </p>
+ *
+ * <p>
+ * <b>Silence is not evidence about a shut door, in either direction</b>, and the rule this
+ * function exists to enforce is that no sentence about a shut door is derived from an age.
+ * `shut_heard_at` is the only evidence there is: the first 403 served after this shut began.
+ * </p>
+ *
+ * <ul>
+ *   <li><b>confirmed</b> — an instant. The board heard it and emptied its list. True for
+ *       ever after, whatever the door has done since: a door that heard the shut and then
+ *       lost the network is still opening for nobody.</li>
+ *   <li><b>not_told</b> — an explicit `null`. Shut, and it has not called since. This is the
+ *       state the cached-list caveat is actually about, and it is the only one.</li>
+ *   <li><b>unknown</b> — the field is absent. An API that has not said. <b>Unknown is not
+ *       false</b>: the screens say they cannot tell rather than picking the arm a frozen age
+ *       points at, which is precisely how the wrong one came to be printed.</li>
+ * </ul>
+ */
+export type DoorShutHeardState = "confirmed" | "not_told" | "unknown";
+
+export type DoorShutHeard = { state: DoorShutHeardState; at: string | null };
+
+export function doorShutHeard(device: {
+  enabled?: boolean; shut_heard_at?: string | null;
+}): DoorShutHeard {
+  // An OPEN door has not been told anything; every caller guards on `enabled`, and this arm
+  // exists so that one which forgets to cannot get a confident answer out of a stale field.
+  if (device.enabled !== false) return { state: "unknown", at: null };
+  const heard = device.shut_heard_at;
+  if (heard === undefined) return { state: "unknown", at: null };
+  return heard === null ? { state: "not_told", at: null } : { state: "confirmed", at: heard };
+}
+
+/**
+ * The confirmation clause a shut door's notice carries, or null where there is nothing to add.
+ *
+ * <p>
+ * The clock face is the club's, because "heard the shut at 06:09" read in the admin's own
+ * zone is the R3-3 defect one sentence along.
+ * </p>
+ */
+export function doorShutHeardLine(
+  device: AdminDoorDevice, timezone: string, named = device.gate_key !== null,
+): string | null {
+  const heard = doorShutHeard(device);
+  if (heard.state === "confirmed") {
+    return `Confirmed: this door heard the shut at ${clubDayAndClock(heard.at!, timezone)}, so it`
+      + " opens for nobody — it threw its saved list away when it was told.";
+  }
+  if (heard.state === "not_told") {
+    if (!named) {
+      return "Not confirmed: it has not called in since it was shut, so it has not been told. It has"
+        + " no door name, so it holds no saved list and opens for nobody anyway.";
+    }
+    return "Not confirmed: it has not called in since it was shut, so it has not been told, and it"
+      + " keeps admitting members with a booking from the list it last downloaded until that goes"
+      + " stale — up to six hours after its last call.";
+  }
+  return null;
+}
+
+/**
  * Who shut this door, and when — A5's replacement for "You shut this door."
  *
  * <p>
@@ -305,7 +465,15 @@ export function doorStateNotice(
   // A5: it said "You shut this door." to every admin who opened the page — false for all but
   // one of them, and unfalsifiable for the reader. The audit row has always carried the
   // actor; WIRE-R2 §2 puts the name on the door row, so the screen can say who and when.
-  if (!device.enabled) return `${doorShutAttribution(device, timezone)} ${doorShutNotice()}`;
+  //
+  // R3-1: and the shut's own CONFIRMATION comes from `shut_heard_at`, never from the age.
+  // Where the API says, that clause replaces the generic both-halves paragraph — there is no
+  // longer a pair to state, because this door's half is known. Where it does not say, the
+  // paragraph stands exactly as it was, which is the honest render of "cannot tell".
+  if (!device.enabled) {
+    const heard = doorShutHeardLine(device, timezone);
+    return `${doorShutAttribution(device, timezone)} ${heard ?? doorShutNotice()}`;
+  }
   const named = device.gate_key !== null;
   if (online) {
     if (named) {
@@ -334,6 +502,33 @@ export function doorStateNotice(
 }
 
 /**
+ * <b>G4c / R3-33 — records this door threw away, which nothing had ever shown.</b>
+ *
+ * <p>
+ * A board queues events it cannot upload in a ring buffer and reports, in every heartbeat,
+ * how many that ring has overwritten since boot. The number has travelled since the gate
+ * shipped and was logged and stored nowhere, so a door that dropped forty scans during an
+ * outage looked identical to one that dropped none — and the club log, which is the record a
+ * committee reads after an incident, was silently incomplete with nothing saying so.
+ * </p>
+ *
+ * <p>
+ * <b>A since-boot TOTAL, not a delta</b>, and the sentence says so: an admin who reads it as
+ * "forty just now" goes looking for an outage that ended last month. `0` is a real answer and
+ * says nothing; `undefined` is an API that does not carry it and also says nothing — never a
+ * zero this side invented.
+ * </p>
+ */
+export function doorEventsLostNotice(device: AdminDoorDevice): string | null {
+  const lost = device.events_lost;
+  if (typeof lost !== "number" || lost <= 0) return null;
+  return `This door has dropped ${plural(lost, "record")} since it last started up — its queue`
+    + " filled while it could not reach the club, and the oldest waiting records were"
+    + " overwritten. They are not in the club log and cannot be recovered. It is a running"
+    + " total since the board last restarted, not a count for today.";
+}
+
+/**
  * The day boundary, named rather than assumed.
  *
  * "Today" computed in a browser is a different day from the club's for any admin travelling
@@ -355,9 +550,18 @@ export function doorScanCountHeading(dayStartedAt: string, timezone: string): st
  * for a board that is fine.
  * </p>
  */
-export function doorScanCountLine(today: DoorToday | null): string {
+export function doorScanCountLine(today: DoorToday | null, online: boolean | null = true): string {
   if (today === null) return "Today's scans could not be read.";
-  return `${today.released} released · ${today.refused} refused`;
+  const counts = `${today.released} released · ${today.refused} refused`;
+  // <b>A-H4 / R3-25 — "Since 00:00 — 13 released · 12 refused" printed as complete, over a
+  // door nothing could reach.</b> These are the club's counts of what it was TOLD, and a
+  // door that has lost the network goes on deciding scans from its cached list and delivers
+  // them whenever it next calls in. So on an unreachable door the pair is a floor, not a
+  // total, and an admin reading it as a total concludes a busy evening was a quiet one. The
+  // `null` arm takes the same qualifier: a page that cannot say whether the door is
+  // reporting cannot say the counts are complete either.
+  if (online === true) return counts;
+  return `${counts} — as far as the club has heard`;
 }
 
 /**
@@ -587,6 +791,45 @@ export function doorCsvDownloaded(rows: number | null, truncated = false): strin
   return `${plural(rows, "scan")} downloaded.`;
 }
 
+/**
+ * <b>A-H2 / R3-14 — the export failed and there was no word of it anywhere.</b>
+ *
+ * <p>
+ * Offline, or on a 500, the button went back to "Download CSV" and nothing else on the page
+ * changed. The toast the handler pushes is not enough on its own and the reviewer proved why:
+ * it floats above the content, it times out, and on the one action whose whole output is a
+ * file that either exists or does not, a message that has already gone is the same as no
+ * message. So the failure is also stated beside the button, where it stays until the next
+ * attempt, and it says the thing a toast never said — that no file was written.
+ * </p>
+ */
+export function doorCsvFailed(reason: string): string {
+  return `${reason} No file was downloaded — nothing has been exported, and nothing at the doors`
+    + " has changed. Try again, or narrow the range if this keeps happening.";
+}
+
+/**
+ * <b>A-M7 / R3-14 — a door was deleted and the next screen said nothing about it.</b>
+ *
+ * <p>
+ * The toast is pushed and then the page navigates, which unmounts the toast host's contents
+ * on the route change — so the confirmation for the single most destructive control on the
+ * surface was, in practice, invisible. An admin arrived back at a list of doors with one
+ * fewer row and no statement that the club had done it, which on a page that also polls looks
+ * exactly like a board that has dropped off.
+ * </p>
+ *
+ * <p>
+ * It carries the two facts a delete's own confirm promised: the scans are not gone, and the
+ * board is not locked out.
+ * </p>
+ */
+export function doorDeletedNotice(name: string): string {
+  return `${name} was deleted. Its past scans are still in the club log under its old name, and`
+    + " the board still has the club's key — it reappears here as a new door with nothing filled"
+    + " in the next time it calls in. Unplug it if you meant to retire it.";
+}
+
 /** Under the last row, when there is no further cursor. */
 export function doorExhaustedNotice(retentionDays: number | null): string {
   if (retentionDays === null) return "That is everything in this range.";
@@ -717,12 +960,29 @@ export function doorAttentionReason(
     // contradicted it about the same door.
     // A8: `null` is "this page cannot say", and it takes the SHUT sentence without the
     // liveness clause — shut is a state the page read, not one it derived from an age.
+    //
+    // R3-1: `shut_heard_at` outranks liveness on BOTH arms where the API sends it. A door
+    // that heard the shut opens for nobody even though it has since gone quiet, and a door
+    // that is reporting has still not necessarily been told — the summary above the tiles
+    // was making the opposite claim in both directions out of an age that had frozen.
+    const heard = doorShutHeard(device);
+    if (heard.state === "confirmed") {
+      return { ...where, kind: "shut", reason: `${name} is shut and has been told. Nobody gets in through it.` };
+    }
+    if (heard.state === "not_told") {
+      return {
+        ...where,
+        kind: "shut",
+        reason: `${name} is shut but has not called in since, so it has not been told.`,
+      };
+    }
     if (online === null) return { ...where, kind: "shut", reason: `${name} is shut.` };
     if (!online) {
       return {
         ...where,
         kind: "shut",
-        reason: `${name} is shut, but nothing can reach it — it may not have been told.`,
+        reason: `${name} is shut, and the club has not heard from it since — this page cannot say`
+          + " whether it was told.",
       };
     }
     return { ...where, kind: "shut", reason: `${name} is shut. Nobody gets in through it.` };
@@ -846,9 +1106,47 @@ export const NO_REASON_RECORDED = "No reason recorded";
  * the door next called in", which invents a delay for a row that had none.
  * </p>
  */
+/**
+ * <b>E8 / C-H4 / A-H1 / R3-17 — "the door told us at 19:22" about a 19:48 scan.</b>
+ *
+ * <p>
+ * A board has no real-time clock. It reports an offset from its own boot, and a board whose
+ * clock has drifted hands the server a scan instant from the future or the past — which is
+ * why the server writes `device.event_time_clamped` about it. The row said nothing, and
+ * printed the two instants in an order that cannot have happened: delivered BEFORE decided.
+ * A reader who meets that has two choices, and both are wrong — believe it, or stop trusting
+ * every time on the page.
+ * </p>
+ *
+ * <p>
+ * <b>The guard runs from the instants themselves as well as from the flag</b>, so a row an
+ * older API cannot mark is still never printed in an impossible order. `time_uncertain` adds
+ * the case the instants cannot show: a time the server CLAMPED, which comes out plausible
+ * precisely because it was corrected.
+ * </p>
+ */
+export function doorTimeIsUncertain(entry: {
+  at: string; delivered_at?: string | null; time_uncertain?: boolean;
+}): boolean {
+  if (entry.time_uncertain === true) return true;
+  if (!entry.delivered_at) return false;
+  // Strictly earlier. Equal is the ordinary case of a row decided and delivered in one call.
+  return new Date(entry.delivered_at).getTime() < new Date(entry.at).getTime();
+}
+
+/** What a row whose own clock is in doubt says about its time, wherever that time is shown. */
+export const TIME_UNCERTAIN_NOTE = "The door's clock was out, so this time is approximate.";
+
 export function doorScanTiming(
-  at: string, deliveredAt: string | null | undefined, timezone?: string,
+  at: string, deliveredAt: string | null | undefined, timezone?: string, uncertain = false,
 ): string | null {
+  // R3-17: an uncertain row never prints the pair as a sequence. The DELIVERY instant is the
+  // server's own clock and is sound; the scan instant is the board's and is not, so the row
+  // says which is which rather than implying an order between them.
+  if (uncertain) {
+    if (!deliveredAt) return TIME_UNCERTAIN_NOTE;
+    return `${TIME_UNCERTAIN_NOTE} The club was told at ${clubClock(deliveredAt, timezone)}.`;
+  }
   // A7: the row prints the clock face itself now, so a row with ONE instant has nothing left
   // for this line to add and returns null rather than repeating the time underneath itself.
   if (!deliveredAt) return null;
@@ -863,8 +1161,15 @@ export function doorScanTiming(
 
 /** The long form, for a `title` where the fact has to arrive once and completely. */
 export function doorScanTimingLong(
-  at: string, deliveredAt: string | null | undefined, timezone?: string,
+  at: string, deliveredAt: string | null | undefined, timezone?: string, uncertain = false,
 ): string {
+  // R3-17: the accessible name is where the fact has to arrive once and completely, so the
+  // doubt travels with it. A `title` a sighted reader can hover and a name a screen-reader
+  // user hears must not disagree about whether a time can be trusted.
+  if (uncertain) {
+    const told = deliveredAt ? ` The club was told at ${clubInstant(deliveredAt, timezone)}.` : "";
+    return `${clubInstant(at, timezone)}. ${TIME_UNCERTAIN_NOTE}${told}`;
+  }
   if (!deliveredAt) return clubInstant(at, timezone);
   const decided = clubInstant(at, timezone);
   const told = clubInstant(deliveredAt, timezone);
@@ -932,34 +1237,70 @@ export function doorRowRender(entry: DeviceActivityEntry): DoorRowRender {
  * because during the changeover a row can legitimately arrive down both paths.
  * </p>
  */
+export type DoorEventRow = {
+  at: string;
+  text: string;
+  token: string | null;
+  /**
+   * How many identical events this row stands for (A-L4 / R3-17 / WIRE-R3 §6).
+   *
+   * 1 for an ordinary row. The server groups and sends a `count`; this side also collapses
+   * rows that are identical in BOTH the words and the minute, because nine "the board's
+   * clock was out and was corrected" rows at one minute filled a door's whole event block
+   * and said one thing nine times — and they arrive that way from any backend that has not
+   * grouped them yet.
+   */
+  count: number;
+};
+
+/** A row's minute, which is the window identical events are collapsed within. */
+function minuteOf(at: string): string {
+  return at.slice(0, 16);
+}
+
 export function doorEventRows(
   items: DeviceActivityEntry[] | null, events: DoorEventEntry[] | null | undefined,
-): { at: string; text: string; token: string | null }[] {
+): DoorEventRow[] {
   // The raw token travels with an UNRECOGNISED row only. On a recognised one it is noise —
   // the sentence already says what happened — and on an unrecognised one it is the only
   // thing a reader can report upstream.
-  const rows = (events ?? []).map((e) => ({
+  const rows: DoorEventRow[] = (events ?? []).map((e) => ({
     at: e.at,
     // A5 / E-L3: `change` where the API sends it, `kind` where it does not. Nine identical
     // "this door's details or state were changed" rows told an admin nothing, and the actor
     // has been on the audit row since the gate shipped.
     text: describeDoorEventChange(e),
     token: describeDoorEventKind(e) === UNRECOGNISED_EVENT && !e.change ? e.action : null,
+    // The server's own count where it has grouped them, never invented from rows that merely
+    // look alike — a count is a claim about what happened, not about what is on screen.
+    count: typeof e.count === "number" && e.count > 0 ? e.count : 1,
   }));
   for (const entry of items ?? []) {
     if (isDoorScan(entry)) continue;
     const text = describeDoorEvent(entry);
-    rows.push({ at: entry.at, text, token: text === UNRECOGNISED_EVENT ? entry.action : null });
+    rows.push({
+      at: entry.at, text, token: text === UNRECOGNISED_EVENT ? entry.action : null, count: 1,
+    });
   }
-  const seen = new Set<string>();
-  return rows
-    .filter((row) => {
-      const key = `${row.at}|${row.text}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => b.at.localeCompare(a.at));
+  // A-L4: identical words, identical minute → one row carrying the count. The exact-instant
+  // dedupe this replaces existed for the changeover (a row arriving down both paths) and did
+  // nothing for nine rows a second apart, which is the shape a clock correction actually has.
+  const byKey = new Map<string, DoorEventRow>();
+  for (const row of rows) {
+    const key = `${minuteOf(row.at)}|${row.text}`;
+    const seen = byKey.get(key);
+    if (!seen) { byKey.set(key, { ...row }); continue; }
+    // Keep the NEWEST instant of the group, so the collapsed row sorts where the most recent
+    // of them would have.
+    if (row.at > seen.at) seen.at = row.at;
+    seen.count += row.count;
+  }
+  return [...byKey.values()].sort((a, b) => b.at.localeCompare(a.at));
+}
+
+/** "Details changed by Priya Naidoo" · "The board's clock was out and was corrected — 9 times". */
+export function doorEventText(row: DoorEventRow): string {
+  return row.count > 1 ? `${row.text} — ${row.count} times` : row.text;
 }
 
 /** The door-card value as a heading reads it. An unknown value is the honest default. */

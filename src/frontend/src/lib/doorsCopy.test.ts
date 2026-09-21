@@ -9,7 +9,8 @@ import {
   doorScanCountHeading, doorScanCountLine, doorSetupChip, doorSignalChip, doorStaleChecksNotice,
   doorStateChip, doorStateNotice, doorsAttentionSummary, describePowerLoss, spellAge,
   doorDisplayName, doorPickerLabel, doorRowIdentity, doorRowName, doorShutAttribution,
-  REMOVED_DOOR_UNNAMED,
+  REMOVED_DOOR_UNNAMED, doorShutHeard, doorShutHeardLine, doorTimeIsUncertain, doorScanTiming,
+  doorEventRows, doorEventText, doorEventsLostNotice,
 } from "./doorsCopy";
 import { doorShutNotice } from "./gateCopy";
 import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal } from "./api";
@@ -648,13 +649,38 @@ describe("doorAttentionReason, on a shut door nothing can reach", () => {
     const silent = doorAttentionReason(door({ enabled: false, name: "Side door" }), false, [])!;
     expect(silent.kind).toBe("shut");
     expect(silent.reason).not.toContain("Nobody gets in");
-    expect(silent.reason).toContain("nothing can reach it");
-    expect(silent.reason).toContain("may not have been told");
+    // R3-1: with no `shut_heard_at` on the row the page does not get to say the door was NOT
+    // told either — the old sentence ("nothing can reach it — it may not have been told")
+    // was a conclusion drawn from an age the shut itself had frozen. It says it cannot tell.
+    expect(silent.reason).toContain("this page cannot say whether it was told");
   });
 
   it("still says it plainly for a shut door the club CAN reach", () => {
     const reachable = doorAttentionReason(door({ enabled: false, name: "Side door" }), true, [])!;
     expect(reachable.reason).toBe("Side door is shut. Nobody gets in through it.");
+  });
+
+  /**
+   * <b>R3-1: `shut_heard_at` outranks liveness in BOTH directions.</b>
+   *
+   * The one that cost most was the first: a board served a 403 within one heartbeat, denying
+   * every scan and holding an empty roster, described on the overview as a door that "may
+   * still be admitting" people. The second matters as much and is less obvious — a door that
+   * is reporting has not necessarily been told, because the shut may be seconds old.
+   */
+  it("reads the shut's own evidence, not the door's age (R3-1)", () => {
+    const told = doorAttentionReason(
+      door({ enabled: false, name: "Side door", shut_heard_at: "2026-09-21T06:09:00Z" }), false, [],
+    )!;
+    expect(told.reason).toBe("Side door is shut and has been told. Nobody gets in through it.");
+
+    const notTold = doorAttentionReason(
+      door({ enabled: false, name: "Side door", shut_heard_at: null }), true, [],
+    )!;
+    expect(notTold.reason).toBe(
+      "Side door is shut but has not called in since, so it has not been told.",
+    );
+    expect(notTold.reason).not.toContain("Nobody gets in");
   });
 });
 
@@ -892,5 +918,288 @@ describe("spellAge", () => {
   /** "never" is already a word, and anything unrecognised is passed through rather than mangled. */
   it("leaves anything that is not an abbreviation alone", () => {
     expect(spellAge("never")).toBe("never");
+  });
+});
+
+
+/**
+ * <b>R3-1 — the worst falsehood this surface has shipped, and the field that ends it.</b>
+ *
+ * <p>
+ * `DeviceIdentity.ResolveAsync` answered `Forbid()` BEFORE noting contact, so shutting a door
+ * froze its `last_seen_at`. Three minutes later the console decided the board was unreachable
+ * and told an admin, in warning colours, that a door which had been served a 403 within one
+ * heartbeat — and had therefore denied every scan and committed an empty roster — "may still
+ * be admitting booked members from its saved list". The control reported a working shut as a
+ * failed one.
+ * </p>
+ *
+ * <p>
+ * The fixture is varied on the ONE field that decides it, across the two liveness values it
+ * used to be decided by, because the whole defect was a screen reading the wrong field.
+ * </p>
+ */
+describe("doorShutHeard — a shut door's own evidence", () => {
+  it("has three answers, and absent is not false", () => {
+    expect(doorShutHeard(door({ enabled: false, shut_heard_at: "2026-09-21T06:09:00Z" })))
+      .toEqual({ state: "confirmed", at: "2026-09-21T06:09:00Z" });
+    expect(doorShutHeard(door({ enabled: false, shut_heard_at: null })))
+      .toEqual({ state: "not_told", at: null });
+    // The older backend. It has said NOTHING, and the screens must not read that as either
+    // answer — which is what reading `last_seen_at` instead amounted to.
+    expect(doorShutHeard(door({ enabled: false })).state).toBe("unknown");
+  });
+
+  it("answers nothing about an OPEN door, whatever is on the row", () => {
+    // A stale `shut_heard_at` on a reopened row must not make the screen say a live door has
+    // "been told" something. The wire clears it on reopen; this is the guard for when it does
+    // not, which is the shape every optional field on this surface has been wrong in once.
+    expect(doorShutHeard(door({ enabled: true, shut_heard_at: "2026-09-21T06:09:00Z" })).state)
+      .toBe("unknown");
+  });
+});
+
+describe("doorShutHeardLine", () => {
+  const TZ = "Africa/Johannesburg";
+
+  it("names the instant the door heard it, in the CLUB's zone", () => {
+    const told = doorShutHeardLine(
+      door({ enabled: false, shut_heard_at: "2026-09-21T04:09:00Z" }), TZ,
+    )!;
+    // 04:09 UTC is 06:09 in Johannesburg. R3-3: an admin reading from another zone must see
+    // the club's clock, not their laptop's.
+    expect(told).toContain("06:09");
+    expect(told).toContain("opens for nobody");
+    expect(told).not.toContain("may still");
+  });
+
+  it("states the cached-list caveat only for the door the server says never called", () => {
+    const notTold = doorShutHeardLine(door({ enabled: false, shut_heard_at: null }), TZ)!;
+    expect(notTold).toContain("has not been told");
+    expect(notTold).toContain("keeps admitting members with a booking");
+
+    // An UNNAMED door holds no list at all, so the same arm must not promise it one — B3's
+    // finding, on the new sentence.
+    const unnamed = doorShutHeardLine(
+      door({ enabled: false, gate_key: null, shut_heard_at: null }), TZ,
+    )!;
+    expect(unnamed).toContain("holds no saved list");
+    expect(unnamed).not.toContain("keeps admitting");
+  });
+
+  it("adds nothing at all where the API has not said", () => {
+    expect(doorShutHeardLine(door({ enabled: false }), TZ)).toBeNull();
+  });
+});
+
+describe("doorStateNotice, on a shut door (R3-1)", () => {
+  const TZ = "Africa/Johannesburg";
+
+  it("reports a confirmed shut as confirmed even though the door has since gone quiet", () => {
+    const notice = doorStateNotice(
+      door({ enabled: false, shut_heard_at: "2026-09-21T04:09:00Z", last_seen_at: "2026-09-21T04:09:00Z" }),
+      false,
+      TZ,
+    )!;
+    expect(notice).toContain("Confirmed: this door heard the shut at");
+    // The exact sentence the reviewer read over a door that had heard it.
+    expect(notice).not.toContain("may still be admitting");
+    expect(notice).not.toContain("Nothing can reach");
+  });
+
+  it("keeps the generic both-halves paragraph where the API cannot say", () => {
+    const notice = doorStateNotice(door({ enabled: false }), false, TZ)!;
+    expect(notice).toContain(doorShutNotice());
+  });
+});
+
+
+/**
+ * <b>A-H4 / R3-25 — "Since 00:00 — 13 released · 12 refused" over a door nothing can reach.</b>
+ *
+ * <p>
+ * These are the club's counts of what it was TOLD. A door that has lost the network goes on
+ * deciding scans from its cached list and delivers them whenever it next calls in, so on an
+ * unreachable door the pair is a floor rather than a total — and an admin reading it as a
+ * total concludes a busy evening was a quiet one.
+ * </p>
+ */
+describe("doorScanCountLine, on a door the club cannot reach", () => {
+  it("prints the pair bare only while the door is reporting", () => {
+    expect(doorScanCountLine({ released: 13, refused: 12 }, true))
+      .toBe("13 released · 12 refused");
+  });
+
+  it("qualifies it when nothing can reach the door", () => {
+    expect(doorScanCountLine({ released: 13, refused: 12 }, false))
+      .toBe("13 released · 12 refused — as far as the club has heard");
+  });
+
+  it("qualifies it when the page cannot say either way", () => {
+    // A8: `null` is "this page cannot currently say". A page that cannot tell whether the
+    // door is reporting cannot tell whether the counts are complete.
+    expect(doorScanCountLine({ released: 1, refused: 0 }, null))
+      .toContain("as far as the club has heard");
+  });
+
+  it("still says the read failed rather than qualifying a number it does not have", () => {
+    expect(doorScanCountLine(null, false)).toBe("Today's scans could not be read.");
+  });
+});
+
+/**
+ * <b>E8 / C-H4 / A-H1 / R3-17 — "the door told us at 19:22" about a 19:48 scan.</b>
+ *
+ * <p>
+ * A board has no real-time clock: it reports an offset from its own boot. A drifted one hands
+ * the server a scan instant from the future or the past, the server writes
+ * `device.event_time_clamped` about it, and the row printed the two instants in an order that
+ * cannot have happened. A reader who meets that either believes it or stops trusting every
+ * time on the page.
+ * </p>
+ */
+describe("doorTimeIsUncertain", () => {
+  it("catches the impossible order from the instants alone", () => {
+    // The shape the reviewer met, and the one an OLDER API cannot flag.
+    expect(doorTimeIsUncertain({
+      at: "2026-09-19T19:48:00Z", delivered_at: "2026-09-19T19:22:00Z",
+    })).toBe(true);
+  });
+
+  it("takes the wire's flag for the case the instants cannot show", () => {
+    // A CLAMPED time comes out plausible — that is what clamping does — so the flag is the
+    // only evidence there is.
+    expect(doorTimeIsUncertain({
+      at: "2026-09-19T19:22:00Z", delivered_at: "2026-09-19T19:48:00Z", time_uncertain: true,
+    })).toBe(true);
+  });
+
+  it("leaves an ordinary offline row alone", () => {
+    expect(doorTimeIsUncertain({
+      at: "2026-09-19T18:40:00Z", delivered_at: "2026-09-19T21:05:00Z",
+    })).toBe(false);
+    expect(doorTimeIsUncertain({ at: "2026-09-19T18:40:00Z" })).toBe(false);
+    // Absent is not true: an API that has not said has not said the row is doubtful.
+    expect(doorTimeIsUncertain({ at: "2026-09-19T18:40:00Z", delivered_at: null })).toBe(false);
+  });
+});
+
+describe("doorScanTiming, on a row whose clock was out", () => {
+  it("never prints an order that cannot have happened", () => {
+    const line = doorScanTiming(
+      "2026-09-19T19:48:00Z", "2026-09-19T19:22:00Z", "Africa/Johannesburg", true,
+    )!;
+    expect(line).toContain("The door's clock was out, so this time is approximate.");
+    // The impossible sequence, in the words that produced it.
+    expect(line).not.toContain("the door told us at");
+    // The DELIVERY instant is the server's own clock and is sound, so it is still stated.
+    expect(line).toContain("The club was told at 21:22");
+  });
+
+  it("leaves a sound offline row saying both instants, in order", () => {
+    expect(doorScanTiming("2026-09-19T16:40:00Z", "2026-09-19T19:05:00Z", "Africa/Johannesburg"))
+      .toBe("Decided at the door at 18:40 — the door told us at 21:05.");
+  });
+});
+
+/**
+ * <b>A-L4 / R3-17 — nine identical "clock was corrected" rows at one minute.</b>
+ *
+ * They filled a door's whole event block and said one thing nine times, so the rename and the
+ * shut an admin had come to find were pushed off the screen by a board with a drifting clock.
+ */
+describe("doorEventRows grouping", () => {
+  const clockRow = (seconds: number) => ({
+    at: `2026-09-19T19:22:${String(seconds).padStart(2, "0")}Z`,
+    action: "device.event_time_clamped",
+    kind: "clock_corrected",
+    change: "clock_corrected",
+  });
+
+  it("collapses identical events inside one minute and carries the count", () => {
+    const rows = doorEventRows(null, [0, 1, 2, 3, 9].map(clockRow));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].count).toBe(5);
+    expect(doorEventText(rows[0])).toContain("5 times");
+    // The NEWEST of the group, so the collapsed row sorts where the most recent would have.
+    expect(rows[0].at).toBe("2026-09-19T19:22:09Z");
+  });
+
+  it("does not collapse two different things, however close together", () => {
+    const rows = doorEventRows(null, [
+      clockRow(0),
+      { at: "2026-09-19T19:22:01Z", action: "device.updated", kind: "edited", change: "shut" },
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.count === 1)).toBe(true);
+  });
+
+  it("does not collapse the same event in two different minutes", () => {
+    const rows = doorEventRows(null, [
+      clockRow(0),
+      { ...clockRow(0), at: "2026-09-19T19:23:00Z" },
+    ]);
+    expect(rows).toHaveLength(2);
+  });
+
+  it("takes the server's own count where it has already grouped them", () => {
+    const rows = doorEventRows(null, [{ ...clockRow(0), count: 9 }]);
+    expect(rows[0].count).toBe(9);
+    expect(doorEventText(rows[0])).toContain("9 times");
+  });
+
+  it("adds no multiplier to a row that stands for itself", () => {
+    const rows = doorEventRows(null, [clockRow(0)]);
+    expect(doorEventText(rows[0])).not.toContain("times");
+  });
+});
+
+/**
+ * WIRE-R3 §6 renames two of the change words. Rows written under both spellings are inside
+ * retention at the same time, so a screen that knows only one renders the other as
+ * "Unrecognised event" — the honest arm for a genuinely unknown action, and the wrong answer
+ * for one we have words for.
+ */
+describe("the two spellings WIRE-R3 renamed", () => {
+  it("reads details_changed and deleted as well as details and removed", () => {
+    const at = "2026-09-19T19:22:00Z";
+    const say = (change: string) => doorEventRows(null, [{
+      at, action: "device.updated", kind: "edited", change, actor_name: "Priya Naidoo",
+    }])[0].text;
+    expect(say("details_changed")).toBe("Details changed by Priya Naidoo");
+    expect(say("details")).toBe("Details changed by Priya Naidoo");
+    expect(say("deleted")).toBe("Deleted by Priya Naidoo");
+    expect(say("removed")).toBe("Deleted by Priya Naidoo");
+  });
+});
+
+/**
+ * <b>G4c / R3-33 — records a door threw away, which nothing had ever shown.</b>
+ *
+ * <p>
+ * A board reports, in every heartbeat, how many queued events its ring buffer has overwritten
+ * since boot. The number travelled since the gate shipped and was stored nowhere — so a door
+ * that dropped forty scans during an outage looked identical to one that dropped none, and
+ * the club log a committee reads after an incident was silently incomplete.
+ * </p>
+ */
+describe("doorEventsLostNotice", () => {
+  it("says how many, and that it is a total since boot", () => {
+    const said = doorEventsLostNotice(door({ events_lost: 40 }))!;
+    expect(said).toContain("dropped 40 records");
+    // The misreading that sends an admin after an outage that ended last month.
+    expect(said).toContain("running total since the board last restarted, not a count for today");
+    expect(said).toContain("cannot be recovered");
+  });
+
+  it("says nothing at zero, and nothing where the API has not said", () => {
+    expect(doorEventsLostNotice(door({ events_lost: 0 }))).toBeNull();
+    // Absent is not zero: a page that printed "0 records dropped" would be stating a fact it
+    // had not read.
+    expect(doorEventsLostNotice(door())).toBeNull();
+  });
+
+  it("counts one record as one", () => {
+    expect(doorEventsLostNotice(door({ events_lost: 1 }))).toContain("dropped 1 record ");
   });
 });

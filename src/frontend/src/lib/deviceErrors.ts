@@ -1,6 +1,6 @@
 import { ApiError } from "./api";
 import { RELAYS } from "../components/ButtonMapEditor";
-import { GATE_KEY_MAX_LENGTH } from "./gateCopy";
+import { DEVICE_NAME_MAX_LENGTH, GATE_KEY_MAX_LENGTH } from "./gateCopy";
 import { LOCATION_NOTE_MAX_LENGTH } from "../components/doors/DoorCardFields";
 import {
   DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
@@ -66,6 +66,39 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
     + " only a door has — and this row is a court box. Refresh the page; if the board really is a"
     + " door, delete the row and let it register itself again.",
   location_note_too_long: `Where the board is has to be at most ${LOCATION_NOTE_MAX_LENGTH} characters. Shorten it and save again.`,
+  /**
+   * A2 / B2 / R3-15 — the one that used to be a 500 with the EF exception in it.
+   *
+   * A name over the column's 128 threw `DbUpdateException` out of the save and the client
+   * got a developer page. The API validates now (WIRE-R3 §3); the field's own `maxLength`
+   * stops it at the keyboard, so this reaches an admin through a paste or a row edited
+   * elsewhere — and it names the FIELD, because the form has two name-shaped boxes and the
+   * old sentence named neither.
+   */
+  name_too_long: `“What the club calls it” is at most ${DEVICE_NAME_MAX_LENGTH} characters. Shorten it and save again.`,
+
+  // --- the club door log's own refusals, added this round ------------------------------
+  //
+  // A-C2 / R3-13: `?door=` naming a board that is no longer on the club's list answered 200
+  // with an empty page, so the screen said "no scans at any door" — a claim about the CLUB
+  // built out of a filter pointing at nothing. The API refuses it now (WIRE-R3 §4) and the
+  // page has a sentence for it; it must never read as "nothing happened".
+  door_not_found: "That door is no longer on the club's list, so these filters match nothing."
+    + " Its past scans are still kept — pick it under “Removed doors”, or choose All doors.",
+  day_invalid: "That is not a day this log can be read for. Pick one from the calendar.",
+  limit_invalid: "That page size could not be read. Press Refresh to start the list again.",
+  reason_invalid: "That is not a reason a door records. Set Outcome back to All outcomes.",
+  period_invalid: "That is not a range this log offers. Pick one from the When list.",
+  range_conflict: "That link asks for two different ranges at once. Pick one from the When list.",
+  /**
+   * R3-34 / B13 — the write this tab sent was written against a state that had moved.
+   *
+   * It is not a failure of the click and the sentence must not read as one: nothing was
+   * changed, the door is in whatever state somebody else left it, and the answer is to look
+   * before deciding again.
+   */
+  door_changed: "Nothing was changed — this door was shut or reopened by somebody else since this"
+    + " page last read it. The screen is refreshing; check what it says now before deciding again.",
   power_loss_behaviour_unknown: "What this door does with no power has to be one of the three"
     + " answers on the form. Pick one and save again.",
 

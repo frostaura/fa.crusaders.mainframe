@@ -4,8 +4,8 @@ import { Card } from "../Card";
 import { DoorFeedRow } from "./DoorFeedRow";
 import { ACTIVITY_READ_FAILED, activityEmptyNotice, isDoorScan } from "../../lib/deviceActivity";
 import {
-  DOOR_EVENTS_NOTE, OFFLINE_WHO_NOTE, doorEventRows, doorQuietNotice, doorScanCountHeading,
-  doorScanCountLine,
+  DOOR_EVENTS_NOTE, OFFLINE_WHO_NOTE, doorEventRows, doorEventText, doorQuietNotice,
+  doorScanCountHeading, doorScanCountLine,
 } from "../../lib/doorsCopy";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
@@ -27,7 +27,18 @@ export type FeedRead = {
 };
 
 /** The instant, and the club's own day — everything the quiet notice needs. */
-export type FeedClock = { now: number; dayStartedAt: string; timezone: string };
+export type FeedClock = {
+  now: number;
+  dayStartedAt: string;
+  timezone: string;
+  /**
+   * Whether this door is reporting — A-H4 / R3-25.
+   *
+   * The day's two numbers are what the club was TOLD, and an unreachable door goes on
+   * deciding scans it has not delivered yet. Printed unqualified they read as a total.
+   */
+  online?: boolean | null;
+};
 
 /**
  * What the feed is showing right now, once its four states are collapsed into one read.
@@ -58,12 +69,14 @@ export type FeedClock = { now: number; dayStartedAt: string; timezone: string };
  */
 export const FEED_FIRST_PAGE = 10;
 
-function FeedBody({ read, clock, expanded, onExpand, firstMoreRef }: {
+function FeedBody({ read, clock, expanded, onExpand, firstMoreRef, onAnnounce }: {
   read: FeedRead;
   clock: FeedClock;
   expanded: boolean;
   onExpand: () => void;
   firstMoreRef: React.Ref<HTMLLIElement>;
+  /** C-L3 / R3-26: what the press did, for the region the section keeps. */
+  onAnnounce: (said: string) => void;
 }) {
   if (read.loading) return <p className="text-sm text-text-secondary">Loading…</p>;
   if (read.error) return <p className="text-sm text-danger-strong">{read.error || ACTIVITY_READ_FAILED}</p>;
@@ -88,7 +101,10 @@ function FeedBody({ read, clock, expanded, onExpand, firstMoreRef }: {
   const shown = expanded ? scans : scans.slice(0, FEED_FIRST_PAGE);
   return (
     <>
-      {quiet && <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">{quiet}</p>}
+      {/* C-M2 / R3-26: standing, not news. "No scans at this door since Wed 18:40 — that is
+          3 days" is as true on the fifth poll as on the first, and a live region re-speaks
+          it on every re-render that touches it. */}
+      {quiet && <p className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">{quiet}</p>}
       {anyOffline && <p className="text-xs text-text-muted">{OFFLINE_WHO_NOTE}</p>}
       <ul>
         {shown.map((entry, i) => (
@@ -109,7 +125,13 @@ function FeedBody({ read, clock, expanded, onExpand, firstMoreRef }: {
       {!expanded && scans.length > FEED_FIRST_PAGE && (
         <button
           type="button"
-          onClick={onExpand}
+          // C-L3 / R3-26: it announced nothing at all. Focus moves to the first revealed
+          // row (C4), which tells a screen-reader user where they are and not what
+          // happened — so the count is said as well.
+          onClick={() => {
+            onExpand();
+            onAnnounce(`Showing all ${scans.length} scans at this door.`);
+          }}
           className="min-h-11 w-full rounded-lg border border-control px-5 text-sm font-medium"
         >
           {`Show the other ${scans.length - FEED_FIRST_PAGE} scans`}
@@ -158,8 +180,11 @@ function DoorEvents({ read, timezone }: { read: FeedRead; timezone: string }) {
                     is the only thing a reader can report upstream. Who did it is in the
                     sentence itself where the API says (WIRE-R2 §2's `actor_name`) — see
                     {@link doorEventRows}. */}
+                {/* A-L4 / R3-17: the COUNT, where several identical events were collapsed
+                    into one row. Nine "the board's clock was out and was corrected" rows at
+                    one minute filled this whole block and said one thing nine times. */}
                 <span className="min-w-0 break-words text-sm text-text-secondary">
-                  {row.token ? `${row.text} · ${row.token}` : row.text}
+                  {row.token ? `${doorEventText(row)} · ${row.token}` : doorEventText(row)}
                 </span>
                 {/* A7 / E-M5 / O1: the CLUB's zone, exactly as the scan rows above get.
                     This list was the one reading the VIEWER's clock, so an admin reading
@@ -200,6 +225,8 @@ export function DoorFeed({ door, today, read, clock }: {
   clock: FeedClock;
 }) {
   const [expanded, setExpanded] = useState(false);
+  /** C-L3 / R3-26: what the last press did. Empty most of the time, so it says nothing. */
+  const [announcement, setAnnouncement] = useState("");
   const firstMoreRef = useRef<HTMLLIElement>(null);
   // C4: after the press, the first row it revealed takes focus.
   useEffect(() => { if (expanded) firstMoreRef.current?.focus(); }, [expanded]);
@@ -214,7 +241,7 @@ export function DoorFeed({ door, today, read, clock }: {
         <Card className="space-y-3">
           <div>
             <p className="text-xs text-text-muted">{doorScanCountHeading(clock.dayStartedAt, clock.timezone)}</p>
-            <p className="text-sm text-text-secondary">{doorScanCountLine(today)}</p>
+            <p className="text-sm text-text-secondary">{doorScanCountLine(today, clock.online ?? true)}</p>
           </div>
           <FeedBody
             read={read}
@@ -222,7 +249,11 @@ export function DoorFeed({ door, today, read, clock }: {
             expanded={expanded}
             onExpand={() => setExpanded(true)}
             firstMoreRef={firstMoreRef}
+            onAnnounce={setAnnouncement}
           />
+          {/* C-L3 / R3-26: one polite region for this section, written by a press and
+              nothing else. Standing text on this page carries no live role at all. */}
+          <p aria-live="polite" className="sr-only">{announcement}</p>
           <Link
             to={`/admin/doors/log?door=${encodeURIComponent(door.id)}`}
             className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-control px-5 text-sm font-medium"
