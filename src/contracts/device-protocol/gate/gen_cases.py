@@ -183,12 +183,28 @@ requests = [
             "an open the gate decided from its own roster while offline. `court` is -1 because "
             "there is no relay bank to index; `duration_ms` is how long the lock was released. "
             "The API already knows about online opens, so this kind is queued for offline ones only."
+            "\n\n"
+            "`boot_id` IS THE IDEMPOTENCY KEY'S MISSING THIRD FIELD, and it is here because "
+            "(device, seq) was not one. The ring is RAM-only, so no event survives a reboot, and "
+            "`seq` resumes from a checkpoint in flash — one record, written in blocks of 64. Erase "
+            "or tear that record and the board renumbers from 1, against a PERMANENT unique index "
+            "on the server: every event of the next evening is silently receipted as a duplicate "
+            "and discarded, INCLUDING the `boot` event the firmware queues precisely so that an "
+            "operator can see a board restarted. Two boards accidentally sharing a MAC dedup each "
+            "other the same way. `boot_id` is a per-boot random 32-bit value — `esp_random()` on "
+            "the board, seedable in the simulator — so the key is (device, boot_id, seq): a "
+            "renumbered board collides with nothing, and a genuine retry of the same event still "
+            "carries the same three fields and is still deduplicated. It is a NUMBER, up to "
+            "4294967295, which is why the server binds it as 64-bit. `accepted_through` is "
+            "unchanged: the board holds one boot's events at a time, so the highest seq in the "
+            "batch means what it always meant."
         ),
         "method": "POST",
         "path_and_query": "/api/v1/device/events",
         "authorization": BEARER,
         "body_hex": body_hex({
             "mac": MAC,
+            "boot_id": 2596069104,
             "uptime_ms": 86400000,
             "events": [{
                 "seq": 7,
@@ -198,6 +214,37 @@ requests = [
                 "method": "qr",
                 "subject": "7Q3F9KM2XZ8B",
                 "duration_ms": 3000,
+            }],
+        }),
+    },
+    {
+        "id": "gate-events-request-no-boot-id",
+        "note": (
+            "THE COMPATIBILITY SHAPE, and the reason `boot_id` could be added without a flag day. "
+            "A body that omits it means boot_id 0 on the server, which is exactly the behaviour "
+            "(device, seq) always had: every such board shares one boot identity and dedups "
+            "against itself as before. That covers the COURT BOX, whose renderer omits the field "
+            "today, and every gate image flashed before this change. The field is additive and "
+            "optional on the wire and REQUIRED in practice on a gate — the gate's renderer always "
+            "sets it, and this vector exists so the server's tolerance of its absence is pinned "
+            "rather than assumed. A subject of `\"` is in here too: the bytes come off a QR code "
+            "and the renderer escapes them, so the corpus carries an escaped one rather than "
+            "leaving that to a reviewer's imagination."
+        ),
+        "method": "POST",
+        "path_and_query": "/api/v1/device/events",
+        "authorization": BEARER,
+        "body_hex": body_hex({
+            "mac": MAC,
+            "uptime_ms": 86400000,
+            "events": [{
+                "seq": 8,
+                "uptime_ms": 86390000,
+                "kind": "unknown_scan",
+                "court": -1,
+                "method": "qr",
+                "subject": "A\"B",
+                "duration_ms": 0,
             }],
         }),
     },
@@ -394,7 +441,7 @@ manifest = {
     "description": (
         "Door-gate HTTP request and response body shapes: the heartbeat's `kind` hint, its two "
         "since-boot diagnostic counters and its gate-shaped answer, the scan decision, and the "
-        "offline gate_open event."
+        "offline gate_open event with the per-boot identity its deduplication key rests on."
     ),
     "authority": (
         "docs/specs/door-gate.md — the behaviour oracle; "

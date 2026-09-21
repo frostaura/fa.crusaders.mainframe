@@ -98,8 +98,12 @@ bool adoptUnlockMs(const char* body, size_t len, uint32_t& unlockMs) {
   // itself matched a quoted string anywhere and a gate heartbeat opens
   // `{"kind":"gate",…}`. That edge is fixed in devapi now and the copy is gone:
   // one implementation, proven in ../shared/test/test_devapi.
+  // AND THE `gate` OBJECT ITSELF IS FOUND AT THE TOP LEVEL (round G4, B2).
+  // `findObject` locates its key by the flat scan, so a nested `gate` object
+  // placed before the real one was the object this read from — bounded by the
+  // hard cap, but still a lock driven for a number the contract did not send.
   size_t innerLen = 0U;
-  const size_t at = devapi::json::findObject(body, len, "gate", innerLen);
+  const size_t at = devapi::json::findTopLevelObject(body, len, "gate", innerLen);
   if (at == devapi::json::kNotFound) {
     return false;
   }

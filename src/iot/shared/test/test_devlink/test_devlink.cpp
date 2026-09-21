@@ -507,7 +507,7 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   const uint64_t now = wrap + 20000ULL;
 
   char body[devlink::kEventBodyCap] = {};
-  const size_t len = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", now, event);
+  const size_t len = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, now, event);
   TEST_ASSERT_TRUE(len > 0U);
   TEST_ASSERT_EQUAL_size_t(strlen(body), len);
   TEST_ASSERT_NOT_NULL(strstr(body, "{\"mac\":\"5ccf7f0a1b2c\","));
@@ -521,7 +521,7 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
 
   // The ordinary case is unchanged: no wrap, no widening.
   event.uptimeMs = 90000UL;
-  TEST_ASSERT_TRUE(devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 120000ULL, event) > 0U);
+  TEST_ASSERT_TRUE(devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, 120000ULL, event) > 0U);
   TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":120000,"));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":90000,"));
 
@@ -532,20 +532,96 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   release.kind = eventq::Kind::Release;
   release.court = eventq::Event::kNoCourt;
   release.uptimeMs = 1000UL;
-  TEST_ASSERT_TRUE(devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 2000ULL, release) > 0U);
+  TEST_ASSERT_TRUE(devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, 2000ULL, release) > 0U);
   TEST_ASSERT_NOT_NULL(strstr(body, "\"method\":null"));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"court\":-1"));
 
   // Refused rather than truncated: a half-rendered body comes back 4xx and the
   // drain path drops the event as one the box caused.
   char tiny[24] = {};
-  TEST_ASSERT_EQUAL_size_t(0U,
-                           devlink::renderEventBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", 2000ULL, release));
+  TEST_ASSERT_EQUAL_size_t(
+      0U, devlink::renderEventBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", 0U, 2000ULL, release));
   TEST_ASSERT_EQUAL_STRING("", tiny);
 
   // And never without a MAC: an events batch that names no device is one the
   // server cannot file against a box.
-  TEST_ASSERT_EQUAL_size_t(0U, devlink::renderEventBody(body, sizeof(body), "", 2000ULL, release));
+  TEST_ASSERT_EQUAL_size_t(0U, devlink::renderEventBody(body, sizeof(body), "", 0U, 2000ULL, release));
+
+  // NOR WITH ONE THAT IS NOT A MAC (round G4, B1). It is the only other `%s` in
+  // this body, and both composition roots render it from dc::hex::encodeLower,
+  // so anything else is a board that has got its own identity wrong. REFUSED
+  // rather than escaped: escaping would hide that, and there is nothing useful
+  // a server can do with a device name nobody minted.
+  static const char* kNotAMac[] = {
+      "5ccf7f0a1b2",                 // eleven
+      "5ccf7f0a1b2cd",               // thirteen
+      "5CCF7F0A1B2C",                // uppercase, which encodeLower never emits
+      "5ccf7f0a1b2g",                // not hex
+      "\",\"uptime_ms\":1,\"x\":\"", // the B1 shape, from the other field
+  };
+  for (size_t i = 0U; i < sizeof(kNotAMac) / sizeof(kNotAMac[0]); ++i) {
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(
+        0U, devlink::renderEventBody(body, sizeof(body), kNotAMac[i], 0U, 2000ULL, release), kNotAMac[i]);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("", body, kNotAMac[i]);
+  }
+}
+
+/// G4 / B1. The shared renderer is safe on ITS OWN, whatever fed the subject —
+/// the court box's serial link as much as the gate's scanner. Fuzzed over the
+/// metacharacters, against the one structural fact a forged field has to break.
+void test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it() {
+  static const char kAlphabet[] = "\"\\:,{}[]abAB01-_ \t\n\r\x01\x1f";
+  const size_t alphabetLen = sizeof(kAlphabet) - 1U;
+
+  uint32_t state = 0x2468ACE1U;
+  for (int iteration = 0; iteration < 20000; ++iteration) {
+    eventq::Event event;
+    event.seq = 11U;
+    event.kind = eventq::Kind::UnknownScan;
+    event.court = eventq::Event::kNoCourt;
+    event.method = eventq::Method::Qr;
+    event.uptimeMs = 500U;
+
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    const uint8_t length = static_cast<uint8_t>(state % (eventq::kMaxSubjectLen + 1U));
+    for (uint8_t i = 0U; i < length; ++i) {
+      state ^= state << 13;
+      state ^= state >> 17;
+      state ^= state << 5;
+      event.subject[i] = kAlphabet[state % alphabetLen];
+    }
+    event.subjectLen = length;
+
+    char body[devlink::kEventBodyCap] = {};
+    const size_t written = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, 2000ULL, event);
+    TEST_ASSERT_TRUE_MESSAGE(written > 0U, "a subject inside the cap must always render");
+
+    // Ten keys and four quoted values: twenty-eight quotes that are not
+    // preceded by an odd number of backslashes, and no more. A byte that
+    // escaped the string adds two.
+    size_t quotes = 0U;
+    size_t slashes = 0U;
+    for (size_t i = 0U; body[i] != '\0'; ++i) {
+      if (body[i] == '\\') {
+        ++slashes;
+        continue;
+      }
+      if (body[i] == '"' && (slashes % 2U) == 0U) {
+        ++quotes;
+      }
+      slashes = 0U;
+    }
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(28U, quotes, body);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"seq\":11,"), body);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"kind\":\"unknown_scan\""), body);
+    // AND NO RAW CONTROL BYTE, which is not legal JSON at all: a body the
+    // server refuses is a record this drain then drops.
+    for (size_t i = 0U; body[i] != '\0'; ++i) {
+      TEST_ASSERT_TRUE_MESSAGE(static_cast<unsigned char>(body[i]) >= 0x20U, body);
+    }
+  }
 }
 
 void test_heartbeat_body_names_the_box_and_survives_the_millis_wrap() {
@@ -612,6 +688,7 @@ int main(int, char**) {
   RUN_TEST(test_a_button_map_element_that_names_a_key_hides_nothing);
 
   RUN_TEST(test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap);
+  RUN_TEST(test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it);
   RUN_TEST(test_heartbeat_body_names_the_box_and_survives_the_millis_wrap);
 
   return UNITY_END();

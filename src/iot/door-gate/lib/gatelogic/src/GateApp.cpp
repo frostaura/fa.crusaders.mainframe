@@ -14,7 +14,8 @@ GateApp::GateApp(const Ports& ports)
       api_(*ports.api), breaker_(*ports.breaker), lock_(*ports.lock), unlock_(*ports.unlock),
       led_(*ports.led), ledPin_(*ports.ledPin), assembler_(*ports.assembler), debounce_(*ports.debounce),
       roster_(*ports.roster), queue_(*ports.queue), log_(ports.log), mac_(ports.mac),
-      firmwareVersion_(ports.firmwareVersion), heartbeatBody_(ports.heartbeatBody),
+      firmwareVersion_(ports.firmwareVersion), bootId_(ports.bootId),
+      watchdogResetRun_(ports.watchdogResetRun), heartbeatBody_(ports.heartbeatBody),
       heartbeatBodyCap_(ports.heartbeatBodyCap), ledActiveHigh_(ports.ledActiveHigh) {
 }
 
@@ -43,6 +44,21 @@ void GateApp::begin() {
   assembler_.reset();
   // A fallback only: the link-up edge re-arms this to "now" (pumpLink).
   heartbeatAt_.arm(now, heartbeatMs_);
+
+  // THE FIRST CALL, HELD BACK AFTER A WATCHDOG RESET (round G4, A4). A peer
+  // that dribbles headers holds one `POST()` open past any budget this firmware
+  // can enforce, and the watchdog ends it by resetting the part — which lands
+  // right back here, arms a heartbeat, associates, and reaches that peer again
+  // within a second. For ever, with no roster and a door that admits nobody.
+  //
+  // Armed on `firstCallAt_` rather than folded into `heartbeatAt_`, because
+  // `pumpLink`'s up edge re-arms THAT to "now" on every association — which is
+  // correct and is precisely what makes the loop tight. Disarmed on a healthy
+  // boot, so this costs nothing in normal service.
+  firstCallHeldBackMs_ = firstCallDelayMs(watchdogResetRun_);
+  if (firstCallHeldBackMs_ > 0U) {
+    firstCallAt_.arm(now, firstCallHeldBackMs_);
+  }
 
   queue_.begin();
   eventq::Event boot;
@@ -206,6 +222,15 @@ void GateApp::feedByte(uint8_t byte) {
     decideScan(assembler_.token());
     break;
   case ScanEvent::Refused:
+  case ScanEvent::Corrupt:
+    // THE SAME ANSWER FOR BOTH, and that is deliberate. From where the member
+    // is standing an over-long code and a holed one are one thing — the board
+    // could not read what they presented — and there is nothing to ask the API
+    // about in either case, because the bytes were discarded rather than
+    // truncated and a token cut short is a different member's token.
+    //
+    // `Corrupt` used to be `None`: no blink, no record, nothing, while
+    // `pumpScanner`'s comment promised feedback (round G4, L1).
     refuseUnreadableLine();
     break;
   case ScanEvent::None:
@@ -215,10 +240,21 @@ void GateApp::feedByte(uint8_t byte) {
 
 void GateApp::refuseUnreadableLine() {
   const uint32_t now = clock_.nowMs();
+  // RATE-LIMITED, AND THIS IS WHAT MAKES L1'S FEEDBACK SAFE TO GIVE. A cable
+  // running beside a switching relay coil produces holed lines by the hundred:
+  // unlimited, the lamp would strobe and, offline, the event ring would fill
+  // with noise and evict the admissions that matter. One answer per window,
+  // which is the debounce's own number — the rate a member's own repeated scans
+  // are already answered at — and what happens in between is nothing at all
+  // rather than something quieter.
+  if (unreadableAt_.remaining(now) > 0U) {
+    return;
+  }
+  unreadableAt_.arm(now, kUnreadableFeedbackMs);
   // The SAME judgement a scan makes — the radio AND the breaker. Asking about
   // the radio alone queued nothing while the host was down, which is the one
   // window in which an unreadable scan is worth knowing about.
-  const ScanDecision decision = refuseUnreadable(attempt(now) == Attempt::RosterOnly);
+  ScanDecision decision = refuseUnreadable(attempt(now) == Attempt::RosterOnly);
   const uint32_t granted = apply(decision, now);
   queue(decision, "", now, granted);
   // No token: the bytes were discarded rather than truncated, and a token cut
@@ -235,7 +271,31 @@ void GateApp::decideScan(const char* token) {
   }
 
   ScanDecision decision;
-  if (attempt(asked) == Attempt::Online) {
+  const Attempt how = attempt(asked);
+  if (unlock_.relocking(asked)) {
+    // THE LOCK HAS NOT FINISHED RELATCHING (round G4, A1). Refused here rather
+    // than asked about, on exactly the debounce's precedent above: a scan this
+    // board cannot honour is not a question for the API, and a 200 answering
+    // `opened` would put a door opening in the server's trail that did not
+    // happen. The member gets the denial blink and scans again.
+    decision = refuseRelocking(how == Attempt::RosterOnly);
+  } else if (how == Attempt::Online && scanCallFloorAt_.remaining(asked) > 0U) {
+    // THE FLOOR UNDER `/gate` CALLS (round G4, A2). The debounce bounds repeats
+    // and cannot bound a stream of tokens it has never seen — a rotating
+    // generator, or a reader pointed at a sheet of printed codes, drove a
+    // measured eighteen POSTs a second. Refused rather than answered from the
+    // roster: the roster does not know about a membership barred this morning,
+    // so letting a throttle send a scan there would be this board's own rate
+    // limiting opening a door the API would have refused.
+    //
+    // NOT QUEUED (the `false`): this branch only runs when the board is ONLINE,
+    // and the queue is for decisions the API does not already know about. The
+    // API knows nothing about this one either — but it is about this board's own
+    // throttle rather than about the member, and a ring filling with a board's
+    // notes to itself is the H1 eviction problem with a different cause.
+    decision = refuseTooFast(false);
+  } else if (how == Attempt::Online) {
+    scanCallFloorAt_.arm(asked, kMinScanCallSpacingMs);
     beforeBlocking();
     decision = api_.scan(mac_, token, unlockMs_, kGateConfig.unlockHardCapMs);
     afterBlocking();
@@ -243,9 +303,9 @@ void GateApp::decideScan(const char* token) {
     decision.fallbackToRoster = true;
   }
 
-  // A FRESH read, on BOTH branches — the online one because the call may have
-  // just spent its whole worst case, and the roster one so there is only one
-  // rule here instead of two that can drift apart.
+  // A FRESH read, on EVERY branch above — the online one because the call may
+  // have just spent its whole worst case, and the other three so there is one
+  // rule here rather than four that can drift apart.
   //
   // This instant is what the release window, the queued event and the debounce
   // are all stamped from. Reading it before the call is what made a 2.9-second
@@ -282,16 +342,31 @@ void GateApp::report(const ScanDecision& decision, const char* token, uint32_t n
   log_->decided(decision, token, grantedMs, nowMs);
 }
 
-uint32_t GateApp::apply(const ScanDecision& decision, uint32_t nowMs) {
+uint32_t GateApp::apply(ScanDecision& decision, uint32_t nowMs) {
   if (!decision.released) {
     led_.cue(LedCue::Denied, nowMs);
     return 0U;
   }
-  if (unlock_.request(nowMs, decision.unlockMs)) {
+  switch (unlock_.request(nowMs, decision.unlockMs)) {
+  case UnlockTimer::Grant::Opened:
     // The opening edge. A re-arm changes only when the door closes, and writing
     // the relay again for a door that is already open would be a click the
     // member reads as a second decision.
     lock_.set(true);
+    break;
+  case UnlockTimer::Grant::Extended:
+    break;
+  case UnlockTimer::Grant::Relocking:
+    // A1's SECOND HALF, and the one that catches the measured case. `pass()`
+    // pumps the lock out of `afterBlocking()` and applies this decision two
+    // lines later, so a window can close inside the very call that granted
+    // this — which is how a relay was measured writing OFF and ON at the same
+    // millisecond, for ever. The decision is rewritten rather than dropped:
+    // the lamp denies, the log says `relocking`, and an offline record says a
+    // scan was refused rather than that a door opened.
+    markRelocking(decision);
+    led_.cue(LedCue::Denied, nowMs);
+    return 0U;
   }
   led_.setReleased(true);
   return unlock_.remainingMs(nowMs);
@@ -317,11 +392,21 @@ void GateApp::queue(const ScanDecision& decision, const char* subject, uint32_t 
 // --- the lock, the link and the lamp ----------------------------------------
 
 void GateApp::pumpLock() {
-  if (!unlock_.tick(clock_.nowMs())) {
+  const UnlockTimer::Close closed = unlock_.tick(clock_.nowMs());
+  if (closed == UnlockTimer::Close::None) {
     return;
   }
   lock_.set(false);
   led_.setReleased(false);
+  if (closed == UnlockTimer::Close::CapForced) {
+    // A WINDOW THAT RAN THE WHOLE HARD CAP. Counted rather than queued, and
+    // that is a stated limitation rather than an oversight: the event queue has
+    // no kind for it, a new kind is a wire change needing a corpus vector and a
+    // backend that tolerates it, and this lane already carries one. What exists
+    // is this counter, the `relocking` refusals the dwell then produces — which
+    // DO reach the queue offline — and the decision log the simulator prints.
+    capForcedCloses_ = saturatingIncrement(capForcedCloses_);
+  }
 }
 
 void GateApp::pumpLink() {
@@ -371,7 +456,8 @@ bool GateApp::heartbeatReady(uint32_t nowMs) const {
   // in every scenario with a flapping radio, and therefore made the E3 bound on
   // the EVENT drain impossible to distinguish from the round-G2 code that did
   // not have it. A predicate that is always true proves nothing.
-  return heartbeatAt_.expired(nowMs) && linkUp_ && heartbeatFloorAt_.remaining(nowMs) == 0U;
+  return heartbeatAt_.expired(nowMs) && linkUp_ && heartbeatFloorAt_.remaining(nowMs) == 0U &&
+         firstCallAt_.remaining(nowMs) == 0U;
 }
 
 bool GateApp::eventDrainReady(uint32_t nowMs) const {
@@ -381,7 +467,8 @@ bool GateApp::eventDrainReady(uint32_t nowMs) const {
   //
   // THE BACKOFF IS PART OF "READY". A drain that is backed off is not waiting
   // for the pass's call and must not make a member's scan wait for one.
-  return linkUp_ && !queue_.empty() && !breaker_.open(nowMs) && eventsAt_.remaining(nowMs) == 0U;
+  return linkUp_ && !queue_.empty() && !breaker_.open(nowMs) && eventsAt_.remaining(nowMs) == 0U &&
+         firstCallAt_.remaining(nowMs) == 0U;
 }
 
 void GateApp::pumpEvents() {
@@ -403,7 +490,7 @@ void GateApp::pumpEvents() {
   }
 
   char body[devlink::kEventBodyCap];
-  if (devlink::renderEventBody(body, sizeof(body), mac_, uptime_.value(), event) == 0U) {
+  if (devlink::renderEventBody(body, sizeof(body), mac_, bootId_, uptime_.value(), event) == 0U) {
     // Unrenderable. The caps make this unreachable, but KEEPING it would pin
     // every later event behind it forever and the board would stop reporting
     // anything at all.
@@ -486,7 +573,10 @@ void GateApp::applyEventReaction(uint16_t status, const char* response) {
   switch (devapi::react(status)) {
   case devapi::Reaction::Accepted: {
     uint32_t through = 0U;
-    if (devapi::json::unsignedField(response, strlen(response), "accepted_through", through)) {
+    // TOP-LEVEL (round G4, B2). This number RELEASES RECORDS — everything at or
+    // below it leaves the ring for ever — so it is read from the object the
+    // server sent rather than from anywhere one happens to appear.
+    if (devapi::json::topLevelUnsignedField(response, strlen(response), "accepted_through", through)) {
       static_cast<void>(queue_.releaseThrough(through));
     }
     return;
@@ -521,6 +611,13 @@ void GateApp::pumpHeartbeat() {
   // fails must not be retried faster than one that succeeds — a refusing host
   // is exactly the case a flapping radio produces.
   if (heartbeatFloorAt_.remaining(now) > 0U) {
+    return;
+  }
+
+  // AND THE BOOT BACKOFF, which is the same shape of rule for a different
+  // reason: the floor bounds how often this board speaks, and this bounds how
+  // soon it speaks after the watchdog reset it. See BootRecovery.h.
+  if (firstCallAt_.remaining(now) > 0U) {
     return;
   }
 

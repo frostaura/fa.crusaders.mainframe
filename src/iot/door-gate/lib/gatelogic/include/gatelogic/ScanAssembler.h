@@ -15,7 +15,7 @@
 //   * an empty line is ignored entirely — no decision, no LED, no event
 //   * a line longer than the token cap is REFUSED, never truncated, and the
 //     rest of that line is discarded
-//   * a non-printable byte discards the whole line
+//   * a byte outside the ROSTER'S TOKEN ALPHABET discards the whole line
 //
 // WHY REFUSE RATHER THAN TRUNCATE
 // -------------------------------
@@ -23,12 +23,34 @@
 // a different token can match a different member. Twenty-one characters
 // truncated to twenty is not "nearly right", it is somebody else's booking.
 //
-// WHY A NON-PRINTABLE BYTE COSTS THE LINE
-// ---------------------------------------
+// WHY A BYTE OUTSIDE THE ALPHABET COSTS THE LINE
+// ----------------------------------------------
+// Two reasons, and the second is round G4's B1.
+//
 // It is the signature of the noise this cable actually produces. A framing
 // error inserts a byte nobody typed; carrying on with the rest of the line
 // would present the server with a token that is neither what was scanned nor
 // anything it can recognise, and would spend an API call doing it.
+//
+// And the set is `roster::isTokenChar` rather than "printable ASCII", because
+// printable ASCII includes `"` and `\`. A QR code carries whatever somebody
+// printed on it, and the token was interpolated into a JSON body with a bare
+// `%s`: `a","method":"code` is seventeen characters and re-wrote `method`;
+// `","seq":99999,"x":"` is nineteen and forged an offline batch's sequence
+// number, so the server acknowledged — and the board then discarded — every
+// genuine door entry queued behind it. The renderers escape now too, but a
+// token outside the roster's alphabet can never match anything in the roster
+// and can never be a code the server minted, so admitting one was never
+// anything but a refusal taken slowly.
+//
+// AND A DISCARDED LINE IS ANSWERED
+// --------------------------------
+// Round G4's L1. `feed` returned `None` for a corrupt line, so a member whose
+// scan met line noise got no blink, no record and nothing anybody could see —
+// while `GateApp::pumpScanner`'s comment had promised them feedback since the
+// day it was written. It returns `Corrupt` now; what the caller DOES about it
+// is rate-limited there, because a noisy cable produces these by the hundred
+// and neither the lamp nor the event ring may be driven by line noise.
 //
 // No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
 
@@ -64,6 +86,12 @@ enum class ScanEvent : uint8_t {
   /// token cap. The caller denies it exactly as it denies an unknown token —
   /// the bytes are gone and there is nothing to ask the API about.
   Refused = 2U,
+  /// A complete line that was CORRUPTED — a byte outside the roster's token
+  /// alphabet, or a UART overrun `markCorrupt()` poisoned it with. Refused for
+  /// the same reason and answered the same way; a separate value only so the
+  /// caller can rate-limit it, because line noise produces these by the
+  /// hundred and an over-long QR code does not.
+  Corrupt = 3U,
 };
 
 class ScanAssembler {

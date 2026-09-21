@@ -28,6 +28,36 @@
 // first released. Both bounds are mutation-proved; remove either and a member
 // can hold a door open indefinitely with no single request that breaks a rule.
 //
+// AND TWO BOUNDS ON THE WINDOW WERE STILL NOT A BOUND ON THE DOOR
+// ---------------------------------------------------------------
+// Round G4, finding A1, and it is the reason this file has a third concept in
+// it. Both bounds above are about ONE window. The cap closed the window and the
+// very next accepted scan opened a fresh one — legally, breaking neither bound
+// — and on a board the two happen in the SAME pass, because `GateApp::pass`
+// calls `pumpLock()` out of `afterBlocking()` and then applies the decision
+// that blocking call produced. Measured on the real simulator with two
+// alternating tokens offered every 50 ms: relay OFF at t=31034 ms and ON at
+// t=31034 ms, dark for 0 ms, then again at +42 ms and +45 ms, for ever. A
+// relay de-energised for zero milliseconds was never de-energised: the strike
+// does not drop and the maglock does not let go of its armature. The door
+// physically never relocked. One token was saved only by the debounce's phase,
+// which is a coincidence of cadence rather than a rule.
+//
+// So a close now guarantees DARK TIME, and a request inside it is REFUSED
+// rather than granted:
+//
+//   * every close — a floor (`minRelockMs`), long enough for the lock hardware
+//     to actually relatch, short enough that a second member behind the first
+//     does not notice it. Without it, two back-to-back members are one
+//     continuous opening with two audit rows.
+//   * a close the CAP forced — a real dwell (`capRelockMs`), because that close
+//     is the board overruling somebody who has held the door open for the whole
+//     cap, and the point of overruling them is that the door shuts.
+//
+// A refused request is answered, never swallowed: `request()` says `Relocking`
+// and the caller turns that into the denial blink and a recorded refusal. The
+// member scans again a moment later and comes in.
+//
 // No Arduino headers, no heap. Compiles for Xtensa and the host test runner.
 
 #ifndef CRUSADERS_GATELOGIC_UNLOCKTIMER_H
@@ -41,22 +71,59 @@ namespace gatelogic {
 
 class UnlockTimer {
 public:
-  /// `hardCapMs` bounds both a single request and the whole release window.
-  explicit UnlockTimer(uint32_t hardCapMs) : hardCapMs_(hardCapMs) {}
+  /// What a request did to the door.
+  enum class Grant : uint8_t {
+    /// The door was LOCKED and is now released — the edge the caller turns into
+    /// a relay write and an LED change.
+    Opened = 0U,
+    /// Already released. Nothing changed about the door, only about when it
+    /// closes, so there is no relay write to make.
+    Extended = 1U,
+    /// REFUSED: the lock is still relatching after a close. Not a decision
+    /// about the member — it is a decision about the hardware — and the caller
+    /// owes them the denial blink and a recorded refusal rather than silence.
+    Relocking = 2U,
+  };
 
-  /// Release the lock for `requestedMs`, or extend an existing release.
-  ///
-  /// Returns true when the door was LOCKED and is now released — the edge the
-  /// composition root turns into a relay write and an LED change. A re-arm
-  /// returns false: nothing changed about the door, only about when it closes.
-  bool request(uint32_t nowMs, uint32_t requestedMs) {
+  /// Why a release window ended.
+  enum class Close : uint8_t {
+    /// It has not.
+    None = 0U,
+    /// The granted window ran out, which is every ordinary close.
+    WindowEnded = 1U,
+    /// The HARD CAP ended it: this window had run for the whole cap. The close
+    /// that overrules somebody holding the door open, and the one that earns
+    /// the long dwell.
+    CapForced = 2U,
+  };
+
+  /// `hardCapMs` bounds both a single request and the whole release window;
+  /// `minRelockMs` is the dark time every close guarantees and `capRelockMs`
+  /// the longer one a cap-forced close guarantees. All three are required
+  /// rather than defaulted: a timer built without a dwell is a timer with A1
+  /// in it, and a default is how that gets rebuilt by accident.
+  UnlockTimer(uint32_t hardCapMs, uint32_t minRelockMs, uint32_t capRelockMs)
+      : hardCapMs_(hardCapMs), minRelockMs_(minRelockMs),
+        capRelockMs_(capRelockMs > minRelockMs ? capRelockMs : minRelockMs) {}
+
+  /// Release the lock for `requestedMs`, or extend an existing release, or
+  /// refuse because the lock has not finished relatching.
+  Grant request(uint32_t nowMs, uint32_t requestedMs) {
     const uint32_t bounded = requestedMs > hardCapMs_ ? hardCapMs_ : requestedMs;
 
     if (!released_) {
+      if (relocking(nowMs)) {
+        // THE ONE ANSWER THAT IS NOT ABOUT THE MEMBER. See the header: a relay
+        // written OFF and ON in one pass is a lock that was never de-energised,
+        // and the pass that closes a window is very often the same pass that
+        // applies the decision the blocking call inside it produced.
+        return Grant::Relocking;
+      }
       released_ = true;
       openedAtMs_ = nowMs;
       until_.arm(nowMs, bounded);
-      return true;
+      relockUntil_.disarm();
+      return Grant::Opened;
     }
 
     // Already released. Never shorter than what is left, and never later than
@@ -69,19 +136,35 @@ public:
       extend = capLeft;
     }
     until_.arm(nowMs, extend);
-    return false;
+    return Grant::Extended;
   }
 
-  /// Advance the window. Returns true on the released -> locked edge, exactly
-  /// once, so the caller can write the relay and queue nothing twice.
-  bool tick(uint32_t nowMs) {
+  /// Advance the window. Answers on the released -> locked edge, exactly once,
+  /// so the caller can write the relay and record nothing twice — and says
+  /// WHICH bound ended it, because the two earn different dark times.
+  Close tick(uint32_t nowMs) {
     if (!released_ || !until_.expired(nowMs)) {
-      return false;
+      return Close::None;
     }
+    // THE CAP ENDED IT when this window has run for the whole cap. Computed
+    // from the window's own start rather than remembered from the last re-arm,
+    // because a window can reach the cap without any re-arm at all — a single
+    // answer asking for the full thirty seconds — and a door open for thirty
+    // seconds owes the same dwell however it got there.
+    const bool capForced = tb::since(nowMs, openedAtMs_) >= hardCapMs_;
     released_ = false;
     until_.disarm();
-    return true;
+    relockUntil_.arm(nowMs, capForced ? capRelockMs_ : minRelockMs_);
+    return capForced ? Close::CapForced : Close::WindowEnded;
   }
+
+  /// True while the lock is relatching and no grant may energise the relay.
+  /// False whenever the door is released — a dwell is about a CLOSED door.
+  bool relocking(uint32_t nowMs) const { return !released_ && relockUntil_.remaining(nowMs) > 0U; }
+
+  /// Milliseconds left of the dwell, for the console and the tests. Zero when
+  /// the lock is free to open.
+  uint32_t relockingForMs(uint32_t nowMs) const { return released_ ? 0U : relockUntil_.remaining(nowMs); }
 
   bool released() const { return released_; }
 
@@ -93,7 +176,13 @@ public:
 
 private:
   uint32_t hardCapMs_;
+  uint32_t minRelockMs_;
+  uint32_t capRelockMs_;
   tb::Deadline until_;
+  /// When the lock may next be energised. Armed by every close, disarmed by the
+  /// open that follows it. A Deadline rather than a sentinel instant for the
+  /// reason the whole of timebase exists: every uint32_t is a legal millis().
+  tb::Deadline relockUntil_;
   /// When THIS release window began. A separate field rather than "the deadline
   /// minus the duration", because the duration changes on every re-arm and the
   /// cap has to be measured from the start of the window, not from the last

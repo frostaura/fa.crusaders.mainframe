@@ -10,18 +10,28 @@
 //     from the day it was written, and for as long as that sentence stood
 //     `overflowed()` was read by NOTHING anywhere in the repository. The DOOR
 //     GATE reads it now and sends the since-boot total as `events_lost` in its
-//     heartbeat request, where an admin can see it on the device row. The COURT
-//     BOX does not: its heartbeat's wire shape has no such field, nothing
-//     consumes the counter, and an overflow there is visible only to a debugger
-//     — so on that device this remains a silent loss, stated rather than
-//     implied. Adding the field to the court box is a wire change and is not
-//     one this class may make on its own.
-//   * At-least-once, NOT at-most-once. The API deduplicates on (device, seq).
-//     A queue that dropped an event to avoid a duplicate would be trading a
-//     charge the club can reverse for a game it never learns about.
-//   * A sequence number is never reused, across reboots included. That is what
-//     the deduplication rests on, and it is the one thing here that is
-//     persisted.
+//     heartbeat request. The COURT BOX does not: its heartbeat's wire shape has
+//     no such field, nothing consumes the counter, and an overflow there is
+//     visible only to a debugger — so on that device this remains a silent
+//     loss, stated rather than implied. Adding the field to the court box is a
+//     wire change and is not one this class may make on its own.
+//
+//     WHERE `events_lost` ACTUALLY GOES, SAID PROPERLY. This header used to say
+//     "where an admin can see it on the device row", and that was not true: the
+//     server LOGS the counter against the device code and stores nothing — the
+//     gate corpus's own vector says so in as many words, because a column would
+//     be an EF migration for a diagnostic. So it reaches a server LOG and the
+//     native simulator's transcript, and no console anywhere shows it. Surfacing
+//     it is worth doing and belongs to whoever owns the admin console; from here
+//     it is owed, not done.
+//   * At-least-once, NOT at-most-once. The API deduplicates on
+//     (device, boot_id, seq). A queue that dropped an event to avoid a duplicate
+//     would be trading a charge the club can reverse for a game it never learns
+//     about.
+//   * A sequence number is never reused WITHIN A BOOT, and a REBOOT is made
+//     distinguishable rather than made impossible — see the boot identity note
+//     below. The checkpointed high-water mark is a best-effort optimisation
+//     now, not the thing deduplication rests on.
 //
 // WHAT IT DOES NOT GUARANTEE, SAID PLAINLY
 // ----------------------------------------
@@ -72,29 +82,75 @@
 // justified after the fact, when a mutation test showed no test could tell
 // whether it was there.
 //
-// WHY OLDEST-FIRST OVERWRITE
-// --------------------------
-// When the ring is full something has to give. The choice is between refusing
-// the new event and discarding the oldest, and the tie is broken by what each
-// costs: the oldest event is the one most likely to have already been uploaded
-// on a link that came back mid-drain, while the newest is the game happening
-// right now with a member standing on the court. So the oldest goes, and
-// `overflowed()` says so — a club that sees that counter move knows it lost
-// history and can go and ask why the box was offline for two days.
+// WHAT GOES WHEN THE RING IS FULL
+// -------------------------------
+// Something has to. Refusing the new event is the wrong answer, and the tie is
+// broken by what each choice costs: an old event is the one most likely to have
+// already been uploaded on a link that came back mid-drain, while the newest is
+// the game happening right now with a member standing on the court.
+//
+// BUT "OLDEST" ALONE WAS THE WRONG RULE, AND THAT WAS ROUND G4's H1. A ring
+// fills only while the board is OFFLINE — online it drains a pass at a time —
+// and offline is exactly when every refusal costs a slot. A code taped near a
+// door, a member re-presenting a dead one, or line noise: each an
+// `unknown_scan`, each evicting the oldest event, which on a busy evening is a
+// `gate_open`. The one record nobody else has — somebody came in — was thrown
+// away to keep a record of somebody who did not.
+//
+// So the oldest DISCARDABLE event goes first (`eventq::isDiscardable`, which is
+// where the per-kind reasoning lives), and an admission is evicted only when
+// the ring holds nothing else. Order among the survivors is preserved: a drain
+// that handed the server an evening out of order would be one nobody could
+// reconcile.
+//
+// `overflowed()` counts EVERY discarded event, whichever kind it was — a club
+// that sees that counter move knows it lost history and can go and ask why the
+// box was offline for two days, and a counter that quietly excused the losses
+// it had decided were cheap would be worth nothing.
 //
 // WHY THE SEQUENCE NUMBER PERSISTS AND THE QUEUE'S CONTENTS NEED NOT
 // ------------------------------------------------------------------
-// `seq` is the idempotency key, and the API enforces it with a PERMANENT unique
-// index on (tenant, device, seq): a number seen before is silently receipted as
-// a duplicate, forever, not merely for a while. So a box that restarted its
-// numbering at 1 after a power cut would have every event up to its old
-// high-water discarded as a duplicate — and under charge-at-booking that is the
-// no-show sweep refunding-and-penalising members who actually played.
+// `seq` is part of the idempotency key, and the API enforces it with a
+// PERMANENT unique index: a number seen before is silently receipted as a
+// duplicate, forever, not merely for a while. So a box that restarted its
+// numbering at 1 would have every event up to its old high-water discarded as a
+// duplicate — and under charge-at-booking that is the no-show sweep
+// refunding-and-penalising members who actually played.
 //
 // It is therefore checkpointed to the store in blocks — see
 // kSeqCheckpointStride — rather than on every push, which would wear the flash
 // out. A reboot resumes from the checkpoint, which is at or AHEAD of the true
 // last value: skipping sequence numbers is free, reusing one is a lost event.
+//
+// AND THE CHECKPOINT WAS THE WHOLE DEFENCE, WHICH IS ROUND G4's C2
+// -----------------------------------------------------------------
+// This file was resting a permanent server-side index on ONE record in flash,
+// and calling it a guarantee. It is not one: a reflash, a wiped NVS partition,
+// a torn write, or a board whose store simply does not come up, and `begin()`
+// reads an absent mark, starts at 1 — correctly, because refusing to start
+// would brick a door over a bookkeeping detail — and the server then discards
+// the WHOLE of the next evening as duplicates. Including the `boot` event this
+// queue exists to make an unexplained gap explainable with. The board sees a
+// clean 200 covering everything it sent and releases its ring, so the evidence
+// is gone from both ends and nothing anywhere says so.
+//
+// The key is (device, boot_id, seq) now. `boot_id` is a per-boot random 32-bit
+// value the COMPOSITION ROOT supplies — `esp_random()` on the board, the clock
+// and the pid in the simulator — and it rides at the top of the upload body
+// beside the MAC. A renumbered board collides with nothing; a genuine retry
+// still carries the same three fields and is still deduplicated; and two boards
+// that end up sharing a MAC stop deduping each other's evidence away.
+//
+// It also changes what this checkpoint IS. It is no longer the thing
+// correctness rests on — it is an optimisation that keeps the numbers in a long
+// run monotonic, and losing it now costs a gap rather than an evening. That is
+// a smaller promise honestly kept, rather than a large one that was not.
+//
+// ZERO MEANS "NO BOOT IDENTITY", and the server reads an absent field the same
+// way, which is exactly what (device, seq) always meant. The COURT BOX passes
+// zero and its wire body is byte-for-byte what it has always been — so this
+// defect is still open on that device, and closing it there is a wire change to
+// the http/ corpus family rather than something this file can do.
 //
 // THIS IS THE ONLY THING THE BRIDGE PERSISTS. The device credential, the WiFi
 // details and the API base URL are compiled into the image as of firmware
@@ -218,7 +274,18 @@ public:
   uint32_t lastSeq() const { return nextSeq_ - 1U; }
 
 private:
+  /// No slot in the ring holds a discardable event.
+  static constexpr uint16_t kNoVictim = 0xFFFFU;
+
   void reserveSequenceBlock(uint32_t upTo);
+
+  /// The offset from `head_` of the oldest event the ring may evict, or
+  /// kNoVictim. See `eventq::isDiscardable`.
+  uint16_t oldestDiscardable() const;
+
+  /// Removes the event at `offset` from the head, counts the loss, and closes
+  /// the gap without reordering what is left.
+  void evictAt(uint16_t offset);
 
   hal::IStore* store_;
   Event ring_[Slots];
@@ -269,6 +336,36 @@ template <uint16_t Slots> void EventQueue<Slots>::reserveSequenceBlock(uint32_t 
   detail::storeSeqMark(store_, reservedThrough_);
 }
 
+template <uint16_t Slots> uint16_t EventQueue<Slots>::oldestDiscardable() const {
+  for (uint16_t offset = 0U; offset < count_; ++offset) {
+    if (isDiscardable(ring_[static_cast<uint16_t>((head_ + offset) % Slots)].kind)) {
+      return offset;
+    }
+  }
+  return kNoVictim;
+}
+
+template <uint16_t Slots> void EventQueue<Slots>::evictAt(uint16_t offset) {
+  ++overflowed_;
+  if (offset == 0U) {
+    // The head, which is the old behaviour and the common one — a ring of
+    // nothing but refusals evicts its oldest every time. No copying.
+    head_ = static_cast<uint16_t>((head_ + 1U) % Slots);
+    --count_;
+    return;
+  }
+  // A slot in the middle. Everything after it moves down one, so the SURVIVORS
+  // stay in the order they happened in — a drain that handed the server an
+  // evening out of order would be a drain nobody could reconcile. At most
+  // Slots-1 copies of a 48-byte record, on a path that only runs while a board
+  // is offline with a full ring.
+  for (uint16_t i = offset; i + 1U < count_; ++i) {
+    ring_[static_cast<uint16_t>((head_ + i) % Slots)] =
+        ring_[static_cast<uint16_t>((head_ + i + 1U) % Slots)];
+  }
+  --count_;
+}
+
 template <uint16_t Slots> PushResult EventQueue<Slots>::push(Event& event) {
   if (event.subjectLen > kMaxSubjectLen) {
     return PushResult::Rejected;
@@ -279,19 +376,18 @@ template <uint16_t Slots> PushResult EventQueue<Slots>::push(Event& event) {
   reserveSequenceBlock(event.seq);
 
   bool overwrote = false;
-  uint16_t slot;
   if (count_ == Slots) {
-    // Full: the oldest goes. head_ advances, count_ stays at Slots.
-    slot = head_;
-    head_ = static_cast<uint16_t>((head_ + 1U) % Slots);
-    ++overflowed_;
+    // FULL. WHAT GOES IS DECIDED BY WHAT IT IS, then by age — see
+    // `eventq::isDiscardable` for why, and round G4's H1 for what deciding by
+    // age alone cost. The oldest refusal goes first; an admission is evicted
+    // only when the ring holds nothing else.
+    const uint16_t victim = oldestDiscardable();
+    evictAt(victim == kNoVictim ? 0U : victim);
     overwrote = true;
-  } else {
-    slot = static_cast<uint16_t>((head_ + count_) % Slots);
-    ++count_;
   }
 
-  ring_[slot] = event;
+  ring_[static_cast<uint16_t>((head_ + count_) % Slots)] = event;
+  ++count_;
 
   return overwrote ? PushResult::OkOverwrote : PushResult::Ok;
 }

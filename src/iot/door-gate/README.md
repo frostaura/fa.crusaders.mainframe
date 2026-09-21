@@ -46,7 +46,9 @@ so the headers still compile with no build system at all.
 | `GATE_UNLOCK_ENERGISES_RELAY` | 1 | **the lock's wiring**: 1 if an energised coil *releases* the lock |
 | `GATE_LED_PIN` / `GATE_LED_ACTIVE_HIGH` | 27 / 1 | the lamp and its polarity |
 | `GATE_UNLOCK_DEFAULT_MS` | 3000 | release time until the first heartbeat |
-| `GATE_UNLOCK_HARD_CAP_MS` | 30000 | the lock can never stay released longer |
+| `GATE_UNLOCK_HARD_CAP_MS` | 30000 | the longest ONE release window may last. On its own this is not a bound on the DOOR — see *the hard cap is a bound on a window* below |
+| `GATE_RELOCK_DWELL_MS` | 3000 | after a window the hard cap ended, the lock stays locked for at least this long and no grant may energise the relay inside it |
+| `GATE_MIN_RELOCK_MS` | 400 | the same, after ANY close: the floor that makes sure the lock is actually de-energised between two windows |
 | `GATE_MAX_TOKEN_LEN` | 20 | `= roster::kMaxTokenLen`, asserted |
 | `GATE_WATCHDOG_SECONDS` | 15 | task watchdog period; **asserted** to exceed one worst-case HTTP call. Was 12, when a call was two phases rather than three. |
 | `HEARTBEAT_INTERVAL_MS` | 30000 | starting cadence; the tenant's is adopted |
@@ -329,6 +331,70 @@ there is no way to interrupt `POST()` from here. A peer that dribbles headers
 can hold one call past the bound. That case is the **watchdog's**, deliberately,
 and it is why the watchdog exists rather than being belt and braces.
 
+**So the board's true worst case is the watchdog's number, not the budgets'**
+(round G4, A3). Against a peer that dribbles headers the call is unbounded by
+anything in `GateConfig.h`; what ends it is `GATE_WATCHDOG_SECONDS`, which
+resets the part. A door released for the full cap when that happens stays
+released for the cap, plus up to the watchdog period, plus the boot that follows
+— and the boot is what actually takes the lock back, because `beginOutputs()`
+writes the LOCKED level into the output register before the pin ever drives.
+With this image's numbers:
+
+| | against a slow-but-answering peer | against a peer that dribbles headers |
+|---|---|---|
+| one blocking call | 12 000 ms | unbounded; ends at the watchdog |
+| physical release, 30 s grant | **42 010 ms** | **≈ 45 500 ms** (30 000 + 15 000 + boot) |
+
+Both are true, of different peers, and **the larger one is the number to plan a
+door around**. Giving the whole call one absolute deadline would collapse the
+second into the first and is not available: the ESP32 core exposes no way to
+abort a `POST()` in flight. The native simulator's `SocketHttpPort` bounds its
+own header read, so the measured figures above are the three-budget case and the
+simulator **cannot** reproduce the watchdog one — said here rather than left for
+somebody to find by comparing a transcript against a board.
+
+### The hard cap is a bound on a window; two dwells make it a bound on the door
+
+Round G4, finding A1. `GATE_UNLOCK_HARD_CAP_MS` bounds one release *window* two
+ways — no single answer may ask for more, and no sequence of re-arms may push a
+deadline past the cap measured from the moment the door first opened. Both held.
+Neither bounded the **door**, because the cap closed the window and the very
+next accepted scan opened a fresh one, legally.
+
+On a board the two happen in the *same pass*: `pass()` calls `pumpLock()` out of
+`afterBlocking()` and applies the decision that blocking call produced two lines
+later. Measured against the compiled simulator with two alternating tokens
+offered every 50 ms — which defeats the single-slot debounce — the relay went
+**OFF at t=31034 ms and ON at t=31034 ms**, dark for **0 ms**, then again at
++42 ms and +45 ms, for ever. A relay de-energised for zero milliseconds was
+never de-energised: the strike does not drop and the maglock keeps its armature.
+The door physically never relocked, and no single request broke any rule. One
+token alone was saved only by the debounce's *phase*, which is a coincidence of
+cadence rather than a rule.
+
+So a close now guarantees dark time, and a grant inside it is **refused**:
+
+| | after | for | because |
+|---|---|---|---|
+| `GATE_MIN_RELOCK_MS` | any close | 400 ms | long enough for a strike to drop or a maglock to re-magnetise, short enough that a second member behind the first does not notice it |
+| `GATE_RELOCK_DWELL_MS` | a close the **cap** forced | 3000 ms | that close is the board overruling somebody who has held the door open for the whole cap, and the point of overruling them is that the door shuts. It is `GATE_UNLOCK_DEFAULT_MS`: the door is shut for at least as long as an ordinary grant holds it open |
+
+A refused scan is **answered, never swallowed**: the lamp gives the denial cue,
+the decision carries the reason `relocking`, and offline it is queued as an
+`unknown_scan` — never as a `gate_open` for a door that did not move. It is
+refused **before the API is asked**, on the debounce's own precedent, so the
+server never writes an `opened` row for an opening that did not happen and the
+pass is not spent on a question whose answer cannot be acted on.
+
+**What is NOT on the wire, said plainly.** A window the cap ended increments
+`GateApp::capForcedCloses()`, which reaches the native simulator's `status` line
+and the host suite and **nothing else**. There is no event kind for it and no
+heartbeat field; both are wire changes needing a corpus vector and a backend
+that tolerates them. The `relocking` refusals the dwell then produces *do* reach
+the queue when the board is offline, so an evening of somebody holding a door
+open is not invisible — but the cap itself is not a number an admin can read.
+Putting it on the wire is owed.
+
 **The release window is timed from after the call that granted it**, on every
 branch. It was timed from before, which made a 2.9-second round trip on a
 three-second grant a 100-millisecond relay pulse: the door did not open, and the
@@ -465,6 +531,17 @@ wrapping, because the API binds them as a signed 64-bit value and silently
 ignores a negative or oversized one. Both are **omitted at zero**, so a healthy
 board's request stays byte-identical to the contract corpus's vector.
 
+**Where they actually go, and it is not the device row.** The server *logs* both
+against the device code and stores neither — a column would be an EF migration
+for a diagnostic, and the gate corpus's own vector says so. So they reach a
+server log and the native simulator's transcript, and **no console anywhere
+shows them**. That is still better than a counter nothing reads, which is what
+`events_lost` was until round G3; it is not what this section used to claim.
+Surfacing them belongs to whoever owns the admin console. The same is true of
+`GateApp::capForcedCloses()` — the count of release windows the hard cap ended,
+which is new in round G4 and reaches the simulator's `status` line and nothing
+else.
+
 **A refusal while the door is already released shows nothing**, and that is
 intended: solid outranks the three blinks, so the second member of a pair —
 refused while the first one's window is still open — sees a steady lamp. The door
@@ -555,7 +632,19 @@ are in [`test/`](test/) and run by `make test-iot`.
 | The framing comes from Content-Length and Transfer-Encoding | `test_body_the_framing_comes_from_content_length_and_transfer_encoding` |
 | A body over the cap is refused, never truncated | `test_body_a_body_over_the_cap_is_refused_rather_than_truncated` |
 | A dribbling peer is cut off at the body phase's own deadline | `test_body_a_dribbling_peer_is_bounded_by_the_body_budget` |
-| Only a whole body keeps the server's status | `test_body_only_a_whole_body_keeps_the_servers_status` |
+| A FAILURE status survives a body that did not arrive; a 2xx does not | `test_body_a_failure_status_survives_a_body_that_did_not`, `test_app_a_403_whose_body_did_not_fit_still_takes_the_board_out_of_service` |
+| The uptime an offline record goes up with is one the server can read, at every clock base | `test_app_an_offline_record_is_stamped_with_an_uptime_the_server_can_read`, `test_uptime64_low_bits_are_millis_at_every_seed`, `test_widen_cannot_underflow_when_the_stamp_is_ahead_of_the_batch` |
+| The hard cap bounds the DOOR and not only a window, with two alternating tokens and one, at every base | `test_unlock_a_capped_window_is_followed_by_real_dark_time`, `test_app_two_alternating_tokens_cannot_hold_the_door_open_for_ever` |
+| Every close leaves the lock genuinely de-energised, including one that closes inside the call that granted the next scan | `test_unlock_any_close_guarantees_the_lock_actually_relatches`, `test_app_a_window_that_closes_inside_the_call_that_granted_the_next_one` |
+| A scan inside the dwell is refused, without asking the API and without recording an opening | `test_app_a_scan_inside_the_relock_dwell_never_reaches_the_api`, `test_app_a_scan_inside_the_relock_dwell_costs_no_call_and_records_no_opening`, and `test/e2e-device`'s `DS4b` |
+| No scanned line can forge a field in either body, fuzzed | `test_render_no_scanned_line_can_forge_a_field_in_the_scan_body`, `test_render_no_scanned_subject_can_forge_a_field_in_the_event_body`, `test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it` |
+| A line is held to the roster's own token alphabet, exhaustively over every byte | `test_scan_refuses_every_byte_outside_the_rosters_token_alphabet` |
+| A corrupt line is ANSWERED, and line noise can neither strobe the lamp nor fill the ring | `test_app_a_corrupt_line_gives_the_member_an_answer`, `test_app_line_noise_cannot_strobe_the_lamp_or_fill_the_ring` |
+| `opened`, `reason` and `unlock_seconds` are read from the TOP-LEVEL object only | `test_gate_response_reads_only_the_top_level_object`, `test_gate_response_takes_its_duration_and_reason_from_the_top_level_too`, `test_top_level_readers_see_only_the_outermost_objects_members` |
+| A full ring evicts refusals before admissions, keeps the order of what survives, and counts every loss | `test_queue_a_full_ring_evicts_refusals_before_it_evicts_admissions`, `test_queue_eviction_keeps_the_order_of_what_it_keeps`, `test_only_the_kinds_that_cost_nothing_to_lose_are_discardable` |
+| Every batch names the boot it came from, so a renumbered board is not deduped away | `test_app_every_uploaded_batch_carries_this_boots_identity`, `test_app_two_boots_that_both_start_at_seq_one_are_told_apart`, and the API's `A_board_that_renumbered_after_a_torn_sequence_mark_is_not_deduped_away` |
+| Alternating tokens cannot hammer `/gate`, and a rate-limited scan is never answered from the roster | `test_app_alternating_tokens_cannot_hammer_the_gate_endpoint`, `test_debounce_remembers_several_tokens_and_still_never_delays_a_new_one`, `test_app_a_rate_limited_scan_is_refused_rather_than_decided_from_the_roster` |
+| A board the watchdog reset holds its first call back, and a healthy boot waits for nothing | `test_boot_recovery_backs_off_only_after_a_watchdog_reset`, `test_app_a_board_the_watchdog_reset_holds_its_first_call_back` |
 | `no_push` and `events_lost` are sent only when there are some, and saturate | `test_heartbeat_body_carries_its_counters_only_when_there_are_some` |
 | A heartbeat whose body never arrived counts as a no-push | `test_app_a_heartbeat_whose_body_never_arrived_counts_as_a_no_push` |
 | Events the ring discarded reach the next heartbeat | `test_app_events_the_ring_discarded_are_reported_in_the_next_heartbeat` |

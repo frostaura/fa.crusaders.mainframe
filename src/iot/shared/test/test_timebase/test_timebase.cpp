@@ -159,11 +159,14 @@ void test_uptime64_accumulates_across_the_wrap(void) {
   tb::Uptime64 up;
   up.seed(0xFFFFF000U);
 
-  TEST_ASSERT_EQUAL_UINT64(0U, up.value());
-  TEST_ASSERT_EQUAL_UINT64(0x800U, up.tick(0xFFFFF800U));
+  // SEEDED AT THE CLOCK'S OWN READING, not at zero. See the class comment: the
+  // accumulator's low 32 bits are millis(), always, because tb::widen and every
+  // event stamp depend on exactly that.
+  TEST_ASSERT_EQUAL_UINT64(0xFFFFF000ULL, up.value());
+  TEST_ASSERT_EQUAL_UINT64(0xFFFFF800ULL, up.tick(0xFFFFF800U));
 
   // Cross the wrap: 0xFFFFF800 -> 0x00000800 is 0x1000 ms.
-  TEST_ASSERT_EQUAL_UINT64(0x1800U, up.tick(0x00000800U));
+  TEST_ASSERT_EQUAL_UINT64(0x100000800ULL, up.tick(0x00000800U));
 
   // A full 49.7-day lap adds 2^32 ms and stays monotonic.
   const uint64_t before = up.value();
@@ -171,6 +174,38 @@ void test_uptime64_accumulates_across_the_wrap(void) {
   up.tick(0x00000800U);
   TEST_ASSERT_TRUE(up.value() > before);
   TEST_ASSERT_EQUAL_UINT64(before + 0x100000000ULL, up.value());
+}
+
+void test_uptime64_low_bits_are_millis_at_every_seed(void) {
+  // G4 / C1. `seed()` used to set `last_` and leave `acc_` at zero, so on any
+  // board whose millis() was not zero at begin() the accumulator ran R ms
+  // BEHIND the clock every event is stamped from — and tb::widen, which assumes
+  // low32(now64) == millis(), then underflowed to ~1.8e19 for any event
+  // uploaded less than R ms after it was stamped. On the ESP32 R is the Arduino
+  // core's init plus Serial.begin, NVS, the UART driver and WiFi.begin: hundreds
+  // of milliseconds, every boot, on every board in the field.
+  //
+  // The INVARIANT, pinned here rather than the arithmetic that follows from it:
+  // the accumulator's low 32 bits equal the raw millis() reading, at the seed
+  // and after every tick, at every base including the wrap.
+  static const uint32_t bases[] = {0U, 1U, 5000U, 1234567U, 0x7FFFFFFFU, 0xFFFFF000U, 0xFFFFFFFFU};
+  for (size_t i = 0U; i < sizeof(bases) / sizeof(bases[0]); ++i) {
+    const uint32_t base = bases[i];
+    tb::Uptime64 up;
+    up.seed(base);
+    TEST_ASSERT_EQUAL_HEX32(base, static_cast<uint32_t>(up.value() & 0xFFFFFFFFULL));
+
+    uint32_t raw = base;
+    for (int step = 0; step < 5; ++step) {
+      raw += 0x30000000U;
+      const uint64_t wide = up.tick(raw);
+      TEST_ASSERT_EQUAL_HEX32(raw, static_cast<uint32_t>(wide & 0xFFFFFFFFULL));
+      // And what the wire carries is still the true elapsed time plus the seed:
+      // uptime INCLUDES the milliseconds before begin() ran, which is truthful —
+      // the part was powered for them.
+      TEST_ASSERT_TRUE(wide >= static_cast<uint64_t>(base));
+    }
+  }
 }
 
 void test_uptime64_is_monotonic_over_many_laps(void) {
@@ -221,6 +256,33 @@ void test_widen_puts_a_32_bit_stamp_back_on_the_right_side_of_the_wrap() {
   }
 }
 
+void test_widen_cannot_underflow_when_the_stamp_is_ahead_of_the_batch() {
+  // G4 / C1's second half. `now64 - back` is unsigned, so a stamp whose low 32
+  // bits are AHEAD of now64's produced ~1.8e19 — a number the server binds as a
+  // `long` and refuses with a 400, which the drain then reads as "a 4xx the
+  // board caused" and DROPS the record. The seeding fix above makes the state
+  // unreachable; this makes the arithmetic incapable of it either way, because
+  // one defence that can be removed by an unrelated edit is not a defence.
+  //
+  // There is no honest answer when `back > now64`: the largest v <= now64 with
+  // low32(v) == stamp is negative, and the next candidate up is later than now.
+  // So it clamps to now64 — "no earlier than this batch", an age of zero, which
+  // is what the SERVER does with an unbelievable stamp anyway and is the one
+  // answer that can never overflow its column.
+  TEST_ASSERT_EQUAL_UINT64(0ULL, tb::widen(0ULL, 1U));
+  TEST_ASSERT_EQUAL_UINT64(1000ULL, tb::widen(1000ULL, 5000U));
+  TEST_ASSERT_EQUAL_UINT64(5000ULL, tb::widen(5000ULL, 0xFFFFFFFFU));
+
+  // Exhaustively, around the boundary: whatever the stamp, the answer is never
+  // greater than now64 and never wraps past it.
+  for (uint64_t now = 0ULL; now < 8ULL; ++now) {
+    for (uint32_t stamp = 0U; stamp < 8U; ++stamp) {
+      const uint64_t wide = tb::widen(now, stamp);
+      TEST_ASSERT_TRUE(wide <= now);
+    }
+  }
+}
+
 void test_format_u64_renders_every_digit_or_refuses() {
   char out[24] = {};
   TEST_ASSERT_EQUAL_size_t(1U, tb::formatU64(0ULL, out, sizeof(out)));
@@ -264,8 +326,10 @@ int main(int, char**) {
   RUN_TEST(test_deadline_remaining_saturates_and_is_wrap_correct);
   RUN_TEST(test_deadline_rearm_extends_from_now);
   RUN_TEST(test_uptime64_accumulates_across_the_wrap);
+  RUN_TEST(test_uptime64_low_bits_are_millis_at_every_seed);
   RUN_TEST(test_uptime64_is_monotonic_over_many_laps);
   RUN_TEST(test_widen_puts_a_32_bit_stamp_back_on_the_right_side_of_the_wrap);
+  RUN_TEST(test_widen_cannot_underflow_when_the_stamp_is_ahead_of_the_batch);
   RUN_TEST(test_format_u64_renders_every_digit_or_refuses);
   return UNITY_END();
 }

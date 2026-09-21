@@ -19,29 +19,55 @@ bool sameToken(const char* a, const char* b) {
 } // namespace
 
 bool ScanDebounce::suppresses(const char* token, uint32_t nowMs) const {
-  if (!seen_ || token == nullptr || token[0] == '\0') {
+  if (token == nullptr || token[0] == '\0') {
     return false;
   }
-  if (!sameToken(last_, token)) {
-    return false;
+  for (uint8_t i = 0U; i < kDebounceSlots; ++i) {
+    const Slot& slot = slots_[i];
+    // tb::since, not subtraction: the window has to survive the 49.7-day wrap,
+    // and a gate in a cupboard runs for months.
+    if (slot.seen && sameToken(slot.token, token) && tb::since(nowMs, slot.decidedAtMs) < windowMs_) {
+      return true;
+    }
   }
-  // tb::since, not subtraction: the window has to survive the 49.7-day wrap,
-  // and a gate in a cupboard runs for months.
-  return tb::since(nowMs, decidedAtMs_) < windowMs_;
+  return false;
 }
 
 void ScanDebounce::decided(const char* token, uint32_t nowMs) {
   if (token == nullptr) {
     return;
   }
+  // A TOKEN ALREADY HELD IS RE-STAMPED IN PLACE rather than taking a second
+  // slot. Without that, a member holding one phone at the reader for a minute
+  // would walk their own token through every slot and push the other members'
+  // out — which is the single-slot defect with more steps.
+  uint8_t at = next_;
+  for (uint8_t i = 0U; i < kDebounceSlots; ++i) {
+    if (slots_[i].seen && sameToken(slots_[i].token, token)) {
+      at = i;
+      break;
+    }
+  }
+
+  Slot& slot = slots_[at];
   size_t i = 0U;
   while (i < roster::kMaxTokenLen && token[i] != '\0') {
-    last_[i] = token[i];
+    slot.token[i] = token[i];
     ++i;
   }
-  last_[i] = '\0';
-  decidedAtMs_ = nowMs;
-  seen_ = true;
+  slot.token[i] = '\0';
+  slot.decidedAtMs = nowMs;
+  slot.seen = true;
+  if (at == next_) {
+    next_ = static_cast<uint8_t>((next_ + 1U) % kDebounceSlots);
+  }
+}
+
+void ScanDebounce::reset() {
+  for (uint8_t i = 0U; i < kDebounceSlots; ++i) {
+    slots_[i].seen = false;
+  }
+  next_ = 0U;
 }
 
 } // namespace gatelogic

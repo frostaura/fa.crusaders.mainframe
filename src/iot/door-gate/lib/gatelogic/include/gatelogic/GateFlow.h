@@ -85,8 +85,13 @@ static_assert(text::length(kPathHeartbeat) <= kMaxPathLen && text::length(kPathG
               "a device path is longer than kMaxPathLen, which sizes the URL buffer");
 
 /// The smallest buffer renderScanBody is ever given: three keys, a 12-hex MAC
-/// and a token bounded by roster::kMaxTokenLen.
-inline constexpr size_t kScanBodyCap = 96U;
+/// and a token bounded by roster::kMaxTokenLen — ESCAPED, which is up to six
+/// bytes per character (round G4, B1). 20 x 6 = 120 for the token alone.
+///
+/// The assembler refuses bytes outside the roster's alphabet now, so nothing a
+/// real scan produces expands at all; the budget is here because the renderer
+/// must be safe against its caller rather than because of it.
+inline constexpr size_t kScanBodyCap = 192U;
 
 /// The longest `reason` the contract defines is `method_not_supported` (21).
 inline constexpr size_t kMaxReasonLen = 24U;
@@ -112,7 +117,22 @@ inline constexpr char kReasonRosterStale[] = "roster_stale";
 /// because the server sends no body it could read one out of.
 inline constexpr char kReasonOutOfService[] = "out_of_service";
 
-static_assert(text::length(kReasonOutOfService) <= kMaxReasonLen,
+/// THE LOCK HAS NOT FINISHED RELATCHING. The one refusal here that is not about
+/// the member at all — see UnlockTimer.h and round G4's A1. It is a distinct
+/// word rather than `not_recognised` because a desk reading a trail full of
+/// these is reading "somebody is holding this door open", which is a different
+/// conversation from "somebody's code does not work".
+inline constexpr char kReasonRelocking[] = "relocking";
+
+/// THIS BOARD IS BEING ASKED FASTER THAN IT WILL ASK THE SERVER. The other
+/// refusal that is not about the member — see `kMinScanCallSpacingMs` and round
+/// G4's A2. Distinct from `relocking` because they say different things to a
+/// desk: one is a door being held open, this is a door being hammered.
+inline constexpr char kReasonTooFast[] = "too_fast";
+
+static_assert(text::length(kReasonOutOfService) <= kMaxReasonLen &&
+                  text::length(kReasonRelocking) <= kMaxReasonLen &&
+                  text::length(kReasonTooFast) <= kMaxReasonLen,
               "a reason longer than the buffer reads as an empty reason at the door");
 
 /// Whether to ask the API at all.
@@ -206,6 +226,41 @@ ScanDecision fromRoster(const roster::Decision& decision, uint32_t adoptedUnlock
 /// about the radio queued nothing while the host was down, which is the one
 /// window in which an unreadable scan is worth knowing about.
 ScanDecision refuseUnreadable(bool offline);
+
+/// A scan this board cannot honour because its own lock is still relatching.
+///
+/// Round G4's A1. Refused BEFORE the API is asked, on exactly the debounce's
+/// precedent — "not a decision, not an API call, not an audit row, and not a
+/// re-armed lock" — for two reasons. A 200 answering `opened` would put a door
+/// opening in the server's audit trail that did not happen, which is a worse
+/// record than none; and spending a whole blocking call to be told yes about a
+/// door that cannot open is spending the pass on nothing.
+///
+/// `offline` decides only whether the refusal is QUEUED, on the same rule as
+/// every other refusal the board decides for itself: while the API can be
+/// reached it can see for itself that nothing was asked.
+ScanDecision refuseRelocking(bool offline);
+
+/// A scan refused because this board will not ask the server again yet.
+///
+/// Round G4's A2. The debounce bounds REPEATS and cannot bound a stream of
+/// tokens it has never seen; this is the bound that does not care what the
+/// token is. Refused rather than answered from the ROSTER, deliberately: the
+/// roster does not know about a membership barred this morning, so answering a
+/// rate-limited scan from it would be this board's own throttle opening a door
+/// the API would have refused. A refusal is recoverable — the scanner repeats
+/// while a code is presented — and the other direction is not.
+ScanDecision refuseTooFast(bool offline);
+
+/// Rewrites a decision that wanted the door open into the relocking refusal.
+///
+/// The second half of A1's fix, and not redundant with the first: the pass that
+/// CLOSES a window is very often the same pass that applies the decision a
+/// blocking call inside it produced (`afterBlocking()` pumps the lock, and the
+/// decision lands two lines later), so a scan can be decided before the dwell
+/// exists and applied after it does. A decision left saying `released` would
+/// queue a `gate_open` for a door that never moved.
+void markRelocking(ScanDecision& decision);
 
 } // namespace gatelogic
 

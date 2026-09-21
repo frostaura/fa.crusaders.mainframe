@@ -335,7 +335,13 @@ public class MainframeDbContext : DbContext
             // response to is normal traffic, and a check-then-insert loses to two retries
             // arriving together — both find nothing and both write. This makes the duplicate
             // impossible rather than unlikely.
-            e.HasIndex(r => new { r.TenantId, r.DeviceId, r.Seq }).IsUnique();
+            //
+            // BOOT_ID IS PART OF IT, and see DeviceEventReceipt.BootId for why: without it a
+            // board whose sequence checkpoint was erased renumbered from 1 and had its whole
+            // next evening discarded as duplicates, against an index that is permanent.
+            // Absent on the wire means 0, which reproduces the old key exactly, so a court
+            // box and every pre-change gate image are unaffected.
+            e.HasIndex(r => new { r.TenantId, r.DeviceId, r.BootId, r.Seq }).IsUnique();
 
             // The lookup a `release` event makes: the last activation this box lit on this
             // relay. Without it, pairing a release to its session is a table scan on every

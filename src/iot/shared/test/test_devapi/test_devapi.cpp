@@ -486,6 +486,84 @@ void test_is_complete_object_reads_only_the_length_it_is_given() {
 
 } // namespace
 
+/// G4 / B2. The top-level family reads ONE object's own members and nothing
+/// nested inside them — including when the decoy comes FIRST, which is the
+/// ordering a flat scan actually loses to.
+void test_top_level_readers_see_only_the_outermost_objects_members() {
+  bool flag = false;
+  uint32_t number = 0U;
+  char text[32] = {};
+  size_t innerLen = 0U;
+
+  // The plain case: both families agree when there is nothing to disagree about.
+  const char* plain = "{\"opened\":true,\"unlock_seconds\":3,\"reason\":\"ok\"}";
+  TEST_ASSERT_TRUE(devapi::json::topLevelBoolField(plain, strlen(plain), "opened", flag));
+  TEST_ASSERT_TRUE(flag);
+  TEST_ASSERT_TRUE(devapi::json::topLevelUnsignedField(plain, strlen(plain), "unlock_seconds", number));
+  TEST_ASSERT_EQUAL_UINT32(3U, number);
+  TEST_ASSERT_TRUE(devapi::json::topLevelStringField(plain, strlen(plain), "reason", text, sizeof(text)));
+  TEST_ASSERT_EQUAL_STRING("ok", text);
+
+  // A NESTED key is absent, in both orders and through both container kinds.
+  const char* nestedAfter = "{\"a\":1,\"outer\":{\"opened\":true}}";
+  const char* nestedFirst = "{\"outer\":{\"opened\":true},\"a\":1}";
+  const char* inAnArray = "{\"rows\":[{\"opened\":true}],\"a\":1}";
+  const char* topLevelArray = "[{\"opened\":true}]";
+  const char* bodies[] = {nestedAfter, nestedFirst, inAnArray, topLevelArray};
+  for (size_t i = 0U; i < sizeof(bodies) / sizeof(bodies[0]); ++i) {
+    flag = false;
+    TEST_ASSERT_FALSE_MESSAGE(devapi::json::topLevelBoolField(bodies[i], strlen(bodies[i]), "opened", flag),
+                              bodies[i]);
+    // And the FLAT family still finds it, which is what the court box depends
+    // on and is why both exist.
+    if (bodies[i] != topLevelArray) {
+      flag = false;
+      TEST_ASSERT_TRUE_MESSAGE(devapi::json::boolField(bodies[i], strlen(bodies[i]), "opened", flag),
+                               bodies[i]);
+    }
+  }
+
+  // A TOP-LEVEL FALSE BEATS A NESTED TRUE, whichever comes first.
+  const char* refusalWithDecoy = "{\"detail\":{\"opened\":true},\"opened\":false}";
+  flag = true;
+  TEST_ASSERT_TRUE(
+      devapi::json::topLevelBoolField(refusalWithDecoy, strlen(refusalWithDecoy), "opened", flag));
+  TEST_ASSERT_FALSE(flag);
+
+  // A decoy STRING VALUE that spells the key is not a key.
+  const char* decoyValue = "{\"reason\":\"opened\",\"opened\":true}";
+  flag = false;
+  TEST_ASSERT_TRUE(devapi::json::topLevelBoolField(decoyValue, strlen(decoyValue), "opened", flag));
+  TEST_ASSERT_TRUE(flag);
+
+  // Escapes and braces inside a value cannot put the member walk out of phase.
+  const char* hostile = "{\"note\":\"a\\\"b{\\\"opened\\\":true}\",\"opened\":false}";
+  flag = true;
+  TEST_ASSERT_TRUE(devapi::json::topLevelBoolField(hostile, strlen(hostile), "opened", flag));
+  TEST_ASSERT_FALSE(flag);
+
+  // The object and array finders are scoped the same way.
+  const char* objects = "{\"meta\":{\"gate\":{\"unlock_seconds\":30}},\"gate\":{\"unlock_seconds\":3}}";
+  const size_t at = devapi::json::findTopLevelObject(objects, strlen(objects), "gate", innerLen);
+  TEST_ASSERT_TRUE(at != devapi::json::kNotFound);
+  number = 0U;
+  TEST_ASSERT_TRUE(devapi::json::unsignedField(objects + at, innerLen, "unlock_seconds", number));
+  TEST_ASSERT_EQUAL_UINT32(3U, number);
+
+  const char* arrays = "{\"meta\":{\"roster\":[\"DECOY|0|0|9\"]},\"roster\":[\"REAL|0|0|9\"]}";
+  size_t element = devapi::json::findTopLevelArray(arrays, strlen(arrays), "roster");
+  TEST_ASSERT_TRUE(element != devapi::json::kNotFound);
+  TEST_ASSERT_TRUE(devapi::json::nextStringElement(arrays, strlen(arrays), element, text, sizeof(text)));
+  TEST_ASSERT_EQUAL_STRING("REAL|0|0|9", text);
+
+  // A body that is not one object at all yields nothing, rather than guessing.
+  const char* notAnObject = "\"opened\":true";
+  flag = false;
+  TEST_ASSERT_FALSE(devapi::json::topLevelBoolField(notAnObject, strlen(notAnObject), "opened", flag));
+  TEST_ASSERT_TRUE(devapi::json::findTopLevelKey(nullptr, 0U, "opened") == devapi::json::kNotFound);
+  TEST_ASSERT_TRUE(devapi::json::findTopLevelKey(plain, strlen(plain), "") == devapi::json::kNotFound);
+}
+
 void setUp() {
 }
 
@@ -526,6 +604,7 @@ int main(int, char**) {
   RUN_TEST(test_is_complete_object_refuses_a_closer_that_does_not_match_its_opener);
   RUN_TEST(test_is_complete_object_refuses_nesting_it_cannot_track);
   RUN_TEST(test_is_complete_object_reads_only_the_length_it_is_given);
+  RUN_TEST(test_top_level_readers_see_only_the_outermost_objects_members);
 
   return UNITY_END();
 }

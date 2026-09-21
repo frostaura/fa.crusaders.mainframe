@@ -9,15 +9,32 @@ bool isTrimmable(uint8_t byte) {
   return byte == static_cast<uint8_t>(' ') || byte == static_cast<uint8_t>('\t');
 }
 
-/// What may go into the line at all: printable ASCII, plus the horizontal tab.
+/// What may go into the line at all: the ROSTER'S OWN TOKEN ALPHABET, plus the
+/// two bytes that exist only to be trimmed.
 ///
-/// The tab is admitted so that it can be TRIMMED. Some scanner modules are
-/// configured with a tab suffix, and a tab arriving as corruption rather than
-/// as whitespace would cost a member their scan for a reason nobody could see.
-/// Everything else — NUL, the other control bytes, DEL, and the high half a
-/// framing error produces — costs the line.
+/// IT USED TO BE EVERY PRINTABLE BYTE, AND THAT WAS ROUND G4'S B1. A QR code
+/// carries whatever somebody printed on it, and `"` and `\` were both admitted:
+/// `a","method":"code` is seventeen characters and re-wrote the `method` field
+/// of the JSON body the token was interpolated into; `","seq":99999,"x":"` is
+/// nineteen and, scanned at a door that was offline, forged the batch's
+/// sequence number so the server acknowledged — and the board then discarded —
+/// every genuine entry queued behind it.
+///
+/// The renderers escape now as well, and that is the layer that makes the body
+/// safe. This is the layer that makes the DECISION safe, and it rests on a
+/// plainer fact: `roster::isTokenChar` is the set a roster token can be made
+/// of, so a line with a byte outside it can never match anything in the roster
+/// and can never be a code the server minted. Admitting one only ever spends a
+/// blocking call to be told no, or writes bytes into an audit trail that nobody
+/// scanned. It is a refusal — and, since round G4's L1, a refusal the member is
+/// actually told about rather than one that happens in silence.
+///
+/// The space and the tab are admitted so that they can be TRIMMED. Some scanner
+/// modules are configured with a tab or space suffix, and one arriving as
+/// corruption rather than as whitespace would cost a member their scan for a
+/// reason nobody could see.
 bool isAccepted(uint8_t byte) {
-  return (byte >= 0x20U && byte < 0x7FU) || byte == static_cast<uint8_t>('\t');
+  return roster::isTokenChar(static_cast<char>(byte)) || isTrimmable(byte);
 }
 
 } // namespace
@@ -61,7 +78,14 @@ ScanEvent ScanAssembler::feed(uint8_t byte) {
   // empties, so reading through it afterwards reads what reset just wrote.
   ScanEvent result = ScanEvent::None;
   if (corrupt_) {
-    result = ScanEvent::None;
+    // ANSWERED, NOT SWALLOWED (round G4, L1). `GateApp::pumpScanner` has
+    // promised the member feedback on a holed line since it was written and
+    // this used to return None, so a scan that met line noise — or, since B1
+    // above, a byte outside the roster's alphabet — produced no blink, no
+    // record and nothing anybody could see. A member stood at a door that gave
+    // them nothing. The caller rate-limits what it does about it, so line
+    // noise cannot strobe the lamp or fill the ring.
+    result = ScanEvent::Corrupt;
   } else if (overflow_) {
     result = ScanEvent::Refused;
   } else {

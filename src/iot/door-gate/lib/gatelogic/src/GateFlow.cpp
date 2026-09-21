@@ -1,6 +1,7 @@
 #include "gatelogic/GateFlow.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "devapi/Json.h"
 #include "gatelogic/GateHeartbeat.h"
@@ -39,7 +40,20 @@ size_t renderScanBody(char* out, size_t cap, const char* mac, const char* token)
     return 0U;
   }
 
-  const int written = snprintf(out, cap, "{\"mac\":\"%s\",\"method\":\"qr\",\"token\":\"%s\"}", mac, token);
+  // ESCAPED, NOT INTERPOLATED (round G4, B1). These bytes came off a scanner
+  // and a QR code is whatever somebody printed on it; a bare `%s` let a
+  // seventeen-character code re-write `method` and a twenty-one-character one
+  // re-write `mac`. The assembler refuses bytes outside the roster's alphabet
+  // now as well, and that is the layer that stops a forged token being asked
+  // about at all — but a renderer that is only safe because of what its caller
+  // happens to feed it is a renderer one refactor away from being unsafe.
+  char safeToken[roster::kMaxTokenLen * devapi::json::kMaxEscapeExpansion + 1U] = {};
+  if (!devapi::json::escapeInto(token, strlen(token), safeToken, sizeof(safeToken))) {
+    return 0U;
+  }
+
+  const int written =
+      snprintf(out, cap, "{\"mac\":\"%s\",\"method\":\"qr\",\"token\":\"%s\"}", mac, safeToken);
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     out[0] = '\0';
     return 0U;
@@ -80,8 +94,16 @@ ScanDecision onGateResponse(uint16_t status, const char* body, size_t len, uint3
     return decision;
   }
 
+  // THE TOP LEVEL, AND NOTHING NESTED INSIDE IT (round G4, B2). `boolField` is
+  // a flat any-depth scan — the court box depends on that for `button_map` in
+  // the heartbeat's nested `config` — and it was reading the one field that
+  // drives a lock. `{"outer":{"opened":true}}` released it, `[{"opened":true}]`
+  // released it, and `{"opened":false,"detail":{"opened":true}}` released it
+  // even though its top-level answer is a refusal, because the flat scan takes
+  // the FIRST match in document order. The same scoping `adoptUnlockMs` has
+  // always applied to `unlock_seconds`, applied to all three of these.
   bool opened = false;
-  if (!devapi::json::boolField(body, len, "opened", opened)) {
+  if (!devapi::json::topLevelBoolField(body, len, "opened", opened)) {
     // A 200 whose body is truncated, empty, or shaped differently from the
     // contract. It is not a refusal — nobody said no — so it is an outage with
     // a 200 on it, and the roster gets its turn.
@@ -89,7 +111,7 @@ ScanDecision onGateResponse(uint16_t status, const char* body, size_t len, uint3
     return decision;
   }
 
-  if (!devapi::json::stringField(body, len, "reason", decision.reason, sizeof(decision.reason))) {
+  if (!devapi::json::topLevelStringField(body, len, "reason", decision.reason, sizeof(decision.reason))) {
     // The flag is the decision; the reason is commentary. A 200 that opens the
     // door with no readable reason still opens the door.
     decision.reason[0] = '\0';
@@ -103,7 +125,7 @@ ScanDecision onGateResponse(uint16_t status, const char* body, size_t len, uint3
 
   uint32_t seconds = 0U;
   decision.released = true;
-  decision.unlockMs = devapi::json::unsignedField(body, len, "unlock_seconds", seconds)
+  decision.unlockMs = devapi::json::topLevelUnsignedField(body, len, "unlock_seconds", seconds)
                           ? unlockMsFromSeconds(seconds, hardCapMs)
                           : clampUnlockMs(adoptedUnlockMs, hardCapMs);
   return decision;
@@ -163,6 +185,32 @@ ScanDecision refuseUnreadable(bool offline) {
   decision.queueEvent = offline;
   decision.eventKind = eventq::Kind::UnknownScan;
   return decision;
+}
+
+ScanDecision refuseRelocking(bool offline) {
+  ScanDecision decision;
+  setReason(decision, kReasonRelocking);
+  decision.queueEvent = offline;
+  decision.eventKind = eventq::Kind::UnknownScan;
+  return decision;
+}
+
+ScanDecision refuseTooFast(bool offline) {
+  ScanDecision decision;
+  setReason(decision, kReasonTooFast);
+  decision.queueEvent = offline;
+  decision.eventKind = eventq::Kind::UnknownScan;
+  return decision;
+}
+
+void markRelocking(ScanDecision& decision) {
+  decision.released = false;
+  decision.unlockMs = 0U;
+  // The RECORD changes too, not just the lamp. An event still saying `gate_open`
+  // would be this board reporting an opening it refused, which is the one thing
+  // an audit trail must never contain.
+  decision.eventKind = eventq::Kind::UnknownScan;
+  setReason(decision, kReasonRelocking);
 }
 
 } // namespace gatelogic

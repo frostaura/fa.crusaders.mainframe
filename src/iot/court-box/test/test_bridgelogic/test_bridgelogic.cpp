@@ -1198,7 +1198,7 @@ void test_corpus_events_body_is_byte_identical_to_the_contract() {
 
   char rendered[devlink::kEventBodyCap] = {};
   const size_t renderedLen =
-      devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), 0x100000000ULL + 20000ULL, event);
+      devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), 0U, 0x100000000ULL + 20000ULL, event);
   TEST_ASSERT_EQUAL_size_t(n, renderedLen);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
   TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);

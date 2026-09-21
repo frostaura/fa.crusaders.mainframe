@@ -30,14 +30,18 @@
 #include <string.h>
 #include <unity.h>
 
+#include <new>
+
 #include "hal/PinLevel.h"
 
 #include "devlink/ApiBreaker.h"
+#include "devlink/EventUpload.h"
 #include "devlink/RosterSync.h"
 #include "eventq/Event.h"
 #include "fakes/FakeClock.h"
 #include "fakes/FakeStore.h"
 #include "gatelogic/ApiBaseUrl.h"
+#include "gatelogic/BootRecovery.h"
 #include "gatelogic/GateApi.h"
 #include "gatelogic/GateApp.h"
 #include "gatelogic/GateConfig.h"
@@ -65,6 +69,8 @@ constexpr uint32_t kBases[] = {kBaseZero, kBaseMid, kBaseWrapSoon, kBaseWrapNow}
 constexpr size_t kBaseCount = sizeof(kBases) / sizeof(kBases[0]);
 
 constexpr uint32_t kCapMs = gatelogic::kGateConfig.unlockHardCapMs;
+constexpr uint32_t kDwellMs = gatelogic::kGateConfig.relockDwellMs;
+constexpr uint32_t kMinRelockMs = gatelogic::kGateConfig.minRelockMs;
 constexpr uint32_t kDefaultMs = gatelogic::kGateConfig.unlockDefaultMs;
 
 using Cache = roster::Roster<gatelogic::kGateRosterEntries>;
@@ -295,21 +301,29 @@ void test_lock_set_drives_the_level_its_wiring_calls_for() {
 // UnlockTimer — the release window and its two bounds
 // ---------------------------------------------------------------------------
 
+/// A timer wired the way the board wires it, so a test can never accidentally
+/// build one without the dwells that make the hard cap a bound on the DOOR.
+gatelogic::UnlockTimer boardTimer() {
+  return gatelogic::UnlockTimer(kCapMs, kMinRelockMs, kDwellMs);
+}
+
 void test_unlock_opens_once_and_closes_once_at_every_clock_base() {
   for (size_t b = 0U; b < kBaseCount; ++b) {
     const uint32_t base = kBases[b];
-    gatelogic::UnlockTimer timer(kCapMs);
+    gatelogic::UnlockTimer timer = boardTimer();
 
-    TEST_ASSERT_TRUE_MESSAGE(timer.request(base, 3000U), "the first request is the opening edge");
+    TEST_ASSERT_TRUE_MESSAGE(timer.request(base, 3000U) == gatelogic::UnlockTimer::Grant::Opened,
+                             "the first request is the opening edge");
     TEST_ASSERT_TRUE(timer.released());
-    TEST_ASSERT_FALSE(timer.tick(base + 2999U));
+    TEST_ASSERT_TRUE(timer.tick(base + 2999U) == gatelogic::UnlockTimer::Close::None);
     TEST_ASSERT_TRUE(timer.released());
 
-    TEST_ASSERT_TRUE_MESSAGE(timer.tick(base + 3000U), "the deadline is the closing edge");
+    TEST_ASSERT_TRUE_MESSAGE(timer.tick(base + 3000U) == gatelogic::UnlockTimer::Close::WindowEnded,
+                             "the deadline is the closing edge");
     TEST_ASSERT_FALSE(timer.released());
     // Exactly once. A second edge would queue a second event and write the
     // relay again for a door that is already shut.
-    TEST_ASSERT_FALSE(timer.tick(base + 3001U));
+    TEST_ASSERT_TRUE(timer.tick(base + 3001U) == gatelogic::UnlockTimer::Close::None);
   }
 }
 
@@ -321,19 +335,20 @@ void test_unlock_opens_once_and_closes_once_at_every_clock_base() {
 void test_unlock_a_re_arm_never_shortens_the_window() {
   for (size_t b = 0U; b < kBaseCount; ++b) {
     const uint32_t base = kBases[b];
-    gatelogic::UnlockTimer timer(kCapMs);
+    gatelogic::UnlockTimer timer = boardTimer();
 
     static_cast<void>(timer.request(base, 10000U));
     // A shorter grant, one second in. 9 s are left; a 1 s grant must not win.
-    TEST_ASSERT_FALSE_MESSAGE(timer.request(base + 1000U, 1000U), "a re-arm is not an opening edge");
+    TEST_ASSERT_TRUE_MESSAGE(timer.request(base + 1000U, 1000U) == gatelogic::UnlockTimer::Grant::Extended,
+                             "a re-arm is not an opening edge");
     TEST_ASSERT_EQUAL_UINT32(9000U, timer.remainingMs(base + 1000U));
-    TEST_ASSERT_FALSE(timer.tick(base + 9999U));
-    TEST_ASSERT_TRUE(timer.tick(base + 10000U));
+    TEST_ASSERT_TRUE(timer.tick(base + 9999U) == gatelogic::UnlockTimer::Close::None);
+    TEST_ASSERT_TRUE(timer.tick(base + 10000U) == gatelogic::UnlockTimer::Close::WindowEnded);
 
     // A LONGER grant does extend.
-    gatelogic::UnlockTimer other(kCapMs);
+    gatelogic::UnlockTimer other = boardTimer();
     static_cast<void>(other.request(base, 3000U));
-    TEST_ASSERT_FALSE(other.request(base + 1000U, 5000U));
+    TEST_ASSERT_TRUE(other.request(base + 1000U, 5000U) == gatelogic::UnlockTimer::Grant::Extended);
     TEST_ASSERT_EQUAL_UINT32(5000U, other.remainingMs(base + 1000U));
   }
 }
@@ -349,16 +364,16 @@ void test_unlock_the_hard_cap_bounds_both_one_answer_and_the_whole_window() {
   for (size_t b = 0U; b < kBaseCount; ++b) {
     const uint32_t base = kBases[b];
 
-    gatelogic::UnlockTimer single(kCapMs);
+    gatelogic::UnlockTimer single = boardTimer();
     static_cast<void>(single.request(base, 600000U)); // ten minutes, asked for once
     TEST_ASSERT_EQUAL_UINT32(kCapMs, single.remainingMs(base));
-    TEST_ASSERT_TRUE(single.tick(base + kCapMs));
+    TEST_ASSERT_TRUE(single.tick(base + kCapMs) == gatelogic::UnlockTimer::Close::CapForced);
 
-    gatelogic::UnlockTimer repeated(kCapMs);
+    gatelogic::UnlockTimer repeated = boardTimer();
     static_cast<void>(repeated.request(base, 3000U));
     // Somebody scanning every two seconds, forever.
     for (uint32_t t = 2000U; t <= 120000U; t += 2000U) {
-      if (repeated.tick(base + t)) {
+      if (repeated.tick(base + t) != gatelogic::UnlockTimer::Close::None) {
         break;
       }
       static_cast<void>(repeated.request(base + t, 3000U));
@@ -370,8 +385,136 @@ void test_unlock_the_hard_cap_bounds_both_one_answer_and_the_whole_window() {
   }
 }
 
+/// G4 / A1, CRITICAL, AND THE TEST ABOVE IS WHY IT SURVIVED THREE ROUNDS.
+///
+/// That test `break`s at the first close, so all it can ever prove is that ONE
+/// window shuts. The cap is a bound on a WINDOW, and the very next accepted scan
+/// opens a fresh one — legally. Measured on the real simulator with two
+/// alternating tokens every 50 ms: relay OFF at t=31034 ms and ON at t=31034 ms,
+/// dark for 0 ms, then +42 ms, then +45 ms, for ever. The door physically never
+/// relocked and no single request broke any rule.
+///
+/// So this one KEEPS SCANNING past the cap, for two minutes of simulated time,
+/// at every clock base and at both cadences the finder used — the one-token one
+/// that the debounce's phase happened to save, and the two-token one it does
+/// not. What it measures is the thing that matters to a lock: DARK TIME.
+void test_unlock_a_capped_window_is_followed_by_real_dark_time() {
+  struct Row {
+    const char* label;
+    uint32_t everyMs; ///< how often a decision is offered
+  };
+
+  const Row rows[] = {
+      {"a decision every pass — two alternating tokens, no debounce", 10U},
+      {"a decision every 2010 ms — one token, at the debounce's own cadence", 2010U},
+  };
+
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    for (const Row& row : rows) {
+      gatelogic::UnlockTimer timer = boardTimer();
+      static_cast<void>(timer.request(kBases[b], 3000U));
+
+      uint32_t releasedFor = 0U;     ///< longest continuous released stretch
+      uint32_t darkAfterCap = 0U;    ///< dark time following the FIRST capped close
+      uint32_t openedAt = kBases[b]; ///< start of the current released stretch
+      uint32_t closedAt = 0U;
+      bool capped = false;
+      bool reopenedAfterCap = false;
+
+      for (uint32_t t = 10U; t <= 120000U; t += 10U) {
+        const uint32_t now = kBases[b] + t;
+        // THE BOARD'S OWN ORDER: `pass()` pumps the lock — including out of
+        // `afterBlocking()`, inside the very call that decided the scan — and
+        // then applies the decision. Any other order here would be testing a
+        // loop this firmware does not have.
+        const gatelogic::UnlockTimer::Close closed = timer.tick(now);
+        if (closed != gatelogic::UnlockTimer::Close::None) {
+          closedAt = now;
+          const uint32_t held = tb::since(now, openedAt);
+          if (held > releasedFor) {
+            releasedFor = held;
+          }
+          if (closed == gatelogic::UnlockTimer::Close::CapForced && !capped) {
+            capped = true;
+          }
+        }
+        if ((t % row.everyMs) < 10U) {
+          const gatelogic::UnlockTimer::Grant grant = timer.request(now, 3000U);
+          if (grant == gatelogic::UnlockTimer::Grant::Opened) {
+            openedAt = now;
+            if (capped && !reopenedAfterCap) {
+              reopenedAfterCap = true;
+              darkAfterCap = tb::since(now, closedAt);
+            }
+          }
+        }
+      }
+
+      char message[224] = {};
+      snprintf(message, sizeof(message), "base %lu, %s: longest release %lu ms, dark after the cap %lu ms",
+               static_cast<unsigned long>(kBases[b]), row.label, static_cast<unsigned long>(releasedFor),
+               static_cast<unsigned long>(darkAfterCap));
+
+      TEST_ASSERT_TRUE_MESSAGE(capped, message);
+      // THE BOUND ON THE WINDOW, which held before this round and still does.
+      TEST_ASSERT_TRUE_MESSAGE(releasedFor <= kCapMs, message);
+      // THE BOUND ON THE DOOR, which did not exist. A relay written OFF and ON
+      // at the same millisecond is a lock that was never de-energised: the
+      // strike does not drop and the maglock keeps its armature.
+      TEST_ASSERT_TRUE_MESSAGE(reopenedAfterCap, message);
+      TEST_ASSERT_TRUE_MESSAGE(darkAfterCap >= kDwellMs, message);
+    }
+  }
+}
+
+/// G4 / A1's other half: EVERY close owes dark time, not only a capped one.
+///
+/// `pass()` calls `pumpLock()` out of `afterBlocking()` and applies the
+/// decision that blocking call produced two lines later, so an ordinary
+/// three-second window can close in the same pass that an API-approved scan
+/// re-opens it. Two back-to-back members would be one continuous opening with
+/// two audit rows and a lock that never moved.
+void test_unlock_any_close_guarantees_the_lock_actually_relatches() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    const uint32_t base = kBases[b];
+    gatelogic::UnlockTimer timer = boardTimer();
+
+    static_cast<void>(timer.request(base, 3000U));
+    TEST_ASSERT_TRUE(timer.tick(base + 3000U) == gatelogic::UnlockTimer::Close::WindowEnded);
+
+    // The same millisecond, which is the measured case.
+    TEST_ASSERT_TRUE_MESSAGE(timer.request(base + 3000U, 3000U) == gatelogic::UnlockTimer::Grant::Relocking,
+                             "a relay written OFF and ON at one instant was never de-energised");
+    TEST_ASSERT_FALSE(timer.released());
+    TEST_ASSERT_TRUE(timer.relocking(base + 3000U));
+    TEST_ASSERT_EQUAL_UINT32(kMinRelockMs, timer.relockingForMs(base + 3000U));
+
+    // One millisecond short of the floor is still refused...
+    TEST_ASSERT_TRUE(timer.request(base + 3000U + kMinRelockMs - 1U, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Relocking);
+    // ...and at the floor the member comes in.
+    TEST_ASSERT_TRUE(timer.request(base + 3000U + kMinRelockMs, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Opened);
+    TEST_ASSERT_TRUE(timer.released());
+    TEST_ASSERT_FALSE_MESSAGE(timer.relocking(base + 3000U + kMinRelockMs),
+                              "a dwell is about a CLOSED door and must not survive the open");
+
+    // AND THE FLOOR IS NOT THE DWELL. A capped close owes the longer one, so
+    // the two constants cannot be collapsed into one by a later edit without
+    // this going red.
+    gatelogic::UnlockTimer capped = boardTimer();
+    static_cast<void>(capped.request(base, kCapMs));
+    TEST_ASSERT_TRUE(capped.tick(base + kCapMs) == gatelogic::UnlockTimer::Close::CapForced);
+    TEST_ASSERT_EQUAL_UINT32(kDwellMs, capped.relockingForMs(base + kCapMs));
+    TEST_ASSERT_TRUE(capped.request(base + kCapMs + kDwellMs - 1U, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Relocking);
+    TEST_ASSERT_TRUE(capped.request(base + kCapMs + kDwellMs, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Opened);
+  }
+}
+
 void test_unlock_reports_how_long_it_has_been_released() {
-  gatelogic::UnlockTimer timer(kCapMs);
+  gatelogic::UnlockTimer timer = boardTimer();
   static_cast<void>(timer.request(kBaseWrapSoon, 3000U));
   TEST_ASSERT_EQUAL_UINT32(0U, timer.releasedForMs(kBaseWrapSoon));
   // Across the wrap: 0xFFFFF000 + 0x2000 has wrapped to 0x1000.
@@ -383,6 +526,34 @@ void test_unlock_reports_how_long_it_has_been_released() {
 // ---------------------------------------------------------------------------
 // ScanAssembler — bytes into one token, or into nothing
 // ---------------------------------------------------------------------------
+
+/// Quotes that actually delimit a JSON string: a `"` not preceded by an odd
+/// number of backslashes. The one structural fact a forged field has to break.
+size_t unescapedQuotes(const char* body) {
+  size_t count = 0U;
+  size_t slashes = 0U;
+  for (size_t i = 0U; body[i] != '\0'; ++i) {
+    if (body[i] == '\\') {
+      ++slashes;
+      continue;
+    }
+    if (body[i] == '"' && (slashes % 2U) == 0U) {
+      ++count;
+    }
+    slashes = 0U;
+  }
+  return count;
+}
+
+size_t occurrences(const char* haystack, const char* needle) {
+  size_t count = 0U;
+  const char* at = haystack;
+  while ((at = strstr(at, needle)) != nullptr) {
+    ++count;
+    at += strlen(needle);
+  }
+  return count;
+}
 
 void test_scan_assembles_a_line_and_treats_crlf_as_one_terminator() {
   gatelogic::ScanAssembler assembler;
@@ -437,7 +608,10 @@ void test_scan_a_non_printable_byte_discards_the_whole_line() {
 
   TEST_ASSERT_TRUE(feedLine(assembler, "GOOD") == gatelogic::ScanEvent::None);
   TEST_ASSERT_TRUE(assembler.feed(0x00U) == gatelogic::ScanEvent::None);
-  TEST_ASSERT_TRUE(feedLine(assembler, "TOKEN\n") == gatelogic::ScanEvent::None);
+  // CORRUPT, NOT NONE (round G4, L1). The line is still discarded — nothing is
+  // handed up and no token is offered — but the caller is told, so the member
+  // standing there gets the denial blink instead of silence.
+  TEST_ASSERT_TRUE(feedLine(assembler, "TOKEN\n") == gatelogic::ScanEvent::Corrupt);
 
   // And the next line is unaffected.
   TEST_ASSERT_TRUE(feedLine(assembler, "CLEAN1\n") == gatelogic::ScanEvent::Token);
@@ -446,7 +620,155 @@ void test_scan_a_non_printable_byte_discards_the_whole_line() {
   // A high byte from a framing error costs the line too.
   TEST_ASSERT_TRUE(feedLine(assembler, "AB") == gatelogic::ScanEvent::None);
   TEST_ASSERT_TRUE(assembler.feed(0xFEU) == gatelogic::ScanEvent::None);
-  TEST_ASSERT_TRUE(feedLine(assembler, "CD\n") == gatelogic::ScanEvent::None);
+  TEST_ASSERT_TRUE(feedLine(assembler, "CD\n") == gatelogic::ScanEvent::Corrupt);
+}
+
+/// G4 / B1. THE LINE IS HELD TO THE ROSTER'S OWN ALPHABET, not to "printable".
+///
+/// Printable ASCII includes `"` and `\`, and the token was interpolated into a
+/// JSON body with a bare `%s`. A token outside `roster::isTokenChar` can never
+/// match anything in the roster and can never be a code the server minted, so
+/// admitting one was only ever a refusal taken slowly — by way of a blocking
+/// call, or of bytes written into an audit trail that nobody scanned.
+void test_scan_refuses_every_byte_outside_the_rosters_token_alphabet() {
+  // Exhaustive over the whole byte range, which is the only way to be sure the
+  // set the SCANNER admits is the set the ROSTER can hold.
+  for (unsigned value = 0U; value < 256U; ++value) {
+    const uint8_t byte = static_cast<uint8_t>(value);
+    if (gatelogic::isLineTerminator(byte)) {
+      continue;
+    }
+    gatelogic::ScanAssembler assembler;
+    static_cast<void>(assembler.feed(static_cast<uint8_t>('A')));
+    static_cast<void>(assembler.feed(byte));
+    const gatelogic::ScanEvent result = assembler.feed(static_cast<uint8_t>('\n'));
+
+    char message[96] = {};
+    snprintf(message, sizeof(message), "byte 0x%02X in a line", value);
+    const bool trimmable = byte == static_cast<uint8_t>(' ') || byte == static_cast<uint8_t>('\t');
+    if (roster::isTokenChar(static_cast<char>(byte)) || trimmable) {
+      TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::ScanEvent::Token, message);
+    } else {
+      TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::ScanEvent::Corrupt, message);
+    }
+  }
+
+  // The two that matter most, named so a reader does not have to derive them:
+  // these are the bytes B1's forged bodies were made of.
+  gatelogic::ScanAssembler assembler;
+  TEST_ASSERT_TRUE(feedLine(assembler, "a\",\"method\":\"code\n") == gatelogic::ScanEvent::Corrupt);
+  TEST_ASSERT_TRUE(feedLine(assembler, "a\\\n") == gatelogic::ScanEvent::Corrupt);
+  // And the roster's own grammar still gets through whole.
+  TEST_ASSERT_TRUE(feedLine(assembler, "7Q3F9KM2XZ8B\n") == gatelogic::ScanEvent::Token);
+  TEST_ASSERT_EQUAL_STRING("7Q3F9KM2XZ8B", assembler.token());
+  TEST_ASSERT_TRUE(feedLine(assembler, "a-b_C9\n") == gatelogic::ScanEvent::Token);
+  TEST_ASSERT_EQUAL_STRING("a-b_C9", assembler.token());
+}
+
+/// G4 / B1, CRITICAL. A QR CODE COULD FORGE THE FIELDS AROUND IT.
+///
+/// `renderScanBody` interpolated the scanned bytes with a bare `%s`, and the
+/// assembler admitted every printable byte including `"` and `\`. Twenty
+/// characters is enough: `a","method":"code` re-writes `method`, and the
+/// assembler's own cap is the only thing that ever refused one.
+///
+/// FUZZED rather than enumerated, because the property is "no byte sequence
+/// ever leaves the string" and a list of five is a list of the five somebody
+/// thought of. Every line the ASSEMBLER accepts is rendered and the result is
+/// checked against the one structural fact that matters: the body has exactly
+/// as many unescaped quotes as its own fixed shape.
+void test_render_no_scanned_line_can_forge_a_field_in_the_scan_body() {
+  // The alphabet a hostile QR can be made of: the JSON metacharacters, a
+  // backslash, and enough ordinary bytes that a sequence looks like a token.
+  static const char kAlphabet[] = "\"\\\\:,{}[]abAB01-_ \t";
+  const size_t alphabetLen = sizeof(kAlphabet) - 1U;
+
+  uint32_t state = 0x13579BDFU;
+  for (int iteration = 0; iteration < 20000; ++iteration) {
+    char line[roster::kMaxTokenLen + 2U] = {};
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    const size_t length = 1U + (state % roster::kMaxTokenLen);
+    for (size_t i = 0U; i < length; ++i) {
+      state ^= state << 13;
+      state ^= state >> 17;
+      state ^= state << 5;
+      line[i] = kAlphabet[state % alphabetLen];
+    }
+    line[length] = '\n';
+
+    // THROUGH THE REAL ASSEMBLER: only what the board would actually hand to
+    // `decideScan` is rendered, so this cannot pass by testing a token the
+    // firmware would have refused anyway.
+    gatelogic::ScanAssembler assembler;
+    if (feedLine(assembler, line) != gatelogic::ScanEvent::Token) {
+      continue;
+    }
+
+    char body[gatelogic::kScanBodyCap] = {};
+    const size_t written = gatelogic::renderScanBody(body, sizeof(body), "5ccf7f0a1b2c", assembler.token());
+    if (written == 0U) {
+      continue; // refused rather than rendered, which is also safe
+    }
+
+    char message[256] = {};
+    snprintf(message, sizeof(message), "token %s produced %s", assembler.token(), body);
+    // The shape is `{"mac":"..","method":"qr","token":".."}` — six keys and
+    // values in quotes, so exactly twelve unescaped quotes and no more. A byte
+    // that escaped the string adds two.
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(12U, unescapedQuotes(body), message);
+    // And the one field a forged `method` would change is still `qr`.
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"method\":\"qr\","), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"method\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"mac\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"token\":"), message);
+  }
+}
+
+/// G4 / B1, the second layer: the SHARED event body, which the court box uses
+/// too and which carries an offline refusal's own bytes as `subject`.
+///
+/// `","seq":99999,"x":"` is nineteen characters. Rendered raw it forged the
+/// batch's `seq`, and the server answers `accepted_through` from the seq it
+/// PARSED — so one crafted QR scanned while a door was offline discarded the
+/// whole evening's backlog on reconnect.
+void test_render_no_scanned_subject_can_forge_a_field_in_the_event_body() {
+  static const char* kHostile[] = {
+      "\",\"seq\":99999,\"x\":\"",
+      "\",\"kind\":\"release",
+      "\",\"court\":0,\"x\":\"",
+      "\",\"duration_ms\":9,\"x\":\"",
+      "a\\",
+      "a\"b",
+      "\\\\\\\\\"",
+  };
+  for (size_t i = 0U; i < sizeof(kHostile) / sizeof(kHostile[0]); ++i) {
+    eventq::Event event;
+    event.seq = 7U;
+    event.kind = eventq::Kind::UnknownScan;
+    event.court = eventq::Event::kNoCourt;
+    event.method = eventq::Method::Qr;
+    event.uptimeMs = 1000U;
+    static_cast<void>(event.setSubject(kHostile[i]));
+
+    char body[devlink::kEventBodyCap] = {};
+    const size_t written = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, 2000ULL, event);
+    char message[384] = {};
+    snprintf(message, sizeof(message), "subject %s produced %s", kHostile[i], body);
+    TEST_ASSERT_TRUE_MESSAGE(written > 0U, message);
+    // `{"mac":"..","uptime_ms":N,"events":[{"seq":N,"uptime_ms":N,"kind":"..",
+    //   "court":N,"method":"..","subject":"..","duration_ms":N}]}` — ten keys
+    // and four quoted values, so twenty-eight unescaped quotes exactly. A byte
+    // that escaped the string adds two; the raw renderer produced 34 for the
+    // first subject below, which is its own six quotes let straight through.
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(28U, unescapedQuotes(body), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"seq\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"kind\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"court\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"duration_ms\":"), message);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"seq\":7,"), message);
+  }
 }
 
 void test_scan_reset_discards_a_partial_line() {
@@ -1270,6 +1592,12 @@ public:
     return had;
   }
 
+  /// Everything fed has been read. A scenario that offers a token on a cadence
+  /// asks this first: a pass the UPLOAD took reads no scanner bytes at all, so
+  /// feeding regardless slowly fills this fake's buffer and fails the scenario
+  /// on a fixture limit rather than on what it is about.
+  bool drained() const { return head_ >= count_; }
+
 private:
   fakes::FakeClock& clock_;
   uint8_t buf_[512] = {};
@@ -1490,8 +1818,13 @@ private:
     /// a body that timed out, did not fit, or did not frame. It is the ONE
     /// shape `no_push` distinguishes, and no fake could express it before
     /// round G3 because the port returned a single number.
+    ///
+    /// THROUGH THE REAL RULE, not a hard-coded zero. Both HAL ports return
+    /// `statusForBody(peerStatus, <the failed read>)`, and a fake that pinned
+    /// the answer that rule used to give could never have shown that it was
+    /// wrong for a 4xx — which is G4 / C1's second half.
     void setBodyFailure(uint16_t peer, uint32_t lat) {
-      set(0U, "", lat);
+      set(gatelogic::statusForBody(peer, gatelogic::BodyResult::TooLarge), "", lat);
       peerStatus = peer;
     }
 
@@ -1551,7 +1884,10 @@ private:
   FakeScannerBytes* arrivals_ = nullptr;
   char arrivalText_[64] = {};
   char lastPath_[64] = {};
-  char lastBody_[256] = {};
+  /// Wider than any body this board renders, so an assertion about the bytes
+  /// that went on the wire is about the FIRMWARE's cap and not about this
+  /// fake's. devlink::kEventBodyCap is the real bound.
+  char lastBody_[640] = {};
   char answer_[512] = {};
   PathState path_[kMaxPaths] = {};
   Scripted script_[kMaxScripted] = {};
@@ -1641,11 +1977,13 @@ private:
 
 /// One whole board, wired the way main.cpp wires it.
 struct Rig {
-  explicit Rig(uint32_t base)
-      : clock(base), watchdog(clock), scanner(clock), http(clock), api(http, breaker, clock),
+  explicit Rig(uint32_t base, uint32_t boot = 0xC0FFEE01UL)
+      : bootId(boot), watchdogResetRun(0U), clock(base), watchdog(clock), scanner(clock), http(clock),
+        api(http, breaker, clock),
         lock(relayPin, gatelogic::kGateConfig.relayActiveHigh, gatelogic::kGateConfig.unlockEnergisesRelay),
-        unlock(gatelogic::kGateConfig.unlockHardCapMs), roster(gatelogic::kGateConfig.rosterMaxAgeMs),
-        queue(&store), app(wire()) {}
+        unlock(gatelogic::kGateConfig.unlockHardCapMs, gatelogic::kGateConfig.minRelockMs,
+               gatelogic::kGateConfig.relockDwellMs),
+        roster(gatelogic::kGateConfig.rosterMaxAgeMs), queue(&store), app(wire()) {}
 
   gatelogic::GateApp::Ports wire() {
     gatelogic::GateApp::Ports ports;
@@ -1669,9 +2007,25 @@ struct Rig {
     ports.log = &log;
     ports.mac = "5ccf7f0a1b2c";
     ports.firmwareVersion = "1.0.0";
+    // A LITERAL, and that is the reason it is a port (round G4, C2). The board draws
+    // this from `esp_random()` and the simulator from the clock and the pid; a class
+    // that reached for either could only be tested against itself, and a boot identity
+    // a test cannot pin is a deduplication rule no test can prove.
+    ports.bootId = bootId;
+    ports.watchdogResetRun = watchdogResetRun;
     ports.heartbeatBody = heartbeatBody;
     ports.heartbeatBodyCap = sizeof(heartbeatBody);
     return ports;
+  }
+
+  /// Re-construct the app over the same ports, so a scenario can change a value
+  /// the composition root supplies ONCE AT BOOT — `watchdogResetRun` is the
+  /// only one — after the rig exists. Placement-new rather than a setter,
+  /// because a port that could change mid-run would be a port this class does
+  /// not have.
+  void rewire() {
+    app.~GateApp();
+    new (&app) gatelogic::GateApp(wire());
   }
 
   /// Boot with no settling at all — the state a board is genuinely in on its
@@ -1748,6 +2102,8 @@ struct Rig {
     }
   }
 
+  uint32_t bootId;
+  uint32_t watchdogResetRun;
   fakes::FakeClock clock;
   FakeWatchdog watchdog;
   FakeLink link;
@@ -1771,6 +2127,11 @@ struct Rig {
 };
 
 constexpr char kOpenThreeSeconds[] = "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3}";
+
+/// The contract's widest grant. Used where a scenario must not have a window
+/// CLOSE inside it — the relock dwell (round G4, A1) is a second rule with its
+/// own test, and a scenario about the call budget must not be decided by it.
+constexpr char kOpenThirtySeconds[] = "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":30}";
 
 /// What the body above grants, as a number the assertions derive from rather
 /// than repeat. A one-field probe that changed the body's seconds and left the
@@ -1856,7 +2217,12 @@ void test_app_a_pass_makes_at_most_one_blocking_call() {
   Rig rig(kBaseMid);
   rig.boot(true);
   rig.http.setLatency(gatelogic::kWorstBlockingCallMs);
-  rig.http.answer(200U, kOpenThreeSeconds);
+  // THE WIDEST GRANT, so no window CLOSES between two twelve-second calls. With
+  // a three-second one the first member's window ends inside the second call,
+  // the lock starts relatching, and the third scan is refused without a call —
+  // correctly, by A1's dwell, which is a different rule with its own test. A
+  // scenario about the call budget must not be decided by it.
+  rig.http.answer(200U, kOpenThirtySeconds);
 
   // Three complete tokens, all in the buffer before the pass begins.
   rig.scanner.feed("TOKENAAAAAAA\nTOKENBBBBBBB\nTOKENCCCCCCC\n");
@@ -2973,6 +3339,729 @@ void test_app_a_404_on_events_keeps_the_backlog_and_retries_it() {
   TEST_ASSERT_TRUE_MESSAGE(rig.queue.empty(), "the kept events have to actually get through in the end");
 }
 
+/// G4 / B2. `opened` WAS READ BY A FLAT ANY-DEPTH SCAN, so a body that never
+/// said the door should open at the top level opened it anyway.
+///
+/// `devapi::json::findKey` finds a key at ANY depth, deliberately — the court
+/// box reads `button_map` out of the heartbeat's nested `config` with no path
+/// expression at all — and `onGateResponse` used it for the one field that
+/// drives a lock. `{"outer":{"opened":true}}` and `[{"opened":true}]` both
+/// released it, and so did `{"opened":false,"detail":{"opened":true}}`, whose
+/// TOP-LEVEL answer is a refusal.
+///
+/// `adoptUnlockMs` had already scoped `unlock_seconds` to the `gate` object and
+/// written down why; this is the same rule applied to the field that matters
+/// most and to the two beside it.
+void test_gate_response_reads_only_the_top_level_object() {
+  struct Row {
+    const char* label;
+    const char* body;
+    bool opens;
+  };
+
+  const Row rows[] = {
+      {"the contract's own open", "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3}", true},
+      {"the contract's own refusal", "{\"opened\":false,\"reason\":\"not_recognised\",\"unlock_seconds\":0}",
+       false},
+      {"nested in an object", "{\"outer\":{\"opened\":true,\"unlock_seconds\":3}}", false},
+      {"a top-level array", "[{\"opened\":true,\"unlock_seconds\":3}]", false},
+      {"a top-level refusal with a nested open", "{\"opened\":false,\"detail\":{\"opened\":true}}", false},
+      {"a reason first, then a nested open",
+       "{\"reason\":\"no\",\"meta\":{\"opened\":true,\"unlock_seconds\":30}}", false},
+      {"a nested open BEFORE the real refusal",
+       "{\"meta\":{\"opened\":true},\"opened\":false,\"reason\":\"not_recognised\"}", false},
+      {"an open behind a decoy string value", "{\"reason\":\"opened\",\"opened\":true,\"unlock_seconds\":3}",
+       true},
+  };
+
+  for (const Row& row : rows) {
+    const gatelogic::ScanDecision decision =
+        gatelogic::onGateResponse(200U, row.body, strlen(row.body), kDefaultMs, kCapMs);
+    char message[256] = {};
+    snprintf(message, sizeof(message), "%s: %s -> released=%d", row.label, row.body,
+             decision.released ? 1 : 0);
+    TEST_ASSERT_EQUAL_MESSAGE(row.opens, decision.released, message);
+    // AND A BODY THAT SAID NOTHING AT THE TOP LEVEL IS AN OUTAGE, not a
+    // refusal: nobody said no, so the roster gets its turn. That is the
+    // existing rule for a 200 whose body is shaped differently from the
+    // contract, and it has to keep holding for these.
+    if (!row.opens && strstr(row.body, "\"opened\":false") == nullptr) {
+      TEST_ASSERT_TRUE_MESSAGE(decision.fallbackToRoster, message);
+    }
+  }
+}
+
+/// G4 / B2. `unlock_seconds` and `reason` are scoped the same way, so a nested
+/// number cannot drive the lock and a nested string cannot explain a decision
+/// it had nothing to do with.
+void test_gate_response_takes_its_duration_and_reason_from_the_top_level_too() {
+  // A nested thirty beside a top-level three: the lock gets three.
+  const char* body = "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3,"
+                     "\"debug\":{\"unlock_seconds\":30,\"reason\":\"tampered\"}}";
+  gatelogic::ScanDecision decision = gatelogic::onGateResponse(200U, body, strlen(body), kDefaultMs, kCapMs);
+  TEST_ASSERT_TRUE(decision.released);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(3000U, decision.unlockMs, body);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("ok", decision.reason, body);
+
+  // A nested one FIRST, which is the ordering a flat scan actually loses to.
+  const char* decoyFirst = "{\"debug\":{\"unlock_seconds\":30,\"reason\":\"tampered\"},"
+                           "\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3}";
+  decision = gatelogic::onGateResponse(200U, decoyFirst, strlen(decoyFirst), kDefaultMs, kCapMs);
+  TEST_ASSERT_TRUE(decision.released);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(3000U, decision.unlockMs, decoyFirst);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("ok", decision.reason, decoyFirst);
+
+  // And a 200 that opens with NO top-level duration still falls back to the
+  // adopted one rather than to a nested number.
+  const char* noDuration = "{\"opened\":true,\"reason\":\"ok\",\"x\":{\"unlock_seconds\":30}}";
+  decision = gatelogic::onGateResponse(200U, noDuration, strlen(noDuration), kDefaultMs, kCapMs);
+  TEST_ASSERT_TRUE(decision.released);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(kDefaultMs, decision.unlockMs, noDuration);
+}
+
+// ---------------------------------------------------------------------------
+// G4 / A4 — a board that has just been reset by its own watchdog
+// ---------------------------------------------------------------------------
+
+/// A4. The arithmetic, at every step: a healthy boot waits for nothing, a run
+/// of watchdog resets doubles from one second to a five-minute ceiling, and any
+/// boot that was NOT the watchdog's clears the run — somebody or something
+/// intervened, and the next honest boot must not wait for a fault it did not
+/// have.
+void test_boot_recovery_backs_off_only_after_a_watchdog_reset() {
+  TEST_ASSERT_EQUAL_UINT32(0U, gatelogic::nextResetRun(false, 0U));
+  TEST_ASSERT_EQUAL_UINT32(0U, gatelogic::nextResetRun(false, 9U));
+  TEST_ASSERT_EQUAL_UINT32(1U, gatelogic::nextResetRun(true, 0U));
+  TEST_ASSERT_EQUAL_UINT32(5U, gatelogic::nextResetRun(true, 4U));
+  // The run stops climbing rather than wrapping — it comes out of memory that
+  // survived a reset, which is exactly the kind of value that is one day not
+  // what anybody expected.
+  TEST_ASSERT_EQUAL_UINT32(gatelogic::kMaxResetRun, gatelogic::nextResetRun(true, gatelogic::kMaxResetRun));
+  TEST_ASSERT_EQUAL_UINT32(gatelogic::kMaxResetRun, gatelogic::nextResetRun(true, 0xFFFFFFFFUL));
+
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, gatelogic::firstCallDelayMs(0U),
+                                   "a healthy boot must not wait for anything");
+  TEST_ASSERT_EQUAL_UINT32(gatelogic::kResetBackoffStartMs, gatelogic::firstCallDelayMs(1U));
+  TEST_ASSERT_EQUAL_UINT32(2U * gatelogic::kResetBackoffStartMs, gatelogic::firstCallDelayMs(2U));
+  TEST_ASSERT_EQUAL_UINT32(4U * gatelogic::kResetBackoffStartMs, gatelogic::firstCallDelayMs(3U));
+
+  // Monotonic, and capped rather than unbounded — a board that waited an hour
+  // would have a club standing at a door whose API came back forty minutes ago.
+  uint32_t previous = 0U;
+  for (uint32_t run = 0U; run <= gatelogic::kMaxResetRun + 4U; ++run) {
+    const uint32_t delay = gatelogic::firstCallDelayMs(run);
+    TEST_ASSERT_TRUE(delay >= previous);
+    TEST_ASSERT_TRUE(delay <= gatelogic::kResetBackoffMaxMs);
+    previous = delay;
+  }
+  TEST_ASSERT_EQUAL_UINT32(gatelogic::kResetBackoffMaxMs,
+                           gatelogic::firstCallDelayMs(gatelogic::kMaxResetRun));
+}
+
+/// A4, AND THE SEQUENCE THAT MAKES IT A LOOP RATHER THAN A FAULT.
+///
+/// `begin()` arms a heartbeat, `pumpLink`'s first up edge re-arms it to NOW,
+/// and the heartbeat is the first thing a board does with its radio — so a peer
+/// that dribbles headers holds that very call until the watchdog resets the
+/// part, which lands back in `begin()` and does it again. For ever, with no
+/// roster and a door that admits nobody.
+///
+/// A board that has just been reset by its watchdog therefore holds its first
+/// network call back — and spends the wait in the ordinary loop, alive and
+/// kicking its watchdog, rather than in a reset.
+void test_app_a_board_the_watchdog_reset_holds_its_first_call_back() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    // A healthy boot is unaffected: the FIRST assertion, because a backoff that
+    // slowed an ordinary board down would be a worse defect than the one it
+    // closes.
+    Rig healthy(kBases[b]);
+    healthy.boot(true);
+    healthy.http.forget();
+    healthy.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    healthy.forceHeartbeat();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, healthy.app.firstCallHeldBackMs(),
+                                     "a healthy boot must wait for nothing");
+    TEST_ASSERT_TRUE_MESSAGE(healthy.http.callsTo(gatelogic::kPathHeartbeat) > 0U,
+                             "and must still heartbeat at once");
+
+    // Three watchdog resets deep: four seconds before the first call.
+    Rig hurt(kBases[b]);
+    hurt.watchdogResetRun = 3U;
+    hurt.rewire();
+    hurt.bootRaw(true);
+    hurt.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    hurt.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+    TEST_ASSERT_EQUAL_UINT32(gatelogic::firstCallDelayMs(3U), hurt.app.firstCallHeldBackMs());
+
+    hurt.runFor(gatelogic::firstCallDelayMs(3U) - 200U);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(0U, hurt.http.calls(),
+                                     "a board the watchdog just reset must not reach that peer again "
+                                     "within a second of associating");
+    // AND IT IS ALIVE THROUGHOUT, which is the whole point: the wait is spent
+    // in the ordinary loop with the watchdog kicked, not in a reset.
+    TEST_ASSERT_TRUE_MESSAGE(
+        hurt.watchdog.longestGapMs() < static_cast<uint32_t>(gatelogic::kGateConfig.watchdogSeconds) * 1000UL,
+        "the board has to STAY UP through the wait — the whole point is that it spends it in the "
+        "loop rather than in a reset");
+
+    // Past the hold, it tries again — a board that gave up would never recover
+    // when the proxy came back.
+    hurt.runFor(1000U);
+    TEST_ASSERT_TRUE_MESSAGE(hurt.http.callsTo(gatelogic::kPathHeartbeat) > 0U,
+                             "the backoff must delay the first call, never cancel it");
+
+    // THE EVENT DRAIN IS HELD BACK WITH IT. `begin()` queues a boot event on
+    // every boot, so a drain that was not gated would reach the same peer on
+    // the same first pass and the hold would have bought nothing.
+    Rig drained(kBases[b]);
+    drained.watchdogResetRun = 3U;
+    drained.rewire();
+    drained.bootRaw(true);
+    drained.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+    drained.runFor(gatelogic::firstCallDelayMs(3U) - 200U);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(0U, drained.http.callsTo(gatelogic::kPathEvents),
+                                     "the boot event must not reach the peer inside the hold");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// G4 / A2 — what bounds the rate this board asks the server at
+// ---------------------------------------------------------------------------
+
+/// A2. TWO ALTERNATING TOKENS DEFEATED THE DEBOUNCE COMPLETELY, because it held
+/// exactly one: every scan differed from the one before, nothing was ever
+/// suppressed, and the board made a measured ~18 POSTs a second to `/gate`. A
+/// code taped beside a reader plus a member's own phone is enough.
+void test_app_alternating_tokens_cannot_hammer_the_gate_endpoint() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.setLatency(0U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+  rig.forceHeartbeat();
+  rig.http.forget();
+
+  const uint32_t start = rig.clock.value();
+  uint32_t alternate = 0U;
+  while (tb::since(rig.clock.value(), start) < 10000UL) {
+    if (rig.scanner.drained()) {
+      rig.scanner.feed((alternate % 2U) == 0U ? "TOKENAAAAAAA\n" : "TOKENBBBBBBB\n");
+      ++alternate;
+    }
+    rig.tick();
+  }
+
+  // TEN SECONDS. The floor allows four calls a second, and the debounce should
+  // be doing most of the work here — two tokens fit in four slots, so after the
+  // first two decisions every scan for the next two seconds is a repeat.
+  const uint32_t calls = rig.http.callsTo(gatelogic::kPathGate);
+  char message[128] = {};
+  snprintf(message, sizeof(message), "%lu calls to /gate in ten simulated seconds",
+           static_cast<unsigned long>(calls));
+  TEST_ASSERT_TRUE_MESSAGE(calls <= 12U, message);
+  // AND IT IS NOT MUTE EITHER: the two members are decided.
+  TEST_ASSERT_TRUE_MESSAGE(calls >= 2U, message);
+}
+
+/// A2. The debounce is what makes the common case free, and it holds SEVERAL
+/// tokens now — so a queue at a door is still several decisions with no wait,
+/// and only a stream of tokens nobody has seen before meets the floor.
+void test_debounce_remembers_several_tokens_and_still_never_delays_a_new_one() {
+  gatelogic::ScanDebounce debounce;
+  const char* tokens[] = {"MEMBERAAAAAA", "MEMBERBBBBBB", "MEMBERCCCCCC", "MEMBERDDDDDD"};
+
+  // Four members arriving together: four decisions, none suppressed.
+  for (size_t i = 0U; i < 4U; ++i) {
+    TEST_ASSERT_FALSE_MESSAGE(debounce.suppresses(tokens[i], kBaseMid + static_cast<uint32_t>(i) * 100U),
+                              tokens[i]);
+    debounce.decided(tokens[i], kBaseMid + static_cast<uint32_t>(i) * 100U);
+  }
+  // And every one of them is now a repeat, which one slot could never say.
+  for (size_t i = 0U; i < 4U; ++i) {
+    TEST_ASSERT_TRUE_MESSAGE(debounce.suppresses(tokens[i], kBaseMid + 500U), tokens[i]);
+  }
+  // A FIFTH is still decided at once: the ring costs the oldest its slot, which
+  // means it is asked about again — the safe direction, since nothing here can
+  // deny anybody.
+  TEST_ASSERT_FALSE(debounce.suppresses("MEMBEREEEEEE", kBaseMid + 500U));
+  debounce.decided("MEMBEREEEEEE", kBaseMid + 500U);
+  TEST_ASSERT_FALSE(debounce.suppresses(tokens[0], kBaseMid + 600U));
+
+  // Past the window everything is decided again, at every clock base.
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    gatelogic::ScanDebounce fresh;
+    fresh.decided("MEMBERAAAAAA", kBases[b]);
+    TEST_ASSERT_TRUE(fresh.suppresses("MEMBERAAAAAA", kBases[b] + gatelogic::kScanDebounceMs - 1U));
+    TEST_ASSERT_FALSE(fresh.suppresses("MEMBERAAAAAA", kBases[b] + gatelogic::kScanDebounceMs));
+  }
+
+  // ONE PHONE HELD AT THE READER MUST NOT WALK ITSELF THROUGH EVERY SLOT. A
+  // re-decision of a token already held re-stamps it in place; otherwise a
+  // member leaving their phone there for a minute pushes the other four out and
+  // the single-slot defect is back with more steps.
+  gatelogic::ScanDebounce held;
+  held.decided("MEMBERAAAAAA", kBaseMid);
+  held.decided("MEMBERBBBBBB", kBaseMid + 10U);
+  for (uint32_t t = 20U; t < 200U; t += 10U) {
+    held.decided("MEMBERBBBBBB", kBaseMid + t);
+  }
+  TEST_ASSERT_TRUE_MESSAGE(held.suppresses("MEMBERAAAAAA", kBaseMid + 300U),
+                           "a held phone must not evict the members around it");
+}
+
+/// A2. A scan the floor refuses is ANSWERED, and it is never answered from the
+/// roster — a throttle this board imposed on itself must not open a door the
+/// API would have refused.
+void test_app_a_rate_limited_scan_is_refused_rather_than_decided_from_the_roster() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.setLatency(0U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  // The API would REFUSE this member — a membership barred this morning, which
+  // is the case the roster cannot know about. The roster still carries them.
+  rig.http.onPath(gatelogic::kPathGate, 200U,
+                  "{\"opened\":false,\"reason\":\"member_not_active\",\"unlock_seconds\":0}", 0U);
+  rig.forceHeartbeat();
+  TEST_ASSERT_EQUAL_UINT8(1U, rig.roster.size());
+
+  // A first scan of some other code, to arm the floor.
+  rig.scanner.feed("OTHERTOKEN00\n");
+  rig.tick();
+  rig.tick();
+
+  // And the barred member, inside the floor.
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+
+  TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(),
+                            "a rate-limited scan must never be answered from the roster");
+  TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonTooFast, rig.log.last().reason);
+  TEST_ASSERT_FALSE(rig.log.last().released);
+
+  // Past the floor, the same member is asked about and refused by the API —
+  // which is the answer that was always correct.
+  rig.runFor(gatelogic::kMinScanCallSpacingMs + gatelogic::kScanDebounceMs);
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+  TEST_ASSERT_FALSE(rig.lock.released());
+  TEST_ASSERT_EQUAL_STRING("member_not_active", rig.log.last().reason);
+}
+
+// ---------------------------------------------------------------------------
+// G4 / C2 — the boot identity every batch carries
+// ---------------------------------------------------------------------------
+
+/// C2. Every uploaded batch names the boot it came from, so a board that
+/// renumbered from 1 after a torn sequence mark is a different board-life
+/// rather than an evening of duplicates.
+void test_app_every_uploaded_batch_carries_this_boots_identity() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b], 0x2BCD1234UL);
+    rig.boot(true);
+    queueOfflineEvents(rig, 1U);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+    rig.link.set(true);
+    rig.runFor(2000UL);
+
+    TEST_ASSERT_EQUAL_STRING(gatelogic::kPathEvents, rig.http.lastPath());
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rig.http.lastBody(), "\"boot_id\":734859828,"), rig.http.lastBody());
+    // IMMEDIATELY AFTER THE MAC, because the corpus pins the bytes and not the
+    // keys: a field in the wrong place is a body the byte-identity test fails.
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(rig.http.lastBody(), "{\"mac\":\"5ccf7f0a1b2c\",\"boot_id\":734859828,\"uptime_ms\":"),
+        rig.http.lastBody());
+    TEST_ASSERT_EQUAL_UINT32(0x2BCD1234UL, rig.app.bootId());
+  }
+}
+
+/// C2. Two boots of one board that BOTH renumbered from 1 are distinguishable
+/// on the wire — which is the whole property, said as a difference rather than
+/// as a field being present.
+void test_app_two_boots_that_both_start_at_seq_one_are_told_apart() {
+  char first[640] = {};
+  char second[640] = {};
+  const uint32_t boots[] = {0x1111'1111UL, 0x2222'2222UL};
+
+  for (size_t i = 0U; i < 2U; ++i) {
+    Rig rig(kBaseMid, boots[i]);
+    rig.boot(true);
+    // A FRESH STORE per rig, so the sequence really does restart at 1 — which
+    // is the state a torn or erased `evq_seq` mark leaves a board in.
+    queueOfflineEvents(rig, 1U);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+    rig.link.set(true);
+    rig.runFor(2000UL);
+    strncpy(i == 0U ? first : second, rig.http.lastBody(), 639U);
+  }
+
+  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(first, "\"seq\":2,"), first);
+  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(second, "\"seq\":2,"), second);
+  TEST_ASSERT_TRUE_MESSAGE(strcmp(first, second) != 0,
+                           "two boots that both renumbered must not send identical batches");
+}
+
+// ---------------------------------------------------------------------------
+// G4 / L1 — a line the board could not read is answered, and bounded
+// ---------------------------------------------------------------------------
+
+/// L1. `pumpScanner`'s comment has promised a member feedback on a holed line
+/// since it was written, and the assembler returned `None` for one: no blink,
+/// no record, nothing. A member stood at a door that gave them nothing back.
+void test_app_a_corrupt_line_gives_the_member_an_answer() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b]);
+    rig.boot(true);
+    rig.http.setLatency(0U);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.forceHeartbeat();
+    rig.log.forget();
+
+    const uint32_t mark = rig.relayPin.opCount();
+    // A NUL out of a framing error, in the middle of an otherwise fine line.
+    rig.scanner.feed("AB\x01"
+                     "CD\n");
+    rig.tick();
+    rig.tick();
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.total(),
+                                     "a line the board could not read has to be ANSWERED");
+    TEST_ASSERT_FALSE_MESSAGE(rig.log.last().released, "and answered as a refusal");
+    TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonNotRecognised, rig.log.last().reason);
+    // NO TOKEN. The bytes were discarded rather than truncated, and a token cut
+    // short is a different member's token.
+    TEST_ASSERT_EQUAL_STRING("", rig.log.last().token);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(mark, rig.relayPin.opCount(), "and the lock never moves for one");
+  }
+}
+
+/// L1's other half, and the reason the feedback is safe to give at all: 9600
+/// baud beside a switching relay coil produces holed lines by the HUNDRED.
+/// Unlimited, the lamp would strobe and — offline — the event ring would fill
+/// with noise and evict the admissions that matter.
+void test_app_line_noise_cannot_strobe_the_lamp_or_fill_the_ring() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.setLatency(0U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.forceHeartbeat();
+  rig.link.set(false);
+  rig.tick();
+  rig.log.forget();
+  const uint16_t queuedBefore = rig.queue.size();
+
+  // Fifty holed lines, faster than any member could present them.
+  for (int i = 0; i < 50; ++i) {
+    if (rig.scanner.drained()) {
+      rig.scanner.feed("A\x01"
+                       "B\n");
+    }
+    rig.tick();
+  }
+
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.total(), "fifty holed lines inside one window are ONE answer");
+  TEST_ASSERT_EQUAL_UINT16_MESSAGE(static_cast<uint16_t>(queuedBefore + 1U), rig.queue.size(),
+                                   "and ONE record, or line noise evicts the opens that matter");
+
+  // Past the window, the next one is answered again — rate-limited, not muted.
+  rig.runFor(gatelogic::kUnreadableFeedbackMs + gatelogic::kIdleDelayMs);
+  rig.log.forget();
+  rig.scanner.feed("A\x01"
+                   "B\n");
+  rig.tick();
+  rig.tick();
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.total(),
+                                   "a member who comes back a moment later is still answered");
+}
+
+// ---------------------------------------------------------------------------
+// G4 / A1 — the hard cap, through the whole loop rather than through the timer
+// ---------------------------------------------------------------------------
+
+/// THE SEQUENCE THE FINDER MEASURED ON THE REAL SIMULATOR, in the rig.
+///
+/// Two alternating tokens defeat the single-slot debounce, so a decision is
+/// offered on every pass. `pass()` pumps the lock out of `afterBlocking()` and
+/// applies the decision that call produced two lines later, so the close and
+/// the re-open land in ONE pass: relay OFF at t=31034 ms and ON at t=31034 ms,
+/// measured, then +42 ms, then +45 ms, for ever. The door never relocked.
+///
+/// Sampling `released()` once per pass is deliberately the WEAKEST observation
+/// that can see this, and that is the point: a within-pass OFF/ON is invisible
+/// to it, so the shipped firmware reads here as "released, every pass, for two
+/// minutes" — which is exactly what it was.
+void test_app_two_alternating_tokens_cannot_hold_the_door_open_for_ever() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b]);
+    rig.boot(true);
+    rig.http.setLatency(0U);
+    rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+
+    uint32_t releasedRun = 0U;
+    uint32_t longestReleased = 0U;
+    uint32_t darkRun = 0U;
+    uint32_t longestDarkAfterCap = 0U;
+    bool everCapped = false;
+
+    const uint32_t start = rig.clock.value();
+    uint32_t previous = start;
+    uint32_t alternate = 0U;
+    // SAMPLED INSIDE THE LOOP, because the decision log is a ring of 32 and
+    // this scenario makes several thousand decisions: the dwell's refusals
+    // happen right after each cap and are long gone from the ring by the end.
+    bool sawRelocking = false;
+    while (tb::since(rig.clock.value(), start) < 120000UL) {
+      if (rig.scanner.drained()) {
+        rig.scanner.feed((alternate % 2U) == 0U ? "TOKENAAAAAAA\n" : "TOKENBBBBBBB\n");
+        ++alternate;
+      }
+      rig.tick();
+      if (rig.log.count() > 0U && strcmp(rig.log.last().reason, gatelogic::kReasonRelocking) == 0) {
+        sawRelocking = true;
+      }
+      // MEASURED OFF THE CLOCK, not counted in passes: the scanner fake charges
+      // a millisecond a byte, exactly as 9600 baud does, so a pass is not a
+      // fixed length and counting them would measure the wrong thing.
+      const uint32_t elapsed = tb::since(rig.clock.value(), previous);
+      previous = rig.clock.value();
+      if (rig.lock.released()) {
+        releasedRun += elapsed;
+        if (releasedRun > longestReleased) {
+          longestReleased = releasedRun;
+        }
+        darkRun = 0U;
+      } else {
+        darkRun += elapsed;
+        releasedRun = 0U;
+        if (rig.app.capForcedCloses() > 0U) {
+          everCapped = true;
+          if (darkRun > longestDarkAfterCap) {
+            longestDarkAfterCap = darkRun;
+          }
+        }
+      }
+    }
+
+    char message[224] = {};
+    snprintf(message, sizeof(message),
+             "base %lu: longest continuous release %lu ms, longest dark after a cap %lu ms, "
+             "cap-forced closes %lu",
+             static_cast<unsigned long>(kBases[b]), static_cast<unsigned long>(longestReleased),
+             static_cast<unsigned long>(longestDarkAfterCap),
+             static_cast<unsigned long>(rig.app.capForcedCloses()));
+
+    TEST_ASSERT_TRUE_MESSAGE(everCapped, message);
+    // The window bound, which held before this round — stated as the firmware's
+    // own documented overrun rather than as a tight number, because the relay
+    // write waits for whatever pass the deadline falls inside. See GateApp.h.
+    TEST_ASSERT_TRUE_MESSAGE(
+        longestReleased <= kCapMs + gatelogic::kWorstBlockingCallMs + gatelogic::kIdleDelayMs, message);
+    // The DOOR bound, which did not exist: after the cap overrules them, the
+    // lock is genuinely de-energised for long enough to relatch.
+    TEST_ASSERT_TRUE_MESSAGE(longestDarkAfterCap >= kDwellMs, message);
+    // AND THE MEMBER IS TOLD, rather than the scan vanishing. The dwell's
+    // refusals are recorded with their own reason, so a desk reading the trail
+    // sees "somebody is holding this door open" rather than nothing at all.
+    TEST_ASSERT_TRUE_MESSAGE(sawRelocking, "a scan refused by the dwell must be answered, not lost");
+  }
+}
+
+/// A1. A scan that meets the dwell is refused WITHOUT asking the API, on the
+/// debounce's own precedent — and, offline, the record it queues says a scan
+/// was refused rather than that a door opened.
+void test_app_a_scan_inside_the_relock_dwell_costs_no_call_and_records_no_opening() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.setLatency(0U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.forceHeartbeat();
+
+  // Offline, so the roster decides and the record is queued.
+  rig.link.set(false);
+  rig.tick();
+  const uint16_t queuedBefore = rig.queue.size();
+
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+  TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the scenario needs the door to open first");
+
+  // Let the window end, then scan again inside the dwell. A DIFFERENT token, so
+  // the debounce is not what refuses it.
+  rig.runFor(gatelogic::kGateConfig.unlockDefaultMs + 2U * gatelogic::kIdleDelayMs);
+  TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "the window has to have closed");
+
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+
+  TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "the lock must stay de-energised through the dwell");
+  TEST_ASSERT_EQUAL_STRING_MESSAGE(gatelogic::kReasonRelocking, rig.log.last().reason,
+                                   "the member is told why, in a word that is about the door");
+  TEST_ASSERT_FALSE_MESSAGE(rig.log.last().released, "and the log must not claim a release");
+
+  // The queued record: an `unknown_scan`, never a `gate_open` for a door that
+  // did not move. Read off the ring's growth plus the decision's own flag.
+  TEST_ASSERT_TRUE_MESSAGE(rig.log.last().queued, "an offline refusal is still evidence");
+  TEST_ASSERT_TRUE(rig.queue.size() > queuedBefore);
+}
+
+/// A1. ONLINE, the dwell refuses BEFORE the API is asked — the debounce's own
+/// precedent. Two things turn on it: a `/gate` call spent on a door that cannot
+/// open is the pass spent on nothing, and a 200 answering `opened` would put a
+/// door opening in the server's audit trail that did not happen.
+void test_app_a_scan_inside_the_relock_dwell_never_reaches_the_api() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.setLatency(0U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+  rig.forceHeartbeat();
+
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+  TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the scenario needs the door to open first");
+  rig.runFor(gatelogic::kGateConfig.unlockDefaultMs + 2U * gatelogic::kIdleDelayMs);
+  TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "the window has to have closed");
+
+  const uint32_t gateCallsBefore = rig.http.callsTo(gatelogic::kPathGate);
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(gateCallsBefore, rig.http.callsTo(gatelogic::kPathGate),
+                                   "a scan the board cannot honour is not a question for the API");
+  TEST_ASSERT_FALSE(rig.lock.released());
+  TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonRelocking, rig.log.last().reason);
+}
+
+/// A1's SECOND HALF, and the exact interleaving the finder measured: the window
+/// closes INSIDE the blocking call that decided the next scan.
+///
+/// `pass()` calls `pumpLock()` from `afterBlocking()` and applies the decision
+/// two lines later, so a twelve-second `/gate` call that starts while the door
+/// is open returns to find the window over — and the API has said `opened`. The
+/// relay would be written OFF and ON at the same millisecond. The pre-check
+/// above cannot see this one: at the instant the scan was decided, the door was
+/// still released and there was no dwell to meet.
+void test_app_a_window_that_closes_inside_the_call_that_granted_the_next_one() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b]);
+    rig.boot(true);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.forceHeartbeat();
+    // A WHOLE WORST-CASE CALL, which is what makes the window end inside it.
+    rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, gatelogic::kWorstBlockingCallMs);
+
+    rig.scanner.feed("TOKENAAAAAAA\n");
+    rig.tick();
+    rig.tick();
+    TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the first member has to get in");
+
+    // The second member, decided while the door is still open, granted by the
+    // API, and applied after the first member's window has ended.
+    rig.scanner.feed("TOKENBBBBBBB\n");
+    rig.tick();
+    rig.tick();
+
+    char message[160] = {};
+    snprintf(message, sizeof(message), "base %lu: reason=%s released=%d",
+             static_cast<unsigned long>(kBases[b]), rig.log.last().reason, rig.log.last().released ? 1 : 0);
+
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), message);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(gatelogic::kReasonRelocking, rig.log.last().reason, message);
+    // AND THE RECORD SAYS SO. A decision left claiming `released` would have
+    // this board report an opening it refused — the one thing an audit trail
+    // must never contain.
+    TEST_ASSERT_FALSE_MESSAGE(rig.log.last().released, message);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, rig.log.last().grantedMs, message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// G4 / C1 — the uptime a real board's events actually go up with
+// ---------------------------------------------------------------------------
+
+/// The decimal number after the `n`th occurrence of `"<key>":` in `body`.
+/// UINT64_MAX when there is no such occurrence, which fails every assertion
+/// below rather than passing one by accident.
+uint64_t numberAfter(const char* body, const char* key, int occurrence) {
+  const char* at = body;
+  for (int i = 0; i <= occurrence; ++i) {
+    at = strstr(at, key);
+    if (at == nullptr) {
+      return UINT64_MAX;
+    }
+    at += strlen(key);
+  }
+  uint64_t value = 0U;
+  if (*at < '0' || *at > '9') {
+    return UINT64_MAX;
+  }
+  while (*at >= '0' && *at <= '9') {
+    value = value * 10ULL + static_cast<uint64_t>(*at - '0');
+    ++at;
+  }
+  return value;
+}
+
+void test_app_an_offline_record_is_stamped_with_an_uptime_the_server_can_read() {
+  // G4 / C1, AND THE REASON NOTHING EVER SAW IT: the simulator's default
+  // `--start-ms 0` is the one value of millis()-at-begin() that hides it.
+  //
+  // `begin()` seeded the accumulator's `last_` from millis() and left its total
+  // at ZERO, while every event was stamped with the RAW millis() reading. So on
+  // a board whose clock read R when begin() ran — which is EVERY ESP32, because
+  // the core's init, Serial.begin, NVS, the UART driver and WiFi.begin all run
+  // first — the batch's own uptime was R ms BEHIND every stamp in it, and
+  // tb::widen underflowed to about 1.8e19 for anything uploaded less than R ms
+  // after it was scanned. The server binds uptime_ms as a signed 64-bit and
+  // refuses the body: in production a bare 400, which this drain reads as "a
+  // 4xx the board caused" and DROPS — the offline entry is gone.
+  //
+  // Every base, because the wrap is the normal case on a board that runs for
+  // months and the seed is exactly where a wrap-time boot would land.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    Rig rig(kBases[i]);
+    rig.boot(true);
+    queueOfflineEvents(rig, 2U);
+
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+    rig.link.set(true);
+    // Straight back up: the upload happens a few passes after the scan, which
+    // is precisely the window the underflow lived in.
+    rig.runFor(2000UL);
+
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(gatelogic::kPathEvents, rig.http.lastPath(),
+                                     "the offline records have to reach /events at all");
+
+    const uint64_t batch = numberAfter(rig.http.lastBody(), "\"uptime_ms\":", 0);
+    const uint64_t stamp = numberAfter(rig.http.lastBody(), "\"uptime_ms\":", 1);
+    char message[192] = {};
+    snprintf(message, sizeof(message), "base %lu: event uptime %llu is ahead of the batch's %llu — %s",
+             static_cast<unsigned long>(kBases[i]), static_cast<unsigned long long>(stamp),
+             static_cast<unsigned long long>(batch), rig.http.lastBody());
+    TEST_ASSERT_TRUE_MESSAGE(stamp <= batch, message);
+
+    // AND IT IS A NUMBER THE SERVER'S COLUMN HOLDS. `long` is what binds
+    // `uptime_ms`, so anything past INT64_MAX is a 400 on the whole batch
+    // whatever the arithmetic meant by it.
+    TEST_ASSERT_TRUE_MESSAGE(batch <= 0x7FFFFFFFFFFFFFFFULL, message);
+    TEST_ASSERT_TRUE_MESSAGE(stamp <= 0x7FFFFFFFFFFFFFFFULL, message);
+
+    // And the event genuinely left: a board that kept it would pass the two
+    // assertions above on a body it never got to send.
+    TEST_ASSERT_TRUE_MESSAGE(rig.queue.empty(), "the acknowledged records have to leave the ring");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // E3 — the response body, bounded by the caller's buffer and the call's clock
 // ---------------------------------------------------------------------------
@@ -3510,24 +4599,91 @@ void test_body_a_deadline_already_passed_is_a_transport_failure() {
   TEST_ASSERT_EQUAL_STRING("", out);
 }
 
-/// E1. The mapping, in the words the door uses. A whole body keeps whatever
-/// status the peer sent — including a refusal, which is authoritative — and
-/// anything else is 0, which is the one answer that sends a scan to the roster.
-void test_body_only_a_whole_body_keeps_the_servers_status() {
+/// E1, AMENDED BY G4 / C1. Where a status's MEANING lives decides whether a
+/// body that did not arrive can take it away.
+///
+/// A 2xx carries its decision in the body, so a 200 nobody could read is
+/// status 0 — "this board learned nothing" — which sends a scan to the roster.
+/// A 4xx and a 5xx carry theirs in the STATUS LINE, which is in the first bytes
+/// of the response and is known before any body byte is read, so they survive a
+/// body that did not.
+void test_body_a_failure_status_survives_a_body_that_did_not() {
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Ok) == 200U, "");
   static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Ok) == 403U, "");
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::TooLarge) == 0U, "");
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Timeout) == 0U, "");
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Malformed) == 0U, "");
-  // A 403 whose body did not arrive is NOT an out-of-service verdict. The
-  // verdict is the status, and a status nobody finished reading is not one.
-  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Timeout) == 0U, "");
+  static_assert(gatelogic::statusForBody(204U, gatelogic::BodyResult::TooLarge) == 0U, "");
+  static_assert(gatelogic::statusForBody(302U, gatelogic::BodyResult::TooLarge) == 0U, "");
+
+  // THE TWO THIS ROUND CHANGED, AND WHAT EACH ONE COST.
+  //
+  // A 403 is the club having taken this board out of service. Read as 0 it was
+  // an OUTAGE, so the board fell back to its roster and kept admitting every
+  // rostered member through the door the admin had just shut — for the whole
+  // six-hour staleness window, which is the exact thing the 403 rule exists to
+  // stop.
+  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Timeout) == 403U, "");
+  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::TooLarge) == 403U, "");
+  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Malformed) == 403U, "");
+
+  // A 400 on `/events` from a server in Development answers a binder refusal
+  // with a developer HTML page thousands of bytes long, against a 192-byte
+  // response buffer. Read as 0 that was Retry = keep, so the head of the ring
+  // was re-posted for ever and every door entry behind it never arrived.
+  static_assert(gatelogic::statusForBody(400U, gatelogic::BodyResult::TooLarge) == 400U, "");
+  static_assert(gatelogic::statusForBody(404U, gatelogic::BodyResult::TooLarge) == 404U, "");
+  static_assert(gatelogic::statusForBody(429U, gatelogic::BodyResult::Timeout) == 429U, "");
+  static_assert(gatelogic::statusForBody(503U, gatelogic::BodyResult::Malformed) == 503U, "");
 
   // AND THE PEER'S STATUS SURVIVES ANYWAY, for the one reader that needs it.
+  // `bodyFailed` is about a 2xx now as it always was: on a failure status the
+  // two agree, so a 403 whose body was lost is not counted as a no-push.
   static_assert(gatelogic::bodyFailed(gatelogic::HttpOutcome{0U, 200U}), "");
   static_assert(!gatelogic::bodyFailed(gatelogic::HttpOutcome{200U, 200U}), "");
   static_assert(!gatelogic::bodyFailed(gatelogic::noCall()), "");
   TEST_PASS();
+}
+
+/// G4 / C1. The same rule where it actually bites: a board taken out of service
+/// by an admin, answering a 403 whose body is larger than the buffer.
+void test_app_a_403_whose_body_did_not_fit_still_takes_the_board_out_of_service() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    Rig rig(kBases[i]);
+    rig.boot(true);
+
+    // A roster first, so there is something an out-of-service board could
+    // wrongly keep admitting from.
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.forceHeartbeat();
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, rig.roster.size(), "the scenario needs a live roster to lose");
+
+    // The admin presses the button. The body did not fit, so the READ failed —
+    // but the status line arrived, and the status line is the verdict.
+    rig.http.onPathBodyFailure(gatelogic::kPathGate, 403U, 0U);
+    rig.link.set(false);
+    rig.tick();
+    rig.link.set(true);
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.tick();
+    rig.tick();
+
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(),
+                              "a 403 is a refusal whatever became of the body behind it");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, rig.roster.size(),
+                                    "and the roster goes with it, or the next link drop re-admits "
+                                    "every rostered member through a door an admin has shut");
+
+    // The mutant this kills: reading the 403 as status 0 sends the scan to the
+    // roster, which still holds the booking, and the door opens.
+    rig.link.set(false);
+    rig.tick();
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.tick();
+    rig.tick();
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(),
+                              "an out-of-service board must admit nobody offline either");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3861,12 +5017,17 @@ int main(int, char**) {
   RUN_TEST(test_unlock_opens_once_and_closes_once_at_every_clock_base);
   RUN_TEST(test_unlock_a_re_arm_never_shortens_the_window);
   RUN_TEST(test_unlock_the_hard_cap_bounds_both_one_answer_and_the_whole_window);
+  RUN_TEST(test_unlock_a_capped_window_is_followed_by_real_dark_time);
+  RUN_TEST(test_unlock_any_close_guarantees_the_lock_actually_relatches);
   RUN_TEST(test_unlock_reports_how_long_it_has_been_released);
 
   RUN_TEST(test_scan_assembles_a_line_and_treats_crlf_as_one_terminator);
   RUN_TEST(test_scan_trims_and_ignores_an_empty_line);
   RUN_TEST(test_scan_refuses_a_token_one_character_over_the_cap_without_truncating);
   RUN_TEST(test_scan_a_non_printable_byte_discards_the_whole_line);
+  RUN_TEST(test_scan_refuses_every_byte_outside_the_rosters_token_alphabet);
+  RUN_TEST(test_render_no_scanned_line_can_forge_a_field_in_the_scan_body);
+  RUN_TEST(test_render_no_scanned_subject_can_forge_a_field_in_the_event_body);
   RUN_TEST(test_scan_reset_discards_a_partial_line);
 
   RUN_TEST(test_debounce_suppresses_the_same_token_inside_the_window_and_not_outside_it);
@@ -3933,6 +5094,22 @@ int main(int, char**) {
   RUN_TEST(test_app_a_heartbeat_whose_body_never_arrived_counts_as_a_no_push);
   RUN_TEST(test_app_a_draining_backlog_still_lets_the_member_at_the_door_through);
   RUN_TEST(test_app_a_404_on_events_keeps_the_backlog_and_retries_it);
+  RUN_TEST(test_gate_response_reads_only_the_top_level_object);
+  RUN_TEST(test_gate_response_takes_its_duration_and_reason_from_the_top_level_too);
+  RUN_TEST(test_boot_recovery_backs_off_only_after_a_watchdog_reset);
+  RUN_TEST(test_app_a_board_the_watchdog_reset_holds_its_first_call_back);
+  RUN_TEST(test_app_alternating_tokens_cannot_hammer_the_gate_endpoint);
+  RUN_TEST(test_debounce_remembers_several_tokens_and_still_never_delays_a_new_one);
+  RUN_TEST(test_app_a_rate_limited_scan_is_refused_rather_than_decided_from_the_roster);
+  RUN_TEST(test_app_every_uploaded_batch_carries_this_boots_identity);
+  RUN_TEST(test_app_two_boots_that_both_start_at_seq_one_are_told_apart);
+  RUN_TEST(test_app_a_corrupt_line_gives_the_member_an_answer);
+  RUN_TEST(test_app_line_noise_cannot_strobe_the_lamp_or_fill_the_ring);
+  RUN_TEST(test_app_two_alternating_tokens_cannot_hold_the_door_open_for_ever);
+  RUN_TEST(test_app_a_scan_inside_the_relock_dwell_costs_no_call_and_records_no_opening);
+  RUN_TEST(test_app_a_scan_inside_the_relock_dwell_never_reaches_the_api);
+  RUN_TEST(test_app_a_window_that_closes_inside_the_call_that_granted_the_next_one);
+  RUN_TEST(test_app_an_offline_record_is_stamped_with_an_uptime_the_server_can_read);
   RUN_TEST(test_body_a_body_that_fits_arrives_whole_however_the_segments_fall);
   RUN_TEST(test_body_an_undeclared_length_ends_when_the_peer_closes);
   RUN_TEST(test_body_a_chunked_keep_alive_capture_is_read_by_its_framing_or_not_at_all);
@@ -3946,7 +5123,8 @@ int main(int, char**) {
   RUN_TEST(test_body_a_dribbling_peer_is_bounded_by_the_body_budget);
   RUN_TEST(test_config_the_worst_call_is_connect_plus_headers_plus_body);
   RUN_TEST(test_body_a_deadline_already_passed_is_a_transport_failure);
-  RUN_TEST(test_body_only_a_whole_body_keeps_the_servers_status);
+  RUN_TEST(test_body_a_failure_status_survives_a_body_that_did_not);
+  RUN_TEST(test_app_a_403_whose_body_did_not_fit_still_takes_the_board_out_of_service);
   RUN_TEST(test_heartbeat_body_carries_its_counters_only_when_there_are_some);
   RUN_TEST(test_app_a_heartbeat_that_pushed_no_roster_is_counted_and_reported);
   RUN_TEST(test_led_a_watchdog_that_would_not_arm_blinks_four_times_as_fast);

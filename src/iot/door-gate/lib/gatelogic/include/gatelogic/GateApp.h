@@ -68,6 +68,43 @@
 // README.md carries that sentence in those words, and it is pinned below by
 // `test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call`.
 //
+// AND THE HARD CAP BOUNDS A WINDOW, NOT THE DOOR — G4's A1
+// --------------------------------------------------------
+// Everything above is about ONE window. The cap closes a window and the next
+// accepted scan opens a fresh one, legally, and on this loop the two land in
+// the SAME pass: `afterBlocking()` pumps the lock, and the decision that call
+// produced is applied two lines later. Measured on the compiled simulator with
+// two alternating tokens every 50 ms, the relay was written OFF and ON at the
+// same millisecond and the door never physically relatched. `UnlockTimer` now
+// guarantees dark time after every close and refuses a grant inside it; see
+// that header for the two dwells and why a cap-forced close earns the longer.
+//
+// AND WHAT BOUNDS A CALL, SAID WITHOUT FLATTERING IT — G4's A3
+// ------------------------------------------------------------
+// `kWorstBlockingCallMs` is the sum of three budgets the port HONOURS, and two
+// of the three are genuinely ours: the connect is `select()`-bounded and the
+// body takes an absolute deadline sampled after the headers return. The HEADER
+// phase is the core's `HTTPClient::setTimeout`, which is an INTER-BYTE timeout:
+// a peer sending one byte every three seconds resets it for ever, `POST()`
+// cannot be interrupted from here, and no number in GateConfig.h bounds it.
+//
+// So on the BOARD the true worst case against a dribbling peer is not 12 010 ms
+// — it is the WATCHDOG, which fires at GATE_WATCHDOG_SECONDS and resets the
+// part. A door released for the full cap when that happens is released for the
+// cap plus up to the watchdog period plus the boot that follows, and the boot
+// is what actually takes the lock back (`beginOutputs()` writes LOCKED before
+// the pin drives). With this image's numbers: 30 s + 15 s + a boot of roughly
+// half a second, so ABOUT 45.5 SECONDS, against the 42.01 s the three budgets
+// alone imply. Both numbers are true of different peers and the larger one is
+// the one to plan a door around.
+//
+// Giving the whole call one absolute deadline would collapse this, and it is
+// not available: the ESP32 core exposes no way to abort a `POST()` in flight.
+// The simulator's `SocketHttpPort` bounds its own header read, so the
+// simulator's measured numbers are the THREE-BUDGET case and cannot reproduce
+// the watchdog one — stated here rather than left for somebody to discover by
+// comparing a transcript with a board.
+//
 // No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
 
 #ifndef CRUSADERS_GATELOGIC_GATEAPP_H
@@ -81,6 +118,7 @@
 #include "devlink/ApiBreaker.h"
 #include "devlink/RosterSync.h"
 #include "eventq/EventQueue.h"
+#include "gatelogic/BootRecovery.h"
 #include "gatelogic/GateApi.h"
 #include "gatelogic/GateConfig.h"
 #include "gatelogic/GateFlow.h"
@@ -140,6 +178,30 @@ public:
     /// life of the image.
     const char* mac = nullptr;
     const char* firmwareVersion = nullptr;
+
+    /// THIS BOOT'S IDENTITY, and the third field of the server's idempotency
+    /// key (round G4, C2). A per-boot random 32-bit value: `esp_random()` on
+    /// the board, a flag or the clock in the simulator, a literal in a test.
+    ///
+    /// It is a PORT rather than something this class generates, for the reason
+    /// everything else here is: a class that reached for a platform RNG could
+    /// only ever be tested against itself, and a boot identity a test cannot
+    /// pin is a deduplication rule no test can prove.
+    ///
+    /// Zero means "this board has no boot identity", which omits the field and
+    /// gives the server exactly the (device, seq) behaviour it always had — so
+    /// a composition root that forgets this is degraded rather than broken.
+    /// The gate's does not forget; the assert in `begin()` is what says so.
+    uint32_t bootId = 0U;
+
+    /// CONSECUTIVE WATCHDOG RESETS BEFORE THIS BOOT (round G4, A4). Zero on a
+    /// healthy boot, which is every boot on a healthy board.
+    ///
+    /// A port for the same reason `bootId` is: it comes from `esp_reset_reason()`
+    /// and a counter in RTC no-init memory, both of which are platform facts,
+    /// and a loop that reached for them could only be tested against itself.
+    /// `BootRecovery.h` carries what it means and what it costs.
+    uint32_t watchdogResetRun = 0U;
 
     /// The heartbeat response buffer. Owned by the composition root and static
     /// there, because the contract allows 4096 bytes and a 4.6 KB local under a
@@ -210,6 +272,17 @@ public:
   /// Saturates rather than wrapping. See GateHeartbeat.h.
   uint32_t noPushHeartbeats() const { return noPushHeartbeats_; }
 
+  /// Release windows the hard cap ended, since boot. See the member.
+  uint32_t capForcedCloses() const { return capForcedCloses_; }
+
+  /// Milliseconds the first network call of this boot was held back for, after
+  /// a watchdog reset. Zero on a healthy boot. See BootRecovery.h.
+  uint32_t firstCallHeldBackMs() const { return firstCallHeldBackMs_; }
+
+  /// This boot's identity, as every uploaded batch carries it. Observable so a
+  /// test and the simulator's console can say WHICH boot a record belongs to.
+  uint32_t bootId() const { return bootId_; }
+
   /// The two since-boot counters exactly as the next request will carry them.
   GateDiagnostics diagnostics() const {
     return GateDiagnostics{noPushHeartbeats_, saturate(queue_.overflowed())};
@@ -258,7 +331,10 @@ private:
   /// Applies a decision to the door and the lamp, and answers with what the
   /// lock was ACTUALLY given after both bounds — which is what the queued event
   /// has to carry, not what was asked for.
-  uint32_t apply(const ScanDecision& decision, uint32_t nowMs);
+  /// Non-const: a decision that asked for the door can come back REFUSED, when
+  /// the lock turns out to still be relatching — see `markRelocking` and round
+  /// G4's A1. The caller records what actually happened, not what was decided.
+  uint32_t apply(ScanDecision& decision, uint32_t nowMs);
 
   void queue(const ScanDecision& decision, const char* subject, uint32_t nowMs, uint32_t grantedMs);
 
@@ -293,12 +369,41 @@ private:
 
   const char* mac_;
   const char* firmwareVersion_;
+  /// This boot's identity, from the composition root. See Ports::bootId.
+  uint32_t bootId_;
+  /// Consecutive watchdog resets before this boot. See Ports::watchdogResetRun.
+  uint32_t watchdogResetRun_;
   char* heartbeatBody_;
   size_t heartbeatBodyCap_;
   bool ledActiveHigh_;
 
   tb::Uptime64 uptime_;
   tb::Deadline heartbeatAt_;
+
+  /// THE FIRST NETWORK CALL OF THIS BOOT, held back after a watchdog reset
+  /// (round G4, A4). Disarmed on a healthy boot, which is every boot on a
+  /// healthy board, so this costs nothing in normal service.
+  ///
+  /// It gates the HEARTBEAT specifically, because the heartbeat is the first
+  /// thing a board does with its radio — `pumpLink`'s up edge arms it to "now"
+  /// — and is therefore the call a dribbling peer holds until the watchdog
+  /// fires. The event drain is gated with it: a board with a boot event in its
+  /// ring would otherwise reach the same peer on the same first pass.
+  tb::Deadline firstCallAt_;
+
+  /// When this board may next ASK THE SERVER about a scan, whatever token is
+  /// presented. See `kMinScanCallSpacingMs` and round G4's A2: the debounce
+  /// bounds repeats, and two alternating tokens defeated it entirely.
+  ///
+  /// Armed from the instant of the ATTEMPT, like the heartbeat's own floor, so
+  /// a slow call does not make the next member wait for the call's duration on
+  /// top of the spacing.
+  tb::Deadline scanCallFloorAt_;
+
+  /// When an unreadable line may next produce an answer. See
+  /// `kUnreadableFeedbackMs`: the feedback L1 added is rate-limited so that a
+  /// noisy cable cannot strobe the lamp or fill the event ring.
+  tb::Deadline unreadableAt_;
 
   /// THE FLOOR, armed after every heartbeat ATTEMPT. Whatever re-armed
   /// `heartbeatAt_` — the cadence, or a link-up edge — no attempt happens
@@ -329,6 +434,24 @@ private:
   /// Heartbeats the server answered that pushed no roster. A diagnostic with no
   /// effect on any decision this class makes; saturating, never wrapping.
   uint32_t noPushHeartbeats_ = 0U;
+
+  /// What `firstCallAt_` was armed for at boot, kept so the console and the
+  /// host suite can say the backoff happened rather than infer it from silence.
+  uint32_t firstCallHeldBackMs_ = 0U;
+
+  /// Release windows the HARD CAP ended, since boot (round G4, A1).
+  ///
+  /// A rising count is somebody holding a door open — a phone taped to the
+  /// reader, a scanner jammed against a frame, or two codes being alternated —
+  /// and it is the only number on this board that says so. Saturating.
+  ///
+  /// NOT ON THE WIRE, and said plainly rather than implied: there is no event
+  /// kind for it and no heartbeat field, both of which are wire changes with
+  /// corpus vectors and a backend behind them. It reaches the native
+  /// simulator's `status` line and the host suite, and the `relocking` refusals
+  /// the dwell produces afterwards DO reach the queue when the board is
+  /// offline. Putting it on the wire is owed.
+  uint32_t capForcedCloses_ = 0U;
 
   /// What the last heartbeat said a release should last. The build-flag default
   /// until the first accepted one, which is what makes a board that has never

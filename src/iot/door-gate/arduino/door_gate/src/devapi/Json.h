@@ -158,6 +158,89 @@ bool isCompleteObject(const char* body, size_t len);
 /// Container levels `isCompleteObject` can track. One bit each in a uint32_t.
 inline constexpr uint32_t kMaxNesting = 32U;
 
+// --- reading ONE object's own members ----------------------------------------
+//
+// WHY BOTH FAMILIES EXIST
+// -----------------------
+// The flat scan above is depended upon and is not going away: the court box
+// reads `button_map`, `slice_minutes` and `walk_up_max_minutes` out of the
+// heartbeat's NESTED `config` object with no path expression at all, and
+// narrowing `findKey` would break it.
+//
+// But a flat scan is the wrong reader for anything a caller ACTS ON, and round
+// G4's B2 is what that cost: `onGateResponse` read `opened` — the one field
+// that drives a lock — with it. `{"outer":{"opened":true}}` released the lock.
+// So did `[{"opened":true}]`. So did `{"opened":false,"detail":{"opened":true}}`,
+// whose top-level answer is a refusal, because `findKey` returns the FIRST
+// match in document order and a decoy placed before the real field wins.
+//
+// `adoptUnlockMs` had already scoped `unlock_seconds` by finding the `gate`
+// object first and reading inside it, and had written down why. These are that
+// reasoning made available rather than re-derived per call site — and they are
+// stricter than that idiom, which bounds a scan at the START of an object and
+// not at its end.
+//
+// THEY ARE NOT A PATH SYNTAX. Exactly one level: the members of the outermost
+// object. A caller that wants a field from a NAMED object still finds that
+// object first, with `findTopLevelObject`, and reads from there.
+
+/// Position just past the closing quote of `key` when it is a member of the
+/// OUTERMOST object — the same contract `findKey` returns, so the readers below
+/// can share everything after it. kNotFound when the key is absent from that
+/// level, when the body is not one object, or when it is malformed.
+///
+/// Every member's value is skipped WHOLE, so a key inside a nested object or
+/// array is not a match however early it appears.
+size_t findTopLevelKey(const char* body, size_t len, const char* key);
+
+/// `stringField` / `unsignedField` / `boolField`, restricted to the outermost
+/// object's own members. Same refusal rules in every other respect.
+bool topLevelStringField(const char* body, size_t len, const char* key, char* out, size_t outCap);
+bool topLevelUnsignedField(const char* body, size_t len, const char* key, uint32_t& out);
+bool topLevelBoolField(const char* body, size_t len, const char* key, bool& out);
+
+/// `findObject` / `findArray`, restricted the same way.
+size_t findTopLevelObject(const char* body, size_t len, const char* key, size_t& outLen);
+size_t findTopLevelArray(const char* body, size_t len, const char* key);
+
+// --- writing ----------------------------------------------------------------
+//
+// WHY A READER HAS AN ESCAPER IN IT
+// ---------------------------------
+// Because the two halves of the JSON string grammar have to agree, and round
+// G4's B1 is what it costs when only one of them exists. `renderScanBody` and
+// `renderEventBody` interpolated SCANNED BYTES with a bare `%s`, and the
+// scanner admitted every printable byte including `"` and `\`. A QR code of
+// twenty characters — `a","method":"code` is seventeen — re-wrote the fields
+// around it: `method`, `mac`, `seq`, `kind`, `court`. `","seq":99999,"x":"` is
+// nineteen and, scanned at a door that was offline, forged the batch's sequence
+// number; the server answers `accepted_through` from the seq it PARSED, so one
+// crafted code discarded a whole evening's backlog on reconnect.
+//
+// So the escaper lives beside the scanner that has to be able to read what it
+// writes. `endOfString` above is the one authority on where a string ENDS, and
+// this is the one authority on how to write one that ends where it should.
+
+/// Longest an escaped string can be per input byte: `\u00XX`.
+inline constexpr size_t kMaxEscapeExpansion = 6U;
+
+/// Writes the CONTENTS of a JSON string — no surrounding quotes — for the first
+/// `inLen` bytes of `in`, escaped so that NO input byte can end the string or
+/// start a field beside it.
+///
+/// `"` and `\` take their two-character forms; every byte below 0x20 takes a
+/// short form where JSON defines one and `\u00XX` otherwise, because a raw
+/// control byte inside a string is not legal JSON and a server that rejects the
+/// body drops the record behind it. Bytes at 0x20 and above pass through, which
+/// keeps UTF-8 intact.
+///
+/// False, with `out` emptied, when it would not fit — REFUSED rather than
+/// truncated, on the same rule as every other renderer here: half an escape
+/// sequence is a body the server cannot parse, and a subject cut short is a
+/// different subject. True with an empty `out` for an empty input, which is a
+/// legitimate subject: a line the board discarded has no bytes to report.
+bool escapeInto(const char* in, size_t inLen, char* out, size_t outCap);
+
 } // namespace json
 } // namespace devapi
 

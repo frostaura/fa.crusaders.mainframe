@@ -89,6 +89,27 @@ HEARTBEAT_TIMEOUT = 50.0
 #: waited on a call fails here rather than being absorbed.
 RELEASE_TOLERANCE_MS = 400
 
+# GATE_MIN_RELOCK_MS, from src/iot/door-gate/platformio.ini. After ANY close the
+# lock stays de-energised for at least this long and no grant may energise the
+# relay inside it — round G4's A1, where the cap closed a window and the very
+# next accepted scan opened a fresh one IN THE SAME PASS: relay OFF and ON at
+# the same millisecond, so the strike never dropped and the door never relatched.
+#
+# It is here because this harness scans FASTER THAN A PERSON CAN. `relay_window`
+# returns the instant the relay goes off and the next `scan` follows within
+# milliseconds, which is inside the dwell — so two steps that had nothing to do
+# with the dwell failed on it. The answer is not to shorten a safety constant
+# until a test stops noticing it: the firmware refuses a scan in this window, on
+# purpose and with its own reason, and this harness both PROVES that (DS4b) and
+# respects it everywhere else.
+RELOCK_DWELL_MS = 400
+CAP_RELOCK_DWELL_MS = 3000
+
+#: `kScanDebounceMs`. A repeat of the SAME token inside this of a decision for it
+#: is dropped without a decision — so a harness re-scanning one code has to wait
+#: it out or the simulator answers nothing at all, which reads as a dead board.
+SCAN_DEBOUNCE_MS = 2000
+
 
 def chk(tag: str, what: str, ok: bool, detail: str = "") -> bool:
     return REPORT.check(tag, what, ok, detail)
@@ -314,6 +335,13 @@ class GateSim:
         off = self.maybe(lambda l: l.channel == "relay" and l.state == "OFF", timeout,
                          mark)
         return (on.at_ms, off.at_ms if off else None)
+
+    def let_the_lock_relatch(self) -> None:
+        """Wait out the firmware's relock dwell before presenting another code.
+
+        A person cannot scan within 400 ms of a door closing; this harness can and
+        does. See RELOCK_DWELL_MS."""
+        time.sleep((RELOCK_DWELL_MS / 1000.0) + 0.15)
 
     def relay_moved(self, mark: int, window: float = 1.5) -> bool:
         """Whether the lock was commanded RELEASED at any point since `mark`.
@@ -687,6 +715,78 @@ def _audit_count(door: Any, action: str, device_code: str) -> int:
     return int(raw or 0)
 
 
+def _dsim_clock_bases(door: Any, live_code: str) -> None:
+    """The offline-decide-then-upload cycle at clock bases the simulator's default
+    is not, INCLUDING one four seconds before the 49.7-day millis() wrap.
+
+    WHY THIS EXISTS, AND WHY IT IS NOT A NICETY. Round G4's C1 was an offline
+    record that every real board destroyed on upload: `Uptime64::seed` left the
+    accumulator R ms behind the raw `millis()` every event is stamped from, so
+    `tb::widen` underflowed and the batch went up with a stamp of about 1.8e19 —
+    which the server refuses, and which the drain then treats as a 4xx the board
+    caused and DROPS. R is `millis()` at `begin()`, and `--start-ms 0` is the
+    single value of it that makes the arithmetic come out right. It was this
+    harness's only value for the whole life of the simulator, so the one end-to-end
+    test of the door's offline evidence was green by construction.
+
+    The default is non-zero now (see `kDefaultStartMs` in the simulator), which is
+    what makes every step above a real test of it. This adds the OTHER base that
+    matters: the wrap, which is the normal case on a board that runs for months and
+    the one place widening has to do any work at all."""
+    # Four seconds before the rollover, so it happens DURING the scan-to-upload
+    # window rather than before the board has associated.
+    for label, start_ms in (("wrap-adjacent", 4_294_963_200), ("mid-range", 1_234_567)):
+        mac = ("02d2" + secrets.token_hex(4))[:12]
+        device_code = f"gate-{mac[-6:]}"
+        sim = GateSim(getattr(door.api, "base", ""), door.key, mac,
+                      door.api.log.parent, name=f"dsim-{start_ms}")
+        try:
+            sim.start(start_ms=start_ms)
+            first = sim.expect(lambda l: l.channel == "hb", 30.0, "the first heartbeat")
+            devices = sc.expect_status(
+                door.w.http.get("/api/v1/admin/devices/", token=door.w.admin_token),
+                200, "devices").json
+            row = next((x for x in devices if x.get("mac_address") == mac), None)
+            sim_id = (row or {}).get("id", "")
+            if not sim_id:
+                raise StepFailed(f"the {label} board did not register: {first.raw}")
+            sc.expect_status(door.w.http.patch(f"/api/v1/admin/devices/{sim_id}",
+                                               {"gate_key": f"sim-door-{start_ms}"},
+                                               token=door.w.admin_token),
+                             200, "name the door")
+            pushed = sim.force_heartbeat()
+            chk("DSIM", f"[{label}] a board whose millis() starts at {start_ms} loads its roster",
+                int(pushed.get("roster", "0")) >= 1, pushed.raw)
+
+            sim.wifi(False)
+            offline_from = sim.mark()
+            allowed = sim.scan(live_code)
+            chk("DSIM", f"[{label}] it decides from the cached roster and opens",
+                allowed.flag("released") and allowed.flag("queued"), allowed.raw)
+
+            reconnect = sim.mark()
+            sim.wifi(True)
+            drained = sim.maybe(lambda l: l.channel == "evq" and l.get("held") == "0", 40.0,
+                                reconnect)
+            # THE ASSERTION C1 WOULD HAVE FAILED. Not "the ring emptied" — a board
+            # that drops an event on a 400 empties its ring too, which is exactly
+            # how this stayed invisible. The evidence is the row SERVER-SIDE.
+            opens = _audit_count(door, "device.gate_open", device_code)
+            boots = _audit_count(door, "device.boot", device_code)
+            chk("DSIM", f"[{label}] AND THE RECORD SURVIVES THE UPLOAD: the offline open and the "
+                        f"boot event are both server-side, so the stamp the board widened was one "
+                        f"the server could actually read",
+                opens == 1 and boots == 1,
+                f"gate_open={opens} boot={boots} drained={drained.raw if drained else None} "
+                f"evq={[l.raw for l in sim.since(offline_from, 'evq')]}")
+            final = sim.status()
+            chk("DSIM", f"[{label}] ...and nothing was lost to a full or jammed ring on the way",
+                final.get("queued") == "0" and final.get("lost") == "0", final.raw)
+            REPORT.note(f"DSIM {label} board {device_code} (start_ms={start_ms}): {final.raw}")
+        finally:
+            sim.stop()
+
+
 def dsim_firmware(door: Any) -> None:
     """DSIM — the compiled door firmware, in the chain, against this run's own API.
 
@@ -835,6 +935,12 @@ def dsim_firmware(door: Any) -> None:
         # So the API is asked first, through door_evening's own played client. The
         # two assertions then say different things: this one is about the FIXTURE,
         # and the one below is about the firmware agreeing with it.
+        # THE DWELL FIRST. DS2 released the lock and this harness reaches the next
+        # scan within milliseconds of it closing, which is inside the firmware's
+        # relock dwell — see RELOCK_DWELL_MS. DS4b proves the dwell; here it is
+        # simply respected, as a person would respect it without noticing.
+        sim.let_the_lock_relatch()
+
         probe = door.gate.scan(early_code)
         chk("DSIM", "FIXTURE PROBE: the API itself answers `too_early` for this code, so the "
                     "assertion below is about the firmware rather than about which member the "
@@ -906,6 +1012,7 @@ def dsim_firmware(door: Any) -> None:
             held is not None and abs(held - want) <= RELEASE_TOLERANCE_MS,
             f"held={held}ms want={want}ms")
 
+        sim.let_the_lock_relatch()
         denied_from = sim.mark()
         denied = sim.scan("QQQQQQQQQQQQ")
         chk("DSIM", "a code the cached list has never heard of is refused offline — the degraded "
@@ -954,6 +1061,69 @@ def dsim_firmware(door: Any) -> None:
             _audit_count(door, "device.gate_open", device_code) == 1
             and _audit_count(door, "device.unknown_scan", device_code) == 1,
             f"gate_open={_audit_count(door, 'device.gate_open', device_code)}")
+
+        # -- D S 5 b : the lock is DE-ENERGISED between two openings ---------
+        #
+        # Round G4, A1. The hard cap bounded a release WINDOW and nothing bounded
+        # the DOOR: the cap closed a window and the very next accepted scan opened
+        # a fresh one, in the same pass, because `pass()` pumps the lock out of
+        # `afterBlocking()` and applies the decision that call produced two lines
+        # later. Measured against this binary with two alternating tokens every
+        # 50 ms: relay OFF at t=31034 ms and ON at t=31034 ms, dark for 0 ms, then
+        # +42 ms and +45 ms, for ever. A relay de-energised for zero milliseconds
+        # was never de-energised — the strike does not drop and the maglock keeps
+        # its armature — so the door physically never relocked, with every single
+        # request inside the rules.
+        # THE STATE HAS TO BE MADE: a dwell exists only just after a CLOSE, so
+        # this opens the door and waits for the window to end before probing.
+        #
+        # AND IT IS HERE, AFTER DS5, RATHER THAN BESIDE THE OFFLINE SECTION: the
+        # openings below are real openings, and offline each one would queue a
+        # `gate_open` that DS5's "exactly once" counts would then read as a drain
+        # that duplicated. The board is back online by now, so these go through
+        # the API and queue nothing.
+        time.sleep((SCAN_DEBOUNCE_MS / 1000.0) + 0.3)
+        dwell_open = sim.mark()
+        reopened = sim.scan(live_code)
+        chk("DSIM", "the cached roster opens the door again, which is what creates the close the "
+                    "dwell follows",
+            reopened.flag("released"), reopened.raw)
+        _, closed_ms = sim.relay_window(dwell_open, timeout=12.0)
+        if closed_ms is None:
+            raise StepFailed("the release window never closed, so the dwell cannot be probed")
+
+        # IMMEDIATELY, which is what no person can do and this harness can. The
+        # SAME code that opened the door a moment ago, so the refusal is
+        # demonstrably about the DOOR and not about the member.
+        dwell_from = sim.mark()
+        dwell = sim.scan(live_code)
+        chk("DSIM", "a scan inside the relock dwell is REFUSED — with the same code that opened the "
+                    "door seconds earlier, so the answer is about the lock relatching and not about "
+                    "the member",
+            not dwell.flag("released") and dwell.get("reason") == "relocking", dwell.raw)
+        chk("DSIM", "  ...and the relay does not move for it", not sim.relay_moved(dwell_from),
+            f"relay lines: {[l.raw for l in sim.since(dwell_from, 'relay')]}")
+        door.reasons_seen.add("relocking")
+
+        # AND IT IS A DWELL, NOT A REFUSAL: the same code opens the door again a
+        # moment later. A board that had simply stopped opening would pass the two
+        # assertions above and be far worse than the defect.
+        #
+        # PAST THE DEBOUNCE TOO, not just past the dwell. The refusal above WAS a
+        # decision for this token, so a re-scan inside kScanDebounceMs is
+        # suppressed without one — correctly, and it would read here as the board
+        # having stopped answering.
+        time.sleep((SCAN_DEBOUNCE_MS / 1000.0) + 0.3)
+        back_from = sim.mark()
+        back = sim.scan(live_code)
+        chk("DSIM", "  ...and once the lock has relatched the same code opens the door again, so the "
+                    "dwell delays a member rather than refusing them",
+            back.flag("released"), back.raw)
+        chk("DSIM", "  ...with the relay actually moving for it", sim.relay_moved(back_from),
+            f"relay lines: {[l.raw for l in sim.since(back_from, 'relay')]}")
+        sim.relay_window(back_from, timeout=12.0)
+        sim.let_the_lock_relatch()
+
 
         # -- D S 6 : the club shuts the door --------------------------------
         #
@@ -1016,6 +1186,9 @@ def dsim_firmware(door: Any) -> None:
         REPORT.note(f"DSIM board {device_code}: {final.raw}")
     finally:
         sim.stop()
+
+    # -- D S 7 b : the same evening at clock bases that are not zero ---------
+    _dsim_clock_bases(door, live_code)
 
     # -- D S 8 : the release-overrun bound, MEASURED ------------------------
     numbers = measure_worst_case_release(workdir, door.key)

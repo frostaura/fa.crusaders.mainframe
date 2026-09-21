@@ -103,6 +103,36 @@ private:
 /// The main loop calls it every pass, so this holds trivially — but it is a
 /// real precondition, not a formality, and it is why this is not simply a
 /// free function.
+///
+/// THE INVARIANT EVERYTHING DOWNSTREAM RESTS ON
+/// --------------------------------------------
+/// **`low32(value()) == millis()`, always.** Events are stamped with the RAW
+/// 32-bit `millis()` reading of the moment they happened, and `widen()` below
+/// puts one back on the right side of the 49.7-day wrap by assuming exactly
+/// this.
+///
+/// It did not hold, and that was round G4's C1. `seed()` set `last_` and left
+/// `acc_` at zero, so the accumulator ran R milliseconds BEHIND `millis()` for
+/// the whole life of the boot, where R is whatever the clock read when the
+/// firmware's `begin()` was called. On the native simulator's default
+/// `--start-ms 0` R is zero and nothing is wrong; on an ESP32 it is the Arduino
+/// core's init plus `Serial.begin`, NVS, the UART driver and `WiFi.begin` —
+/// hundreds of milliseconds on every board on every boot. `widen()` then
+/// UNDERFLOWED for any event uploaded less than R ms after it was stamped and
+/// produced a stamp of about 1.8e19, which the server binds as a signed 64-bit
+/// and refuses with a 400 — which the event drain reads as "a 4xx the board
+/// caused" and DROPS. Every offline door entry on every real board, lost, with
+/// no test anywhere able to see it because the one clock base the simulator ran
+/// at was the one that hides it.
+///
+/// WHAT "UPTIME" THEREFORE MEANS ON THE WIRE, SAID DELIBERATELY
+/// ------------------------------------------------------------
+/// It is `millis()` widened, so it INCLUDES the milliseconds before `begin()`
+/// ran. That is truthful — the part was powered for them — and it is the only
+/// definition under which the invariant above can hold, because `millis()`
+/// counts them and a stamp IS a `millis()` reading. Nothing downstream can see
+/// the difference either: the server dates an event by SUBTRACTING its uptime
+/// from the batch's, and the offset cancels.
 class Uptime64 {
 public:
   /// Feed the current raw millis() value; returns accumulated milliseconds.
@@ -114,9 +144,17 @@ public:
 
   uint64_t value() const { return acc_; }
 
-  /// Seed the counter at construction-time clock value, so the first tick()
-  /// does not count the boot instant as elapsed time.
-  void seed(uint32_t now) { last_ = now; }
+  /// Seed the counter at the construction-time clock value.
+  ///
+  /// BOTH FIELDS, and that is the whole of the fix. `last_` so the first tick()
+  /// does not count the boot instant as elapsed time, and `acc_` so the
+  /// accumulator's low 32 bits are the raw `millis()` reading from the very
+  /// first pass — see the class comment for what seeding only the first of the
+  /// two cost.
+  void seed(uint32_t now) {
+    last_ = now;
+    acc_ = now;
+  }
 
 private:
   uint32_t last_ = 0;
@@ -140,10 +178,24 @@ private:
 /// LARGEST value not after `now64` whose low 32 bits are `stamp`. Exact for
 /// anything queued less than 49.7 days ago, which is every event the server
 /// will accept (its own bound is 30 days).
+///
+/// IT CANNOT UNDERFLOW, and that is a second defence rather than a restatement
+/// of the first. `now64 - back` is unsigned, so `back > now64` used to produce
+/// about 1.8e19 — a number the server refuses with a 400 and the drain drops
+/// the record over. Seeding `Uptime64` correctly (above) makes that state
+/// unreachable, but one defence that an unrelated edit can remove is not a
+/// defence, and the value this returns reaches a database column.
+///
+/// There is no honest answer when `back > now64`: the largest v <= now64 with
+/// `low32(v) == stamp` is negative, and the next candidate up is LATER than
+/// now. So it clamps to `now64` — "no earlier than this batch", an age of zero,
+/// which is what the server does with an unbelievable stamp anyway and is the
+/// one answer that cannot overflow anything.
 inline uint64_t widen(uint64_t now64, uint32_t stamp) {
   const uint32_t low = static_cast<uint32_t>(now64 & 0xFFFFFFFFULL);
   const uint32_t back = low - stamp; // modulo 2^32, which is what makes this work
-  return now64 - static_cast<uint64_t>(back);
+  const uint64_t backWide = static_cast<uint64_t>(back);
+  return backWide > now64 ? now64 : now64 - backWide;
 }
 
 /// Renders `value` as decimal into `out`. Returns the length, or 0 when it

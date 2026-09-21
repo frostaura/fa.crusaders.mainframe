@@ -972,7 +972,13 @@ void drainEvents(uint32_t nowMs) {
   // filtered out of the host test build, so a wrap bug here is a wrap bug no
   // test can reach (review 3, finding 25).
   char body[devlink::kEventBodyCap];
-  if (devlink::renderEventBody(body, sizeof(body), gMacHex, gUptime.value(), event) == 0U) {
+  // BOOT ID 0, WHICH OMITS THE FIELD AND KEEPS THIS BOX'S WIRE BODY EXACTLY
+  // AS IT HAS ALWAYS BEEN. The server reads an absent `boot_id` as 0, which is
+  // what (device, seq) always meant — so nothing about this box changes, and
+  // nothing about it is fixed either: the torn-mark renumbering round G4's C2
+  // describes is a court-box defect too, and closing it here is a wire change
+  // to the http/ corpus family and a second lane's work. Owed, not done.
+  if (devlink::renderEventBody(body, sizeof(body), gMacHex, 0U, gUptime.value(), event) == 0U) {
     // Unrenderable. The caps make this unreachable — the longest possible body
     // is well under half the buffer — but if it ever happened, KEEPING the event
     // would pin every later one behind it forever and the box would stop

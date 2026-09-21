@@ -82,6 +82,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "devapi/DeviceClient.h"
 #include "devlink/ApiBreaker.h"
@@ -112,6 +113,25 @@ constexpr char kDefaultStoreDir[] = ".gatestore";
 /// runs sharing one would share a device.
 constexpr char kDefaultMac[] = "02d0deadbeef";
 
+/// What the clock reads at launch unless a harness says otherwise.
+///
+/// NOT ZERO, AND THAT IS THE WHOLE POINT OF THE CONSTANT. Zero is the one value
+/// of millis()-at-begin() that no real board ever has: the Arduino core's init,
+/// `Serial.begin`, NVS, the UART driver and `WiFi.begin` all run before
+/// `gApp.begin()` does. It is also the one value that HID round G4's C1 — the
+/// uptime accumulator was seeded R ms behind the clock every event is stamped
+/// from, and with R = 0 the bug is arithmetically invisible. A simulator whose
+/// default is the single value that cannot occur in the field is a simulator
+/// that can be green by construction, and this one was, for every run of
+/// `door_evening.py` there has ever been.
+///
+/// The exact number is deliberately not round and is not load-bearing: nothing
+/// may come to depend on it. It is larger than a real board's few hundred
+/// milliseconds on purpose, because the window C1 lived in is R wide and a
+/// harness wants it visible rather than marginal. `--start-ms 0` still says
+/// zero, for a test that specifically wants it.
+constexpr uint32_t kDefaultStartMs = 4200U;
+
 volatile sig_atomic_t gStopRequested = 0;
 
 void onSignal(int) {
@@ -126,11 +146,42 @@ struct Options {
   /// What the clock reads at launch. 4294963200 puts the 49.7-day millis()
   /// rollover four seconds after startup, so a harness can assert "the lock
   /// still releases across the wrap" in one run instead of in seven weeks.
-  uint32_t startMs = 0U;
+  /// Defaults to kDefaultStartMs — see there for why it is not zero.
+  uint32_t startMs = kDefaultStartMs;
   /// Start with the radio down, so a harness can prove what a board does before
   /// it has ever loaded a roster.
   bool linkDown = false;
+  /// THIS BOOT'S IDENTITY, the third field of the server's idempotency key
+  /// (round G4, C2). `esp_random()` on the board; SEEDABLE here, because a
+  /// harness that wants to prove "the same board, restarted, is not deduped
+  /// away" has to be able to say which boot is which — and one that wants to
+  /// prove the opposite has to be able to repeat one. Zero means "draw one",
+  /// which is what a run that does not care gets.
+  uint32_t bootId = 0U;
+  /// Read the response headers the way the BOARD does — an inter-byte timeout
+  /// a dribbling peer can hold open for ever — instead of the absolute deadline
+  /// this simulator uses by default. Round G4, A4: the one unbounded path in
+  /// this firmware was the one path no test vehicle could reach.
+  bool boardHeaderTimeout = false;
 };
+
+/// A boot identity for a run that did not name one.
+///
+/// NOT `rand()`. The requirement is that two consecutive runs of one simulator
+/// — and two simulators a harness gave the same MAC — do not collide, and a
+/// PRNG seeded from a one-second clock gives two processes started in the same
+/// second the same answer. The clock's nanoseconds and the pid are what
+/// actually differ between two runs of this binary.
+uint32_t drawBootId() {
+  timespec now;
+  static_cast<void>(clock_gettime(CLOCK_REALTIME, &now));
+  const uint32_t mixed = static_cast<uint32_t>(now.tv_nsec) ^ (static_cast<uint32_t>(now.tv_sec) << 11) ^
+                         (static_cast<uint32_t>(getpid()) * 2654435761UL);
+  // Never zero: zero is the wire's "this board has no boot identity", which
+  // omits the field and hands the server the (device, seq) behaviour C2 exists
+  // to close.
+  return mixed == 0U ? 1U : mixed;
+}
 
 void usage() {
   printf("usage: gate-simulator --api-base URL --device-key KEY [--mac HEX12] [--store DIR]\n"
@@ -141,8 +192,18 @@ void usage() {
          "  --mac         this board's MAC as 12 lowercase hex (or GATE_MAC)\n"
          "  --store       directory for the event queue's persisted sequence\n"
          "  --start-ms    what the millis() clock reads at launch; 4294963200 puts\n"
-         "                the 49.7-day rollover four seconds from now\n"
+         "                the 49.7-day rollover four seconds from now. Defaults to\n"
+         "                a NON-ZERO value: zero is the one reading no real board\n"
+         "                has at begin(), and it is the one that hid G4's C1\n"
+         "  --boot-id     this boot's identity, the third field of the server's\n"
+         "                idempotency key. Drawn from the clock and the pid when\n"
+         "                absent; give one to repeat or to distinguish a boot\n"
          "  --link-down   boot with the radio not associated\n"
+         "  --board-header-timeout\n"
+         "                read response headers with the BOARD's inter-byte timeout\n"
+         "                instead of an absolute deadline. A peer that dribbles then\n"
+         "                holds the call open past the watchdog, exactly as on the\n"
+         "                hardware, and the breach is reported instead of resetting\n"
          "console: 'scan <code>', 'rxerror', 'wifi up|down', 'status', 'quit'\n");
 }
 
@@ -169,8 +230,16 @@ bool parseArgument(int argc, char** argv, int& i, Options& out) {
     out.startMs = static_cast<uint32_t>(strtoul(value, nullptr, 10));
     return true;
   }
+  if (takeValue(argc, argv, i, "--boot-id", &value)) {
+    out.bootId = static_cast<uint32_t>(strtoul(value, nullptr, 10));
+    return true;
+  }
   if (strcmp(argv[i], "--link-down") == 0) {
     out.linkDown = true;
+    return true;
+  }
+  if (strcmp(argv[i], "--board-header-timeout") == 0) {
+    out.boardHeaderTimeout = true;
     return true;
   }
   return false;
@@ -198,6 +267,9 @@ bool parseOptions(int argc, char** argv, Options& out) {
     }
   }
   applyEnvironment(out);
+  if (out.bootId == 0U) {
+    out.bootId = drawBootId();
+  }
   return out.apiBase != nullptr && out.deviceKey != nullptr;
 }
 
@@ -272,8 +344,8 @@ public:
         watchdog_(kGateConfig.watchdogSeconds, clock_), http_(options.apiBase, authorization_, clock_),
         api_(http_, breaker_, clock_),
         lock_(relayPin_, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay),
-        unlockTimer_(kGateConfig.unlockHardCapMs), queue_(&store_), roster_(kGateConfig.rosterMaxAgeMs),
-        app_(wire()) {}
+        unlockTimer_(kGateConfig.unlockHardCapMs, kGateConfig.minRelockMs, kGateConfig.relockDwellMs),
+        queue_(&store_), roster_(kGateConfig.rosterMaxAgeMs), app_(wire()) {}
 
   /// `Bearer <key>`, rendered once, exactly as setupIdentity() does at boot.
   /// Static and filled before the Board is constructed, because SocketHttpPort
@@ -291,6 +363,8 @@ public:
       return false;
     }
     static_cast<void>(console_.begin());
+    // BEFORE ANY CALL. See Options::boardHeaderTimeout and round G4's A4.
+    http_.useBoardHeaderTimeout(options_.boardHeaderTimeout);
 
     // FIRST, before anything else can take time or fail, exactly as setup()
     // does: the lock's LOCKED level into the output register before the pin
@@ -355,6 +429,7 @@ private:
     ports.log = &decisions_;
     ports.mac = options_.mac;
     ports.firmwareVersion = fw::kFirmwareVersion;
+    ports.bootId = options_.bootId;
     ports.heartbeatBody = heartbeatBody_;
     ports.heartbeatBodyCap = sizeof(heartbeatBody_);
     return ports;
@@ -363,7 +438,8 @@ private:
   /// Five lines at boot, then nothing in the loop. The key is not among them.
   void banner() {
     printf("[sim] crusaders door-gate simulator %s\n", fw::kFirmwareVersion);
-    printf("[sim] mac=%s api=%s store=%s\n", options_.mac, options_.apiBase, options_.storeDir);
+    printf("[sim] mac=%s api=%s store=%s boot_id=%lu\n", options_.mac, options_.apiBase, options_.storeDir,
+           static_cast<unsigned long>(options_.bootId));
     printf("[sim] clock starts at %lu ms, idle %lu ms/pass, watchdog %us, worst call %lu ms\n",
            static_cast<unsigned long>(options_.startMs), static_cast<unsigned long>(kIdleDelayMs),
            static_cast<unsigned>(kGateConfig.watchdogSeconds),
@@ -373,6 +449,10 @@ private:
            static_cast<unsigned long>(kGateConfig.unlockHardCapMs),
            static_cast<unsigned long>(kGateConfig.heartbeatMs),
            static_cast<unsigned long>(kGateConfig.rosterMaxAgeMs));
+    if (options_.boardHeaderTimeout) {
+      printf("[sim] header phase uses the BOARD's INTER-BYTE timeout: a dribbling peer can hold a "
+             "call past the watchdog, and the breach is reported rather than resetting\n");
+    }
     printf("[sim] console: scan <code> | rxerror | wifi up|down | status | quit\n");
     static_cast<void>(fflush(stdout));
   }
@@ -398,20 +478,39 @@ private:
     lastUnlockMs_ = app_.unlockMs();
     lastNoPush_ = app_.noPushHeartbeats();
 
-    if (queue_.size() != lastQueued_) {
+    // A WINDOW THE HARD CAP ENDED. Printed rather than left to `status`, because
+    // it is an EVENT — somebody is holding this door open — and a transcript
+    // that only carried the final total could not say when. Round G4, A1.
+    if (app_.capForcedCloses() != lastCapped_) {
+      lastCapped_ = app_.capForcedCloses();
+      printf("[cap] window ended by the hard cap, total=%lu, lock dark for %lums t=%lums\n",
+             static_cast<unsigned long>(lastCapped_), static_cast<unsigned long>(kGateConfig.relockDwellMs),
+             static_cast<unsigned long>(clock_.nowMs()));
+      static_cast<void>(fflush(stdout));
+    }
+
+    // ON THE SIZE OR ON THE LOSS, and the second is round G4's H1. A ring that
+    // is FULL does not change size when it overflows — it evicts one event and
+    // takes another — so every loss after the first was invisible in a
+    // transcript, which is exactly the state (offline, ring full) the losses
+    // happen in. `lost` is what a harness asserts the eviction policy with.
+    if (queue_.size() != lastQueued_ || queue_.overflowed() != lastLost_) {
       printf("[evq] held=%u lost=%lu t=%lums\n", static_cast<unsigned>(queue_.size()),
              static_cast<unsigned long>(queue_.overflowed()), static_cast<unsigned long>(clock_.nowMs()));
       static_cast<void>(fflush(stdout));
       lastQueued_ = queue_.size();
+      lastLost_ = queue_.overflowed();
     }
   }
 
   void status() {
     printf(
-        "[status] link=%d released=%d roster=%u age_ms=%lu unlock_ms=%lu queued=%u lost=%lu "
-        "no_push=%lu calls=%lu worst_call_ms=%lu worst_gap_ms=%lu wdt_breaches=%lu "
+        "[status] link=%d released=%d relocking_ms=%lu capped=%lu roster=%u age_ms=%lu unlock_ms=%lu "
+        "queued=%u lost=%lu no_push=%lu calls=%lu worst_call_ms=%lu worst_gap_ms=%lu wdt_breaches=%lu "
         "dropped_scan_bytes=%lu t=%lums\n",
-        app_.linkUp() ? 1 : 0, lock_.released() ? 1 : 0, static_cast<unsigned>(roster_.size()),
+        app_.linkUp() ? 1 : 0, lock_.released() ? 1 : 0,
+        static_cast<unsigned long>(unlockTimer_.relockingForMs(clock_.nowMs())),
+        static_cast<unsigned long>(app_.capForcedCloses()), static_cast<unsigned>(roster_.size()),
         static_cast<unsigned long>(roster_.ageMs(clock_.nowMs())),
         static_cast<unsigned long>(app_.unlockMs()), static_cast<unsigned>(queue_.size()),
         static_cast<unsigned long>(queue_.overflowed()), static_cast<unsigned long>(app_.noPushHeartbeats()),
@@ -480,6 +579,8 @@ private:
 
   GateApp app_;
 
+  uint32_t lastCapped_ = 0U;
+  uint32_t lastLost_ = 0U;
   uint32_t lastRosterAge_ = 0U;
   uint32_t lastUnlockMs_ = 0U;
   uint32_t lastNoPush_ = 0U;

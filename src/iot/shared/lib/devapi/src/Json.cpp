@@ -112,8 +112,12 @@ size_t findKey(const char* body, size_t len, const char* key) {
   return kNotFound;
 }
 
-bool stringField(const char* body, size_t len, const char* key, char* out, size_t outCap) {
-  size_t at = findKey(body, len, key);
+namespace {
+
+/// The string value at a position `findKey` or `findTopLevelKey` returned.
+/// Shared by both families so the two can never disagree about what a value is
+/// — only about where a key may be found.
+bool stringAt(const char* body, size_t len, size_t at, char* out, size_t outCap) {
   if (at == kNotFound) {
     return false;
   }
@@ -122,6 +126,12 @@ bool stringField(const char* body, size_t len, const char* key, char* out, size_
     return false;
   }
   return out[0] != '\0';
+}
+
+} // namespace
+
+bool stringField(const char* body, size_t len, const char* key, char* out, size_t outCap) {
+  return stringAt(body, len, findKey(body, len, key), out, outCap);
 }
 
 namespace {
@@ -150,8 +160,9 @@ bool readUnsigned(const char* body, size_t len, size_t& at, uint32_t& out) {
 
 } // namespace
 
-bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
-  size_t at = findKey(body, len, key);
+namespace {
+
+bool unsignedAt(const char* body, size_t len, size_t at, uint32_t& out) {
   if (at == kNotFound) {
     return false;
   }
@@ -159,8 +170,7 @@ bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out)
   return readUnsigned(body, len, at, out);
 }
 
-bool boolField(const char* body, size_t len, const char* key, bool& out) {
-  size_t at = findKey(body, len, key);
+bool boolAt(const char* body, size_t len, size_t at, bool& out) {
   if (at == kNotFound) {
     return false;
   }
@@ -176,8 +186,19 @@ bool boolField(const char* body, size_t len, const char* key, bool& out) {
   return false;
 }
 
-size_t findObject(const char* body, size_t len, const char* key, size_t& outLen) {
-  size_t at = findKey(body, len, key);
+} // namespace
+
+bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
+  return unsignedAt(body, len, findKey(body, len, key), out);
+}
+
+bool boolField(const char* body, size_t len, const char* key, bool& out) {
+  return boolAt(body, len, findKey(body, len, key), out);
+}
+
+namespace {
+
+size_t objectAt(const char* body, size_t len, size_t at, size_t& outLen) {
   if (at == kNotFound) {
     return kNotFound;
   }
@@ -211,8 +232,7 @@ size_t findObject(const char* body, size_t len, const char* key, size_t& outLen)
   return kNotFound;
 }
 
-size_t findArray(const char* body, size_t len, const char* key) {
-  size_t at = findKey(body, len, key);
+size_t arrayAt(const char* body, size_t len, size_t at) {
   if (at == kNotFound) {
     return kNotFound;
   }
@@ -223,6 +243,16 @@ size_t findArray(const char* body, size_t len, const char* key) {
     return kNotFound;
   }
   return at + 1U;
+}
+
+} // namespace
+
+size_t findObject(const char* body, size_t len, const char* key, size_t& outLen) {
+  return objectAt(body, len, findKey(body, len, key), outLen);
+}
+
+size_t findArray(const char* body, size_t len, const char* key) {
+  return arrayAt(body, len, findKey(body, len, key));
 }
 
 bool nextStringElement(const char* body, size_t len, size_t& at, char* out, size_t outCap) {
@@ -329,6 +359,226 @@ size_t pastBalancedObject(const char* body, size_t len, size_t at) {
 }
 
 } // namespace
+
+namespace {
+
+/// One escaped byte, written into `out` at `at`. Returns the new `at`, or
+/// kNotFound when it would not fit — checked per byte rather than up front,
+/// because the expansion depends on the bytes and an up-front worst-case check
+/// would refuse a subject that fits comfortably.
+size_t writeEscaped(char byte, char* out, size_t outCap, size_t at) {
+  const char* pair = nullptr;
+  switch (byte) {
+  case '"':
+    pair = "\\\"";
+    break;
+  case '\\':
+    pair = "\\\\";
+    break;
+  case '\b':
+    pair = "\\b";
+    break;
+  case '\f':
+    pair = "\\f";
+    break;
+  case '\n':
+    pair = "\\n";
+    break;
+  case '\r':
+    pair = "\\r";
+    break;
+  case '\t':
+    pair = "\\t";
+    break;
+  default:
+    break;
+  }
+
+  if (pair != nullptr) {
+    if (at + 2U >= outCap) {
+      return kNotFound;
+    }
+    out[at] = pair[0];
+    out[at + 1U] = pair[1];
+    return at + 2U;
+  }
+
+  const unsigned char value = static_cast<unsigned char>(byte);
+  if (value >= 0x20U) {
+    // Everything printable, and every UTF-8 continuation byte, straight
+    // through: escaping those would change what the server stores.
+    if (at + 1U >= outCap) {
+      return kNotFound;
+    }
+    out[at] = byte;
+    return at + 1U;
+  }
+
+  // A control byte with no short form. Raw, it is not legal JSON at all, and a
+  // body the server refuses is a record the drain then drops.
+  static const char kHex[] = "0123456789abcdef";
+  if (at + 6U >= outCap) {
+    return kNotFound;
+  }
+  out[at] = '\\';
+  out[at + 1U] = 'u';
+  out[at + 2U] = '0';
+  out[at + 3U] = '0';
+  out[at + 4U] = kHex[(value >> 4) & 0x0FU];
+  out[at + 5U] = kHex[value & 0x0FU];
+  return at + 6U;
+}
+
+} // namespace
+
+bool escapeInto(const char* in, size_t inLen, char* out, size_t outCap) {
+  if (out == nullptr || outCap == 0U) {
+    return false;
+  }
+  out[0] = '\0';
+  if (in == nullptr) {
+    return inLen == 0U;
+  }
+
+  size_t at = 0U;
+  for (size_t i = 0U; i < inLen; ++i) {
+    at = writeEscaped(in[i], out, outCap, at);
+    if (at == kNotFound) {
+      out[0] = '\0';
+      return false;
+    }
+  }
+  out[at] = '\0';
+  return true;
+}
+
+namespace {
+
+/// Past the value that starts at `at`, whatever kind it is. kNotFound when the
+/// document ends inside it or a container never balances.
+///
+/// `pastBalancedObject` below handles `{` and `[` alike — it remembers each
+/// opener's KIND — so it is the one walker for both. A scalar is anything up to
+/// the next `,` or `}` at this level, which cannot be inside a string because a
+/// string is skipped whole above it.
+size_t pastBalancedObject(const char* body, size_t len, size_t at);
+
+size_t pastValue(const char* body, size_t len, size_t at) {
+  if (at >= len) {
+    return kNotFound;
+  }
+  if (body[at] == '"') {
+    const size_t close = endOfString(body, len, at);
+    return close == kNotFound ? kNotFound : close + 1U;
+  }
+  if (body[at] == '{' || body[at] == '[') {
+    return pastBalancedObject(body, len, at);
+  }
+  while (at < len && body[at] != ',' && body[at] != '}') {
+    ++at;
+  }
+  return at;
+}
+
+} // namespace
+
+namespace {
+
+/// One member of an object: the span of its KEY and the position of its colon.
+///
+/// Split out of `findTopLevelKey` so neither is over the complexity gate — and
+/// the split is the honest one, because this is the part that decides whether
+/// the bytes at `at` are a member at all, while the loop above decides what to
+/// do about the one it found.
+struct Member {
+  size_t keyStart = 0U; ///< first byte INSIDE the key's quotes
+  size_t keyLen = 0U;
+  size_t pastKey = 0U;      ///< just past the key's CLOSING quote — what findKey returns
+  size_t colon = kNotFound; ///< kNotFound when this is not a member
+};
+
+Member memberAt(const char* body, size_t len, size_t at) {
+  Member member;
+  if (at >= len || body[at] != '"') {
+    return member; // the closing brace, a trailing comma, or malformed
+  }
+  const size_t close = endOfString(body, len, at);
+  if (close == kNotFound) {
+    return member;
+  }
+  const size_t colon = skipSpace(body, len, close + 1U);
+  if (colon >= len || body[colon] != ':') {
+    return member; // a key with no value: not a document this reads
+  }
+  member.keyStart = at + 1U;
+  member.keyLen = close - (at + 1U);
+  member.pastKey = close + 1U;
+  member.colon = colon;
+  return member;
+}
+
+} // namespace
+
+size_t findTopLevelKey(const char* body, size_t len, const char* key) {
+  if (body == nullptr || key == nullptr) {
+    return kNotFound;
+  }
+  const size_t keyLen = strlen(key);
+  if (keyLen == 0U) {
+    return kNotFound;
+  }
+
+  size_t at = skipSpace(body, len, 0U);
+  // A TOP-LEVEL ARRAY IS NOT AN OBJECT, and that is one of the two bodies B2
+  // reported: `[{"opened":true}]` released a lock through the flat scan.
+  if (at >= len || body[at] != '{') {
+    return kNotFound;
+  }
+  ++at;
+
+  while (true) {
+    const Member member = memberAt(body, len, skipSpace(body, len, at));
+    if (member.colon == kNotFound) {
+      return kNotFound;
+    }
+    if (member.keyLen == keyLen && memcmp(body + member.keyStart, key, keyLen) == 0) {
+      // Just PAST the key's closing quote — the same contract findKey returns,
+      // which is what lets both families share every reader after this point.
+      return member.pastKey;
+    }
+    // NOT THIS ONE: past its value WHOLE, so a key nested inside it is never a
+    // match however early in the document it appears.
+    at = pastValue(body, len, skipToValue(body, len, member.colon));
+    if (at == kNotFound) {
+      return kNotFound;
+    }
+    at = skipSpace(body, len, at);
+    if (at >= len || body[at] != ',') {
+      return kNotFound; // the object ended, and the key was not in it
+    }
+    ++at;
+  }
+}
+
+bool topLevelStringField(const char* body, size_t len, const char* key, char* out, size_t outCap) {
+  return stringAt(body, len, findTopLevelKey(body, len, key), out, outCap);
+}
+
+bool topLevelUnsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
+  return unsignedAt(body, len, findTopLevelKey(body, len, key), out);
+}
+
+bool topLevelBoolField(const char* body, size_t len, const char* key, bool& out) {
+  return boolAt(body, len, findTopLevelKey(body, len, key), out);
+}
+
+size_t findTopLevelObject(const char* body, size_t len, const char* key, size_t& outLen) {
+  return objectAt(body, len, findTopLevelKey(body, len, key), outLen);
+}
+
+size_t findTopLevelArray(const char* body, size_t len, const char* key) {
+  return arrayAt(body, len, findTopLevelKey(body, len, key));
+}
 
 bool isCompleteObject(const char* body, size_t len) {
   if (body == nullptr) {
