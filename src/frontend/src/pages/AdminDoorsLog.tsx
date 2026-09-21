@@ -738,6 +738,12 @@ function AdminDoorsLogPageBody() {
                 filename, which outlives the screen that explained it. */}
             {doorGone ? (
               <p className="text-sm text-warning-strong">{LOG_CSV_BLOCKED_DOOR_GONE}</p>
+            ) : pickADay ? (
+              // A-L3 / R3-12, the export half: with no day chosen there is no range to
+              // export, and the filters the file would be built from are the DEFAULT period
+              // — so the button would hand a chair a file of the last 24 hours named for a
+              // day they had not picked. That is A4's finding with a different filter.
+              <p className="text-sm text-text-muted">Pick a day above before exporting.</p>
             ) : (
               <>
                 {/* C4: enabled throughout, for the reason on Refresh above — `disabled` blurs. */}
