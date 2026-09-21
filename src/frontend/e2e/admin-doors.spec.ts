@@ -272,7 +272,7 @@ test.describe("Shutting every door", () => {
     ]);
 
     await page.getByRole("button", { name: /— every door the club has open/ }).click();
-    await page.getByRole("button", { name: /tap again to confirm/ }).click();
+    await page.getByRole("button", { name: /again to confirm/ }).click();
 
     const heading = page.getByRole("heading", { name: /2 doors shut — 1 confirmed, 1 not/ });
     await expect(heading).toBeVisible();
@@ -306,7 +306,7 @@ test.describe("Shutting every door", () => {
     ]);
 
     await page.getByRole("button", { name: /— every door the club has open/ }).click();
-    await page.getByRole("button", { name: /tap again to confirm/ }).click();
+    await page.getByRole("button", { name: /again to confirm/ }).click();
 
     const line = page.getByText(/confirmed — heard from/);
     await expect(line).toBeVisible();
@@ -475,7 +475,7 @@ test.describe("One door's page", () => {
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
     await page.getByRole("button", { name: "Shut this door — Front door" }).click();
-    await page.getByRole("button", { name: "Shut this door — Front door — tap again to confirm" }).click();
+    await page.getByRole("button", { name: "Shut this door — Front door — choose again to confirm" }).click();
 
     expect((await patch).postData()).toBe('{"enabled":false}');
   });
@@ -503,10 +503,10 @@ test.describe("One door's page", () => {
     await openDoor(page, [door({ name: "Front door" })]);
 
     await page.getByRole("button", { name: "Delete this door — Front door" }).click();
-    await expect(page.getByRole("button", { name: "Delete this door — Front door — tap again to confirm" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Delete this door — Front door — choose again to confirm" })).toBeVisible();
     // The armed button IS the confirm sentence — asserted on the control rather than on a
     // text node, because the width sentinel carries the same words invisibly.
-    const armed = page.getByRole("button", { name: "Delete this door — Front door — tap again to confirm" });
+    const armed = page.getByRole("button", { name: "Delete this door — Front door — choose again to confirm" });
     await expect(armed).toBeVisible();
     // C10's two facts, in the words A2 gave them this round: the armed confirm was a
     // paragraph, and what it listed it destroyed while saying nothing about the door's

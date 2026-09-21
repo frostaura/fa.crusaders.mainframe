@@ -159,6 +159,37 @@
     :focus-visible {
       outline: 2px solid Highlight;
     }
+
+    /*
+     * B5 — the two halves of an armed confirm, told apart without colour.
+     *
+     * Everything that distinguishes them ordinarily is colour: the confirm is filled amber,
+     * the way out is a white outline. Forced colours throws both away and leaves two boxes
+     * with the same 1 px `ButtonText` edge from the rule above, side by side, one of which
+     * shuts a door. Reviewer B screenshotted the pair and they are indistinguishable.
+     *
+     * So the distinction is made in WEIGHT and in LINE STYLE, neither of which a forced
+     * palette can take away: the one that acts is heavy and solid, the one that stops is the
+     * dashed secondary. It fires only in this mode — nothing about the ordinary rendering
+     * changes — and `e2e/confirm-armed.spec.ts` measures both under
+     * `emulateMedia({ forcedColors: "active" })` rather than asserting that a class is present.
+     */
+    /*
+     * `button[data-confirm=…]`, not the bare attribute — and measured, not reasoned about.
+     * `[data-confirm="go"]` is (0,1,0), exactly what Tailwind's own `border` utility scores,
+     * and the utilities layer is later in the source: the first draft of this rule lost the
+     * width silently and the e2e print-out read "go 1px solid · stop 1px dashed". Adding the
+     * element carries it to (0,1,1), which beats a utility class on any element.
+     */
+    button[data-confirm="go"] {
+      border-width: 3px;
+      border-style: solid;
+    }
+
+    button[data-confirm="stop"] {
+      border-width: 1px;
+      border-style: dashed;
+    }
   }
 
   /*

@@ -144,8 +144,11 @@ for (const size of SIZES) {
 
         // Two buttons, side by side, and the consequence above them as page text.
         await expect(wrapper.locator("> button")).toHaveCount(2);
-        const confirm = wrapper.locator("> button").nth(0);
-        const cancel = wrapper.locator("> button").nth(1);
+        // By ROLE in the pair, not by position. C-H1 moved the way out to the front — focus
+        // lands on it and Tab must reach the other option — so an index here would have
+        // silently swapped what every assertion below is about.
+        const confirm = wrapper.locator('> button[data-confirm="go"]');
+        const cancel = wrapper.locator('> button[data-confirm="stop"]');
         const consequence = wrapper.locator("> p");
         await expect(consequence).toBeVisible();
 
@@ -280,17 +283,19 @@ for (const size of SIZES) {
             Math.abs(boxes.confirm.y - boxes.cancel.y),
             `confirm ${i} ("${idle}") stacks its buttons in ${Math.round(room)} px of room, which is enough for both`,
           ).toBeLessThanOrEqual(1);
+          // C-H1: the way out is the LEFT of the two, because focus lands on it and Tab
+          // moves right. It used to be on the right, so the natural Tab left the pair.
           expect(
-            boxes.cancel.x,
-            `confirm ${i} ("${idle}") does not put the Cancel beside the confirm`,
-          ).toBeGreaterThan(boxes.confirm.x);
+            boxes.confirm.x,
+            `confirm ${i} ("${idle}") does not put the confirm beside the way out`,
+          ).toBeGreaterThan(boxes.cancel.x);
         } else {
           // Stacked is the right answer here, and both are still on screen and still 44 px —
           // which the assertions above have already established.
           expect(
-            boxes.cancel.y,
+            boxes.confirm.y,
             `confirm ${i} ("${idle}") has only ${Math.round(room)} px of room, so the pair must stack`,
-          ).toBeGreaterThan(boxes.confirm.y);
+          ).toBeGreaterThan(boxes.cancel.y);
         }
 
         // C3 — focus is on the SAFE one, so a second Enter cannot do the thing.
@@ -355,7 +360,7 @@ test("keeps the frame round its words in pixels, whatever the root font size", a
           y: Number.parseFloat(style.paddingTop),
         };
       })));
-      await wrapper.locator("> button").nth(1).evaluate((n: HTMLElement) => n.click());
+      await wrapper.locator('> button[data-confirm="stop"]').evaluate((n: HTMLElement) => n.click());
     }
     return out;
   };
@@ -412,8 +417,8 @@ test("brings the armed block into view when the trigger was at the bottom edge",
   await trigger.click();
 
   await expect(wrapper.locator("> button")).toHaveCount(2);
-  const confirm = wrapper.locator("> button").nth(0);
-  const cancel = wrapper.locator("> button").nth(1);
+  const confirm = wrapper.locator('> button[data-confirm="go"]');
+  const cancel = wrapper.locator('> button[data-confirm="stop"]');
   await expect(wrapper.locator("> p")).toBeInViewport();
   await expect(confirm, "the confirm scrolled out of view when it armed").toBeInViewport();
   await expect(cancel, "the Cancel is below the fold — C7 exactly").toBeInViewport();
@@ -447,7 +452,7 @@ test("brings the armed block into view when the trigger was at the bottom edge",
   // whose top row of pixels is on screen is exactly the defect C7 describes. That looseness is
   // what let the mutant survive the first draft of this case.
   await expect(
-    wrapper.locator("> button").nth(1),
+    wrapper.locator("> button").last(),
     "armed without focus, nothing brought the block back into view",
   ).toBeInViewport({ ratio: 0.99 });
   await expect(wrapper.locator("> p")).toBeInViewport({ ratio: 0.99 });
@@ -467,6 +472,52 @@ test("brings the armed block into view when the trigger was at the bottom edge",
     await page.evaluate(() => document.querySelector("main")!.scrollTop),
     "arming a control that was already on screen jumped the page",
   ).toBe(settled);
+});
+
+/**
+ * C-H1 (HIGH) — the natural Tab out of the armed pair went out of the PAIR.
+ *
+ * <p>
+ * Reviewer C armed a per-door shut from the keyboard, pressed Tab once, and landed on "Delete
+ * this door" with the confirm silently cancelled behind them. Focus goes to the safe button
+ * when a control arms; that button was the LAST thing in the group, so the obvious key left
+ * the group, the blur disarmed it without a word, and the next control on the page was the
+ * most destructive one there. The confirm sat behind the cancel, reachable only by Shift+Tab.
+ * </p>
+ *
+ * <p>
+ * jsdom implements no Tab at all, so this is the only place the actual keypress can be held:
+ * a real browser, a real focus order, a real focusout.
+ * </p>
+ */
+test("Tab from the armed way out reaches the confirm instead of leaving the control", async ({ page }) => {
+  await open(page, "/admin/devices", 0);
+  await expect(page.getByText("Cupboard box").first()).toBeVisible();
+
+  const wrapper = page.locator(CONFIRMS).first();
+  const confirm = wrapper.locator('> button[data-confirm="go"]');
+  const cancel = wrapper.locator('> button[data-confirm="stop"]');
+  const live = wrapper.locator('> span[aria-live="polite"]');
+
+  // Armed from the keyboard, which is the only way the finding reproduces: focus has to be on
+  // the trigger for the control to hand it to the safe button.
+  await wrapper.locator("> button").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(wrapper.locator("> button")).toHaveCount(2);
+  await expect(cancel).toBeFocused();
+
+  await page.keyboard.press("Tab");
+
+  // Still armed, still saying what it was about to do, and the keyboard is on the other option
+  // rather than on whatever came next in the document.
+  await expect(confirm, "Tab left the armed pair instead of reaching the confirm").toBeFocused();
+  await expect(wrapper.locator("> button")).toHaveCount(2);
+  await expect(live).not.toHaveText("Cancelled — nothing was changed.");
+
+  // And back the way it came, which is the other half of a two-control group.
+  await page.keyboard.press("Shift+Tab");
+  await expect(cancel).toBeFocused();
+  await expect(wrapper.locator("> button")).toHaveCount(2);
 });
 
 /**
@@ -649,5 +700,52 @@ test.describe("under forced colours", () => {
     );
     expect(widths).toHaveLength(2);
     for (const width of widths) expect(width).toBeGreaterThan(0);
+  });
+
+  /**
+   * B5 — and the two of them are not the SAME bounded box.
+   *
+   * <p>
+   * Everything that tells the pair apart ordinarily is colour: the confirm is filled amber,
+   * the way out is a white outline. Forced colours throws both away, and the rule above then
+   * gives each the same 1 px `ButtonText` edge — so reviewer B's screenshot shows two
+   * identical boxes side by side, one of which shuts a door, distinguishable only by reading
+   * the words on them. That is exactly the case a non-colour distinction is required for.
+   * </p>
+   *
+   * <p>
+   * Measured as computed style in the emulated mode, and measured in the ORDINARY mode too:
+   * the point is that the difference appears where the colour disappears, and a test that only
+   * looked at forced colours could not tell a deliberate distinction from a leftover.
+   * </p>
+   */
+  test("tells the destructive half from the safe half without using colour", async ({ page }) => {
+    await open(page, "/admin/devices", 0);
+    await expect(page.getByText("Cupboard box").first()).toBeVisible();
+
+    const wrapper = page.locator(CONFIRMS).first();
+    await wrapper.locator("> button").first().click();
+    await expect(wrapper.locator("> button")).toHaveCount(2);
+
+    const edges = () => wrapper.locator("> button").evaluateAll((nodes) => nodes.map((n) => {
+      const style = getComputedStyle(n);
+      return {
+        role: (n as HTMLElement).dataset.confirm,
+        width: Number.parseFloat(style.borderTopWidth),
+        style: style.borderTopStyle,
+      };
+    }));
+
+    await page.emulateMedia({ forcedColors: "active" });
+    const forced = await edges();
+    const go = forced.find((e) => e.role === "go")!;
+    const stop = forced.find((e) => e.role === "stop")!;
+    expect(go, "the armed pair has no destructive half").toBeTruthy();
+    expect(stop, "the armed pair has no way out").toBeTruthy();
+    expect(
+      `${go.width}${go.style}` !== `${stop.width}${stop.style}`,
+      `under forced colours both buttons are ${go.width}px ${go.style} — identical`,
+    ).toBe(true);
+    console.log(`[B5] forced colours: go ${go.width}px ${go.style} · stop ${stop.width}px ${stop.style}`);
   });
 });
