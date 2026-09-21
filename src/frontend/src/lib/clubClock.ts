@@ -18,10 +18,15 @@
  * </p>
  *
  * <p>
- * <b>The timezone is optional and that is deliberate.</b> Where the club's own zone is known
- * — every screen that has read `GET /admin/doors` — it is passed, and the face is the club's
- * day. Where it is not yet known the browser's zone is used, which for a club volunteer
- * standing in the club is the same zone; what is never done is to guess a named zone.
+ * <b>The timezone argument is optional; the club's zone is not.</b> E2 / R3-3: with
+ * `timezoneId=Pacific/Auckland` the log header read "Read at 06:09 club time" over rows a day
+ * out, while the Door-events block and the CSV — which the server writes — were right. Two of
+ * the call sites here had simply never passed a zone, and a third passed one out of a payload
+ * that did not carry the field. Both now come out the same way: every function below resolves
+ * its zone through {@link zoneFor}, which falls back to the zone the club itself last told us
+ * (`lib/clubZone`) before it falls back to the reader's clock. Nothing here guesses a zone —
+ * until the club has said, the reader's own is used, and `clubZoneIsKnown()` is what copy asks
+ * before it dares write the words "club time".
  * </p>
  *
  * <p>
@@ -31,14 +36,40 @@
  * </p>
  */
 
+import { clubZone, isUsableZone, rememberClubZone } from "./clubZone";
+
 /** The one locale every doors face is written in. See the note above: a format, not a language. */
 const CLUB_LOCALE = "en-GB";
 
 const CLOCK: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", hour12: false };
 
+/**
+ * Which zone this face is actually written in. The one place that decision is made.
+ *
+ * <p>
+ * The caller's zone, if it gave one this engine can format in; then the zone the club itself
+ * last told us; then `undefined`, which is the reader's own clock. A caller that DOES hand over
+ * a zone teaches it to `lib/clubZone` on the way past, so a screen with one payload carrying
+ * the field and one that does not cannot print two different midnights.
+ * </p>
+ *
+ * <p>
+ * The `isUsableZone` guard is not defensive padding: `toLocaleTimeString` throws a `RangeError`
+ * on a zone it does not know, the value comes from a settings column somebody typed, and a
+ * throw in a render body is a blank console rather than a wrong clock.
+ * </p>
+ */
+function zoneFor(timezone?: string): string | undefined {
+  if (isUsableZone(timezone)) {
+    rememberClubZone(timezone);
+    return timezone;
+  }
+  return clubZone();
+}
+
 /** "21:25" — a clock face in the club's day. */
 export function clubClock(iso: string | number | Date, timezone?: string): string {
-  return new Date(iso).toLocaleTimeString(CLUB_LOCALE, { ...CLOCK, timeZone: timezone });
+  return new Date(iso).toLocaleTimeString(CLUB_LOCALE, { ...CLOCK, timeZone: zoneFor(timezone) });
 }
 
 /**
@@ -50,7 +81,7 @@ export function clubClock(iso: string | number | Date, timezone?: string): strin
 export function clubDayAndClock(iso: string | number | Date, timezone?: string): string {
   const date = new Date(iso);
   const day = date.toLocaleDateString(CLUB_LOCALE, {
-    weekday: "short", day: "numeric", month: "short", timeZone: timezone,
+    weekday: "short", day: "numeric", month: "short", timeZone: zoneFor(timezone),
   });
   return `${day}, ${clubClock(date, timezone)}`;
 }
@@ -62,7 +93,7 @@ export function clubDayAndClock(iso: string | number | Date, timezone?: string):
 export function clubInstant(iso: string | number | Date, timezone?: string): string {
   const date = new Date(iso);
   const day = date.toLocaleDateString(CLUB_LOCALE, {
-    day: "numeric", month: "long", year: "numeric", timeZone: timezone,
+    day: "numeric", month: "long", year: "numeric", timeZone: zoneFor(timezone),
   });
   return `${day}, ${clubClock(date, timezone)}`;
 }
@@ -88,7 +119,9 @@ export function clubInstant(iso: string | number | Date, timezone?: string): str
  * <b>And the zone is the club's, always.</b> O1: this surface had two clock formatters and
  * the feed did not pass a timezone to either, so an admin reading the log from a laptop in
  * another zone got their own midnight against the club's day boundary. The API sends
- * `timezone` on `/admin/doors` and, since WIRE-R2 §3, on the log too; every caller passes it.
+ * `timezone` on `/admin/doors` and, since WIRE-R2 §3, on the log too. R3-3: a caller that
+ * passes it is no longer the only way this comes out right — see {@link zoneFor} — because
+ * "every caller passes it" was the claim, and two of them did not.
  * </p>
  */
 export function clubRowTime(iso: string | number | Date, now: number, timezone?: string): string {
@@ -99,7 +132,7 @@ export function clubRowTime(iso: string | number | Date, now: number, timezone?:
 /** Two instants in the CLUB's calendar day — never the browser's. */
 function isSameClubDay(a: Date, b: Date, timezone?: string): boolean {
   const face = (d: Date) => d.toLocaleDateString(CLUB_LOCALE, {
-    day: "2-digit", month: "2-digit", year: "numeric", timeZone: timezone,
+    day: "2-digit", month: "2-digit", year: "numeric", timeZone: zoneFor(timezone),
   });
   return face(a) === face(b);
 }
@@ -125,6 +158,6 @@ export function clubRangeInWords(
 /** "19 September 2026" — a date with no clock, for the printed card's own footer. */
 export function clubDate(iso: string | number | Date, timezone?: string): string {
   return new Date(iso).toLocaleDateString(CLUB_LOCALE, {
-    day: "numeric", month: "long", year: "numeric", timeZone: timezone,
+    day: "numeric", month: "long", year: "numeric", timeZone: zoneFor(timezone),
   });
 }

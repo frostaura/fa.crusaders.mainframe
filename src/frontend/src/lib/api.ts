@@ -2,6 +2,8 @@
  * Typed API client. Reads/writes the access token from localStorage so refresh-survives-reload.
  */
 
+import { noteClubZoneFrom } from "./clubZone";
+
 /**
  * The one `localStorage` key the session lives under.
  *
@@ -217,6 +219,14 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     passwordChangeRequiredHandler?.();
   }
   if (!res.ok) throw new ApiError(res.status, payload);
+  // R3-3 — the club's zone, learned wherever the club happens to mention it.
+  //
+  // Every response carrying one of the instants `lib/clubClock` writes carries `timezone` at
+  // the top level: /me/door, /me/door/history, /admin/doors, /admin/doors/activity,
+  // /admin/settings, the schedule day. One hook here is what makes a screen that forgot to
+  // pass the field — or was handed a payload that did not have it — still print the club's
+  // day rather than the reader's. It learns; it never guesses. See `lib/clubZone`.
+  noteClubZoneFrom(payload);
   return payload as T;
 }
 

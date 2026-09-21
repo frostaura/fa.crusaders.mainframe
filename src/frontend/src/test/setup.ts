@@ -50,3 +50,15 @@ if (!("EventSource" in globalThis)) {
     value: InertEventSource, writable: true, configurable: true,
   });
 }
+
+// R3-3 — the club's remembered zone is module state, so it outlives a test.
+//
+// `lib/clubZone` holds the zone the club last mentioned, and vitest isolates modules per test
+// FILE, not per test. One test formatting with an explicit `Pacific/Auckland` would otherwise
+// leave every later test in that file reading Auckland midnights — which is exactly the class
+// of hidden input the clock gotchas in MEMORY.md are about. Cleared before each test so a
+// formatter with no zone of its own behaves the same however it was reached.
+import { beforeEach } from "vitest";
+import { forgetClubZone } from "../lib/clubZone";
+
+beforeEach(() => { forgetClubZone(); });
