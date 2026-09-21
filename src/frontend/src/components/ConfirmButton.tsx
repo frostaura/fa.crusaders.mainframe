@@ -3,7 +3,6 @@ import { UNSAFE_LocationContext } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { focusAfterAction, pageHeading } from "../lib/focusAfterAction";
-import { ActionGlyph } from "./ActionGlyph";
 import { useActionFeedback, type ActionIntent } from "./useActionFeedback";
 
 export type ConfirmTone = "info" | "danger";
@@ -487,6 +486,37 @@ const CONTROL_CLASS = cn(
  */
 const ARMED_GRID_CLASS = "grid grid-cols-[repeat(auto-fit,minmax(min(6rem,100%),1fr))] gap-2";
 
+/**
+ * A glyph in front of a label, WITHOUT turning the label into a flex item.
+ *
+ * <p>
+ * <b>This is the third time this exact arithmetic has bitten this file.</b> The obvious
+ * shape — <code>&lt;span class="flex items-center gap-1.5"&gt;{glyph}{label}&lt;/span&gt;</code>
+ * — makes the label a flex item, and `CONTROL_CLASS` carries `break-words`
+ * (<code>overflow-wrap: break-word</code>), which drops a flex item's automatic minimum size to
+ * roughly ONE CHARACTER. Flex is then free to squeeze it to nothing. Measured by
+ * `e2e/confirm-armed.spec.ts` at 320 px: "Cancel" rendered over <b>three lines</b> in an 84 px
+ * column whose widest word needs 45, and "Deactivate" over two in the same column. Adding
+ * `min-w-0` to the label — which looks like the fix — is the instruction to allow exactly that.
+ * </p>
+ *
+ * <p>
+ * Inline layout has no such minimum. The glyph is an inline-block that the text flows around,
+ * so the label wraps only when it genuinely does not fit, which is what `break-words` is for
+ * and what every measurement in this file assumes. `align-[-0.2em]` sits the mark on the text's
+ * baseline rather than on the line box's.
+ * </p>
+ */
+function GlyphLabel({ glyph, children }: { glyph: React.ReactNode; children: React.ReactNode }) {
+  if (!glyph) return <>{children}</>;
+  return (
+    <span className="block w-full text-center">
+      <span className="mr-1.5 inline-block align-[-0.2em]">{glyph}</span>
+      {children}
+    </span>
+  );
+}
+
 export function ConfirmButton({
   idleLabel,
   confirmLabel = "Tap to confirm",
@@ -719,6 +749,28 @@ export function ConfirmButton({
   const idleText = textOf(idleLabel);
   const consequence = textOf(confirmLabel);
   const showingArmed = armed;
+  /**
+   * <b>This control wears a glyph on its OUTCOME and never at rest — and that is measured.</b>
+   *
+   * <p>
+   * The armed pair is a two-column grid whose columns are about 84 px at 320 px, and the
+   * button's own padding leaves roughly 60 px of content box. A 16 px mark plus its 6 px gap
+   * takes a third of that: `e2e/confirm-armed.spec.ts` caught "Cancel" over three lines and
+   * "Deactivate" over two, on the two screens the spec walks. Every decoration ever put inside
+   * this control has cost a broken word — it is the same finding as the 45-word consequence
+   * that used to be its label, and as the `h-11` the component now strips off call sites.
+   * </p>
+   *
+   * <p>
+   * Nothing is lost. Ruling 4 already exempts destructive actions from the thumb, and
+   * `tone="danger"` is what almost every call site here passes; the member-facing confirm and
+   * decline pair that GOAL 12 is really about is the booking dialog, which is two `Button`s
+   * with room for a mark beside each word. What this control keeps is the rest of the theme:
+   * the press, the working phase, the colour, the shake — and the refusal mark, which appears
+   * on the TRIGGER once the armed pair has gone and there is a full row to draw it in.
+   * </p>
+   */
+  const outcomeGlyph = feedback.phase === "success" || feedback.phase === "failure" ? feedback.glyph : null;
 
   return (
     <div
@@ -785,10 +837,7 @@ export function ConfirmButton({
             onClick={(e) => { e.stopPropagation(); cancel(); }}
             className={cn(CONTROL_CLASS, "border-control bg-bg-surface text-text-secondary")}
           >
-            <span className="inline-flex items-center justify-center gap-1.5">
-              <ActionGlyph kind="decline" />
-              <span>{cancelLabel}</span>
-            </span>
+            {cancelLabel}
           </button>
           <button
             type="button"
@@ -832,13 +881,7 @@ export function ConfirmButton({
                 <span>Working…</span>
               </span>
             ) : (
-              <span className="flex items-center justify-center gap-1.5">
-                {/* Nothing for a destructive confirm — ruling 4. The call site's own icon,
-                    inside `idleLabel`, is what this control wears, and a thumbs-up over
-                    "Delete this door" is the thing that rule exists to refuse. */}
-                {feedback.glyph}
-                <span className="min-w-0">{idleLabel}</span>
-              </span>
+              <GlyphLabel glyph={outcomeGlyph}>{idleLabel}</GlyphLabel>
             )}
           </button>
         </>
@@ -860,7 +903,7 @@ export function ConfirmButton({
           {...feedback.props}
           className={cn(CONTROL_CLASS, idleClassName, withoutFixedHeight(className), feedback.className)}
         >
-          {idleLabel}
+          <GlyphLabel glyph={outcomeGlyph}>{idleLabel}</GlyphLabel>
         </button>
       )}
 

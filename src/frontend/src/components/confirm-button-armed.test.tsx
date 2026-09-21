@@ -630,19 +630,22 @@ describe("ConfirmButton — the armed state", () => {
     fireEvent.click(screen.getByRole("button", { name: "Revoke — Really revoke?" }));
 
     /*
-     * Scoped to the CONFIRM button, not to the container.
+     * Scoped to the CONFIRM button and to the spinner's own class, rather than to "the first
+     * SVG in the container".
      *
-     * `container.querySelector("svg")` was unambiguous while the control drew exactly one
-     * SVG. Since item 12 the way out carries a decline glyph, which is earlier in the DOM,
-     * so the bare query started measuring the glyph and reporting that the spinner had lost
-     * its reduced-motion class. Ask for the spinner where the spinner is.
+     * The bare query was unambiguous while the control drew exactly one SVG, and item 12
+     * briefly put a decline glyph on the way out — earlier in the DOM — so it started
+     * measuring the glyph and reporting that the spinner had lost its reduced-motion class.
+     * The glyph came back out again (the armed pair's columns are ~84 px at 320 and a 16 px
+     * mark plus its gap broke "Cancel" over three lines), but the lesson stands: ask for the
+     * spinner where the spinner is.
      */
     const working = screen.getByRole("button", { name: "Revoke — Really revoke?" });
     const spinner = working.querySelector("svg.animate-spin")!;
     expect(spinner).toBeTruthy();
     expect(spinner.getAttribute("class")).toContain("motion-reduce:animate-none");
-    // …and the container still has the glyph in it, which is what the query above tripped on.
-    expect(container.querySelectorAll("svg").length).toBeGreaterThan(1);
+    // And it is still the only mark this control draws while it is working.
+    expect(container.querySelectorAll("svg")).toHaveLength(1);
     // And the way out stays on screen while the action is in flight, disabled rather than
     // removed: a button that unmounts under a focused finger drops focus to <body>.
     expect(screen.getByRole("button", { name: /^Cancel/ })).toBeDisabled();

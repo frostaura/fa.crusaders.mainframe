@@ -309,7 +309,10 @@ test.describe("the six admin tabs at lg", () => {
       };
     });
     expect(tabs.navVisible).toBe(true);
-    expect(tabs.destinations).toContain("/admin/doors");
+    // D3 §3.1 — the sixth tab is Monitoring now; Doors is a destination inside it. Still six
+    // tabs, still the width at which a sixth either fits or does not, which is what A20's
+    // condition was about.
+    expect(tabs.destinations).toContain("/admin/monitoring");
     expect(tabs.destinations).toHaveLength(6);
     expect(tabs.tops, "the admin tabs wrapped onto a second line").toHaveLength(1);
 
