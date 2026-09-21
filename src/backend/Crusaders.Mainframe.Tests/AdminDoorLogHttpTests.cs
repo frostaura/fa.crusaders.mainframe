@@ -366,16 +366,20 @@ public sealed class AdminDoorLogHttpTests
         var feed = await client.GetFromJsonAsync<JsonElement>($"/api/v1/admin/devices/{doorId}/activity");
         var feedRow = feed.GetProperty("items").EnumerateArray().Single();
 
-        foreach (var key in new[] { "at", "delivered_at", "action", "reason", "offline", "fingerprint" })
+        foreach (var key in
+                 new[] { "at", "delivered_at", "time_uncertain", "action", "reason", "offline", "fingerprint" })
         {
             Assert.Equal(feedRow.GetProperty(key).GetRawText(), logRow.GetProperty(key).GetRawText());
         }
         Assert.Equal(feedRow.GetProperty("member").GetRawText(), logRow.GetProperty("member").GetRawText());
 
-        // …and the per-board feed stays exactly seven keys: WIRE-W1's six plus `delivered_at`,
+        // …and the per-board feed stays exactly EIGHT keys: WIRE-W1's six, plus `delivered_at`,
         // which A4 added because an offline row's `at` is the SCAN and the row was written when
-        // the board next called in. A page that had only one of the two could not say which.
-        Assert.Equal(7, feedRow.EnumerateObject().Count());
+        // the board next called in — a page with only one of the two could not say which — plus
+        // `time_uncertain` (WIRE-R3 §2), which says whether the pair can be trusted at all. The
+        // count is asserted rather than the keys listed because the point of this test is that
+        // NOTHING reaches one surface and not the other.
+        Assert.Equal(8, feedRow.EnumerateObject().Count());
     }
 
     /// <summary>A registration and an admin edit are the BOARD's story, not the door's log.</summary>
