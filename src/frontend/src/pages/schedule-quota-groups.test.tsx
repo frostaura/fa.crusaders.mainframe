@@ -59,7 +59,10 @@ describe("item 19 — the daily maximum, on the grid", () => {
     open(dayWith({ maxSlotsPerDay: 4, bookedSlotsToday: 4, remainingToday: 0, adminExempt: false }));
 
     const cell = await screen.findByRole("button", { name: /Court 1 at 17:00 — you've booked your 4 slots for today/ });
-    expect(cell).toHaveAttribute("aria-disabled", "true");
+    // An ordinary enabled button, NOT `disabled` and not `aria-disabled` — it is operable, and
+    // operating it is how the member finds out why. See the note on `UnavailableCell`.
+    expect(cell).not.toBeDisabled();
+    expect(cell).not.toHaveAttribute("aria-disabled");
     expect(cell).toHaveTextContent("Full");
     // Colour is never the only carrier (SC 1.4.1). The dashed `control` border is what tells a
     // quota cell from a Taken one, which is the same grey with no border at all.

@@ -157,6 +157,23 @@ describe("the grid's cells", () => {
     expect(screen.getByRole("gridcell", { name: /Court 1 at 08:00 — held by the club for League night/ })).toBeTruthy();
   });
 
+  it("keeps a floor under the scroller, so big type never leaves a slit of grid", async () => {
+    stubDay(futureDay());
+    const { container } = renderPage(<SchedulePage />);
+    await screen.findByRole("grid");
+    const scroller = container.querySelector('[role="grid"]')?.parentElement;
+    // Measured at 320×568 with a 32 px root font, where the reserve was written as `9rem`: the
+    // scroller computed to 74 px of visible grid, with the sticky court header intercepting the
+    // click on the one row inside it. A `rem` reserve scales with the TEXT while the viewport
+    // does not, so the bigger the type the less grid there is. The reserve is pixels of chrome
+    // and is written in pixels; the floor is what makes the page scroll rather than the grid
+    // vanish, and the two measured variables are what keep it from being a guess (D3-B10).
+    expect(scroller?.className).toMatch(/max-h-\[max\(280px,/);
+    expect(scroller?.className).toContain("--app-chrome-height");
+    expect(scroller?.className).toContain("--selection-bar-height");
+    expect(scroller?.className).not.toMatch(/-\d+rem\)/);
+  });
+
   it("names the closed cell as a button that answers, not as a dead surface — D4 §2.9", async () => {
     stubDay(futureDay());
     renderPage(<SchedulePage />);

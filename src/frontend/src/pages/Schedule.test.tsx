@@ -1196,12 +1196,14 @@ describe("Schedule — peak-hour slots a member cannot book are not offered as i
     expect(screen.queryByRole("button", { name: /^Book Court 1 at 17:00 for/ })).not.toBeInTheDocument();
     const cell = screen.getByLabelText(/Court 1 at 17:00 — reserved for league and senior members/);
     expect(cell).toBeInTheDocument();
-    // It IS a button now, and `aria-disabled` rather than `disabled` — D4 §2.9. It was an inert
-    // `div` with an `aria-label` no sighted member ever hears: a member tapped it and NOTHING
-    // happened, with no explanation and no route to one. A `disabled` button would be no better
-    // — a hole in the tab order that explains nothing — so it stays focusable and answers.
+    // It IS a button now — D4 §2.9. It was an inert `div` with an `aria-label` no sighted
+    // member ever hears: a member tapped it and NOTHING happened, with no explanation and no
+    // route to one. And it is an ORDINARY button: neither `disabled` (a hole in the tab order
+    // that explains nothing) nor `aria-disabled` (a claim that it cannot be operated, when
+    // operating it is the whole point).
     expect(cell.tagName).toBe("BUTTON");
-    expect(cell).toHaveAttribute("aria-disabled", "true");
+    expect(cell).not.toBeDisabled();
+    expect(cell).not.toHaveAttribute("aria-disabled");
   });
 
   it("answers when that reserved cell is pressed, instead of doing nothing — D4 §2.9", async () => {

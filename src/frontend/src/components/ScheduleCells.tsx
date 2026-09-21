@@ -69,7 +69,20 @@ const HEADING_ID = "schedule-grid-heading";
  * <p>
  * <b>D3-B10 — the scroller's height is measured, not guessed.</b> It was
  * `max-h-[calc(100vh-220px)]`; `Layout` publishes `--app-chrome-height` from a `ResizeObserver`
- * precisely because a guessed chrome constant had already shipped as a bug twice.
+ * precisely because a guessed chrome constant had already shipped as a bug twice, and
+ * `SelectionBar` publishes its own the same way so the action strip never covers the last row.
+ * </p>
+ *
+ * <p>
+ * <b>And the reserve is in PIXELS, with a pixel floor.</b> Written as `9rem` it measured
+ * <b>74 px</b> of visible grid at 320×568 with a 32 px root font — a slit, with the sticky
+ * court header intercepting the click on the only row in it. A `rem` reserve scales with the
+ * text while the viewport does not, so the bigger the type the less grid there is, which is
+ * backwards. What this reserve protects is pixels of chrome, so it is expressed in pixels; the
+ * `max(280px, …)` floor is what makes the page scroll instead of the grid vanishing. That is
+ * the same rule `ConfirmButton`'s grid states in the other direction: a measurement belongs in
+ * the unit of the thing it is measuring, and a word at a 32 px root is twice as wide while a
+ * fingertip is not.
  * </p>
  */
 export function ScheduleBoard(props: GridProps & { onExpandEarlier: () => void; earlierLabel: string | null }) {
@@ -98,7 +111,8 @@ export function ScheduleBoard(props: GridProps & { onExpandEarlier: () => void; 
   const columns = `64px repeat(${day.courts.length}, minmax(120px, 1fr))`;
   return (
     <Card className="p-0 overflow-hidden mb-6">
-      <div ref={scroller} className="overflow-auto max-h-[calc(100dvh-var(--app-chrome-height,154px)-9rem)]">
+      <div ref={scroller}
+        className="overflow-auto max-h-[max(280px,calc(100dvh-var(--app-chrome-height,154px)-var(--selection-bar-height,0px)-96px))]">
         <div role="grid" aria-labelledby={HEADING_ID} aria-multiselectable={ctx.selection ? true : undefined}
           className="grid min-w-[600px]" style={{ gridTemplateColumns: columns }}>
           <HeaderRow courts={day.courts} sliceMinutes={day.sliceMinutes}
@@ -342,13 +356,25 @@ function UnavailableCell({ reason, where, ctx }: { reason: GridReason; where: st
   const closed = reason === "out_of_hours";
   const word = unavailableWord(reason, ctx.rules);
   const label = unavailableLabel(reason, where, ctx.rules);
-    // `aria-disabled`, never `disabled`: the cell stays focusable, so a keyboard or screen-reader
-  // user can reach it and be told why. A `disabled` button is a hole in the tab order that
-  // explains nothing, which is exactly the dead surface D4 §2.9 measured.
+    // An ordinary, ENABLED button — and this is a deliberate departure from D4 §7.1, which asked
+  // for `aria-disabled="true"`.
+  //
+  // D4's reason for preferring it to `disabled` was that the cell must stay focusable, so a
+  // keyboard or screen-reader user can reach it and be told why; a `disabled` button is a hole
+  // in the tab order that explains nothing, which is the dead surface D4 §2.9 measured. That
+  // reasoning stands. `aria-disabled` is simply not what achieves it: it asserts "present but
+  // NOT OPERABLE", and this control is operable — pressing it is the whole point, it just does
+  // not book. The accessible name already carries the refusal ("Court 1 at 16:00 — reserved for
+  // league and senior members until closer to the time"), which is a great deal clearer than a
+  // dimmed state a reader announces as "unavailable".
+  //
+  // Found by driving it: Playwright refuses to click an `aria-disabled` button at all
+  // ("element is not enabled"). Automation and assistive technology read that attribute the
+  // same way, so the attribute was about to make the cell unreachable for exactly the users it
+  // was added for.
   return (
     <button
       type="button"
-      aria-disabled={true}
       onClick={() => ctx.explain(reason, where)}
       aria-label={label}
       className={cn(
@@ -391,7 +417,7 @@ function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
       {slot.blockLabel && <span className="text-[10px] text-text-secondary">{CELL_WORD.hold}</span>}
     </span>
   );
-  const shell = "m-0.5 h-12 rounded-md bg-bg-muted bg-[repeating-linear-gradient(45deg,_rgba(0,0,0,0.04)_0,_rgba(0,0,0,0.04)_4px,_transparent_4px,_transparent_8px)] flex items-center justify-center gap-1 text-xs text-text-secondary px-1";
+  const shell = "m-0.5 h-12 rounded-md border border-transparent bg-bg-muted bg-[repeating-linear-gradient(45deg,_rgba(0,0,0,0.04)_0,_rgba(0,0,0,0.04)_4px,_transparent_4px,_transparent_8px)] flex items-center justify-center gap-1 text-xs text-text-secondary px-1";
   if (selectKey) {
     return (
       <Cell label={where} selectKey={selectKey} selection={ctx.selection}>
@@ -428,7 +454,13 @@ function ContinuationCell({ slot, where }: { slot: ScheduleSlot; where: string }
   const tone = slot.isMine ? "bg-info-soft/60 text-info-strong" : "bg-bg-muted text-text-secondary";
   return (
     <Cell label={slot.isMine ? `${where} — continues, your booking` : `${where} — continues, reserved`}>
-      <div className={cn("m-0.5 h-12 rounded-md flex items-center justify-center text-[11px]", tone)} aria-hidden="true">⋯</div>
+      {/* `border border-transparent`, the house rule from `index.css`'s forced-colors block and
+          from `BUTTON_VARIANT_CLASS.ghost`: under `forced-colors: active` every author
+          background is thrown away, so a cell whose only boundary is its fill becomes bare text
+          in an empty box. Measured: this one and the Taken cell below were the two on the grid
+          computing `border: 0px`. A transparent 1 px border is already in the box model, so
+          nothing moves. */}
+      <div className={cn("m-0.5 h-12 rounded-md border border-transparent flex items-center justify-center text-[11px]", tone)} aria-hidden="true">⋯</div>
     </Cell>
   );
 }
@@ -487,7 +519,9 @@ function OtherCell(props: SlotCellProps & { slot: ScheduleSlot }) {
       {slot.checkedIn && <span className="text-[10px] text-success-strong shrink-0">on court</span>}
     </>
   );
-  const shell = "m-0.5 h-12 w-[calc(100%-0.25rem)] rounded-md bg-bg-muted text-text-secondary flex items-center justify-center gap-2 text-xs px-1";
+  // See the note on `ContinuationCell`: `border border-transparent` is what survives
+  // `forced-colors: active`, where this cell's grey fill does not.
+  const shell = "m-0.5 h-12 w-[calc(100%-0.25rem)] rounded-md border border-transparent bg-bg-muted text-text-secondary flex items-center justify-center gap-2 text-xs px-1";
   const target = { kind: "booked", bookingId: slot.bookingId ?? "" } as const;
   const pickable = ctx.isAdmin && !facts.isPast && Boolean(slot.bookingId);
   const selectKey = selectableAs(ctx.selection, target, pickable);
