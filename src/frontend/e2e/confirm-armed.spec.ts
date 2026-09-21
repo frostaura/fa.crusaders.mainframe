@@ -321,6 +321,19 @@ for (const size of SIZES) {
  * has to be enforced on the rendered result rather than on the class string. The word does not
  * fit either way at that size, so even the word-break check reads it as an honest break.
  * </p>
+ *
+ * <p>
+ * <b>`/admin/settings` only, and the reason is a live one rather than an oversight.</b> Six
+ * other call sites still hand this control padding in `rem` — `AdminDevices` (`h-8 px-3`,
+ * twice), `AdminMembers` and `AdminWebhooks` (`h-11 px-4`), `Profile` (`h-9 px-3 text-xs`) and
+ * `DeviceApiKeyPanel` (`h-9 px-3`) — and every one of them would fail this test today. None is
+ * producing a broken word yet, because the containers they sit in are wide enough to absorb the
+ * doubling; all six are the same latent defect the Courts row had. They are other lanes' files,
+ * so this walks the one page whose call sites are in scope, and the finisher's report carries
+ * the list. Widen the page list here the moment those `px-*` overrides go — or strip padding
+ * centrally in `withoutFixedHeight`, the way a fixed height is already refused, and delete this
+ * paragraph.
+ * </p>
  */
 test("keeps the frame round its words in pixels, whatever the root font size", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
