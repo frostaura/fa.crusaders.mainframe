@@ -486,6 +486,73 @@ public sealed class DeviceRegistryService
         _db.Devices.CountAsync(d => d.AutoRegistered, ct);
 
     /// <summary>
+    /// Serialises this club's auto-registrations against each other, so the unacknowledged-board
+    /// cap is a bound rather than a suggestion — D2-B30.
+    ///
+    /// <para>
+    /// <b>A COUNT followed by an INSERT is not a limit.</b> Thirty-two heartbeats arriving
+    /// together with thirty-two invented MACs and one valid club key all read "fewer than
+    /// sixteen", and all thirty-two insert: the only unique index is on
+    /// <c>(TenantId, MacAddress)</c>, which constrains identity and says nothing about a
+    /// count. The real ceiling was the per-minute rate limit, which is a different and much
+    /// larger number, and every row past the cap is permanent — on the Devices page, in the
+    /// audit trail, and in the alerting the cap exists to bound.
+    /// </para>
+    ///
+    /// <para>
+    /// A transaction-scoped Postgres advisory lock is the smallest thing that closes it, and
+    /// it is the mechanism <see cref="PayerLock"/> already uses for the same shape of race on
+    /// money. Keyed on the TENANT alone: two clubs registering boards at the same instant have
+    /// no reason to wait for each other, and one club's boards are registered at human speed.
+    /// A non-Postgres provider takes no lock and keeps the old behaviour, exactly as the payer
+    /// lock does — the in-memory provider has no concurrency to lose to.
+    /// </para>
+    /// </summary>
+    public async Task<IAsyncDisposable> RegistrationLockAsync(Guid tenantId, CancellationToken ct)
+    {
+        if (!_db.Database.IsNpgsql()) return new NoLock();
+
+        var owned = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(ct)
+            : null;
+
+        await _db.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock({0})", [PayerLock.KeyFor(tenantId, Guid.Empty)], ct);
+
+        return new RegistrationLock(owned);
+    }
+
+    /// <summary>The lock on a provider that has no advisory locks and no concurrency to lose to.</summary>
+    private sealed class NoLock : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Holds the registration transaction open until the caller is done deciding, then commits.
+    ///
+    /// <para>
+    /// Commits rather than rolls back, because unlike the payer lock there is nothing here a
+    /// refusal must undo: the refusal path writes no rows at all, and the success path's rows
+    /// are the registration itself. Disposing without a commit would discard a board that had
+    /// just been admitted.
+    /// </para>
+    /// </summary>
+    private sealed class RegistrationLock : IAsyncDisposable
+    {
+        private readonly Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? _owned;
+
+        public RegistrationLock(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? owned) => _owned = owned;
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_owned is null) return;
+            await _owned.CommitAsync();
+            await _owned.DisposeAsync();
+        }
+    }
+
+    /// <summary>
     /// A MAC in the form the boards announce — twelve lowercase hex characters, no
     /// separators — or null when it could not be one.
     ///

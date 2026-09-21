@@ -125,7 +125,7 @@ public static class DeviceIdentity
     /// </param>
     public static async Task<(Device? Device, IResult? Refusal)> ResolveOrRegisterAsync(
         MainframeDbContext db, DeviceRegistryService devices, string? mac, DeviceKind hintedKind,
-        CancellationToken ct)
+        Guid tenantId, CancellationToken ct)
     {
         var normalised = DeviceRegistryService.NormaliseMacAddress(mac);
         if (normalised is null) return (null, Results.BadRequest(new { error = MacRequired }));
@@ -144,6 +144,20 @@ public static class DeviceIdentity
             // SERVE the request and that method's job is to build a row. A board that already
             // has one never reaches this line: the cap bounds creation, never service, or a
             // flood would take a club's installed doors offline.
+            // UNDER THE CLUB'S REGISTRATION LOCK — D2-B30. A count followed by an insert is not
+            // a limit: thirty-two heartbeats arriving together with thirty-two invented MACs
+            // all read "fewer than sixteen" and all insert, because the only unique index is
+            // on the MAC and constrains identity rather than a count. See
+            // DeviceRegistryService.RegistrationLockAsync for why an advisory lock is the
+            // smallest thing that closes it, and why it is keyed on the tenant alone.
+            //
+            // Taken only on the branch that can CREATE a row. A board that already has one
+            // never reaches this line, so the lock cannot serialise ordinary heartbeats — a
+            // flood would otherwise queue a club's installed doors behind each other.
+            await using var registration = await devices.RegistrationLockAsync(tenantId, ct);
+
+            // Re-read inside the lock. The whole point is that the value read outside it was
+            // not a fact anybody could act on.
             if (await devices.UnacknowledgedCountAsync(ct) >= DeviceRegistryService.MaxUnacknowledgedDevices)
             {
                 return (null, Results.Conflict(new { error = DeviceRegistryService.TooManyUnacknowledgedDevices }));

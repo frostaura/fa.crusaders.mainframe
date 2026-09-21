@@ -70,7 +70,7 @@ public static class DeviceEndpoints
             return Results.BadRequest(new { error = KindUnknown });
         }
 
-        var (device, refusal) = await DeviceIdentity.ResolveOrRegisterAsync(db, registry, req.Mac, hintedKind, ct);
+        var (device, refusal) = await DeviceIdentity.ResolveOrRegisterAsync(db, registry, req.Mac, hintedKind, tenant.TenantId, ct);
         if (refusal is not null)
         {
             // The only refusal this path can give that a club can act on: their ceiling of
