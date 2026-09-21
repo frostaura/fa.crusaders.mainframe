@@ -68,7 +68,9 @@ function ScheduleListRow({ row }: { row: ScheduleRow }) {
             nothing to anybody tabbing down it. */}
         <Link
           to={`/admin/schedules/${row.id}`}
-          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-text-primary hover:bg-bg-muted"
+          // `border-control` is the token a CONTROL's boundary is measured at 3:1 with;
+          // `border-border` is deliberately quieter and is for a card edge or a table rule.
+          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-control px-4 text-sm font-medium text-text-primary hover:bg-bg-muted"
         >
           {`Open ${row.name}`}
         </Link>

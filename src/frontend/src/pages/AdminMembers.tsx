@@ -1190,7 +1190,9 @@ function MemberClassCell({ member, busy, onChange }: { member: AdminMember; busy
         clipped label with no way to read the rest of it.
       */
       title={classLabel(current)}
-      className="min-h-11 px-2 w-full max-w-full rounded-lg border border-border bg-bg-surface text-text-primary text-xs disabled:opacity-60"
+      // `border-control`, not `border-border`: once this is 44px it is a form control, and
+      // the decorative token is deliberately below the 3:1 a control boundary is measured at.
+      className="min-h-11 px-2 w-full max-w-full rounded-lg border border-control bg-bg-surface text-text-primary text-xs disabled:opacity-60"
     >
       {MEMBER_CLASSES.map((c) => <option key={c} value={c}>{classLabel(c)}</option>)}
     </select>

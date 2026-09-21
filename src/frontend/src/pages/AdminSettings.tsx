@@ -581,7 +581,7 @@ export default function AdminSettingsPage() {
         <EcoSection
           id={SECTION_IDS.screens}
           title="Box screens & scanning"
-          lede="What the court box's screen does, and how long it waits. A box picks these up on its next heartbeat, so a change reaches the courts within a minute rather than instantly."
+          lede="What the court box's screen does, and how long it waits. A box picks these up the next time it calls in, so a change reaches the courts within a minute rather than the moment you save it."
           rules={DEVICE_TIMING_RULES}
           settings={settings}
           onChange={setSettings}

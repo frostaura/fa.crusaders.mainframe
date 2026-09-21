@@ -54,9 +54,12 @@ describe("the settings rows this release owes", () => {
     // GOAL item 1 and item 18. Both were firmware constants with no way to change them.
     expect(await screen.findByLabelText(/Screen returns to the start after/)).toHaveValue(10);
     expect(screen.getByLabelText(/Next person may scan within/)).toHaveValue(10);
-    // And the hint says WHEN a change takes effect, because a pull-only box is never told
-    // anything except in the answer to a beat it made itself.
-    expect(screen.getByText(/picks these up on its next heartbeat/)).toBeInTheDocument();
+    // And the block says WHEN a change takes effect, because a pull-only box is never told
+    // anything except in the answer to a call it made itself. In the estate's own words —
+    // "the next time it calls in" — and NOT "on its next heartbeat", which is a protocol
+    // detail wearing a sentence and which `settings-door-validation.test.tsx` holds the
+    // whole page to.
+    expect(screen.getByText(/picks these up the next time it calls in/)).toBeInTheDocument();
   });
 
   it("gives the per-day slot ceiling a row, in slots, as Dean asked", async () => {
