@@ -339,6 +339,12 @@ public class CourtActivationService
         // That is the safe way round.
         await _db.SaveChangesAsync(ct);
 
+        // AFTER the commit, never before it. A court that flashes "on" on a wall screen and
+        // then silently reverts because the transaction rolled back is worse than one that is
+        // a second late — the club walks to a court nobody is on. Publishing here rather than
+        // beside the row write is the whole of that ordering.
+        if (lightRow is not null) await _lights.PublishAsync(lightRow, court.CourtNumber, ct);
+
         await _bus.EmitAsync(LightsOnEvent(court, booking, payerUserId, method, now), ct);
 
         return new ActivationResult.Activated(booking, payerUserId, amount, AlreadyActive: false);

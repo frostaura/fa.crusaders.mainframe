@@ -6,6 +6,7 @@ using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Security.DeviceAuth;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
@@ -167,7 +168,37 @@ public static class DeviceEndpoints
 
         await db.SaveChangesAsync(ct);
 
+        // AFTER the commit, for the reason the activation path publishes after its own: a
+        // restored court that appears on the board and then vanishes because the save failed
+        // sends somebody to a dark court believing the software said otherwise.
+        await PublishRestoredAsync(services, relays, ct);
+
         return Results.Ok(CourtBoxView(device, tenant.TenantSlug, s, roster, relays, now));
+    }
+
+    /// <summary>
+    /// Pushes every court this heartbeat changed onto the control board, after the commit.
+    ///
+    /// <para>
+    /// Reads the rows back from the tracker rather than carrying them out of
+    /// <see cref="RestoreAsync"/>: the publish must describe what was COMMITTED, and the row
+    /// the service returned was the pre-save entity.
+    /// </para>
+    /// </summary>
+    private static async Task PublishRestoredAsync(
+        HeartbeatServices services, IReadOnlyList<string>? relays, CancellationToken ct)
+    {
+        if (relays is null or { Count: 0 }) return;
+
+        foreach (var entry in services.Db.ChangeTracker.Entries<CourtLightState>().ToList())
+        {
+            var number = await services.Db.Courts.AsNoTracking()
+                .Where(c => c.Id == entry.Entity.CourtId)
+                .Select(c => c.CourtNumber)
+                .FirstOrDefaultAsync(ct);
+            if (number == 0) continue;
+            await services.Lights.PublishAsync(entry.Entity, number, ct);
+        }
     }
 
     /// <summary>
