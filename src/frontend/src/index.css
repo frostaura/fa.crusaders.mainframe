@@ -268,6 +268,42 @@
       transform: none;
       box-shadow: none;
     }
+
+    /*
+     * The action-feedback theme's five keyframes, stood down by name.
+     *
+     * <p>
+     * This is the belt to the `motion-reduce:animate-none` braces at each use site, and it is
+     * NOT a replacement for them — see the note on `keyframes` in tailwind.config.ts. A rule
+     * here can only name animations it knows about; a component that invents a sixth still has
+     * to say so itself. What this catches is the case that class cannot: an animation applied
+     * from a `className` composed at runtime, where the `motion-reduce:` sibling is one branch
+     * of a conditional somebody forgot.
+     * </p>
+     *
+     * <p>
+     * The COLOUR change, the glyph swap and the full hold are deliberately NOT stood down.
+     * They are not motion — they are what the feedback actually is, and a member who has asked
+     * for less movement has not asked to be told less. §3.5 of the member design.
+     * </p>
+     */
+    [data-fb] {
+      animation-name: none !important;
+      transform: none !important;
+    }
+
+    /*
+     * The chip's zero-balance entice, and the flyout above it.
+     *
+     * Under reduce the chip grows the word "Top up" instead — a static affordance that is
+     * always there, which for this audience is better than motion they asked not to see. The
+     * flyout simply does not render; this rule is what makes a stale one harmless.
+     */
+    [data-zero-entice],
+    [data-balance-flyout] {
+      animation-name: none !important;
+      transform: none !important;
+    }
   }
 }
 

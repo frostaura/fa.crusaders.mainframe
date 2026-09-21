@@ -192,7 +192,11 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
       className={cn(
         "pointer-events-auto select-none",
         "rounded-lg border px-4 py-2.5 text-sm font-medium shadow-md w-full",
-        "transition-all duration-300 ease-out",
+        // `duration-enter`, not `duration-300`. This was the one timing in the product that
+        // lived nowhere but here — a third duration beside the theme's two, invisible to
+        // anybody reading tailwind.config.ts and unreachable from TypeScript. The removal
+        // timer below is `durationMs + 250`, which still clears the 220 ms this resolves to.
+        "transition-all duration-enter ease-out",
         tones[toast.tone],
         visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3",
       )}

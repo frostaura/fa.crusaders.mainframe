@@ -100,6 +100,65 @@ export const palette = {
 } as const;
 
 /**
+ * How long things take, and how they get there. One definition, for every consumer.
+ *
+ * <p>
+ * The same three-copy problem the palette had, one layer along. Before this block there were
+ * exactly two durations in the Tailwind theme (`fast: 120ms`, `base: 200ms`), one easing curve
+ * written as a literal in `index.css`, and a third duration — `duration-300 ease-out` — living
+ * alone inside `Toast.tsx`, which is a transition nobody could find by looking at the theme.
+ * A feedback theme that adds seven more timings without a home would make that four copies and
+ * then eight.
+ * </p>
+ *
+ * <p>
+ * <b>The bands are Material 3's, and one number deliberately is not.</b> State-layer response
+ * is 50–150 ms, component animation 100–300 ms, and feedback specifically "fast, subtle and
+ * never blocking". {@link motion.duration.hold} is 1 200 ms, which is far outside that band on
+ * purpose: the band governs how long a thing should take to MOVE, and the hold is not motion,
+ * it is reading time. This club's members are older and not confident with a phone; a tick that
+ * clears in 200 ms is a tick somebody watching their own finger never sees. It is a tenant
+ * setting for the same reason — a club may genuinely want longer.
+ * </p>
+ *
+ * <p>
+ * Consumed only through a Tailwind class name (`duration-press`, `ease-out`, `animate-fb-draw`).
+ * `tokens.test.ts` asserts that no component file carries a `duration-[…]` or `ease-[…]`
+ * arbitrary value, because an arbitrary value is a fourth copy with a different spelling.
+ * </p>
+ */
+export const motion = {
+  duration: {
+    /** The press compression. Short enough that a tap feels landed rather than laggy. */
+    press: "90ms",
+    fast: "120ms",
+    base: "200ms",
+    /** A dialog arriving, a thumb sliding between two segments. */
+    enter: "220ms",
+    /** An outcome glyph drawing itself, and the fill cross-fading under it. */
+    in: "180ms",
+    /** How long an outcome stays put before it settles. Reading time, not motion. */
+    hold: "1200ms",
+    /** Back to rest. Also the whole of a destructive success, which does not celebrate. */
+    settle: "240ms",
+    /** One failure shake. Three cycles, never repeated. */
+    shake: "320ms",
+    /** The ceiling on a credits count-up; the floor and the scaling are in `useCountUp`. */
+    count: "600ms",
+    /** One breath of the zero-balance chip. Three of these is one burst. */
+    breathe: "1400ms",
+  },
+  easing: {
+    /** The curve `index.css`'s affordance layer already uses on every pressable. */
+    standard: "cubic-bezier(0.4, 0, 0.2, 1)",
+    /** M3 emphasised-decelerate: arrives quickly, settles softly. Outcomes and entrances. */
+    out: "cubic-bezier(0.2, 0, 0, 1)",
+    /** Leaves slowly, goes quickly. The press, which should feel like weight. */
+    in: "cubic-bezier(0.3, 0, 1, 1)",
+  },
+} as const;
+
+/**
  * Colours a tenant may override at runtime, with their Crusaders defaults.
  *
  * <p>

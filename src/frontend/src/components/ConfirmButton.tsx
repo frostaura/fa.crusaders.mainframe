@@ -328,7 +328,10 @@ const CONTROL_CLASS = cn(
    * "Cancel" into "Cance / l". The text scales; the padding around it does not need to.
    */
   "flex flex-col items-stretch justify-center rounded-md px-[12px] py-[8px] text-center text-sm font-medium",
-  "transition-colors duration-200 ease-out",
+  // `duration-base`, not `duration-200` — the same number, from the motion block in
+  // `lib/tokens.ts`, so that this control's colour cross-fade and the feedback theme's
+  // phases are timed by one source rather than by a literal that happens to agree.
+  "transition-colors duration-base ease-out",
   /**
    * `min-h-11`, and no `overflow-hidden`.
    *
