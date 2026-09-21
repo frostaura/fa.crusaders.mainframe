@@ -257,9 +257,16 @@ public class NoShowWorkerTests
         await CreateWorker(host).TickAsync(default);
 
         // Inside the swept booking's original window — only the truncation makes this free.
+        //
+        // ActorIsAdmin is STATED rather than inferred from actorId != userId (D2-B13). This test
+        // has always meant "book as an admin so the member rules stay out of the way" — its own
+        // summary says so — and it used to get that exemption for free from the inference. It is
+        // load-bearing here: the overlap predicate is the thing under test, and without the
+        // exemption this booking is refused OutOfHours in the last few minutes of a UTC day,
+        // which is the wall-clock trap memory/gotchas-clock.md records.
+        var payer = new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
         var result = await bookings.CreateAsync(
-            host.Courts[0].Id, host.PlayerUser.Id, host.AdminUser.Id,
-            DateTimeOffset.UtcNow.AddMinutes(5), sliceCount: 1, default);
+            host.Courts[0].Id, payer, DateTimeOffset.UtcNow.AddMinutes(5), sliceCount: 1, default);
 
         Assert.IsType<BookingResult.Ok>(result);
     }

@@ -80,6 +80,20 @@ public sealed class BookingService
     /// A booking nobody is overriding anything for — the member's own, or an admin's
     /// on-behalf booking that the member can afford. Delegates to the overload below.
     /// </summary>
+    /// <remarks>
+    /// <b>This overload books as a MEMBER, whoever <paramref name="actorId"/> is.</b>
+    /// <c>BookingPayer.ActorIsAdmin</c> defaults to false, so an admin id passed here buys no
+    /// exemption from peak hours, the group windows or the per-day caps.
+    ///
+    /// <para>
+    /// That is the point of D2-B13 and it is a real behaviour change: the old code inferred
+    /// "admin" from <c>actorId != userId</c>, so this overload silently granted the exemption to
+    /// anyone acting for somebody else and silently withheld it from an admin acting for
+    /// themselves. A caller that means "as an admin" now has to say so, through the
+    /// <see cref="BookingPayer"/> overload — which is the whole improvement, and also the thing
+    /// that will surprise a reader who remembers the old shape.
+    /// </para>
+    /// </remarks>
     public Task<BookingResult> CreateAsync(Guid courtId, Guid userId, Guid actorId, DateTimeOffset startsAt, int sliceCount, CancellationToken ct)
         => CreateAsync(courtId, new BookingPayer(userId, actorId), startsAt, sliceCount, ct);
 
