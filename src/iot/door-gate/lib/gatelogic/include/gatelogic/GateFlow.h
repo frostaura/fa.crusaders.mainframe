@@ -124,8 +124,15 @@ inline constexpr char kReasonOutOfService[] = "out_of_service";
 /// conversation from "somebody's code does not work".
 inline constexpr char kReasonRelocking[] = "relocking";
 
+/// THIS BOARD IS BEING ASKED FASTER THAN IT WILL ASK THE SERVER. The other
+/// refusal that is not about the member — see `kMinScanCallSpacingMs` and round
+/// G4's A2. Distinct from `relocking` because they say different things to a
+/// desk: one is a door being held open, this is a door being hammered.
+inline constexpr char kReasonTooFast[] = "too_fast";
+
 static_assert(text::length(kReasonOutOfService) <= kMaxReasonLen &&
-                  text::length(kReasonRelocking) <= kMaxReasonLen,
+                  text::length(kReasonRelocking) <= kMaxReasonLen &&
+                  text::length(kReasonTooFast) <= kMaxReasonLen,
               "a reason longer than the buffer reads as an empty reason at the door");
 
 /// Whether to ask the API at all.
@@ -233,6 +240,17 @@ ScanDecision refuseUnreadable(bool offline);
 /// every other refusal the board decides for itself: while the API can be
 /// reached it can see for itself that nothing was asked.
 ScanDecision refuseRelocking(bool offline);
+
+/// A scan refused because this board will not ask the server again yet.
+///
+/// Round G4's A2. The debounce bounds REPEATS and cannot bound a stream of
+/// tokens it has never seen; this is the bound that does not care what the
+/// token is. Refused rather than answered from the ROSTER, deliberately: the
+/// roster does not know about a membership barred this morning, so answering a
+/// rate-limited scan from it would be this board's own throttle opening a door
+/// the API would have refused. A refusal is recoverable — the scanner repeats
+/// while a code is presented — and the other direction is not.
+ScanDecision refuseTooFast(bool offline);
 
 /// Rewrites a decision that wanted the door open into the relocking refusal.
 ///

@@ -118,6 +118,7 @@
 #include "devlink/ApiBreaker.h"
 #include "devlink/RosterSync.h"
 #include "eventq/EventQueue.h"
+#include "gatelogic/BootRecovery.h"
 #include "gatelogic/GateApi.h"
 #include "gatelogic/GateConfig.h"
 #include "gatelogic/GateFlow.h"
@@ -193,6 +194,15 @@ public:
     /// The gate's does not forget; the assert in `begin()` is what says so.
     uint32_t bootId = 0U;
 
+    /// CONSECUTIVE WATCHDOG RESETS BEFORE THIS BOOT (round G4, A4). Zero on a
+    /// healthy boot, which is every boot on a healthy board.
+    ///
+    /// A port for the same reason `bootId` is: it comes from `esp_reset_reason()`
+    /// and a counter in RTC no-init memory, both of which are platform facts,
+    /// and a loop that reached for them could only be tested against itself.
+    /// `BootRecovery.h` carries what it means and what it costs.
+    uint32_t watchdogResetRun = 0U;
+
     /// The heartbeat response buffer. Owned by the composition root and static
     /// there, because the contract allows 4096 bytes and a 4.6 KB local under a
     /// blocking HTTP call is a crash that reads as a random reset.
@@ -264,6 +274,10 @@ public:
 
   /// Release windows the hard cap ended, since boot. See the member.
   uint32_t capForcedCloses() const { return capForcedCloses_; }
+
+  /// Milliseconds the first network call of this boot was held back for, after
+  /// a watchdog reset. Zero on a healthy boot. See BootRecovery.h.
+  uint32_t firstCallHeldBackMs() const { return firstCallHeldBackMs_; }
 
   /// This boot's identity, as every uploaded batch carries it. Observable so a
   /// test and the simulator's console can say WHICH boot a record belongs to.
@@ -357,12 +371,34 @@ private:
   const char* firmwareVersion_;
   /// This boot's identity, from the composition root. See Ports::bootId.
   uint32_t bootId_;
+  /// Consecutive watchdog resets before this boot. See Ports::watchdogResetRun.
+  uint32_t watchdogResetRun_;
   char* heartbeatBody_;
   size_t heartbeatBodyCap_;
   bool ledActiveHigh_;
 
   tb::Uptime64 uptime_;
   tb::Deadline heartbeatAt_;
+
+  /// THE FIRST NETWORK CALL OF THIS BOOT, held back after a watchdog reset
+  /// (round G4, A4). Disarmed on a healthy boot, which is every boot on a
+  /// healthy board, so this costs nothing in normal service.
+  ///
+  /// It gates the HEARTBEAT specifically, because the heartbeat is the first
+  /// thing a board does with its radio — `pumpLink`'s up edge arms it to "now"
+  /// — and is therefore the call a dribbling peer holds until the watchdog
+  /// fires. The event drain is gated with it: a board with a boot event in its
+  /// ring would otherwise reach the same peer on the same first pass.
+  tb::Deadline firstCallAt_;
+
+  /// When this board may next ASK THE SERVER about a scan, whatever token is
+  /// presented. See `kMinScanCallSpacingMs` and round G4's A2: the debounce
+  /// bounds repeats, and two alternating tokens defeated it entirely.
+  ///
+  /// Armed from the instant of the ATTEMPT, like the heartbeat's own floor, so
+  /// a slow call does not make the next member wait for the call's duration on
+  /// top of the spacing.
+  tb::Deadline scanCallFloorAt_;
 
   /// When an unreadable line may next produce an answer. See
   /// `kUnreadableFeedbackMs`: the feedback L1 added is rate-limited so that a
@@ -398,6 +434,10 @@ private:
   /// Heartbeats the server answered that pushed no roster. A diagnostic with no
   /// effect on any decision this class makes; saturating, never wrapping.
   uint32_t noPushHeartbeats_ = 0U;
+
+  /// What `firstCallAt_` was armed for at boot, kept so the console and the
+  /// host suite can say the backoff happened rather than infer it from silence.
+  uint32_t firstCallHeldBackMs_ = 0U;
 
   /// Release windows the HARD CAP ended, since boot (round G4, A1).
   ///

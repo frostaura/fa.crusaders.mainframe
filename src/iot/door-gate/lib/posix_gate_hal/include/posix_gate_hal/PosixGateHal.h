@@ -245,6 +245,22 @@ public:
 
   gatelogic::HttpOutcome post(const char* path, const char* body, char* out, size_t outCap) override;
 
+  /// READ THE HEADERS THE WAY THE BOARD DOES: an INTER-BYTE timeout, re-armed
+  /// on every byte, rather than the absolute deadline this port uses by
+  /// default.
+  ///
+  /// It makes the simulator WORSE, deliberately, and that is round G4's A4.
+  /// `HTTPClient::setTimeout` is inter-byte and `POST()` cannot be interrupted,
+  /// so a peer sending one header byte every three seconds holds one blocking
+  /// call open for ever on the hardware — past `kWorstBlockingCallMs`, past the
+  /// watchdog, which then resets the part. This port's absolute deadline means
+  /// the simulator could never show that, so the one unbounded path in the
+  /// firmware was the one path no test vehicle could reach.
+  ///
+  /// OFF by default, because every other scenario wants the simulator bounded.
+  /// `--board-header-timeout` turns it on.
+  void useBoardHeaderTimeout(bool on) { boardHeaderTimeout_ = on; }
+
   /// Calls made, and the longest one in milliseconds. The simulator prints
   /// these; the worst-case measurement in `test/e2e-device/gate_sim.py` reads
   /// them back.
@@ -258,6 +274,7 @@ private:
   hal::IClock& clock_;
   uint32_t calls_ = 0U;
   uint32_t worstCallMs_ = 0U;
+  bool boardHeaderTimeout_ = false;
 };
 
 /// `gatelogic::IDecisionLog` as one line per decision on stdout.

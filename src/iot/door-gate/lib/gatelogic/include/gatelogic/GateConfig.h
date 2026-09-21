@@ -177,6 +177,40 @@ inline constexpr uint32_t kMinUnlockMs = 1000UL;
 /// otherwise be an API call, an audit row and a re-armed lock.
 inline constexpr uint32_t kScanDebounceMs = 2000UL;
 
+/// How many recently-decided tokens the debounce remembers.
+///
+/// ONE WAS NOT ENOUGH, AND THAT WAS ROUND G4's A2. A single slot held THE LAST
+/// token, so ALTERNATING two defeated it completely — every scan differed from
+/// the one before, nothing was ever suppressed, and the board made a measured
+/// ~18 POSTs per second to `/gate`. A code taped beside a reader plus a
+/// member's own phone is enough to produce it.
+///
+/// Four, because it is about how many PEOPLE can be at one door inside one
+/// two-second window, not about how many an attacker can invent. Four covers a
+/// queue at a club door with room to spare; a fifth arrival in two seconds is
+/// simply asked about, which is the safe direction. This bounds nothing on its
+/// own against somebody rotating five codes — `kMinScanCallSpacingMs` is what
+/// does that — but it is the half that costs a legitimate member nothing.
+inline constexpr uint8_t kDebounceSlots = 4U;
+
+/// THE FLOOR UNDER `/gate` CALLS, WHATEVER TOKEN ASKS FOR ONE.
+///
+/// The debounce above is about REPEATS, so it cannot bound anything against a
+/// stream of tokens it has never seen — and that is exactly what a rotating
+/// generator, or a scanner pointed at a sheet of printed codes, produces. This
+/// is the bound that does not care what the token is.
+///
+/// 250 ms, which is four calls a second against a measured eighteen, and which
+/// NO PERSON CAN MEET. Presenting two DIFFERENT codes at one reader a quarter
+/// of a second apart is not something a queue of members does; two members
+/// arriving together are hundreds of milliseconds apart at best, and a member
+/// holding one phone is suppressed by the debounce rather than by this. So the
+/// legitimate cost is zero in every case anybody has been able to describe, and
+/// a scan that does meet it is REFUSED with its own reason rather than lost —
+/// the scanner repeats while a code is presented, so the re-read a moment later
+/// is decided normally.
+inline constexpr uint32_t kMinScanCallSpacingMs = 250UL;
+
 /// How often an UNREADABLE line may produce an answer — a denial blink and,
 /// offline, one queued record.
 ///

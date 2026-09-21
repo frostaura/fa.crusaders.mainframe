@@ -20,6 +20,24 @@
 // decisions, and making the second one wait would be a door that refuses the
 // person standing behind the person it just let in.
 //
+// WHY MORE THAN ONE SLOT — ROUND G4, A2
+// -------------------------------------
+// One slot held THE LAST token, so ALTERNATING two defeated it completely:
+// every scan was a different token from the one before, nothing was ever
+// suppressed, and the board made a measured ~18 POSTs per second to `/gate`.
+// A code taped beside a reader and a member's own phone is enough; so is a
+// scanner reading two codes on one card.
+//
+// `kDebounceSlots` slots is the fix, and it costs a legitimate member nothing:
+// a DIFFERENT token is still never suppressed, so several people arriving
+// together are still several decisions. What changes is that "different" now
+// means different from the last few rather than from the last one — and no
+// door has more than a few people at it inside one debounce window.
+//
+// It is a RING of recent decisions, not a set with eviction rules: the oldest
+// slot is overwritten, so a token that falls out is simply asked about again,
+// which is the safe direction. Nothing here can deny anybody.
+//
 // No Arduino headers, no heap. Compiles for Xtensa and the host test runner.
 
 #ifndef CRUSADERS_GATELOGIC_SCANDEBOUNCE_H
@@ -46,16 +64,24 @@ public:
   /// has barred is also standing there holding their phone up.
   void decided(const char* token, uint32_t nowMs);
 
-  /// Forget the last decision, so the next scan of it is answered immediately.
-  void reset() { seen_ = false; }
+  /// Forget every recent decision, so the next scan of any of them is answered
+  /// immediately.
+  void reset();
 
 private:
+  struct Slot {
+    char token[roster::kMaxTokenLen + 1U] = {};
+    uint32_t decidedAtMs = 0U;
+    /// A flag, not "decidedAtMs == 0". Every uint32_t is a legal millis()
+    /// reading, so no value is free to mean "never" — TimeBase.h's rule.
+    bool seen = false;
+  };
+
   uint32_t windowMs_;
-  char last_[roster::kMaxTokenLen + 1U] = {};
-  uint32_t decidedAtMs_ = 0U;
-  /// A flag, not "decidedAtMs_ == 0". Every uint32_t is a legal millis()
-  /// reading, so no value is free to mean "never" — the rule TimeBase.h states.
-  bool seen_ = false;
+  Slot slots_[kDebounceSlots];
+  /// Where the NEXT decision goes. The oldest slot, because they are filled in
+  /// order — which makes this a ring rather than a cache with a policy.
+  uint8_t next_ = 0U;
 };
 
 } // namespace gatelogic

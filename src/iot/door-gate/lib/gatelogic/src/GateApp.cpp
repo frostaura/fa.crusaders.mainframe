@@ -14,7 +14,8 @@ GateApp::GateApp(const Ports& ports)
       api_(*ports.api), breaker_(*ports.breaker), lock_(*ports.lock), unlock_(*ports.unlock),
       led_(*ports.led), ledPin_(*ports.ledPin), assembler_(*ports.assembler), debounce_(*ports.debounce),
       roster_(*ports.roster), queue_(*ports.queue), log_(ports.log), mac_(ports.mac),
-      firmwareVersion_(ports.firmwareVersion), bootId_(ports.bootId), heartbeatBody_(ports.heartbeatBody),
+      firmwareVersion_(ports.firmwareVersion), bootId_(ports.bootId),
+      watchdogResetRun_(ports.watchdogResetRun), heartbeatBody_(ports.heartbeatBody),
       heartbeatBodyCap_(ports.heartbeatBodyCap), ledActiveHigh_(ports.ledActiveHigh) {
 }
 
@@ -43,6 +44,21 @@ void GateApp::begin() {
   assembler_.reset();
   // A fallback only: the link-up edge re-arms this to "now" (pumpLink).
   heartbeatAt_.arm(now, heartbeatMs_);
+
+  // THE FIRST CALL, HELD BACK AFTER A WATCHDOG RESET (round G4, A4). A peer
+  // that dribbles headers holds one `POST()` open past any budget this firmware
+  // can enforce, and the watchdog ends it by resetting the part — which lands
+  // right back here, arms a heartbeat, associates, and reaches that peer again
+  // within a second. For ever, with no roster and a door that admits nobody.
+  //
+  // Armed on `firstCallAt_` rather than folded into `heartbeatAt_`, because
+  // `pumpLink`'s up edge re-arms THAT to "now" on every association — which is
+  // correct and is precisely what makes the loop tight. Disarmed on a healthy
+  // boot, so this costs nothing in normal service.
+  firstCallHeldBackMs_ = firstCallDelayMs(watchdogResetRun_);
+  if (firstCallHeldBackMs_ > 0U) {
+    firstCallAt_.arm(now, firstCallHeldBackMs_);
+  }
 
   queue_.begin();
   eventq::Event boot;
@@ -263,7 +279,17 @@ void GateApp::decideScan(const char* token) {
     // `opened` would put a door opening in the server's trail that did not
     // happen. The member gets the denial blink and scans again.
     decision = refuseRelocking(how == Attempt::RosterOnly);
+  } else if (how == Attempt::Online && scanCallFloorAt_.remaining(asked) > 0U) {
+    // THE FLOOR UNDER `/gate` CALLS (round G4, A2). The debounce bounds repeats
+    // and cannot bound a stream of tokens it has never seen — a rotating
+    // generator, or a reader pointed at a sheet of printed codes, drove a
+    // measured eighteen POSTs a second. Refused rather than answered from the
+    // roster: the roster does not know about a membership barred this morning,
+    // so letting a throttle send a scan there would be this board's own rate
+    // limiting opening a door the API would have refused.
+    decision = refuseTooFast(false);
   } else if (how == Attempt::Online) {
+    scanCallFloorAt_.arm(asked, kMinScanCallSpacingMs);
     beforeBlocking();
     decision = api_.scan(mac_, token, unlockMs_, kGateConfig.unlockHardCapMs);
     afterBlocking();
@@ -424,7 +450,8 @@ bool GateApp::heartbeatReady(uint32_t nowMs) const {
   // in every scenario with a flapping radio, and therefore made the E3 bound on
   // the EVENT drain impossible to distinguish from the round-G2 code that did
   // not have it. A predicate that is always true proves nothing.
-  return heartbeatAt_.expired(nowMs) && linkUp_ && heartbeatFloorAt_.remaining(nowMs) == 0U;
+  return heartbeatAt_.expired(nowMs) && linkUp_ && heartbeatFloorAt_.remaining(nowMs) == 0U &&
+         firstCallAt_.remaining(nowMs) == 0U;
 }
 
 bool GateApp::eventDrainReady(uint32_t nowMs) const {
@@ -434,7 +461,8 @@ bool GateApp::eventDrainReady(uint32_t nowMs) const {
   //
   // THE BACKOFF IS PART OF "READY". A drain that is backed off is not waiting
   // for the pass's call and must not make a member's scan wait for one.
-  return linkUp_ && !queue_.empty() && !breaker_.open(nowMs) && eventsAt_.remaining(nowMs) == 0U;
+  return linkUp_ && !queue_.empty() && !breaker_.open(nowMs) && eventsAt_.remaining(nowMs) == 0U &&
+         firstCallAt_.remaining(nowMs) == 0U;
 }
 
 void GateApp::pumpEvents() {
@@ -577,6 +605,13 @@ void GateApp::pumpHeartbeat() {
   // fails must not be retried faster than one that succeeds — a refusing host
   // is exactly the case a flapping radio produces.
   if (heartbeatFloorAt_.remaining(now) > 0U) {
+    return;
+  }
+
+  // AND THE BOOT BACKOFF, which is the same shape of rule for a different
+  // reason: the floor bounds how often this board speaks, and this bounds how
+  // soon it speaks after the watchdog reset it. See BootRecovery.h.
+  if (firstCallAt_.remaining(now) > 0U) {
     return;
   }
 

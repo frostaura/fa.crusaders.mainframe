@@ -274,13 +274,22 @@ struct Headers {
 /// One header line, or the empty line that ends them. False on a timeout or a
 /// peer that hung up mid-headers.
 bool readLine(gatelogic::IResponseStream& stream, hal::IClock& clock, uint32_t headerDeadline, char* out,
-              size_t cap) {
+              size_t cap, bool interByte) {
   size_t len = 0U;
   for (;;) {
     if (tb::reached(clock.nowMs(), headerDeadline)) {
       return false;
     }
     const int byte = stream.read();
+    if (byte >= 0 && interByte) {
+      // THE BOARD'S OWN SEMANTICS (round G4, A4). `HTTPClient::setTimeout` is
+      // an INTER-BYTE timeout, so every byte that arrives buys the peer another
+      // whole timeout and a dribbler holds the call for ever. Off by default,
+      // because a simulator that is bounded is what every other scenario wants
+      // — but the one unbounded path in this firmware must be reachable in a
+      // test vehicle, and this is what makes it so.
+      headerDeadline = clock.nowMs() + gatelogic::kHttpResponseTimeoutMs;
+    }
     if (byte < 0) {
       if (!stream.connected()) {
         return false;
@@ -329,19 +338,24 @@ bool containsNoCase(const char* text, const char* needle) {
 /// The status line and every header, bounded by an ABSOLUTE deadline.
 ///
 /// The board's header phase is `HTTPClient`'s and is bounded only by an
-/// inter-byte timeout — a peer that dribbles resets it for ever, which is the
+/// INTER-BYTE timeout — a peer that dribbles resets it for ever, which is the
 /// one case the watchdog exists for. A host socket can have a real deadline, so
-/// this one does. The difference is in the header's `WHAT IS DELIBERATELY NOT
-/// REPRODUCED`, and it makes the simulator slightly safer than the board on
-/// that path and never less so.
+/// this one does BY DEFAULT, which makes the simulator slightly safer than the
+/// board on that path and never less so.
+///
+/// `interByte` is how a harness gives that safety up on purpose (round G4, A4):
+/// with it the simulator reproduces the board's unbounded header phase, holds
+/// the call, and `ConsoleWatchdog` reports the breach that on hardware is a
+/// reset. Without it, the one unbounded path in this firmware was the one path
+/// no test vehicle could reach.
 bool readHeaders(gatelogic::IResponseStream& stream, hal::IClock& clock, uint32_t headerDeadline,
-                 Headers& out) {
+                 Headers& out, bool interByte) {
   out.status = 0;
   out.contentLength = gatelogic::kUnknownBodyLength;
   out.chunked = false;
 
   char line[512];
-  if (!readLine(stream, clock, headerDeadline, line, sizeof(line))) {
+  if (!readLine(stream, clock, headerDeadline, line, sizeof(line), interByte)) {
     return false;
   }
   // "HTTP/1.1 200 OK". The status is the second token.
@@ -355,7 +369,7 @@ bool readHeaders(gatelogic::IResponseStream& stream, hal::IClock& clock, uint32_
   }
 
   for (;;) {
-    if (!readLine(stream, clock, headerDeadline, line, sizeof(line))) {
+    if (!readLine(stream, clock, headerDeadline, line, sizeof(line), interByte)) {
       return false;
     }
     if (line[0] == '\0') {
@@ -508,11 +522,11 @@ bool sendRequest(int fd, const Request& request_, hal::IClock& clock, uint32_t w
 ///
 /// The body is read by the REAL `gatelogic::readBody`, framed by the REAL
 /// `gatelogic::frameFromHeaders`.
-gatelogic::HttpOutcome readResponse(int fd, hal::IClock& clock, char* out, size_t outCap) {
+gatelogic::HttpOutcome readResponse(int fd, hal::IClock& clock, char* out, size_t outCap, bool interByte) {
   SocketStream stream(fd);
   Headers headers;
   const uint32_t headersFrom = clock.nowMs();
-  if (!readHeaders(stream, clock, headersFrom + gatelogic::kHttpResponseTimeoutMs, headers)) {
+  if (!readHeaders(stream, clock, headersFrom + gatelogic::kHttpResponseTimeoutMs, headers, interByte)) {
     return gatelogic::noCall();
   }
   gatelogic::BodyResult read = gatelogic::BodyResult::Ok;
@@ -552,7 +566,7 @@ gatelogic::HttpOutcome SocketHttpPort::post(const char* path, const char* body, 
         startedAt + gatelogic::kHttpConnectTimeoutMs + gatelogic::kHttpResponseTimeoutMs;
     const Request request{endpoint, path, authorization_, body};
     if (sendRequest(fd, request, clock_, writeDeadline)) {
-      outcome = readResponse(fd, clock_, out, outCap);
+      outcome = readResponse(fd, clock_, out, outCap, boardHeaderTimeout_);
     }
     static_cast<void>(::close(fd));
   }

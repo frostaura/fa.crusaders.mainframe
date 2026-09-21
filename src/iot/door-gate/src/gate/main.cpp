@@ -52,8 +52,9 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <esp_random.h>
 
+#include <esp_random.h>
+#include <esp_system.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -64,6 +65,7 @@
 #include "esp32_hal/Esp32Hal.h"
 #include "fwversion/Version.h"
 #include "gatelogic/ApiBaseUrl.h"
+#include "gatelogic/BootRecovery.h"
 #include "gatelogic/GateApi.h"
 #include "gatelogic/GateApp.h"
 #include "gatelogic/GateConfig.h"
@@ -211,6 +213,39 @@ uint32_t drawBootId() {
 
 uint32_t gBootId = drawBootId();
 
+/// CONSECUTIVE WATCHDOG RESETS, ACROSS RESETS. See `gatelogic/BootRecovery.h`
+/// for why a board needs to know.
+///
+/// `RTC_NOINIT_ATTR` puts it in RTC slow memory and tells the startup code NOT
+/// to zero it, which is the only storage on this part that survives a reset
+/// without wearing flash out — and a flash write per watchdog reset is exactly
+/// the wrong thing to add to a board that is resetting in a loop. It does NOT
+/// survive a power cycle, which is correct: somebody who pulled the power has
+/// intervened, and the run should start again.
+///
+/// Uninitialised memory is uninitialised, so the first read after a POWER-ON
+/// is whatever the RTC domain happened to hold. `nextResetRun` is fed a
+/// `watchdogReset` of false on that boot and answers 0 regardless, so the
+/// garbage never reaches the arithmetic — which is why the reset REASON is
+/// read first and is not inferred from the counter.
+RTC_NOINIT_ATTR uint32_t gWatchdogResetRun;
+
+/// The run for THIS boot, computed once and written straight back.
+///
+/// `esp_reset_reason()` is the part's own account of why it restarted, and
+/// `ESP_RST_TASK_WDT` is the task watchdog this firmware arms. `ESP_RST_WDT`
+/// (the other watchdogs) and `ESP_RST_INT_WDT` are counted with it: all three
+/// mean "something held this board and a timer ended it", which is the state
+/// the backoff is for. A panic, a brownout, a power-on or a reflash are not.
+uint32_t drawWatchdogResetRun() {
+  const esp_reset_reason_t reason = esp_reset_reason();
+  const bool watchdog = reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT || reason == ESP_RST_WDT;
+  gWatchdogResetRun = gatelogic::nextResetRun(watchdog, watchdog ? gWatchdogResetRun : 0U);
+  return gWatchdogResetRun;
+}
+
+uint32_t gWatchdogResetRunThisBoot = drawWatchdogResetRun();
+
 /// `Bearer <DEVICE_API_KEY>`, rendered once at boot. Held rather than rebuilt
 /// per call because it is the same string for the life of the image and the
 /// heap it would churn is shared with the network stack.
@@ -221,8 +256,7 @@ devlink::ApiBreaker gBreaker;
 GateApi gApi(gHttp, gBreaker, gClock);
 
 LockDriver gLock(gRelayPin, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay);
-UnlockTimer gUnlock(kGateConfig.unlockHardCapMs, kGateConfig.minRelockMs,
-                    kGateConfig.relockDwellMs);
+UnlockTimer gUnlock(kGateConfig.unlockHardCapMs, kGateConfig.minRelockMs, kGateConfig.relockDwellMs);
 LedPattern gLed;
 ScanAssembler gAssembler;
 ScanDebounce gDebounce;
@@ -264,6 +298,7 @@ GateApp::Ports wire() {
   ports.mac = gMacHex;
   ports.firmwareVersion = fw::kFirmwareVersion;
   ports.bootId = gBootId;
+  ports.watchdogResetRun = gWatchdogResetRunThisBoot;
   ports.heartbeatBody = gHeartbeatBody;
   ports.heartbeatBodyCap = sizeof(gHeartbeatBody);
   return ports;
@@ -302,7 +337,16 @@ void bootLog(bool watchdogArmed) {
   Serial.print(F(API_BASE_URL));
   Serial.print(F(" watchdog="));
   Serial.print(static_cast<int>(kGateConfig.watchdogSeconds));
-  Serial.println(watchdogArmed ? F("s") : F("s NOT ARMED — esp_task_wdt refused"));
+  Serial.print(watchdogArmed ? F("s") : F("s NOT ARMED — esp_task_wdt refused"));
+  // THE ONE LINE THAT EXPLAINS A BOARD IN TROUBLE. A reset loop scrolls this
+  // past once a cycle and there is no other surface on this hardware that could
+  // carry it — one LED cannot say "the API is dribbling headers at me". The run
+  // and the hold are printed always, so a healthy board's line shows 0 and 0
+  // and a technician has something to compare against.
+  Serial.print(F(" wdt_reset_run="));
+  Serial.print(static_cast<unsigned>(gWatchdogResetRunThisBoot));
+  Serial.print(F(" first_call_held_ms="));
+  Serial.println(static_cast<unsigned long>(gatelogic::firstCallDelayMs(gWatchdogResetRunThisBoot)));
 }
 
 } // namespace

@@ -111,8 +111,7 @@ ScanDecision onGateResponse(uint16_t status, const char* body, size_t len, uint3
     return decision;
   }
 
-  if (!devapi::json::topLevelStringField(body, len, "reason", decision.reason,
-                                        sizeof(decision.reason))) {
+  if (!devapi::json::topLevelStringField(body, len, "reason", decision.reason, sizeof(decision.reason))) {
     // The flag is the decision; the reason is commentary. A 200 that opens the
     // door with no readable reason still opens the door.
     decision.reason[0] = '\0';
@@ -191,6 +190,14 @@ ScanDecision refuseUnreadable(bool offline) {
 ScanDecision refuseRelocking(bool offline) {
   ScanDecision decision;
   setReason(decision, kReasonRelocking);
+  decision.queueEvent = offline;
+  decision.eventKind = eventq::Kind::UnknownScan;
+  return decision;
+}
+
+ScanDecision refuseTooFast(bool offline) {
+  ScanDecision decision;
+  setReason(decision, kReasonTooFast);
   decision.queueEvent = offline;
   decision.eventKind = eventq::Kind::UnknownScan;
   return decision;

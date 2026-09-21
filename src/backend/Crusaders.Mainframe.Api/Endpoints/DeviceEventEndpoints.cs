@@ -243,7 +243,7 @@ public static class DeviceEventEndpoints
             // is what lets the box release it and move on.
             if (!alreadyRecorded.Contains(e.Seq))
             {
-                var time = TimeOf(batch, e, now) with { Kind = AuditKind(e.Kind) };
+                var time = TimeOf(batch, e, now) with { Kind = AuditKind(e.Kind), BootId = batch.BootId };
 
                 // EVERY decision below reads the normalised kind, never e.Kind. See AuditKind:
                 // two readings of one field on one request is what let one space around
@@ -277,7 +277,7 @@ public static class DeviceEventEndpoints
                     _ => null,
                 };
 
-                if (await RecordAsync(services, device!, e, time, outcome, batch.BootId, ct)) recorded++;
+                if (await RecordAsync(services, device!, e, time, outcome, ct)) recorded++;
             }
 
             acceptedThrough = e.Seq;
@@ -342,6 +342,18 @@ public static class DeviceEventEndpoints
     {
         /// <summary>The event's <c>kind</c>, trimmed, bounded and never empty — see <see cref="AuditKind"/>.</summary>
         public string Kind { get; init; } = "unknown";
+
+        /// <summary>
+        /// Which BOOT of the board this event belongs to — see <see cref="DeviceEventBatch"/>.
+        ///
+        /// <para>
+        /// Here for exactly the reason <see cref="Kind"/> is: <c>RecordAsync</c> is at the
+        /// complexity gate's six-parameter cap, and these are facts established about the
+        /// event before anything is decided rather than arguments a caller chooses. It comes
+        /// off the BATCH, not the event, because a board holds one boot's events at a time.
+        /// </para>
+        /// </summary>
+        public long BootId { get; init; }
     }
 
     /// <summary>
@@ -763,7 +775,7 @@ public static class DeviceEventEndpoints
     /// </summary>
     private static async Task<bool> RecordAsync(
         DeviceEventServices services, Device device, DeviceEventDto e, EventFacts time,
-        ActivationOutcome? outcome, long bootId, CancellationToken ct)
+        ActivationOutcome? outcome, CancellationToken ct)
     {
         var (db, tenant, _, _, _, _) = services;
 
@@ -771,7 +783,7 @@ public static class DeviceEventEndpoints
         {
             TenantId = tenant.TenantId,
             DeviceId = device.Id,
-            BootId = bootId,
+            BootId = time.BootId,
             Seq = e.Seq,
             Kind = time.Kind,
             OccurredAt = time.OccurredAt,
@@ -806,7 +818,7 @@ public static class DeviceEventEndpoints
             // WHICH BOOT THE SEQUENCE BELONGS TO. Without it a trail shows `seq 1` twice
             // and nothing to tell the two apart, which is exactly the confusion the key
             // change exists to end.
-            boot_id = bootId,
+            boot_id = time.BootId,
             seq = e.Seq,
             kind = time.Kind,
             court = e.Court,

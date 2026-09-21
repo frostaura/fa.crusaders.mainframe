@@ -482,6 +482,43 @@ size_t pastValue(const char* body, size_t len, size_t at) {
 
 } // namespace
 
+namespace {
+
+/// One member of an object: the span of its KEY and the position of its colon.
+///
+/// Split out of `findTopLevelKey` so neither is over the complexity gate — and
+/// the split is the honest one, because this is the part that decides whether
+/// the bytes at `at` are a member at all, while the loop above decides what to
+/// do about the one it found.
+struct Member {
+  size_t keyStart = 0U; ///< first byte INSIDE the key's quotes
+  size_t keyLen = 0U;
+  size_t pastKey = 0U;      ///< just past the key's CLOSING quote — what findKey returns
+  size_t colon = kNotFound; ///< kNotFound when this is not a member
+};
+
+Member memberAt(const char* body, size_t len, size_t at) {
+  Member member;
+  if (at >= len || body[at] != '"') {
+    return member; // the closing brace, a trailing comma, or malformed
+  }
+  const size_t close = endOfString(body, len, at);
+  if (close == kNotFound) {
+    return member;
+  }
+  const size_t colon = skipSpace(body, len, close + 1U);
+  if (colon >= len || body[colon] != ':') {
+    return member; // a key with no value: not a document this reads
+  }
+  member.keyStart = at + 1U;
+  member.keyLen = close - (at + 1U);
+  member.pastKey = close + 1U;
+  member.colon = colon;
+  return member;
+}
+
+} // namespace
+
 size_t findTopLevelKey(const char* body, size_t len, const char* key) {
   if (body == nullptr || key == nullptr) {
     return kNotFound;
@@ -500,24 +537,18 @@ size_t findTopLevelKey(const char* body, size_t len, const char* key) {
   ++at;
 
   while (true) {
-    at = skipSpace(body, len, at);
-    if (at >= len || body[at] != '"') {
-      return kNotFound; // the closing brace, a trailing comma, or malformed
-    }
-    const size_t close = endOfString(body, len, at);
-    if (close == kNotFound) {
+    const Member member = memberAt(body, len, skipSpace(body, len, at));
+    if (member.colon == kNotFound) {
       return kNotFound;
     }
-    const size_t colon = skipSpace(body, len, close + 1U);
-    if (colon >= len || body[colon] != ':') {
-      return kNotFound; // a member with no value: not a document this reads
-    }
-    if (close - (at + 1U) == keyLen && memcmp(body + at + 1U, key, keyLen) == 0) {
-      return close + 1U; // the same contract findKey returns
+    if (member.keyLen == keyLen && memcmp(body + member.keyStart, key, keyLen) == 0) {
+      // Just PAST the key's closing quote — the same contract findKey returns,
+      // which is what lets both families share every reader after this point.
+      return member.pastKey;
     }
     // NOT THIS ONE: past its value WHOLE, so a key nested inside it is never a
     // match however early in the document it appears.
-    at = pastValue(body, len, skipToValue(body, len, colon));
+    at = pastValue(body, len, skipToValue(body, len, member.colon));
     if (at == kNotFound) {
       return kNotFound;
     }

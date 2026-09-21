@@ -1,0 +1,122 @@
+// Crusaders Mainframe — what a board does about the boot it has just had.
+//
+// THE FAILURE THIS EXISTS FOR — ROUND G4, A4
+// ------------------------------------------
+// `HTTPClient::setTimeout` is an INTER-BYTE timeout and `POST()` cannot be
+// interrupted from this firmware, so a peer that sends one header byte every
+// three seconds holds one blocking call open for ever. `GateConfig.h`'s
+// watchdog assert bounds a call that honours its budgets; it cannot bound one
+// that does not, and the watchdog is what ends that call — by resetting the
+// part.
+//
+// On its own that is a survivable fault. What makes it a BOOT LOOP is the
+// sequence after it: `begin()` arms the first heartbeat, `pumpLink`'s first
+// link-up edge re-arms it to *now*, and the heartbeat is the very first thing
+// a board does with its radio. So every boot reaches that peer within a second
+// of associating, is held, is reset, and boots again — for ever. The roster
+// never loads, so the door admits NOBODY; the console line that would tell
+// somebody why scrolls past once per cycle; and nothing on the board's one LED
+// distinguishes it from a board whose WiFi password is wrong.
+//
+// A proxy that has partially fallen over, a load balancer draining, a captive
+// portal, or simply a container mid-restart all produce a dribbling peer. This
+// is not an attack scenario.
+//
+// WHAT THIS DOES ABOUT IT
+// -----------------------
+// A board that has just been reset BY ITS WATCHDOG waits before its first
+// network call, and waits longer each consecutive time. The wait is spent in
+// the ordinary loop — the watchdog is kicked, the scanner is drained, the lock
+// is pumped — so the board is alive and reachable by a person at the door and
+// at the USB console, which a board in a reset loop is not.
+//
+// WHAT IT DELIBERATELY DOES NOT DO
+// --------------------------------
+// It does not stop calling. A board that gave up would never recover when the
+// proxy came back, and "the door admits nobody until somebody notices" is the
+// outcome this is trying to avoid rather than a resting state to settle into.
+// The backoff has a ceiling for the same reason: at the cap the board still
+// tries, just rarely enough that it spends its life running rather than
+// rebooting.
+//
+// It also does not make the door work. Without a heartbeat there is no roster,
+// and offline a gate admits only rostered members — so the door still admits
+// nobody while the peer is broken. What changes is that the BOARD survives,
+// the console says why, and the recovery is automatic rather than a site visit.
+//
+// WHY THE COUNT LIVES OUTSIDE THIS HEADER
+// ---------------------------------------
+// It has to survive a reset, and the only storage that does without wearing
+// flash is the ESP32's RTC no-init memory — which is a platform fact and
+// belongs in the composition root. This file is the arithmetic, so a host test
+// can drive every step of it; `src/gate/main.cpp` holds the count and reads
+// `esp_reset_reason()`.
+//
+// No Arduino headers, no heap. Compiles for Xtensa and the host test runner.
+
+#ifndef CRUSADERS_GATELOGIC_BOOTRECOVERY_H
+#define CRUSADERS_GATELOGIC_BOOTRECOVERY_H
+
+#include <stdint.h>
+
+namespace gatelogic {
+
+/// The first delay, after one watchdog reset.
+///
+/// A second, because one watchdog reset is not evidence of anything: a genuinely
+/// slow evening, a single dropped packet storm, or a peer that was restarting
+/// all produce one, and a board that punished itself for it would be slower to
+/// open a door for no reason.
+inline constexpr uint32_t kResetBackoffStartMs = 1000UL;
+
+/// The ceiling. Five minutes is where a board stops spending its life rebooting
+/// and starts spending it running: at this spacing a peer that never recovers
+/// costs twelve calls an hour instead of one every fifteen seconds, and the
+/// board is up and answering its console in between.
+///
+/// It is NOT longer than that, because the peer usually does recover — a
+/// container finishes restarting, a proxy comes back — and a board that took
+/// half an hour to notice would have a club standing at a door that works.
+inline constexpr uint32_t kResetBackoffMaxMs = 300000UL;
+
+/// Consecutive watchdog resets past which the count stops rising. Reaching this
+/// already means the backoff is at its ceiling, and a count that kept climbing
+/// would only be a number that wraps.
+inline constexpr uint32_t kMaxResetRun = 16U;
+
+/// The consecutive-watchdog-reset count for THIS boot.
+///
+/// A boot that was not caused by the watchdog clears it: a power cycle, a
+/// button, a reflash or a brownout all mean somebody or something has
+/// intervened, and carrying a run across that would make the next honest boot
+/// wait for a fault it did not have.
+///
+/// One return statement: the generated sketch compiles at gnu++11.
+constexpr uint32_t nextResetRun(bool watchdogReset, uint32_t previousRun) {
+  return !watchdogReset ? 0U : (previousRun >= kMaxResetRun ? kMaxResetRun : previousRun + 1U);
+}
+
+/// How long to wait before the FIRST network call of a boot that follows `run`
+/// consecutive watchdog resets. Zero for a healthy boot, then doubling from
+/// `kResetBackoffStartMs` to `kResetBackoffMaxMs`.
+///
+/// A loop rather than a shift, because a shift past 32 is undefined behaviour
+/// and `run` comes out of memory that survived a reset — which is exactly the
+/// kind of value that is one day not what anybody expected.
+inline uint32_t firstCallDelayMs(uint32_t run) {
+  if (run == 0U) {
+    return 0U;
+  }
+  uint32_t delay = kResetBackoffStartMs;
+  for (uint32_t i = 1U; i < run; ++i) {
+    if (delay >= kResetBackoffMaxMs / 2U) {
+      return kResetBackoffMaxMs;
+    }
+    delay *= 2U;
+  }
+  return delay > kResetBackoffMaxMs ? kResetBackoffMaxMs : delay;
+}
+
+} // namespace gatelogic
+
+#endif // CRUSADERS_GATELOGIC_BOOTRECOVERY_H
