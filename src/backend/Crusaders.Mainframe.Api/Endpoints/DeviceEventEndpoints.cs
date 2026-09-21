@@ -1102,7 +1102,9 @@ public static class DeviceEventEndpoints
         // NOW the confirmation, with the lights on and the sentence in it true.
         await ok.SendConfirmationAsync!(ct);
 
-        return Results.Ok(Grant(ok.Booking, live.AmountCredits, ok.BalanceAfterCredits, replayed: false));
+        return Results.Ok(Grant(
+            ok.Booking, live.AmountCredits, ok.BalanceAfterCredits, replayed: false,
+            display: await MemberDisplay.ForAsync(db, userId, ct)));
     }
 
     /// <summary>
@@ -1234,13 +1236,27 @@ public static class DeviceEventEndpoints
         // The balance now rather than as it stood after the first attempt: the box shows
         // the member what they have, and a movement between the two attempts is real.
         var balance = await ledger.GetBalanceAsync(entry.UserId, ct);
-        return Results.Ok(Grant(booking, -entry.AmountCredits, balance, replayed: true, now));
+        return Results.Ok(Grant(
+            booking, -entry.AmountCredits, balance, replayed: true, now,
+            await MemberDisplay.ForAsync(db, entry.UserId, ct)));
     }
 
     // Block bodies, not expression bodies, for the two members below. lizard's C# parser
     // mis-scopes an expression-bodied member containing braces and emits a *global*
     // pseudo-function whose reported length is the whole file — see memory/gotchas.md.
-    private static object Grant(Booking booking, decimal amountCredits, decimal balanceAfterCredits, bool replayed, DateTimeOffset? now = null)
+    /// <summary>
+    /// What the box puts on the relay timer, and the name it greets the buyer with.
+    ///
+    /// <para>
+    /// <paramref name="display"/> is GOAL item 4's greeting line — see
+    /// <see cref="MemberDisplay"/> for why the SERVER truncates it rather than the board.
+    /// Absent when the club has no name on file, which changes the greeting and nothing else:
+    /// the court still comes on.
+    /// </para>
+    /// </summary>
+    private static object Grant(
+        Booking booking, decimal amountCredits, decimal balanceAfterCredits, bool replayed,
+        DateTimeOffset? now = null, string? display = null)
     {
         // A fresh purchase is granted what was sold; a replay what is left of it, rounded
         // up so a member is not cut off ahead of the window they paid for.
@@ -1255,6 +1271,7 @@ public static class DeviceEventEndpoints
             amount_credits = amountCredits,
             balance_after_credits = balanceAfterCredits,
             replayed,
+            member_display = display,
         };
     }
 

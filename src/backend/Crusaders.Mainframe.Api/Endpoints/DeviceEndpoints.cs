@@ -57,7 +57,7 @@ public static class DeviceEndpoints
         ILoggerFactory logs,
         CancellationToken ct)
     {
-        var (db, tenant, settings, registry, codes) = services;
+        var (db, tenant, settings, registry, codes, _, _, _) = services;
 
         // Validated BEFORE the MAC is resolved, so a firmware that believes in a device kind
         // this server does not have is told so whether or not its row already exists. The
@@ -92,9 +92,9 @@ public static class DeviceEndpoints
         // a per-interval count sees a board that looks worse every hour it stays up.
         NoteCountersAsync(logs, device!, req);
 
-        // …and the one of the two counters a club has to be able to see, onto the row. See
-        // NoteEventsLost and Device.EventsLost (R3-33).
-        NoteEventsLost(device!, req, now);
+        // …and the two counters a club has to be able to see: onto the row, and — as the RISE
+        // between two heartbeats — into the club's error log. See NoteCounterRows.
+        NoteCounterRows(services, device!, req, now);
 
         device!.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
         if (req.EffectiveRunningVersion is { } running) device.RunningVersion = running;
@@ -145,8 +145,12 @@ public static class DeviceEndpoints
                 : await DeviceGateRosterBuilder.BuildAsync(db, codes, s, now, ct);
 
             return Results.Ok(GateHeartbeatView.Of(
-                device, tenant.TenantSlug, s.HeartbeatSeconds, GateAccess.UnlockSecondsFor(s),
-                gateRoster, now));
+                // HeartbeatCadence.Effective, not the raw setting. A stored 3600 used to be
+                // sent verbatim to a board that clamps to 300, while the console showed 300 —
+                // the exact failure HeartbeatCadence exists to prevent, reproduced on the one
+                // path that bypassed it.
+                device, tenant.TenantSlug, HeartbeatCadence.Effective(s.HeartbeatSeconds),
+                GateAccess.UnlockSecondsFor(s), gateRoster, now));
         }
 
         // The bookings this box may admit on its own, as TOKEN|relay|opens_in|closes_in.
@@ -155,11 +159,52 @@ public static class DeviceEndpoints
         // one — an omitted key would leave a stale roster live. See DeviceRosterBuilder.
         var roster = await DeviceRosterBuilder.BuildAsync(db, codes, device, s, now, ct);
 
-        return Results.Ok(new
+        // GOAL item 17. Settled BEFORE the response is composed, because the previous beat's
+        // outcome and this beat's answer are one decision: a box that just told us it restored
+        // nothing needs the same answer again, and one that told us it restored two courts
+        // needs those courts on the server's books before the control board is asked about them.
+        var relays = await RestoreAsync(services, device, req, s, now, ct);
+
+        await db.SaveChangesAsync(ct);
+
+        return Results.Ok(CourtBoxView(device, tenant.TenantSlug, s, roster, relays, now));
+    }
+
+    /// <summary>
+    /// The court box's heartbeat response.
+    ///
+    /// <para>
+    /// A named method rather than an inline initialiser, for the reason recorded in
+    /// <c>memory/gotchas.md</c>: lizard's C# parser treats the <c>{</c> of an object
+    /// initialiser as the end of a function, so a large anonymous object inside the handler
+    /// charges the rest of the file to a global pseudo-function and trips the length gate.
+    /// </para>
+    /// </summary>
+    private static object CourtBoxView(
+        Device device, string tenantSlug, TenantSettingsView s,
+        IReadOnlyList<string> roster, IReadOnlyList<string>? relays, DateTimeOffset now)
+    {
+        var body = new Dictionary<string, object?>
         {
-            server_time = now,
-            tenant_slug = tenant.TenantSlug,
-            device_code = device.DeviceCode,
+            // CLUB-LOCAL WALL TIME, as nineteen characters, and this is a correction rather
+            // than a preference. The box has no timezone database and no RTC: it reads the
+            // first nineteen characters of this field and prints them on the glass. Sending
+            // UTC put a South African club's landing screen two hours behind all day, and
+            // "READY 17:42" beside a court booked for 19:45 is a member standing at a box
+            // believing they are early.
+            //
+            // The offset is deliberately NOT appended. A board that prints a prefix cannot be
+            // handed a value whose meaning depends on a suffix it will never read.
+            ["server_time"] = ClubWallTime(s, now),
+
+            // …and the UTC truth beside it, for anything that computes rather than prints.
+            // Epoch seconds because that is the one representation a board with no tz database
+            // can do arithmetic on, and because it makes the two fields impossible to confuse.
+            ["server_unix"] = now.ToUnixTimeSeconds(),
+
+            ["tenant_slug"] = tenantSlug,
+            ["device_code"] = device.DeviceCode,
+
             // The courts this box drives, in relay order: index 0 = relay A … index
             // 3 = relay D. Replaces the old single court_number — one physical box
             // serves up to four courts (review C4). The button map below is the
@@ -167,34 +212,104 @@ public static class DeviceEndpoints
             // is guaranteed to fit this list: the pair is checked at the moment an
             // admin saves either one (ButtonMap.FirstSelectionBeyond), and
             // auto-registration derives an override rather than leaving a mismatch.
-            court_numbers = device.CourtNumbers,
-            heartbeat_seconds = s.HeartbeatSeconds,
-            config = new
-            {
-                slice_minutes = s.SliceMinutes,
-                grace_window_minutes = s.GraceWindowMinutes,
-                // The longest walk-up this club will actually sell — the same bound
-                // WalkUpForDeviceAsync applies, min(club cap, relay hard cap), so the box
-                // is never told a number the API will refuse.
-                //
-                // Sent because it was not (finding M-F1): a club that lowered its walk-up
-                // maximum to 20 left the box advertising 15/30/45/60 on its minute buttons
-                // and the API refusing three of the four with `minutes_out_of_range` — a
-                // configuration change the member got blamed for, at a court with nobody at
-                // the desk. The console now warns an admin whose button map exceeds this
-                // (see AdminDevices), and the box has the number it needs to grey the
-                // button out or refuse it locally rather than round-tripping to a refusal.
-                walk_up_max_minutes = Math.Min(s.WalkUpMaxMinutes, RelayHardCap.Minutes),
+            ["court_numbers"] = device.CourtNumbers,
 
-                // What each of the eight buttons does, by physical position. Sent on
-                // every heartbeat rather than only when it changes: a box that
-                // rebooted and missed the change would otherwise open the wrong
-                // court until somebody edited the setting again. Same wire shape
-                // whether the map is the box's own or the club's.
-                button_map = ButtonMap.EffectiveFor(device.ButtonMapJson, s.Buttons).ToWire(),
-            },
-            roster,
-        });
+            // Effective, not raw. See the gate branch above for what the raw value did.
+            ["heartbeat_seconds"] = HeartbeatCadence.Effective(s.HeartbeatSeconds),
+            ["config"] = ConfigView(device, s),
+            ["roster"] = roster,
+        };
+
+        // ABSENT when the club has switched restore off, EMPTY when nothing should be on, and
+        // the two mean different things to the firmware: absent is "this API does not do
+        // restore" and the box stops waiting for one; empty is "nothing should be on", which
+        // is information at boot. Neither ever switches anything off.
+        if (relays is not null) body["relays"] = relays;
+
+        return body;
+    }
+
+    /// <summary>
+    /// The club's own wall clock at <paramref name="now"/>, as the nineteen characters
+    /// <c>YYYY-MM-DDTHH:MM:SS</c>.
+    ///
+    /// <para>
+    /// Falls back to UTC when the club's stored zone id is one this platform's tzdb does not
+    /// know. A board printing UTC is wrong by an offset; a board printing nothing because the
+    /// heartbeat threw is a board with a blank screen, and the settings PUT is not the only way
+    /// a value reaches that column.
+    /// </para>
+    /// </summary>
+    private static string ClubWallTime(TenantSettingsView s, DateTimeOffset now)
+    {
+        var local = TimeZoneInfo.TryFindSystemTimeZoneById(s.Timezone, out var zone)
+            ? TimeZoneInfo.ConvertTime(now, zone)
+            : now;
+        return local.ToString("yyyy-MM-ddTHH:mm:ss");
+    }
+
+    /// <summary>
+    /// The <c>config</c> block: the numbers the box runs on.
+    ///
+    /// <para>
+    /// Every value is read through <see cref="BoxSettings"/> rather than off the settings
+    /// record, so the board is never sent a number the board would refuse — the rule the roster
+    /// path already follows and the two decision paths did not. An absent key is impossible
+    /// here by construction; the firmware's own contract is that an absent key changes nothing,
+    /// which is what keeps an older API from blanking what a newer one configured.
+    /// </para>
+    /// </summary>
+    private static object ConfigView(Device device, TenantSettingsView s)
+    {
+        return new
+        {
+            slice_minutes = s.SliceMinutes,
+            grace_window_minutes = s.GraceWindowMinutes,
+
+            // The longest walk-up this club will actually sell — the same bound
+            // WalkUpForDeviceAsync applies, min(club cap, relay hard cap), so the box
+            // is never told a number the API will refuse.
+            //
+            // Sent because it was not (finding M-F1): a club that lowered its walk-up
+            // maximum to 20 left the box advertising 15/30/45/60 on its minute buttons
+            // and the API refusing three of the four with `minutes_out_of_range` — a
+            // configuration change the member got blamed for, at a court with nobody at
+            // the desk.
+            walk_up_max_minutes = Math.Min(s.WalkUpMaxMinutes, RelayHardCap.Minutes),
+
+            // GOAL items 1, 11, 15 and 18 — the screen's own clocks. Every one of them is a
+            // timeout that returns the glass to the landing page, which is the whole of the
+            // "screens that never leave and no button closes" class of defect: a deadlock is
+            // a state with no exit, and a revert timer is an exit that cannot be missed.
+            //
+            // lcd_revert_seconds is BOTH item 1's revert and item 18's rapid-scan window.
+            // There is deliberately one number: the countdown item 18 asks for IS this hold,
+            // surfaced, and a scan pre-empts it immediately rather than waiting it out. A
+            // second "cooldown" setting would be a second timer over the same interval, and a
+            // second state that can get stuck.
+            lcd_revert_seconds = BoxSettings.LcdRevertSeconds(s),
+            lcd_choice_seconds = BoxSettings.LcdChoiceSeconds(s),
+            lcd_card_seconds = BoxSettings.LcdCardSeconds(s),
+            lcd_hint_seconds = BoxSettings.LcdHintSeconds(s),
+
+            // Held at or above lcd_choice_seconds by the reader, not by luck. Below it, a
+            // member who scans, walks to the court door and comes back finds the pad still
+            // holding their selection while the bridge has forgotten who they are — a
+            // selection belonging to nobody, which is how somebody else's court comes on.
+            scan_memory_seconds = BoxSettings.ScanMemorySeconds(s),
+
+            clock_trust_minutes = BoxSettings.ClockTrustMinutes(s),
+            relay_restore_enabled = BoxSettings.RelayRestoreEnabled(s),
+            device_fault_reporting = BoxSettings.DeviceFaultReporting(s),
+            device_fault_max_per_hour = BoxSettings.DeviceFaultMaxPerHour(s),
+
+            // What each of the eight buttons does, by physical position. Sent on
+            // every heartbeat rather than only when it changes: a box that
+            // rebooted and missed the change would otherwise open the wrong
+            // court until somebody edited the setting again. Same wire shape
+            // whether the map is the box's own or the club's.
+            button_map = ButtonMap.EffectiveFor(device.ButtonMapJson, s.Buttons).ToWire(),
+        };
     }
 
     /// <summary>
@@ -236,6 +351,224 @@ public static class DeviceEndpoints
     }
 
     /// <summary>
+    /// GOAL item 17, both halves: settle what the box did with the LAST restore, then compute
+    /// this one. Returns the wire array, or null when this club has switched restore off.
+    ///
+    /// <para>
+    /// <b>The two halves are one method because they are one decision.</b> Settling first means
+    /// a box reporting <c>restored_relays: 0</c> against an outstanding expectation is recorded
+    /// as a failure AND is handed the same answer again on this very response — which is the
+    /// only behaviour that gets the court lit without a person walking to the cupboard.
+    /// </para>
+    ///
+    /// <para>
+    /// Nothing here queues an activation, re-stamps attendance or touches money. <b>The API is
+    /// the SOURCE of the restore, so it has already heard about it</b> — the event queue exists
+    /// to carry what the API did NOT hear. The <c>!ON</c> the box sends is a relay command and
+    /// nothing else, which is what makes a second power cut a second harmless restore rather
+    /// than a second charge.
+    /// </para>
+    /// </summary>
+    private static async Task<IReadOnlyList<string>?> RestoreAsync(
+        HeartbeatServices services, Device device, HeartbeatRequest req, TenantSettingsView s,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        // The box's own report is read whether or not restore is enabled: it is evidence about
+        // the hardware, not part of the restore handshake, and a club that has switched restore
+        // off still wants its control board to say "confirmed by the box".
+        await NoteRelayReportAsync(services, device, req, now, ct);
+
+        if (!BoxSettings.RelayRestoreEnabled(s)) return null;
+
+        var plan = await RelayRestorePlan.ForAsync(services.Db, device, now, ct);
+        await SettleRestoreAsync(services, device, req, plan, now, ct);
+
+        // Marked ONLY for a board that looks freshly booted. The answer is served on every
+        // heartbeat because only the box knows whether it has just started, but an ordinary
+        // running box with a lit court must never be asked to confirm a restore it was never
+        // going to perform — that would file a `restore_failed` every minute of every evening
+        // and bury the one that means a court is genuinely dark.
+        if (plan.Count > 0 && LooksFreshlyBooted(req, s))
+        {
+            device.RestoreServedAt = now;
+            device.RestoreServedRelays = plan.Count;
+            Audit(services, device, "device.relay_restore_served", new
+            {
+                device_id = device.Id,
+                device_code = device.DeviceCode,
+                relays = plan.Select(p => new
+                {
+                    relay = p.Relay,
+                    court_number = p.CourtNumber,
+                    remaining_seconds = p.RemainingSeconds,
+                    booking_id = p.BookingId,
+                }),
+            });
+        }
+
+        return [.. plan.Select(p => p.ToWire())];
+    }
+
+    /// <summary>
+    /// What the box says its relays are actually doing, onto the light-state projection —
+    /// the <c>confirmed_at</c> half of GOAL item 10.
+    ///
+    /// <para>
+    /// <b>Every other column on that row is the server's BELIEF.</b> It is assembled from
+    /// grants the server issued and events it was told about, and until this report arrives a
+    /// control-board tile can only honestly say "we believe Court 2 is on". This is the box
+    /// answering "here is what is closed right now", which is what lets the tile say "lights on
+    /// — confirmed by the box at 18:04" and survive a member asking whether the software is
+    /// sure.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>An ABSENT key and an EMPTY array are different and both are handled.</b> Absent is a
+    /// firmware that does not report relay state — every board in the field until the new image
+    /// ships — and nothing is written, so the tiles keep saying "believed". Empty is the box
+    /// reporting that nothing is closed, which confirms every one of its courts OFF. Treating
+    /// absence as emptiness would paint "confirmed off" across every court in every club still
+    /// running the current firmware.
+    /// </para>
+    ///
+    /// <para>
+    /// The report does NOT change the believed state. It is a second, independent column: a box
+    /// that says a relay is open while the server believes it granted time is a contradiction
+    /// an admin must SEE, not one the server should resolve by quietly adopting the box's view
+    /// and losing the evidence that they disagreed.
+    /// </para>
+    /// </summary>
+    private static async Task NoteRelayReportAsync(
+        HeartbeatServices services, Device device, HeartbeatRequest req, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (req.RelayState is not { } report) return;
+        if (device.Kind != DeviceKind.CourtBox) return;
+
+        var closed = new HashSet<int>();
+        foreach (var element in report)
+        {
+            // One bad element must not discard the evening's other three — the rule the roster
+            // parser already states. A malformed entry is skipped silently here because the
+            // fault channel is where a board's malformed output belongs, and raising one row
+            // per heartbeat for a board with a stuck formatter is the flood item 7 exists to
+            // prevent.
+            var pipe = element?.IndexOf('|') ?? -1;
+            if (pipe <= 0) continue;
+            if (int.TryParse(element![..pipe], out var relay) && relay >= 0) closed.Add(relay);
+        }
+
+        var courts = await services.Lights.CourtsByRelayAsync(device, ct);
+        for (var relay = 0; relay < courts.Count; relay++)
+        {
+            if (courts[relay] is not { } court) continue;
+            await services.Lights.RecordConfirmationAsync(
+                court.Id, device.Id, relay, closed.Contains(relay), now, ct);
+        }
+    }
+
+    /// <summary>
+    /// Whether this heartbeat is plausibly the board's first since a reboot.
+    ///
+    /// <para>
+    /// Derived from the board's own uptime against the club's effective cadence — the same
+    /// derivation the firmware uses for how long its landing screen says "checking with the
+    /// club": four beats, clamped into <c>[60 s, 600 s]</c>. A board with no uptime field at
+    /// all is treated as fresh, because a firmware that does not report uptime is an older
+    /// build and the restore is the whole point of the feature.
+    /// </para>
+    /// </summary>
+    private static bool LooksFreshlyBooted(HeartbeatRequest req, TenantSettingsView s)
+    {
+        if (req.UptimeMs is not { } uptime) return true;
+        var window = Math.Clamp(HeartbeatCadence.Effective(s.HeartbeatSeconds) * 4, 60, 600);
+        return uptime <= window * 1000L;
+    }
+
+    /// <summary>
+    /// What the box did with the restore it was last served.
+    ///
+    /// <para>
+    /// Three outcomes and each has a row, because the club needs to be able to tell them apart:
+    /// nothing outstanding (silence); the box acted (confirmed, and the courts go on the
+    /// server's books as restored after a power loss); the box heard and did not act
+    /// (<b>failed</b> — a court is dark that the club believes is lit, with a member on it who
+    /// has already been charged, and this is the highest-value single row on the control board).
+    /// </para>
+    ///
+    /// <para>
+    /// The expectation is consumed whatever the answer. The box restores exactly once per boot,
+    /// so a second beat carrying zero is not a second failure — it is a board running normally,
+    /// and re-filing the failure every minute would turn the one row that matters into noise.
+    /// </para>
+    /// </summary>
+    private static async Task SettleRestoreAsync(
+        HeartbeatServices services, Device device, HeartbeatRequest req,
+        IReadOnlyList<RelayRestoreItem> plan, DateTimeOffset now, CancellationToken ct)
+    {
+        var restored = req.RestoredRelays is > 0 and { } n ? n : 0;
+        var served = device.RestoreServedRelays;
+        if (device.RestoreServedAt is null && restored == 0) return;
+
+        device.RestoreServedAt = null;
+        device.RestoreServedRelays = 0;
+
+        if (restored == 0)
+        {
+            Audit(services, device, "device.relay_restore_failed", new
+            {
+                device_id = device.Id, device_code = device.DeviceCode, served, restored = 0,
+            });
+            DeviceErrorService.InBackground(
+                services.Scopes, services.Logs.CreateLogger(typeof(DeviceEndpoints)),
+                services.Tenant.TenantId, services.Tenant.TenantSlug,
+                new DeviceErrorReport(
+                    DeviceErrorCodes.RestoreNotConfirmed, DeviceErrorSource.Server,
+                    DeviceId: device.Id, ClaimedDeviceCode: device.DeviceCode,
+                    Detail: $"served {served} relay(s), the box reported 0"));
+            return;
+        }
+
+        Audit(services, device, "device.relay_restore_confirmed", new
+        {
+            device_id = device.Id, device_code = device.DeviceCode, served, restored,
+        });
+
+        foreach (var item in plan)
+        {
+            var evidence = new LightEvidence(item.CourtId, device.Id, item.Relay, Seq: 0, BootId: 0, At: now);
+            var row = await services.Lights.RecordOnAsync(
+                evidence, item.EndsAt, LightCause.RestoreAfterPowerDip, item.CausedByUserId,
+                item.BookingId, ct);
+            if (row is null) continue;
+
+            services.Lights.Audit(
+                CourtLightStateService.LightsRestoredAction, item.CourtId, item.CourtNumber,
+                item.CausedByUserId,
+                new
+                {
+                    device_id = device.Id,
+                    device_code = device.DeviceCode,
+                    relay = item.Relay,
+                    booking_id = item.BookingId,
+                    remaining_seconds = item.RemainingSeconds,
+                });
+        }
+    }
+
+    /// <summary>One audit row about this board, with the details already shaped by the caller.</summary>
+    private static void Audit(HeartbeatServices services, Device device, string action, object details)
+    {
+        services.Db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = device.TenantId,
+            ActorUserId = Guid.Empty,
+            Action = action,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(details),
+        });
+    }
+
+    /// <summary>
     /// Puts the board's dropped-record counter on the ROW, where a club can see it (R3-33).
     ///
     /// <para>
@@ -263,12 +596,72 @@ public static class DeviceEndpoints
     /// cannot throw. Block body for the lizard reason in <c>memory/gotchas.md</c>.
     /// </para>
     /// </summary>
-    private static void NoteEventsLost(Device device, HeartbeatRequest req, DateTimeOffset now)
+    /// <summary>
+    /// Both board counters onto the row, and their RISE into the club's error log — GOAL item
+    /// 7's answer to the two genuine failure counters the firmware reports.
+    ///
+    /// <para>
+    /// <b>The rise, not the absolute, and that is the whole reason this is not one line.</b>
+    /// Both counters are since-boot totals, so a board that has been up for a week and lost
+    /// fourteen events would otherwise re-report the same fourteen every single minute — three
+    /// hundred rows a day saying one thing happened once. The delta between two heartbeats is
+    /// the number of NEW failures, which is the only figure an admin can act on. A counter that
+    /// went DOWN is a reboot, not a negative rise, and contributes nothing.
+    /// </para>
+    ///
+    /// <para>
+    /// The absolute is kept on the row and echoed into the error row's detail as
+    /// <c>since_boot=&lt;n&gt;</c>, which is what answers "and how many in total" without a
+    /// second column anywhere.
+    /// </para>
+    /// </summary>
+    private static void NoteCounterRows(
+        HeartbeatServices services, Device device, HeartbeatRequest req, DateTimeOffset now)
     {
-        if (req.EventsLost is not { } reported) return;
+        NoteCounter(services, device, DeviceErrorCodes.QueueEventsLost, req.EventsLost, device.EventsLost, now,
+            (d, value) => { d.EventsLost = value; d.EventsLostReportedAt = now; });
 
-        device.EventsLost = (int)Math.Clamp(reported, 0, int.MaxValue);
-        device.EventsLostReportedAt = now;
+        NoteCounter(services, device, DeviceErrorCodes.QueueNoPush, req.NoPush, device.NoPush, now,
+            (d, value) => { d.NoPush = value; d.NoPushReportedAt = now; });
+    }
+
+    /// <summary>
+    /// One since-boot counter: stored, and its rise reported.
+    ///
+    /// <para>
+    /// <b>Absent is not zero, and a zero is not "nothing was lost".</b> A board on an older
+    /// build sends no counter at all; one that has just rebooted sends a genuine zero and has
+    /// forgotten everything it lost before the reboot. So an absent value leaves the columns
+    /// exactly as they were — a club that has seen a loss keeps seeing it — and a present
+    /// value, including zero, is stored with the instant it arrived. That instant is what lets
+    /// a console say "as of 19:04" rather than asserting a current state it cannot know.
+    /// </para>
+    ///
+    /// <para>
+    /// Clamped into <see cref="int"/>: the wire field is a <c>long</c> because the board's
+    /// counter is, and a value past <c>int.MaxValue</c> is a board whose counter has gone wrong
+    /// rather than a club that lost two billion scans. Saturating is honest at the top end and
+    /// cannot throw.
+    /// </para>
+    /// </summary>
+    private static void NoteCounter(
+        HeartbeatServices services, Device device, string code, long? reported, int previous,
+        DateTimeOffset now, Action<Device, int> store)
+    {
+        if (reported is not { } value) return;
+
+        var current = (int)Math.Clamp(value, 0, int.MaxValue);
+        var rise = current - previous;
+        store(device, current);
+        if (rise <= 0) return;
+
+        DeviceErrorService.InBackground(
+            services.Scopes, services.Logs.CreateLogger(typeof(DeviceEndpoints)),
+            device.TenantId, services.Tenant.TenantSlug,
+            new DeviceErrorReport(
+                code, DeviceErrorSource.Server, DeviceId: device.Id,
+                ClaimedDeviceCode: device.DeviceCode,
+                Detail: $"since_boot={current}", Count: rise, At: now));
     }
 }
 
@@ -281,7 +674,12 @@ public sealed record HeartbeatServices(
     ITenantContext Tenant,
     TenantSettingsAccessor Settings,
     DeviceRegistryService Registry,
-    AccessCodeService Codes);
+    AccessCodeService Codes,
+    /// <summary>The light-state projection this heartbeat's restore and relay report both write.</summary>
+    CourtLightStateService Lights,
+    /// <summary>For the fault rows this heartbeat raises off the request thread. See <see cref="DeviceErrorService.InBackground"/>.</summary>
+    IServiceScopeFactory Scopes,
+    ILoggerFactory Logs);
 
 /// <summary>
 /// What a court box reports about itself. Only <c>mac</c> is required — it is the board's
@@ -375,7 +773,41 @@ public sealed record HeartbeatRequest(
     /// box's wire is untouched this round.
     /// </para>
     /// </summary>
-    [property: JsonPropertyName("events_lost")] long? EventsLost = null)
+    [property: JsonPropertyName("events_lost")] long? EventsLost = null,
+    /// <summary>
+    /// How many relays this box re-energised from the restore it was last served — GOAL item
+    /// 17's acknowledgement. Omitted at zero, so a board with nothing to report sends the same
+    /// body it always did.
+    ///
+    /// <para>
+    /// It is how the server learns the restore LANDED. A served restore followed by a zero —
+    /// or by an absent field, which reads as zero — is the row an admin must see, because it
+    /// means a court is dark that the club believes is lit, with a member on it who has already
+    /// been charged.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>long?</c> and not <c>int?</c>, for the reason <see cref="NoPush"/> is: an
+    /// out-of-range value must be ignored, never 400 the whole heartbeat and take the roster
+    /// and the config down with it. A diagnostic counter must not be able to take a court box
+    /// out of service.
+    /// </para>
+    /// </summary>
+    [property: JsonPropertyName("restored_relays")] long? RestoredRelays = null,
+    /// <summary>
+    /// What the box BELIEVES is closed right now, carried up from the Mega's <c>!STATE</c>, as
+    /// <c>&lt;relay&gt;|&lt;remaining_seconds&gt;</c>.
+    ///
+    /// <para>
+    /// The same pipe-delimited string array as the restore answer, for the same heapless-scanner
+    /// reason. <b>Three states, not two:</b> the key ABSENT means this firmware does not report
+    /// relay state at all — which is every board in the field until the new image ships — and
+    /// an EMPTY ARRAY means the box reports that nothing is closed. Reading the first as the
+    /// second would make the control board say "confirmed off" about every court in every club
+    /// running the current firmware.
+    /// </para>
+    /// </summary>
+    [property: JsonPropertyName("relay_state")] string[]? RelayState = null)
 {
     /// <summary>The reported version under either name, trimmed — or null when neither was sent.</summary>
     public string? EffectiveRunningVersion

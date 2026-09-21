@@ -488,6 +488,13 @@ public class MainframeDbContext : DbContext
 
             e.Property(s => s.State).HasConversion<int>();
             e.Property(s => s.Cause).HasConversion<int>();
+
+            // UNKNOWN, not Off, for every row that predates the box's own relay report — and
+            // for every board whose firmware never sends one. Defaulting to Off would make the
+            // control board say "confirmed off" about courts no box has ever spoken about,
+            // which is the software asserting evidence it does not have on the one screen whose
+            // job is to distinguish the two.
+            e.Property(s => s.ConfirmedState).HasConversion<int>().HasDefaultValue(LightState.Unknown);
             e.HasQueryFilter(s => s.TenantId == _tenant.TenantId);
 
             // The control board reads every row for the tenant in one go, and the restore

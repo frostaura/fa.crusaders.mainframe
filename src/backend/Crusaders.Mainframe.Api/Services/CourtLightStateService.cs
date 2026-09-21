@@ -154,6 +154,33 @@ public sealed class CourtLightStateService
     }
 
     /// <summary>
+    /// Records what the BOX says a relay is doing — independently of what the server believes.
+    ///
+    /// <para>
+    /// Two columns rather than one, because a box reporting a relay open while the server
+    /// believes it granted time is a contradiction an admin must SEE. Folding the report into
+    /// <see cref="CourtLightState.State"/> would resolve the disagreement by quietly adopting
+    /// the box's view and destroying the evidence that they ever disagreed — which is exactly
+    /// the case where somebody has to walk to the cupboard.
+    /// </para>
+    ///
+    /// <para>
+    /// Not gated on the out-of-order guard: a heartbeat carries no sequence number, and its
+    /// report is about the instant it was sent rather than about an event in a queue.
+    /// </para>
+    /// </summary>
+    public async Task RecordConfirmationAsync(
+        Guid courtId, Guid deviceId, int relay, bool closed, DateTimeOffset at, CancellationToken ct)
+    {
+        var row = await RowForAsync(courtId, ct);
+        row.ConfirmedAt = at;
+        row.ConfirmedState = closed ? LightState.On : LightState.Off;
+        row.DeviceId ??= deviceId;
+        row.Relay ??= relay;
+        row.UpdatedAt = at;
+    }
+
+    /// <summary>
     /// Every court this board drives, in relay order, for the restore and outage paths.
     ///
     /// <para>

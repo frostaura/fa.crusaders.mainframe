@@ -75,6 +75,11 @@ public static class DeviceActivateEndpoint
         var resolved = await services.Codes.ResolveAsync(req.Token, ct);
         if (resolved is null) return Refused("not_recognised");
 
+        // Resolved ONCE, here, and carried onto every branch below including the refusals.
+        // The box paints the member's card before it knows the outcome, so a refusal without a
+        // name is a screen that greets a member the club knows perfectly well as a stranger.
+        var display = await MemberDisplay.ForAsync(services.Db, resolved.UserId, ct);
+
         // A member the club has barred opens nothing here (finding K-F1, second door). The
         // ident-code branch below already answered "no booking" for one, because it searches
         // through CourtActivationService.FindForUserAsync and that filters them out — but the
@@ -88,22 +93,22 @@ public static class DeviceActivateEndpoint
         // standing at the court.
         if (await MembershipAccess.IsBarredFromCourtsAsync(services.Db, resolved.UserId, ct))
         {
-            return Refused("no_booking");
+            return Refused("no_booking", display: display);
         }
 
         // A court named in the request narrows the search, and must be one of this box's.
-        if (req.Court is { } narrowed && !device.CourtNumbers.Contains(narrowed)) return Refused("wrong_court");
+        if (req.Court is { } narrowed && !device.CourtNumbers.Contains(narrowed)) return Refused("wrong_court", display: display);
 
         var found = resolved.Purpose == AccessCodePurpose.BookingActivation
             ? await ForBookingCodeAsync(device, req, resolved, services, now, ct)
             : await ForIdentCodeAsync(device, req, resolved, services, now, ct);
 
-        if (found.Reason is not null) return Refused(found.Reason, found.Court);
+        if (found.Reason is not null) return Refused(found.Reason, found.Court, display);
 
         var result = await services.Activation.ActivateAsync(
             found.Court!, found.Booking!, resolved.UserId, payerOverrideUserId: null, req.Method!, ct);
 
-        return From(result, found.Court!, now);
+        return From(result, found.Court!, now, display);
     }
 
     private sealed record Found(Booking? Booking, Court? Court, string? Reason);
@@ -190,7 +195,8 @@ public static class DeviceActivateEndpoint
     // Block bodies rather than expression bodies: lizard's C# parser mis-scopes an
     // expression-bodied member containing braces into a *global* pseudo-function the
     // length of the file — see memory/gotchas.md.
-    private static DeviceActivateResponse From(ActivationResult result, Court court, DateTimeOffset now)
+    private static DeviceActivateResponse From(
+        ActivationResult result, Court court, DateTimeOffset now, string? display)
     {
         return result switch
         {
@@ -204,7 +210,8 @@ public static class DeviceActivateEndpoint
                 CourtNumber: court.CourtNumber,
                 BookingId: ended.Booking.Id,
                 GrantedSeconds: 0,
-                StartsInSeconds: null),
+                StartsInSeconds: null,
+                MemberDisplay: display),
 
             // The remainder of the slot, clamped to what the relay bank will actually hold.
             // A repeat scan of a live session lands here too, with whatever is left — which
@@ -215,7 +222,8 @@ public static class DeviceActivateEndpoint
                 CourtNumber: court.CourtNumber,
                 BookingId: a.Booking.Id,
                 GrantedSeconds: Math.Clamp((int)Math.Floor((a.Booking.EndsAt - now).TotalSeconds), 1, RelayHardCap.Seconds),
-                StartsInSeconds: null),
+                StartsInSeconds: null,
+                MemberDisplay: display),
 
             ActivationResult.TooEarly early => new DeviceActivateResponse(
                 Activated: false,
@@ -223,15 +231,17 @@ public static class DeviceActivateEndpoint
                 CourtNumber: court.CourtNumber,
                 BookingId: early.Booking.Id,
                 GrantedSeconds: 0,
-                StartsInSeconds: early.StartsInSeconds),
+                StartsInSeconds: early.StartsInSeconds,
+                MemberDisplay: display),
 
-            ActivationResult.InsufficientBalance => Refused("insufficient_balance", court),
-            ActivationResult.NoBooking => Refused("no_booking", court),
-            _ => Refused("not_chargeable", court),
+            ActivationResult.InsufficientBalance => Refused("insufficient_balance", court, display),
+            ActivationResult.NoBooking => Refused("no_booking", court, display),
+            _ => Refused("not_chargeable", court, display),
         };
     }
 
-    private static DeviceActivateResponse Refused(string reason, Court? court = null)
+    private static DeviceActivateResponse Refused(
+        string reason, Court? court = null, string? display = null)
     {
         return new DeviceActivateResponse(
             Activated: false,
@@ -239,7 +249,8 @@ public static class DeviceActivateEndpoint
             CourtNumber: court?.CourtNumber,
             BookingId: null,
             GrantedSeconds: 0,
-            StartsInSeconds: null);
+            StartsInSeconds: null,
+            MemberDisplay: display);
     }
 }
 
@@ -274,4 +285,21 @@ public sealed record DeviceActivateResponse(
     [property: JsonPropertyName("court_number")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? CourtNumber,
     [property: JsonPropertyName("booking_id")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? BookingId,
     [property: JsonPropertyName("granted_seconds")] int GrantedSeconds,
-    [property: JsonPropertyName("starts_in_seconds")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? StartsInSeconds);
+    [property: JsonPropertyName("starts_in_seconds")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? StartsInSeconds,
+    /// <summary>
+    /// The member's name for the LCD's greeting line, at most
+    /// <see cref="MemberDisplay.MaxLength"/> characters — GOAL item 4.
+    ///
+    /// <para>
+    /// Present on EVERY response where the API resolved a member, refusals included, because
+    /// the box paints the name card BEFORE it knows the outcome: "HI PRIYA — no booking found"
+    /// is a sentence, and "HI THERE — no booking found" to a member the club knows perfectly
+    /// well is the software looking broken at the worst moment.
+    /// </para>
+    ///
+    /// <para>
+    /// Omitted when nobody was identified, which is exactly the existing <c>not_recognised</c>
+    /// case surfaced as copy. Last in the record so the field is purely additive on the wire.
+    /// </para>
+    /// </summary>
+    [property: JsonPropertyName("member_display")][property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MemberDisplay = null);

@@ -330,6 +330,14 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid?>("CausedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ConfirmedState")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(2);
+
                     b.Property<Guid?>("DeviceId")
                         .HasColumnType("uuid");
 
@@ -432,10 +440,22 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<int>("NoPush")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("NoPushReportedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset?>("OutOfServiceSince")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("PowerLossBehaviour")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("RestoreServedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RestoreServedRelays")
                         .HasColumnType("integer");
 
                     b.Property<string>("RunningVersion")

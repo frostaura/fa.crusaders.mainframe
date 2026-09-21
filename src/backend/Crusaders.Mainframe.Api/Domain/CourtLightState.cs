@@ -141,6 +141,39 @@ public sealed class CourtLightState : ITenantScoped
     public DateTimeOffset UpdatedAt { get; set; }
 
     /// <summary>
+    /// When the BOX last told us what this relay is actually doing — its <c>relay_state</c>
+    /// report on the heartbeat, carried up from the Mega's own <c>!STATE</c>.
+    ///
+    /// <para>
+    /// <b>This is the difference between what the server granted and what the hardware did.</b>
+    /// Every other column here is the server's BELIEF, assembled from grants it issued and
+    /// events it was told about; this one is the box answering "here is what is closed right
+    /// now". Until it arrives, a tile can only honestly say "we believe Court 2 is on". Once it
+    /// has, the tile may say "lights on — confirmed by the box at 18:04", which is the sentence
+    /// a club actually wants and the only one that survives a member asking "are you sure?".
+    /// </para>
+    ///
+    /// <para>
+    /// Null on a board whose firmware does not report relay state — which is every board in the
+    /// field until the new image ships — and that absence must read as "not confirmed", never
+    /// as "confirmed off". Three states, not two.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? ConfirmedAt { get; set; }
+
+    /// <summary>
+    /// What the box said at <see cref="ConfirmedAt"/>: <see cref="LightState.On"/> when the
+    /// relay appeared in its report, <see cref="LightState.Off"/> when it reported and this
+    /// relay was absent from the list, and <see cref="LightState.Unknown"/> when no report has
+    /// ever arrived.
+    /// </summary>
+    public LightState ConfirmedState { get; set; } = LightState.Unknown;
+
+    /// <summary>Whether the box's own report still stands as evidence at <paramref name="now"/>, given how long a silence the club tolerates.</summary>
+    public bool ConfirmedWithin(DateTimeOffset now, int seconds) =>
+        ConfirmedAt is { } at && (now - at).TotalSeconds <= seconds;
+
+    /// <summary>
     /// Seconds left on the grant at <paramref name="now"/>, floored at zero, or null when the
     /// lights are not believed on or the grant has no end.
     ///
