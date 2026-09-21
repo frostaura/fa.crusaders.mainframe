@@ -181,6 +181,10 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasIndex("TenantId", "ScanAt");
 
+                    b.HasIndex("TenantId", "ActorUserId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "SubjectUserId", "CreatedAt");
+
                     b.ToTable("audit_log", (string)null);
                 });
 
@@ -271,6 +275,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid>("ActorUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AdminNote")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<decimal>("AmountChargedCredits")
                         .HasColumnType("numeric(10,2)");
 
@@ -321,6 +329,12 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid?>("PaidByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ScheduleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("ScheduleOccurrenceDate")
+                        .HasColumnType("date");
+
                     b.Property<int>("SliceCount")
                         .HasColumnType("integer");
 
@@ -347,9 +361,142 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasIndex("TenantId", "CourtId", "StartsAt");
 
+                    b.HasIndex("TenantId", "ScheduleId", "StartsAt");
+
                     b.HasIndex("TenantId", "UserId", "StartsAt");
 
                     b.ToTable("bookings", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.BookingSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("DaysOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("EndMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<short>("IntervalWeeks")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset?>("MaterialisedThrough")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("StartMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.ToTable("booking_schedules", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_booking_schedules_days", "\"DaysOfWeek\" BETWEEN 1 AND 127");
+
+                            t.HasCheckConstraint("ck_booking_schedules_interval", "\"IntervalWeeks\" BETWEEN 1 AND 8");
+
+                            t.HasCheckConstraint("ck_booking_schedules_time_range", "\"EndMinute\" > \"StartMinute\" AND \"EndMinute\" <= 1440 AND \"StartMinute\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.BookingScheduleCourt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CourtId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ScheduleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ScheduleId", "CourtId")
+                        .IsUnique();
+
+                    b.ToTable("booking_schedule_courts", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.BookingScheduleException", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("EndMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("OccurrenceDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid>("ScheduleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("StartMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ScheduleId", "OccurrenceDate")
+                        .IsUnique();
+
+                    b.ToTable("booking_schedule_exceptions", (string)null);
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.Court", b =>
@@ -659,6 +806,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("ExternalReference")
                         .IsUnique()
                         .HasFilter("\"ExternalReference\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "ActorUserId", "CreatedAt");
 
                     b.HasIndex("TenantId", "UserId", "CreatedAt");
 

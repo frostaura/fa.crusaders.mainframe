@@ -501,6 +501,7 @@ app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();
 app.MapAdminDoorEndpoints();
 app.MapAdminLedgerEndpoints();
+app.MapAdminChangeEndpoints();
 app.MapMeProfileEndpoints();
 app.MapMeDoorEndpoints();
 app.MapWebhookEndpoints();

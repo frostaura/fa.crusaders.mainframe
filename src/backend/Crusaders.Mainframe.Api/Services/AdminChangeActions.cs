@@ -106,6 +106,19 @@ public static class AdminChangeActions
     public const string CourtUpdated = "court.updated";
     public const string CourtDeactivated = "court.deactivated";
 
+    /// <summary>
+    /// An admin downloaded the club's change record.
+    ///
+    /// <para>
+    /// <b>Not in D2's original list, and added deliberately rather than reusing
+    /// <see cref="SettingsUpdated"/>.</b> An export is a thing that happened to the club's
+    /// records and it is not a settings change; filing it as one would make the record lie
+    /// about itself in the one table designed to be trusted. The door log already audits its
+    /// own export for the same reason.
+    /// </para>
+    /// </summary>
+    public const string ChangesExported = "changes.exported";
+
     // ---- device ----
     public const string DeviceUpdated = "device.updated";
     public const string DeviceDeleted = "device.deleted";
@@ -131,7 +144,7 @@ public static class AdminChangeActions
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged,
         MemberClassChanged, MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
         MemberPasswordReset, MemberTraceViewed,
-        SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated,
+        SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
     ];
 
@@ -158,7 +171,8 @@ public static class AdminChangeActions
         GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged => AdminChangeAreas.Group,
         MemberClassChanged or MemberApproved or MemberRejected or MemberSuspended
             or MemberReactivated or MemberPasswordReset or MemberTraceViewed => AdminChangeAreas.Member,
-        SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated => AdminChangeAreas.Setting,
+        SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
+            or ChangesExported => AdminChangeAreas.Setting,
         DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
             or DoorsReopenedAll or MonitoringErrorResolved => AdminChangeAreas.Device,
         _ => null,
@@ -212,6 +226,7 @@ public static class AdminChangeActions
             CourtCreated => $"Added a court{of}",
             CourtUpdated => $"Changed a court{of}",
             CourtDeactivated => $"Deactivated a court{of}",
+            ChangesExported => "Downloaded the club's change record",
 
             DeviceUpdated => $"Changed a device{of}",
             DeviceDeleted => $"Removed a device{of}",

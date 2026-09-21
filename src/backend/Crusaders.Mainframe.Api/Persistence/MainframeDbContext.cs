@@ -45,6 +45,15 @@ public class MainframeDbContext : DbContext
     /// </para>
     /// </summary>
     public DbSet<AdminChangeLog> AdminChangeLogs => Set<AdminChangeLog>();
+
+    /// <summary>Repeating court bookings — league nights, coaching blocks. GOAL item 14.</summary>
+    public DbSet<BookingSchedule> BookingSchedules => Set<BookingSchedule>();
+
+    /// <summary>Which courts each schedule occupies. A child table, not a <c>uuid[]</c>.</summary>
+    public DbSet<BookingScheduleCourt> BookingScheduleCourts => Set<BookingScheduleCourt>();
+
+    /// <summary>The single dates that do not follow a schedule's rule — skipped or re-timed.</summary>
+    public DbSet<BookingScheduleException> BookingScheduleExceptions => Set<BookingScheduleException>();
     public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
     public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
     public DbSet<EnrolledTemplate> EnrolledTemplates => Set<EnrolledTemplate>();
@@ -156,6 +165,11 @@ public class MainframeDbContext : DbContext
             e.HasIndex(b => new { b.TenantId, b.UserId, b.StartsAt });
             e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
             e.Property(b => b.Status).HasConversion<int>();
+            // How "edit this and future" finds an occurrence's rows, and how the grid learns
+            // which league night a block belongs to. StartsAt last so the index also serves
+            // "everything this schedule has ahead of now".
+            e.HasIndex(b => new { b.TenantId, b.ScheduleId, b.StartsAt });
+            e.Property(b => b.AdminNote).HasMaxLength(128);
             e.Property(b => b.BlockLabel).HasMaxLength(128);
             e.Property(b => b.CancellationReason).HasMaxLength(512);
             e.Property(b => b.Version).IsConcurrencyToken();
@@ -167,6 +181,14 @@ public class MainframeDbContext : DbContext
             e.ToTable("ledger_entries");
             e.HasKey(l => l.Id);
             e.HasIndex(l => new { l.TenantId, l.UserId, l.CreatedAt });
+
+            // The night trace asks "what did this person do" in BOTH directions — as the
+            // subject of a movement and as the actor of one — because an admin adjusting
+            // somebody's credits belongs on that member's night AND on the admin's own. The
+            // subject half is served by the index above; without this one the actor half is a
+            // sequential scan of the club's entire ledger.
+            e.HasIndex(l => new { l.TenantId, l.ActorUserId, l.CreatedAt });
+
             e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
             e.Property(l => l.AmountCredits).HasColumnType("numeric(10,2)");
             e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
@@ -190,6 +212,7 @@ public class MainframeDbContext : DbContext
 
         ConfigureAuditLog(modelBuilder);
         ConfigureAdminChangeLog(modelBuilder);
+        ConfigureBookingSchedules(modelBuilder);
 
         modelBuilder.Entity<WebhookEndpoint>(e =>
         {
@@ -416,6 +439,16 @@ public class MainframeDbContext : DbContext
             e.HasKey(a => a.Id);
             e.HasIndex(a => new { a.TenantId, a.CreatedAt });
             e.HasIndex(a => new { a.TenantId, a.ScanAt });
+
+            // The night trace's two halves, and the change view's actor filter.
+            //
+            // audit_log had exactly one index — (TenantId, CreatedAt) — and grows for ever for
+            // every non-door action, because retention_years only NULLS the subject rather than
+            // deleting the row. Asking it "everything about this person on this night" without
+            // these is a full scan of the club's whole history, twice, per request.
+            e.HasIndex(a => new { a.TenantId, a.SubjectUserId, a.CreatedAt });
+            e.HasIndex(a => new { a.TenantId, a.ActorUserId, a.CreatedAt });
+
             e.Property(a => a.Action).HasMaxLength(128).IsRequired();
             e.Property(a => a.DetailsJson).HasColumnType("jsonb");
             e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
@@ -461,6 +494,64 @@ public class MainframeDbContext : DbContext
             e.Property(a => a.RequestId).HasMaxLength(64);
             e.Property(a => a.IpAddress).HasMaxLength(64);
             e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// Repeating bookings — the rule, the courts it occupies, and the dates that break it.
+    ///
+    /// <para>
+    /// <b>The CHECK constraints are on the database and not only in the validator.</b> An
+    /// occurrence expander reading <c>EndMinute &lt;= StartMinute</c> produces a negative-length
+    /// block, and a <c>DaysOfWeek</c> of zero produces a schedule that materialises nothing and
+    /// reports success — both of which are the shape of <c>peak_hours</c>' "validated one way and
+    /// read another" defect, which left peak protection silently off for every Regular member
+    /// with no error anywhere. The PUT is not the only way a value reaches a column.
+    /// </para>
+    /// </summary>
+    private void ConfigureBookingSchedules(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<BookingSchedule>(e =>
+        {
+            e.ToTable("booking_schedules", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_booking_schedules_time_range",
+                    $"\"EndMinute\" > \"StartMinute\" AND \"EndMinute\" <= {BookingSchedule.MinutesPerDay} AND \"StartMinute\" >= 0");
+                t.HasCheckConstraint(
+                    "ck_booking_schedules_days",
+                    $"\"DaysOfWeek\" BETWEEN {BookingSchedule.SundayBit} AND {BookingSchedule.AllDays}");
+                t.HasCheckConstraint(
+                    "ck_booking_schedules_interval",
+                    $"\"IntervalWeeks\" BETWEEN 1 AND {BookingSchedule.MaxIntervalWeeks}");
+            });
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => new { s.TenantId, s.Status });
+            e.Property(s => s.Name).HasMaxLength(128).IsRequired();
+            e.Property(s => s.Label).HasMaxLength(128).IsRequired();
+            e.Property(s => s.Status).HasConversion<int>();
+            e.HasQueryFilter(s => s.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<BookingScheduleCourt>(e =>
+        {
+            e.ToTable("booking_schedule_courts");
+            e.HasKey(c => c.Id);
+            e.HasIndex(c => new { c.TenantId, c.ScheduleId, c.CourtId }).IsUnique();
+            e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<BookingScheduleException>(e =>
+        {
+            e.ToTable("booking_schedule_exceptions");
+            e.HasKey(x => x.Id);
+            // One exception per date: a date that is both skipped and re-timed is two
+            // contradictory instructions, and the database is the only place that can refuse the
+            // second one when two admins send them at once.
+            e.HasIndex(x => new { x.TenantId, x.ScheduleId, x.OccurrenceDate }).IsUnique();
+            e.Property(x => x.Kind).HasConversion<int>();
+            e.Property(x => x.Reason).HasMaxLength(512);
+            e.HasQueryFilter(x => x.TenantId == _tenant.TenantId);
         });
     }
 

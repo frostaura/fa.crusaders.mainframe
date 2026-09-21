@@ -48,6 +48,49 @@ public sealed class Booking : ITenantScoped
     public BookingStatus Status { get; set; } = BookingStatus.Booked;
 
     public string? BlockLabel { get; set; }        // for AdminBlock
+
+    /// <summary>
+    /// A free-text name an admin typed beside a real member when booking on their behalf —
+    /// "Priya's guest". Rendered to ADMINS only.
+    ///
+    /// <para>
+    /// <b>Its own column rather than an overload, and the two rejected alternatives are why.</b>
+    /// <see cref="BlockLabel"/> is read by <c>AdminBlockService</c> and by the grid as "this is a
+    /// block", so putting a name there on a member's paid booking would turn a charged row into
+    /// one four readers treat as costing nobody anything. <see cref="CancellationReason"/> is
+    /// already a money discriminator with exactly one owner — <c>SettleReleaseAsync</c> and
+    /// <c>ChargeLitCancelledBookingAsync</c> compare it against one constant — so an admin's
+    /// prose there is arbitrary text inside a money decision.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Admins only, because the grid's photo-and-name rule is a member-facing invariant.</b> A
+    /// guest's name is not a member's name and no member screen may render it.
+    /// </para>
+    /// </summary>
+    public string? AdminNote { get; set; }
+
+    /// <summary>
+    /// The repeating schedule that produced this row, when one did.
+    ///
+    /// <para>
+    /// An occurrence is a real <c>AdminBlock</c> booking — that is what makes the GiST exclusion
+    /// constraint reserve the court — and this column is what lets "edit this and future" find
+    /// its rows and the grid say which league night a block belongs to.
+    /// </para>
+    /// </summary>
+    public Guid? ScheduleId { get; set; }
+
+    /// <summary>
+    /// The CLUB-LOCAL date of the occurrence that produced this row.
+    ///
+    /// <para>
+    /// Stored rather than derived from <see cref="StartsAt"/>, because the derivation needs the
+    /// club's zone and a DST-correct day boundary, and every reader that wanted it would have to
+    /// do that arithmetic again. It is also the key a single-date exception matches on.
+    /// </para>
+    /// </summary>
+    public DateOnly? ScheduleOccurrenceDate { get; set; }
     public DateTimeOffset? CancelledAt { get; set; }
     public string? CancellationReason { get; set; }
     public bool CancellationPenaltyWaived { get; set; }
